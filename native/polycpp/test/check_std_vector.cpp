@@ -38,7 +38,6 @@
 
 int main() {
 
-
   std::vector<int> xs(CHECK_SIZE_DEF, -1);
   int result = __polyregion_offload_f1__([CHECK_CAPTURE]() mutable {
 #ifdef CHECK_MUT
@@ -47,8 +46,6 @@ int main() {
     return xs[CHECK_SIZE_DEF - 1];
   });
   printf("%d %d", result, xs[CHECK_SIZE_DEF - 1]);
-
-
 
   return 0;
 }

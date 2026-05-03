@@ -60,7 +60,7 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
                 return mag(Expr::Float64Const(1)); //
               else throw BackendException("unimplemented");
             });
-      },                                                                                             //
+      }, //
       [&](const Math::Round &v) -> ValPtr {
         // PolyAST's `Round` allows the return type to differ from the input (matching JDK's
         // `math.round(Float): Int` and `math.round(Double): Long`). LLVM's `llvm.round`
@@ -72,7 +72,7 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
           return cg.intr1(llvm::Intrinsic::round, v.tpe, v.x);
         const auto rounded = cg.intr1(llvm::Intrinsic::round, inTpe, v.x);
         return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
-      }, //
+      },                                                                                             //
       [&](const Math::Ceil &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::ceil, v.tpe, v.x); },    //
       [&](const Math::Floor &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::floor, v.tpe, v.x); },  //
       [&](const Math::Rint &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::rint, v.tpe, v.x); },    //

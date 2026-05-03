@@ -7,11 +7,11 @@
   #include <string>
   #include <system_error>
 
-  inline const char *polyregion_dl_error_() {
-    thread_local std::string msg;
-    msg = std::system_category().message(::GetLastError());
-    return msg.c_str();
-  }
+inline const char *polyregion_dl_error_() {
+  thread_local std::string msg;
+  msg = std::system_category().message(::GetLastError());
+  return msg.c_str();
+}
 
   #define polyregion_dl_open(path) LoadLibraryA(path)
   #define polyregion_dl_error() polyregion_dl_error_()

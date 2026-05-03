@@ -160,7 +160,6 @@ object StdLib {
     def update(i: Int, x: A): Unit = data.update(i, x)
   }
 
-
   // trait Function0[+R] { def apply(): R }
 
   // trait Function1[-T1, +R] {

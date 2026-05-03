@@ -91,7 +91,7 @@ object VerifyPass {
 
     def validateExpr(c: Context, e: p.Expr): Context = e match {
       case p.Expr.Cast(from, as) =>
-        val c0 = validateTerm(c, from)
+        val c0                   = validateTerm(c, from)
         def isNumeric(t: p.Type) = t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
         (from.tpe, as) match {
           case (from, as) if from == as => c0
@@ -108,13 +108,13 @@ object VerifyPass {
         val c1 = args.foldLeft(c0)(validateTerm(_, _))
         val c2 = captures.foldLeft(c1)(validateTerm(_, _))
         c2
-      case p.Expr.Index(lhs, idx, component)         => (validateTerm(_: Context, lhs)).andThen(validateTerm(_, idx))(c)
-      case p.Expr.RefTo(lhs, idx, _, _)              =>
+      case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Context, lhs)).andThen(validateTerm(_, idx))(c)
+      case p.Expr.RefTo(lhs, idx, _, _) =>
         val c0 = validateTerm(c, lhs); idx.fold(c0)(validateTerm(c0, _))
-      case p.Expr.Alloc(witness, size, space)        => validateTerm(c, size)
-      case p.Expr.Annotated(inner, _, _)             => validateExpr(c, inner)
+      case p.Expr.Alloc(witness, size, space)                     => validateTerm(c, size)
+      case p.Expr.Annotated(inner, _, _)                          => validateExpr(c, inner)
       case p.Expr.SpecOp(_) | p.Expr.MathOp(_) | p.Expr.IntrOp(_) => c
-      case ref                                       => validateTerm(c, ref)
+      case ref                                                    => validateTerm(c, ref)
     }
 
     def validateStmt(c: Context, s: p.Stmt): Context = s match {
@@ -126,9 +126,9 @@ object VerifyPass {
         // substituted by concrete types (call-site specialisation may leave a polymorphic return
         // type that the caller's var has already concretised).
         def varCompatible(t: p.Type, u: p.Type): Boolean = (t, u) match {
-          case (a, b) if a == b                                   => true
-          case (p.Type.Var(_), _) | (_, p.Type.Var(_))            => true
-          case (p.Type.Ptr(c1, l1, s1), p.Type.Ptr(c2, l2, s2))   => l1 == l2 && s1 == s2 && varCompatible(c1, c2)
+          case (a, b) if a == b                                 => true
+          case (p.Type.Var(_), _) | (_, p.Type.Var(_))          => true
+          case (p.Type.Ptr(c1, l1, s1), p.Type.Ptr(c2, l2, s2)) => l1 == l2 && s1 == s2 && varCompatible(c1, c2)
           case (p.Type.Struct(n1, v1, a1, _), p.Type.Struct(n2, v2, a2, _)) =>
             n1 == n2 && v1 == v2 && a1.size == a2.size && a1.zip(a2).forall((l, r) => varCompatible(l, r))
           case _ => false
@@ -137,12 +137,12 @@ object VerifyPass {
           case Some(rhs) if rhs.tpe != name.tpe =>
             (name.tpe, rhs.tpe) match {
               case (p.Type.Struct(name, _, _, _), p.Type.Struct(_, _, _, parents)) if parents.contains(name) => c0
-              case (l, r) if varCompatible(l, r) => c0
+              case (l, r) if varCompatible(l, r)                                                             => c0
               case _ => c0 ~ s"Var declaration of incompatible type ${rhs.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
             }
           case _ => c0
         }
-      case p.Stmt.Mut(name, expr ) =>
+      case p.Stmt.Mut(name, expr) =>
         val c0 = (validateTerm(_: Context, name)).andThen(validateExpr(_, expr))(c)
         if (name.tpe == expr.tpe) c0
         else c0 ~ s"Assignment of incompatible type ${expr.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
@@ -194,7 +194,7 @@ object VerifyPass {
       // Abstract definitions (e.g. typeclass methods like `Monoid.mempty`) have empty/comment-only
       // bodies; they're dispatched via vtable in DynamicDispatchPass and never invoked directly.
       case Nil if f.body.forall(_.isInstanceOf[p.Stmt.Comment]) => Nil
-      case Nil => List("Function contains no return statements")
+      case Nil                                                  => List("Function contains no return statements")
       case ts if ts.exists(x => x != f.rtn && !(x == p.Type.Nothing || f.rtn == p.Type.Nothing)) =>
         List(
           s"Not all return stmts return the function return type, expected ${f.rtn.repr}, got ${ts.map(_.repr).mkString(",")}"

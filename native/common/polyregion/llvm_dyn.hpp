@@ -28,12 +28,13 @@ template <typename T, typename U, typename... Fs> std::optional<T> visitDyn(U n,
 
 template <typename U, typename... Fs> bool visitDyn0(U n, Fs... fs) {
   return (([&]() -> bool {
-    if (auto x = llvm::dyn_cast<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
-      fs(x);
-      return true;
-    }
-    return false;
-  }()) || ...);
+            if (auto x = llvm::dyn_cast<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
+              fs(x);
+              return true;
+            }
+            return false;
+          }()) ||
+          ...);
 }
 
 } // namespace polyregion::llvm_shared

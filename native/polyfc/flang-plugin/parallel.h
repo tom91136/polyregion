@@ -37,7 +37,7 @@ polyast::Function forEach(const std::string &fnName,     //
 polyast::Function reduce(const std::string &fnName,       //
                          const polyast::Named &capture,   //
                          const polyast::Named &unmanaged, //
-                         const OpParams &params,            //
+                         const OpParams &params,          //
                          const std::vector<SingleVarReduction> &reductions);
 
 } // namespace polyregion::polyfc::parallel_ops

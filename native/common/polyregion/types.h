@@ -344,7 +344,7 @@ struct TypeLayout {
   }
 
   POLYREGION_RT_PROTECT void visualise(std::FILE *fd, const std::function<void(size_t, const AggregateMember &)> &show = {}, //
-                              const size_t level = 0, const size_t offset = 0) const {
+                                       const size_t level = 0, const size_t offset = 0) const {
     constexpr size_t maxCol = 128;
     constexpr size_t alignColumn = 60; //
 

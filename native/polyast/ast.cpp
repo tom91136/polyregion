@@ -106,8 +106,8 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
                        [&](const Type::Bool1 &) -> Opt<size_t> { return 8 / 8; }, //
 
                        [&](const Type::Struct &) -> Opt<size_t> { return {}; }, [&](const Type::Ptr &) -> Opt<size_t> { return {}; },
-                       [&](const Type::Var &) -> Opt<size_t> { return {}; },                                           //
-                       [&](const Type::Exec &) -> Opt<size_t> { return {}; },                                          //
+                       [&](const Type::Var &) -> Opt<size_t> { return {}; },  //
+                       [&](const Type::Exec &) -> Opt<size_t> { return {}; }, //
                        [&](const Type::Annotated &x) -> Opt<size_t> { return primitiveSize(x.tpe); });
 }
 

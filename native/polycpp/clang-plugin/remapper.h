@@ -1,21 +1,17 @@
 #pragma once
 
-#include <iostream>
 #include <optional>
 
 #include "ast.h"
 #include "fmt/format.h"
+#include "polyregion/error.h"
 
 #include "clang/AST/ASTContext.h"
 
 namespace polyregion::polystl {
 
 using namespace polyregion::polyast;
-
-[[noreturn]] static void raise(const std::string &message, const char *file = __builtin_FILE(), int line = __builtin_LINE()) {
-  std::cerr << fmt::format("[{}:{}] {}", file, line, message) << std::endl;
-  std::abort();
-}
+using polyregion::raise;
 
 struct Remapper {
   clang::ASTContext &context;

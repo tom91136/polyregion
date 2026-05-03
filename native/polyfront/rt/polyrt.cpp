@@ -35,9 +35,8 @@ static void selectDevice(Platform &p) {
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
     if (const auto index = parseIntNoExcept(name.c_str()); index && *index < devices.size()) {
       polyregion::polyrt::currentDevice = std::move(devices.at(*index));
-    } else if (const auto matching =
-               std::find_if(devices.begin(), devices.end(),
-                            [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
+    } else if (const auto matching = std::find_if(devices.begin(), devices.end(),
+                                                  [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
                matching != devices.end()) {
       polyregion::polyrt::currentDevice = std::move(*matching);
     }

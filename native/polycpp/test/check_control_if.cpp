@@ -55,7 +55,6 @@
 
 int main() {
 
-
   auto a = std::stoi(std::getenv("A"));
   auto b = std::stoi(std::getenv("B"));
 

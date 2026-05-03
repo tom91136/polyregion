@@ -48,7 +48,7 @@ public:
 enum class PolyreflectPass : uint8_t { ProtectRT, Interpose, ReflectStack, ReflectMem };
 
 extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
-  llvm::errs() << "[PolyReflect] load `"<< "`\n";
+  llvm::errs() << "[PolyReflect] load `" << "`\n";
 
   const static auto parsePasses = [](const std::string &s) -> std::vector<PolyreflectPass> {
     if (s.empty()) return {};
@@ -67,14 +67,12 @@ extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo l
   const static auto addPasses = [](llvm::ModulePassManager &MPM, const std::vector<PolyreflectPass> &passes) {
     for (const auto pass : passes) {
       // if (verboseOpt) {
-        llvm::errs() << "[PolyReflect] Add pass `" << magic_enum::enum_name(pass) << "`\n";
+      llvm::errs() << "[PolyReflect] Add pass `" << magic_enum::enum_name(pass) << "`\n";
       // }
       switch (pass) {
         case PolyreflectPass::ProtectRT: MPM.addPass(polyregion::polyreflect::ProtectRTPass(verboseOpt)); break;
         case PolyreflectPass::Interpose: MPM.addPass(polyregion::polyreflect::InterposePass(verboseOpt)); break;
-        case PolyreflectPass::ReflectStack:
-          MPM.addPass(polyregion::polyreflect::ReflectStackPass(verboseOpt));
-        break;
+        case PolyreflectPass::ReflectStack: MPM.addPass(polyregion::polyreflect::ReflectStackPass(verboseOpt)); break;
         case PolyreflectPass::ReflectMem: MPM.addPass(polyregion::polyreflect::ReflectMemPass(verboseOpt)); break;
         default: break;
       }

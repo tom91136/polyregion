@@ -19,31 +19,21 @@
 
 #include "polyregion/compat.h"
 
+#include "polyregion/error.h"
 #include "polyregion/export.h"
 #include "polyregion/types.h"
 
 #ifdef POLYINVOKE_TRACE
-  #error Trace already defined
+  #error POLYINVOKE_TRACE already defined
 #else
-
-  #if !defined(__PRETTY_FUNCTION__) && !defined(__GNUC__)
-    #define __PRETTY_FUNCTION__ __FUNCSIG__
-  #endif
-
   // #define POLYINVOKE_TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
   #define POLYINVOKE_TRACE()
-
 #endif
 
 #ifdef POLYINVOKE_FATAL
   #error POLYINVOKE_FATAL already defined
 #else
-
-  #define POLYINVOKE_FATAL(prefix, fmt, ...)                                                                                               \
-    do {                                                                                                                                   \
-      std::fprintf(stderr, "[%s] %s:%d FATAL: " fmt " (in `%s`)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);              \
-      std::abort();                                                                                                                        \
-    } while (0)
+  #define POLYINVOKE_FATAL(prefix, fmt, ...) POLYREGION_FATAL(prefix, fmt, __VA_ARGS__)
 #endif
 
 namespace polyregion::invoke {

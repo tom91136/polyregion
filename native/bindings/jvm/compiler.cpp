@@ -24,7 +24,6 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32) == Compiler::Target_Object_LLVM_SPIRV32);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64) == Compiler::Target_Object_LLVM_SPIRV64);
 
-
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_Metal1_0) == Compiler::Target_Source_C_Metal1_0);
@@ -51,20 +50,19 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source
 }
 
 static generated::Layout::Instance toJni(JNIEnv *env, const polyast::StructLayout &l) {
-  return gen::Layout::of(env)(
-      env,                                                                                        //
-      toJni(env, l.name), //
-      jlong(l.sizeInBytes),                                                                       //
-      jlong(l.alignment),                                                                         //
-      toJni(env, l.members, gen::Member::of(env).clazz,                                           //
-            [&](auto &m) {                                                                        //
-              return gen::Member::of(env)(env,                                                    //
-                                          toJni(env, m.name.symbol),                              //
-                                          jlong(m.offsetInBytes),                                 //
-                                          jlong(m.sizeInBytes))                                   //
-                  .instance;                                                                      //
-            })                                                                                    //
-  );                                                                                              //
+  return gen::Layout::of(env)(env,                                                           //
+                              toJni(env, l.name),                                            //
+                              jlong(l.sizeInBytes),                                          //
+                              jlong(l.alignment),                                            //
+                              toJni(env, l.members, gen::Member::of(env).clazz,              //
+                                    [&](auto &m) {                                           //
+                                      return gen::Member::of(env)(env,                       //
+                                                                  toJni(env, m.name.symbol), //
+                                                                  jlong(m.offsetInBytes),    //
+                                                                  jlong(m.sizeInBytes))      //
+                                          .instance;                                         //
+                                    })                                                       //
+  );                                                                                         //
 }
 
 static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent &e) {
@@ -76,14 +74,12 @@ static cp::Options fromJni(JNIEnv *env, jobject options) {
   auto targetOrdinal = opt.target(env);
   if (auto target = ct::targetFromOrdinal(targetOrdinal); target) {
     return {.target = *target, .arch = fromJni(env, opt.arch(env))};
-  } else
-    throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
+  } else throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
 }
 
 static ct::OptLevel fromJni(JNIEnv *, jbyte optOrdinal) {
   if (auto opt = ct::optFromOrdinal(optOrdinal); opt) return *opt;
-  else
-    throw std::logic_error("Unknown opt value: " + std::to_string(optOrdinal));
+  else throw std::logic_error("Unknown opt value: " + std::to_string(optOrdinal));
 }
 
 jbyte Compiler::hostTarget0(JNIEnv *, jclass) {
@@ -95,9 +91,7 @@ jbyte Compiler::hostTarget0(JNIEnv *, jclass) {
   }
 }
 
-jstring Compiler::hostTriplet0(JNIEnv *env, jclass) {
-  return toJni(env, polyregion::backend::llvmc::defaultHostTriple().str());
-}
+jstring Compiler::hostTriplet0(JNIEnv *env, jclass) { return toJni(env, polyregion::backend::llvmc::defaultHostTriple().str()); }
 
 jobjectArray Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options) {
   return wrapException(env, EX, [&]() {
@@ -113,13 +107,12 @@ jobject Compiler::compile0(JNIEnv *env, jclass, //
     if (!c.binary) throw std::logic_error(c.messages);
     auto bin = env->NewByteArray(jsize(c.binary->size()));
     env->SetByteArrayRegion(bin, 0, jsize(c.binary->size()), reinterpret_cast<jbyte *>(c.binary->data()));
-    return gen::Compilation::of(env)(
-               env,
-               bin,                                                                                                //
-               toJni(env, c.features, gen::String::of(env).clazz, [&](auto &s) { return toJni(env, s); }),         //
-               toJni(env, c.events, gen::Event::of(env).clazz, [&](auto &e) { return toJni(env, e).instance; }),   //
-               toJni(env, c.layouts, gen::Layout::of(env).clazz, [&](auto &l) { return toJni(env, l).instance; }), //
-               toJni(env, c.messages))                                                                             //
+    return gen::Compilation::of(env)(env,
+                                     bin,                                                                                                //
+                                     toJni(env, c.features, gen::String::of(env).clazz, [&](auto &s) { return toJni(env, s); }),         //
+                                     toJni(env, c.events, gen::Event::of(env).clazz, [&](auto &e) { return toJni(env, e).instance; }),   //
+                                     toJni(env, c.layouts, gen::Layout::of(env).clazz, [&](auto &l) { return toJni(env, l).instance; }), //
+                                     toJni(env, c.messages))                                                                             //
         .instance;
   });
 }

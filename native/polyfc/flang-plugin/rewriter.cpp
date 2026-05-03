@@ -63,11 +63,11 @@ std::optional<runtime::Type> runtimeType(const polyast::Type::Any &tpe) {
       [&](const polyast::Type::Unit0 &) -> R { return runtime::Type::Void; },  //
       [&](const polyast::Type::Bool1 &) -> R { return runtime::Type::Bool1; }, //
 
-      [&](const polyast::Type::Struct &) -> R { return {}; },                //
-      [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; },   //
-      [&](const polyast::Type::Var &) -> R { return {}; },                   //
-      [&](const polyast::Type::Exec &) -> R { return {}; },                  //
-      [&](const polyast::Type::Annotated &t) { return runtimeType(t.tpe); }  //
+      [&](const polyast::Type::Struct &) -> R { return {}; },               //
+      [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; },  //
+      [&](const polyast::Type::Var &) -> R { return {}; },                  //
+      [&](const polyast::Type::Exec &) -> R { return {}; },                 //
+      [&](const polyast::Type::Annotated &t) { return runtimeType(t.tpe); } //
   );
 }
 
@@ -208,8 +208,8 @@ public:
     captureFields | for_each([&](auto &f) {
       LLVM::VarAnnotation::create(B, uLoc(B), f.fieldPtr, annotationConst, nullConst(B), intConst(B, i32Ty(B), 0), nullConst(B));
     });
-    return captureMirror.local(B, {captureFields                                                  //
-                                   | map([](auto &f) { return f.fieldPtr; })                      //
+    return captureMirror.local(B, {captureFields                                                   //
+                                   | map([](auto &f) { return f.fieldPtr; })                       //
                                    | prepend(LLVM::ZeroOp::create(B, uLoc(B), preludeTy).getRes()) //
                                    | to_vector()});
   }
@@ -262,10 +262,19 @@ public:
         CharStar(M),                                                                        //
         KernelObject(M), KernelBundle(M), AggregateMember(M), TypeLayout(M), FReduction(M), //
         primitiveTypeLayouts(std::vector<polyast::Type::Any>{
-                                 polyast::Type::Float16(), polyast::Type::Float32(), polyast::Type::Float64(),                      //
-                                 polyast::Type::IntU8(), polyast::Type::IntU16(), polyast::Type::IntU32(), polyast::Type::IntU64(), //
-                                 polyast::Type::IntS8(), polyast::Type::IntS16(), polyast::Type::IntS32(), polyast::Type::IntS64(), //
-                                 polyast::Type::Unit0(), polyast::Type::Bool1(),                                                    //
+                                 polyast::Type::Float16(),
+                                 polyast::Type::Float32(),
+                                 polyast::Type::Float64(), //
+                                 polyast::Type::IntU8(),
+                                 polyast::Type::IntU16(),
+                                 polyast::Type::IntU32(),
+                                 polyast::Type::IntU64(), //
+                                 polyast::Type::IntS8(),
+                                 polyast::Type::IntS16(),
+                                 polyast::Type::IntS32(),
+                                 polyast::Type::IntS64(), //
+                                 polyast::Type::Unit0(),
+                                 polyast::Type::Bool1(), //
                              } //
                              | collect([&](auto &t) {
                                  return polyast::primitiveSize(t) ^ map([&](auto sizeInBytes) {
@@ -307,11 +316,11 @@ public:
                    << magic_enum::enum_name(c.locality) << ")\n";
     }
 
-    const auto table = bundle.layouts                                                                                       //
-                       | values()                                                                                           //
-                       | map([&](auto &sl) {                                                                                //
-                           return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}, {}, {}), sl};                //
-                         })                                                                                                 //
+    const auto table = bundle.layouts                                                                        //
+                       | values()                                                                            //
+                       | map([&](auto &sl) {                                                                 //
+                           return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}, {}, {}), sl}; //
+                         })                                                                                  //
                        | to<std::unordered_map>();
 
     auto structLayoutsArray = TypeLayout.global(M, [&](OpBuilder &B0) {
@@ -341,34 +350,33 @@ public:
             const auto fbm =
                 region.boxes ^ get_maybe(l.name) ^ map([&](const FBoxedMirror &m) {
                   static size_t id = 0;
-                  const auto fn =
-                      defineFunc(M, fmt::format("box_size_resolver_{}", ++id), i64Ty(B0), {ptrTy(B0)}, LLVM::Linkage::Internal,
-                                 [&](OpBuilder &B1, LLVM::LLVMFuncOp &f) {
-                                   const auto loadField = [&](const polyast::Named &n, const Type &ty) {
-                                     return l.members ^ find([&](auto &x) { return x.name == n; }) ^
-                                            fold(
-                                                [&](auto &slm) -> Value {
-                                                  auto gep = LLVM::GEPOp::create(B1, uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
-                                                                                    ValueRange{intConst(B1, i64Ty(B1), slm.offsetInBytes)});
-                                                  return LLVM::LoadOp::create(B1, uLoc(B1), ty, gep.getRes());
-                                                },
-                                                [&]() -> Value { raise(fmt::format("Missing field {}", repr(n))); });
-                                   };
-                                   auto totalSizeInBytes = loadField(m.sizeInBytes, i64Ty(B1));
-                                   if (m.ranks != 0) {
-                                     const auto dimsTy =
-                                         LLVM::LLVMStructType::getLiteral(M.getContext(), {i64Ty(B1), i64Ty(B1), i64Ty(B1)});
-                                     const auto dims = loadField(m.dims, LLVM::LLVMArrayType::get(dimsTy, m.ranks));
-                                     for (int64_t i = 0; i < static_cast<int64_t>(m.ranks); ++i) {
-                                       // XXX Dim type fields are: { 0 = lowerBound, 1 = extent, 2 = stride }, we want the extent (1) at
-                                       // rank
-                                       const auto dim = LLVM::ExtractValueOp::create(B1, uLoc(B1), dims, ArrayRef{i}).getResult();
-                                       const auto extent = LLVM::ExtractValueOp::create(B1, uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
-                                       totalSizeInBytes = arith::MulIOp::create(B1, uLoc(B1), totalSizeInBytes, extent).getResult();
-                                     }
-                                   }
-                                   LLVM::ReturnOp::create(B1, uLoc(B1), totalSizeInBytes);
-                                 });
+                  const auto fn = defineFunc(
+                      M, fmt::format("box_size_resolver_{}", ++id), i64Ty(B0), {ptrTy(B0)}, LLVM::Linkage::Internal,
+                      [&](OpBuilder &B1, LLVM::LLVMFuncOp &f) {
+                        const auto loadField = [&](const polyast::Named &n, const Type &ty) {
+                          return l.members ^ find([&](auto &x) { return x.name == n; }) ^
+                                 fold(
+                                     [&](auto &slm) -> Value {
+                                       auto gep = LLVM::GEPOp::create(B1, uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
+                                                                      ValueRange{intConst(B1, i64Ty(B1), slm.offsetInBytes)});
+                                       return LLVM::LoadOp::create(B1, uLoc(B1), ty, gep.getRes());
+                                     },
+                                     [&]() -> Value { raise(fmt::format("Missing field {}", repr(n))); });
+                        };
+                        auto totalSizeInBytes = loadField(m.sizeInBytes, i64Ty(B1));
+                        if (m.ranks != 0) {
+                          const auto dimsTy = LLVM::LLVMStructType::getLiteral(M.getContext(), {i64Ty(B1), i64Ty(B1), i64Ty(B1)});
+                          const auto dims = loadField(m.dims, LLVM::LLVMArrayType::get(dimsTy, m.ranks));
+                          for (int64_t i = 0; i < static_cast<int64_t>(m.ranks); ++i) {
+                            // XXX Dim type fields are: { 0 = lowerBound, 1 = extent, 2 = stride }, we want the extent (1) at
+                            // rank
+                            const auto dim = LLVM::ExtractValueOp::create(B1, uLoc(B1), dims, ArrayRef{i}).getResult();
+                            const auto extent = LLVM::ExtractValueOp::create(B1, uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
+                            totalSizeInBytes = arith::MulIOp::create(B1, uLoc(B1), totalSizeInBytes, extent).getResult();
+                          }
+                        }
+                        LLVM::ReturnOp::create(B1, uLoc(B1), totalSizeInBytes);
+                      });
                   return std::pair{m.addr, LLVM::AddressOfOp::create(B0, uLoc(B0), fn).getRes()};
                 });
             return l.members ^ map([&](auto &m) {

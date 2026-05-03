@@ -23,7 +23,7 @@ int main() {
     int a, b, c;
     bar bar;
   };
-  foo value{42, 43, 44, bar{{45},46, baz{47}}};
+  foo value{42, 43, 44, bar{{45}, 46, baz{47}}};
   foo c = __polyregion_offload_f1__([CHECK_CAPTURE]() { return value; });
   printf("%d %d %d %d %d %d", c.a, c.b, c.c, c.bar.e, c.bar.d, c.bar.baz.e);
   return 0;

@@ -14,12 +14,12 @@ using namespace polyregion::polyast;
 using namespace aspartame;
 
 polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
-                                                clang::ASTContext &C,                //
-                                                clang::DiagnosticsEngine &diag,      //
-                                                const std::string &moduleId,         //
-                                                const clang::CXXMethodDecl &functor, //
-                                                const clang::SourceLocation &loc,    //
-                                                runtime::PlatformKind kind) {
+                                               clang::ASTContext &C,                //
+                                               clang::DiagnosticsEngine &diag,      //
+                                               const std::string &moduleId,         //
+                                               const clang::CXXMethodDecl &functor, //
+                                               const clang::SourceLocation &loc,    //
+                                               runtime::PlatformKind kind) {
   Remapper remapper(C);
 
   auto parent = functor.getParent();
@@ -43,7 +43,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   // `__tid` at the top of the body so any references to the lambda's parameter name resolve.
   Vec<Stmt::Any> tidAliases;
   Vec<const clang::ParmVarDecl *> userParams;
-  for (auto *p : functor.parameters()) userParams.push_back(p);
+  for (auto *p : functor.parameters())
+    userParams.push_back(p);
   if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
     auto name = userParams.front()->getName().str();
     if (!name.empty()) {
@@ -72,12 +73,11 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
               | append(recv) //
               | to_vector();
 
-  auto f0 = std::make_shared<Function>(Sym({"_main"}), std::vector<std::string>{}, std::optional<Arg>{}, args,
-                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, stmts,
+  auto f0 = std::make_shared<Function>(Sym({"_main"}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
+                                       std::vector<Arg>{}, rtnTpe, stmts,
                                        std::set<FunctionAttr::Any>{FunctionAttr::Exported(), FunctionAttr::Entry()});
 
-  auto program = Program(*f0,
-                         r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
+  auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
                          r.structs | values() | map([&](auto &x) { return *x; }) | to_vector());
 
   auto exportedStructNames =

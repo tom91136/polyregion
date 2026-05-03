@@ -19,10 +19,9 @@ object Symbols {
   val Array       = p.Sym("scala" :: "Array" :: Nil)
   val ArrayModule = "scala" :: "Array$" :: Nil
 
-
   val Intrinsics = p.Sym(classOf[intrinsics.type])
 
-  // 
+  //
   val ArrayMirror = p.Sym(classOf[intrinsics.TypedBuffer[?]])
 
   // Array don't delegate to aneeds a ClassTag which it can't have for *

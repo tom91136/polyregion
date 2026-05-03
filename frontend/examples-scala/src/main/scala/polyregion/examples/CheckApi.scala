@@ -130,8 +130,7 @@ object CheckApi {
 
         val q0 = d0.createQueue(10000L);
 
-        for (_ <- 0 to 1) {
-
+        for (_ <- 0 to 1)
 //          q0.enqueueHostToDeviceAsync(
 //            data,
 //            xs,
@@ -150,8 +149,8 @@ object CheckApi {
             () => {
               println("  K done! id=" + Thread.currentThread().getId)
               val x = Array.ofDim[Int](4)
-                            data.asIntBuffer().get(x)
-                            println(">>> " + x.toList)
+              data.asIntBuffer().get(x)
+              println(">>> " + x.toList)
 
             }
           )
@@ -170,13 +169,12 @@ object CheckApi {
 //        q0.close();
 //        d0.close();
 //          r.close()
-        }
 
 //      r.close()
       }
     }
 
-       Thread.sleep(1000)
+    Thread.sleep(1000)
 
 //    val q = d0.createQueue()
 //    d0.createQueue()

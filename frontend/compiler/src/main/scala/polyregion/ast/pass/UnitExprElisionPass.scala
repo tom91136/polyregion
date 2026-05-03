@@ -9,10 +9,10 @@ object UnitExprElisionPass extends ProgramPass {
   // An expression that has no observable effects when evaluated -- safe to drop
   // when its result (a Unit value) is unused.
   private def isSideEffectFree(e: p.Expr): Boolean = e match {
-    case p.Expr.Unit0Const          => true
-    case p.Expr.Select(_, _)        => true
-    case p.Expr.Annotated(x, _, _)  => isSideEffectFree(x)
-    case _                          => false
+    case p.Expr.Unit0Const         => true
+    case p.Expr.Select(_, _)       => true
+    case p.Expr.Annotated(x, _, _) => isSideEffectFree(x)
+    case _                         => false
   }
 
   private def run(f: p.Function) = f
@@ -25,7 +25,7 @@ object UnitExprElisionPass extends ProgramPass {
     }
     .modifyAll[p.Expr] {
       case s @ p.Expr.Select(_, _) if s.tpe == p.Type.Unit0 => p.Expr.Unit0Const
-      case x                                               => x
+      case x                                                => x
     }
 
   override def apply(program: p.Program, log: Log): p.Program = {

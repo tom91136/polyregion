@@ -96,8 +96,7 @@ class SynchronisedMemAllocation {
         std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%ld, offset=%ld}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
                      meta.offsetInBytes); //
       const size_t effectiveSize = meta.sizeInBytes - meta.offsetInBytes;
-      const uintptr_t memberRemotePtr =
-          mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize);
+      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize);
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
       std::fprintf(stderr, "[SMA] Warning: encountered foreign pointer %p when writing type @%s at offset %zu\n",

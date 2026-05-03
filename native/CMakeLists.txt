@@ -437,3 +437,44 @@ add_subdirectory(polyreflect)
 add_subdirectory(polycpp)
 add_subdirectory(polyfc)
 add_subdirectory(bindings)
+
+# ---- format / format-check -------------------------------------------------
+# `cmake --build <build> --target format`        -> clang-format -i across the tree
+# `cmake --build <build> --target format-check`  -> clang-format --dry-run --Werror (CI gate)
+#
+# Vendored sources (`polyinvoke/thirdparty/`) and build/dependency dirs are skipped;
+# generated files under `polyast/generated/` are intentionally included.
+file(GLOB_RECURSE POLYREGION_FORMAT_SOURCES
+        LIST_DIRECTORIES false
+        CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/*.cpp"
+        "${CMAKE_SOURCE_DIR}/*.cc"
+        "${CMAKE_SOURCE_DIR}/*.h"
+        "${CMAKE_SOURCE_DIR}/*.hpp")
+list(FILTER POLYREGION_FORMAT_SOURCES EXCLUDE REGEX
+        "/(_deps|llvm-[^/]+|vcpkg_installed|cmake-build-[^/]+|CMakeFiles)/|/polyinvoke/thirdparty/|/clspv_include/|/(debian-sysroot-image-creator|sysroot-[^/]+)/")
+
+# Prefer the bundled LLVM dist's clang-format so output is reproducible across hosts.
+file(GLOB POLYREGION_LLVM_DIST_BIN "${CMAKE_SOURCE_DIR}/llvm-*-dist/bin")
+find_program(POLYREGION_CLANG_FORMAT NAMES clang-format HINTS ${POLYREGION_LLVM_DIST_BIN})
+
+if (POLYREGION_CLANG_FORMAT)
+    add_custom_target(format
+            COMMAND ${POLYREGION_CLANG_FORMAT} --style=file -i ${POLYREGION_FORMAT_SOURCES}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            VERBATIM
+            COMMENT "clang-format -i (${POLYREGION_CLANG_FORMAT})")
+    add_custom_target(format-check
+            COMMAND ${POLYREGION_CLANG_FORMAT} --style=file --dry-run --Werror ${POLYREGION_FORMAT_SOURCES}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            VERBATIM
+            COMMENT "clang-format --dry-run (${POLYREGION_CLANG_FORMAT})")
+else ()
+    set(_no_cf_msg "clang-format not found; build the bundled LLVM (cmake -P build_llvm.cmake) or install one on PATH")
+    add_custom_target(format
+            COMMAND ${CMAKE_COMMAND} -E echo "${_no_cf_msg}"
+            COMMAND ${CMAKE_COMMAND} -E false)
+    add_custom_target(format-check
+            COMMAND ${CMAKE_COMMAND} -E echo "${_no_cf_msg}"
+            COMMAND ${CMAKE_COMMAND} -E false)
+endif ()

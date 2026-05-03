@@ -16,8 +16,7 @@ namespace polyregion::memoryfs {
 std::optional<std::string> open(const std::string &name) {
 #ifdef _WIN32
   std::wstring wname(name.begin(), name.end());
-  HANDLE h =
-      CreateFileW(wname.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  HANDLE h = CreateFileW(wname.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   if (h == INVALID_HANDLE_VALUE) return {};
   CloseHandle(h);
   return name;

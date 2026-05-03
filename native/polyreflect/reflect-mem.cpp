@@ -338,12 +338,12 @@ public:
       if (F->hasAddressTaken()) {
         t.taint(F);
         for (auto &a : F->args()) {
-           t.taint(&a);
+          t.taint(&a);
         }
       }
       t.propagateForward();
       for (auto &arg : F->args()) {
-        if (!t.isTainted(&arg) ) continue;
+        if (!t.isTainted(&arg)) continue;
         if (debug) llvm::errs() << "[CGTA]   tainted arg: `" << arg << "`\n";
         for (const auto &U : F->uses()) {
           if (auto ACS = llvm::AbstractCallSite(&U)) {

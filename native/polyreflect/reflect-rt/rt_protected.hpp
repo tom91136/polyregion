@@ -10,7 +10,7 @@
 
 #if defined(__linux__) || defined(__APPLE__)
 
-  #define __DEF_DLSYM(func, ret_type, ...) ret_type (*_##func)(__VA_ARGS__) = (ret_type(*)(__VA_ARGS__))dlsym(RTLD_NEXT, #func)
+  #define __DEF_DLSYM(func, ret_type, ...) ret_type (*_##func)(__VA_ARGS__) = (ret_type (*)(__VA_ARGS__))dlsym(RTLD_NEXT, #func)
 
 extern "C" inline void *__interposed_malloc(const size_t size) {
   static __DEF_DLSYM(malloc, void *, size_t);

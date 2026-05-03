@@ -23,7 +23,6 @@ TEST_CASE("Fn identity") {
   Function a = function("foo", {"in"_(tpe)()}, tpe)({ret("in"_(tpe))});
   Function b = function("foo", {"in"_(tpe)()}, tpe)({ret("in"_(tpe))});
 
-
   CHECK(a == b);
 }
 

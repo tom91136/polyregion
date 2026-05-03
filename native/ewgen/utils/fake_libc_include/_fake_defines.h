@@ -1,19 +1,19 @@
 #ifndef _FAKE_DEFINES_H
 #define _FAKE_DEFINES_H
 
-#define	NULL	0
-#define	BUFSIZ		1024
-#define	FOPEN_MAX	20
-#define	FILENAME_MAX	1024
+#define NULL 0
+#define BUFSIZ 1024
+#define FOPEN_MAX 20
+#define FILENAME_MAX 1024
 
 #ifndef SEEK_SET
-#define	SEEK_SET	0	/* set file offset to offset */
+  #define SEEK_SET 0 /* set file offset to offset */
 #endif
 #ifndef SEEK_CUR
-#define	SEEK_CUR	1	/* set file offset to current plus offset */
+  #define SEEK_CUR 1 /* set file offset to current plus offset */
 #endif
 #ifndef SEEK_END
-#define	SEEK_END	2	/* set file offset to EOF plus offset */
+  #define SEEK_END 2 /* set file offset to EOF plus offset */
 #endif
 
 #define __LITTLE_ENDIAN 1234
@@ -209,23 +209,23 @@
 #define va_end(_list)
 
 /* Vectors */
-#define __m128    int
-#define __m128_u  int
-#define __m128d   int
+#define __m128 int
+#define __m128_u int
+#define __m128d int
 #define __m128d_u int
-#define __m128i   int
+#define __m128i int
 #define __m128i_u int
-#define __m256    int
-#define __m256_u  int
-#define __m256d   int
+#define __m256 int
+#define __m256_u int
+#define __m256d int
 #define __m256d_u int
-#define __m256i   int
+#define __m256i int
 #define __m256i_u int
-#define __m512    int
-#define __m512_u  int
-#define __m512d   int
+#define __m512 int
+#define __m512_u int
+#define __m512d int
 #define __m512d_u int
-#define __m512i   int
+#define __m512i int
 #define __m512i_u int
 
 /* C11 stdnoreturn.h defines */
@@ -239,18 +239,18 @@
 #define static_assert _Static_assert
 
 /* C11 stdatomic.h defines */
-#define ATOMIC_BOOL_LOCK_FREE       0
-#define ATOMIC_CHAR_LOCK_FREE       0
-#define ATOMIC_CHAR16_T_LOCK_FREE   0
-#define ATOMIC_CHAR32_T_LOCK_FREE   0
-#define ATOMIC_WCHAR_T_LOCK_FREE    0
-#define ATOMIC_SHORT_LOCK_FREE      0
-#define ATOMIC_INT_LOCK_FREE        0
-#define ATOMIC_LONG_LOCK_FREE       0
-#define ATOMIC_LLONG_LOCK_FREE      0
-#define ATOMIC_POINTER_LOCK_FREE    0
+#define ATOMIC_BOOL_LOCK_FREE 0
+#define ATOMIC_CHAR_LOCK_FREE 0
+#define ATOMIC_CHAR16_T_LOCK_FREE 0
+#define ATOMIC_CHAR32_T_LOCK_FREE 0
+#define ATOMIC_WCHAR_T_LOCK_FREE 0
+#define ATOMIC_SHORT_LOCK_FREE 0
+#define ATOMIC_INT_LOCK_FREE 0
+#define ATOMIC_LONG_LOCK_FREE 0
+#define ATOMIC_LLONG_LOCK_FREE 0
+#define ATOMIC_POINTER_LOCK_FREE 0
 #define ATOMIC_VAR_INIT(value) (value)
-#define ATOMIC_FLAG_INIT { 0 }
+#define ATOMIC_FLAG_INIT {0}
 #define kill_dependency(y) (y)
 
 /* C11 stdalign.h defines */

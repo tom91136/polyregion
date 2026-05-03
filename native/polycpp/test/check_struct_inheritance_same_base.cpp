@@ -30,11 +30,11 @@ int main() {
   C value{A{Base{12}, 3.0f}, B{Base{42}, 5.0f}, 7.0f};
 
   C result = __polyregion_offload_f1__([CHECK_CAPTURE]() { return value; });
-  printf("%d %f %d %f %f",             //
-         static_cast<A&>(result).x,            // From A's Base
-         result.y,                     // From A's y
-         static_cast<B&>(result).x,            // From B's Base
-         result.z,                     // From B's z
-         result.w);                    // From C's w
+  printf("%d %f %d %f %f",           //
+         static_cast<A &>(result).x, // From A's Base
+         result.y,                   // From A's y
+         static_cast<B &>(result).x, // From B's Base
+         result.z,                   // From B's z
+         result.w);                  // From C's w
   return 0;
 }

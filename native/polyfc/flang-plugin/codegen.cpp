@@ -7,7 +7,6 @@
 using namespace polyregion;
 using namespace aspartame;
 
-
 polyfront::KernelBundle polyfc::compileRegion( //
     clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts, runtime::PlatformKind kind,
     const std::string &moduleId, const Remapper::DoConcurrentRegion &region) {

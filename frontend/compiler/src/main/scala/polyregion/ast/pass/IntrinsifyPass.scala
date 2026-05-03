@@ -35,15 +35,15 @@ object IntrinsifyPass extends ProgramPass {
   // 5.6.1. Unary Numeric Promotion
   private def unaryPromote(t: p.Type) = t match {
     case p.Type.IntS8 | p.Type.IntS16 | p.Type.IntU16 => p.Type.IntS32
-    case x                                        => x
+    case x                                            => x
   }
 
   // 5.6.2. Binary Numeric Promotion
   private def binaryPromote(t: p.Type, u: p.Type) = Set(t, u) match {
     case xs if xs contains p.Type.Float64 => p.Type.Float64
-    case xs if xs contains p.Type.Float32  => p.Type.Float32
-    case xs if xs contains p.Type.IntS64   => p.Type.IntS64
-    case _                               => p.Type.IntS32
+    case xs if xs contains p.Type.Float32 => p.Type.Float32
+    case xs if xs contains p.Type.IntS64  => p.Type.IntS64
+    case _                                => p.Type.IntS32
   }
 
   private def binaryPromoteIntr[A](x: p.Expr, y: p.Expr, upper: p.Type, idx: Int)(f: (p.Expr, p.Expr) => A) = {
@@ -196,10 +196,10 @@ object IntrinsifyPass extends ProgramPass {
             }
           case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool1 && y.tpe == p.Type.Bool1 && rtn == p.Type.Bool1 =>
             val (expr, stmts) = op match {
-              case "&&"   => (p.Expr.IntrOp(p.Intr.LogicAnd(x, y)), Nil)
-              case "||"   => (p.Expr.IntrOp(p.Intr.LogicOr(x, y)), Nil)
-              case "=="   => (p.Expr.IntrOp(p.Intr.LogicEq(x, y)), Nil)
-              case "!="   => (p.Expr.IntrOp(p.Intr.LogicNeq(x, y)), Nil)
+              case "&&" => (p.Expr.IntrOp(p.Intr.LogicAnd(x, y)), Nil)
+              case "||" => (p.Expr.IntrOp(p.Intr.LogicOr(x, y)), Nil)
+              case "==" => (p.Expr.IntrOp(p.Intr.LogicEq(x, y)), Nil)
+              case "!=" => (p.Expr.IntrOp(p.Intr.LogicNeq(x, y)), Nil)
               case unsupported =>
                 println(s"No bool-bool-bool intrinsic for op: $unsupported")
                 (inv, Nil)
@@ -334,8 +334,7 @@ object IntrinsifyPass extends ProgramPass {
           // element type comes from `tpeArgs.head` (the call-site type argument), since the
           // declared rtn `Array[T]` may still be a Var(T) before specialisation runs.
           case (
-                Symbols.ArrayModule :+ "ofDim" |
-                "scala" :: "runtime" :: "Arrays$" :: "newGenericArray" :: Nil,
+                Symbols.ArrayModule :+ "ofDim" | "scala" :: "runtime" :: "Arrays$" :: "newGenericArray" :: Nil,
                 length :: rest
               ) if rest.size <= 1 =>
             tpeArgs.headOption match {

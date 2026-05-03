@@ -31,5 +31,4 @@ object Support {
 
   inline def linearise(inline start: Int, inline step: Int)(inline index: Int) = start + (index * step)
 
-
 }

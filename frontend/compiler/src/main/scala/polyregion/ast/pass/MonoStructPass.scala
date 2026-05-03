@@ -11,8 +11,8 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
     println(">MonoStructPass")
 
     val structsInFunction: List[p.Type.Struct] =
-      ((program.entry :: program.functions)
-        .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s }))
+      (program.entry :: program.functions)
+        .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s })
         .distinct
 
     println(s"In f = ${structsInFunction} ${program.defs}")
@@ -48,7 +48,7 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
     // we also try the post-replacement shape against the table built from pre-replacement keys.
     def doReplacement(t: p.Type): p.Type = t match {
       case s @ p.Type.Struct(name, tpeVars, args, parents) =>
-        val newArgs        = args.map(doReplacement(_))
+        val newArgs                        = args.map(doReplacement(_))
         val withRenamedArgs: p.Type.Struct = p.Type.Struct(name, tpeVars, newArgs, parents)
         // First try the original shape (matches when the body still has pre-rename args).
         val byOriginal = replacementTable.get(s)
@@ -61,11 +61,14 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
           if (byOriginal.isDefined || byRenamed.isDefined) None
           else
             replacementTable.collectFirst {
-              case (key, sdef) if key.name == name && key.args.size == newArgs.size &&
-                  key.args.map(applyTypeReplacement) == newArgs =>
+              case (key, sdef)
+                  if key.name == name && key.args.size == newArgs.size &&
+                    key.args.map(applyTypeReplacement) == newArgs =>
                 sdef
             }
-        println(s"[Rep] ${s.repr} (recovered=${withRenamedArgs.repr}) => ${byOriginal.orElse(byRenamed).orElse(byName)}")
+        println(
+          s"[Rep] ${s.repr} (recovered=${withRenamedArgs.repr}) => ${byOriginal.orElse(byRenamed).orElse(byName)}"
+        )
         byOriginal.orElse(byRenamed).orElse(byName) match {
           case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil, sdef.parents)
           case None       => withRenamedArgs

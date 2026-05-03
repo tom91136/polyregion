@@ -128,10 +128,10 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       [&](const Type::Ptr &x) -> llvm::Type * {
         if (x.length) return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), *x.length);
         return llvm::PointerType::get(actual, addressSpace(x.space));
-      },                                                                                                       //
+      }, //
       [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },
       [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); },
-      [&](const Type::Annotated &x) -> llvm::Type * { return resolveType(x.tpe, structs, functionBoundary); }  //
+      [&](const Type::Annotated &x) -> llvm::Type * { return resolveType(x.tpe, structs, functionBoundary); } //
   );
 }
 
@@ -167,31 +167,35 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // so e.g. `Node.next: Option[Node]` lands here without an Option struct def. The kernel can't
   // dereference these opaque structs, but type-only references (capturing Node by-value while
   // only reading `node.elem`) work fine.
-  std::function<void(const Type::Any&)> walk = [&](const Type::Any &t) {
+  std::function<void(const Type::Any &)> walk = [&](const Type::Any &t) {
     if (auto s = t.template get<Type::Struct>()) {
       auto name = repr(s->name);
       if (!opaqueTypes.contains(name)) {
         opaqueTypes.emplace(name, llvm::StructType::create(actual, name));
       }
-      for (auto &arg : s->args) walk(arg);
+      for (auto &arg : s->args)
+        walk(arg);
     } else if (auto p = t.template get<Type::Ptr>()) {
       walk(p->comp);
     } else if (auto a = t.template get<Type::Annotated>()) {
       walk(a->tpe);
     } else if (auto e = t.template get<Type::Exec>()) {
-      for (auto &arg : e->args) walk(arg);
+      for (auto &arg : e->args)
+        walk(arg);
       walk(e->rtn);
     }
   };
   for (auto &def : structs) {
-    for (auto &m : def.members) walk(m.tpe);
+    for (auto &m : def.members)
+      walk(m.tpe);
   }
   // Synthesise StructDefs for any types we created opaque shells for but weren't in the input.
   // We give them a single i8 placeholder member so LLVM treats them as sized (size 1) — empty
   // structs aren't well-supported by `DataLayout::getAlignment`.
   std::vector<StructDef> allDefs(structs.begin(), structs.end());
   Set<std::string> originalNames;
-  for (auto &d : structs) originalNames.emplace(repr(d.name));
+  for (auto &d : structs)
+    originalNames.emplace(repr(d.name));
   for (auto &[name, _] : opaqueTypes) {
     if (!originalNames.contains(name)) {
       // Fabricate a Sym from the dotted name. The kernel can only treat this as opaque (no
@@ -204,8 +208,8 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // Phase 2a: register stubs so resolveType can refer to any struct by name during body resolution.
   Map<std::string, StructInfo> resolved;
   for (auto &def : allDefs) {
-    const auto stub = StructInfo{.def = def, .layout = StructLayout(repr(def.name), 0, 0, {}),
-                                 .tpe = opaqueTypes.at(repr(def.name)), .memberIndices = {}};
+    const auto stub = StructInfo{
+        .def = def, .layout = StructLayout(repr(def.name), 0, 0, {}), .tpe = opaqueTypes.at(repr(def.name)), .memberIndices = {}};
     resolved.emplace(repr(def.name), stub);
   }
   // Phase 2b: setBody on every struct so all types are sized (recursive defs can ask each other for size).

@@ -19,7 +19,7 @@ class CollectionLengthSuite extends BaseSuite {
     val xs = Buffer[Float](41, 42, 43)
 
     val v = V(1, U(2))
-    testExpr{
+    testExpr {
       val x = v
       x.a + x.a + x.u.a
     }
@@ -110,8 +110,8 @@ class CollectionLengthSuite extends BaseSuite {
     override def apply(a: Int) = a + 1
   }
 
-  trait Foo{
-    def foo : Int
+  trait Foo {
+    def foo: Int
   }
 
 //  val f1 = F1()
@@ -135,7 +135,6 @@ class CollectionLengthSuite extends BaseSuite {
 //      def foo(i:Int) = i
 //      foo(ext)
 
-
 //       val f0 = F0()
 //       f0()
 
@@ -153,7 +152,7 @@ class CollectionLengthSuite extends BaseSuite {
 //      val ext = 128
 //      type A = Int
 
-      i+1
+      i + 1
 //      class Foo2{
 //        def innerFn : Int = 42
 //      }
@@ -167,7 +166,6 @@ class CollectionLengthSuite extends BaseSuite {
 //        override def foo = 42
 //      }
 //      f.foo
-
 
 //        val m = new XFunction1[Int, Int]{
 //          override def apply(v1: Int): Int = v1+v1

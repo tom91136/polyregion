@@ -79,7 +79,9 @@ const static std::string Empty = "#empty";
   }
 }
 
-[[nodiscard]] static Named baseMember(const StructDef &s) { return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {}, {}, {})); }
+[[nodiscard]] static Named baseMember(const StructDef &s) {
+  return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {}, {}, {}));
+}
 
 // static Expr::Select select(const Expr::Select & a, const Expr::Select & b) {
 //   const auto xs = a.init | append(a.last) | concat(b.init) | append(b.last) | to_vector();
@@ -327,14 +329,14 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::IntS32 &) -> std::string { return "int32_t"; }, //
       [&](const Type::IntS64 &) -> std::string { return "int64_t"; }, //
 
-      [&](const Type::Bool1 &) -> std::string { return "bool"; },                //
-      [&](const Type::Unit0 &) -> std::string { return "void"; },                //
-      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },       //
-      [&](const Type::Struct &x) -> std::string { return repr(x.name); },        //
-      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; }, //
+      [&](const Type::Bool1 &) -> std::string { return "bool"; },                  //
+      [&](const Type::Unit0 &) -> std::string { return "void"; },                  //
+      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },         //
+      [&](const Type::Struct &x) -> std::string { return repr(x.name); },          //
+      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },   //
       [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; }, //
-      [&](const Type::Exec &) -> std::string { return "/*exec*/"; },              //
-      [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }   //
+      [&](const Type::Exec &) -> std::string { return "/*exec*/"; },               //
+      [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }     //
   );
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -442,8 +444,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     body.emplace_back(Stmt::Return((Expr::Unit0Const())));
   }
 
-  auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{},
-                                       receiver ^ to_vector() ^ concat(args), std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body,
+  auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args),
+                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body,
                                        std::set<FunctionAttr::Any>{FunctionAttr::Internal()});
   r.functions.emplace(name, fn);
   return {name, fn};
@@ -490,16 +492,15 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                            | map([&](auto &p, auto &offsetAndSize) {
                                auto original = baseMember(*p);
                                if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
-                               auto e = r.structs ^=
-                                   get_or_emplace(Empty, [](auto &k) {
-                                     return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vec<Named>{}, std::vector<Sym>{});
-                                   });
+                               auto e = r.structs ^= get_or_emplace(Empty, [](auto &k) {
+                                 return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vec<Named>{}, std::vector<Sym>{});
+                               });
                                return std::pair{Named(original.symbol, Type::Struct(e->name, {}, {}, {})), offsetAndSize};
                              }) //
                            | to_vector();
 
     const auto emptyStruct = inherited.empty() && members.empty();
-    *stub = StructDef(                            //
+    *stub = StructDef(                           //
         Sym({name}), std::vector<std::string>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
@@ -662,8 +663,10 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         auto inner = handleType(tpe->getPointeeType(), r);
         if (inner.is<Type::Ptr>()) return inner;
         return refTpe(inner);
-      },                                                                                                             // T
-      [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}, {}, {}); } // struct T { ... }
+      }, // T
+      [&](const clang::RecordType *tpe) -> Type::Any {
+        return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}, {}, {});
+      } // struct T { ... }
   );
   if (!result) {
     llvm::outs() << "Unhandled type:\n";
@@ -844,8 +847,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_PointerToBoolean: {
             const auto srcTpe = sourceExpr.tpe();
             if (srcTpe.is<Type::Ptr>()) {
-              return Expr::IntrOp(Intr::LogicNeq(r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64())),
-                                                 integralConstOfType(Type::IntS64(), 0)));
+              return Expr::IntrOp(
+                  Intr::LogicNeq(r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64())), integralConstOfType(Type::IntS64(), 0)));
             }
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), integralConstOfType(srcTpe, 0)));
           }
@@ -1101,9 +1104,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
-            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},        //
+            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},       //
             args ^ prepend(r.newVar(conform(r, ref(receiver), *actualReceiverTpe))), //
-            std::vector<Expr::Any>{},                                                 //
+            std::vector<Expr::Any>{},                                                //
             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CXXOperatorCallExpr *expr) {
@@ -1124,9 +1127,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
-            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},        //
+            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},       //
             args ^ prepend(r.newVar(conform(r, ref(receiver), *actualReceiverTpe))), //
-            std::vector<Expr::Any>{},                                                 //
+            std::vector<Expr::Any>{},                                                //
             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
@@ -1242,8 +1245,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           Vec<Expr::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
-          return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{}, args,
-                                        std::vector<Expr::Any>{}, handleType(expr->getCallReturnType(context), r)));
+          return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{}, args, std::vector<Expr::Any>{},
+                                        handleType(expr->getCallReturnType(context), r)));
         }
       },
       [&](const clang::CXXThisExpr *expr) { //  method(...)
@@ -1256,7 +1259,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         if (auto recordDecl = llvm::dyn_cast<clang::RecordDecl>(expr->getMemberDecl()->getDeclContext()); recordDecl) {
           if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>(); s) {
-            auto member = Named(repr(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
+            auto member =
+                Named(repr(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
             if (auto s1 = baseExpr.get<Expr::Select>(); s1) {
               return select(r, s1->init ^ append(s1->last), member);
             } else {

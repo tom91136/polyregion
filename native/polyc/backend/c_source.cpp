@@ -112,8 +112,8 @@ struct CLAddressSpaceTracePass {
                                | distinct()                                                                //
                                | to_vector();                                                              //
     if (tracedRtnTpes.size() != 1) {
-      body.emplace_back(Stmt::Comment(
-          fmt::format("CLASTP: Return type diverged for function {}, types={}", repr(fn.name), tracedRtnTpes | mk_string(", ", show_repr))));
+      body.emplace_back(Stmt::Comment(fmt::format("CLASTP: Return type diverged for function {}, types={}", repr(fn.name),
+                                                  tracedRtnTpes | mk_string(", ", show_repr))));
     }
     return Function(fn.name, fn.tpeVars, fn.receiver, fn.args, fn.moduleCaptures, fn.termCaptures, tracedRtnTpes[0], body, fn.attrs);
   }
@@ -169,10 +169,10 @@ struct CLAddressSpaceTracePass {
 
     const auto spaceSpecialisedName = [](const Sym &name, const std::vector<TypeSpace::Any> &ts) -> Sym {
       auto suffix = ts ^ mk_string("", [&](auto &s) {
-        return s.match_total([&](TypeSpace::Global) { return "g"; }, //
-                             [&](TypeSpace::Local) { return "l"; },  //
-                             [&](TypeSpace::Private) { return "p"; });
-      });
+                      return s.match_total([&](TypeSpace::Global) { return "g"; }, //
+                                           [&](TypeSpace::Local) { return "l"; },  //
+                                           [&](TypeSpace::Private) { return "p"; });
+                    });
       auto fqn = name.fqn;
       if (!fqn.empty()) fqn.back() = fqn.back() + "_" + suffix;
       else fqn.push_back("_" + suffix);

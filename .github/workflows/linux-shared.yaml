@@ -21,16 +21,17 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         # llvm-tblgen is in llvm
         run: |
-          sudo apt-get install ninja-build llvm libcrypt-dev libtool autoconf automake libltdl-dev
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang lld llvm libcrypt-dev libltdl-dev python3-requests default-jdk
 
       - name: Dotenv
         id: dotenv
-        uses: falti/dotenv-action@v1.1
+        uses: falti/dotenv-action@v1.2
         with:
           path: ./native/.env
 
@@ -49,7 +50,7 @@ jobs:
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         id: restore-sysroot
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
           key: sysroot-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
@@ -62,7 +63,7 @@ jobs:
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         id: save-sysroot
         with:
           path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
@@ -78,7 +79,7 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
           key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
@@ -91,7 +92,7 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         id: save-llvm
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*

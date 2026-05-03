@@ -20,9 +20,7 @@ int main() {
   };
   Derived value{{11, 22}, 33, 44};
 
-  Derived result = __polyregion_offload_f1__([CHECK_CAPTURE]() {
-    return value;
-  });
+  Derived result = __polyregion_offload_f1__([CHECK_CAPTURE]() { return value; });
   printf("%d %d %d %d", result.a, result.b, result.c, result.d);
   return 0;
 }

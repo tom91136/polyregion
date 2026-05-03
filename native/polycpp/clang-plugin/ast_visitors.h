@@ -23,6 +23,7 @@ public:
 
 class SpecialisationPathVisitor : public clang::RecursiveASTVisitor<SpecialisationPathVisitor> {
   std::unordered_map<const clang::FunctionDecl *, std::pair<clang::FunctionDecl *, clang::CallExpr *>> map;
+
 public:
   explicit SpecialisationPathVisitor(const clang::ASTContext &context);
   bool shouldVisitTemplateInstantiations() const;

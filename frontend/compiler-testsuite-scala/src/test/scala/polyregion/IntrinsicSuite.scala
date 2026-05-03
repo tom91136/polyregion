@@ -51,13 +51,13 @@ class IntrinsicSuite extends BaseSuite {
     // JDK StrictMath.hypot (Kahan) vs platform libm's hypot are both correctly rounded but
     // can disagree on the last bit; allow a tiny ULP slack.
     testExprUlps[Double](math.hypot(a, b), maxUlps = 2) // D
-    testExpr[Double](math.pow(a, b))   // D
-    testExpr[Double](math.toDegrees(a)) // D
-    testExpr[Double](math.toRadians(a)) // D
+    testExpr[Double](math.pow(a, b))                    // D
+    testExpr[Double](math.toDegrees(a))                 // D
+    testExpr[Double](math.toRadians(a))                 // D
 
     // TODO parameterise these
 
-    testExpr[Double](math.abs(b)) // I, L, F, D
+    testExpr[Double](math.abs(b))    // I, L, F, D
     testExpr[Double](math.min(a, b)) // I, L, F, D
     testExpr[Double](math.max(a, b)) // I, L, F, D
     testExpr[Double](math.signum(b)) // I, L, F, D

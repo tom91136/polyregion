@@ -369,7 +369,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           if (const auto lhsPtr = x.as.get<Type::Ptr>()) {
             // TODO check layout and loss of information
             // if (lhsPtr->comp.is<Type::Struct>() && rhsPtr->comp.is<Type::Struct>()) {
-              return from;
+            return from;
             // }
           }
         }
@@ -434,8 +434,10 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         // function shape produced by createPrototype).
         Vec<AnyExpr> allArgs;
         if (x.receiver) allArgs.push_back(*x.receiver);
-        for (auto &c : x.captures) allArgs.push_back(c);
-        for (auto &a : x.args) allArgs.push_back(a);
+        for (auto &c : x.captures)
+          allArgs.push_back(c);
+        for (auto &a : x.args)
+          allArgs.push_back(a);
         const auto argNoUnit = allArgs ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
         const auto sig = Signature(x.name, /*tpeVars*/ {}, /*receiver*/ {}, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }),
                                    /*moduleCaptures*/ {}, /*termCaptures*/ {}, x.rtn);
@@ -741,25 +743,28 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   // indices via in-kernel intrinsics (threadIdx.* etc.), not as kernel parameters, so we must not
   // add a __tid arg there or the kernel ABI will be off-by-one and the first user arg gets read
   // from the wrong slot.
-  const auto cpuTarget = cg.C.options.target == LLVMBackend::Target::x86_64 || //
+  const auto cpuTarget = cg.C.options.target == LLVMBackend::Target::x86_64 ||  //
                          cg.C.options.target == LLVMBackend::Target::AArch64 || //
                          cg.C.options.target == LLVMBackend::Target::ARM;
   if (fn.attrs.contains(FunctionAttr::Entry()) && cpuTarget) {
     allArgs.push_back(Arg(Named("__tid", Type::IntS64()), {}));
   }
   if (fn.receiver) allArgs.push_back(*fn.receiver);
-  for (auto &a : fn.moduleCaptures) allArgs.push_back(a);
-  for (auto &a : fn.termCaptures) allArgs.push_back(a);
-  for (auto &a : fn.args) allArgs.push_back(a);
+  for (auto &a : fn.moduleCaptures)
+    allArgs.push_back(a);
+  for (auto &a : fn.termCaptures)
+    allArgs.push_back(a);
+  for (auto &a : fn.args)
+    allArgs.push_back(a);
 
   // Unit types in arguments are discarded
   const auto argsNoUnit = allArgs | filter([](auto &arg) { return !arg.named.tpe.template is<Type::Unit0>(); }) | to_vector();
   // Unit type at function return type position is void, any other location, Unit is a singleton value.
   // Structs are returned by-value (functionBoundary=false) — caller copies the result into a stack
   // slot. Args still travel as opaque pointers (functionBoundary=true) for ABI consistency.
-  const auto rtnTpe = fn.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(cg.C.actual)
+  const auto rtnTpe = fn.rtn.is<Type::Unit0>()    ? llvm::Type::getVoidTy(cg.C.actual)
                       : fn.rtn.is<Type::Struct>() ? cg.resolveType(fn.rtn, false)
-                      : cg.resolveType(fn.rtn, true);
+                                                  : cg.resolveType(fn.rtn, true);
 
   const auto argTys = argsNoUnit                                                            //
                       | map([&](auto &arg) { return cg.resolveType(arg.named.tpe, true); }) //
@@ -792,7 +797,8 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
   Vec<Function> allFns;
   allFns.reserve(program.functions.size() + 1);
   allFns.push_back(program.entry);
-  for (auto &f : program.functions) allFns.push_back(f);
+  for (auto &f : program.functions)
+    allFns.push_back(f);
   const auto prototypes = allFns ^ map([&](auto &fn) { return createPrototype(*this, M, fn); });
 
   prototypes | for_each([&](auto &llvmFn, auto &fn, auto &argsNoUnit) {
@@ -832,7 +838,6 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
   std::string ir;
   llvm::raw_string_ostream irOut(ir);
   M.print(irOut, nullptr);
-
 
   std::string err;
   llvm::raw_string_ostream errOut(err);

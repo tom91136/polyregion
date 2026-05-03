@@ -28,7 +28,7 @@ thread_local jclass clazz = nullptr;
 
 static void unregisterMethods(JNIEnv *env) {
   if (!clazz) return;
-  if(env->UnregisterNatives(clazz) != 0){
+  if (env->UnregisterNatives(clazz) != 0) {
     throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
   env->DeleteGlobalRef(clazz);
@@ -43,7 +43,7 @@ static void registerMethods(JNIEnv *env) {
       {(char *)"hostTarget0", (char *)"()B", (void *)&hostTarget0},
       {(char *)"hostTriplet0", (char *)"()Ljava/lang/String;", (void *)&hostTriplet0},
       {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)[Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0}};
-  if(env->RegisterNatives(clazz, methods, 4) != 0){
+  if (env->RegisterNatives(clazz, methods, 4) != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
 }

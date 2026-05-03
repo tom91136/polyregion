@@ -6,7 +6,7 @@
 
 using json = nlohmann::json;
 
-namespace polyregion::polyast { 
+namespace polyregion::polyast {
 [[nodiscard]] POLYREGION_EXPORT Sym sym_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json sym_to_json(const Sym &);
 [[nodiscard]] POLYREGION_EXPORT SourcePosition sourceposition_from_json(const json &);
@@ -37,7 +37,7 @@ namespace polyregion::polyast {
 [[nodiscard]] POLYREGION_EXPORT json compileevent_to_json(const CompileEvent &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
-namespace Intr { 
+namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
 [[nodiscard]] POLYREGION_EXPORT Intr::LogicNot logicnot_from_json(const json &);
@@ -91,7 +91,7 @@ namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Intr::Any &);
 } // namespace Intr
-namespace Expr { 
+namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT Expr::Float16Const float16const_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json float16const_to_json(const Expr::Float16Const &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Float32Const float32const_from_json(const json &);
@@ -145,7 +145,7 @@ namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr
-namespace FunctionAttr { 
+namespace FunctionAttr {
 [[nodiscard]] POLYREGION_EXPORT FunctionAttr::Internal internal_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json internal_to_json(const FunctionAttr::Internal &);
 [[nodiscard]] POLYREGION_EXPORT FunctionAttr::Exported exported_from_json(const json &);
@@ -159,7 +159,7 @@ namespace FunctionAttr {
 [[nodiscard]] POLYREGION_EXPORT FunctionAttr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const FunctionAttr::Any &);
 } // namespace FunctionAttr
-namespace Stmt { 
+namespace Stmt {
 [[nodiscard]] POLYREGION_EXPORT Stmt::Block block_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json block_to_json(const Stmt::Block &);
 [[nodiscard]] POLYREGION_EXPORT Stmt::Comment comment_from_json(const json &);
@@ -187,7 +187,7 @@ namespace Stmt {
 [[nodiscard]] POLYREGION_EXPORT Stmt::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Stmt::Any &);
 } // namespace Stmt
-namespace Math { 
+namespace Math {
 [[nodiscard]] POLYREGION_EXPORT Math::Abs abs_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json abs_to_json(const Math::Abs &);
 [[nodiscard]] POLYREGION_EXPORT Math::Sin sin_from_json(const json &);
@@ -241,7 +241,7 @@ namespace Math {
 [[nodiscard]] POLYREGION_EXPORT Math::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Math::Any &);
 } // namespace Math
-namespace TypeSpace { 
+namespace TypeSpace {
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Global global_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json global_to_json(const TypeSpace::Global &);
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Local local_from_json(const json &);
@@ -251,7 +251,7 @@ namespace TypeSpace {
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const TypeSpace::Any &);
 } // namespace TypeSpace
-namespace Spec { 
+namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT Spec::Assert assert_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json assert_to_json(const Spec::Assert &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuBarrierGlobal gpubarrierglobal_from_json(const json &);
@@ -281,7 +281,7 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT Spec::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Spec::Any &);
 } // namespace Spec
-namespace TypeKind { 
+namespace TypeKind {
 [[nodiscard]] POLYREGION_EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json none_to_json(const TypeKind::None &);
 [[nodiscard]] POLYREGION_EXPORT TypeKind::Ref ref_from_json(const json &);
@@ -293,7 +293,7 @@ namespace TypeKind {
 [[nodiscard]] POLYREGION_EXPORT TypeKind::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const TypeKind::Any &);
 } // namespace TypeKind
-namespace Type { 
+namespace Type {
 [[nodiscard]] POLYREGION_EXPORT Type::Float16 float16_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json float16_to_json(const Type::Float16 &);
 [[nodiscard]] POLYREGION_EXPORT Type::Float32 float32_from_json(const json &);
@@ -335,7 +335,6 @@ namespace Type {
 [[nodiscard]] POLYREGION_EXPORT Type::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Type::Any &);
 } // namespace Type
-[[nodiscard]] POLYREGION_EXPORT json hashed_to_json(const json&);
-[[nodiscard]] POLYREGION_EXPORT json hashed_from_json(const json&);
+[[nodiscard]] POLYREGION_EXPORT json hashed_to_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json hashed_from_json(const json &);
 } // namespace polyregion::polyast
-

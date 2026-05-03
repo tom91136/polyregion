@@ -124,7 +124,6 @@ struct CodeGen {
   [[nodiscard]] ValPtr binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
                                    const ValPtrFn2 &fractionalFn);
 
-
   Pair<Opt<std::string>, std::string> transform(const Program &program);
 };
 

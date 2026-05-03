@@ -77,7 +77,6 @@ class CompilerSpec extends munit.FunSuite {
 //    }
 //  }
 
- 
   class Base(val a: Int) {
     def foo(n: Int): Int = a + n
   }
@@ -131,7 +130,6 @@ class CompilerSpec extends munit.FunSuite {
       // val un = Unrelated()
       // val m = ClassB(123)
       // m.foo(12345)
-
 
       // val o  = if(true) ClassA(2) else ClassB(9)
       // o.foo(2)

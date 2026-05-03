@@ -421,9 +421,9 @@ object Remapper {
         // and rewriting it to `this.a` silently drops the parameter access.
         def handleThisRef(ref: q.Ref, named: p.Named) = {
           val rootIsThisOrAbsent = ref match {
-            case _: q.Ident                  => true
-            case q.Select(_: q.This, _)      => true
-            case _                           => false
+            case _: q.Ident             => true
+            case q.Select(_: q.This, _) => true
+            case _                      => false
           }
           if (rootIsThisOrAbsent && owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
             val ownerSym = ref.symbol.owner

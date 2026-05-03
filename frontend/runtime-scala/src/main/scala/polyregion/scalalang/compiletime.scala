@@ -330,7 +330,9 @@ object compiletime {
                   lut,
                   layouts,
                   allReprsInCaptures,
-                  '{ (b: java.nio.Buffer) => { keepAlive += b; Platforms.pointerOfDirectBuffer(b) } },
+                  '{ (b: java.nio.Buffer) =>
+                    keepAlive += b; Platforms.pointerOfDirectBuffer(b)
+                  },
                   '{ Platforms.directBufferFromPointer(_, _) }
                 )
 

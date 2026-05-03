@@ -17,7 +17,7 @@ static T *throwIfNil(T *t, NS::Error *error, const std::string &message, const c
   if (!t) {
     if (error) {
       POLYINVOKE_FATAL(PREFIX, "%s:%d: %s: %s\nSuggestion:%s\n", file, line, message.c_str(), error->localizedDescription()->utf8String(),
-                   error->localizedRecoverySuggestion()->utf8String());
+                       error->localizedRecoverySuggestion()->utf8String());
     } else POLYINVOKE_FATAL(PREFIX, "%s:%d: %s and Metal did not provide a reason\n", file, line, message.c_str());
   }
   return t;
@@ -180,7 +180,7 @@ MetalDeviceQueue::~MetalDeviceQueue() {
   pool->release();
 }
 void MetalDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
-                                                 const MaybeCallback &cb) {
+                                                  const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   std::memcpy(static_cast<char *>(queryMemObject(dst)->contents()) + dstOffset, //
               static_cast<char *>(queryMemObject(src)->contents()) + srcOffset, size);

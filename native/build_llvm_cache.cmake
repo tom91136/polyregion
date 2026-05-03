@@ -1,11 +1,11 @@
 
 if (UNIX)
-    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind openmp)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
     # needs a bootstrapping build for libcxx because cl.exe isn't support
     # see https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows
-    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt openmp)
     # nothing for RUNTIME_TARGETS
 else ()
     message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
@@ -29,7 +29,6 @@ set(LLVM_TARGETS_TO_BUILD
 
 set(LLVM_ENABLE_PROJECTS
         flang
-        openmp
         clang
         clang-tools-extra
         lld

@@ -60,21 +60,19 @@ object Simple {
 
     // val result = HIP.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O0], Int](42)
 
-
     val a = 1
-    object M{
+    object M {
       val x = 1
-      def a = x+1
+      def a = x + 1
     }
 
     val bb = Buffer[Boolean](true)
 
-    Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{
+    Host.aot.task[Config[Target.Host.type, Opt.O0], Double] {
       val xs = Array.ofDim[Double](4)
       xs(0)
 
     }
-
 
 //    List(1,2,3,0,42,44).foreach{i =>
 //      val resultS = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ math.tanh(i.toDouble) }
@@ -83,8 +81,6 @@ object Simple {
 //
 //    }
 //    Platforms.platforms.close()
-
-
 
     // val Const  = scala.compiletime.constValue[Target.X86.Znver.Arch]
     // val Const1 = scala.compiletime.constValue[c.Target#Arch]

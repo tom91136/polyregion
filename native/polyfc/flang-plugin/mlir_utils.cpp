@@ -27,12 +27,12 @@ mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::s
   const auto saved = B.saveInsertionPoint();
   B.setInsertionPointToStart(m.getBody());
   const StringRef ref(value.c_str(), value.size() + (nullTerminate ? 1 : 0));
-  auto var = LLVM::GlobalOp::create(B, uLoc(B),                                             //
-                                      LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), //
-                                      true, LLVM::Linkage::Private, fmt::format("str_const_{}", ++id), B.getStringAttr(ref));
+  auto var = LLVM::GlobalOp::create(B, uLoc(B),                                          //
+                                    LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), //
+                                    true, LLVM::Linkage::Private, fmt::format("str_const_{}", ++id), B.getStringAttr(ref));
   B.restoreInsertionPoint(saved);
   return LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), B.getI8Type(), LLVM::AddressOfOp::create(B, uLoc(B), var),
-                               ValueRange{intConst(B, i32Ty(B), 0)});
+                             ValueRange{intConst(B, i32Ty(B), 0)});
 }
 
 mlir::LLVM::LLVMFuncOp polyregion::polyfc::defineFunc(ModuleOp &m, const std::string &name, const Type rtnTy,
@@ -54,7 +54,7 @@ void polyregion::polyfc::defineGlobalCtor(ModuleOp &m, const std::string &name,
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
   LLVM::GlobalCtorsOp::create(B, uLoc(B), B.getArrayAttr({SymbolRefAttr::get(ctor)}), B.getArrayAttr({B.getIntegerAttr(i32Ty(B), 1)}),
-                                B.getArrayAttr(B.getZeroAttr(i32Ty(B))));
+                              B.getArrayAttr(B.getZeroAttr(i32Ty(B))));
 }
 
 polyregion::polyfc::DynamicAggregateMirror::DynamicAggregateMirror(MLIRContext *C, const std::string &name, const std::vector<Type> &types)

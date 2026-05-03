@@ -10,7 +10,7 @@
 
 int main() {
 
-  struct foo{};
+  struct foo {};
   foo value{};
   __polyregion_offload_f1__([CHECK_CAPTURE]() { return value; });
 

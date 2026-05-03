@@ -13,10 +13,10 @@
 namespace polyregion::polystl {
 
 polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
-                            clang::ASTContext &C,                //
-                            clang::DiagnosticsEngine &diag,      //
-                            const std::string &moduleId,         //
-                            const clang::CXXMethodDecl &functor, //
-                            const clang::SourceLocation &loc,    //
-                            runtime::PlatformKind kind);
+                                      clang::ASTContext &C,                //
+                                      clang::DiagnosticsEngine &diag,      //
+                                      const std::string &moduleId,         //
+                                      const clang::CXXMethodDecl &functor, //
+                                      const clang::SourceLocation &loc,    //
+                                      runtime::PlatformKind kind);
 } // namespace polyregion::polystl

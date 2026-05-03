@@ -343,15 +343,13 @@ class Processor extends AbstractProcessor {
                     processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class", null)
                   val os = gen.openOutputStream()
 
-
-
                   val bytes = new net.bytebuddy.ByteBuddy()
                     .subclass(classOf[ /* polyregion.java.BinaryOffloadExecutable */ Nothing])
                     .name(fqcn)
                     .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
                     .defineField(
                       "$BINARY$",
-                      classOf[scala.Array[Byte]] ,
+                      classOf[scala.Array[Byte]],
                       Visibility.PUBLIC,
                       Ownership.STATIC,
                       FieldManifestation.FINAL

@@ -98,10 +98,10 @@ mlir::Type polyfc::Remapper::resolveType(const Type::Any &tpe) {
       [&](const Type::Ptr &x) -> mlir::Type {
         if (x.length) return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), *x.length);
         return mlir::LLVM::LLVMPointerType::get(C);
-      },                                                                                                  //
-      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); }, //
+      },                                                                                                     //
+      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); },   //
       [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }, //
-      [&](const Type::Annotated &x) -> mlir::Type { return resolveType(x.tpe); }                          //
+      [&](const Type::Annotated &x) -> mlir::Type { return resolveType(x.tpe); }                             //
   );
 }
 
@@ -920,10 +920,11 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                              ? forEach(fnName, Capture, params) //
                              : reduce(fnName, Capture, Reduction, params, svrs);
 
-  const Program program(entry, r.functions, r.defs                       //
-                                                 | values()              //
-                                                 | concat(r.syntheticDefs) //
-                                                 | to_vector());
+  const Program program(entry, r.functions,
+                        r.defs                        //
+                            | values()                //
+                            | concat(r.syntheticDefs) //
+                            | to_vector());
 
   llvm::errs() << repr(program) << "\n";
   llvm::errs().flush();
@@ -937,15 +938,16 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
 
   return DoConcurrentRegion{
       .program = program,
-      .layouts = defLayouts                                                                       //
+      .layouts = defLayouts                                                                     //
                  | map([&](auto &l) { return std::pair{l.name == repr(capturesDef.name), l}; }) //
                  | to_vector(),
       .captures = captures,
       .reductions = exprWithReductions ^ map([](auto &, auto &rd) { return rd; }),
-      .boxes =
-          r.boxTypes                                                                                                                            //
-          | collect([](auto &k, auto &f) { return f ^ get_maybe<FBoxedMirror>() ^ map([&](auto &v) { return std::pair{repr(k.name), v}; }); }) //
-          | to<std::unordered_map>(),                                                                                                           //
+      .boxes = r.boxTypes //
+               | collect([](auto &k, auto &f) {
+                   return f ^ get_maybe<FBoxedMirror>() ^ map([&](auto &v) { return std::pair{repr(k.name), v}; });
+                 })                        //
+               | to<std::unordered_map>(), //
       .preludeLayout = findNamedLayout(preludeDef.name),
       .captureLayout = findNamedLayout(capturesDef.name),
       .reductionLayout = exprWithReductions.empty() ? std::optional<StructLayout>{} : findNamedLayout(reductionsDef.name),

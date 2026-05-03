@@ -10,13 +10,11 @@
 #pragma region do: {output}
 #pragma region requires: 42 42 1
 
-
 #pragma region case: &ptr
 #pragma region using: size=1,10,100
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: -1 -1 1
-
 
 #pragma region case: &ptr=42
 #pragma region using: size=1,10,100

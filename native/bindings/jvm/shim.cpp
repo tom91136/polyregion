@@ -1,7 +1,7 @@
-#include "polyregion/dl.h"
 #include "generated/mirror.h"
 #include "generated/natives.h"
 #include "jni_utils.h"
+#include "polyregion/dl.h"
 
 using namespace polyregion::generated::registry;
 
@@ -39,9 +39,7 @@ static JavaVM *CurrentVM = {};
   CurrentVM = nullptr;
 }
 
-void Natives::registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file) {
-  files.push_back(env->NewGlobalRef(file));
-}
+void Natives::registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file) { files.push_back(env->NewGlobalRef(file)); }
 
 static std::string resolveDlError() {
   auto message = polyregion_dl_error();

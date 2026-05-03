@@ -44,13 +44,11 @@ int main() {
 #ifdef CHECK_MUT
     xs[CHECK_SIZE_DEF - 1] *= 42;
 #endif
-//    int aaa = xs[4];
-//    return 42;
+    //    int aaa = xs[4];
+    //    return 42;
     return xs[CHECK_SIZE_DEF - 1];
   });
   printf("%d %d", result, xs[CHECK_SIZE_DEF - 1]);
-
-
 
   return 0;
 }

@@ -40,7 +40,7 @@ class CaptureSuite extends BaseSuite {
       // are kernel-opaque and the host-side Pickler can't reconstruct an Option ctor through depth-2.
       // case class Node(elem: Int, next: Option[Node])
       case class CaseClassA(b: Int, c: Int)
-      val as       = Array(CaseClassA(1, 2), CaseClassA(3, 4))
+      val as = Array(CaseClassA(1, 2), CaseClassA(3, 4))
       // val node     = Node(1, Some(Node(2, None)))
       val (t1, t2) = (1, 2)
       val b        = as(0).b

@@ -19,8 +19,7 @@ using namespace polyregion;
 using namespace aspartame;
 
 // See https://stackoverflow.com/a/39758021/896997
-template <typename T = std::byte>
-std::vector<T> readFromStdIn() {
+template <typename T = std::byte> std::vector<T> readFromStdIn() {
   std::freopen(nullptr, "rb", stdin);
   if (std::ferror(stdin)) throw std::runtime_error(std::strerror(errno));
   std::size_t len;
@@ -91,11 +90,11 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
 
                  compiler::initialise();
                  std::cout << "[POLYC] Compiling program:\n";
-                 std::cout<< "=================" <<std::endl;
+                 std::cout << "=================" << std::endl;
                  std::cout << repr(program) << "\n";
-                 std::cout<< "=================" <<std::endl;
+                 std::cout << "=================" << std::endl;
 
-                 try{
+                 try {
                    auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
                    if (verbose) std::cerr << repr(compilation) << std::endl;
                    if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
@@ -107,7 +106,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                      std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
                      outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
                    }
-                 } catch (const std::exception&e) {
+                 } catch (const std::exception &e) {
                    std::cerr << e.what() << std::endl;
                  }
 

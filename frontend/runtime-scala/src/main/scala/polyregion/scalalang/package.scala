@@ -304,9 +304,9 @@ object Platforms {
   export platforms.*
 }
 
-inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64[?]]    = Platform(Platforms.CUDA(), lift)
-inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN[?]]      = Platform(Platforms.HIP(), lift)
-inline def liftHSA[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN[?]]      = Platform(Platforms.HSA(), lift)
+inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64[?]] = Platform(Platforms.CUDA(), lift)
+inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN[?]]   = Platform(Platforms.HIP(), lift)
+inline def liftHSA[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN[?]]   = Platform(Platforms.HSA(), lift)
 inline def liftOpenCL[F[_]](lift: Suspend[F]): Platform[F, Target.OpenCL_C] = Platform(Platforms.OpenCL(), lift)
 inline def liftHost[F[_]](lift: Suspend[F]): Device[F, Target.CPU] = Device(Platforms.Relocatable().devices()(0), lift)
 
@@ -327,9 +327,9 @@ object blocking {
     ref.get.fold(throw _, identity)
   }
 
-  lazy val CUDA: Platform[Id, Target.NVPTX64[?]]    = liftCUDA(Latched)
-  lazy val HIP: Platform[Id, Target.AMDGCN[?]]      = liftHIP(Latched)
-  lazy val HSA: Platform[Id, Target.AMDGCN[?]]      = liftHSA(Latched)
+  lazy val CUDA: Platform[Id, Target.NVPTX64[?]] = liftCUDA(Latched)
+  lazy val HIP: Platform[Id, Target.AMDGCN[?]]   = liftHIP(Latched)
+  lazy val HSA: Platform[Id, Target.AMDGCN[?]]   = liftHSA(Latched)
   lazy val OpenCL: Platform[Id, Target.OpenCL_C] = liftOpenCL(Latched)
   lazy val Host: Device[Id, Target.CPU]          = liftHost(Latched)
 
@@ -344,8 +344,8 @@ object future {
     p.future
   }
 
-  lazy val CUDA: Platform[Future, Target.NVPTX64[?]]    = liftCUDA(SuspendFuture)
-  lazy val HIP: Platform[Future, Target.AMDGCN[?]]      = liftHIP(SuspendFuture)
+  lazy val CUDA: Platform[Future, Target.NVPTX64[?]] = liftCUDA(SuspendFuture)
+  lazy val HIP: Platform[Future, Target.AMDGCN[?]]   = liftHIP(SuspendFuture)
   lazy val OpenCL: Platform[Future, Target.OpenCL_C] = liftOpenCL(SuspendFuture)
   lazy val Host: Device[Future, Target.CPU]          = liftHost(SuspendFuture)
 

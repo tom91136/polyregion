@@ -99,7 +99,7 @@ object Retyper {
               val tpe = d.tpt.tpe
               // Skip references to objects as those are singletons and should be identified and lifted by the Remapper.
               if (isModuleClass(tpe.typeSymbol)) None.success
-              else  typer0(tpe).map { case (_ -> t, wit) => Some(p.Named(field.name, t)) }
+              else typer0(tpe).map { case (_ -> t, wit) => Some(p.Named(field.name, t)) }
             case _ => ???
           }
         } yield sm

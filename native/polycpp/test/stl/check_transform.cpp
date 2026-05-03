@@ -79,8 +79,6 @@ int main() {
   int size = 1024;
   if (auto sizeEnv = std::getenv("SIZE"); sizeEnv) size = std::stoi(sizeEnv);
 
-
-
   std::vector<float> b(size);
   std::fill(b.begin(), b.end(), 0.2);
 
@@ -88,11 +86,9 @@ int main() {
   std::fill(c.begin(), c.end(), 0.2);
 
   ranged<int> r(0, size);
-  std::transform(                                        //
-      std::execution::par_unseq, r.begin(), r.end(), b.data(),  //
-      [scalar = 0.4, c = c.data()](int i) {
-        return scalar * c[i];
-      });
+  std::transform(                                              //
+      std::execution::par_unseq, r.begin(), r.end(), b.data(), //
+      [scalar = 0.4, c = c.data()](int i) { return scalar * c[i]; });
 
   auto checksum = std::reduce(b.begin(), b.end(), 0.0, std::plus<>()) / size;
 

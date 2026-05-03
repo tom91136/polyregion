@@ -15,7 +15,7 @@ int main() {
     int *begin, *end;
   };
   struct vec {
-    vec_impl* impl;
+    vec_impl *impl;
   };
 
   int size = 10;
@@ -23,7 +23,6 @@ int main() {
   int *xs = new int[size];
   for (int i = 0; i < size; ++i)
     xs[i] = i;
-
 
   auto impl = new vec_impl{xs, xs + size};
   vec value{impl};

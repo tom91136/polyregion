@@ -97,7 +97,7 @@ template <typename P> static void assertCompile(const P &p) {
 }
 
 TEST_CASE("json round-trip", "[ast]") {
-  Function expected = mkFn(                                                                   //
+  Function expected = mkFn(                                                            //
       "foo", {Arg(Named("a", Type::IntS32()), {}), Arg(Named("b", Double), {})}, Unit, //
       {
           Comment("a"), //
@@ -299,9 +299,9 @@ TEST_CASE("return struct and take ref", "[compiler]") {
 
   auto entry = function("bar", {"in"_(Ptr(fooTpe))()}, Unit)({
       let("a") = mkInvoke("gen", {}, barTpe),                                                         //
-      let("ar") = RefTo("a"_(barTpe), {}, barTpe, Global),                                          //
+      let("ar") = RefTo("a"_(barTpe), {}, barTpe, Global),                                            //
       let("r") = mkInvoke("aux", {Select({"in"_(Ptr(fooTpe))}, y), "ar"_(Ptr(barTpe))}, Ptr(barTpe)), //
-      ret(Unit0Const())                                                                             //
+      ret(Unit0Const())                                                                               //
   });
 
   assertCompile(program({fooDef, barDef}, {entry, gen, aux}));
@@ -574,16 +574,16 @@ TEST_CASE("index struct array member", "[compiler]") {
   Type::Struct myStruct(Sym({"MyStruct"}), {}, {}, {});
 
   Function fn = mkFn("foo", {Arg(Named("s", Ptr(myStruct)), {})}, Type::IntS32(),
-              {
+                     {
 
-                  Var(Named("a", myStruct), {Index(Select({}, Named("s", Ptr(myStruct))), Expr::IntS32Const(0), myStruct)}),
+                         Var(Named("a", myStruct), {Index(Select({}, Named("s", Ptr(myStruct))), Expr::IntS32Const(0), myStruct)}),
 
-                  Var(Named("b", Type::IntS32()), {(Select({Named("a", myStruct)}, defX))}),
+                         Var(Named("b", Type::IntS32()), {(Select({Named("a", myStruct)}, defX))}),
 
-                  //                  Mut(Select({Named("s",  Ptr(myStruct ))}, defX),  (IntS32Const(42 ),
-                  Return(IntS32Const(69)),
-              },
-              {FunctionAttr::Exported()});
+                         //                  Mut(Select({Named("s",  Ptr(myStruct ))}, defX),  (IntS32Const(42 ),
+                         Return(IntS32Const(69)),
+                     },
+                     {FunctionAttr::Exported()});
   assertCompile(program({def}, {fn}));
 }
 
@@ -595,12 +595,12 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   Type::Struct myStruct(Sym({"MyStruct"}), {}, {}, {});
 
   Function fn = mkFn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Type::IntS32(),
-              {
-                  Var(Named("x", myStruct), Index(Select({}, Named("xs", Ptr(myStruct))), IntS32Const(0), myStruct)),
-                  Mut(Select({Named("x", myStruct)}, defX), IntS32Const(42)),
-                  Return(IntS32Const(69)),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("x", myStruct), Index(Select({}, Named("xs", Ptr(myStruct))), IntS32Const(0), myStruct)),
+                         Mut(Select({Named("x", myStruct)}, defX), IntS32Const(42)),
+                         Return(IntS32Const(69)),
+                     },
+                     {FunctionAttr::Exported()});
   assertCompile(program({def}, {fn}));
 }
 
@@ -612,12 +612,12 @@ TEST_CASE("array update struct elem", "[compiler]") {
   Type::Struct myStruct(Sym({"MyStruct"}), {}, {}, {});
 
   Function fn = mkFn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Type::IntS32(),
-              {
-                  Var(Named("data", myStruct), {}),
-                  Update(Select({}, Named("xs", Ptr(myStruct))), IntS32Const(7), Select({}, Named("data", myStruct))),
-                  Return(IntS32Const(69)),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("data", myStruct), {}),
+                         Update(Select({}, Named("xs", Ptr(myStruct))), IntS32Const(7), Select({}, Named("data", myStruct))),
+                         Return(IntS32Const(69)),
+                     },
+                     {FunctionAttr::Exported()});
   assertCompile(program({def}, {fn}));
 }
 
@@ -640,16 +640,16 @@ TEST_CASE("alias struct member", "[compiler]") {
   StructDef def(Sym({"a.b"}), {}, {(Named("x", SInt)), (Named("y", SInt))}, {});
   Named arg("in", Type::Struct(Sym({"a.b"}), {}, {}, {}));
   Function fn = mkFn("foo", {Arg(arg, {})}, Unit,
-              {
-                  Var(                   //
-                      Named("y2", SInt), //
-                      {
-                          (Select({arg}, Named("y", SInt))) //
-                      } //
-                      ),
-                  Return(Unit0Const()),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(                   //
+                             Named("y2", SInt), //
+                             {
+                                 (Select({arg}, Named("y", SInt))) //
+                             } //
+                             ),
+                         Return(Unit0Const()),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({def}, {fn}));
 }
@@ -660,12 +660,12 @@ TEST_CASE("alias array", "[compiler]") {
   const auto arr = Ptr(SInt);
 
   Function fn = mkFn("foo", {}, arr,
-              {
-                  Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
-                  Var(Named("t", arr), {(Select({}, Named("s", arr)))}),
-                  Return(Select({}, Named("s", arr))),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
+                         Var(Named("t", arr), {(Select({}, Named("s", arr)))}),
+                         Return(Select({}, Named("s", arr))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({}, {fn}));
 }
@@ -679,20 +679,20 @@ TEST_CASE("mut struct", "[compiler]") {
   Type::Struct myStruct(Sym({"MyStruct"}), {}, {}, {});
 
   Function fn = mkFn("foo", {Arg(Named("out", myStruct), {})}, Unit,
-              {
-                  //                  Var(Named("s", myStruct), {}),
-                  //                  Var(Named("t", myStruct), {}),
+                     {
+                         //                  Var(Named("s", myStruct), {}),
+                         //                  Var(Named("t", myStruct), {}),
 
-                  //                  Mut(Select({}, Named("t", myStruct)),  (Select({}, Named("out", myStruct ),
+                         //                  Mut(Select({}, Named("t", myStruct)),  (Select({}, Named("out", myStruct ),
 
-                  Mut(Select({Named("out", myStruct)}, defX), IntS32Const(42)),
-                  Mut(Select({Named("out", myStruct)}, defY), IntS32Const(43)),
-                  //                  Mut(Select({}, Named("s", myStruct)),  (Select({}, Named("t", myStruct ),
+                         Mut(Select({Named("out", myStruct)}, defX), IntS32Const(42)),
+                         Mut(Select({Named("out", myStruct)}, defY), IntS32Const(43)),
+                         //                  Mut(Select({}, Named("s", myStruct)),  (Select({}, Named("t", myStruct ),
 
-                  //                  Return( (Unit0Const())),
-                  Return(Unit0Const()),
-              },
-              {FunctionAttr::Exported()});
+                         //                  Return( (Unit0Const())),
+                         Return(Unit0Const()),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({def}, {fn}));
 }
@@ -703,16 +703,16 @@ TEST_CASE("mut array", "[compiler]") {
   const auto arr = Ptr(SInt);
 
   Function fn = mkFn("foo", {}, arr,
-              {
-                  Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
-                  Var(Named("t", arr), {Alloc(arr.comp, IntS32Const(20), Global)}),
-                  Var(Named("u", arr), {Alloc(arr.comp, IntS32Const(30), Global)}),
-                  Mut(Select({}, Named("s", arr)), Select({}, Named("t", arr))),
-                  Mut(Select({}, Named("t", arr)), Select({}, Named("u", arr))),
-                  Mut(Select({}, Named("t", arr)), Select({}, Named("s", arr))),
-                  Return(Select({}, Named("s", arr))),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
+                         Var(Named("t", arr), {Alloc(arr.comp, IntS32Const(20), Global)}),
+                         Var(Named("u", arr), {Alloc(arr.comp, IntS32Const(30), Global)}),
+                         Mut(Select({}, Named("s", arr)), Select({}, Named("t", arr))),
+                         Mut(Select({}, Named("t", arr)), Select({}, Named("u", arr))),
+                         Mut(Select({}, Named("t", arr)), Select({}, Named("s", arr))),
+                         Return(Select({}, Named("s", arr))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({}, {fn}));
 }
@@ -721,12 +721,12 @@ TEST_CASE("mut prim", "[compiler]") {
   compiler::initialise();
 
   Function fn = mkFn("foo", {}, SInt,
-              {
-                  Var(Named("s", SInt), {(IntS32Const(10))}),
-                  Mut(Select({}, Named("s", SInt)), IntS32Const(20)),
-                  Return(Select({}, Named("s", SInt))),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("s", SInt), {(IntS32Const(10))}),
+                         Mut(Select({}, Named("s", SInt)), IntS32Const(20)),
+                         Return(Select({}, Named("s", SInt))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({}, {fn}));
 }
@@ -742,17 +742,17 @@ TEST_CASE("alloc struct", "[compiler]") {
   Type::Struct myStruct2(Sym({"MyStruct2"}), {}, {}, {});
 
   Function fn = mkFn("foo", {Arg(Named("out", myStruct), {})}, SInt,
-              {
-                  Var(Named("s", myStruct), {}),
-                  Mut(Select({Named("s", myStruct)}, defX), IntS32Const(42)),
-                  Mut(Select({Named("s", myStruct)}, defY), IntS32Const(43)),
-                  Var(Named("t", myStruct2), {}),
+                     {
+                         Var(Named("s", myStruct), {}),
+                         Mut(Select({Named("s", myStruct)}, defX), IntS32Const(42)),
+                         Mut(Select({Named("s", myStruct)}, defY), IntS32Const(43)),
+                         Var(Named("t", myStruct2), {}),
 
-                  //                  Mut(Select({}, Named("out", myStruct)),  (Select({}, Named("s", myStruct))),
-                  //                  true), Return( (Unit0Const())),
-                  Return(IntrOp(Add(Select({Named("s", myStruct)}, defX), Select({Named("s", myStruct)}, defY), SInt))),
-              },
-              {FunctionAttr::Exported()});
+                         //                  Mut(Select({}, Named("out", myStruct)),  (Select({}, Named("s", myStruct))),
+                         //                  true), Return( (Unit0Const())),
+                         Return(IntrOp(Add(Select({Named("s", myStruct)}, defX), Select({Named("s", myStruct)}, defY), SInt))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({def, def2}, {fn}));
 }
@@ -771,16 +771,16 @@ TEST_CASE("alloc struct nested", "[compiler]") {
   Type::Struct myStruct(Sym({"MyStruct"}), {}, {}, {});
 
   Function fn = mkFn("foo", {}, SInt,
-              {
-                  Var(Named("t", myStruct2), {}),
-                  Var(Named("s", myStruct), {}),
-                  Mut(Select({Named("s", myStruct)}, defX), IntS32Const(42)),
-                  Mut(Select({Named("s", myStruct)}, defY), IntS32Const(43)),
-                  Mut(Select({Named("s", myStruct)}, defZ), Select({}, Named("t", myStruct2))),
-                  Mut(Select({Named("s", myStruct), defZ}, defX), IntS32Const(42)),
-                  Return(IntS32Const(69)),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("t", myStruct2), {}),
+                         Var(Named("s", myStruct), {}),
+                         Mut(Select({Named("s", myStruct)}, defX), IntS32Const(42)),
+                         Mut(Select({Named("s", myStruct)}, defY), IntS32Const(43)),
+                         Mut(Select({Named("s", myStruct)}, defZ), Select({}, Named("t", myStruct2))),
+                         Mut(Select({Named("s", myStruct), defZ}, defX), IntS32Const(42)),
+                         Return(IntS32Const(69)),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({def2, def}, {fn}));
 }
@@ -791,13 +791,13 @@ TEST_CASE("alloc array", "[compiler]") {
   const auto arr = Ptr(SInt);
 
   Function fn = mkFn("foo", {}, arr,
-              {
-                  Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
-                  Var(Named("t", arr), {Alloc(arr.comp, IntS32Const(20), Global)}),
-                  Var(Named("u", arr), {Alloc(arr.comp, IntS32Const(30), Global)}),
-                  Return(Select({}, Named("s", arr))),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
+                         Var(Named("t", arr), {Alloc(arr.comp, IntS32Const(20), Global)}),
+                         Var(Named("u", arr), {Alloc(arr.comp, IntS32Const(30), Global)}),
+                         Return(Select({}, Named("s", arr))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({}, {fn}));
 }
@@ -806,13 +806,13 @@ TEST_CASE("cast expr", "[compiler]") {
   compiler::initialise();
 
   Function fn = mkFn("foo", {}, SInt,
-              {
-                  Var(Named("d", Double), {Cast(IntS32Const(10), Double)}),
-                  Var(Named("i", SInt), {Cast(Select({}, Named("d", Double)), SInt)}),
+                     {
+                         Var(Named("d", Double), {Cast(IntS32Const(10), Double)}),
+                         Var(Named("i", SInt), {Cast(Select({}, Named("d", Double)), SInt)}),
 
-                  Return(Select({}, Named("i", SInt))),
-              },
-              {FunctionAttr::Exported()});
+                         Return(Select({}, Named("i", SInt))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({}, {fn}));
 }
@@ -826,14 +826,14 @@ TEST_CASE("cast fp to int expr", "[compiler]") {
   const auto to = SInt;
 
   Function fn = mkFn("foo", {}, to,
-              {
-                  Var(Named("i", from.tpe), {from}),
+                     {
+                         Var(Named("i", from.tpe), {from}),
 
-                  Var(Named("d", to), {Cast(Select({}, Named("i", from.tpe)), to)}),
+                         Var(Named("d", to), {Cast(Select({}, Named("i", from.tpe)), to)}),
 
-                  Return(Select({}, Named("d", to))),
-              },
-              {FunctionAttr::Exported()});
+                         Return(Select({}, Named("d", to))),
+                     },
+                     {FunctionAttr::Exported()});
 
   assertCompile(program({}, {fn}));
 }
@@ -842,16 +842,16 @@ TEST_CASE("cond", "[compiler]") {
   compiler::initialise();
 
   Function fn = mkFn("foo", {}, SInt,
-              {
-                  Var(Named("out", SInt), {}),
-                  Cond(Bool1Const(true),                                       //
-                       {Mut(Select({}, Named("out", SInt)), IntS32Const(42))}, //
-                       {Mut(Select({}, Named("out", SInt)), IntS32Const(43))}  //
-                       ),
+                     {
+                         Var(Named("out", SInt), {}),
+                         Cond(Bool1Const(true),                                       //
+                              {Mut(Select({}, Named("out", SInt)), IntS32Const(42))}, //
+                              {Mut(Select({}, Named("out", SInt)), IntS32Const(43))}  //
+                              ),
 
-                  Return(Select({}, Named("out", SInt))),
-              },
-              {FunctionAttr::Exported()});
+                         Return(Select({}, Named("out", SInt))),
+                     },
+                     {FunctionAttr::Exported()});
   assertCompile(program({}, {fn}));
 }
 
@@ -859,10 +859,10 @@ TEST_CASE("while false", "[compiler]") {
   compiler::initialise();
 
   Function fn = mkFn("foo", {}, Unit,
-              {
-                  While({}, Bool1Const(false), {}),
-                  Return(Unit0Const()),
-              },
-              {FunctionAttr::Exported()});
+                     {
+                         While({}, Bool1Const(false), {}),
+                         Return(Unit0Const()),
+                     },
+                     {FunctionAttr::Exported()});
   assertCompile(program({}, {fn}));
 }

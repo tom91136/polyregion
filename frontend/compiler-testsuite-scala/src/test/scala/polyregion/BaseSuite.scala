@@ -43,7 +43,7 @@ trait BaseSuite extends munit.FunSuite {
     case JDK, Offload
   }
 
-  inline def offload0(using inline target: AssertTarget)(inline f: => Any): Unit =   target match {
+  inline def offload0(using inline target: AssertTarget)(inline f: => Any): Unit = target match {
     case AssertTarget.JDK => f
     case AssertTarget.Offload =>
       import polyregion.scalalang.*
@@ -59,7 +59,7 @@ trait BaseSuite extends munit.FunSuite {
       latch.await(5, TimeUnit.SECONDS)
   }
 
-  inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A =   target match {
+  inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A = target match {
     case AssertTarget.JDK => f
     case AssertTarget.Offload =>
       import polyregion.scalalang.*
@@ -138,8 +138,8 @@ trait BaseSuite extends munit.FunSuite {
       else if (java.lang.Float.isInfinite(actual) || java.lang.Float.isInfinite(expected))
         actual == expected
       else {
-        val ab = java.lang.Float.floatToIntBits(actual)
-        val eb = java.lang.Float.floatToIntBits(expected)
+        val ab                 = java.lang.Float.floatToIntBits(actual)
+        val eb                 = java.lang.Float.floatToIntBits(expected)
         def order(b: Int): Int = if (b < 0) 0x80000000 - b else b
         Math.abs(order(ab) - order(eb)) <= maxUlps
       }
@@ -147,9 +147,10 @@ trait BaseSuite extends munit.FunSuite {
       fail(s"Expected $expected within $maxUlps ULPs, got $actual (Δ=${actual - expected})")
   }
 
-  /** Like `assertOffloadValue`, but allows the offload result to differ from the JDK reference
-    * by up to `maxUlps` last-place units. Use for intrinsics where host libm and JDK
-    * StrictMath are correctly rounded but disagree on the last bit. */
+  /** Like `assertOffloadValue`, but allows the offload result to differ from the JDK reference by up to `maxUlps`
+    * last-place units. Use for intrinsics where host libm and JDK StrictMath are correctly rounded but disagree on the
+    * last bit.
+    */
   inline def assertOffloadValueUlps[A](inline f: AssertTarget ?=> A, maxUlps: Int): Unit = {
     val actual =
       if (!Toggles.NoOffload) Some(f(using AssertTarget.Offload))

@@ -12,8 +12,7 @@ bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_os
 }
 
 std::pair<std::optional<std::string>, std::optional<std::string>>
-polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args,
-                                    const std::vector<llvm::MemoryBufferRef> &files) {
+polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files) {
 
   static std::atomic_size_t id;
 
@@ -30,8 +29,7 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args,
       std::ofstream outFile(*path, std::ios::out | std::ios::binary);
       outFile.write(f.getBufferStart(), ssize_t(f.getBufferSize()));
       outFile.close();
-    } else
-      throw std::logic_error("Cannot create temp file " + f.getBufferIdentifier().str());
+    } else throw std::logic_error("Cannot create temp file " + f.getBufferIdentifier().str());
   }
 
   auto output = memoryfs::open("out." + std::to_string(id++));

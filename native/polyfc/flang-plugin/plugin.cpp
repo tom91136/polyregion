@@ -116,8 +116,8 @@ class RewriteIRAction final : public Fortran::frontend::PluginParseTreeAction {
       cmdArgRef.push_back(x.c_str());
     unsigned int missingArgIndex{};
     unsigned int missingArgCount{};
-    const auto args = clang::getDriverOptTable().ParseArgs(cmdArgRef, missingArgIndex, missingArgCount,
-                                                                   llvm::opt::Visibility(clang::options::FC1Option));
+    const auto args =
+        clang::getDriverOptTable().ParseArgs(cmdArgRef, missingArgIndex, missingArgCount, llvm::opt::Visibility(clang::options::FC1Option));
     if (const auto arg = args.getLastArg(clang::options::OPT_Action_Group)) {
       llvm::outs() << "[PolyFC] action=" << arg->getOption().getName() << "\n";
       const bool success = [&] {

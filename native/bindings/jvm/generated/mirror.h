@@ -1,25 +1,26 @@
 #include <jni.h>
-#include <optional>
 #include <memory>
+#include <optional>
 namespace polyregion::generated {
 struct ByteBuffer {
   struct Instance {
     const ByteBuffer &meta;
     jobject instance;
     Instance(const ByteBuffer &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID allocateDirect_ILjava_nio_ByteBuffer_Method;
   jmethodID allocate_ILjava_nio_ByteBuffer_Method;
+
 private:
   explicit ByteBuffer(JNIEnv *env);
   static thread_local std::unique_ptr<ByteBuffer> cached;
+
 public:
-  static ByteBuffer& of(JNIEnv *env);
+  static ByteBuffer &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   jobject allocateDirect(JNIEnv *env, jint arg0) const;
   jobject allocate(JNIEnv *env, jint arg0) const;
 };
@@ -28,18 +29,19 @@ struct Property {
     const Property &meta;
     jobject instance;
     Instance(const Property &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Property(JNIEnv *env);
   static thread_local std::unique_ptr<Property> cached;
+
 public:
-  static Property& of(JNIEnv *env);
+  static Property &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jstring key, jstring value) const;
 };
 struct Dim3 {
@@ -47,7 +49,7 @@ struct Dim3 {
     const Dim3 &meta;
     jobject instance;
     Instance(const Dim3 &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     jlong x(JNIEnv *env) const;
     jlong y(JNIEnv *env) const;
     jlong z(JNIEnv *env) const;
@@ -57,13 +59,15 @@ struct Dim3 {
   jfieldID yField;
   jfieldID zField;
   jmethodID ctor0Method;
+
 private:
   explicit Dim3(JNIEnv *env);
   static thread_local std::unique_ptr<Dim3> cached;
+
 public:
-  static Dim3& of(JNIEnv *env);
+  static Dim3 &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong x, jlong y, jlong z) const;
 };
 struct Policy {
@@ -71,9 +75,9 @@ struct Policy {
     const Policy &meta;
     jobject instance;
     Instance(const Policy &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    Dim3::Instance global(JNIEnv *env, const Dim3& clazz) const;
-    Dim3::Instance local(JNIEnv *env, const Dim3& clazz) const;
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
+    Dim3::Instance global(JNIEnv *env, const Dim3 &clazz) const;
+    Dim3::Instance local(JNIEnv *env, const Dim3 &clazz) const;
     jint localMemoryBytes(JNIEnv *env) const;
   };
   jclass clazz;
@@ -83,13 +87,15 @@ struct Policy {
   jmethodID ctor0Method;
   jmethodID ctor1Method;
   jmethodID ctor2Method;
+
 private:
   explicit Policy(JNIEnv *env);
   static thread_local std::unique_ptr<Policy> cached;
+
 public:
-  static Policy& of(JNIEnv *env);
+  static Policy &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jobject global) const;
   Instance operator()(JNIEnv *env, jobject global, jobject local) const;
   Instance operator()(JNIEnv *env, jobject global, jobject local, jint localMemoryBytes) const;
@@ -99,18 +105,19 @@ struct Queue {
     const Queue &meta;
     jobject instance;
     Instance(const Queue &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Queue(JNIEnv *env);
   static thread_local std::unique_ptr<Queue> cached;
+
 public:
-  static Queue& of(JNIEnv *env);
+  static Queue &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong nativePeer, jobject device) const;
 };
 struct Device {
@@ -118,18 +125,19 @@ struct Device {
     const Device &meta;
     jobject instance;
     Instance(const Device &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Device(JNIEnv *env);
   static thread_local std::unique_ptr<Device> cached;
+
 public:
-  static Device& of(JNIEnv *env);
+  static Device &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong nativePeer, jlong id, jstring name, jboolean sharedAddressSpace) const;
 };
 struct Platform {
@@ -137,18 +145,19 @@ struct Platform {
     const Platform &meta;
     jobject instance;
     Instance(const Platform &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Platform(JNIEnv *env);
   static thread_local std::unique_ptr<Platform> cached;
+
 public:
-  static Platform& of(JNIEnv *env);
+  static Platform &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong nativePeer, jstring name) const;
 };
 struct Event {
@@ -156,18 +165,19 @@ struct Event {
     const Event &meta;
     jobject instance;
     Instance(const Event &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Event(JNIEnv *env);
   static thread_local std::unique_ptr<Event> cached;
+
 public:
-  static Event& of(JNIEnv *env);
+  static Event &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong epochMillis, jlong elapsedNanos, jstring name, jstring data) const;
 };
 struct Layout {
@@ -175,18 +185,19 @@ struct Layout {
     const Layout &meta;
     jobject instance;
     Instance(const Layout &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Layout(JNIEnv *env);
   static thread_local std::unique_ptr<Layout> cached;
+
 public:
-  static Layout& of(JNIEnv *env);
+  static Layout &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jstring name, jlong sizeInBytes, jlong alignment, jobjectArray members) const;
 };
 struct Member {
@@ -194,18 +205,19 @@ struct Member {
     const Member &meta;
     jobject instance;
     Instance(const Member &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Member(JNIEnv *env);
   static thread_local std::unique_ptr<Member> cached;
+
 public:
-  static Member& of(JNIEnv *env);
+  static Member &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jstring name, jlong offsetInBytes, jlong sizeInBytes) const;
 };
 struct Options {
@@ -213,7 +225,7 @@ struct Options {
     const Options &meta;
     jobject instance;
     Instance(const Options &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     jstring arch(JNIEnv *env) const;
     jbyte target(JNIEnv *env) const;
   };
@@ -221,13 +233,15 @@ struct Options {
   jfieldID archField;
   jfieldID targetField;
   jmethodID ctor0Method;
+
 private:
   explicit Options(JNIEnv *env);
   static thread_local std::unique_ptr<Options> cached;
+
 public:
-  static Options& of(JNIEnv *env);
+  static Options &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
+  Instance wrap(JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jbyte target, jstring arch) const;
 };
 struct Compilation {
@@ -235,74 +249,78 @@ struct Compilation {
     const Compilation &meta;
     jobject instance;
     Instance(const Compilation &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
   jmethodID ctor0Method;
+
 private:
   explicit Compilation(JNIEnv *env);
   static thread_local std::unique_ptr<Compilation> cached;
+
 public:
-  static Compilation& of(JNIEnv *env);
+  static Compilation &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray events, jobjectArray layouts, jstring messages) const;
+  Instance wrap(JNIEnv *env, jobject instance);
+  Instance operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray events, jobjectArray layouts,
+                      jstring messages) const;
 };
 struct String {
   struct Instance {
     const String &meta;
     jobject instance;
     Instance(const String &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
   };
   jclass clazz;
+
 private:
   explicit String(JNIEnv *env);
   static thread_local std::unique_ptr<String> cached;
+
 public:
-  static String& of(JNIEnv *env);
+  static String &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
-  
+  Instance wrap(JNIEnv *env, jobject instance);
 };
 struct Runnable {
   struct Instance {
     const Runnable &meta;
     jobject instance;
     Instance(const Runnable &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     void run(JNIEnv *env) const;
   };
   jclass clazz;
   jmethodID run_VMethod;
+
 private:
   explicit Runnable(JNIEnv *env);
   static thread_local std::unique_ptr<Runnable> cached;
+
 public:
-  static Runnable& of(JNIEnv *env);
+  static Runnable &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
-  
+  Instance wrap(JNIEnv *env, jobject instance);
 };
 struct File {
   struct Instance {
     const File &meta;
     jobject instance;
     Instance(const File &meta, jobject instance);
-    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
+    template <typename T, typename F> std::optional<T> map(F &&f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     jboolean delete_(JNIEnv *env) const;
   };
   jclass clazz;
   jmethodID delete_ZMethod;
+
 private:
   explicit File(JNIEnv *env);
   static thread_local std::unique_ptr<File> cached;
+
 public:
-  static File& of(JNIEnv *env);
+  static File &of(JNIEnv *env);
   static void drop(JNIEnv *env);
-  Instance wrap (JNIEnv *env, jobject instance);
-  
+  Instance wrap(JNIEnv *env, jobject instance);
 };
-}// polyregion::generated
+} // namespace polyregion::generated

@@ -275,7 +275,7 @@ extension (e: p.Type) {
 
   def isNumeric: Boolean = e.kind match {
     case Type.Kind.Integral | Type.Kind.Fractional => true
-    case _                                       => false
+    case _                                         => false
   }
   def repr: String = e match {
     case p.Type.Struct(sym, tpeVars, args, parents) =>
@@ -311,24 +311,24 @@ extension (e: p.Type) {
     case p.Type.Struct(sym, _, args, parents) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
     case p.Type.Ptr(comp, length, space) => s"${comp.monomorphicName}${length.fold("")(i => s"*$i")}^$space[]"
-    case p.Type.Bool1            => "Bool"
-    case p.Type.IntU8            => "U8"
-    case p.Type.IntU16           => "Charc"
-    case p.Type.IntU32           => "U32"
-    case p.Type.IntU64           => "U64"
-    case p.Type.IntS8            => "Byteb"
-    case p.Type.IntS16           => "Shorts"
-    case p.Type.IntS32           => "Inti"
-    case p.Type.IntS64           => "Longl"
-    case p.Type.Float16          => "F16"
-    case p.Type.Float32          => "Floatf"
-    case p.Type.Float64          => "Doubled"
+    case p.Type.Bool1                    => "Bool"
+    case p.Type.IntU8                    => "U8"
+    case p.Type.IntU16                   => "Charc"
+    case p.Type.IntU32                   => "U32"
+    case p.Type.IntU64                   => "U64"
+    case p.Type.IntS8                    => "Byteb"
+    case p.Type.IntS16                   => "Shorts"
+    case p.Type.IntS32                   => "Inti"
+    case p.Type.IntS64                   => "Longl"
+    case p.Type.Float16                  => "F16"
+    case p.Type.Float32                  => "Floatf"
+    case p.Type.Float64                  => "Doubled"
 
-    case p.Type.Unit0                        => "Unitv"
-    case p.Type.Nothing                      => "Nothing"
-    case p.Type.Var(name)                    => s"#$name"
-    case p.Type.Exec(tpeArgs, args, rtn)     => ???
-    case p.Type.Annotated(tpe, _, _)         => tpe.monomorphicName
+    case p.Type.Unit0                    => "Unitv"
+    case p.Type.Nothing                  => "Nothing"
+    case p.Type.Var(name)                => s"#$name"
+    case p.Type.Exec(tpeArgs, args, rtn) => ???
+    case p.Type.Annotated(tpe, _, _)     => tpe.monomorphicName
   }
 }
 
@@ -444,22 +444,22 @@ extension (e: p.Expr) {
     case p.Expr.IntrOp(op)                  => s"intr($op)"
     case p.Expr.Annotated(expr, pos, comment) =>
       s"${expr.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
-    case p.Expr.NullPtrConst(comp, space)   => s"nullptr[${comp.repr}^$space]"
-    case p.Expr.Float16Const(x)             => s"f16($x)"
-    case p.Expr.Float32Const(x)             => s"f32($x)"
-    case p.Expr.Float64Const(x)             => s"f64($x)"
-    case p.Expr.IntU8Const(x)               => s"u8($x)"
-    case p.Expr.IntU16Const(x)              => s"u16($x)"
-    case p.Expr.IntU32Const(x)              => s"u32($x)"
-    case p.Expr.IntU64Const(x)              => s"u64($x)"
-    case p.Expr.IntS8Const(x)               => s"i8($x)"
-    case p.Expr.IntS16Const(x)              => s"i16($x)"
-    case p.Expr.IntS32Const(x)              => s"i32($x)"
-    case p.Expr.IntS64Const(x)              => s"i64($x)"
-    case p.Expr.Unit0Const                  => "unit0"
-    case p.Expr.Bool1Const(x)               => s"bool1($x)"
-    case p.Expr.Select(xs, x)               => (xs :+ x).map(_.repr).mkString(".")
-    case p.Expr.Poison(t)                   => s"poison[${t.repr}]"
+    case p.Expr.NullPtrConst(comp, space) => s"nullptr[${comp.repr}^$space]"
+    case p.Expr.Float16Const(x)           => s"f16($x)"
+    case p.Expr.Float32Const(x)           => s"f32($x)"
+    case p.Expr.Float64Const(x)           => s"f64($x)"
+    case p.Expr.IntU8Const(x)             => s"u8($x)"
+    case p.Expr.IntU16Const(x)            => s"u16($x)"
+    case p.Expr.IntU32Const(x)            => s"u32($x)"
+    case p.Expr.IntU64Const(x)            => s"u64($x)"
+    case p.Expr.IntS8Const(x)             => s"i8($x)"
+    case p.Expr.IntS16Const(x)            => s"i16($x)"
+    case p.Expr.IntS32Const(x)            => s"i32($x)"
+    case p.Expr.IntS64Const(x)            => s"i64($x)"
+    case p.Expr.Unit0Const                => "unit0"
+    case p.Expr.Bool1Const(x)             => s"bool1($x)"
+    case p.Expr.Select(xs, x)             => (xs :+ x).map(_.repr).mkString(".")
+    case p.Expr.Poison(t)                 => s"poison[${t.repr}]"
   }
 }
 
@@ -469,7 +469,7 @@ extension (stmt: p.Stmt) {
       s"{\n${xs.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
     case p.Stmt.Comment(value)          => s" /* $value */"
     case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
-    case p.Stmt.Mut(name, expr)   => s"${name.repr} := ${expr.repr}"
+    case p.Stmt.Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
     case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
     case p.Stmt.While(tests, cond, body) =>
       s"while({${(tests.map(_.repr) :+ cond.repr).mkString(";")}}){\n${body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"

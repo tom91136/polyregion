@@ -1,17 +1,14 @@
 #pragma once
 
-#include <cstdio>
 #include <string>
 
 #include "llvm/Support/raw_ostream.h"
 
+#include "polyregion/error.h"
+
 namespace polyregion::polyfc {
 
-[[noreturn]] inline void raise(const std::string &message, const char *file = __builtin_FILE(), const int line = __builtin_LINE()) {
-  std::fprintf(stderr, "[%s:%d] %s\n", file, line, message.c_str());
-  std::fflush(stderr);
-  std::abort();
-}
+using polyregion::raise;
 
 template <typename T> auto value_of(T t) { return static_cast<std::underlying_type_t<T>>(t); }
 
