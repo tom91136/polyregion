@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <atomic>
 #include <cstring>
 
@@ -77,7 +78,7 @@ PlatformKind HsaPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::Managed;
 }
-ModuleFormat HsaPlatform::moduleFormat() {
+ModuleFormat HsaDevice::moduleFormat() {
   POLYINVOKE_TRACE();
   return ModuleFormat::HSACO;
 }
@@ -287,7 +288,7 @@ std::vector<Property> HsaDevice::properties() {
 std::vector<std::string> HsaDevice::features() {
   POLYINVOKE_TRACE();
   auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
-  return {gfxArch};
+  return {"hsa", "amd", gfxArch};
 }
 void HsaDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
@@ -403,7 +404,8 @@ void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, v
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                         std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  if (types.back() != Type::Void) POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
+  if (types.back() != Type::Void)
+    POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
 
   auto [fn, argOffsets] = device.store.resolveFunction(moduleName, symbol, types);
 
@@ -448,7 +450,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
       POLYINVOKE_FATAL(PREFIX, "Argument size out of bound, kernel expects %u bytes, argument %ld leads to overflow", kernargSegmentSize,
                        i);
     }
-    if (types[i] == Type::Void) POLYINVOKE_FATAL(PREFIX, "Illegal argument type: %s", to_string(types[i]).data());
+    if (types[i] == Type::Void) POLYINVOKE_FATAL(PREFIX, "Illegal argument type: %s", magic_enum::enum_name(types[i]).data());
     // XXX scratch (local) in HSA is a pointer of 4 bytes with the dynamic_shared_pointer kind
     size_t size = types[i] == Type::Scratch ? 4 : byteOfType(types[i]);
     if (types[i] == Type::Scratch) {

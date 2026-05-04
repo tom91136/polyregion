@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "magic_enum/magic_enum.hpp"
+
 #include "aspartame/optional.hpp"
 #include "aspartame/string.hpp"
 #include "aspartame/unordered_map.hpp"
@@ -32,27 +34,16 @@ template <typename T = std::byte> std::vector<T> readFromStdIn() {
   return input;
 }
 
-static std::string targetDescription =
-    "PolyAST to object code compiler.\nSupported targets:" //
-    + (compiletime::targets() ^
-       group_map_reduce([](auto, auto t) { return t; }, [](auto k, auto) { return k; }, [](auto l, auto r) { return l + "|" + r; }) //
-       ^ to_vector()                                                                                                                //
-       ^ sort_by([](auto k, auto) { return k; })                                                                                    //
-       ^ mk_string("\n\t", "\n\t", "", [](compiletime::Target k, auto v) {
-           switch (k) {
-             case compiletime::Target::Object_LLVM_HOST: return v + ": \tObject (LLVM, HOST)";
-             case compiletime::Target::Object_LLVM_x86_64: return v + ": \tObject (LLVM, x86_64)";
-             case compiletime::Target::Object_LLVM_AArch64: return v + ": \tObject (LLVM, AArch64)";
-             case compiletime::Target::Object_LLVM_ARM: return v + ": \tObject (LLVM, ARM)";
-             case compiletime::Target::Object_LLVM_NVPTX64: return v + ": \tObject (LLVM, NVPTX64)";
-             case compiletime::Target::Object_LLVM_AMDGCN: return v + ": \tObject (LLVM, AMDGCN)";
-             case compiletime::Target::Object_LLVM_SPIRV32: return v + ": \tObject (LLVM, SPIRV32)";
-             case compiletime::Target::Object_LLVM_SPIRV64: return v + ": \tObject (LLVM, SPIRV64)";
-             case compiletime::Target::Source_C_C11: return v + ": \tSource (C, C11)";
-             case compiletime::Target::Source_C_OpenCL1_1: return v + ": \tSource (C, OpenCL1_1)";
-             case compiletime::Target::Source_C_Metal1_0: return v + ": \tSource (C, Metal1_0)";
-           }
-         }));
+static std::string targetDescription =                                      //
+    "PolyAST to object code compiler.\nSupported targets:" +                //
+    (compiletime::TargetSpec::registry()                                    //
+     ^ mk_string("\n\t", "\n\t", "", [](const compiletime::TargetSpec &s) { //
+         std::string names(s.canonical);                                    //
+         for (const auto &a : s.aliases)
+           names += std::string("|") + std::string(a);                                     //
+         return names + ": \t" + std::string(magic_enum::enum_name(s.codegen)) + " via " + //
+                std::string(magic_enum::enum_name(s.runtime));                             //
+       }));
 
 int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-value-param)
                fire::arg({0, "Input source, in either JSON or MessagePack format. Format is auto detected based on ASCII ranges."}),
@@ -67,9 +58,10 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
-  return compiletime::targets() ^ get_maybe(rawTarget ^ to_lower()) ^
+  return compiletime::TargetSpec::findByName(rawTarget) ^
          fold(
-             [&](const compiletime::Target &target) { //
+             [&](const compiletime::TargetSpec &spec) {
+               const auto target = spec.codegen;
                compiletime::OptLevel opt;
                switch (rawOpt) {
                  case 0: opt = compiletime::OptLevel::O0; break;

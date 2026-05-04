@@ -5,6 +5,7 @@ target_sources(polycommon
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
         FILES
+        polyregion/aliases.h
         polyregion/concurrency_utils.hpp
         polyregion/types.h
         polyregion/export.h

@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include "polyregion/compat.h"
 
 #include <iostream>
@@ -65,12 +66,12 @@ std::variant<std::string, std::unique_ptr<invoke::Platform>> invoke::Platform::o
 #ifdef RUNTIME_ENABLE_METAL
       return metal::MetalPlatform::create();
 #else
-      POLYINVOKE_FATAL("Runtime", "%s backend not available", to_string(b).data());
+      POLYINVOKE_FATAL("Runtime", "%s backend not available", magic_enum::enum_name(b).data());
 #endif
     case Backend::SharedObject: return object::SharedPlatform::create();
     case Backend::RelocatableObject: return object::RelocatablePlatform::create();
   }
-  return "Backend " + std::string(to_string(b)) + " not available";
+  return "Backend " + std::string(magic_enum::enum_name(b)) + " not available";
 }
 
 invoke::detail::CountingLatch::Token::Token(CountingLatch &latch) : latch(latch) { POLYINVOKE_TRACE(); }

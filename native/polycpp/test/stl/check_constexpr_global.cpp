@@ -19,16 +19,13 @@ int main() {
   std::array<int, 1> idx{0};
 
   std::array<int, 1> outI{0};
-  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(),
-                [d = outI.data()](int) { d[0] = kAnswer; });
+  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(), [d = outI.data()](int) { d[0] = kAnswer; });
 
   std::array<float, 1> outF{0};
-  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(),
-                [d = outF.data()](int) { d[0] = 3.0f + kQuarter; });
+  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(), [d = outF.data()](int) { d[0] = 3.0f + kQuarter; });
 
   std::array<float, 1> outBig{0};
-  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(),
-                [d = outBig.data()](int) { d[0] = (kBig > 0.0f) ? 99.0f : -1.0f; });
+  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(), [d = outBig.data()](int) { d[0] = (kBig > 0.0f) ? 99.0f : -1.0f; });
 
   printf("int=%d float=%f bigfloat=%f", outI[0], outF[0], outBig[0]);
   fflush(stdout);

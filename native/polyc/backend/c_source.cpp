@@ -192,7 +192,8 @@ struct CLAddressSpaceTracePass {
         | to_vector();
 
     if (spaceSpecialisedFns.empty()) return p;
-    return Program(spaceSpecialisedFns.front(), Vec<Function>(std::next(spaceSpecialisedFns.begin()), spaceSpecialisedFns.end()), p.defs);
+    return Program(spaceSpecialisedFns.front(), Vector<Function>(std::next(spaceSpecialisedFns.begin()), spaceSpecialisedFns.end()),
+                   p.defs);
   }
 };
 

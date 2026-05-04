@@ -22,7 +22,7 @@ class SPIRVOpenCLTargetSpecificHandler;
 
 class LLVMBackend final : public Backend {
 public:
-  enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV32, SPIRV64 };
+  enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV32_Kernel, SPIRV64_Kernel, SPIRV_GLCompute };
   struct Options {
     Target target;
     std::string arch;
@@ -55,7 +55,9 @@ struct TargetedContext {
   using AS = unsigned int;
   LLVMBackend::Options options;
   llvm::LLVMContext actual;
-  AS AllocaAS = 0, GlobalAS = 0, LocalAS = 0;
+  // GenericAS routes inter-AS casts through OpenCL's Generic (4) on targets that have it; 0
+  // means the target has no AS distinction.
+  AS AllocaAS = 0, GlobalAS = 0, LocalAS = 0, GenericAS = 0;
   explicit TargetedContext(const LLVMBackend::Options &options);
 
   [[nodiscard]] llvm::Type *i32Ty();

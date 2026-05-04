@@ -15,23 +15,23 @@ string polyast::qualified(const Expr::Select &select) {
   return select.init | append(select.last) | mk_string(".", [](auto &x) { return x.symbol; });
 }
 
-Vec<Named> polyast::path(const Expr::Select &select) { return select.init | append(select.last) | to_vector(); }
+Vector<Named> polyast::path(const Expr::Select &select) { return select.init | append(select.last) | to_vector(); }
 
 Named polyast::head(const Expr::Select &select) { return select.init.empty() ? select.last : select.init.front(); }
 
-Vec<Named> polyast::tail(const Expr::Select &select) {
+Vector<Named> polyast::tail(const Expr::Select &select) {
   if (select.init.empty()) return {select.last};
   else {
-    Vec<Named> xs(std::next(select.init.begin()), select.init.end());
+    Vector<Named> xs(std::next(select.init.begin()), select.init.end());
     xs.push_back(select.last);
     return xs;
   }
 }
 
-Pair<Named, Vec<Named>> polyast::uncons(const Expr::Select &select) {
+Pair<Named, Vector<Named>> polyast::uncons(const Expr::Select &select) {
   if (select.init.empty()) return {{select.last}, {}};
   else {
-    Vec<Named> xs(std::next(select.init.begin()), select.init.end());
+    Vector<Named> xs(std::next(select.init.begin()), select.init.end());
     xs.push_back(select.last);
     return {select.init.front(), xs};
   }
@@ -39,16 +39,16 @@ Pair<Named, Vec<Named>> polyast::uncons(const Expr::Select &select) {
 
 Expr::Select polyast::selectNamed(const Expr::Select &select, const Named &that) { return Expr::Select(path(select), that); }
 
-Expr::Select polyast::selectNamed(const Vec<Named> &names) {
+Expr::Select polyast::selectNamed(const Vector<Named> &names) {
   if (names.empty()) throw std::logic_error("Cannot create select from empty name paths");
-  return Expr::Select(Vec<Named>(names.begin(), std::prev(names.end())), names.back());
+  return Expr::Select(Vector<Named>(names.begin(), std::prev(names.end())), names.back());
 }
 
 Expr::Select polyast::selectNamed(const Named &name) { return Expr::Select({}, name); }
 
 Expr::Select polyast::parent(const Expr::Select &select) {
   if (select.init.empty()) return select;
-  return Expr::Select(Vec<Named>(select.init.begin(), std::prev(select.init.end())), select.init.back());
+  return Expr::Select(Vector<Named>(select.init.begin(), std::prev(select.init.end())), select.init.back());
 }
 
 Type::Struct polyast::typeOf(const StructDef &def) { return Type::Struct(def.name, def.tpeVars, {}, def.parents); }
@@ -196,16 +196,16 @@ dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{n
 Expr::IntrOp dsl::call(const Intr::Any &intr) { return IntrOp(intr); }
 Expr::MathOp dsl::call(const Math::Any &intr) { return MathOp(intr); }
 Expr::SpecOp dsl::call(const Spec::Any &intr) { return SpecOp(intr); }
-std::function<Function(Vec<Stmt::Any>)> dsl::function(const string &name, const Vec<Arg> &args, const Type::Any &rtn,
-                                                      const std::set<FunctionAttr::Any> &attrs) {
+std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, const Vector<Arg> &args, const Type::Any &rtn,
+                                                         const std::set<FunctionAttr::Any> &attrs) {
   return [=](auto &&stmts) {
     return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, attrs);
   };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
-Program dsl::program(const Vec<StructDef> &structs, const Vec<Function> &functions) {
+Program dsl::program(const Vector<StructDef> &structs, const Vector<Function> &functions) {
   if (functions.empty()) throw std::logic_error("dsl::program requires at least one (entry) function");
-  return Program(functions.front(), Vec<Function>(std::next(functions.begin()), functions.end()), structs);
+  return Program(functions.front(), Vector<Function>(std::next(functions.begin()), functions.end()), structs);
 }
 Program dsl::program(const Function &function) { return Program(function, {}, {}); }
 

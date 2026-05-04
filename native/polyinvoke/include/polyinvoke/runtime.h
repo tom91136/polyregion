@@ -300,30 +300,7 @@ template <> constexpr std::optional<Access> POLYREGION_EXPORT from_underlying<Ac
   }
 }
 
-enum class POLYREGION_EXPORT Backend : uint8_t {
-  CUDA,
-  HIP,
-  HSA,
-  OpenCL,
-  Vulkan,
-  Metal,
-  SharedObject,
-  RelocatableObject,
-};
-
-constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
-  switch (b) {
-    case Backend::CUDA: return "CUDA";
-    case Backend::HIP: return "HIP";
-    case Backend::HSA: return "HSA";
-    case Backend::OpenCL: return "OpenCL";
-    case Backend::Vulkan: return "Vulkan";
-    case Backend::Metal: return "Metal";
-    case Backend::SharedObject: return "SharedObject";
-    case Backend::RelocatableObject: return "RelocatableObject";
-    default: throw std::logic_error("Unimplemented backend");
-  }
-}
+// Backend enum lives in common/polyregion/types.h alongside Target / TargetSpec.
 
 struct POLYREGION_EXPORT DeviceQueue {
 
@@ -366,6 +343,7 @@ struct POLYREGION_EXPORT Device {
   virtual POLYREGION_EXPORT ~Device() = default;
   [[nodiscard]] virtual POLYREGION_EXPORT int64_t id() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::string name() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT ModuleFormat moduleFormat() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool singleEntryPerModule() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<Property> properties() = 0;
@@ -406,7 +384,6 @@ public:
   [[nodiscard]] POLYREGION_EXPORT virtual std::string name() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<Property> properties() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual PlatformKind kind() = 0;
-  [[nodiscard]] POLYREGION_EXPORT virtual ModuleFormat moduleFormat() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
   [[nodiscard]] POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> of(const Backend &b);
 };

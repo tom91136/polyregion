@@ -2,7 +2,9 @@
 #include <cstdarg>
 
 #include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
 #include "polyregion/concurrency_utils.hpp"
+#include "polyregion/types.h"
 #include "polyrt/rt.h"
 
 constexpr auto PlatformSelectorEnv = "POLYRT_PLATFORM";
@@ -19,68 +21,94 @@ std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
 std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
 
 static std::optional<size_t> parseIntNoExcept(const char *str) {
-  errno = 0; // strtol to avoid exceptions
-  const size_t value = std::strtol(str, nullptr, 10);
-  return errno == 0 ? std::optional{value} : std::nullopt;
+  errno = 0;
+  char *end = nullptr;
+  const size_t value = std::strtol(str, &end, 10);
+  // strtol returns 0 on "no conversion" without setting errno; reject empty / trailing garbage.
+  if (errno != 0 || end == str || *end != '\0') return std::nullopt;
+  return value;
 }
 
 static void setupBackend(const Backend backend) {
   auto errorOrPlatform = Platform::of(backend);
   if (const auto err = errorOrPlatform ^ get_maybe<std::string>())
-    log(DebugLevel::None, "Backend %s failed to initialise: %s", to_string(backend).data(), err->c_str());
+    log(DebugLevel::None, "Backend %s failed to initialise: %s", magic_enum::enum_name(backend).data(), err->c_str());
   else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
 }
 
-static void selectDevice(Platform &p) {
-  auto devices = p.enumerate();
-  if (const auto env = std::getenv(DeviceSelectorEnv); env) {
-    const auto name = std::string(env) ^ to_lower();
-    if (const auto index = parseIntNoExcept(name.c_str()); index && *index < devices.size()) {
-      polyregion::polyrt::currentDevice = std::move(devices.at(*index));
-    } else if (const auto matching = std::find_if(devices.begin(), devices.end(),
-                                                  [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
-               matching != devices.end()) {
-      polyregion::polyrt::currentDevice = std::move(*matching);
-    }
-  } else if (!devices.empty()) polyregion::polyrt::currentDevice = std::move(devices[0]);
+namespace {
+// Selection is by feature equality, never by name substring -- names are for display.
+bool deviceMatchesHint(Device &d, const std::string &hint) {
+  if (hint.empty()) return true;
+  const auto needle = hint ^ to_lower();
+  for (const auto &f : d.features())
+    if ((f ^ to_lower()) == needle) return true;
+  return false;
 }
 
-static void selectPlatform() {
-  const static std::unordered_map<std::string, Backend> NameToBackend = {
-      {"host", Backend::RelocatableObject}, //
-      {"host_so", Backend::SharedObject},   //
-
-      {"ptx", Backend::CUDA},  //
-      {"cuda", Backend::CUDA}, //
-
-      {"amdgpu", Backend::HIP}, //
-      {"hip", Backend::HIP},    //
-      {"hsa", Backend::HSA},    //
-
-      {"opencl", Backend::OpenCL}, //
-      {"ocl", Backend::OpenCL},    //
-      {"cl", Backend::OpenCL},     //
-
-      {"vulkan", Backend::Vulkan}, //
-      {"vk", Backend::Vulkan},     //
-
-      {"metal", Backend::Metal}, //
-      {"mtl", Backend::Metal},   //
-      {"apple", Backend::Metal}, //
-  };
-
-  if (const auto env = std::getenv(PlatformSelectorEnv); env) {
-    auto name = std::string(env) ^ to_lower();
-    if (const size_t pos = name.find('@'); pos != std::string::npos) name = name.substr(0, pos);
-    if (const auto backend = NameToBackend ^ get_maybe(name)) setupBackend(*backend);
-    else {
-      log(DebugLevel::None, "Backend %s is not a supported value for %s; options are %s={%s}", env, PlatformSelectorEnv, PlatformSelectorEnv,
-          (NameToBackend ^ keys() ^ mk_string("|")).c_str());
+bool deviceMatchesRequired(Device &d, const std::vector<std::string_view> &requiredFeatures) {
+  if (requiredFeatures.empty()) return true;
+  const auto features = d.features();
+  for (const auto &req : requiredFeatures) {
+    bool found = false;
+    for (const auto &f : features) {
+      if (f.size() != req.size()) continue;
+      bool eq = true;
+      for (size_t i = 0; i < f.size(); ++i) {
+        char x = f[i], y = req[i];
+        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x + 32);
+        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y + 32);
+        if (x != y) {
+          eq = false;
+          break;
+        }
+      }
+      if (eq) {
+        found = true;
+        break;
+      }
     }
-  } else {
+    if (!found) return false;
+  }
+  return true;
+}
+} // namespace
+
+static void selectDevice(Platform &p, const std::vector<std::string_view> &requiredFeatures, const std::string &hint, bool strict) {
+  auto devices = p.enumerate();
+  std::vector<std::unique_ptr<Device>> eligible;
+  eligible.reserve(devices.size());
+  for (auto &d : devices)
+    if (deviceMatchesRequired(*d, requiredFeatures)) eligible.push_back(std::move(d));
+
+  if (!hint.empty())
+    if (const auto index = parseIntNoExcept(hint.c_str()); index && *index < eligible.size()) {
+      polyregion::polyrt::currentDevice = std::move(eligible.at(*index));
+      return;
+    }
+  for (auto &d : eligible)
+    if (deviceMatchesHint(*d, hint)) {
+      polyregion::polyrt::currentDevice = std::move(d);
+      return;
+    }
+  if (!strict && !eligible.empty()) polyregion::polyrt::currentDevice = std::move(eligible.front());
+}
+
+static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatform() {
+  std::optional<std::string> envValue;
+  if (const auto env = std::getenv(PlatformSelectorEnv)) envValue = env;
+  if (!envValue) {
     log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
     setupBackend(Backend::RelocatableObject);
+    return std::nullopt;
   }
+  auto parsed = polyregion::compiletime::TargetSpec::parse(*envValue);
+  if (!parsed) {
+    log(DebugLevel::None, "Backend %s is not a supported value for %s", envValue->c_str(), PlatformSelectorEnv);
+    return std::nullopt;
+  }
+  setupBackend(parsed->spec.runtime);
+  return parsed;
 }
 
 void polyregion::polyrt::initialise() {
@@ -88,17 +116,29 @@ void polyregion::polyrt::initialise() {
   std::call_once(flag, []() {
     if (!currentPlatform) {
       log(DebugLevel::Info, "Initialising backends... (addr=%p)", (void *)&initialise);
-      selectPlatform();
-      if (currentPlatform) selectDevice(*currentPlatform);
+      auto parsed = selectPlatform();
+      if (currentPlatform) {
+        const auto requiredFeatures = parsed ? parsed->spec.requiredDeviceFeatures : std::vector<std::string_view>{};
+        const auto hint = parsed ? parsed->hint : std::string{};
+        // An explicit POLYRT_DEVICE override is strict: no fallback to devices[0].
+        bool strict = false;
+        std::string effectiveHint = hint;
+        if (const auto env = std::getenv(DeviceSelectorEnv)) {
+          effectiveHint = env;
+          strict = true;
+        }
+        selectDevice(*currentPlatform, requiredFeatures, effectiveHint, strict);
+      }
       if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
       if (currentPlatform) {
-        log(DebugLevel::Info, "- Platform: %s [%s, %s] Device: %s",
-            currentPlatform->name().c_str(),           //
-            to_string(currentPlatform->kind()).data(), //
-            to_string(currentPlatform->moduleFormat()).data(), currentDevice->name().c_str());
-        currentDevice->features() ^ grouped(10) ^ for_each([](const auto &chunk) {
-          log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str());
-        });
+        log(DebugLevel::Info, "- Platform: %s [%s] Device: %s [%s]",
+            currentPlatform->name().c_str(),                          //
+            magic_enum::enum_name(currentPlatform->kind()).data(),    //
+            currentDevice ? currentDevice->name().c_str() : "(none)", //
+            currentDevice ? magic_enum::enum_name(currentDevice->moduleFormat()).data() : "(no device)");
+        if (currentDevice)
+          currentDevice->features() ^ grouped(10) ^
+              for_each([](const auto &chunk) { log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str()); });
       }
     }
   });
@@ -149,20 +189,18 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
     return false;
   }
 
-  if (currentPlatform->kind() != object.kind || currentPlatform->moduleFormat() != object.format) {
+  if (currentPlatform->kind() != object.kind || currentDevice->moduleFormat() != object.format) {
     log(DebugLevel::Debug, "Skipping incompatible image: %s [%s] (targeting %s [%s])",
-        to_string(object.kind).data(), //
-        to_string(object.format).data(),
-        to_string(currentPlatform->kind()).data(), //
-        to_string(currentPlatform->moduleFormat()).data());
+        magic_enum::enum_name(object.kind).data(),   //
+        magic_enum::enum_name(object.format).data(), //
+        magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
     return false;
   }
 
   log(DebugLevel::Debug, "Found compatible image: %s [%s] (targeting %s [%s])",
-      to_string(object.kind).data(), //
-      to_string(object.format).data(),
-      to_string(currentPlatform->kind()).data(), //
-      to_string(currentPlatform->moduleFormat()).data());
+      magic_enum::enum_name(object.kind).data(),   //
+      magic_enum::enum_name(object.format).data(), //
+      magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
 
   //  TODO need to check if object.feature is a strict subset of device feature
 

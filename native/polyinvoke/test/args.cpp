@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <numeric>
 
 #include "catch2/catch_test_macros.hpp"
@@ -25,7 +26,7 @@ using namespace aspartame;
 template <typename I> void testArgs(I images, std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
   auto platform = polyregion::test_utils::makePlatform(backend);
-  DYNAMIC_SECTION("backend=" << to_string(backend)) {
+  DYNAMIC_SECTION("backend=" << magic_enum::enum_name(backend)) {
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
@@ -41,7 +42,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
             // otherwise, we expect exactly one image
             if (imageGroups.size() != 1) {
               FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend="
-                                           << to_string(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
+                                           << magic_enum::enum_name(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
             } else {
               d->loadModule("module", imageGroups[0].second);
               kernelName = [](auto args) { return "_arg" + std::to_string(args); };
@@ -81,7 +82,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
             d->freeDevice(out_d);
           }
         } else {
-          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << to_string(backend)
+          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << magic_enum::enum_name(backend)
                                                          << ", features=" << (d->features() | mk_string(",")) << ")");
         }
       }

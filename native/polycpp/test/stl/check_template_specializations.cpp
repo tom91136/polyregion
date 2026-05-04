@@ -11,8 +11,7 @@
 template <int Multiplier> int runKernel() {
   std::array<int, 1> idx{0};
   std::array<int, 1> out{-1};
-  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(),
-                [d = out.data()](int) { d[0] = Multiplier * 10; });
+  std::for_each(std::execution::par_unseq, idx.begin(), idx.end(), [d = out.data()](int) { d[0] = Multiplier * 10; });
   return out[0];
 }
 

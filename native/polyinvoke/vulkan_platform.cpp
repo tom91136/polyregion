@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <iostream>
 #include <utility>
 
@@ -81,9 +82,9 @@ PlatformKind VulkanPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::Managed;
 }
-ModuleFormat VulkanPlatform::moduleFormat() {
+ModuleFormat VulkanDevice::moduleFormat() {
   POLYINVOKE_TRACE();
-  return ModuleFormat::SPIRV;
+  return ModuleFormat::SPIRV_GLCompute;
 }
 
 template <typename T, typename U, typename F> constexpr static auto transform_idx_if(U &from, F &&f) {
@@ -265,9 +266,25 @@ std::vector<Property> VulkanDevice::properties() {
       //      { "sparseProperties",   vk::to_string(props.sparseProperties ) },
   };
 }
+// Vulkan deviceName fingerprints differ from OpenCL's, so the vendor normaliser is local.
+static std::string normaliseVulkanVendor(std::string s) {
+  std::string lower(s.size(), {});
+  for (size_t i = 0; i < s.size(); ++i)
+    lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+  if (lower.find("nvidia") != std::string::npos) return "nvidia";
+  if (lower.find("intel") != std::string::npos) return "intel";
+  // RADV / AMDVLK / AMDGPU-PRO all collapse to "amd".
+  if (lower.find("radv") != std::string::npos || lower.find("amd") != std::string::npos || lower.find("radeon") != std::string::npos)
+    return "amd";
+  if (lower.find("llvmpipe") != std::string::npos) return "llvmpipe";
+  if (lower.find("apple") != std::string::npos) return "apple";
+  if (lower.find("mesa") != std::string::npos) return "mesa";
+  return "unknown";
+}
+
 std::vector<std::string> VulkanDevice::features() {
   POLYINVOKE_TRACE();
-  return {};
+  return {"vulkan", "spirv_glcompute", normaliseVulkanVendor(device.getProperties().deviceName)};
 }
 void VulkanDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
@@ -391,7 +408,8 @@ void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset
 void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  if (types.back() != Type::Void) POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
+  if (types.back() != Type::Void)
+    POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
 
   // pointers are uniforms sharing the same descriptor set with monotonically increasing binding
   // anything that's scalar goes into a struct and added as the last binding of the same descriptor set

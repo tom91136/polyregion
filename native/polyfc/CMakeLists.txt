@@ -29,6 +29,8 @@ target_include_directories(polyfc-test PRIVATE
         polydco
         ${LLVM_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(polyfc-test PRIVATE
+        POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 
 # === test_all.h.in variables ===
 get_filename_component(POLYFC_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)

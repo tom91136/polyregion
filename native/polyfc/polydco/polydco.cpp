@@ -1,6 +1,8 @@
 #include <span>
 #include <thread>
 
+#include "magic_enum/magic_enum.hpp"
+
 #include "ftypes.h"
 #include "polydco.h"
 
@@ -298,7 +300,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
     }
 
     for (size_t i = 0; i < reductionsCount; ++i) {
-      fprintf(stderr, "Reduction[%ld] = {%s, %s -> %p}\n", i, to_string(reductions[i].type).data(),
+      fprintf(stderr, "Reduction[%ld] = {%s, %s -> %p}\n", i, magic_enum::enum_name(reductions[i].type).data(),
               polydco::FReduction::to_string(reductions[i].kind).data(), static_cast<void *>(reductions[i].dest));
     }
   }

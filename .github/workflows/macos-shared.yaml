@@ -24,8 +24,9 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install dependencies
+        # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
         run: |
-          brew install llvm lld cmake ninja zlib
+          brew install llvm lld cmake ninja zlib gcc
           echo "JAVA_HOME=$(/usr/libexec/java_home)" >> $GITHUB_ENV
           echo "$(brew --prefix llvm)/bin"          >> $GITHUB_PATH
 

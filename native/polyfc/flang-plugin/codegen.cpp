@@ -1,6 +1,8 @@
 #include <iostream>
 
 #include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
+
 #include "codegen.h"
 #include "utils.h"
 
@@ -20,13 +22,13 @@ polyfront::KernelBundle polyfc::compileRegion( //
                               [&](const std::string &err) -> std::optional<polyast::CompileResult> {
                                 emit(diag, Level::Warning, //
                                      "%0 [PolyDCO] Frontend failed to compile program [%1, target=%2, features=%3]\n%4", diagLoc, moduleId,
-                                     std::string(to_string(target)), features, err);
+                                     std::string(magic_enum::enum_name(target)), features, err);
                                 return std::nullopt;
                               }) //
                  ^ map([&](auto &x) { return std::tuple{target, features, x}; });
         }) //
       | collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
-          auto targetName = std::string(to_string(target));
+          auto targetName = std::string(magic_enum::enum_name(target));
           emit(diag, Level::Remark, "%0 [PolyDCO] Compilation events for [%1, target=%2, features=%3]\n%4", //
                diagLoc, moduleId, targetName, features, repr(result));
           if (auto bin = result.binary) {

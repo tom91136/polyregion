@@ -40,11 +40,13 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
       LocalAS = 3;
       AllocaAS = 5;
       break;
-    case LLVMBackend::Target::SPIRV32:
-    case LLVMBackend::Target::SPIRV64:
-      GlobalAS = 1;
-      LocalAS = 3;
-      AllocaAS = 0;
+    case LLVMBackend::Target::SPIRV32_Kernel:
+    case LLVMBackend::Target::SPIRV64_Kernel:
+    case LLVMBackend::Target::SPIRV_GLCompute:
+      GlobalAS = 1;  // CrossWorkgroup
+      LocalAS = 3;   // Workgroup
+      AllocaAS = 0;  // Function/private
+      GenericAS = 4; // Generic
       break;
   }
 }
@@ -58,40 +60,24 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
 }
 
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {
-  // LLVM requires allocas to dominate every use. If the current insertion point is inside a loop
-  // body or after a branch, an alloca emitted there fails verification when reads of the slot
-  // happen on a different control-flow path. Place all allocas at the start of the function entry
-  // block — the canonical pattern that mem2reg expects — and leave the builder's insertion point
-  // untouched so subsequent stores/loads still land where the caller intended.
-  const auto allocaTy = ty->isPointerTy() ? B.getPtrTy() : ty;
+  // SPIRV pointer slots must use the value's AS or the store crosses disjoint spaces; everywhere
+  // else stay on the default-AS `ptr` to keep RuntimeDyld / CUDA / HIP layouts unchanged.
+  const auto allocaTy = (ty->isPointerTy() && GenericAS == 0) ? B.getPtrTy() : ty;
   llvm::Value *stackPtr;
   if (auto fn = B.GetInsertBlock() ? B.GetInsertBlock()->getParent() : nullptr) {
     auto &entry = fn->getEntryBlock();
     llvm::IRBuilder<> entryB(&entry, entry.getFirstNonPHIOrDbgOrAlloca());
     stackPtr = entryB.CreateAlloca(allocaTy, AS, nullptr, key);
-    if (AS != 0) {
-      // The address-space cast must also live in entry so its result dominates any use.
-      stackPtr = entryB.CreateAddrSpaceCast(stackPtr, B.getPtrTy());
-    }
+    if (AS != 0) stackPtr = entryB.CreateAddrSpaceCast(stackPtr, B.getPtrTy());
     return stackPtr;
   }
   stackPtr = B.CreateAlloca(allocaTy, AS, nullptr, key);
   return AS != 0 ? B.CreateAddrSpaceCast(stackPtr, B.getPtrTy()) : stackPtr;
 }
 
-ValPtr TargetedContext::load(llvm::IRBuilder<> &B, const ValPtr rhs, llvm::Type *ty) const {
-  if (ty->isPointerTy()) {
-    const ValPtr spaceNormalisedRhs = rhs->getType()->getPointerAddressSpace() != GlobalAS ? B.CreateAddrSpaceCast(rhs, B.getPtrTy()) : rhs;
-    return B.CreateLoad(B.getPtrTy(), spaceNormalisedRhs);
-  }
-  return B.CreateLoad(ty, rhs);
-}
+ValPtr TargetedContext::load(llvm::IRBuilder<> &B, const ValPtr rhs, llvm::Type *ty) const { return B.CreateLoad(ty, rhs); }
 
 ValPtr TargetedContext::store(llvm::IRBuilder<> &B, const ValPtr rhsVal, const ValPtr lhsPtr) const {
-  if (const llvm::Type *rhsTy = rhsVal->getType();
-      rhsTy->isPointerTy() && rhsTy->getPointerAddressSpace() != lhsPtr->getType()->getPointerAddressSpace()) {
-    return B.CreateStore(B.CreateAddrSpaceCast(rhsVal, lhsPtr->getType()), lhsPtr);
-  }
   return B.CreateStore(rhsVal, lhsPtr);
 }
 
@@ -266,31 +252,25 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
   using llvm::Triple;
   const auto bindGpuArch = [&](const Triple::ArchType &archTpe, const Triple::VendorType &vendor, const Triple::OSType &os) {
     const Triple triple(Triple::getArchTypeName(archTpe), Triple::getVendorTypeName(vendor), Triple::getOSTypeName(os));
+    if (archTpe == Triple::ArchType::UnknownArch) throw std::logic_error("Arch must be specified for " + triple.str());
+    return llvmc::TargetInfo{
+        .triple = triple,
+        .layout = {},
+        .target = llvmc::targetFromTriple(triple),
+        .cpu = {.uArch = arch, .features = {}},
+    };
+  };
 
-    switch (archTpe) {
-      case Triple::ArchType::UnknownArch: throw std::logic_error("Arch must be specified for " + triple.str());
-      case Triple::ArchType::spirv32:
-        // XXX We don't have a SPIRV target machine in LLVM yet, but we do know the data layout from Clang:
-        // See clang/lib/Basic/Targets/SPIR.h
-        return llvmc::TargetInfo{
-            .triple = triple,                                                                                                         //
-            .layout = llvm::DataLayout("e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024"), //
-            .target = nullptr,                                                                                                        //
-            .cpu = {.uArch = arch, .features = {}}};
-      case Triple::ArchType::spirv64: // Same thing for SPIRV64
-        return llvmc::TargetInfo{
-            .triple = triple,                                                                                                 //
-            .layout = llvm::DataLayout("e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024"), //
-            .target = nullptr,                                                                                                //
-            .cpu = {.uArch = arch, .features = {}}};
-      default:
-        return llvmc::TargetInfo{
-            .triple = triple,
-            .layout = {},
-            .target = llvmc::targetFromTriple(triple),
-            .cpu = {.uArch = arch, .features = {}},
-        };
-    }
+  // SPIRV execution model is picked from the triple OS: `spirv64-unknown-unknown` -> OpenCL
+  // Kernel (Physical/OpenCL); `spirv-unknown-vulkan-compute` -> Vulkan compute (Logical/GLCompute).
+  const auto bindSpirv = [&](const std::string &tripleStr) {
+    const Triple triple(tripleStr);
+    return llvmc::TargetInfo{
+        .triple = triple,
+        .layout = {},
+        .target = llvmc::targetFromTriple(triple),
+        .cpu = {.uArch = arch, .features = {}},
+    };
   };
 
   const auto bindCpuArch = [&](const Triple::ArchType &archTpe) {
@@ -315,8 +295,9 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     case Target::ARM: return bindCpuArch(Triple::ArchType::arm);
     case Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
     case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
-    case Target::SPIRV32: return bindGpuArch(Triple::ArchType::spirv32, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
-    case Target::SPIRV64: return bindGpuArch(Triple::ArchType::spirv64, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
+    case Target::SPIRV32_Kernel: return bindSpirv("spirv32-unknown-unknown");
+    case Target::SPIRV64_Kernel: return bindSpirv("spirv64-unknown-unknown");
+    case Target::SPIRV_GLCompute: return bindSpirv("spirv-unknown-vulkan1.3-compute");
     default: throw BackendException(fmt::format("Unexpected target {}", magic_enum::enum_name(target)));
   }
 }

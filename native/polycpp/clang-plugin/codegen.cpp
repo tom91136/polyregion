@@ -1,6 +1,8 @@
 #include <iostream>
 
 #include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
+
 #include "clang_utils.h"
 #include "codegen.h"
 #include "polyregion/types.h"
@@ -36,18 +38,15 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
 
   auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name, {}, {}, {}), {}, TypeSpace::Global())), {});
 
-  // The kernel ABI provides a leading thread-id (Int64) arg that polyc auto-prepends for Entry
-  // functions. The lambdas wrapping offload regions also take a single int64 tid as their first
-  // (and only) parameter — which the runtime supplies via the same slot. To avoid duplicating that
-  // arg, drop the lambda's leading int64 from the function's arg list and instead alias it to
-  // `__tid` at the top of the body so any references to the lambda's parameter name resolve.
-  Vec<Stmt::Any> tidAliases;
-  Vec<const clang::ParmVarDecl *> userParams;
+  // The kernel ABI prepends a thread-id Int64 to Entry functions and the offload lambdas take
+  // an int64 tid as their first parameter -- the runtime fills the same slot for both. Drop
+  // the lambda's leading int64 from the arg list and alias it to `__tid` at the top of the body.
+  Vector<Stmt::Any> tidAliases;
+  Vector<const clang::ParmVarDecl *> userParams;
   for (auto *p : functor.parameters())
     userParams.push_back(p);
   if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
-    // Use declName() rather than the raw spelling so the alias matches the suffixed symbol that
-    // remapper.cpp's DeclRefExpr handler emits for references to this parameter inside the body.
+    // declName() carries the per-decl ID suffix so the alias matches what DeclRefExpr emits.
     auto name = declName(userParams.front());
     if (!name.empty()) {
       tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()), Expr::Select({}, Named("__tid", Type::IntS64()))));
@@ -108,7 +107,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                               diag.Report(
                                   diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
                                                        "[PolySTL] Frontend failed to compile program [%0, target=%1, features=%2]\n%3"))
-                                  << moduleId << std::string(to_string(target)) << features << err;
+                                  << moduleId << std::string(magic_enum::enum_name(target)) << features << err;
                               return std::nullopt;
                             }) ^
                  map([&](auto &x) { return std::tuple{target, features, x}; });
@@ -117,26 +116,26 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
       collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
         diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                               "[PolySTL] Compilation events for [%0, target=%1, features=%2]\n%3"))
-            << moduleId << std::string(to_string(target)) << features << repr(result);
+            << moduleId << std::string(magic_enum::enum_name(target)) << features << repr(result);
 
         if (auto bin = result.binary; !bin) {
           diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
                                                 "[PolySTL] Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3"))
-              << moduleId << std::string(to_string(target)) << features << result.messages;
+              << moduleId << std::string(magic_enum::enum_name(target)) << features << result.messages;
           return std::nullopt;
         } else {
 
           if (!result.messages.empty()) {
             diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
                                                   "[PolySTL] Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4"))
-                << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(to_string(target)) << features
-                << result.messages;
+                << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(magic_enum::enum_name(target))
+                << features << result.messages;
 
           } else {
             diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                                   "[PolySTL] Backend emitted binary (%0KB) [%1, target=%2, features=%3]"))
-                << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(to_string(target)) << features
-                << result.messages;
+                << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(magic_enum::enum_name(target))
+                << features << result.messages;
           }
 
           if (auto format = runtime::moduleFormatOf(target)) {
@@ -149,7 +148,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
           } else {
             diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                                   "[PolySTL] Backend emitted binary for unknown target [%1, target=%2, features=%3]"))
-                << moduleId << std::string(to_string(target)) << features << result.messages;
+                << moduleId << std::string(magic_enum::enum_name(target)) << features << result.messages;
             return std::nullopt;
           }
         }

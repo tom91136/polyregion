@@ -3,15 +3,10 @@
 
 #include "llvmc.h"
 
-#include "clspv.h"
 #include "compiler.h"
 #include "lld_lite.h"
 #include "polyregion/llvm_utils.hpp"
 
-#include "spirv-tools/libspirv.h"
-#include "spirv-tools/libspirv.hpp"
-
-#include "spirv-tools/optimizer.hpp"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -152,7 +147,7 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));
 }
 
-polyast::Pair<polyast::Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
+Pair<Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (llvm::verifyModule(mod, &errOut)) {
@@ -286,7 +281,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     {
       auto optPassStart = compiler::nowMono();
 
-      optimise(TM, *m, optLevel);
+      // SPIRV: skip the host-side opt pipeline; FunctionAttrs would infer memory(none) -> Pure ->
+      // OpUnreachable. The driver / SPIRV-Tools run their own passes on the blob.
+      const auto isSpirv = TM.getTargetTriple().getArch() == llvm::Triple::spirv32 ||
+                           TM.getTargetTriple().getArch() == llvm::Triple::spirv64 || TM.getTargetTriple().getArch() == llvm::Triple::spirv;
+      if (!isSpirv) optimise(TM, *m, optLevel);
 
       llvm::legacy::PassManager PM;
       auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
@@ -364,109 +363,27 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", patchedPtx);
       return {std::vector<int8_t>(patchedPtx.begin(), patchedPtx.end()), {info.cpu.uArch}, events, {}, ""};
     }
-    default:
-      switch (info.triple.getArch()) {
-        case llvm::Triple::ArchType::spirv32:
-        case llvm::Triple::ArchType::spirv64: {
-
-          auto opt0Start = compiler::nowMono();
-
-          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(opt0Start), "opt0", module2Ir(M));
-
-          auto clspvStart = compiler::nowMono();
-
-          llvm::SmallVector<char, 0> objBuffer;
-          llvm::raw_svector_ostream objStream(objBuffer);
-          clspv::RunPassPipeline(M, '3', &objStream);
-
-          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(clspvStart), "clspv", module2Ir(M));
-
-          auto validateStart = compiler::nowMono();
-          auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(M);
-          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(validateStart), "clspv_validate", verifyMsg);
-
-          auto optPassStart = compiler::nowMono();
-          std::vector<char> binary(objBuffer.begin(), objBuffer.end());
-
-          std::vector<uint32_t> spvRaw((binary.size() + 3) / 4, 0);
-          std::memcpy(spvRaw.data(), binary.data(), binary.size());
-
-          spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
-          optimizer.RegisterPass(spvtools::CreateStripNonSemanticInfoPass());
-          optimizer.RegisterPerformancePasses();
-          std::vector<uint32_t> nonSemanticSpv;
-          optimizer.Run(spvRaw.data(), spvRaw.size(), &nonSemanticSpv);
-
-          //          std::ofstream fileS("foo.spv", std::ios::binary);
-          //          fileS.write(reinterpret_cast<const char *>(nonSemanticSpv.data()), nonSemanticSpv.size() * sizeof(uint32_t));
-          //          fileS.close();
-
-          //        spvtools::SpirvTools tools(SPV_ENV_UNIVERSAL_1_5);
-          //        std::string out;
-          //        auto error = tools.Disassemble(disBuffer.data(), disBuffer.size(), &out, disOptions);
-          spv_text text;
-          spv_diagnostic diagnostic = nullptr;
-          spv_context context = spvContextCreate(SPV_ENV_VULKAN_1_1);
-          spv_result_t error = spvBinaryToText(context, nonSemanticSpv.data(), nonSemanticSpv.size(),
-                                               SPV_BINARY_TO_TEXT_OPTION_NONE |               //
-                                                   SPV_BINARY_TO_TEXT_OPTION_INDENT |         //
-                                                   SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES | //
-                                                   SPV_BINARY_TO_TEXT_OPTION_COMMENT,
-                                               &text, &diagnostic);
-          spvContextDestroy(context);
-          if (error) {
-            events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "spirv-opt",
-                                "[Error " +                                                                             //
-                                    std::to_string(diagnostic->position.index) + ":" +                                  //
-                                    std::to_string(diagnostic->position.line) + ":" +                                   //
-                                    std::to_string(diagnostic->position.column) + "] " + std::string(diagnostic->error) //
-            );
-            spvDiagnosticDestroy(diagnostic);
-          } else {
-            std::string out(text->str, text->length);
-            events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "spirv-opt", out);
-            spvTextDestroy(text);
-          }
-
-          //        auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, M, events, true);
-          //        events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
-          //        return {std::vector<char>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events};
-
-          //        SPIRV::TranslatorOpts opts;
-          //        opts.shouldReplaceLLVMFmulAddWithOpenCLMad()
-          //        auto spirvConvertStart = compiler::nowMono();
-          //        std::string errors;
-          //        std::stringstream ss;
-          //        llvm::writeSpirv(M.get(), opts, ss, errors);
-          //        std::string spirvBin = ss.str();
-          //        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(spirvConvertStart), "llvm_to_spirv",
-          //                            "(" + std::to_string(spirvBin.size()) + " bytes)");
-          //        std::vector<char> binary(spirvBin.begin(), spirvBin.end());
-
-          std::vector<int8_t> convertedSpv(nonSemanticSpv.size() * sizeof(uint32_t));
-          std::memcpy(convertedSpv.data(), nonSemanticSpv.data(), convertedSpv.size());
-
-          return {convertedSpv, {info.cpu.uArch}, events, {}, ""};
-        }
-        default: {
-
-          auto features = info.cpu.features ^ split(",");
-          llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
-
-          auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
-          bindLLVMTargetMachineDataLayout(*llvmTM, M);
-          auto [_, object, objectStart, objectElapsed] =
-              mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, M, events, true);
-          events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
-
-          std::vector<int8_t> binary(object.begin(), object.end());
-          if (emitDisassembly) {
-            auto [_, assembly, assemblyStart, assemblyElapsed] =
-                mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
-            events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
-          }
-          return {binary, features, events, {}, ""};
-        }
+    default: {
+      auto features = info.cpu.features ^ split(",");
+      if (info.triple.getArch() != llvm::Triple::ArchType::spirv &&   //
+          info.triple.getArch() != llvm::Triple::ArchType::spirv32 && //
+          info.triple.getArch() != llvm::Triple::ArchType::spirv64) {
+        llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
       }
+
+      auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
+      bindLLVMTargetMachineDataLayout(*llvmTM, M);
+      auto [_, object, objectStart, objectElapsed] =
+          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, M, events, true);
+      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+
+      std::vector<int8_t> binary(object.begin(), object.end());
+      if (emitDisassembly) {
+        auto [_, assembly, assemblyStart, assemblyElapsed] =
+            mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
+        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
+      }
+      return {binary, features, events, {}, ""};
+    }
   }
 }

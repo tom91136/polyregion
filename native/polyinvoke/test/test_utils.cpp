@@ -1,12 +1,13 @@
 #include "test_utils.h"
 #include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
 #include "polyregion/llvm_utils.hpp"
 
 using namespace aspartame;
 
 std::unique_ptr<polyregion::invoke::Platform> polyregion::test_utils::makePlatform(const invoke::Backend backend) {
   if (auto errorOrPlatform = invoke::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-    throw std::runtime_error("Backend " + std::string(to_string(backend)) +
+    throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend)) +
                              " failed to initialise: " + std::get<std::string>(errorOrPlatform));
   } else return std::move(std::get<std::unique_ptr<invoke::Platform>>(errorOrPlatform));
 }
@@ -21,8 +22,8 @@ polyregion::test_utils::findTestImage(const ImageGroups &images, const invoke::B
   // HIP accepts HSA kernels
   const auto canonicalBackend = backend == invoke::Backend::HIP ? invoke::Backend::HSA : backend;
 
-  return images                                                //
-         ^ get_maybe(std::string(to_string(canonicalBackend))) //
+  return images                                                            //
+         ^ get_maybe(std::string(magic_enum::enum_name(canonicalBackend))) //
          ^ flat_map([&](auto &featureToImage) -> std::optional<std::vector<std::pair<std::string, std::string>>> {
              // For things like OpenCL/Vulkan which is arch independent
              if (sortedFeatures.empty())

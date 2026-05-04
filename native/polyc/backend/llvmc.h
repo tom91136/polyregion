@@ -28,7 +28,7 @@ struct POLYREGION_EXPORT TargetInfo {
 
 POLYREGION_EXPORT const CpuInfo &hostCpuInfo();
 POLYREGION_EXPORT const llvm::Target *targetFromTriple(const llvm::Triple &tripleName);
-POLYREGION_EXPORT polyast::Pair<polyast::Opt<std::string>, std::string> verifyModule(llvm::Module &mod);
+POLYREGION_EXPORT Pair<Opt<std::string>, std::string> verifyModule(llvm::Module &mod);
 POLYREGION_EXPORT polyast::CompileResult compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
                                                        llvm::Module &M);
 

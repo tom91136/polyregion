@@ -1,4 +1,5 @@
 #include "polyinvoke/cuda_platform.h"
+#include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cuda;
@@ -52,7 +53,7 @@ PlatformKind CudaPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::Managed;
 }
-ModuleFormat CudaPlatform::moduleFormat() {
+ModuleFormat CudaDevice::moduleFormat() {
   POLYINVOKE_TRACE();
   return ModuleFormat::PTX;
 }
@@ -134,7 +135,7 @@ std::vector<std::string> CudaDevice::features() {
   int ccMajor = 0, ccMinor = 0;
   CHECKED(cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
   CHECKED(cuDeviceGetAttribute(&ccMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
-  return {"sm_" + std::to_string((ccMajor * 10) + ccMinor)};
+  return {"cuda", "nvidia", "sm_" + std::to_string((ccMajor * 10) + ccMinor)};
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
@@ -223,7 +224,8 @@ void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, 
 void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                          std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  if (types.back() != Type::Void) POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
+  if (types.back() != Type::Void)
+    POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
   auto fn = store.resolveFunction(moduleName, symbol, types);
   auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});

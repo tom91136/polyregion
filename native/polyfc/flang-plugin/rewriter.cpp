@@ -412,7 +412,7 @@ public:
         | to_vector();
 
     static size_t id = 0;
-    defineGlobalCtor(M, fmt::format("dco_layoutInit_{}_{}", to_string(kind), ++id), [&](OpBuilder &FB, auto &) {
+    defineGlobalCtor(M, fmt::format("dco_layoutInit_{}_{}", magic_enum::enum_name(kind), ++id), [&](OpBuilder &FB, auto &) {
       aggregateMembersArray | for_each([&](auto &g, auto idx) {
         LLVM::StoreOp::create(FB, uLoc(FB), g.gep(FB), structLayoutsArray.gep(FB, idx, TypeLayout.members));
       });

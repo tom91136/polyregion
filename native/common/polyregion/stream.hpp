@@ -6,6 +6,8 @@
 #include <iostream>
 #include <numeric>
 
+#include "magic_enum/magic_enum.hpp"
+
 #include "concurrency_utils.hpp"
 #include "polyinvoke/runtime.h"
 
@@ -72,7 +74,7 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
       << std::fixed << std::setprecision(3) //
       << "===BabelStream (" << title << ")===\n"
       << "Running kernels " << times << " times\n"
-      << "Precision: " << to_string(tpe) << "\n"
+      << "Precision: " << magic_enum::enum_name(tpe) << "\n"
       << "Array size: " << sizesMB.copy / 2 << " MB (=" << sizesMB.copy / 2 / 1000 << " GB)\n"
       << "Total size: " << sizesMB.triad << " MB (=" << sizesMB.triad / 1000 << " GB)\n";
   for (auto &ln : extraLines)

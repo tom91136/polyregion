@@ -54,9 +54,9 @@ struct Failure {
 
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
 
-static Vec<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
+static Vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
   using namespace clang::ast_matchers;
-  Vec<std::variant<Failure, Callsite>> results;
+  Vector<std::variant<Failure, Callsite>> results;
   runMatch(
       context,
       [&](const MatchFinder::MatchResult &result) {
@@ -209,7 +209,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
       bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(Sym({sl.name}), {}, {}, {}), sl}; }) | to<Map>();
 
   auto primitiveTypeLayoutsDecls =
-      Vec<Type::Any>{
+      Vector<Type::Any>{
           Type::Float16(), Type::Float32(), Type::Float64(),                 //
           Type::IntU8(),   Type::IntU16(),  Type::IntU32(),  Type::IntU64(), //
           Type::IntS8(),   Type::IntS16(),  Type::IntS32(),  Type::IntS64(), //
@@ -323,7 +323,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
           /*metadata           */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, bundle.metadata)),
       });
 
-  Vec<clang::Stmt *> newStmts =                                                                                   //
+  Vector<clang::Stmt *> newStmts =                                                                                //
       kernelImageDecls                                                                                            //
       | concat(primitiveTypeLayoutsDecls | values())                                                              //
       | append(structTypeLayoutArrayDecl)                                                                         //
@@ -376,12 +376,10 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                                 name += ">";
                                 return name;
                               });
-              // The path-of-source-locations alone collides across template instantiations of
-              // the enclosing function (e.g. `fasten_main<PPWI>` in miniBUDE — same line numbers
-              // for PPWI=1, 2, 4, ...). The runtime keeps a flat moduleName→object map and
-              // silently keeps the first kernel loaded, so subsequent PPWI specialisations
-              // dispatch the wrong kernel and produce zero outputs. Suffix with the lambda's
-              // CXXRecordDecl ID, which clang allocates fresh per instantiation.
+              // Source locations alone collide across template instantiations (miniBUDE's
+              // `fasten_main<PPWI>` has the same line numbers for every PPWI). The runtime's
+              // flat moduleName->object map keeps the first kernel and silently mis-dispatches
+              // the rest. Disambiguate with the lambda's CXXRecordDecl ID.
               moduleId += fmt::format("@{:x}", c.functorDecl->getParent()->getID());
 
               std::cout << moduleId << std::endl;
@@ -395,10 +393,10 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
               if (opts.verbose) {
                 D.Report(c.callLambdaArgExpr->getExprLoc(),
                          D.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
-                    << moduleId << to_string(c.kind)
+                    << moduleId << std::string(magic_enum::enum_name(c.kind))
                     << (bundle.objects //
                         | map([](auto &o) {
-                            return std::string(to_string(o.format)) + "=" +
+                            return std::string(magic_enum::enum_name(o.format)) + "=" +
                                    std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
                           }) //
                         | mk_string(", "));

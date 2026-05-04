@@ -59,6 +59,8 @@ target_include_directories(polycpp-test PRIVATE
         polystl
         ${LLVM_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(polycpp-test PRIVATE
+        POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 
 # === test_all.h.in variables ===
 get_filename_component(POLYCPP_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)

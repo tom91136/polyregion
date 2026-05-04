@@ -9,6 +9,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "export.h"
 
@@ -17,6 +18,21 @@
 #else
   #define POLYREGION_RT_PROTECT
 #endif
+
+namespace polyregion::invoke {
+
+enum class POLYREGION_EXPORT Backend : uint8_t {
+  CUDA,
+  HIP,
+  HSA,
+  OpenCL,
+  Vulkan,
+  Metal,
+  SharedObject,
+  RelocatableObject,
+};
+
+} // namespace polyregion::invoke
 
 namespace polyregion::compiletime {
 
@@ -28,46 +44,14 @@ enum class POLYREGION_EXPORT Target : uint8_t {
 
   Object_LLVM_NVPTX64 = 20,
   Object_LLVM_AMDGCN,
-  Object_LLVM_SPIRV32,
-  Object_LLVM_SPIRV64,
+  Object_LLVM_SPIRV32_Kernel,
+  Object_LLVM_SPIRV64_Kernel,
+  Object_LLVM_SPIRV_GLCompute,
 
   Source_C_C11 = 30,
   Source_C_OpenCL1_1,
   Source_C_Metal1_0,
 };
-POLYREGION_RT_PROTECT static constexpr std::string_view to_string(const Target &target) {
-  switch (target) {
-    case Target::Object_LLVM_HOST: return "host";
-    case Target::Object_LLVM_x86_64: return "x86_64";
-    case Target::Object_LLVM_AArch64: return "aarch64";
-    case Target::Object_LLVM_ARM: return "arm";
-    case Target::Object_LLVM_NVPTX64: return "nvptx64";
-    case Target::Object_LLVM_AMDGCN: return "amdgcn";
-    case Target::Object_LLVM_SPIRV32: return "spirv32";
-    case Target::Object_LLVM_SPIRV64: return "spirv64";
-    case Target::Source_C_C11: return "c11";
-    case Target::Source_C_OpenCL1_1: return "opencl1_1";
-    case Target::Source_C_Metal1_0: return "metal1_0";
-  }
-}
-POLYREGION_RT_PROTECT static constexpr std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal) {
-  auto target = static_cast<Target>(ordinal);
-  switch (target) {
-    case Target::Object_LLVM_HOST:
-    case Target::Object_LLVM_x86_64:
-    case Target::Object_LLVM_AArch64:
-    case Target::Object_LLVM_ARM:
-    case Target::Object_LLVM_NVPTX64:
-    case Target::Object_LLVM_AMDGCN:
-    case Target::Source_C_OpenCL1_1:
-    case Target::Source_C_C11:
-    case Target::Source_C_Metal1_0:
-    case Target::Object_LLVM_SPIRV32:
-    case Target::Object_LLVM_SPIRV64:
-      return target;
-      // XXX do not add default here, see -Werror=switch
-  }
-}
 
 enum class POLYREGION_EXPORT OptLevel : uint8_t {
   O0 = 10,
@@ -76,70 +60,79 @@ enum class POLYREGION_EXPORT OptLevel : uint8_t {
   O3,
   Ofast,
 };
-POLYREGION_RT_PROTECT static constexpr std::string_view to_string(const OptLevel &target) {
-  switch (target) {
-    case OptLevel::O0: return "O0";
-    case OptLevel::O1: return "O1";
-    case OptLevel::O2: return "O2";
-    case OptLevel::O3: return "O3";
-    case OptLevel::Ofast: return "Ofast";
+
+struct POLYREGION_EXPORT TargetSpec {
+  std::string_view canonical;
+  std::vector<std::string_view> aliases;
+  Target codegen;
+  invoke::Backend runtime;
+  bool sharedAddressSpace;
+  std::vector<std::string_view> requiredDeviceFeatures;
+
+  POLYREGION_RT_PROTECT static const std::vector<TargetSpec> &registry() {
+    using T = Target;
+    using B = invoke::Backend;
+    // clang-format off
+    static const std::vector<TargetSpec> r = {
+      {"host",            {"native"},                       T::Object_LLVM_HOST,             B::RelocatableObject, true,  {}},
+      {"x86_64",          {},                               T::Object_LLVM_x86_64,           B::RelocatableObject, true,  {}},
+      {"aarch64",         {"arm64"},                        T::Object_LLVM_AArch64,          B::RelocatableObject, true,  {}},
+      {"arm",             {},                               T::Object_LLVM_ARM,              B::RelocatableObject, true,  {}},
+      {"cuda",            {"ptx", "nvptx64"},               T::Object_LLVM_NVPTX64,          B::CUDA,              true,  {}},
+      {"hsa",             {"amdgcn", "amdgpu"},             T::Object_LLVM_AMDGCN,           B::HSA,               true,  {}},
+      {"hip",             {},                               T::Object_LLVM_AMDGCN,           B::HIP,               true,  {}},
+      {"spirv64_kernel",  {"spirv", "spirv64",
+                           "spirv_kernel", "opencl_spirv"}, T::Object_LLVM_SPIRV64_Kernel,   B::OpenCL,            false, {"spirv_kernel"}},
+      {"spirv32_kernel",  {"spirv32"},                      T::Object_LLVM_SPIRV32_Kernel,   B::OpenCL,            false, {"spirv_kernel"}},
+      {"spirv_glcompute", {"vulkan", "vulkan_spirv"},       T::Object_LLVM_SPIRV_GLCompute,  B::Vulkan,            false, {"spirv_glcompute"}},
+      {"opencl1_1",       {"opencl"},                       T::Source_C_OpenCL1_1,           B::OpenCL,            false, {"source"}},
+      {"metal1_0",        {"metal"},                        T::Source_C_Metal1_0,            B::Metal,             true,  {}},
+      {"c11",             {},                               T::Source_C_C11,                 B::SharedObject,      true,  {}},
+    };
+    // clang-format on
+    return r;
   }
-}
-POLYREGION_RT_PROTECT static constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal) {
-  auto target = static_cast<OptLevel>(ordinal);
-  switch (target) {
-    case OptLevel::O0:
-    case OptLevel::O1:
-    case OptLevel::O2:
-    case OptLevel::O3:
-    case OptLevel::Ofast:
-      return target;
-      // XXX do not add default here, see -Werror=switch
+
+  POLYREGION_RT_PROTECT static std::optional<TargetSpec> findByCodegen(Target t) {
+    for (const auto &s : registry())
+      if (s.codegen == t) return s;
+    return std::nullopt;
   }
-}
 
-POLYREGION_RT_PROTECT static const std::unordered_map<std::string, Target> &targets() {
-  static std::unordered_map<std::string, Target> //
-      data{                                      // obj
-           {"host", Target::Object_LLVM_HOST},
-           {"native", Target::Object_LLVM_HOST},
-           {"x86_64", Target::Object_LLVM_x86_64},
-           {"aarch64", Target::Object_LLVM_AArch64},
-           {"arm64", Target::Object_LLVM_AArch64},
-           {"arm", Target::Object_LLVM_ARM},
+  POLYREGION_RT_PROTECT static std::optional<TargetSpec> findByName(std::string_view name) {
+    auto eq = [](std::string_view a, std::string_view b) {
+      if (a.size() != b.size()) return false;
+      for (size_t i = 0; i < a.size(); ++i) {
+        char x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x + 32);
+        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y + 32);
+        if (x != y) return false;
+      }
+      return true;
+    };
+    for (const auto &s : registry()) {
+      if (eq(s.canonical, name)) return s;
+      for (const auto &a : s.aliases)
+        if (eq(a, name)) return s;
+    }
+    return std::nullopt;
+  }
 
-           // ptx
-           {"nvptx64", Target::Object_LLVM_NVPTX64},
-           {"ptx", Target::Object_LLVM_NVPTX64},
-           {"cuda", Target::Object_LLVM_NVPTX64},
+  struct ParsedRef;
+  POLYREGION_RT_PROTECT static std::optional<ParsedRef> parse(std::string_view input);
+};
 
-           // hsaco
-           {"amdgcn", Target::Object_LLVM_AMDGCN},
-           {"amdgpu", Target::Object_LLVM_AMDGCN},
-           {"hsa", Target::Object_LLVM_AMDGCN},
-           {"hip", Target::Object_LLVM_AMDGCN},
+struct POLYREGION_EXPORT TargetSpec::ParsedRef {
+  TargetSpec spec;
+  std::string hint;
+};
 
-           // spirv
-           {"spirv32", Target::Object_LLVM_SPIRV32},
-           {"spirv64", Target::Object_LLVM_SPIRV64},
-           {"spirv", Target::Object_LLVM_SPIRV64},
-           {"vulkan", Target::Object_LLVM_SPIRV64},
-
-           // src
-           {"c11", Target::Source_C_C11},
-           {"opencl1_1", Target::Source_C_OpenCL1_1},
-           {"opencl", Target::Source_C_OpenCL1_1},
-           {"metal1_0", Target::Source_C_Metal1_0},
-           {"metal", Target::Source_C_Metal1_0}};
-  return data;
-}
-
-POLYREGION_RT_PROTECT static std::optional<Target> parseTarget(const std::string &name) {
-  std::string lower(name.size(), {});
-  for (size_t i = 0; i < name.size(); ++i)
-    lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
-  if (auto it = targets().find(lower); it != targets().end()) return it->second;
-  else return {};
+POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::parse(std::string_view input) {
+  auto at = input.find('@');
+  auto head = (at == std::string_view::npos) ? input : input.substr(0, at);
+  auto tail = (at == std::string_view::npos) ? std::string_view{} : input.substr(at + 1);
+  if (auto s = findByName(head)) return ParsedRef{*s, std::string(tail)};
+  return std::nullopt;
 }
 
 } // namespace polyregion::compiletime
@@ -189,27 +182,6 @@ POLYREGION_RT_PROTECT static constexpr size_t byteOfType(Type t) {
   }
 }
 
-POLYREGION_RT_PROTECT static constexpr std::string_view to_string(const Type &type) {
-  switch (type) {
-    case Type::Void: return "Void";
-    case Type::Bool1: return "Bool1";
-    case Type::IntU8: return "UInt8";
-    case Type::IntU16: return "UInt16";
-    case Type::IntU32: return "UInt32";
-    case Type::IntU64: return "UInt64";
-    case Type::IntS8: return "Int8";
-    case Type::IntS16: return "Int16";
-    case Type::IntS32: return "Int32";
-    case Type::IntS64: return "Int64";
-    case Type::Float16: return "Float16";
-    case Type::Float32: return "Float32";
-    case Type::Float64: return "Float64";
-    case Type::Ptr: return "Ptr";
-    case Type::Scratch: return "Scratch";
-    default: std::fprintf(stderr, "Unimplemented Type\n"); std::abort();
-  }
-}
-
 using TypedPointer = std::pair<Type, void *>;
 
 } // namespace polyregion::runtime
@@ -217,13 +189,7 @@ using TypedPointer = std::pair<Type, void *>;
 namespace polyregion::runtime {
 
 enum class POLYREGION_EXPORT PlatformKind : uint8_t { HostThreaded = 1, Managed };
-POLYREGION_RT_PROTECT static constexpr std::string_view to_string(const PlatformKind &b) {
-  switch (b) {
-    case PlatformKind::HostThreaded: return "HostThreaded";
-    case PlatformKind::Managed: return "Managed";
-    default: std::fprintf(stderr, "Unimplemented PlatformKind\n"); std::abort();
-  }
-}
+
 POLYREGION_RT_PROTECT static constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
   if (name == "host" || name == "hostthreaded") return PlatformKind::HostThreaded;
   if (name == "managed") return PlatformKind::Managed;
@@ -239,33 +205,24 @@ POLYREGION_RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(
       return runtime::PlatformKind::HostThreaded;
     case compiletime::Target::Object_LLVM_NVPTX64:
     case compiletime::Target::Object_LLVM_AMDGCN:
-    case compiletime::Target::Object_LLVM_SPIRV32:
-    case compiletime::Target::Object_LLVM_SPIRV64:
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
     case compiletime::Target::Source_C_OpenCL1_1:
     case compiletime::Target::Source_C_Metal1_0: //
       return runtime::PlatformKind::Managed;
   }
 }
 
-enum class POLYREGION_EXPORT ModuleFormat : uint8_t { Source = 1, Object, DSO, PTX, HSACO, SPIRV };
-POLYREGION_RT_PROTECT static constexpr std::string_view to_string(const ModuleFormat &x) {
-  switch (x) {
-    case ModuleFormat::Source: return "Source";
-    case ModuleFormat::Object: return "Object";
-    case ModuleFormat::DSO: return "DSO";
-    case ModuleFormat::PTX: return "PTX";
-    case ModuleFormat::HSACO: return "HSACO";
-    case ModuleFormat::SPIRV: return "SPIRV";
-    default: std::fprintf(stderr, "Unimplemented ModuleFormat\n"); std::abort();
-  }
-}
+enum class POLYREGION_EXPORT ModuleFormat : uint8_t { Source = 1, Object, DSO, PTX, HSACO, SPIRV_Kernel, SPIRV_GLCompute };
 POLYREGION_RT_PROTECT static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
   if (name == "src" || name == "source") return ModuleFormat::Source;
   if (name == "obj" || name == "object") return ModuleFormat::Object;
   if (name == "dso") return ModuleFormat::DSO;
   if (name == "ptx") return ModuleFormat::PTX;
   if (name == "hsaco") return ModuleFormat::HSACO;
-  if (name == "spirv") return ModuleFormat::SPIRV;
+  if (name == "spirv_kernel" || name == "spirv") return ModuleFormat::SPIRV_Kernel;
+  if (name == "spirv_glcompute") return ModuleFormat::SPIRV_GLCompute;
   return {};
 }
 
@@ -280,9 +237,11 @@ POLYREGION_RT_PROTECT static constexpr std::optional<runtime::ModuleFormat> modu
       return runtime::ModuleFormat::PTX;
     case compiletime::Target::Object_LLVM_AMDGCN: //
       return runtime::ModuleFormat::HSACO;
-    case compiletime::Target::Object_LLVM_SPIRV32:
-    case compiletime::Target::Object_LLVM_SPIRV64: //
-      return runtime::ModuleFormat::SPIRV;
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: //
+      return runtime::ModuleFormat::SPIRV_Kernel;
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute: //
+      return runtime::ModuleFormat::SPIRV_GLCompute;
     case compiletime::Target::Source_C_OpenCL1_1:
     case compiletime::Target::Source_C_Metal1_0:
     case compiletime::Target::Source_C_C11: //

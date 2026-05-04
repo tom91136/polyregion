@@ -48,7 +48,7 @@ function(add_target_compile_check name driver source arch)
             -c ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${out})
 endfunction()
 
-foreach (TGT cuda@sm_70 hsa@gfx900 spirv@host metal@host c11@host)
+foreach (TGT cuda@sm_70 hsa@gfx900 spirv64_kernel@host spirv_glcompute@host metal@host c11@host)
     string(REPLACE "@" "-" SAFE ${TGT})
     add_target_compile_check(polycpp-tgt-${SAFE} polycpp offload.cpp ${TGT})
     add_target_compile_check(polyfc-tgt-${SAFE}  polyfc  offload.f95 ${TGT})

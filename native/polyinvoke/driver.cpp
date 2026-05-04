@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -233,7 +234,8 @@ void run() {
 
   for (auto backend : {Backend::RelocatableObject}) {
     if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      std::cerr << "Backend " << to_string(backend) << " failed to initialise: " << std::get<std::string>(errorOrPlatform) << "\n";
+      std::cerr << "Backend " << magic_enum::enum_name(backend) << " failed to initialise: " << std::get<std::string>(errorOrPlatform)
+                << "\n";
     } else rts.emplace_back(std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform)));
   }
 

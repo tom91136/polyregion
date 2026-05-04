@@ -77,8 +77,12 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
     case compiletime::Target::Object_LLVM_AMDGCN:
       validate(llvm::Triple::ArchType::amdgcn);
       return {.target = backend::LLVMBackend::Target::AMDGCN, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_SPIRV32: return {.target = backend::LLVMBackend::Target::SPIRV32, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVMBackend::Target::SPIRV64, .arch = options.arch};
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+      return {.target = backend::LLVMBackend::Target::SPIRV32_Kernel, .arch = options.arch};
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      return {.target = backend::LLVMBackend::Target::SPIRV64_Kernel, .arch = options.arch};
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+      return {.target = backend::LLVMBackend::Target::SPIRV_GLCompute, .arch = options.arch};
     case compiletime::Target::Source_C_OpenCL1_1: //
     case compiletime::Target::Source_C_Metal1_0:  //
     case compiletime::Target::Source_C_C11:       //
@@ -95,8 +99,9 @@ std::vector<polyast::StructLayout> compiler::layoutOf(const std::vector<polyast:
     case compiletime::Target::Object_LLVM_ARM: [[fallthrough]];
     case compiletime::Target::Object_LLVM_NVPTX64: [[fallthrough]];
     case compiletime::Target::Object_LLVM_AMDGCN: [[fallthrough]];
-    case compiletime::Target::Object_LLVM_SPIRV32: [[fallthrough]];
-    case compiletime::Target::Object_LLVM_SPIRV64: return backend::LLVMBackend(toLLVMBackendOptions(options)).resolveLayouts(defs);
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute: return backend::LLVMBackend(toLLVMBackendOptions(options)).resolveLayouts(defs);
     case compiletime::Target::Source_C_C11: [[fallthrough]];
     case compiletime::Target::Source_C_OpenCL1_1: [[fallthrough]];
     case compiletime::Target::Source_C_Metal1_0:
@@ -125,8 +130,9 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
       case compiletime::Target::Object_LLVM_ARM:
       case compiletime::Target::Object_LLVM_NVPTX64:
       case compiletime::Target::Object_LLVM_AMDGCN:
-      case compiletime::Target::Object_LLVM_SPIRV32:
-      case compiletime::Target::Object_LLVM_SPIRV64:                                     //
+      case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+      case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      case compiletime::Target::Object_LLVM_SPIRV_GLCompute:                             //
         return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));    //
       case compiletime::Target::Source_C_OpenCL1_1:                                      //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //

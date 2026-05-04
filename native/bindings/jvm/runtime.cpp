@@ -1,6 +1,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+
+#include "magic_enum/magic_enum.hpp"
 #include <utility>
 #include <vector>
 
@@ -117,7 +119,7 @@ jlong Platforms::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
 static jobject toJni(JNIEnv *env, rt::Backend backend) {
   return wrapException(env, EX, [&]() {
     if (auto errorOrPlatform = rt::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      throw std::runtime_error("Backend " + std::string(to_string(backend)) +
+      throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend)) +
                                " failed to initialise: " + std::get<std::string>(errorOrPlatform));
     } else {
       auto [peer, platform] =
@@ -283,7 +285,7 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
                              fromJni(env, cb));
 
     if (argTs[argCount - 1] == rt::Type::Ptr) {
-      auto args = argTs ^ mk_string(",", [](auto &tpe) { return std::string(to_string(tpe)); });
+      auto args = argTs ^ mk_string(",", [](auto &tpe) { return std::string(magic_enum::enum_name(tpe)); });
       throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
     }
   });

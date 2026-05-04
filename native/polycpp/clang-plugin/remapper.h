@@ -22,18 +22,18 @@ struct Remapper {
     bool ctorChain = false;
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
-    Vec<Stmt::Any> stmts{};
+    Vector<Stmt::Any> stmts{};
     Map<std::string, std::shared_ptr<Function>> functions{};
     Map<std::string, std::shared_ptr<StructDef>> structs{};
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
-    Map<std::string, Vec<std::shared_ptr<StructDef>>> parents{};
+    Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
 
     template <typename T>
-    [[nodiscard]] Pair<T, Vec<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
-                                                 const Opt<bool> &scopeCtorChain = {},                   //
-                                                 const Opt<Type::Any> &scopeRtnType = {},                //
-                                                 const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                                 const bool persistCounter = true) {
+    [[nodiscard]] Pair<T, Vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
+                                                    const Opt<bool> &scopeCtorChain = {},                   //
+                                                    const Opt<Type::Any> &scopeRtnType = {},                //
+                                                    const std::shared_ptr<StructDef> &scopeStructName = {}, //
+                                                    const bool persistCounter = true) {
       const std::shared_ptr<StructDef> nextParent = scopeStructName ? scopeStructName : parent;
       RemapContext r{nextParent,
                      scopeCtorChain.value_or(ctorChain),
@@ -54,22 +54,20 @@ struct Remapper {
       parents = r.parents;
       return {result, r.stmts};
     }
-    // persistCounter defaults to true so temporary names (`_v<N>`) stay unique across nested
-    // scopes within a function. Resetting the counter would let parallel scopes (then/else,
-    // ternary branches, etc.) reuse the same `_v1, _v2, ...` names — polyc's backend keeps a
-    // flat stackVarPtrs LUT and rejects re-declared names with mismatched types. Function-level
-    // scopes (`handleFnDecl`) explicitly pass `persistCounter=false` to start each function fresh.
-    [[nodiscard]] Vec<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
-                                        const Opt<bool> &scopeCtorChain = {},                   //
-                                        const Opt<Type::Any> &scopeRtnType = {},                //
-                                        const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                        bool persistCounter = true);
+    // persistCounter=true keeps `_v<N>` temporaries unique across sibling scopes within one
+    // function -- polyc's flat stackVarPtrs LUT rejects same-name re-declarations of differing
+    // types. Function-level scopes pass false to reset.
+    [[nodiscard]] Vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
+                                           const Opt<bool> &scopeCtorChain = {},                   //
+                                           const Opt<Type::Any> &scopeRtnType = {},                //
+                                           const std::shared_ptr<StructDef> &scopeStructName = {}, //
+                                           bool persistCounter = true);
 
     [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
     [[nodiscard]] bool emptyStruct(const StructDef &def);
 
     void push(const Stmt::Any &stmt);
-    void push(const Vec<Stmt::Any> &xs);
+    void push(const Vector<Stmt::Any> &xs);
 
     [[nodiscard]] Named newName(const Type::Any &tpe);
     [[nodiscard]] Expr::Any newVar(const Expr::Any &expr);

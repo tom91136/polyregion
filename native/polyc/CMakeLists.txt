@@ -10,7 +10,6 @@ set(LIB_SOURCES
         backend/c_source.cpp
         backend/lld_lite.cpp
         backend/memoryfs.cpp
-        backend/clspv.cpp
         compiler.cpp
 )
 
@@ -29,9 +28,6 @@ target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR})
 target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
-        #        ${spirv-llvm-translator_SOURCE_DIR}/include
-        #        ${clspv_passes_INCLUDE_DIRS}
-        ${spirv-tools_SOURCE_DIR}/include
         . ../include)
 
 if (NOT WIN32)
@@ -103,7 +99,6 @@ target_link_libraries(polyc
         Aspartame::Aspartame
         magic_enum::magic_enum
         fmt::fmt
-        SPIRV-Tools-opt
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )

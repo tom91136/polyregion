@@ -1,6 +1,7 @@
 #include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
+#include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/runtime.h"
 #include "polyregion/concurrency_utils.hpp"
@@ -226,11 +227,11 @@ int main() {
     std::unique_ptr<polyregion::invoke::Platform> platform;
 
     if (auto errorOrPlatform = polyregion::invoke::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      throw std::runtime_error("Backend " + std::string(to_string(backend)) +
+      throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend)) +
                                " failed to initialise: " + std::get<std::string>(errorOrPlatform));
     } else platform = std::move(std::get<std::unique_ptr<polyregion::invoke::Platform>>(errorOrPlatform));
 
-    std::cout << "backend=" << to_string(backend) << " arch=" << arch << std::endl;
+    std::cout << "backend=" << magic_enum::enum_name(backend) << " arch=" << arch << std::endl;
     {
 
       compiler::initialise();

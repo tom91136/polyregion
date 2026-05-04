@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <mutex>
 #include <system_error>
 #include <thread>
@@ -36,7 +37,7 @@ static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vec
       case Type::Float64: return &ffi_type_double;
       case Type::Ptr: return &ffi_type_pointer;
       case Type::Void: return &ffi_type_void;
-      default: POLYINVOKE_FATAL(prefix, "Illegal ffi type: %s", to_string(tpe).data());
+      default: POLYINVOKE_FATAL(prefix, "Illegal ffi type: %s", magic_enum::enum_name(tpe).data());
     }
   };
   if (types.size() != args.size()) POLYINVOKE_FATAL(prefix, "types size (%zu) != args size (%zu)", types.size(), args.size());
@@ -142,7 +143,7 @@ PlatformKind RelocatablePlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::HostThreaded;
 }
-ModuleFormat RelocatablePlatform::moduleFormat() {
+ModuleFormat ObjectDevice::moduleFormat() {
   POLYINVOKE_TRACE();
   return ModuleFormat::Object;
 }
@@ -212,10 +213,8 @@ void *malloc_(size_t size) {
 uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
   if (Name == "malloc") return reinterpret_cast<uint64_t>(&malloc_);
   if (auto addr = llvm::RTDyldMemoryManager::getSymbolAddress(Name)) return addr;
-  // RTDyldMemoryManager's default uses dlsym(RTLD_DEFAULT, ...) which on some glibc/loader
-  // configurations misses libm's sincosf/sincos and the like (LLVM's optimiser fuses paired
-  // sin(x)+cos(x) into sincosf). Fall back to dlopen+dlsym on libm directly so the JIT'd kernel
-  // can resolve them at finalize time.
+  // RTDyldMemoryManager defaults to dlsym(RTLD_DEFAULT, ...), which on some glibc/loader configs
+  // misses sincosf etc. (LLVM fuses paired sin/cos into sincosf). Open libm directly.
 #if defined(__linux__) || defined(__APPLE__)
   static void *libm = []() -> void * {
   #if defined(__APPLE__)
@@ -280,8 +279,8 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
   if (policy.global.z != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);
   if (policy.local) POLYINVOKE_FATAL(prefix, "Policy local dimension is not supported: size=%zu", policy.local->second);
   if (types[0] != Type::IntS64)
-    POLYINVOKE_FATAL(prefix, "Expecting first argument as index (%s), but was %s", to_string(Type::IntS64).data(),
-                     to_string(types[0]).data());
+    POLYINVOKE_FATAL(prefix, "Expecting first argument as index (%s), but was %s", magic_enum::enum_name(Type::IntS64).data(),
+                     magic_enum::enum_name(types[0]).data());
 }
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                                 std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
@@ -304,8 +303,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         if (types[0] != Type::IntS64) {
-          POLYINVOKE_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", to_string(Type::IntS64).data(),
-                           to_string(types[0]).data());
+          POLYINVOKE_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", magic_enum::enum_name(Type::IntS64).data(),
+                           magic_enum::enum_name(types[0]).data());
         }
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;
@@ -329,10 +328,6 @@ std::vector<Property> SharedPlatform::properties() {
 PlatformKind SharedPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::HostThreaded;
-}
-ModuleFormat SharedPlatform::moduleFormat() {
-  POLYINVOKE_TRACE();
-  return ModuleFormat::Object;
 }
 std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   POLYINVOKE_TRACE();

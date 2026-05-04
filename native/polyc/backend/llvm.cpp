@@ -41,8 +41,9 @@ std::unique_ptr<TargetSpecificHandler> TargetSpecificHandler::from(LLVMBackend::
     case LLVMBackend::Target::ARM: return std::make_unique<CPUTargetSpecificHandler>();
     case LLVMBackend::Target::NVPTX64: return std::make_unique<NVPTXTargetSpecificHandler>();
     case LLVMBackend::Target::AMDGCN: return std::make_unique<AMDGPUTargetSpecificHandler>();
-    case LLVMBackend::Target::SPIRV32: [[fallthrough]];
-    case LLVMBackend::Target::SPIRV64: return std::make_unique<SPIRVOpenCLTargetSpecificHandler>();
+    case LLVMBackend::Target::SPIRV32_Kernel: [[fallthrough]];
+    case LLVMBackend::Target::SPIRV64_Kernel: [[fallthrough]];
+    case LLVMBackend::Target::SPIRV_GLCompute: return std::make_unique<SPIRVOpenCLTargetSpecificHandler>();
     default: throw BackendException(fmt::format("Unknown target {}", magic_enum::enum_name(target)));
   }
 }
@@ -81,7 +82,8 @@ ValPtr CodeGen::invokeAbort() { return B.CreateCall(resolveExtFn(Type::Nothing()
 
 ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyExpr &arg) { //
   const auto fn = resolveExtFn(rtn, name, {arg.tpe()});
-  if (C.options.target == LLVMBackend::Target::SPIRV32 || C.options.target == LLVMBackend::Target::SPIRV64) {
+  if (C.options.target == LLVMBackend::Target::SPIRV32_Kernel || C.options.target == LLVMBackend::Target::SPIRV64_Kernel ||
+      C.options.target == LLVMBackend::Target::SPIRV_GLCompute) {
     fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
   }
   if (!rtn.is<Type::Unit0>()) {
@@ -93,7 +95,8 @@ ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyExp
 }
 ValPtr CodeGen::extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs, const AnyExpr &rhs) {
   const auto fn = resolveExtFn(rtn, name, {lhs.tpe(), rhs.tpe()});
-  if (C.options.target == LLVMBackend::Target::SPIRV32 || C.options.target == LLVMBackend::Target::SPIRV64) {
+  if (C.options.target == LLVMBackend::Target::SPIRV32_Kernel || C.options.target == LLVMBackend::Target::SPIRV64_Kernel ||
+      C.options.target == LLVMBackend::Target::SPIRV_GLCompute) {
     fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
     fn->addFnAttr(llvm::Attribute::NoBuiltin);
     fn->addFnAttr(llvm::Attribute::Convergent);
@@ -174,7 +177,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
       const auto info = structTypeOf(tpe);
       if (auto idx = info.memberIndices ^ get_maybe(path.symbol)) {
         if (auto p = tpe.get<Type::Ptr>(); p && !p->length) {
-          root = B.CreateInBoundsGEP(info.tpe, C.load(B, root, B.getPtrTy(C.AllocaAS)),
+          root = B.CreateInBoundsGEP(info.tpe, C.load(B, root, C.GenericAS != 0 ? B.getPtrTy(C.GlobalAS) : B.getPtrTy()),
                                      {//
                                       llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), *idx)},
                                      qualified(select) + "_select_ptr");
@@ -192,7 +195,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
         // raw pointer bytes instead of the pointed-to struct.
         const auto fieldLlvmType = info.tpe->getElementType(*idx);
         if (fieldLlvmType->isPointerTy() && path.tpe.template is<Type::Struct>()) {
-          root = C.load(B, root, B.getPtrTy(C.AllocaAS));
+          root = C.load(B, root, C.GenericAS != 0 ? B.getPtrTy(C.GlobalAS) : B.getPtrTy());
         }
         tpe = path.tpe;
       } else {
@@ -432,7 +435,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::Invoke &x) -> ValPtr {
         // Combine receiver + module captures + term captures + args (matching the LLVM-level
         // function shape produced by createPrototype).
-        Vec<AnyExpr> allArgs;
+        Vector<AnyExpr> allArgs;
         if (x.receiver) allArgs.push_back(*x.receiver);
         for (auto &c : x.captures)
           allArgs.push_back(c);
@@ -444,7 +447,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         return functions ^ get_maybe(sig) ^
                fold(
                    [&](auto &fn) -> ValPtr {
-                     const auto params =
+                     auto params =
                          argNoUnit ^ map([&](auto &term) -> ValPtr {
                            // Struct args at the call boundary are passed by pointer (see resolveType
                            // with functionBoundary=true). Pass the address rather than the loaded value.
@@ -454,6 +457,17 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                            const auto val = mkExprVal(term);
                            return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, resolveType(Type::Bool1(), true)) : val;
                          });
+                     // SPIRV only: widen a specific AS (CrossWorkgroup/global) to the formal's
+                     // Generic AS when calling internal helpers. The reverse direction is UB on
+                     // OpenCL. AMDGCN/NVPTX have no Generic AS so they're left alone.
+                     if (C.GenericAS != 0) {
+                       for (size_t i = 0; i < params.size(); ++i) {
+                         auto *formal = fn->getFunctionType()->getParamType(i);
+                         auto *actual = params[i]->getType();
+                         if (formal != actual && formal->isPointerTy() && actual->isPointerTy())
+                           params[i] = B.CreateAddrSpaceCast(params[i], formal);
+                       }
+                     }
                      const auto call = B.CreateCall(fn, params);
                      // in case the fn returns a unit (which is mapped to void), we just return the constant
                      return x.rtn.is<Type::Unit0>() ? mkExprVal(Expr::Unit0Const()) : call;
@@ -549,11 +563,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         } else {
           const auto tpe = resolveType(x.name.tpe);
           auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
-          // insert_or_assign so a re-declaration with the same name (e.g. two adjacent for-loops
-          // each declaring `int l = 0`) rebinds the LUT to the new stack slot. emplace() silently
-          // dropped the second slot, leaving subsequent reads pointing at the previous loop's
-          // final value — for `for (int l = 0; l < N; l++)` this meant the second loop never ran
-          // because l was already N from the prior loop's exit.
+          // insert_or_assign rebinds the LUT on a same-name redeclaration (e.g. two adjacent
+          // `for (int l = 0; ...)` loops); emplace silently kept the prior slot so the second
+          // loop saw l == N and never ran.
           if (auto it = stackVarPtrs.find(x.name.symbol); it != stackVarPtrs.end() && it->second.first != x.name.tpe) {
             throw BackendException("Re-declaration of " + x.name.symbol + " changes type from " + to_string(it->second.first) + " to " +
                                    to_string(x.name.tpe));
@@ -745,7 +757,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
 static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) {
 
   // Combine receiver + module captures + term captures + args into the LLVM-level args list
-  Vec<Arg> allArgs;
+  Vector<Arg> allArgs;
   // CPU-style kernels (HostThreaded ABI) receive a leading thread-id (Int64) arg from the runtime
   // — `ObjectDeviceQueue::threadedLaunch` writes `tid` into the first ffi slot before invoking.
   // GPU launches (cuLaunchKernel / hsa_kernel_dispatch / clEnqueueNDRangeKernel) provide thread
@@ -803,7 +815,7 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
 Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
   structTypes = C.resolveLayouts(program.defs);
 
-  Vec<Function> allFns;
+  Vector<Function> allFns;
   allFns.reserve(program.functions.size() + 1);
   allFns.push_back(program.entry);
   for (auto &f : program.functions)
@@ -828,7 +840,13 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
                                              ? B.CreateICmpNE(llvmArg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C.actual), 0, true))
                                              : llvmArg;
 
-                     auto stackPtr = C.allocaAS(B, resolveType(arg.named.tpe), C.AllocaAS, arg.named.symbol + "_stack_ptr");
+                     // SPIRV: keep the kernel arg's AS on the stack slot or the store would
+                     // cross non-overlapping spaces. Other targets stay on resolveType.
+                     const bool spirvTarget = C.options.target == LLVMBackend::Target::SPIRV32_Kernel ||
+                                              C.options.target == LLVMBackend::Target::SPIRV64_Kernel ||
+                                              C.options.target == LLVMBackend::Target::SPIRV_GLCompute;
+                     auto *slotTy = spirvTarget ? llvmArgValue->getType() : resolveType(arg.named.tpe);
+                     auto stackPtr = C.allocaAS(B, slotTy, C.AllocaAS, arg.named.symbol + "_stack_ptr");
                      auto _ = C.store(B, llvmArgValue, stackPtr);
                      return {arg.named.symbol, {arg.named.tpe, stackPtr}};
                    }) //

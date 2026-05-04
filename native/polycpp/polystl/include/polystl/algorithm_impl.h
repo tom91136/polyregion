@@ -80,7 +80,8 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchManaged(global / blocks, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
+        const auto grid = (global + blocks - 1) / blocks;
+        details::dispatchManaged(grid, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
         return;
       }
       break;

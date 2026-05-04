@@ -37,8 +37,9 @@ void testAll(bool passthrough) {
         | to_vector();
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
-    const auto output = fmt::format(
-        "{:x}", std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) { return fmt::vformat(x.command, unevaluatedStore); })));
+    const auto output = fmt::format("polycpp_test_{:x}", std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) {
+                                                                                    return fmt::vformat(x.command, unevaluatedStore);
+                                                                                  })));
     const auto evaluatedStore = augmentedArgs ^ append(std::pair{"output", output}) ^ and_then(mkArgStore);
 
     for (size_t i = 0; i < case_.runs.size(); ++i) {
@@ -54,7 +55,7 @@ void testAll(bool passthrough) {
         }
 
         envs.emplace_back(fmt::format("POLYCPP_DRIVER={}", ClangDriver));
-        envs.emplace_back(fmt::vformat("POLYRT_PLATFORM={polycpp_arch}", evaluatedStore));
+        envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", fmt::vformat("{polycpp_arch}", evaluatedStore)));
         envs.emplace_back("POLYRT_HOST_FALLBACK=0");
 
         // if host, + -fsanitize=address,undefined
@@ -74,7 +75,20 @@ void testAll(bool passthrough) {
         auto stderrFile = llvm::sys::fs::TempFile::create("polycpp_stderr-%%-%%-%%-%%-%%");
         if (auto e = stderrFile.takeError()) FAIL("Cannot create stderr:" << toString(std::move(e)));
 
-        auto exitCode = llvm::sys::ExecuteAndWait(args[0], args_, envs_, {std::nullopt, stdoutFile->TmpName, stderrFile->TmpName});
+        // ExecuteAndWait does PATH but not cwd; args[0] is either "polycpp" (BinaryDir) or a
+        // just-compiled binary in cwd, so resolve both without touching PATH or chdir.
+        auto resolveBin = [&](llvm::StringRef name) -> std::string {
+          auto inBinaryDir = fmt::format("{}/{}", BinaryDir, std::string(name));
+          if (llvm::sys::fs::exists(inBinaryDir)) return inBinaryDir;
+          if (llvm::sys::fs::exists(name)) {
+            llvm::SmallString<256> abs(name);
+            llvm::sys::fs::make_absolute(abs);
+            return std::string(abs);
+          }
+          return std::string(name);
+        };
+        const auto resolved = resolveBin(args[0]);
+        auto exitCode = llvm::sys::ExecuteAndWait(resolved, args_, envs_, {std::nullopt, stdoutFile->TmpName, stderrFile->TmpName});
 
         auto stdout_ = polyregion::read_string(stdoutFile->TmpName);
         auto stderr_ = polyregion::read_string(stderrFile->TmpName);
@@ -100,9 +114,10 @@ void testAll(bool passthrough) {
             }
           }
         }
+        // Drop the compiled binary so the cwd stays clean across a sweep. Only reached when
+        // every REQUIRE in this section passed; failed runs leave the binary for triage.
         if (i == case_.runs.size() - 1) {
-          // if (llvm::sys::fs::remove(binaryName)) INFO("Removed binary: " << binaryName);
-          // else WARN("Cannot remove binary: " << binaryName);
+          if (auto ec = llvm::sys::fs::remove(output)) WARN("Cannot remove binary " << output << ": " << ec.message());
         }
       }
     }
@@ -113,18 +128,7 @@ void testAll(bool passthrough) {
       std::ifstream source(test, std::ios::in | std::ios::binary);
 
       auto cases = polyregion::polyfront::TestCase::parseTestCase(
-          source, "#pragma region",
-          {
-#if defined(__linux__)
-              {"polycpp_arch", {"cuda@sm_89", /*"hip@gfx1036",*/ "hsa@gfx1036", "host@native"}} //
-#elif defined(__APPLE__)
-              {"polycpp_arch", {"host@apple-m2"}} //
-#elif defined(_WIN32)
-              {"polycpp_arch", {}} //
-#else
-  #error "Unsupported platform"
-#endif
-          });
+          source, "#pragma region", {{"polycpp_arch", polyregion::polyfront::loadTestTargets(POLYREGION_TEST_PROFILE_DIR)}});
 
       if (cases.empty()) FAIL("No test cases found");
 

@@ -264,3 +264,11 @@ venv
 
 sysroot-*.tar.gz
 sysroot-*/
+
+polycpp_test_*
+polyfc_test_*
+polycpp_stderr-*
+polycpp_stdout-*
+polyfc_stderr-*
+polyfc_stdout-*
+gpucore.*

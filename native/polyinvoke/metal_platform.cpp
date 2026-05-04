@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <cstring>
 
 #include "polyinvoke/metal_platform.h"
@@ -45,7 +46,7 @@ PlatformKind MetalPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::Managed;
 }
-ModuleFormat MetalPlatform::moduleFormat() {
+ModuleFormat MetalDevice::moduleFormat() {
   POLYINVOKE_TRACE();
   return ModuleFormat::Source;
 }
@@ -199,7 +200,8 @@ void MetalDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset,
 void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                           std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  if (types.back() != Type::Void) POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
+  if (types.back() != Type::Void)
+    POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
   auto kernel = store.resolveFunction(moduleName, symbol, types);
 
   auto args = detail::argDataAsPointers(types, argData);

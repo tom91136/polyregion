@@ -1,36 +1,36 @@
 #pragma once
 
 #include <functional>
-#include <optional>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
 
 #include "generated/polyast.h"
 #include "generated/polyast_repr.h"
+#include "polyregion/aliases.h"
 #include "polyregion/compat.h"
 
 namespace polyregion::polyast {
 
-using Bytes = std::vector<char>;
-template <typename T> using Vec = std::vector<T>;
-template <typename T> using Opt = std::optional<T>;
-template <typename T> using Set = std::unordered_set<T>;
-template <typename T, typename U> using Pair = std::pair<T, U>;
-template <typename T, typename U> using Map = std::unordered_map<T, U>;
+using polyregion::Map;
+using polyregion::Opt;
+using polyregion::Pair;
+using polyregion::Set;
+using polyregion::String;
+using polyregion::StringView;
+using polyregion::Vector;
+
+using Bytes = Vector<char>;
 
 const static auto show_repr = [](auto &x) { return repr(x); };
 
 std::string qualified(const Expr::Select &);
-Vec<Named> path(const Expr::Select &);
+Vector<Named> path(const Expr::Select &);
 Named head(const Expr::Select &);
-Vec<Named> tail(const Expr::Select &);
+Vector<Named> tail(const Expr::Select &);
 
-std::pair<Named, Vec<Named>> uncons(const Expr::Select &);
+std::pair<Named, Vector<Named>> uncons(const Expr::Select &);
 
 Expr::Select selectNamed(const Expr::Select &select, const Named &that);
 
-Expr::Select selectNamed(const Vec<Named> &names);
+Expr::Select selectNamed(const Vector<Named> &names);
 
 Expr::Select selectNamed(const Named &name);
 
@@ -77,7 +77,7 @@ const static auto Unit = Tpe::Unit0();
 const static auto Nothing = Tpe::Nothing();
 
 Tpe::Ptr Ptr(const Tpe::Any &t, Opt<int32_t> l = {}, const TypeSpace::Any &s = TypeSpace::Global());
-Tpe::Struct Struct(std::string name, Vec<Type::Any> members);
+Tpe::Struct Struct(std::string name, Vector<Type::Any> members);
 
 struct AssignmentBuilder {
   std::string name;
@@ -146,9 +146,9 @@ AssignmentBuilder let(const std::string &name);
 IntrOp call(const Intr::Any &);
 MathOp call(const Math::Any &);
 SpecOp call(const Spec::Any &);
-std::function<Function(Vec<Stmt::Any>)> function(const std::string &name, const Vec<Arg> &args, const Type::Any &rtn,
-                                                 const std::set<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
-Program program(const Vec<StructDef> &structs = {}, const Vec<Function> &functions = {});
+std::function<Function(Vector<Stmt::Any>)> function(const std::string &name, const Vector<Arg> &args, const Type::Any &rtn,
+                                                    const std::set<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
+Program program(const Vector<StructDef> &structs = {}, const Vector<Function> &functions = {});
 Program program(const Function &function);
 
 Return ret(const Expr::Any &expr = Unit0Const());

@@ -1,5 +1,7 @@
 #include <string>
 
+#include "magic_enum/magic_enum.hpp"
+
 #include "backend/llvmc.h"
 #include "compiler.h"
 #include "generated/compiler.h"
@@ -21,8 +23,12 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object
 
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_NVPTX64) == Compiler::Target_Object_LLVM_NVPTX64);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_AMDGCN) == Compiler::Target_Object_LLVM_AMDGCN);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32) == Compiler::Target_Object_LLVM_SPIRV32);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64) == Compiler::Target_Object_LLVM_SPIRV64);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32_Kernel) ==
+              Compiler::Target_Object_LLVM_SPIRV32_Kernel);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64_Kernel) ==
+              Compiler::Target_Object_LLVM_SPIRV64_Kernel);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV_GLCompute) ==
+              Compiler::Target_Object_LLVM_SPIRV_GLCompute);
 
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
@@ -72,13 +78,13 @@ static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent
 static cp::Options fromJni(JNIEnv *env, jobject options) {
   auto opt = gen::Options::of(env).wrap(env, options);
   auto targetOrdinal = opt.target(env);
-  if (auto target = ct::targetFromOrdinal(targetOrdinal); target) {
+  if (auto target = magic_enum::enum_cast<ct::Target>(targetOrdinal); target) {
     return {.target = *target, .arch = fromJni(env, opt.arch(env))};
   } else throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
 }
 
 static ct::OptLevel fromJni(JNIEnv *, jbyte optOrdinal) {
-  if (auto opt = ct::optFromOrdinal(optOrdinal); opt) return *opt;
+  if (auto opt = magic_enum::enum_cast<ct::OptLevel>(optOrdinal); opt) return *opt;
   else throw std::logic_error("Unknown opt value: " + std::to_string(optOrdinal));
 }
 

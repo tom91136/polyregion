@@ -16,27 +16,47 @@ public:
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT PlatformKind kind() override;
-  POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
 namespace details {
 using ClModuleStore = detail::ModuleStore<cl_program, cl_kernel>;
-}
+using ClCreateProgramWithIL_fn = cl_program(CL_API_CALL *)(cl_context, const void *, size_t, cl_int *);
+using ClSVMAlloc_fn = void *(CL_API_CALL *)(cl_context, cl_bitfield, size_t, cl_uint);
+using ClSVMFree_fn = void(CL_API_CALL *)(cl_context, void *);
+using ClEnqueueSVMMemcpy_fn = cl_int(CL_API_CALL *)(cl_command_queue, cl_bool, void *, const void *, size_t, cl_uint, const cl_event *,
+                                                    cl_event *);
+using ClSetKernelArgSVMPointer_fn = cl_int(CL_API_CALL *)(cl_kernel, cl_uint, const void *);
+using ClSetKernelExecInfo_fn = cl_int(CL_API_CALL *)(cl_kernel, cl_uint, size_t, const void *);
+
+struct SVMFns {
+  ClSVMAlloc_fn alloc;
+  ClSVMFree_fn free;
+  ClEnqueueSVMMemcpy_fn memcpy;
+  ClSetKernelArgSVMPointer_fn setKernelArg;
+  ClSetKernelExecInfo_fn setKernelExecInfo;
+  cl_bitfield memFlags; // CL_MEM_SVM_FINE_GRAIN_BUFFER, else 0 for coarse-grain
+  explicit operator bool() const { return alloc && free && memcpy && setKernelArg && setKernelExecInfo; }
+};
+} // namespace details
 
 class POLYREGION_EXPORT ClDevice final : public Device {
 
   detail::LazyDroppable<cl_device_id> device;
   detail::LazyDroppable<cl_context> context;
   std::string deviceName;
-  details::ClModuleStore store; // store needs to be dropped before dropping device
+  ModuleFormat format;
+  details::ClCreateProgramWithIL_fn ilCreateFn; // non-null iff format==SPIRV_Kernel
+  details::SVMFns svm{};                        // populated iff device advertises buffer SVM
+  details::ClModuleStore store;                 // must be dropped before the device
   detail::MemoryObjects<cl_mem> memoryObjects;
 
 public:
-  explicit ClDevice(cl_device_id device);
+  explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, details::SVMFns svm);
   ~ClDevice() override;
   POLYREGION_EXPORT int64_t id() override;
   POLYREGION_EXPORT std::string name() override;
+  POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
@@ -57,12 +77,13 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
   details::ClModuleStore &store;
   cl_command_queue queue = {};
   std::function<cl_mem(uintptr_t)> queryMemObject;
+  details::SVMFns svm; // forwarded from ClDevice; when set, use SVM ops instead of cl_mem
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
 
 public:
   POLYREGION_EXPORT ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                                  decltype(queryMemObject) queryMemObject);
+                                  decltype(queryMemObject) queryMemObject, details::SVMFns svm);
   POLYREGION_EXPORT ~ClDeviceQueue() override;
   POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                     const MaybeCallback &cb) override;

@@ -1,3 +1,4 @@
+#include "magic_enum/magic_enum.hpp"
 #include <cmath>
 
 #include "catch2/catch_test_macros.hpp"
@@ -51,8 +52,9 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                 } else {
                   // otherwise, we expect exactly one image
                   if (imageGroups.size() != 1) {
-                    FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend="
-                                                 << to_string(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
+                    FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
+                                                 << "`(backend=" << magic_enum::enum_name(backend)
+                                                 << ", features=" << (d->features() | mk_string(",")) << ")");
                   } else {
                     d->loadModule("module", imageGroups[0].second);
                     kernelSpecs = {.copy = {"module", "stream_copy" + suffix},
@@ -74,7 +76,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                       CHECK(actual < relTolerance);
                     });
               } else {
-                WARN("No kernel test image found for device `" << d->name() << "`(backend=" << to_string(backend)
+                WARN("No kernel test image found for device `" << d->name() << "`(backend=" << magic_enum::enum_name(backend)
                                                                << ", features=" << (d->features() | mk_string(",")) << ")");
               }
             }

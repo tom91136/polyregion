@@ -61,12 +61,6 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-        clspv
-        URL https://github.com/google/clspv/archive/0e6205272feb72595643d8789b2ccc1f54f46770.zip
-        URL_HASH SHA256=ebffbb5f01c001090181ea91e3ff6e1fb7e30f1e928adb6f02ee585c76e418bf
-)
-
-FetchContent_Declare(
         Aspartame
         #               SOURCE_DIR /home/tom/Aspartame
         GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
@@ -79,7 +73,6 @@ find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(unofficial-libffi CONFIG REQUIRED)
-find_package(SPIRV-Tools-opt CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -332,97 +325,6 @@ message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 FetchContent_MakeAvailable(fire)
-FetchContent_GetProperties(clspv)
-if (NOT clspv_POPULATED)
-    FetchContent_Populate(clspv)
-
-    set(clspv_passes_INCLUDE_DIRS
-            ${clspv_SOURCE_DIR}/include
-            ${clspv_SOURCE_DIR}/lib
-            ${spirv-headers_SOURCE_DIR}/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/clspv_include)
-    set(clspv_passes_SOURCE_FILES
-            ${clspv_SOURCE_DIR}/lib/AddFunctionAttributesPass.cpp
-            ${clspv_SOURCE_DIR}/lib/AllocateDescriptorsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ArgKind.cpp
-            ${clspv_SOURCE_DIR}/lib/AutoPodArgsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/BitcastUtils.cpp
-            ${clspv_SOURCE_DIR}/lib/Builtins.cpp
-            ${clspv_SOURCE_DIR}/lib/CallGraphOrderedFunctions.cpp
-            ${clspv_SOURCE_DIR}/lib/ClusterPodKernelArgumentsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ClusterConstants.cpp
-            ${clspv_SOURCE_DIR}/lib/ComputeStructuredOrder.cpp
-            ${clspv_SOURCE_DIR}/lib/ConstantEmitter.cpp
-            ${clspv_SOURCE_DIR}/lib/Constants.cpp
-            ${clspv_SOURCE_DIR}/lib/DeclarePushConstantsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/DefineOpenCLWorkItemBuiltinsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/DescriptorCounter.cpp
-            ${clspv_SOURCE_DIR}/lib/DirectResourceAccessPass.cpp
-            ${clspv_SOURCE_DIR}/lib/FeatureMacro.cpp
-            ${clspv_SOURCE_DIR}/lib/FixupBuiltinsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/FixupStructuredCFGPass.cpp
-            ${clspv_SOURCE_DIR}/lib/FunctionInternalizerPass.cpp
-            ${clspv_SOURCE_DIR}/lib/HideConstantLoadsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/InlineEntryPointsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/InlineFuncWithImageMetadataGetterPass.cpp
-            ${clspv_SOURCE_DIR}/lib/InlineFuncWithPointerBitCastArgPass.cpp
-            ${clspv_SOURCE_DIR}/lib/InlineFuncWithPointerToFunctionArgPass.cpp
-            ${clspv_SOURCE_DIR}/lib/InlineFuncWithSingleCallSitePass.cpp
-            ${clspv_SOURCE_DIR}/lib/Layout.cpp
-            ${clspv_SOURCE_DIR}/lib/LogicalPointerToIntPass.cpp
-            ${clspv_SOURCE_DIR}/lib/LongVectorLoweringPass.cpp
-            ${clspv_SOURCE_DIR}/lib/SetImageChannelMetadataPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ThreeElementVectorLoweringPass.cpp
-            ${clspv_SOURCE_DIR}/lib/LowerAddrSpaceCastPass.cpp
-            ${clspv_SOURCE_DIR}/lib/LowerPrivatePointerPHIPass.cpp
-            ${clspv_SOURCE_DIR}/lib/MultiVersionUBOFunctionsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/NativeMathPass.cpp
-            ${clspv_SOURCE_DIR}/lib/NormalizeGlobalVariable.cpp
-            ${clspv_SOURCE_DIR}/lib/OpenCLInlinerPass.cpp
-            ${clspv_SOURCE_DIR}/lib/Option.cpp
-            ${clspv_SOURCE_DIR}/lib/Passes.cpp
-            ${clspv_SOURCE_DIR}/lib/PhysicalPointerArgsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/PushConstant.cpp
-            ${clspv_SOURCE_DIR}/lib/SPIRVOp.cpp
-            ${clspv_SOURCE_DIR}/lib/SPIRVProducerPass.cpp
-            ${clspv_SOURCE_DIR}/lib/RemoveUnusedArguments.cpp
-            ${clspv_SOURCE_DIR}/lib/ReorderBasicBlocksPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ReplaceLLVMIntrinsicsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ReplaceOpenCLBuiltinPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ReplacePointerBitcastPass.cpp
-            ${clspv_SOURCE_DIR}/lib/RewriteInsertsPass.cpp
-            ${clspv_SOURCE_DIR}/lib/RewritePackedStructs.cpp
-            ${clspv_SOURCE_DIR}/lib/ScalarizePass.cpp
-            ${clspv_SOURCE_DIR}/lib/ShareModuleScopeVariables.cpp
-            ${clspv_SOURCE_DIR}/lib/SignedCompareFixupPass.cpp
-            ${clspv_SOURCE_DIR}/lib/SimplifyPointerBitcastPass.cpp
-            ${clspv_SOURCE_DIR}/lib/SpecConstant.cpp
-            ${clspv_SOURCE_DIR}/lib/SpecializeImageTypes.cpp
-            ${clspv_SOURCE_DIR}/lib/SplatArgPass.cpp
-            ${clspv_SOURCE_DIR}/lib/SplatSelectCondition.cpp
-            ${clspv_SOURCE_DIR}/lib/StripFreezePass.cpp
-            ${clspv_SOURCE_DIR}/lib/Types.cpp
-            ${clspv_SOURCE_DIR}/lib/UBOTypeTransformPass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoBoolPass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoByvalPass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoGetElementPtrConstantExprPass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoInstCombinePass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoSRetPass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoTranslateSamplerFoldPass.cpp
-            ${clspv_SOURCE_DIR}/lib/UndoTruncateToOddIntegerPass.cpp
-            ${clspv_SOURCE_DIR}/lib/ZeroInitializeAllocasPass.cpp
-    )
-
-    foreach (SOURCE
-            "${clspv_SOURCE_DIR}/lib/UndoInstCombinePass.cpp"
-            "${clspv_SOURCE_DIR}/lib/SPIRVProducerPass.cpp")
-        message(STATUS "Patching ${SOURCE}")
-
-        file(READ "${SOURCE}" FILE_CONTENTS)
-        string(REPLACE "PoisonMaskElem" "UndefMaskElem" FILE_CONTENTS "${FILE_CONTENTS}")
-        file(WRITE "${SOURCE}" "${FILE_CONTENTS}")
-    endforeach ()
-endif ()
 
 
 set(COMPILE_OPTIONS
@@ -471,7 +373,7 @@ file(GLOB_RECURSE POLYREGION_FORMAT_SOURCES
         "${CMAKE_SOURCE_DIR}/*.h"
         "${CMAKE_SOURCE_DIR}/*.hpp")
 list(FILTER POLYREGION_FORMAT_SOURCES EXCLUDE REGEX
-        "/(_deps|llvm-[^/]+|vcpkg_installed|cmake-build-[^/]+|CMakeFiles)/|/polyinvoke/thirdparty/|/clspv_include/|/(debian-sysroot-image-creator|sysroot-[^/]+)/")
+        "/(_deps|llvm-[^/]+|vcpkg_installed|cmake-build-[^/]+|CMakeFiles)/|/polyinvoke/thirdparty/|/(debian-sysroot-image-creator|sysroot-[^/]+)/")
 
 # Prefer the bundled LLVM dist's clang-format so output is reproducible across hosts.
 file(GLOB POLYREGION_LLVM_DIST_BIN "${CMAKE_SOURCE_DIR}/llvm-*-dist/bin")

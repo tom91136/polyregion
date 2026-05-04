@@ -60,9 +60,9 @@ struct Options {
         auto archAndFeatures = rawArchAndFeaturesList ^ split('@');
         if (archAndFeatures.size() != 2)
           errors.emplace_back("Missing or invalid placement of arch and feature separator '@' in " + rawArchAndFeaturesList);
-        if (auto t = polyregion::compiletime::parseTarget(archAndFeatures[0]); t) {
+        if (auto s = polyregion::compiletime::TargetSpec::findByName(archAndFeatures[0]); s) {
           for (auto &feature : archAndFeatures[1] ^ split(','))
-            opts.targets.emplace_back(*t, feature);
+            opts.targets.emplace_back(s->codegen, feature);
         } else errors.emplace_back("Unknown arch " + archAndFeatures[0]);
       }
       opts.targets = opts.targets ^ distinct();
@@ -112,9 +112,11 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   file.write(reinterpret_cast<const char *>(data.data()), data.size());
   file.flush();
 
-  std::vector<llvm::StringRef> args{//
-                                    "",         "--polyc",         inputPath.str(), "--out", outputPath.str(),
-                                    "--target", to_string(target), "--arch",        arch};
+  const auto canonical = polyregion::compiletime::TargetSpec::findByCodegen(target);
+  if (!canonical) return std::string("Unknown codegen target ordinal: ") + std::to_string(static_cast<int>(target));
+  std::vector<llvm::StringRef> args{
+      //
+      "", "--polyc", inputPath.str(), "--out", outputPath.str(), "--target", std::string_view(canonical->canonical), "--arch", arch};
 
   if (opts.verbose) {
     (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();

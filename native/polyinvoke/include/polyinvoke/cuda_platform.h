@@ -16,7 +16,6 @@ public:
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT PlatformKind kind() override;
-  POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
@@ -35,6 +34,7 @@ public:
   explicit CudaDevice(int ordinal);
   POLYREGION_EXPORT int64_t id() override;
   POLYREGION_EXPORT std::string name() override;
+  POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;

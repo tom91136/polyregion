@@ -1,5 +1,8 @@
 
 if (UNIX)
+    # flang-rt's CMakeLists calls enable_language(Fortran), so a Fortran compiler must be on
+    # PATH at LLVM-runtimes-configure time. Linux runners get gfortran via apt, macOS via brew
+    # (gcc formula). Windows MSVC has no native gfortran path, so flang-rt is omitted there.
     list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind openmp)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
@@ -27,6 +30,7 @@ set(LLVM_TARGETS_TO_BUILD
         X86
         NVPTX
         AMDGPU
+        SPIRV
         CACHE STRING "")
 
 set(LLVM_ENABLE_PROJECTS

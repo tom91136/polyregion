@@ -14,9 +14,20 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   fn.addFnAttr(llvm::Attribute::Convergent);
   fn.addFnAttr(llvm::Attribute::NoRecurse);
   fn.addFnAttr(llvm::Attribute::NoUnwind);
+  // Block FunctionAttrs from inferring memory(none); SPIRV would emit FunctionControl::Pure and
+  // the optimizer folds Pure bodies to OpUnreachable. optnone+noinline keep this stable; the
+  // driver / SPIRV-Tools do their own opts.
+  fn.setMemoryEffects(llvm::MemoryEffects::unknown());
+  fn.addFnAttr(llvm::Attribute::OptimizeNone);
+  fn.addFnAttr(llvm::Attribute::NoInline);
 
-  // See logic defined in clang/lib/CodeGen/CodeGenModule.cpp @ CodeGenModule::GenKernelArgMetadata
-  // We need to insert OpenCL metadata for clspv to pick up and identify the arg types
+  // SPIR_KERNEL requires void return, so internal helpers (lambdas etc.) get SPIR_FUNC instead.
+  if (!source.attrs.contains(polyast::FunctionAttr::Entry())) {
+    fn.setCallingConv(llvm::CallingConv::SPIR_FUNC);
+    return;
+  }
+
+  // See clang/lib/CodeGen/CodeGenModule.cpp @ CodeGenModule::GenKernelArgMetadata.
   llvm::SmallVector<llvm::Metadata *, 8> addressQuals;     // MDNode for the kernel argument address space qualifiers.
   llvm::SmallVector<llvm::Metadata *, 8> accessQuals;      // MDNode for the kernel argument access qualifiers (images only).
   llvm::SmallVector<llvm::Metadata *, 8> argTypeNames;     // MDNode for the kernel argument type names.
@@ -72,54 +83,111 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   fn.setCallingConv(llvm::CallingConv::SPIR_KERNEL);
 }
 
+// OpenCL builtin signatures (OpenCL C 1.2/2.0). Itanium mangling encodes the concrete arg
+// types (j=uint, m=ulong, ...); the SPIRV backend asserts the call matches the declaration,
+// so we resolve the canonical signature and cast at the call site.
+namespace {
+struct OclBuiltin {
+  const char *mangled;
+  llvm::Type *(*ret)(llvm::LLVMContext &); // size_t = i64 on 64-bit SPIRV
+  std::vector<llvm::Type *(*)(llvm::LLVMContext &)> args;
+};
+inline llvm::Type *i32(llvm::LLVMContext &c) { return llvm::Type::getInt32Ty(c); }
+inline llvm::Type *i64(llvm::LLVMContext &c) { return llvm::Type::getInt64Ty(c); }
+inline llvm::Type *vd(llvm::LLVMContext &c) { return llvm::Type::getVoidTy(c); }
+
+const OclBuiltin GET_GLOBAL_ID{"_Z13get_global_idj", i64, {i32}};
+const OclBuiltin GET_GLOBAL_SIZE{"_Z15get_global_sizej", i64, {i32}};
+const OclBuiltin GET_GROUP_ID{"_Z12get_group_idj", i64, {i32}};
+const OclBuiltin GET_NUM_GROUPS{"_Z14get_num_groupsj", i64, {i32}};
+const OclBuiltin GET_LOCAL_ID{"_Z12get_local_idj", i64, {i32}};
+const OclBuiltin GET_LOCAL_SIZE{"_Z14get_local_sizej", i64, {i32}};
+const OclBuiltin BARRIER{"_Z7barrierj", vd, {i32}};
+const OclBuiltin MEM_FENCE{"_Z9mem_fencej", vd, {i32}};
+} // namespace
+
+static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requestedRtn, llvm::ArrayRef<ValPtr> args) {
+  auto &ctx = cg.C.actual;
+  std::vector<llvm::Type *> paramTys;
+  paramTys.reserve(b.args.size());
+  for (auto &mk : b.args)
+    paramTys.push_back(mk(ctx));
+  auto *fnTy = llvm::FunctionType::get(b.ret(ctx), paramTys, /*isVarArg*/ false);
+  auto fnCallee = cg.M.getOrInsertFunction(b.mangled, fnTy);
+  auto *fn = llvm::cast<llvm::Function>(fnCallee.getCallee());
+  fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+  fn->addFnAttr(llvm::Attribute::Convergent);
+  fn->addFnAttr(llvm::Attribute::NoUnwind);
+
+  std::vector<llvm::Value *> coerced;
+  coerced.reserve(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    auto *src = args[i];
+    auto *dst = paramTys[i];
+    if (src->getType() == dst) coerced.push_back(src);
+    else if (src->getType()->isIntegerTy() && dst->isIntegerTy()) coerced.push_back(cg.B.CreateIntCast(src, dst, /*isSigned*/ false));
+    else throw polyregion::backend::BackendException(std::string("cannot coerce arg to OCL builtin ") + b.mangled);
+  }
+  auto *call = cg.B.CreateCall(fn, coerced);
+  call->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+
+  if (b.ret(ctx)->isVoidTy()) return call;
+  auto *want = cg.resolveType(requestedRtn, true);
+  if (call->getType() == want) return call;
+  if (call->getType()->isIntegerTy() && want->isIntegerTy()) return cg.B.CreateIntCast(call, want, /*isSigned*/ false);
+  throw polyregion::backend::BackendException(std::string("cannot coerce OCL builtin ") + b.mangled + " result to requested type");
+}
+
 // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
+  auto &ctx = cg.C.actual;
+  auto u32 = [&](uint32_t k) { return llvm::ConstantInt::get(i32(ctx), k); };
 
   return expr.op.match_total( //
-      [&](const Spec::Assert &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return cg.extFn1("_Z13get_global_idj", v.tpe, v.dim); },
-      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return cg.extFn1("_Z15get_global_sizej", v.tpe, v.dim); },
-      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return cg.extFn1("_Z12get_group_idj", v.tpe, v.dim); },
-      [&](const Spec::GpuGroupSize &v) -> ValPtr { return cg.extFn1("_Z14get_num_groupsj", v.tpe, v.dim); },
-      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return cg.extFn1("_Z12get_local_idj", v.tpe, v.dim); },
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return cg.extFn1("_Z14get_local_sizej", v.tpe, v.dim); },
-      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return cg.extFn1("_Z7barrierj", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE)); },
-      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return cg.extFn1("_Z7barrierj", v.tpe, Expr::IntS32Const(CLK_LOCAL_MEM_FENCE)); },
+      [&](const Spec::Assert &) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },
+      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return callOcl(cg, GET_GLOBAL_ID, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return callOcl(cg, GET_GLOBAL_SIZE, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return callOcl(cg, GET_GROUP_ID, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { return callOcl(cg, GET_NUM_GROUPS, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return callOcl(cg, GET_LOCAL_ID, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return callOcl(cg, GET_LOCAL_SIZE, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return callOcl(cg, BARRIER, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE)}); },
+      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return callOcl(cg, BARRIER, v.tpe, {u32(CLK_LOCAL_MEM_FENCE)}); },
       [&](const Spec::GpuBarrierAll &v) -> ValPtr {
-        return cg.extFn1("_Z7barrierj", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
+        return callOcl(cg, BARRIER, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE)});
       },
-      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE)); },
-      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_LOCAL_MEM_FENCE)); },
+      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return callOcl(cg, MEM_FENCE, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE)}); },
+      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return callOcl(cg, MEM_FENCE, v.tpe, {u32(CLK_LOCAL_MEM_FENCE)}); },
       [&](const Spec::GpuFenceAll &v) -> ValPtr {
-        return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
+        return callOcl(cg, MEM_FENCE, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE)});
       });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   return expr.op.match_total( //                                                       //
-      [&](const Math::Abs &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Sin &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Cos &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Tan &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Asin &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Acos &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Atan &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Sinh &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Cosh &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Tanh &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Signum &v) -> ValPtr { throw BackendException("unimplemented"); }, //
-      [&](const Math::Round &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Ceil &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Floor &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Rint &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Sqrt &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Cbrt &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Exp &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Expm1 &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Log &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Log1p &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Log10 &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Pow &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Atan2 &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Hypot &v) -> ValPtr { throw BackendException("unimplemented"); }   //
+      [&](const Math::Abs &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Sin &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Cos &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Tan &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Asin &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Acos &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Atan &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Sinh &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Cosh &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Tanh &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Signum &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); }, //
+      [&](const Math::Round &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
+      [&](const Math::Ceil &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Floor &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
+      [&](const Math::Rint &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Sqrt &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Cbrt &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
+      [&](const Math::Exp &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Expm1 &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
+      [&](const Math::Log &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Log1p &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
+      [&](const Math::Log10 &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
+      [&](const Math::Pow &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
+      [&](const Math::Atan2 &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
+      [&](const Math::Hypot &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); }   //
   );
 }

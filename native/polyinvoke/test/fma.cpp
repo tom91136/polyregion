@@ -1,6 +1,7 @@
 #include "catch2/catch_test_macros.hpp"
 #include "catch2/generators/catch_generators_range.hpp"
 #include "catch2/matchers/catch_matchers_floating_point.hpp"
+#include "magic_enum/magic_enum.hpp"
 
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
@@ -29,14 +30,14 @@ const static std::vector xs{0.f,
 template <typename I> void testFma(I images, std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
   auto platform = polyregion::test_utils::makePlatform(backend);
-  DYNAMIC_SECTION("backend=" << to_string(backend)) {
+  DYNAMIC_SECTION("backend=" << magic_enum::enum_name(backend)) {
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
 
           if (imageGroups.size() != 1) {
-            FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
-                                         << "`(backend=" << to_string(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
+            FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend="
+                                         << magic_enum::enum_name(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
           }
 
           std::string module_;
@@ -84,7 +85,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
             d->freeDevice(out_d);
           }
         } else {
-          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << to_string(backend)
+          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << magic_enum::enum_name(backend)
                                                          << ", features=" << (d->features() | mk_string(",")) << ")");
         }
       }

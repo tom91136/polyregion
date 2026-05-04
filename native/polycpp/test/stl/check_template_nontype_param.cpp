@@ -13,7 +13,8 @@ template <size_t N> int triangleSum() {
   std::array<int, 1> idx{0};
   std::for_each(std::execution::par_unseq, idx.begin(), idx.end(), [d = outArr.data()](int) {
     int sum = 0;
-    for (size_t l = 0; l < N; l++) sum += static_cast<int>(l) + 1;
+    for (size_t l = 0; l < N; l++)
+      sum += static_cast<int>(l) + 1;
     d[0] = sum;
   });
   return outArr[0];

@@ -1,4 +1,5 @@
 #include "polyinvoke/hip_platform.h"
+#include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hip;
@@ -43,7 +44,7 @@ PlatformKind HipPlatform::kind() {
   POLYINVOKE_TRACE();
   return PlatformKind::Managed;
 }
-ModuleFormat HipPlatform::moduleFormat() {
+ModuleFormat HipDevice::moduleFormat() {
   POLYINVOKE_TRACE();
   return ModuleFormat::HSACO;
 }
@@ -127,7 +128,7 @@ std::vector<std::string> HipDevice::features() {
   // See https://docs.amd.com/bundle/ROCm_Release_Notes_v5.0/page/Breaking_Changes.html
   hipDeviceProp_t prop;
   CHECKED(hipGetDeviceProperties(&prop, device));
-  return {"gfx" + std::to_string(prop.gcnArch)};
+  return {"hip", "amd", "gfx" + std::to_string(prop.gcnArch)};
 }
 void HipDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
@@ -216,7 +217,8 @@ void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, v
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                         std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  if (types.back() != Type::Void) POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
+  if (types.back() != Type::Void)
+    POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
   auto fn = store.resolveFunction(moduleName, symbol, types);
   auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});

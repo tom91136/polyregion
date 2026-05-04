@@ -37,8 +37,9 @@ void testAll(bool passthrough) {
         | to_vector();
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
-    const auto output = fmt::format(
-        "{:x}", std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) { return fmt::vformat(x.command, unevaluatedStore); })));
+    const auto output = fmt::format("polyfc_test_{:x}", std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) {
+                                                                                   return fmt::vformat(x.command, unevaluatedStore);
+                                                                                 })));
     const auto evaluatedStore = augmentedArgs ^ append(std::pair{"output", output}) ^ and_then(mkArgStore);
 
     for (size_t i = 0; i < case_.runs.size(); ++i) {
@@ -54,7 +55,7 @@ void testAll(bool passthrough) {
         }
 
         envs.emplace_back(fmt::format("POLYFC_DRIVER={}", FlangDriver));
-        envs.emplace_back(fmt::vformat("POLYRT_PLATFORM={polyfc_arch}", evaluatedStore));
+        envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", fmt::vformat("{polyfc_arch}", evaluatedStore)));
         envs.emplace_back("POLYRT_HOST_FALLBACK=0");
 
         // if host, + -fsanitize=address,undefined
@@ -100,9 +101,10 @@ void testAll(bool passthrough) {
             }
           }
         }
+        // Drop the compiled binary so the cwd stays clean across a sweep. Only reached when
+        // every REQUIRE in this section passed; failed runs leave the binary for triage.
         if (i == case_.runs.size() - 1) {
-          // if (llvm::sys::fs::remove(binaryName)) INFO("Removed binary: " << binaryName);
-          // else WARN("Cannot remove binary: " << binaryName);
+          if (auto ec = llvm::sys::fs::remove(output)) WARN("Cannot remove binary " << output << ": " << ec.message());
         }
       }
     }
@@ -113,21 +115,7 @@ void testAll(bool passthrough) {
       std::ifstream source(test, std::ios::in | std::ios::binary);
 
       auto cases = polyregion::polyfront::TestCase::parseTestCase(
-          source, "!CHECK",
-          {
-#if defined(__linux__)
-              // {"polyfc_arch", {  "cuda@sm_89"}} //
-              {"polyfc_arch", {"cuda@sm_89", /*"hip@gfx1036", */ "hsa@gfx1036", "host@native"}} //
-      //              {"polyfc_arch", {"opencl@host" }} //
-
-#elif defined(__APPLE__)
-              {"polyfc_arch", {"host@apple-m2"}} //
-#elif defined(_WIN32)
-              {"polyfc_arch", {}} //
-#else
-  #error "Unsupported platform"
-#endif
-          });
+          source, "!CHECK", {{"polyfc_arch", polyregion::polyfront::loadTestTargets(POLYREGION_TEST_PROFILE_DIR)}});
 
       if (cases.empty()) FAIL("No test cases found");
 
