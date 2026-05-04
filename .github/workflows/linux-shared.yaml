@@ -21,9 +21,9 @@ jobs:
   build:
     runs-on: ${{ inputs.build_arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     env:
-      # Thin LTO link jobs each peak ~3-4 GB; serialise to avoid the runner being killed for
-      # exceeding memory.
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "1"
+      # Flang TUs eat ~5-6 GB each, so unconstrained ninja parallelism on a 16 GB runner OOMs
+      # and thrashes. ubuntu-24.04 / ubuntu-24.04-arm both have ~16 GB → 16 / 5 ≈ 3 concurrent.
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "3"
     steps:
       - uses: actions/checkout@v5
 

@@ -20,6 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install LLVM
+        # Without clang-cl the LLVM runtimes sub-build (compiler-rt builtins) fails because
+        # cl.exe cannot parse GCC __attribute__ syntax used in e.g. aarch64/fp_mode.c.
+        # The github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
+        # windows-11-arm runner may not, so install explicitly.
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+            choco install llvm -y --no-progress
+          }
+          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
+
       - name: Setup JDK (${{ inputs.build_arch }})
         shell: pwsh
         working-directory: ./native

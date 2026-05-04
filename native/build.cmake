@@ -157,8 +157,13 @@ if (ACTION STREQUAL "LLVM")
     if (LLVM_NATIVE_BUILD)
         # Without the toolchain file CMake autodetects the host compiler. On Linux that is
         # usually gcc; pin clang so the LLVM build matches what the toolchain would have set.
+        # On Windows MSVC defaults pick cl.exe, but compiler-rt builtins use GCC-style
+        # __attribute__ syntax cl.exe cannot parse, so pin clang-cl which understands both
+        # MSVC CLI and GCC attributes. Workflow installs LLVM and exposes clang-cl on PATH.
         if (UNIX AND NOT APPLE)
             list(APPEND BUILD_OPTIONS -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_ASM_COMPILER=clang)
+        elseif (WIN32)
+            list(APPEND BUILD_OPTIONS -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_ASM_COMPILER=clang-cl)
         endif ()
         find_program(POLYREGION_CCACHE_PROGRAM ccache)
         if (POLYREGION_CCACHE_PROGRAM)

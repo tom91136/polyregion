@@ -3,9 +3,11 @@ if (UNIX)
     list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind openmp)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
-    # needs a bootstrapping build for libcxx because cl.exe isn't support
-    # see https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows
-    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt openmp)
+    # libcxx/libcxxabi/libunwind need a bootstrapping build because cl.exe is unsupported
+    # (https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows). flang-rt is omitted
+    # because Windows MSVC has no native Fortran path. compiler-rt is built using the
+    # workflow-installed clang-cl (see windows-shared.yaml + build.cmake LLVM_NATIVE_BUILD).
+    list(APPEND RUNTIME_COMPONENTS compiler-rt openmp)
     # nothing for RUNTIME_TARGETS
 else ()
     message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
@@ -52,6 +54,11 @@ if (DEFINED ENV{POLYREGION_LLVM_PARALLEL_COMPILE_JOBS})
 endif ()
 if (DEFINED ENV{POLYREGION_LLVM_PARALLEL_TABLEGEN_JOBS})
     set(LLVM_PARALLEL_TABLEGEN_JOBS "$ENV{POLYREGION_LLVM_PARALLEL_TABLEGEN_JOBS}" CACHE STRING "")
+endif ()
+# Flang TUs eat ~5-6GB each, so on memory-tight runners ninja's default $(nproc) parallelism
+# OOMs and thrashes. Cap flang separately so the rest of LLVM still compiles at full width.
+if (DEFINED ENV{POLYREGION_FLANG_PARALLEL_COMPILE_JOBS})
+    set(FLANG_PARALLEL_COMPILE_JOBS "$ENV{POLYREGION_FLANG_PARALLEL_COMPILE_JOBS}" CACHE STRING "")
 endif ()
 
 set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")

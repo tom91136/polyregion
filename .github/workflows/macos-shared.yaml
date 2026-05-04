@@ -21,7 +21,6 @@ jobs:
       # macos-26 (Apple Silicon) gives ~7 GB / 3 cores; clang+flang+MLIR parallel compilation
       # peaks past that and the runner is silently killed mid-build. Cap concurrency to fit.
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "2"
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "1"
     steps:
       - uses: actions/checkout@v5
 
