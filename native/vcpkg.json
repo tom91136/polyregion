@@ -29,6 +29,10 @@
     },
     {
       "name": "vulkan-memory-allocator"
+    },
+    {
+      "name": "zlib",
+      "platform": "windows"
     }
   ],
   "overrides": [

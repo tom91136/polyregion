@@ -1,0 +1,28 @@
+name: Setup JDK
+description: Download and extract a Temurin JDK for the given architecture, exporting JAVA_HOME.
+inputs:
+  build_arch:
+    description: Build architecture (amd64 or arm64)
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      working-directory: ./native
+      run: |
+        # Temurin 8 has no Windows aarch64 build; use Temurin 21 for arm64.
+        switch ("${{ inputs.build_arch }}".ToLower()) {
+          "amd64" { $jdk_arch = "x64";    $repo = "temurin8-binaries";  $version = "jdk8u352-b08";   $jdk_major = "8" }
+          "arm64" { $jdk_arch = "aarch64"; $repo = "temurin21-binaries"; $version = "jdk-21.0.5+11"; $jdk_major = "21" }
+          default {
+            Write-Error "Invalid architecture for JDK: ${{ inputs.build_arch }}"
+            break
+          }
+        }
+        $version_short = $version.replace("-", "").replace("jdk", "").replace("+", "_")
+        $url = "https://github.com/adoptium/${repo}/releases/download/${version}/OpenJDK${jdk_major}U-jdk_${jdk_arch}_windows_hotspot_${version_short}.zip"
+        Write-Output "Downloading JDK from $url"
+        Invoke-WebRequest -Uri $url -OutFile jdk_${jdk_arch}.zip
+        Expand-Archive -Path .\jdk_${jdk_arch}.zip -DestinationPath .\jdk_${jdk_arch}
+        $extracted_dir = (Get-ChildItem -Directory .\jdk_${jdk_arch}).Name
+        echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}\$extracted_dir" >> $env:GITHUB_ENV

@@ -184,6 +184,13 @@ if (ACTION STREQUAL "LLVM")
     check_process_return(${SUCCESS} "LLVM build")
 elseif (ACTION STREQUAL "CONFIGURE")
     setup_vcpkg()
+    if (APPLE)
+        execute_process(
+                COMMAND brew --prefix zlib
+                OUTPUT_VARIABLE BREW_ZLIB_PREFIX
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+        list(APPEND BUILD_OPTIONS -DZLIB_ROOT=${BREW_ZLIB_PREFIX})
+    endif ()
     message(STATUS "Starting configuration...")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
@@ -193,6 +200,7 @@ elseif (ACTION STREQUAL "CONFIGURE")
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_INSTALL_PREFIX=${LLVM_DIST_DIR}
             -DPOLYREGION_LLVM_DYLIB=${POLYREGION_LLVM_DYLIB}
+            -DZLIB_USE_STATIC_LIBS=ON
             -GNinja
 
             COMMAND_ECHO STDERR

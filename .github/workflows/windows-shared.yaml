@@ -21,37 +21,23 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install LLVM
-        # Without clang-cl the LLVM runtimes sub-build (compiler-rt builtins) fails because
-        # cl.exe cannot parse GCC __attribute__ syntax used in e.g. aarch64/fp_mode.c.
-        # The github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
-        # windows-11-arm runner may not, so install explicitly.
+        # Without clang-cl the LLVM runtimes (compiler-rt builtins) fails because
+        # cl.exe cannot parse GCC __attribute__ syntax used in e.g. aarch64/fp_mode.c. The
+        # github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
+        # windows-11-arm runner may not, so install explicitly via winget.
         shell: pwsh
+        env:
+          LLVM_HOST_VERSION: "21.1.6"
         run: |
           if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
-            choco install llvm -y --no-progress
+            winget install --id LLVM.LLVM --version $env:LLVM_HOST_VERSION --silent --disable-interactivity --accept-source-agreements --accept-package-agreements
           }
           echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
 
       - name: Setup JDK (${{ inputs.build_arch }})
-        shell: pwsh
-        working-directory: ./native
-        run: |
-          # Temurin 8 has no Windows aarch64 build; use Temurin 21 for arm64.
-          switch ("${{ inputs.build_arch }}".ToLower()) {
-            "amd64" { $jdk_arch = "x64";    $repo = "temurin8-binaries";  $version = "jdk8u352-b08";   $jdk_major = "8" }
-            "arm64" { $jdk_arch = "aarch64"; $repo = "temurin21-binaries"; $version = "jdk-21.0.5+11"; $jdk_major = "21" }
-            default {
-              Write-Error "Invalid architecture for JDK: ${{ inputs.build_arch }}"
-              break
-            }
-          }
-          $version_short = $version.replace("-", "").replace("jdk", "").replace("+", "_")
-          $url = "https://github.com/adoptium/${repo}/releases/download/${version}/OpenJDK${jdk_major}U-jdk_${jdk_arch}_windows_hotspot_${version_short}.zip"
-          Write-Output "Downloading JDK from $url"
-          Invoke-WebRequest -Uri $url -OutFile jdk_${jdk_arch}.zip
-          Expand-Archive -Path .\jdk_${jdk_arch}.zip -DestinationPath .\jdk_${jdk_arch}
-          $extracted_dir = (Get-ChildItem -Directory .\jdk_${jdk_arch}).Name
-          echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}\$extracted_dir" >> $env:GITHUB_ENV
+        uses: ./.github/actions/setup-jdk
+        with:
+          build_arch: ${{ inputs.build_arch }}
 
       - name: Dotenv
         id: dotenv
@@ -99,60 +85,8 @@ jobs:
       - name: Configure release build
         working-directory: ./native
         run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
+          call setup_msvc_env.bat ${{ inputs.build_arch }}
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
-
-      - name: Release build polycpp
-        working-directory: ./native
-        if: always()
-        run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polycpp -P build.cmake
-
-      - name: Release build polyrt-exec
-        working-directory: ./native
-        if: always()
-        run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-exec -P build.cmake
-
-      - name: Release build polyc-bin
-        working-directory: ./native
-        if: always()
-        run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-bin -P build.cmake
-
-      - name: Release build shim
-        working-directory: ./native
-        if: always()
-        run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNIshim -P build.cmake
-
-      - name: Release build runtime
-        working-directory: ./native
-        if: always()
-        run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-JNI -P build.cmake
-
-      - name: Release build compiler
-        working-directory: ./native
-        if: always()
-        run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNI -P build.cmake
-
-      - name: Check artefact
-        if: always()
-        shell: pwsh
-        working-directory: ./native
-        run: |
-          ls .\build-windows-${{ inputs.build_arch }}\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\polyc         | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\polycpp       | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\polyrt        | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
 
       - name: Build dist
         working-directory: ./native
@@ -165,6 +99,24 @@ jobs:
         working-directory: ./native
         run: Compress-Archive -Path .\polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist\* -DestinationPath polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}.zip
 
+      - name: Check artefact
+        if: always()
+        working-directory: ./native
+        # XXX dumpbin needs an MSVC env to find link.exe
+        run: |
+          call setup_msvc_env.bat ${{ inputs.build_arch }}
+          set "DIST=polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist"
+          dir "%DIST%\bin"
+          dir "%DIST%\lib"
+          for %%B in (polyc.exe polycpp.exe polyfc.exe clang++.exe flang-new.exe) do (
+            echo ---- %%B ----
+            if exist "%DIST%\bin\%%B" (dumpbin /dependents "%DIST%\bin\%%B") else echo MISSING: %DIST%\bin\%%B
+          )
+          for %%L in (polyc-JNI.dll polyc-JNIshim.dll polyinvoke-JNI.dll) do (
+            echo ---- %%L ----
+            if exist "%DIST%\lib\%%L" (dumpbin /dependents "%DIST%\lib\%%L") else echo MISSING: %DIST%\lib\%%L
+          )
+
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
@@ -172,7 +124,32 @@ jobs:
           path: ./native/polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}.zip
           if-no-files-found: error
 
-      - name: Check dist
+  dist-check:
+    needs: build
+    runs-on: ${{ inputs.build_arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup JDK (${{ inputs.build_arch }})
+        uses: ./.github/actions/setup-jdk
+        with:
+          build_arch: ${{ inputs.build_arch }}
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
+          path: ./native
+
+      - name: Extract dist
+        shell: pwsh
+        working-directory: ./native
+        run: |
+          $dest = "polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Expand-Archive -Path "polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}.zip" -DestinationPath $dest
+
+      - name: Run dist-check
         working-directory: ./native
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }}

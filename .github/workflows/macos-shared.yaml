@@ -18,8 +18,7 @@ jobs:
   build:
     runs-on: ${{ inputs.build_arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env:
-      # macos-26 (Apple Silicon) gives ~7 GB / 3 cores; clang+flang+MLIR parallel compilation
-      # peaks past that and the runner is silently killed mid-build. Cap concurrency to fit.
+      # Flang TUs need ~5-6 GB each
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "2"
     steps:
       - uses: actions/checkout@v5
@@ -74,56 +73,6 @@ jobs:
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
 
-      - name: Release build polycpp
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polycpp -P build.cmake
-
-      - name: Release build polyrt-exec
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-exec -P build.cmake
-
-      - name: Release build polyc-bin
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-bin -P build.cmake
-
-      - name: Release build shim
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNIshim -P build.cmake
-
-      - name: Release build runtime
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-JNI -P build.cmake
-
-      - name: Release build compiler
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNI -P build.cmake
-
-      - name: Check artefact
-        if: always()
-        working-directory: ./native
-        run: |
-          ls -lah build-darwin-${{ inputs.build_arch }}/bindings/jvm
-          ls -lah build-darwin-${{ inputs.build_arch }}/polyc/
-          ls -lah build-darwin-${{ inputs.build_arch }}/polycpp/
-          ls -lah build-darwin-${{ inputs.build_arch }}/polyrt/
-          show_libs () {
-             for arg in $@; do
-               file "$1"
-               otool -L "$1"
-               echo "======"
-             done
-          }
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/polyc/polyc
-          show_libs build-darwin-${{ inputs.build_arch }}/polycpp/polycpp
-          show_libs build-darwin-${{ inputs.build_arch }}/polyrt/polyrt-exec
-
       - name: Build dist
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=DIST -P build.cmake
@@ -132,6 +81,26 @@ jobs:
         working-directory: ./native
         run: tar -cJf polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}.tar.xz -C polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist .
 
+      - name: Check artefact
+        working-directory: ./native
+        if: always()
+        run: |
+          DIST=polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          ls -lah "$DIST/bin" "$DIST/lib"
+          inspect () {
+            local f="$1"
+            if [[ ! -f "$f" ]]; then echo "MISSING: $f"; return; fi
+            file "$f"
+            otool -L "$f"
+            echo "----"
+          }
+          for b in polyc polycpp polyfc clang++ flang-new; do
+            inspect "$DIST/bin/$b"
+          done
+          for l in "$DIST"/lib/libpolyc-JNI.dylib "$DIST"/lib/libpolyc-JNIshim.dylib "$DIST"/lib/libpolyinvoke-JNI.dylib; do
+            inspect "$l"
+          done
+
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
@@ -139,6 +108,28 @@ jobs:
           path: ./native/polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}.tar.xz
           if-no-files-found: error
 
-      - name: Check dist
+  dist-check:
+    needs: build
+    runs-on: ${{ inputs.build_arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        # XXX tbb is needed for the polycpp-offload dist-check
+        run: brew install cmake tbb
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
+          path: ./native
+
+      - name: Extract dist
+        working-directory: ./native
+        run: |
+          mkdir -p polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          tar -xJf polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}.tar.xz -C polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+
+      - name: Run dist-check
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CHECK -P build.cmake
