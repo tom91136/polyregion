@@ -8,11 +8,13 @@
 #include "backend/c_source.h"
 #include "backend/llvm.h"
 #include "backend/llvmc.h"
+#include "qjs_runner.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
+#include "polyregion/io.hpp"
 #include "polyregion/llvm_utils.hpp"
 
 using namespace polyregion;
@@ -120,6 +122,29 @@ static void sortEvents(polyast::CompileResult &c) {
   c.events = c.events ^ sort_by([](auto &x) { return x.epochMillis; });
 }
 
+static polypass::JsPassRunner &sharedJsRunner() {
+  static polypass::JsPassRunner runner;
+  static std::once_flag loaded;
+  std::call_once(loaded, [] {
+    const auto path = polypass::JsPassRunner::findBundle();
+    if (path.empty()) throw std::logic_error("polyc: polypass.js not found (set $POLYPASS_JS or install the dist)");
+    if (auto err = runner.loadModule(read_string(path), path); !err.empty())
+      throw std::logic_error("polyc: failed to load polypass.js: " + err);
+  });
+  return runner;
+}
+
+static polyast::Program runJsPass(const polyast::Program &p, std::string_view passName) {
+  auto bytes = nlohmann::json::to_msgpack(polyast::hashed_to_json(polyast::program_to_json(p)));
+  std::vector<uint8_t> in(bytes.begin(), bytes.end());
+  std::string err;
+  auto out = sharedJsRunner().runPass(passName, in, err);
+  // auto out = in;
+  if (!err.empty()) throw std::logic_error(fmt::format("polypass {}: {}", passName, err));
+  const auto outJson = polyast::hashed_from_json(nlohmann::json::from_msgpack(out.data(), out.data() + out.size()));
+  return polyast::program_from_json(outJson);
+}
+
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
   initialise();
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
@@ -144,7 +169,16 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
     }
   };
 
-  polyast::CompileResult c = mkBackend()->compileProgram(program, opt);
+  std::vector<polyast::CompileEvent> preEvents;
+  auto effective = program;
+  {
+    const auto t0 = nowMono();
+    effective = runJsPass(effective, "DeadStructElimination");
+    preEvents.emplace_back(nowMs(), elapsedNs(t0), "polypass_DeadStructElimination", "");
+  }
+
+  polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
+  c.events ^= concat_inplace(preEvents);
   sortEvents(c);
   return c;
 }

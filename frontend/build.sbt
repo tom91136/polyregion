@@ -1,9 +1,15 @@
 // import org.typelevel.scalacoptions.ScalacOptions
 
+import org.scalajs.linker.interface.{ESVersion, ModuleKind => SJSModuleKind, OutputPatterns}
+
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
 lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
+
+lazy val passBundleDest   = settingKey[File]("Destination of the JS pass bundle in the native tree.")
+lazy val exportPassBundle = taskKey[File]("Build pass.js (fullLinkJS) and copy it into the native tree.")
+lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)generate native C++/JNI sources.")
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
@@ -73,25 +79,66 @@ lazy val `runtime-scala` = project
   )
   .dependsOn(`binding-jvm`, compiler % Compile)
 
-lazy val ast = project
+lazy val ast = crossProject(JVMPlatform, JSPlatform)
+  .in(file("ast"))
   .settings(
     commonSettings,
-    name                := "ast",
-    assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
+    name := "ast",
     scalacOptions ++=
-      Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
-        Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
-    ,
-    Compile / mainClass := Some("polyregion.ast.CodeGen"),
+      Seq("-Yretain-trees") ++
+        Seq("-Xmax-inlines", "80"),
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.15.10",
-      "com.lihaoyi"   %% "fansi"      % "0.5.0",
-      "com.lihaoyi"   %% "upickle"    % "4.0.2",
-      "com.lihaoyi"   %% "pprint"     % "0.9.0",
-      "org.typelevel" %% "cats-core"  % catsVersion
+      "com.lihaoyi"   %%% "upickle"   % "4.0.2",
+      "org.typelevel" %%% "cats-core" % catsVersion
     )
   )
-  .dependsOn(`binding-jvm`)
+
+lazy val codegen = project
+  .in(file("codegen"))
+  .settings(
+    commonSettings,
+    name                := "codegen",
+    assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
+    scalacOptions ++=
+      Seq("-Yretain-trees") ++
+        Seq("-Xmax-inlines", "80"),
+    Compile / mainClass := Some("polyregion.ast.CodeGen"),
+    libraryDependencies ++= Seq(
+      "com.lihaoyi" %% "pprint" % "0.9.0"
+    ),
+    genCodegen := (Compile / runMain).toTask(" polyregion.ast.CodeGen").value
+  )
+  .dependsOn(ast.jvm, `binding-jvm`)
+
+lazy val pass = crossProject(JVMPlatform, JSPlatform)
+  .in(file("pass"))
+  .settings(
+    commonSettings,
+    name := "pass",
+    scalacOptions ++=
+      Seq("-Yretain-trees") ++
+        Seq("-Xmax-inlines", "80"),
+    libraryDependencies ++= Seq(
+      "org.scalameta" %%% "munit" % munitVersion % Test
+    )
+  )
+  .jsSettings(
+    scalaJSUseMainModuleInitializer := false,
+    scalaJSLinkerConfig ~= { _.withModuleKind(SJSModuleKind.NoModule) },
+    passBundleDest := nativeDir / "polyc" / "polypass.js",
+    exportPassBundle := {
+      // fastLinkJS does IR-level DCE (tree-shaking) without Closure's name mangling, leaving the
+      // bundle readable for debugging from C++/QuickJS. fullLinkJS would minify everything.
+      val _      = (Compile / fastLinkJS).value
+      val srcDir = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+      val src    = srcDir / "main.js"
+      val dst    = passBundleDest.value
+      IO.copyFile(src, dst)
+      streams.value.log.info(s"pass bundle: $src -> $dst (${dst.length() / 1024} KB)")
+      dst
+    }
+  )
+  .dependsOn(ast)
 
 lazy val compiler = project
   .settings(
@@ -100,11 +147,12 @@ lazy val compiler = project
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ++=
-      Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
-        Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
-    ,
+      Seq("-Yretain-trees") ++
+        Seq("-Xmax-inlines", "80"),
     libraryDependencies ++= Seq(
+      "net.bytebuddy"   % "byte-buddy"                        % "1.15.10",
       "org.scala-lang" %% "scala2-library-tasty-experimental" % scala3Version,
+      "com.lihaoyi"    %% "pprint"                            % "0.9.0",
       "org.scalameta"  %% "munit"                             % munitVersion % Test
     ),
     (Compile / unmanagedJars) := {
@@ -119,7 +167,7 @@ lazy val compiler = project
       }
     }
   )
-  .dependsOn(`ast`)
+  .dependsOn(ast.jvm, pass.jvm)
 
 lazy val `compiler-testsuite-scala` = project
   .settings(
@@ -197,6 +245,11 @@ lazy val root = project
   .settings(commonSettings)
   .aggregate(
     `binding-jvm`,
+    ast.jvm,
+    ast.js,
+    codegen,
+    pass.jvm,
+    pass.js,
     `runtime-scala`,
     `runtime-java`,
     compiler,

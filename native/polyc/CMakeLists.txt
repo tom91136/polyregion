@@ -10,13 +10,14 @@ set(LIB_SOURCES
         backend/c_source.cpp
         backend/lld_lite.cpp
         backend/memoryfs.cpp
+        qjs_runner.cpp
         compiler.cpp
 )
 
 add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_polyc.cpp)
 
-add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp)
+add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp test/qjs_runner.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin driver_main.cpp)
 
@@ -99,6 +100,7 @@ target_link_libraries(polyc
         Aspartame::Aspartame
         magic_enum::magic_enum
         fmt::fmt
+        qjs
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )
@@ -121,4 +123,10 @@ target_link_options(polyc PRIVATE ${LINK_OPTIONS})
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
 
+# Bake the source-tree path so polyc binaries find polypass.js when run from a CMake build dir
+# (no install required). Dist installs ship the bundle under lib/ next to the binaries and the
+# runtime locates it relative to the exe.
+target_compile_definitions(polyc PRIVATE POLYPASS_JS_DEV_PATH="${CMAKE_CURRENT_SOURCE_DIR}/polypass.js")
+
 install(TARGETS polyc-bin RUNTIME DESTINATION bin)
+install(FILES polypass.js DESTINATION lib OPTIONAL)

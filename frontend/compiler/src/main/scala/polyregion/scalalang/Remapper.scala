@@ -94,7 +94,7 @@ object Remapper {
 
         for {
           (captures, c) <- RefOutliner
-            .outline(Log(""), defDef.rhs.get)
+            .outline(RenderedLog(""), defDef.rhs.get)
             .map((captures, v) => captures.filterNot(cap => argSymbols.contains(cap._2.symbol)))
             .map(xs =>
               xs.foldLeft(List.empty[(q.Symbol, p.Named)] -> c) { case ((acc, c0), (_, ref, (term, tpe))) =>
@@ -102,7 +102,7 @@ object Remapper {
                 ((ref.symbol, p.Named(name, tpe)) :: acc) -> c
               }
             )
-          (fn, c0) <- c.mapFn(defDef, Log(""))
+          (fn, c0) <- c.mapFn(defDef, RenderedLog(""))
           allCaptureNames = (fn.termCaptures ++ captures
             .map(_._2)
             .map(p.Arg(_))).distinct // Include outlined and propagated

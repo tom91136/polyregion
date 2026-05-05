@@ -76,6 +76,7 @@ find_package(unofficial-libffi CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(qjs CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
 if (USE_LINKER)

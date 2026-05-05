@@ -64,7 +64,7 @@ object compiletime {
 
     val witnesses = collectWitnesses[T]().map((a, b) => (simplifyTpe(a), simplifyTpe(b)))
 
-    given l: Log = Log("Derive packed mirrors")
+    given l: RenderedLog = RenderedLog("Derive packed mirrors")
     (for {
       typeLUT <- witnesses.traverse { (s, m) =>
         for {
@@ -149,8 +149,8 @@ object compiletime {
     case x => x
   }
 
-  private def mirrorMethod(using q: Quoted, sink: Log)   //
-  (sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol) //
+  private def mirrorMethod(using q: Quoted, sink: RenderedLog) //
+  (sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol)       //
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[(p.Function, q.Dependencies)] = for {
 
     log <- sink.subLog(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}").success
@@ -222,8 +222,8 @@ object compiletime {
     }
   } yield mirrorMethods
 
-  private def derivePackedMirrorsImpl(using q: Quoted, sink: Log) //
-  (source: q.TypeRepr, mirror: q.TypeRepr)                        //
+  private def derivePackedMirrorsImpl(using q: Quoted, sink: RenderedLog) //
+  (source: q.TypeRepr, mirror: q.TypeRepr)                                //
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[p.Mirror] = {
 
     val m = for {

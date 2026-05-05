@@ -870,7 +870,7 @@ object Compiler {
         .success
     }
 
-    _ = println(log.render().mkString("\n"))
+    _ = log match { case rl: RenderedLog => println(rl.render().mkString("\n")); case _ => }
 
     // verify again after optimisation
     optLog = log.subLog("Opt")
