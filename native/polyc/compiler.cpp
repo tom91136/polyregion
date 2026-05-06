@@ -135,13 +135,13 @@ static polypass::JsPassRunner &sharedJsRunner() {
 }
 
 static polyast::Program runJsPass(const polyast::Program &p, std::string_view passName) {
-  auto bytes = nlohmann::json::to_msgpack(polyast::hashed_to_json(polyast::program_to_json(p)));
+  auto bytes = nlohmann::json::to_msgpack(polyast::program_to_json(p));
   std::vector<uint8_t> in(bytes.begin(), bytes.end());
   std::string err;
   auto out = sharedJsRunner().runPass(passName, in, err);
   // auto out = in;
   if (!err.empty()) throw std::logic_error(fmt::format("polypass {}: {}", passName, err));
-  const auto outJson = polyast::hashed_from_json(nlohmann::json::from_msgpack(out.data(), out.data() + out.size()));
+  const auto outJson = nlohmann::json::from_msgpack(out.data(), out.data() + out.size());
   return polyast::program_from_json(outJson);
 }
 
@@ -173,8 +173,11 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   auto effective = program;
   {
     const auto t0 = nowMono();
-    effective = runJsPass(effective, "DeadStructElimination");
-    preEvents.emplace_back(nowMs(), elapsedNs(t0), "polypass_DeadStructElimination", "");
+    auto before = polyast::repr(effective);
+    effective = runJsPass(effective, "Opt");
+    auto after = polyast::repr(effective);
+    auto data = "; before:\n" + before + "\n; after:\n" + after;
+    preEvents.emplace_back(nowMs(), elapsedNs(t0), "polypass_opt", data);
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);

@@ -25,14 +25,12 @@ object VarReducePass extends ProgramPass {
             case x @ p.Expr.Select(Nil, `name`)     => that
             case x                                  => x
           }
-          if (modified == f) f // No reference replaced, keep this dangling reference
-          else {
-            // We did end up having to replace references, so it's safe to delete the extra var declaration
-            log.info(s"Delete `${source.repr}`")
-            modified.modifyAll[p.Stmt] {
-              case `source` => p.Stmt.Comment(s"[VarReducePass] ${source.repr}")
-              case x        => x
-            }
+          // Whether or not any reference was rewritten, the rhs is a pure Select so an unused
+          // alias is a dead store either way; drop the source var declaration in both cases.
+          log.info(s"Delete `${source.repr}`")
+          modified.modifyAll[p.Stmt] {
+            case `source` => p.Stmt.Comment(s"[VarReducePass] ${source.repr}")
+            case x        => x
           }
         case None => f
       }

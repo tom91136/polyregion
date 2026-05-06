@@ -15,19 +15,19 @@ object Compiler {
   import Remapper.*
   import Retyper.*
 
-  private val ProgramPasses: List[ProgramPass] = List(
-    printPass(IntrinsifyPass),
-    // printPass(DynamicDispatchPass),
-    printPass(SpecialisationPass),
+//   private val ProgramPasses: List[ProgramPass] = List(
+//     printPass(IntrinsifyPass),
+//     // printPass(DynamicDispatchPass),
+//     printPass(SpecialisationPass),
 
-//    FnInlinePass,
-    VarReducePass,
-    UnitExprElisionPass,
-    DeadArgEliminationPass
-  )
+// //    FnInlinePass,
+//     VarReducePass,
+//     UnitExprElisionPass,
+//     DeadArgEliminationPass
+//   )
 
-  private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
-    scala.Function.chain(ProgramPasses.map(p => p(_, log)))(program).success
+//   private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
+//     scala.Function.chain(ProgramPasses.map(p => p(_, log)))(program).success
 
   // This derives the signature based on the *owning* symbol only!
   // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
@@ -799,7 +799,7 @@ object Compiler {
 
     optPassLog = log.subLog("Opt Passes")
 
-    opt                                <- runProgramOptPasses(unopt, optPassLog)
+    opt                                <- passes.get("Opt").fold(throw IllegalArgumentException("Opt pass not found"))(_.apply(unopt, optPassLog))
     (monomorphicToPolymorphicSym, opt) <- MonoStructPass(opt, log).success
 
     // Wire up Invoke captures and propagate captures transitively up to the entry. compileFn

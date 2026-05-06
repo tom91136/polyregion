@@ -57,15 +57,27 @@ string polyast::repr(const CompileResult &compilation) {
   std::ostringstream os;
   os << "Compilation {"                                                                                            //
      << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //
-     << "\n  messages: `" << compilation.messages << "`"                                                           //
-     << "\n  features: `" << (compilation.features ^ mk_string(",")) << "`"                                        //
-     << "\n  layouts: `\n"
-     << (compilation.layouts ^ mk_string("\n", [](auto &l) { return repr(l) ^ indent(4); })) << "`" //
-     << "\n  events:\n";
+     << "\n  messages: " << (compilation.messages.empty() ? "(none)" : "`" + compilation.messages + "`")           //
+     << "\n  features: " << (compilation.features.empty() ? "(none)" : compilation.features ^ mk_string(","));
+  if (compilation.layouts.empty()) {
+    os << "\n  layouts: (none)";
+  } else {
+    os << "\n  layouts:\n" << (compilation.layouts ^ mk_string("\n", [](auto &l) { return repr(l) ^ indent(4); }));
+  }
+  os << "\n  events:";
+  if (compilation.events.empty()) os << " (none)";
+  else os << '\n';
 
   for (auto &e : compilation.events) {
     os << "    [" << e.epochMillis << ", +" << static_cast<double>(e.elapsedNanos) / 1e6 << "ms] " << e.name;
-    if (e.data.empty()) continue;
+    if (e.data.empty()) {
+      os << '\n';
+      continue;
+    }
+    if (e.data.find('\n') == std::string::npos) {
+      os << ": " << e.data << '\n';
+      continue;
+    }
     os << ":\n";
     std::stringstream ss(e.data);
     string l;
@@ -76,7 +88,7 @@ string polyast::repr(const CompileResult &compilation) {
     }
     os << "       ╰───\n";
   }
-  os << "\n}";
+  os << "}";
   return os.str();
 }
 

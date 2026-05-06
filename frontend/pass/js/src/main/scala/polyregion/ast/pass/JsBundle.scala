@@ -11,10 +11,22 @@ import scala.scalajs.js.typedarray.{ArrayBuffer, Int8Array, Uint8Array}
 object JsBundle {
 
   private final class ConsoleLog(prefix: String) extends Log {
-    def info(message: String, details: String*): Unit =
-      js.Dynamic.global.console.log(s"[$prefix] $message", details.mkString(", "))
-    def subLog(name: String): Log = new ConsoleLog(s"$prefix/$name")
+    def info(message: String, details: String*): Unit = println(s"[$prefix] $message ${details.mkString(", ")}")
+    def subLog(name: String): Log                     = new ConsoleLog(s"$prefix/$name")
   }
+
+  private val Opt: ProgramPass = (program, log) =>
+    scala.Function.chain(
+      List(
+        printPass(IntrinsifyPass),
+        // printPass(DynamicDispatchPass),
+        printPass(SpecialisationPass),
+       //    FnInlinePass,
+        VarReducePass,
+        UnitExprElisionPass,
+        DeadArgEliminationPass
+      ).map(p => p(_, log))
+    )(program)
 
   private val passes: Map[String, ProgramPass | BoundaryPass[?]] = Map(
     "DeadArgElimination"    -> DeadArgEliminationPass,
@@ -24,7 +36,8 @@ object JsBundle {
     "MonoStruct"            -> MonoStructPass,
     "Specialisation"        -> SpecialisationPass,
     "UnitExprElision"       -> UnitExprElisionPass,
-    "VarReduce"             -> VarReducePass
+    "VarReduce"             -> VarReducePass,
+    "Opt"                   -> Opt
   )
 
   @JSExportTopLevel("runPass")

@@ -26,6 +26,19 @@ class VarReducePassSuite extends munit.FunSuite {
     assert(refsToB.isEmpty, s"alias `b` should have been collapsed away, but found refs: ${refsToB.map(_.repr)}")
   }
 
+  test("unused alias to a Select is dropped: var b = a; (no uses)") {
+    val a = named("a")
+    val b = named("b")
+    val body = List(
+      p.Stmt.Var(a, Some(p.Expr.IntS32Const(1))),
+      p.Stmt.Var(b, Some(select(a))),
+      p.Stmt.Return(select(a))
+    )
+    val out      = VarReducePass(program(entry(body = body, args = Nil).copy(rtn = p.Type.IntS32)), NoopLog)
+    val varDecls = out.entry.body.collect { case v: p.Stmt.Var => v.name }
+    assert(!varDecls.contains(b), s"unused alias `b` should have been dropped, body: ${out.entry.body.map(_.repr)}")
+  }
+
   test("running pass twice is idempotent") {
     val a = named("a")
     val b = named("b")
