@@ -532,27 +532,48 @@ void doRewrite(ModuleOp op) {
 } // namespace
 
 void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
-  // Legacy path: pre-Flang-22 lowered user `do concurrent` to `fir.do_loop unordered`. We mark
-  // those so the FIR-side walk can distinguish user-written do-concurrent from elemental/forall
-  // (which also lower unordered).
+  m.walk([&](fir::DoConcurrentOp doc) {
+    auto &wrapperBlock = doc.getRegion().front();
+    auto loopOp = mlir::cast<fir::DoConcurrentLoopOp>(wrapperBlock.getTerminator());
+    if (loopOp.getLowerBound().size() != 1) {
+      diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                       "[PolyFC] multi-dimensional `do concurrent` is not yet supported"));
+      return;
+    }
+    if (loopOp.getNumLocalOperands() != 0) {
+      diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                       "[PolyFC] `do concurrent ... local(...)` clause is not yet supported"));
+      return;
+    }
+    OpBuilder B(doc);
+    // Hoist the iv allocations (everything before the terminator in the wrapper block) out so
+    // they survive the erase below.
+    for (auto &op : llvm::make_early_inc_range(wrapperBlock.without_terminator()))
+      op.moveBefore(doc);
+    auto unordered = fir::DoLoopOp::create(B, doc.getLoc(),                                                            //
+                                           loopOp.getLowerBound()[0], loopOp.getUpperBound()[0], loopOp.getStep()[0], //
+                                           /*unordered=*/true, /*finalCountValue=*/false,
+                                           /*iterArgs=*/mlir::ValueRange{}, loopOp.getReduceVars(), loopOp.getReduceAttrsAttr());
+    unordered->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
+    auto &loopBlock = loopOp.getRegion().front();
+    // Block args of the source loop are [induction, reduce_args...]; the new fir.do_loop body
+    // already binds those itself, so map them onto the destination block args before splicing.
+    loopBlock.getArgument(0).replaceAllUsesWith(unordered.getInductionVar());
+    for (auto [src, dst] : llvm::zip_equal(
+             loopBlock.getArguments().drop_front(loopOp.getNumInductionVars()).take_front(loopOp.getNumReduceOperands()),
+             unordered.getRegionIterArgs())) {
+      src.replaceAllUsesWith(dst);
+    }
+    auto *destBody = unordered.getBody();
+    destBody->getOperations().splice(destBody->getTerminator()->getIterator(), loopBlock.getOperations());
+    doc.erase();
+  });
+
+  // Mark all unordered fir.do_loop ops (both the ones we just synthesised and any pre-Flang-22
+  // legacy lowerings) so the FIR walker can distinguish them from elemental/forall artefacts.
   m.walk([&](fir::DoLoopOp doLoop) {
     if (!doLoop.getUnordered()) return;
     doLoop->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
-  });
-
-  // FIXME Flang 22+ lowers `do concurrent` to fir.do_concurrent / fir.do_concurrent.loop, not
-  // the legacy `fir.do_loop unordered` shape this plugin walks. To re-enable offload: walk
-  // fir::DoConcurrentLoopOp, extract bounds/step/reduce/local from it, and re-port
-  // parallel.cpp::forEach + reduce onto the new Term/Expr split. Running Flang's
-  // `simplify-fir-operations` pass mid-pipeline trips "data element must be symbol or
-  // #llvm.zero" on the host-side lowering -- prefer a direct rewrite. Erroring out below keeps
-  // the regression visible instead of falling back to Fortran's sequential runtime.
-  m.walk([&](fir::DoConcurrentOp doc) {
-    diag.Report(diag.getCustomDiagID(
-        clang::DiagnosticsEngine::Error,
-        "[PolyFC] `do concurrent` lowered to fir.do_concurrent (Flang 22+) is not yet supported by this plugin. "
-        "The legacy fir.do_loop-unordered rewriter path is unreachable; offload would silently no-op. "
-        "Tracked as a FIXME in flang-plugin/rewriter.cpp::rewriteHLFIR."));
   });
 }
 
@@ -571,11 +592,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   Rewriter rewriter(m);
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
-      // After simplify-fir-operations every `do concurrent` is `fir.do_loop unordered`. The
-      // DoConcurrentAsWritten marker is dropped during the conversion (the new fir::DoLoopOp
-      // is fresh), so we accept every unordered loop and rely on the offload pipeline to
-      // bail if the body has anything it can't lower.
-      if (!doLoop.getUnordered()) return;
+      if (!doLoop.getUnordered() || !doLoop->hasAttr(DoConcurrentAsWritten)) return;
 
       std::string moduleId = fmt::format("kernel_{:p}", fmt::ptr(&doLoop));
       std::string diagLoc = show(doLoop.getLoc());

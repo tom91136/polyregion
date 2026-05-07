@@ -19,7 +19,7 @@ mlir::LLVM::LLVMPointerType polyregion::polyfc::ptrTy(MLIRContext *C) { return L
 mlir::LLVM::LLVMPointerType polyregion::polyfc::ptrTy(const OpBuilder &B) { return ptrTy(B.getContext()); }
 mlir::Value polyregion::polyfc::nullConst(OpBuilder &B) { return LLVM::ZeroOp::create(B, uLoc(B), ptrTy(B)); }
 mlir::Value polyregion::polyfc::intConst(OpBuilder &B, Type ty, const int64_t value) {
-  return arith::ConstantOp::create(B, uLoc(B), ty, B.getIntegerAttr(ty, value));
+  return LLVM::ConstantOp::create(B, uLoc(B), ty, B.getIntegerAttr(ty, value));
 }
 mlir::Value polyregion::polyfc::boolConst(OpBuilder &B, const bool value) { return intConst(B, B.getI1Type(), value); }
 mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::string &value, const bool nullTerminate) {
@@ -54,7 +54,7 @@ void polyregion::polyfc::defineGlobalCtor(ModuleOp &m, const std::string &name,
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
   LLVM::GlobalCtorsOp::create(B, uLoc(B), B.getArrayAttr({SymbolRefAttr::get(ctor)}), B.getArrayAttr({B.getIntegerAttr(i32Ty(B), 1)}),
-                              B.getArrayAttr(B.getZeroAttr(i32Ty(B))));
+                              B.getArrayAttr({LLVM::ZeroAttr::get(B.getContext())}));
 }
 
 polyregion::polyfc::DynamicAggregateMirror::DynamicAggregateMirror(MLIRContext *C, const std::string &name, const std::vector<Type> &types)
