@@ -33,15 +33,9 @@ object SpecialisationPass extends ProgramPass {
     .foldLeft(done) { case (acc, ivk) =>
       val newName = monomorphicName(ivk)
       if (done.contains(newName)) acc
-      else if (!fnLUT.contains(ivk.name)) acc // missing impl — verifier will surface a useful error
+      else if (!fnLUT.contains(ivk.name)) acc
       else {
         val fnImpl = fnLUT(ivk.name)
-        // Inherited-trait method calls (e.g. `xs.size` resolving to `SeqOps.size`) sometimes
-        // arrive here with `ivk.tpeArgs` carrying duplicated type-var refs accumulated up the
-        // hierarchy — `[Var(A), Var(CC), Var(C), Var(A), Var(CC), Var(C)]` for a 3-tparam method.
-        // Take only the prefix that aligns with the function's own tpeVars; the trailing copies
-        // are redundant. Also tolerate Vars whose name isn't in our lut (passing them through
-        // unchanged) so a missing substitution doesn't crash specialisation.
         val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs.take(fnImpl.tpeVars.size)).toMap
         val specialisedFnImpl = fnImpl
           .copy(name = newName, tpeVars = Nil)
@@ -63,11 +57,6 @@ object SpecialisationPass extends ProgramPass {
 
     log.info("functions", fnLUT.keys.toSeq.map(_.repr)*)
     log.info("callsites", callsites.map(_.repr)*)
-
-    // Tracing specialisation
-    // 1. For entry fn, find all callsites
-    // 2. Specialise fn for each callsite, cache results
-    // 3. Walk all callsites again, replace with monomorphic names
 
     val specialisations = recursiveSpecialise(fnLUT, program.entry)
 

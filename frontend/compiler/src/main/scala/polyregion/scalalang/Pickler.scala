@@ -33,8 +33,8 @@ object Pickler {
     case p.Type.IntS64             => rt.Type.LONG
     case p.Type.Float32            => rt.Type.FLOAT
     case p.Type.Float64            => rt.Type.DOUBLE
-    case p.Type.Ptr(_, _, _)       => rt.Type.PTR
-    case p.Type.Struct(_, _, _, _) => rt.Type.PTR
+    case p.Type.Ptr(_, _)       => rt.Type.PTR
+    case p.Type.Struct(_, _) => rt.Type.PTR
     case p.Type.Unit0              => rt.Type.VOID
     case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
@@ -171,8 +171,8 @@ object Pickler {
           }
         }
       (sdef, repr.widenTermRefByName) :: sdef.members.flatMap {
-        case p.Named(member, p.Type.Struct(name, _, _, _))              => descend(name, member)
-        case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _, _, _), _, _)) => descendArrayElement(name)
+        case p.Named(member, p.Type.Struct(name, _))              => descend(name, member)
+        case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _), _)) => descendArrayElement(name)
         case _                                                          => Nil
       }
     }
@@ -283,7 +283,7 @@ object Pickler {
       // data buffer at `i * structSize`, no pointer indirection). The slot size must therefore
       // match the struct's layout size, not the pointer size.
       val elementSizeInBytes = comp match {
-        case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+        case p.Type.Struct(name, _) if lut.contains(name) =>
           layouts(lut(name))._1.sizeInBytes.toInt
         case _ => tpeAsRuntimeTpe(comp).sizeInBytes()
       }
@@ -305,7 +305,7 @@ object Pickler {
             ${
               val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
               comp match {
-                case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+                case p.Type.Struct(name, _) if lut.contains(name) =>
                   // Inline struct slot — the kernel reads/writes struct bytes directly at
                   // arrBuffer[i*structSize..(i+1)*structSize] (no pointer indirection). For non-null
                   // inputs we serialise via callWrite (which yields a struct-sized buffer pointer)
@@ -346,18 +346,18 @@ object Pickler {
       ${
         Varargs(mapping.members.map { m =>
           val memberOffset = Expr(m.offsetInBytes.toInt)
-          (rootAfterPrism, m.tpe) match {
-            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _, _)) =>
+          ((rootAfterPrism, m.tpe): @scala.unchecked) match {
+            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
               writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
-            case (_, p.Type.Struct(name, _, _, _)) if lut.get(name).exists(_.members.isEmpty) =>
+            case (_, p.Type.Struct(name, _)) if lut.get(name).exists(_.members.isEmpty) =>
               // Empty-member struct field (e.g. trait-based mirrors like `Monoid` whose
               // dispatch is resolved without reading the field). The backend lays these out
               // inline as 0-byte slots, so there's nothing to write — and trying to put an
               // 8-byte pointer at the slot's offset would overflow the parent buffer when the
               // parent is composed of nothing but such slots.
               '{ () }
-            case (_, p.Type.Struct(name, _, _, _)) if lut.contains(name) =>
+            case (_, p.Type.Struct(name, _)) if lut.contains(name) =>
               // Nested struct field — laid out INLINE in the parent buffer at memberOffset
               // (matches the kernel's `functionBoundary=false` member layout). callWrite
               // produces a struct-sized buffer; memcpy its bytes into the parent slot.
@@ -372,7 +372,7 @@ object Pickler {
                 dst.put(tmp)
                 ()
               }
-            case (_, p.Type.Struct(_, _, _, _)) =>
+            case (_, p.Type.Struct(_, _)) =>
               // Opaque struct member (e.g. scala.Option) — kernel doesn't access this field;
               // skip (the inline layout has no slot for it anyway).
               '{ () }
@@ -404,7 +404,7 @@ object Pickler {
     ): Expr[Unit] = {
       // Mirror the inline-struct slot sizing used in writeArray.
       val elementSizeInBytes = comp match {
-        case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+        case p.Type.Struct(name, _) if lut.contains(name) =>
           layouts(lut(name))._1.sizeInBytes.toInt
         case _ => tpeAsRuntimeTpe(comp).sizeInBytes()
       }
@@ -430,7 +430,7 @@ object Pickler {
             $seq(i) = ${
               val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
               comp match {
-                case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+                case p.Type.Struct(name, _) if lut.contains(name) =>
                   // Element bytes live INLINE at arrBuffer[i*structSize]. Reconstruct the struct
                   // directly via readMapping using the inline element address — bypassing callRead
                   // since the result-holder slot was never written by the host (so ptrMap.get(root)
@@ -474,8 +474,8 @@ object Pickler {
         Varargs(
           mapping.members.map { m =>
             val memberOffset = Expr(m.offsetInBytes.toInt)
-            (root, m.tpe) match {
-              case (_, p.Type.Ptr(comp, _, _)) =>
+            ((root, m.tpe): @scala.unchecked) match {
+              case (_, p.Type.Ptr(comp, _)) =>
                 (
                   mapping.write,
                   root.asTerm.tpe.widenTermRefByName match {
@@ -493,14 +493,14 @@ object Pickler {
                     q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
                 }
 
-              case (_, p.Type.Struct(name, _, _, _)) if lut.contains(name) =>
+              case (_, p.Type.Struct(name, _)) if lut.contains(name) =>
                 // Inline-laid-out nested struct field. Both empty- and non-empty-member cases
                 // resolve to a no-op here: case class fields are vals (immutable) so the kernel
                 // can't mutate them, and any same-instance update would be a fresh allocation
                 // we'd have no way to splice back into the host's owning struct anyway. Read-only
                 // captures stay consistent with the host because we never overwrite their fields.
                 '{ () }
-              case (_, p.Type.Struct(_, _, _, _)) =>
+              case (_, p.Type.Struct(_, _)) =>
                 // Opaque struct member — kernel doesn't write this back, skip update.
                 '{ () }
               case (_, _) =>
@@ -590,15 +590,15 @@ object Pickler {
               val terms = mapping.members.map { m =>
                 val memberOffset = Expr(m.offsetInBytes.toInt)
                 m.tpe match {
-                  case p.Type.Ptr(comp, _, _) =>
+                  case p.Type.Ptr(comp, _) =>
                     // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
                     '{ ??? }.asTerm
-                  case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+                  case p.Type.Struct(name, _) if lut.contains(name) =>
                     // Nested struct field laid out inline — pass `parentPtr + memberOffset` as
                     // the struct pointer so callRead wraps the inline slice and reconstructs.
                     val nestedPtr = '{ $ptr + ${ memberOffset }.toLong }
                     callRead(name, '{ null }, nestedPtr, ptrMap, objMap).asTerm
-                  case p.Type.Struct(_, _, _, _) =>
+                  case p.Type.Struct(_, _) =>
                     // Opaque struct field — synthesise null since we can't reconstruct it from kernel side.
                     '{ null }.asTerm
                   case _ => readPrim('buffer, memberOffset, m.tpe).asTerm

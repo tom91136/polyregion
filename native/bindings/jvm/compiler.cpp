@@ -23,12 +23,9 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object
 
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_NVPTX64) == Compiler::Target_Object_LLVM_NVPTX64);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_AMDGCN) == Compiler::Target_Object_LLVM_AMDGCN);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32_Kernel) ==
-              Compiler::Target_Object_LLVM_SPIRV32_Kernel);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64_Kernel) ==
-              Compiler::Target_Object_LLVM_SPIRV64_Kernel);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV_GLCompute) ==
-              Compiler::Target_Object_LLVM_SPIRV_GLCompute);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32_Kernel) == Compiler::Target_Object_LLVM_SPIRV32_Kernel);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64_Kernel) == Compiler::Target_Object_LLVM_SPIRV64_Kernel);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV_GLCompute) == Compiler::Target_Object_LLVM_SPIRV_GLCompute);
 
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);

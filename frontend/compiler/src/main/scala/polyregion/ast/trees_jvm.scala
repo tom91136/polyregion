@@ -36,6 +36,12 @@ object PolyAstToExpr {
   given NamedToExpr: ToExpr[p.Named] with {
     def apply(x: p.Named)(using Quotes) = '{ p.Named(${ Expr(x.symbol) }, ${ Expr(x.tpe) }) }
   }
+  given StructTypeToExpr: ToExpr[p.Type.Struct] with {
+    def apply(x: p.Type.Struct)(using Quotes) = '{
+      p.Type.Struct(${ Expr(x.name) }, ${ Expr(x.args) })
+    }
+  }
+
   given StructDefToExpr: ToExpr[p.StructDef] with {
     def apply(x: p.StructDef)(using Quotes) = '{
       p.StructDef(
@@ -72,13 +78,14 @@ object PolyAstToExpr {
       case p.Type.IntS64  => '{ p.Type.IntS64 }
       case p.Type.Unit0   => '{ p.Type.Unit0 }
 
-      case p.Type.Struct(name, tpeVars, args, parents) =>
-        '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
-      case p.Type.Ptr(component, length, space) =>
-        '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(length) }, ${ Expr(space) }) }
+      case p.Type.Struct(name, args) =>
+        '{ p.Type.Struct(${ Expr(name) }, ${ Expr(args) }) }
+      case p.Type.Ptr(component, space) =>
+        '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(space) }) }
+      case p.Type.Arr(component, length, space) =>
+        '{ p.Type.Arr(${ Expr(component) }, ${ Expr(length) }, ${ Expr(space) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
-      case p.Type.Annotated(_, _, _)       => ???
     }
   }
 

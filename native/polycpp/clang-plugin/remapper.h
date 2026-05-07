@@ -70,7 +70,7 @@ struct Remapper {
     void push(const Vector<Stmt::Any> &xs);
 
     [[nodiscard]] Named newName(const Type::Any &tpe);
-    [[nodiscard]] Expr::Any newVar(const Expr::Any &expr);
+    [[nodiscard]] Term::Any newVar(const Expr::Any &expr);
     [[nodiscard]] Named newVar(const Type::Any &tpe);
     //    void operator+=(const Remapper &that);
   };

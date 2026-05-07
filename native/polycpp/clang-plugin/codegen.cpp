@@ -34,9 +34,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto rtnTpe = remapper.handleType(returnTpe, r);
 
   auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentDef);
-  stmts.push_back(Stmt::Return(Expr::Unit0Const()));
+  stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
 
-  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name, {}, {}, {}), {}, TypeSpace::Global())), {});
+  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name, {}), TypeSpace::Global())), {});
 
   // The kernel ABI prepends a thread-id Int64 to Entry functions and the offload lambdas take
   // an int64 tid as their first parameter -- the runtime fills the same slot for both. Drop
@@ -49,7 +49,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
     // declName() carries the per-decl ID suffix so the alias matches what DeclRefExpr emits.
     auto name = declName(userParams.front());
     if (!name.empty()) {
-      tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()), Expr::Select({}, Named("__tid", Type::IntS64()))));
+      tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()),
+                                     Expr::Alias(dsl::Select(Vector<Named>{}, Named("__tid", Type::IntS64()))),
+                                     /*isMutable*/ false));
     }
     userParams.erase(userParams.begin());
   }
@@ -66,7 +68,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                 auto tpe = remapper.handleType(x->getType(), r);
 
                 auto annotatedTpe = tpe.get<Type::Ptr>() ^
-                                    fold([&](auto p) { return Type::Ptr(p.comp, p.length, local ? TypeSpace::Local() : p.space).widen(); },
+                                    fold([&](auto p) { return Type::Ptr(p.comp, local ? TypeSpace::Local() : p.space).widen(); },
                                          [&]() { return tpe; });
 
                 return Arg(Named(declName(x), annotatedTpe), {});
@@ -76,14 +78,18 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
 
   auto f0 = std::make_shared<Function>(Sym({"_main"}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
                                        std::vector<Arg>{}, rtnTpe, stmts,
-                                       std::set<FunctionAttr::Any>{FunctionAttr::Exported(), FunctionAttr::Entry()});
+                                       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
 
-  auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector());
+  auto program = Program(*f0,
+                         r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
+                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(),
+                         PassPhase::Initial());
 
+  auto exportedFns = (std::vector<Function>{program.entry} ^ concat(program.functions))                                                //
+                     | filter([](auto &f) { return f.visibility.template is<FunctionVisibility::Exported>(); })                         //
+                     | to_vector();
   auto exportedStructNames =
-      (std::vector<Function>{program.entry} ^ concat(program.functions))                                                                  //
-      | filter([](auto &f) { return f.attrs ^ contains(FunctionAttr::Exported()); })                                                      //
+      exportedFns                                                                                                                        //
       | flat_map([](auto &f) { return f.args; })                                                                                          //
       | collect([](auto &a) { return extractComponent(a.named.tpe) ^ flat_map([](auto &t) { return t.template get<Type::Struct>(); }); }) //
       | map([](auto &s) { return repr(s.name); })                                                                                         //
@@ -154,5 +160,16 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
         }
       }) //
       | to_vector();
+  // If targets were requested for this kind but every one of them failed to compile, escalate
+  // to a hard error: a kernel bundle with zero objects compiles cleanly but then fails at run
+  // time with "no compatible image", which is much harder to diagnose than a compile-time
+  // failure that surfaces the original backend error.
+  const auto requestedForKind = opts.targets ^ count([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); });
+  if (requestedForKind > 0 && objects.empty()) {
+    diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Error,
+                                          "[PolySTL] No kernels compiled successfully for [%0, kind=%1] (requested %2 target(s)); "
+                                          "see prior diagnostics for the per-target failure"))
+        << moduleId << std::string(magic_enum::enum_name(kind)) << static_cast<int>(requestedForKind);
+  }
   return polyfront::KernelBundle{moduleId, objects, layouts, program_to_json(program).dump()};
 }

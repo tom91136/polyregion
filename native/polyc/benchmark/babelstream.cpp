@@ -26,10 +26,10 @@ using namespace polyregion::polyast::dsl;
 
 Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   using Stmts = std::vector<Stmt::Any>;
-  static auto empty = [](auto, auto) -> Stmts { return {}; };
-  auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs, const std::function<Stmts(Expr::Any, Expr::Any)> &mkPrelude,
-                           const std::function<Stmts(Expr::Any, Expr::Any)> &mkLoopBody,
-                           const std::function<Stmts(Expr::Any, Expr::Any)> &mkEpilogue) {
+  static auto empty = [](Term::Any, Term::Any) -> Stmts { return {}; };
+  auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs, const std::function<Stmts(Term::Any, Term::Any)> &mkPrelude,
+                           const std::function<Stmts(Term::Any, Term::Any)> &mkLoopBody,
+                           const std::function<Stmts(Term::Any, Term::Any)> &mkEpilogue) {
     std::vector<Arg> args = {"a"_(Ptr(type))(), "b"_(Ptr(type))(), "c"_(Ptr(type))()};
     if (!gpu) {
       std::vector<Arg> cpuArgs = {"id"_(Long)(), "begin"_(Ptr(Long))(), "end"_(Ptr(Long))()};
@@ -47,7 +47,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       auto loopBody = mkLoopBody("id"_(Long), "i"_(Long));
       loopBody.push_back(Mut("i"_(Long), call(Add("i"_(Long), 1_(Long), Long)))); // i++
 
-      stmts.push_back(While({let("bound") = "end"_(Ptr(Long))["id"_(Long)], let("cont") = call(LogicLt("i"_(Long), "bound"_(Long)))},
+      stmts.push_back(whileLoop({let("bound") = "end"_(Ptr(Long))["id"_(Long)], let("cont") = call(LogicLt("i"_(Long), "bound"_(Long)))},
                             "cont"_(Bool),
                             loopBody)); // while(i < end[id])
 
@@ -62,9 +62,9 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       stmts ^= concat_inplace(mkEpilogue("local_i"_(UInt), "i"_(UInt)));
     }
 
-    stmts.push_back(ret(Unit0Const()));
+    stmts.push_back(ret(Term::Unit0Const()));
 
-    return function("stream_" + name + suffix, args, Unit, {FunctionAttr::Entry(), FunctionAttr::Exported()})(stmts);
+    return function("stream_" + name + suffix, args, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true)(stmts);
   };
 
   auto copy = mkCpuStreamFn( //
@@ -144,7 +144,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                 return {
                     let("global_size") = call(GpuGlobalSize(0_(UInt))),
                     "wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type),
-                    While({let("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
+                    whileLoop({let("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
                           {let("ai") = "a"_(Ptr(type))[i],                                     // ai = a[i]
                            let("bi") = "b"_(Ptr(type))[i],                                     // bi = b[i]
                            let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],            // sumid = sum[local_i]
@@ -154,10 +154,11 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                            ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))}), // i += array_size
                     let("offset") = call(GpuLocalSize(0_(UInt))),                              // offset = get_local_size()
                     "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)),              // offset /= 2
-                    While({let("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
+                    whileLoop({let("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
                           {
                               let("_") = call(GpuBarrierLocal()),
-                              Cond({call(LogicLt("local_i"_(UInt), "offset"_(UInt)))}, //
+                              let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
+                              Cond("__cond_lt"_(Bool), //
                                    {
                                        let("new_offset") =
                                            call(Add("local_i"_(UInt), "offset"_(UInt), UInt)),       // new_offset = local_i + offset
@@ -172,7 +173,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                               "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
                           }),
                     let("group_id") = call(GpuGroupIdx(0_(UInt))),
-                    Cond({call(LogicEq("local_i"_(UInt), 0_(UInt)))}, //
+                    let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))),
+                    Cond("__cond_eq"_(Bool), //
                          {
                              let("wg_sum_old_1") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
                              "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
@@ -191,7 +193,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   //  std::cout << repr(triad) << std::endl;
   //  std::cout << repr(dot) << std::endl;
 
-  auto entry = function("entry", {}, Unit)({ret(Unit0Const())});
+  auto entry = function("entry", {}, Unit)({ret(Term::Unit0Const())});
   return program({}, {entry, copy, mul, add, triad, dot});
 }
 

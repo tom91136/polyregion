@@ -10,17 +10,17 @@ class IntrinsifyPassSuite extends munit.FunSuite {
   // corresponding Math/Spec/Intr op nodes, removing the Invoke from the AST. Calls to other
   // unknown symbols should be left alone.
 
-  private val intrinsicsTpe  = p.Type.Struct(sym("polyregion", "scalalang", "intrinsics$"), Nil, Nil, Nil)
-  private val intrinsicsRecv = select(named("intrinsics$", intrinsicsTpe))
+  private val intrinsicsTpe  = p.Type.Struct(sym("polyregion", "scalalang", "intrinsics$"), Nil)
+  private val intrinsicsRecv = selectT(named("intrinsics$", intrinsicsTpe))
 
-  private def call(op: String, args: List[p.Expr], rtn: p.Type): p.Expr.Invoke =
-    p.Expr.Invoke(sym("polyregion", "scalalang", "intrinsics$", op), Nil, Some(intrinsicsRecv), args, Nil, rtn)
+  private def call(op: String, args: List[p.Term], rtn: p.Type): p.Expr.Invoke =
+    p.Expr.Invoke(sym("polyregion", "scalalang", "intrinsics$", op), Nil, Some(intrinsicsRecv), args, rtn)
 
   test("intrinsics.sin(x) lowers to a MathOp(Sin)") {
     val xArg = arg("x", p.Type.Float32)
     val e = entry(
       args = List(xArg),
-      body = List(p.Stmt.Var(named("r", p.Type.Float32), Some(call("sin", List(select(xArg.named)), p.Type.Float32))))
+      body = List(p.Stmt.Var(named("r", p.Type.Float32), Some(call("sin", List(selectT(xArg.named)), p.Type.Float32))))
     )
     val out     = IntrinsifyPass(program(e), NoopLog)
     val invokes = out.entry.body.flatMap(_.collectWhere[p.Expr] { case i: p.Expr.Invoke => i })

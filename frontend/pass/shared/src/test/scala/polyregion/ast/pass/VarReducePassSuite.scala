@@ -15,13 +15,13 @@ class VarReducePassSuite extends munit.FunSuite {
     val b   = named("b")
     val ret = p.Stmt.Return(select(b))
     val body = List(
-      p.Stmt.Var(a, Some(p.Expr.IntS32Const(1))),
+      p.Stmt.Var(a, Some(p.Expr.Alias(p.Term.IntS32Const(1)))),
       p.Stmt.Var(b, Some(select(a))),
       ret
     )
     val out = VarReducePass(program(entry(body = body, args = Nil).copy(rtn = p.Type.IntS32)), NoopLog)
-    val refsToB = out.entry.body.flatMap(_.collectWhere[p.Expr] {
-      case s: p.Expr.Select if s.last == b => s
+    val refsToB = out.entry.body.flatMap(_.collectWhere[p.Term] {
+      case s: p.Term.Select if s.root.symbol == b.symbol => s
     })
     assert(refsToB.isEmpty, s"alias `b` should have been collapsed away, but found refs: ${refsToB.map(_.repr)}")
   }
@@ -30,7 +30,7 @@ class VarReducePassSuite extends munit.FunSuite {
     val a = named("a")
     val b = named("b")
     val body = List(
-      p.Stmt.Var(a, Some(p.Expr.IntS32Const(1))),
+      p.Stmt.Var(a, Some(p.Expr.Alias(p.Term.IntS32Const(1)))),
       p.Stmt.Var(b, Some(select(a))),
       p.Stmt.Return(select(a))
     )
@@ -43,7 +43,7 @@ class VarReducePassSuite extends munit.FunSuite {
     val a = named("a")
     val b = named("b")
     val body = List(
-      p.Stmt.Var(a, Some(p.Expr.IntS32Const(1))),
+      p.Stmt.Var(a, Some(p.Expr.Alias(p.Term.IntS32Const(1)))),
       p.Stmt.Var(b, Some(select(a))),
       p.Stmt.Return(select(b))
     )

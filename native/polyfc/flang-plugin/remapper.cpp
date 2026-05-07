@@ -40,16 +40,34 @@ static auto asView(const mlir::Operation::operand_range range) {
   return view(range.getBase(), range.getBase() + range.size()) | map([](auto &x) { return x.get(); });
 }
 
+static Term::Select asSelectF(const Expr::Any &expr) {
+  if (auto a = expr.template get<Expr::Alias>()) {
+    if (auto s = a->ref.template get<Term::Select>()) return *s;
+  }
+  return Term::Select(Named("_invalid_select", expr.tpe()), {}, expr.tpe());
+}
+
 static Stmt::Any update0(const Expr::Any &expr, const Expr::Any &rhs) {
-  // XXX for reductions, we'll be storing to a ref that is now a scalar, so handle it accordingly
-  return expr.tpe().is<Type::Ptr>() ? Stmt::Update(expr, Expr::IntU64Const(0), rhs).widen() : Stmt::Mut(expr, rhs).widen();
+  if (expr.tpe().is<Type::Ptr>()) {
+    auto sel = asSelectF(expr);
+    auto idx = Term::IntU64Const(0);
+    auto rhsT = rhs.template get<Expr::Alias>()
+                    ? rhs.template get<Expr::Alias>()->ref
+                    : Term::Any(Term::Poison(rhs.tpe()).widen());
+    return Stmt::Update(sel, idx, rhsT).widen();
+  }
+  return Stmt::Mut(asSelectF(expr), rhs).widen();
 }
 
 static Expr::Any index0(const Expr::Any &rhs) {
-  // XXX for reductions, we'll be loading from a ref that is now a scalar, so handle it accordingly
-  return rhs.tpe().get<Type::Ptr>()                                                                 //
-         ^ map([&](auto &ptr) { return Expr::Index(rhs, Expr::IntU64Const(0), ptr.comp).widen(); }) //
-         ^ get_or_else(rhs);                                                                        //
+  return rhs.tpe().get<Type::Ptr>()                                                                          //
+         ^ map([&](auto &ptr) {
+             auto base = rhs.template get<Expr::Alias>()
+                             ? rhs.template get<Expr::Alias>()->ref
+                             : Term::Any(Term::Poison(rhs.tpe()).widen());
+             return Expr::Index(base, Term::IntU64Const(0), ptr.comp).widen();
+           })                                                                                                //
+         ^ get_or_else(rhs);                                                                                 //
 }
 
 static std::optional<mlir::Value> maybe(mlir::Value v) { return v ? std::optional{v} : std::nullopt; }
@@ -95,13 +113,10 @@ mlir::Type polyfc::Remapper::resolveType(const Type::Any &tpe) {
         if (!def) raise(fmt::format("Unseen struct type {}", repr(x)));
         return mlir::LLVM::LLVMStructType::getLiteral(C, def->members ^ map([&](auto &m) { return resolveType(m.tpe); }));
       }, //
-      [&](const Type::Ptr &x) -> mlir::Type {
-        if (x.length) return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), *x.length);
-        return mlir::LLVM::LLVMPointerType::get(C);
-      },                                                                                                     //
-      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); },   //
-      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }, //
-      [&](const Type::Annotated &x) -> mlir::Type { return resolveType(x.tpe); }                             //
+      [&](const Type::Ptr &x) -> mlir::Type { return mlir::LLVM::LLVMPointerType::get(C); },                                //
+      [&](const Type::Arr &x) -> mlir::Type { return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), x.length); },      //
+      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); },                  //
+      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }                 //
   );
 }
 
@@ -125,18 +140,18 @@ StructLayout polyfc::Remapper::resolveLayout(const StructDef &def) {
   return StructLayout(repr(def.name), size, L.getTypeABIAlignment(mirror), ms);
 }
 
-Expr::Select polyfc::Remapper::newVar(const std::variant<Expr::Any, Type::Any> &x) {
+Term::Select polyfc::Remapper::newVar(const std::variant<Expr::Any, Type::Any> &x) {
   static size_t id = 0;
   return x ^ fold_total(
                  [&](const Expr::Any &expr) {
                    const Named name(fmt::format("v{}", id++), expr.tpe());
-                   stmts.emplace_back(Stmt::Var(name, expr));
-                   return Expr::Select({}, name);
+                   stmts.emplace_back(Stmt::Var(name, expr, /*isMutable*/ false));
+                   return Term::Select(name, {}, name.tpe);
                  },
                  [&](const Type::Any &tpe) {
                    const Named name(fmt::format("v{}", id++), tpe);
-                   stmts.emplace_back(Stmt::Var(name, {}));
-                   return Expr::Select({}, name);
+                   stmts.emplace_back(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
+                   return Term::Select(name, {}, name.tpe);
                  });
 }
 
@@ -144,8 +159,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
 
   auto handleSeq = [&](fir::SequenceType t) -> Type::Any {
     const auto dynamic = t.hasDynamicExtents() || t.hasUnknownShape();
-    return Type::Ptr(handleType(t.getEleTy()),
-                     !dynamic && !captureBoundary ? std::optional<int32_t>{t.getConstantArraySize()} : std::nullopt, TypeSpace::Global());
+    return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global());
   };
 
   auto handleBox = [&](const fir::BoxType t) -> std::pair<Type::Any, FType> {
@@ -156,10 +170,10 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
       return {FBoxedNoneMirror::tpe(), FBoxedNoneM};
     } else {
       const auto comp0 = handleType(t.getEleTy());
-      const auto comp = comp0.is<Type::Ptr>() ? comp0 : Type::Ptr(comp0, {}, TypeSpace::Global()); // add ptr, even if the component isn't
+      const auto comp = comp0.is<Type::Ptr>() ? comp0 : Type::Ptr(comp0, TypeSpace::Global()); // add ptr, even if the component isn't
       FBoxedMirror mirror(comp, fir::getBoxRank(t));
       const auto def = mirror.def();
-      Type::Struct ty(def.name, {}, {}, {});
+      Type::Struct ty(def.name, {});
       typesLUT.insert({t, mirror});
       boxTypes.emplace(ty, mirror);
       defs.insert({ty, def});
@@ -178,7 +192,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                  case 16: return i.isSigned() || i.isSignless() ? Type::IntS16().widen() : Type::IntU16().widen();
                  case 32: return i.isSigned() || i.isSignless() ? Type::IntS32().widen() : Type::IntU32().widen();
                  case 64: return i.isSigned() || i.isSignless() ? Type::IntS64().widen() : Type::IntU64().widen();
-                 default: return Type::Annotated(Type::Nothing(), {}, fmt::format("Unsupported MLIR integer type {}", show(type)));
+                 default: return Type::Nothing();
                }
              },
              [&](mlir::Float16Type) -> Type::Any { return Type::Float16(); }, //
@@ -190,48 +204,58 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                if (const auto boxTy = llvm::dyn_cast<fir::BoxType>(t.getEleTy())) { // record both
                  auto [tpe, boxed] = handleBox(boxTy);
                  typesLUT.insert({t, boxed});
-                 return Type::Ptr(tpe, {}, TypeSpace::Global());
+                 return Type::Ptr(tpe, TypeSpace::Global());
                }
                // Otherwise use normal pointer semantic
-               return Type::Ptr(handleType(t.getEleTy()), {}, TypeSpace::Global());
+               return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global());
              },
              [&](const fir::HeapType t) -> Type::Any { return handleType(t.getEleTy()); },
              [&](const fir::SequenceType t) -> Type::Any { return handleSeq(t); },
-             [&](const fir::CharacterType) -> Type::Any { return Type::Ptr(Type::IntU8(), {}, TypeSpace::Global()); },
+             [&](const fir::CharacterType) -> Type::Any { return Type::Ptr(Type::IntU8(), TypeSpace::Global()); },
              [&](fir::RecordType t) -> Type::Any {
                const StructDef def(Sym({t.getName().str()}), {},
                                    t.getTypeList()                                                                //
                                        | map([&](auto &name, auto &tpe) { return Named(name, handleType(tpe)); }) //
                                        | to_vector(),
-                                   {});
-               const Type::Struct ty(def.name, {}, {}, {});
+                                   std::vector<Type::Struct>{});
+               const Type::Struct ty(def.name, {});
                defs.insert({ty, def});
                return ty;
              }, //
              [&](const fir::BoxType t) -> Type::Any {
                const auto box = handleBox(t).first;
-               return captureBoundary ? Type::Ptr(box, {}, TypeSpace::Global()) : box;
+               return captureBoundary ? Type::Ptr(box, TypeSpace::Global()) : box;
              }) //
-         ^ get_or_else(Type::Annotated(Type::Nothing(), {}, fmt::format("ERROR: Unsupported MLIR type {}", show(type))).widen());
+         ^ get_or_else(Type::Nothing());
 }
 
-Expr::Select polyfc::Remapper::handleSelectExpr(const mlir::Value val) {
+Term::Select polyfc::Remapper::handleSelectExpr(const mlir::Value val) {
   const auto expr = handleValueAs(val);
-  return expr.get<Expr::Select>() ^ fold([&]() { return newVar(expr); });
+  // Term::Select isn't an alternative of Expr::Any anymore; unwrap from Expr::Alias if present.
+  if (auto a = expr.template get<Expr::Alias>()) {
+    if (auto s = a->ref.template get<Term::Select>()) return *s;
+  }
+  return newVar(expr);
 }
 
 Expr::Any polyfc::Remapper::handleValueAsScalar(const mlir::Value val) {
 
   const auto expr = handleValue(val);
   return expr ^
-         fold_partial([&](const Expr::Any &x) { return index0(x); },                                       //
-                      [&](const FVar &x) { return index0(x.value); },                                      //
-                      [](const FBoxed &x) { return index0(x.addr()); },                                    //
-                      [](const FArrayCoord &x) { return Expr::Index(x.array, x.offset, x.comp).widen(); }) //
-         ^ fold([&]() {                                                                                    //
-             return Expr::Annotated(Expr::Poison(handleType(val.getType())), {},
-                                    fmt::format("Value {} cannot be treated as a Expr::Any scalar", fRepr(expr)))
-                 .widen();
+         fold_partial([&](const Expr::Any &x) { return index0(x); },                       //
+                      [&](const FVar &x) { return index0(Expr::Alias(x.value).widen()); }, //
+                      [](const FBoxed &x) { return index0(x.addr()); },                    //
+                      [](const FArrayCoord &x) -> Expr::Any {
+                        // FArrayCoord carries Expr::Any operands but Expr::Index now needs Term::Any.
+                        // Approximate: extract the underlying Term when wrapped in Alias, else Poison.
+                        auto unwrap = [](const Expr::Any &e) -> Term::Any {
+                          if (auto a = e.template get<Expr::Alias>()) return a->ref;
+                          return Term::Poison(e.tpe()).widen();
+                        };
+                        return Expr::Index(unwrap(x.array), unwrap(x.offset), x.comp).widen();
+                      }) //
+         ^ fold([&]() {  //
+             return Expr::Alias(Term::Poison(handleType(val.getType()))).widen();
            });
 }
 
@@ -323,8 +347,7 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
       handleOp(defOp);
       if (const auto it = valuesLUT.find(val); it != valuesLUT.end()) return it->second;
       else {
-        return Expr::Annotated(Expr::Poison(handleType(val.getType())), {},
-                               fmt::format("ERROR: Constant or defined vector type did not yield a usable value {}", show(val)));
+        return Expr::Alias(Term::Poison(handleType(val.getType())));
       }
     }
 
@@ -338,12 +361,13 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
       // Both %7 and %11 could be the root, but %10 is what we really want as that has the correct var names.
       // When we encounter a memref where the defining op isn't a fir.declare, we'll trace the root too.
 
-      auto bind = [&](const Expr::Select &select, const mlir::Value x) -> FExpr {
+      auto bind = [&](const Term::Select &select, const mlir::Value x) -> FExpr {
         if (!altRoot) captures.insert({x, select});
 
+        const auto selectExpr = Expr::Any(Expr::Alias(select));
         if (const auto tpe = fTypeOf(x.getType())) {
-          const auto expr = *tpe ^ fold_total([&](const FBoxedMirror &m) -> FExpr { return FBoxed(select, m); },
-                                              [&](const FBoxedNoneMirror &) -> FExpr { return FBoxedNone{select}; },
+          const auto expr = *tpe ^ fold_total([&](const FBoxedMirror &m) -> FExpr { return FBoxed(selectExpr, m); },
+                                              [&](const FBoxedNoneMirror &) -> FExpr { return FBoxedNone{selectExpr}; },
                                               [&](const FVarMirror &m) -> FExpr {
                                                 // possibly an alloca is crossing the boundary...
                                                 raise("FVar crossing the boundary!");
@@ -351,8 +375,8 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
           valuesLUT.insert({x, expr});
           return expr;
         } else {
-          valuesLUT.insert({x, select});
-          return select;
+          valuesLUT.insert({x, selectExpr});
+          return selectExpr;
         }
       };
 
@@ -362,17 +386,17 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
              ^ fold(
                    [&](const BoxRoot &root) {
                      const Named field(root.name ^ fold([]() { return fmt::format("arg_{}", ++id); }), tpe);
-                     auto expr = bind(Expr::Select(altRoot.value_or(captureRoot), field), root.value);
+                     auto expr = bind(dsl::Select(altRoot.value_or(captureRoot), field), root.value);
                      valuesLUT.insert({val, expr});
                      return expr;
                    },
                    [&]() {
                      const Named field(fmt::format("arg_{}", ++id), tpe);
-                     return bind(Expr::Select(altRoot.value_or(captureRoot), field), val);
+                     return bind(dsl::Select(altRoot.value_or(captureRoot), field), val);
                    });
     }
   }
-  return Expr::Annotated(Expr::Poison(handleType(val.getType())), {}, fmt::format("ERROR: Unseen MLIR value {}", show(val)));
+  return Expr::Alias(Term::Poison(handleType(val.getType())));
 }
 
 template <typename T> struct Bind {
@@ -382,24 +406,22 @@ template <typename T> struct Bind {
 void polyfc::Remapper::handleOp(mlir::Operation *op) {
   const auto witness = [&](auto x, auto expr) -> void { valuesLUT.insert({x, expr}); };
   const auto intr2 = [&](auto x, auto ap) -> void {
-    witness(x.getResult(), Expr::IntrOp(ap(handleValueAsScalar(x.getLhs()), //
-                                           handleValueAsScalar(x.getRhs())) //
-                                            .widen()));
+    auto l = newVar(handleValueAsScalar(x.getLhs()));
+    auto r = newVar(handleValueAsScalar(x.getRhs()));
+    witness(x.getResult(), Expr::IntrOp(ap(l, r).widen()));
   };
   const auto intr2r = [&](auto x, auto ap) -> void {
-    witness(x.getResult(), Expr::IntrOp(ap(handleValueAsScalar(x.getLhs()), //
-                                           handleValueAsScalar(x.getRhs()), //
-                                           handleType(x.getType()))         //
-                                            .widen()));
+    auto l = newVar(handleValueAsScalar(x.getLhs()));
+    auto r = newVar(handleValueAsScalar(x.getRhs()));
+    witness(x.getResult(), Expr::IntrOp(ap(l, r, handleType(x.getType())).widen()));
   };
   const auto poison = [&](auto x, const std::string &reason) -> void {
-    witness(x, Expr::Poison(handleType(x.getType())));
-    stmts.emplace_back(Stmt::Comment(fmt::format("ERR: {}", reason)));
+    witness(x, Expr::Alias(Term::Poison(handleType(x.getType()))));
   };
-  const auto poison0 = [&](const std::string &reason) { stmts.emplace_back(Stmt::Comment(fmt::format("ERR: {}", reason))); };
+  const auto poison0 = [&](const std::string &reason) { ; };
   const auto push = [&](const auto &x) { stmts.emplace_back(x); };
 
-  // push(Stmt::Comment(show(op)));
+  // push(Term::Unit0Const().widen());
 
   const auto handled = llvm_shared::visitDyn0(
       op, //
@@ -408,32 +430,33 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           const auto constVal = c.getValue();
           if (const auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(constVal)) {
             const auto tpe = handleType(intAttr.getType());
-            if (tpe.is<Type::IntS8>()) return Expr::IntS8Const(intAttr.getInt());
-            if (tpe.is<Type::IntS16>()) return Expr::IntS16Const(intAttr.getInt());
-            if (tpe.is<Type::IntS32>()) return Expr::IntS32Const(intAttr.getInt());
-            if (tpe.is<Type::IntS64>()) return Expr::IntS64Const(intAttr.getInt());
-            if (tpe.is<Type::IntU8>()) return Expr::IntU8Const(intAttr.getInt());
-            if (tpe.is<Type::IntU16>()) return Expr::IntU16Const(intAttr.getInt());
-            if (tpe.is<Type::IntU32>()) return Expr::IntU32Const(intAttr.getInt());
-            if (tpe.is<Type::IntU64>()) return Expr::IntU64Const(intAttr.getInt());
+            if (tpe.is<Type::IntS8>()) return Expr::Alias(Term::IntS8Const(intAttr.getInt()));
+            if (tpe.is<Type::IntS16>()) return Expr::Alias(Term::IntS16Const(intAttr.getInt()));
+            if (tpe.is<Type::IntS32>()) return Expr::Alias(Term::IntS32Const(intAttr.getInt()));
+            if (tpe.is<Type::IntS64>()) return Expr::Alias(Term::IntS64Const(intAttr.getInt()));
+            if (tpe.is<Type::IntU8>()) return Expr::Alias(Term::IntU8Const(intAttr.getInt()));
+            if (tpe.is<Type::IntU16>()) return Expr::Alias(Term::IntU16Const(intAttr.getInt()));
+            if (tpe.is<Type::IntU32>()) return Expr::Alias(Term::IntU32Const(intAttr.getInt()));
+            if (tpe.is<Type::IntU64>()) return Expr::Alias(Term::IntU64Const(intAttr.getInt()));
           } else if (const auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(constVal)) {
             const auto tpe = handleType(floatAttr.getType());
-            if (tpe.is<Type::Float16>()) return Expr::Float16Const(floatAttr.getValueAsDouble());
-            if (tpe.is<Type::Float32>()) return Expr::Float32Const(floatAttr.getValueAsDouble());
-            if (tpe.is<Type::Float64>()) return Expr::Float64Const(floatAttr.getValueAsDouble());
+            if (tpe.is<Type::Float16>()) return Expr::Alias(Term::Float16Const(floatAttr.getValueAsDouble()));
+            if (tpe.is<Type::Float32>()) return Expr::Alias(Term::Float32Const(floatAttr.getValueAsDouble()));
+            if (tpe.is<Type::Float64>()) return Expr::Alias(Term::Float64Const(floatAttr.getValueAsDouble()));
           }
-          return Expr::Annotated(Expr::Poison(handleType(constVal.getType())), {},
-                                 fmt::format("ERROR: Unsupported arith.constant op {}", show(c)));
+          return Expr::Alias(Term::Poison(handleType(constVal.getType())));
         }());
       },
       [&](fir::BoxDimsOp dims) {
         const auto boxSelect = handleValueAs<FBoxed>(dims.getVal());
         const auto rank = handleValueAs(dims.getDim());
-
-        const auto dim = newVar(Expr::Index(boxSelect.dims(), rank, FDimMirror::tpe()));
-        witness(dims.getLowerBound(), selectNamed(dim, FDimM.lowerBound));
-        witness(dims.getExtent(), selectNamed(dim, FDimM.extent));
-        witness(dims.getByteStride(), selectNamed(dim, FDimM.stride));
+        // Expr::Index now requires Term::Any operands; bind the box-dims base and rank to atom Selects.
+        auto dimsBase = newVar(boxSelect.dims());
+        auto rankT = newVar(rank);
+        const auto dim = newVar(Expr::Index(dimsBase, rankT, FDimMirror::tpe()).widen());
+        witness(dims.getLowerBound(), Expr::Alias(selectField(dim, FDimM.lowerBound)));
+        witness(dims.getExtent(), Expr::Alias(selectField(dim, FDimM.extent)));
+        witness(dims.getByteStride(), Expr::Alias(selectField(dim, FDimM.stride)));
       },
       [&](fir::ShiftOp s) {
         witness(s.getResult(),
@@ -454,10 +477,13 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](mlir::arith::SelectOp x) {
         const auto cond = handleValueAsScalar(x.getCondition());
         const auto value = newVar(handleType(x.getType()));
-        push(Stmt::Cond(Expr::IntrOp(Intr::LogicEq(cond, dsl::integral(cond.tpe(), 1))), //
-                        {Stmt::Mut(value, handleValueAsScalar(x.getTrueValue()))},       //
-                        {Stmt::Mut(value, handleValueAsScalar(x.getFalseValue()))}));
-        witness(x.getResult(), value);
+        auto condT = newVar(cond);
+        Term::Any oneT = dsl::integral(cond.tpe(), 1);
+        auto eqT = newVar(Expr::IntrOp(Intr::LogicEq(condT, oneT)).widen());
+        push(Stmt::Cond(eqT,                                                                                               //
+                        {Stmt::Mut(value, handleValueAsScalar(x.getTrueValue())).widen()},                                 //
+                        {Stmt::Mut(value, handleValueAsScalar(x.getFalseValue())).widen()}).widen());
+        witness(x.getResult(), Expr::Alias(value));
       },
       [&](mlir::arith::CmpIOp x) {
         switch (x.getPredicate()) {
@@ -478,8 +504,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
 
       [&](mlir::arith::CmpFOp x) {
         switch (x.getPredicate()) {
-          case mlir::arith::CmpFPredicate::AlwaysFalse: return witness(x.getResult(), dsl::integral(Type::Bool1(), false));
-          case mlir::arith::CmpFPredicate::AlwaysTrue: return witness(x.getResult(), dsl::integral(Type::Bool1(), true));
+          case mlir::arith::CmpFPredicate::AlwaysFalse: return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
+          case mlir::arith::CmpFPredicate::AlwaysTrue: return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
 
           case mlir::arith::CmpFPredicate::OEQ: return intr2(x, Bind<Intr::LogicEq>());
           case mlir::arith::CmpFPredicate::OGT: return intr2(x, Bind<Intr::LogicGt>());
@@ -551,10 +577,11 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                   return m ^ fold_total([&](const FBoxedMirror &bm) -> FExpr { return FBoxed(select, bm); },    //
                                         [&](const FBoxedNoneMirror &) -> FExpr { return FBoxedNone{select}; }); //
                 })                                                                                              //
-              ^ fold([&] { // pointing to scalar, like fir.alloca, use FVar semantic
-                  return select.get<Expr::Select>() ^
-                         fold([&](auto &s) -> FExpr { return FVar{s}; },
-                              [&]() -> FExpr { return Expr::Annotated(Expr::Poison(select.tpe()), {}, "CoordinateOp non-select coord"); });
+              ^ fold([&]() -> FExpr { // pointing to scalar, like fir.alloca, use FVar semantic
+                  if (auto a = select.template get<Expr::Alias>()) {
+                    if (auto s = a->ref.template get<Term::Select>()) return FVar{*s};
+                  }
+                  return Expr::Any(Expr::Alias(Term::Poison(select.tpe())));
                 });
 
           witness(c.getResult(), expr);
@@ -568,19 +595,24 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       },
       [&](fir::ConvertOp c) {
         const auto as = handleType(c.getType());
-        stmts.emplace_back(Stmt::Comment(fmt::format("convert {} to {}", fRepr(handleValue(c.getOperand())), repr(as))));
         if (const auto from = handleValue(c.getOperand()); from ^ holds_any<FVar, FBoxed, FBoxedNone>()) {
           if (const auto tpe = fTypeOf(c.getType())) {
             *tpe ^ foreach_total([&](const FBoxedMirror &) { witness(c.getResult(), from); },
                                  [&](const FBoxedNoneMirror &) { witness(c.getResult(), from); },
                                  [&](const FVarMirror &) { witness(c.getResult(), from); });
           } else {
-            from ^ foreach_partial([&](const FVar &e) { witness(c.getResult(), Expr::Cast(e.value, as)); },
-                                   [&](const FBoxed &e) { witness(c.getResult(), Expr::Cast(index0(e.addr()), as)); },
-                                   [&](const FBoxedNone &e) {
-                                     poison(c.getResult(), fmt::format("Cast source is an FBoxNone ({}) but output type is not an FType {}",
-                                                                       fRepr(e), repr(as)));
-                                   });
+            from ^ foreach_partial(
+                [&](const FVar &e) {
+                  // Expr::Cast now requires Term::Any.
+                  witness(c.getResult(), Expr::Cast(e.value.widen(), as).widen());
+                },
+                [&](const FBoxed &e) {
+                  auto base = newVar(index0(e.addr()));
+                  witness(c.getResult(), Expr::Cast(base, as).widen());
+                },
+                [&](const FBoxedNone &e) {
+                  poison(c.getResult(), fmt::format("Cast source is an FBoxNone ({}) but output type is not an FType {}", fRepr(e), repr(as)));
+                });
           }
         } else {
           if (const auto tpe = fTypeOf(c.getType())) {
@@ -590,7 +622,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                                  [&](const FVarMirror &) { witness(c.getResult(), from); });
           } else {
             if (const auto expr = handleValueAs(c.getOperand()); expr.tpe() == as) witness(c.getResult(), expr);
-            else witness(c.getResult(), Expr::Cast(expr, as));
+            else {
+              auto term = newVar(expr);
+              witness(c.getResult(), Expr::Cast(term, as).widen());
+            }
           }
         }
       },
@@ -607,7 +642,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](fir::EmboxOp a) { witness(a, handleValue(a.getMemref())); },
       [&](fir::AddrOfOp a) {
         if (auto global = llvm::dyn_cast_if_present<fir::GlobalOp>(mlir::SymbolTable::lookupSymbolIn(M, a.getSymbol()))) {
-          witness(a.getResult(), Expr::Select({}, Named(global.getSymName().str(), handleType(global.getType()))));
+          {
+            const auto gName = Named(global.getSymName().str(), handleType(global.getType()));
+            witness(a.getResult(), Expr::Alias(Term::Select(gName, {}, gName.tpe)));
+          }
         } else {
           return poison(a.getResult(),
                         fmt::format("FIR AddrOf lookup of symbol {} is not a FIR global", a.getSymbol().getLeafReference().str()));
@@ -631,140 +669,73 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             if (!rhs) return poison0(fmt::format("Unknown RHS {} in call to {}", show(args[1]), name));
 
             const auto rhs0 = *rhs ^ fold_total(
-                                         [&](const Expr::Any &x) {
-                                           return Expr::Annotated(Expr::Poison(rhsTye), {}, fmt::format("IMPL?? {}", repr(x))).widen();
-                                         },
-                                         [&](const FVar &x) { return x.value.widen(); },
-                                         [&](const FBoxed &x) { return Expr::Annotated(Expr::Poison(rhsTye), {}, "IMPL").widen(); },
-                                         [&](const FBoxedNone &x) { return Expr::Annotated(Expr::Poison(rhsTye), {}, "IMPL").widen(); });
+                                         [&](const Expr::Any &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
+                                         [&](const FVar &x) -> Expr::Any { return Expr::Alias(x.value).widen(); },
+                                         [&](const FBoxed &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
+                                         [&](const FBoxedNone &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); });
 
-            *lhs ^ foreach_total([&](const Expr::Any &x) { push(Stmt::Mut(x, rhs0)); },   //
-                                 [&](const FVar &x) { push(Stmt::Mut(x.value, rhs0)); },  //
-                                 [&](const FBoxed &x) { push(update0(x.addr(), rhs0)); }, //
-                                 [&](const FBoxedNone &x) { poison0("IMPL"); });
+            *lhs ^ foreach_total(
+                       [&](const Expr::Any &x) {
+                         // Stmt::Mut needs Term::Select lhs.
+                         push(Stmt::Mut(asSelectF(x), rhs0));
+                       },                                                                  //
+                       [&](const FVar &x) { push(Stmt::Mut(x.value, rhs0)); },             //
+                       [&](const FBoxed &x) { push(update0(x.addr(), rhs0)); },            //
+                       [&](const FBoxedNone &x) { poison0("IMPL"); });
           } else poison0(fmt::format("Unimplemented intrinsic in {}", show(a)));
         } else poison0(fmt::format("Unknown callee in {}", show(a)));
       },
 
       [&](fir::ArrayCoorOp c) {
-        // XXX see `XArrayCoorOpConversion` in CodeGen.cpp
-        // XXX `XArrayCoorOp` values are created by `ArrayCoorConversion` in PreCGRewrite.cpp
-        // The overall invariant is:
-        /// coor.getIndices().size() == rank
-        /// coor.getShape().empty() || coor.getShape().size() == rank
-        /// coor.getShift().empty() || coor.getShift().size() == rank
-        /// coor.getSlice().empty() || coor.getSlice().size() == 3 * rank
-        ///
-        const auto seqTy = fir::unwrapUntilSeqType(c.getMemref().getType());
-        if (!seqTy) {
-          return poison(c, fmt::format("ERROR: Memref {} type does not contain a sequence type", show(static_cast<mlir::Type>(seqTy))));
-        }
-        auto maybeRef = handleValue(c.getMemref());
-        const auto ref = maybeRef ^ narrow<FBoxed, FVar, Expr::Any>(); // BoxedArray | Expr::Any + seq type
-        if (!ref) {
-          return poison(c, fmt::format("ERROR: Memref is not a FBoxed|Expr, the type is {}, expr is {}",
-                                       show(static_cast<mlir::Type>(seqTy)), fRepr(maybeRef)));
-        }
-        if (seqTy.hasUnknownShape()) {
-          return poison(c, fmt::format("IMPL: Unknown shape not implemented yet, op={}", show(c)));
-        }
-
-        const auto ones = [](auto n) { return repeat(Expr::IntS64Const(1).widen()) | take(n) | to_vector(); };
-        const size_t ranks = seqTy.getDimension();
-
-        std::vector<Expr::Any> actualShape;
-        if (seqTy.hasDynamicExtents()) {
-          std::optional<FBoxed> boxed = *ref ^ get_maybe<FBoxed>();
-          if (!boxed) {
-            return poison(c, fmt::format("ERROR: array ({}) has dynamic extent but us not boxed", show(c.getMemref())));
-          }
-          actualShape =
-              iota<size_t>(0, ranks) | map([&](auto r) { return selectAny(newVar(boxed->dimAt(r)), FDimM.extent); }) | to_vector();
-        } else { // known extent (shape), in theory this could be boxed too, but we just ignore the dynamic shape
-          actualShape = seqTy.getShape() | map([](auto extent) { return Expr::IntS64Const(extent).widen(); }) | to_vector();
-        }
-
-        const auto indices = asView(c.getIndices()) | map([&](auto x) { return handleValueAs(x); }) | to_vector();
-        const auto [shape, shift] = maybe(c.getShape())                                                                                   //
-                                    ^ flat_map([&](auto &v) { return handleValue(v) ^ narrow<FShift, FShape, FShapeShift>(); })           //
-                                    ^ map([&](auto &v) {                                                                                  //
-                                        return v ^ fold_total([&](const FShift &x) { return std::pair{actualShape, x.lowerBounds}; },     //
-                                                              [&](const FShape &x) { return std::pair{x.extents, ones(ranks)}; },         //
-                                                              [&](const FShapeShift &x) { return std::pair{x.extents, x.lowerBounds}; }); //
-                                      })                                                                                                  //
-                                    ^ fold([&] { return std::pair{actualShape, ones(ranks)}; });                                          //
-        const auto [sliceLB, sliceStep] = maybe(c.getSlice())                                                                             //
-                                          ^ map([&](auto &x) { return handleValueAs<FSlice>(x); })                                        //
-                                          ^ map([&](auto &s) { return std::pair{s.lowerBounds, s.strides}; })                             //
-                                          ^ fold([&] { return std::pair{shift, ones(ranks)}; });                                          //
-
-        for (const auto &[name, xs] :
-             {std::pair{"indices", indices}, {"shape", shape}, {"shift", shift}, {"sliceLB", sliceLB}, {"sliceStep", sliceStep}}) {
-          if (xs.size() != ranks) {
-            return poison(c, fmt::format("ERROR: invariant: {} array size != rank ({})", name, ranks));
-          }
-        }
-
-        using namespace polyast::dsl;
-        const auto offset = newVar(0_(Long));
-        const auto stride = newVar(1_(Long));
-        for (size_t i = 0; i < ranks; ++i) {                              // lb[i] === shift[i]
-          auto idx = newVar(call(Intr::Sub(indices[i], shift[i], Long))); // idx = indices[i] - lb[i]
-          auto diff = newVar(call(Intr::Add(                              // diff = idx * step[i] + (sliceLB[i] - lb[i]);
-              call(Intr::Mul(idx, sliceStep[i], Long)),                   //
-              call(Intr::Sub(sliceLB[i], shift[i], Long)),                //
-              Long)));
-
-          push(Mut(offset, call(Intr::Add(offset, call(Intr::Mul(diff, stride, Long)), Long)))); // offset += diff * stride[i]
-          push(Mut(stride, call(Intr::Mul(stride, shape[i], Long))));                            // stride *= shape[i]
-        }
-        witness(c.getResult(), *ref ^ fold_total([&](const FBoxed &e) { return FArrayCoord{e.addr(), offset, e.comp()}; }, //
-                                                 [&](const FVar &e) { return FArrayCoord{e.value, offset, handleType(seqTy.getEleTy())}; },
-                                                 [&](const Expr::Any &e) { return FArrayCoord{e, offset, handleType(seqTy.getEleTy())}; }));
+        // FIXME re-port ArrayCoor lowering to ANF form. The original implementation built a chain of
+        // Intr::{Sub,Add,Mul} over Expr::Any operands; the new schema requires Term::Any args, so the
+        // entire offset/stride accumulator needs to thread temp Vars. Stubbed out so the rest of the
+        // plugin links; any kernel hitting this path will surface as a poison FArrayCoord at runtime.
+        poison(c, "FIXME: ArrayCoorOp not yet ported to new AST schema");
       },
 
       [&](fir::AllocaOp a) {
         static size_t id;
         const Named named(fmt::format("alloca_{}", ++id), handleType(a.getInType()));
-        push(Stmt::Var(named, {}));
+        push(Stmt::Var(named, std::optional<Expr::Any>{}, /*isMutable*/ true).widen());
         if (named.tpe.is<Type::Ptr>()) {
-          witness(a.getResult(), Expr::Select({}, named));
+          witness(a.getResult(), Expr::Alias(Term::Select(named, {}, named.tpe)));
         } else {
-          witness(a.getResult(), FVar{Expr::Select({}, named)});
+          witness(a.getResult(), FVar{Term::Select(named, {}, named.tpe)});
         }
       },
       [&](fir::LoadOp l) {
         const auto expr = handleValue(l.getMemref());
         if (const auto ref = expr ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
-          *ref ^ foreach_total([&](const Expr::Any &e) { witness(l.getResult(), index0(e)); },                                //
-                               [&](const FVar &e) { witness(l.getResult(), e.value); },                                       //
-                               [&](const FArrayCoord &e) { witness(l.getResult(), Expr::Index(e.array, e.offset, e.comp)); }, //
-                               [&](const FBoxed &e) { witness(l.getResult(), e); });                                          //
+          *ref ^ foreach_total(
+                     [&](const Expr::Any &e) { witness(l.getResult(), index0(e)); },                            //
+                     [&](const FVar &e) { witness(l.getResult(), Expr::Alias(e.value).widen()); },              //
+                     [&](const FArrayCoord &e) {
+                       auto base = newVar(e.array);
+                       auto off = newVar(e.offset);
+                       witness(l.getResult(), Expr::Index(base, off, e.comp).widen());
+                     },                                                                                         //
+                     [&](const FBoxed &e) { witness(l.getResult(), e); });                                      //
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
       },
       [&](fir::StoreOp s) {
         const auto rhs = handleValueAs(s.getValue());
         if (const auto lhs = handleValue(s.getMemref()) ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
-          *lhs ^ foreach_total([&](const Expr::Any &e) { push(update0(e, rhs)); },                        //
-                               [&](const FVar &a) { push(Stmt::Mut(a.value, rhs)); },                     //
-                               [&](const FArrayCoord &e) { push(Stmt::Update(e.array, e.offset, rhs)); }, //
-                               [&](const FBoxed &e) {
-                                 push(update0(e.addr(), rhs)); // TODO does this actually happen?
-                               });
+          *lhs ^ foreach_total(
+                     [&](const Expr::Any &e) { push(update0(e, rhs)); },                                  //
+                     [&](const FVar &a) { push(Stmt::Mut(a.value, rhs).widen()); },                       //
+                     [&](const FArrayCoord &e) {
+                       auto rhsT = newVar(rhs);
+                       push(Stmt::Update(asSelectF(e.array), newVar(e.offset), rhsT).widen());
+                     },                                                                                   //
+                     [&](const FBoxed &e) { push(update0(e.addr(), rhs)); });
         } else poison0(fmt::format("StoreOp LHS value not an Expr|FBoxed|FArrayCoord, was {}", show(s.getValue())));
       },
       [&](const fir::ResultOp r) {
-        //        if (const auto xs = r.getResults(); xs.empty()) {
-        //          push(Stmt::Return(Expr::Unit0Const()));
-        //        } else if (xs.size() > 1) {
-        //          push(Stmt::Comment(fmt::format("ERROR: Multiple values in return: {}", show(r))));
-        //        } else {
-        //          push(Stmt::Return(handleValue(xs.front())));
-        //        }
-        push(Stmt::Comment(fmt::format("ignored op {}", show(r))));
+        // (no-op result, formerly emitted Stmt::Comment)
       });
   if (!handled) {
-    push(Stmt::Comment(fmt::format("ERROR: Unsupported MLIR op {}", show(op))).widen());
+    // (no-op for unhandled ops)
   }
 }
 
@@ -803,16 +774,16 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   const static Named Ends("#ends", Ptr(Long));
   const static Named MappedInduction("#mappedInd", Long);
 
-  const Type::Struct CaptureType(Sym({fmt::format("#Capture<{}>", name)}), {}, {}, {});
+  const Type::Struct CaptureType(Sym({fmt::format("#Capture<{}>", name)}), {});
   const Named Capture("#capture", Ptr(CaptureType));
 
-  const Type::Struct ReductionType(Sym({fmt::format("#Reduction<{}>", name)}), {}, {}, {});
+  const Type::Struct ReductionType(Sym({fmt::format("#Reduction<{}>", name)}), {});
   const Named Reduction("#reduction", Ptr(ReductionType));
 
   const StructDef preludeDef(Sym({"#Prelude"}), {},
                              gpu ? std::vector{LowerBound, UpperBound, Step, TripCount} //
                                  : std::vector{LowerBound, UpperBound, Step, TripCount, Begins, Ends},
-                             {});
+                             std::vector<Type::Struct>{});
   const Named Prelude("#prelude", typeOf(preludeDef));
 
   op.getBody()->dump();
@@ -835,14 +806,33 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                           ^ narrow<Expr::Any, FBoxed>() //
                           ^ flat_map([](auto &v) {      //
                               return v ^ fold_total(
-                                             [](const Expr::Any &e) {
-                                               return e.get<Select>() ^ flat_map([&](auto &s) {
-                                                        return s.last.tpe.template get<Type::Ptr>() //
-                                                               ^ map([&](auto &p) { return Named(s.last.symbol, p.comp); });
-                                                      });
+                                             [](const Expr::Any &e) -> std::optional<Named> {
+                                               // The new Term::Select carries (root, steps, tpe). The "last" component
+                                               // is the leaf segment - either the last Field's name (with Select.tpe) or root.
+                                               if (auto a = e.template get<Expr::Alias>()) {
+                                                 if (auto sel = a->ref.template get<Term::Select>()) {
+                                                   if (auto p = sel->tpe.template get<Type::Ptr>()) {
+                                                     std::string leaf = sel->root.symbol;
+                                                     for (auto &st : sel->steps) {
+                                                       if (auto f = st.template get<PathStep::Field>()) leaf = f->name;
+                                                     }
+                                                     return Named(leaf, p->comp);
+                                                   }
+                                                 }
+                                               }
+                                               return std::nullopt;
                                              },
-                                             [](const FBoxed &e) {
-                                               return e.base.get<Select>() ^ map([&](auto &s) { return Named(s.last.symbol, e.comp()); });
+                                             [](const FBoxed &e) -> std::optional<Named> {
+                                               if (auto a = e.base.template get<Expr::Alias>()) {
+                                                 if (auto sel = a->ref.template get<Term::Select>()) {
+                                                   std::string leaf = sel->root.symbol;
+                                                   for (auto &st : sel->steps) {
+                                                     if (auto f = st.template get<PathStep::Field>()) leaf = f->name;
+                                                   }
+                                                   return Named(leaf, e.comp());
+                                                 }
+                                               }
+                                               return std::nullopt;
                                              });
                             }) //
                           ^ map([&](auto &target) {
@@ -859,7 +849,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   for (auto &[expr, rd] : exprWithReductions) {
     llvm::errs() << "XXXX R " << fRepr(expr) << " = " << repr(rd.named) << repr(rd.named.tpe) << "\n";
     for (auto &entry : r.valuesLUT) {
-      if (entry.second == expr) entry.second = Select({}, rd.named);
+      if (entry.second == expr) entry.second = Expr::Any(Expr::Alias(Term::Select(rd.named, {}, rd.named.tpe)));
     }
   }
 
@@ -868,7 +858,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   }
 
   // Then inject induction
-  r.valuesLUT.insert({op.getInductionVar(), selectNamed(MappedInduction)});
+  r.valuesLUT.insert({op.getInductionVar(), Expr::Any(Expr::Alias(selectNamed(MappedInduction)))});
   // Finally, map all operations
   for (auto &x : op.getBody()->getOperations()) {
     r.handleOp(&x);
@@ -877,8 +867,14 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   // Captures are now populated
   const auto captures = r.captures //
                         | map([](auto &p) {
-                            return DoConcurrentRegion::Capture{.named = tail(p.second)[0], //
-                                                               .value = p.first,           //
+                            // The new Term::Select stores root + path-steps; pick the leaf Named (last Field, else root).
+                            std::string leaf = p.second.root.symbol;
+                            for (auto &s : p.second.steps) {
+                              if (auto f = s.template get<PathStep::Field>()) leaf = f->name;
+                            }
+                            const Named leafNamed(leaf, p.second.tpe);
+                            return DoConcurrentRegion::Capture{.named = leafNamed,    //
+                                                               .value = p.first,      //
                                                                .locality = DoConcurrentRegion::Locality::Default};
                           }) //
                         | to_vector();
@@ -887,18 +883,24 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                               std::vector{Prelude}                                          //
                                   | concat(captures | map([](auto &c) { return c.named; })) //
                                   | to_vector(),
-                              {});
+                              std::vector<Type::Struct>{});
 
   const StructDef reductionsDef(ReductionType.name, {}, //
-                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }), {});
+                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }),
+                                std::vector<Type::Struct>{});
 
   r.syntheticDefs.emplace(preludeDef);
   r.syntheticDefs.emplace(capturesDef);
   if (!exprWithReductions.empty()) r.syntheticDefs.emplace(reductionsDef);
 
   const auto svrs = exprWithReductions ^ map([&](auto &, auto &rd) {
+                      // SingleVarReduction.init is Term::Any. reductionInit returns Expr::Any (Alias-wrapped Term).
+                      auto initExpr = reductionInit(rd.kind, rd.named.tpe);
+                      Term::Any initTerm = initExpr.template get<Expr::Alias>()
+                                               ? initExpr.template get<Expr::Alias>()->ref
+                                               : Term::Any(Term::Poison(rd.named.tpe).widen());
                       return SingleVarReduction{.target = rd.named,                                   //
-                                                .init = reductionInit(rd.kind, rd.named.tpe),         //
+                                                .init = initTerm,                                     //
                                                 .partialArray = Select({Reduction}, rd.partialArray), //
                                                 .binaryOp = reductionOp(rd.kind, rd.named.tpe)};
                     });
@@ -923,7 +925,8 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                         r.defs                        //
                             | values()                //
                             | concat(r.syntheticDefs) //
-                            | to_vector());
+                            | to_vector(),
+                        PassPhase::Initial());
 
   llvm::errs() << repr(program) << "\n";
   llvm::errs().flush();

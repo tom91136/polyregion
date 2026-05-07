@@ -71,13 +71,13 @@ object compiletime {
           (_ -> st, _) <- Retyper.typer0(s)
           (_ -> mt, _) <- Retyper.typer0(m)
           st <- st match {
-            case p.Type.Struct(sym, _, _, _) =>
+            case p.Type.Struct(sym, _) =>
               println(s"???> Go ${sym} ==  ${m.show}")
               sym.success
             case bad => s"source class ${s.show} (mirror is ${m.show}) is not a class type, got repr: ${bad.repr}".fail
           }
           mt <- mt match {
-            case p.Type.Struct(sym, _, _, _) => sym.success
+            case p.Type.Struct(sym, _) => sym.success
             case bad => s"mirror class ${m.show} (source is ${s.show}) is not a class type, got repr: ${bad.repr}".fail
           }
         } yield mt -> st
@@ -139,11 +139,10 @@ object compiletime {
     }
 
   private def replaceTypes(mirrorToSourceTable: Map[p.Sym, p.Sym])(t: p.Type) = t match {
-    case p.Type.Struct(sym, tpeVars, args, parents) =>
-      p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args, parents) match {
-        case p.Type.Struct(Symbols.ArrayMirror, _, x :: Nil, _) =>
-          // XXX restore @scala.Array back to the proper array type if needed
-          p.Type.Ptr(x, None, p.Type.Space.Global)
+    case p.Type.Struct(sym, args) =>
+      p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), args) match {
+        case p.Type.Struct(Symbols.ArrayMirror, x :: Nil) =>
+          p.Type.Ptr(x, p.Type.Space.Global)
         case x => x
       }
     case x => x
@@ -253,12 +252,8 @@ object compiletime {
               reflectedSig <- Compiler.deriveSignature(reflectedDef)
               // Map the mirrored method to use the source types first, otherwise we're comparing different classes entirely.
               reflectedSigWithSourceTpes = reflectedSig
-                .copy(name = p.Sym(sourceName)) // We also replace the name to use the source ones.
+                .copy(name = p.Sym(sourceName))
                 .modifyAll[p.Type](_.mapNode(replaceTypes(mirrorToSourceTable)(_)))
-                .modifyAll[p.Type] {
-                  case s: p.Type.Struct => s.copy(parents = Nil)
-                  case x                => x
-                }
 
               sourceSigs <- sources.traverse((sourceSym, sourceDef) =>
                 Compiler.deriveSignature(sourceDef).map(sourceSym -> _)
@@ -269,12 +264,7 @@ object compiletime {
                 //  Doing this may make the overload resolution less accurate.
                 //  We also discard the generic types here, to handle cases like Seq[A] =:= SeqOp[A, CC[_], C]
 
-                sourceSig
-                  .copy(receiver = None, tpeVars = Nil)
-                  .modifyAll[p.Type] {
-                    case s: p.Type.Struct => s.copy(parents = Nil)
-                    case x                => x
-                  } ==
+                sourceSig.copy(receiver = None, tpeVars = Nil) ==
                   reflectedSigWithSourceTpes.copy(receiver = None, tpeVars = Nil)
               } match {
                 case sourceMirror :: Nil => // single match
@@ -319,7 +309,19 @@ object compiletime {
       (_, _, dependentStructs, _) <-
         Compiler.compileAndReplaceStructDependencies(
           sink,
-          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, Nil, p.Type.Nothing, Nil, Set(p.Function.Attr.Exported)),
+          p.Function(
+            p.Sym("_dummy_"),
+            Nil,
+            None,
+            Nil,
+            Nil,
+            Nil,
+            p.Type.Nothing,
+            Nil,
+            p.Function.Visibility.Exported,
+            p.Function.FpMode.Relaxed,
+            isEntry = false
+          ),
           deps
         )(Map.empty)
 

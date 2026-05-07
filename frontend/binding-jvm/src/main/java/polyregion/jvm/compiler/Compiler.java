@@ -28,8 +28,9 @@ public final class Compiler implements AutoCloseable {
   static final byte //
       Target_Object_LLVM_NVPTX64 = 20,
       Target_Object_LLVM_AMDGCN = 21,
-      Target_Object_LLVM_SPIRV32 = 22,
-      Target_Object_LLVM_SPIRV64 = 23;
+      Target_Object_LLVM_SPIRV32_Kernel = 22,
+      Target_Object_LLVM_SPIRV64_Kernel = 23,
+      Target_Object_LLVM_SPIRV_GLCompute = 24;
   static final byte //
       Target_Source_C_C11 = 30,
       Target_Source_C_OpenCL1_1 = 31,

@@ -59,10 +59,17 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
       [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return GlobalAS; });
 }
 
+llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B) const {
+  return GenericAS != 0 ? B.getPtrTy(GlobalAS) : B.getPtrTy();
+}
+
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {
-  // SPIRV pointer slots must use the value's AS or the store crosses disjoint spaces; everywhere
-  // else stay on the default-AS `ptr` to keep RuntimeDyld / CUDA / HIP layouts unchanged.
-  const auto allocaTy = (ty->isPointerTy() && GenericAS == 0) ? B.getPtrTy() : ty;
+  // SPIRV slots must use the value's AS (stores would otherwise cross disjoint spaces); other
+  // targets are happy with default-AS slots. Non-default-AS pointers (NVPTX `addrspace(3)` for
+  // shared memory) need their AS preserved -- coercing to default AS would have NVPTX emit
+  // `st.b64` instead of `st.shared.b64` on the load.
+  const auto preserveAS = ty->isPointerTy() && llvm::cast<llvm::PointerType>(ty)->getAddressSpace() != 0;
+  const auto allocaTy = (ty->isPointerTy() && GenericAS == 0 && !preserveAS) ? B.getPtrTy() : ty;
   llvm::Value *stackPtr;
   if (auto fn = B.GetInsertBlock() ? B.GetInsertBlock()->getParent() : nullptr) {
     auto &entry = fn->getEntryBlock();
@@ -129,13 +136,17 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
                     });
       }, //
       [&](const Type::Ptr &x) -> llvm::Type * {
-        if (x.length) return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), *x.length);
         return llvm::PointerType::get(actual, addressSpace(x.space));
       }, //
+      [&](const Type::Arr &x) -> llvm::Type * {
+        // At a function boundary, a sized array travels as a pointer to its element type (matching
+        // C array decay). Inside the function body, the LLVM `[N x T]` aggregate is kept so a
+        // [0, idx] GEP can index it.
+        if (functionBoundary) return llvm::PointerType::get(actual, addressSpace(TypeSpace::Global()));
+        return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
+      }, //
       [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },
-      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); },
-      [&](const Type::Annotated &x) -> llvm::Type * { return resolveType(x.tpe, structs, functionBoundary); } //
-  );
+      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); }  );
 }
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
@@ -180,8 +191,8 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
         walk(arg);
     } else if (auto p = t.template get<Type::Ptr>()) {
       walk(p->comp);
-    } else if (auto a = t.template get<Type::Annotated>()) {
-      walk(a->tpe);
+    } else if (auto a = t.template get<Type::Arr>()) {
+      walk(a->comp);
     } else if (auto e = t.template get<Type::Exec>()) {
       for (auto &arg : e->args)
         walk(arg);

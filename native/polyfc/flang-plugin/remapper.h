@@ -21,7 +21,7 @@ struct Remapper {
 
   llvm::DenseMap<mlir::Value, FExpr> valuesLUT;
   llvm::DenseMap<mlir::Type, FType> typesLUT;
-  llvm::DenseMap<mlir::Value, polyast::Expr::Select> captures;
+  llvm::DenseMap<mlir::Value, polyast::Term::Select> captures;
 
   std::unordered_set<polyast::StructDef> syntheticDefs;
   std::unordered_map<polyast::Type::Struct, polyast::StructDef> defs;
@@ -29,7 +29,7 @@ struct Remapper {
 
   std::vector<polyast::Stmt::Any> stmts;
   std::vector<polyast::Function> functions;
-  polyast::Expr::Select newVar(const std::variant<polyast::Expr::Any, polyast::Type::Any> &expr);
+  polyast::Term::Select newVar(const std::variant<polyast::Expr::Any, polyast::Type::Any> &expr);
 
   Remapper(mlir::ModuleOp &M, mlir::DataLayout &L, mlir::Operation *perimeter, const std::vector<polyast::Named> &captureRoot);
   std::optional<FType> fTypeOf(const mlir::Type &type);
@@ -37,15 +37,14 @@ struct Remapper {
   polyast::StructLayout resolveLayout(const polyast::StructDef &def);
   polyast::Type::Any handleType(mlir::Type type, bool captureBoundary = false);
   FExpr handleValue(mlir::Value val, const std::optional<std::vector<polyast::Named>> &altRoot = {});
-  polyast::Expr::Select handleSelectExpr(mlir::Value val);
+  polyast::Term::Select handleSelectExpr(mlir::Value val);
   polyast::Expr::Any handleValueAsScalar(mlir::Value val);
 
   template <typename T = polyast::Expr::Any> T handleValueAs(const mlir::Value val) {
     const auto expr = handleValue(val);
-    return expr ^ get_maybe<T>() ^ fold([&] {
+    return expr ^ get_maybe<T>() ^ fold([&]() -> T {
              if constexpr (std::is_same_v<T, polyast::Expr::Any>) {
-               return polyast::Expr::Annotated(polyast::Expr::Poison(handleType(val.getType())), {},
-                                               fmt::format("Value {} cannot be cast to Expr::Any", fRepr(expr)));
+               return polyast::Expr::Alias(polyast::Term::Poison(handleType(val.getType())));
              } else return T{};
            });
   }

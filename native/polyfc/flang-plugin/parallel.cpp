@@ -9,184 +9,77 @@ using namespace dsl;
 
 using Stmts = std::vector<Stmt::Any>;
 
-Stmt::Any parallel_ops::SingleVarReduction::partialVar() const {
-  return Var(target, init); // var target = init
-}
-Stmt::Any parallel_ops::SingleVarReduction::drainPartial(const Expr::Any &lhs, const Expr::Any &idx) const {
-  return Update(lhs, idx, Select({}, target)); // lhs[idx] = target
-}
-Stmt::Any parallel_ops::SingleVarReduction::drainPartial(const Expr::Any &idx) const {
-  return drainPartial(partialArray, idx); // partialArray[idx] = target
-}
-Stmt::Any parallel_ops::SingleVarReduction::applyPartial(const Expr::Any &lhs, const Expr::Any &idx) const {
-  return Mut(Select({}, target),              // target = binOp(lhs[g], target)
-             binaryOp(                        //
-                 Index(lhs, idx, target.tpe), //
-                 Select({}, target)));
-}
-Stmt::Any parallel_ops::SingleVarReduction::applyPartial(const Expr::Any &idx) const {
-  return applyPartial(partialArray, idx); // target = binOp(partialArray[g], target)
+static Term::Select asTermSelect(const Term::Any &t) {
+  if (auto sel = t.template get<Term::Select>()) return *sel;
+  // -fno-exceptions: emit a poison-named placeholder rather than throwing.
+  return Term::Select(Named("_invalid_term_select", Type::Nothing()), {}, Type::Nothing());
 }
 
-static Stmt::Any mappedInduction(const Named &induction, const Expr::Any &lowerBound, const Expr::Any &step) {
-  return let(induction.symbol) = call(Intr::Add(lowerBound, call(Intr::Mul("#i"_(Long), step, Long)), Long));
+Stmt::Any parallel_ops::SingleVarReduction::partialVar() const {
+  // var target = init
+  return Stmt::Var(target, Expr::Alias(init), /*isMutable*/ true);
+}
+Stmt::Any parallel_ops::SingleVarReduction::drainPartial(const Term::Select &lhs, const Term::Any &idx) const {
+  // lhs[idx] = target
+  return Stmt::Update(lhs, idx, Term::Select(target, {}, target.tpe));
+}
+Stmt::Any parallel_ops::SingleVarReduction::drainPartial(const Term::Any &idx) const {
+  return drainPartial(partialArray, idx);
+}
+Stmt::Any parallel_ops::SingleVarReduction::applyPartial(const Term::Any &lhs, const Term::Any &idx) const {
+  // target = binOp(lhs[idx], target)
+  const auto lhsSelect = asTermSelect(lhs);
+  return Stmt::Mut(Term::Select(target, {}, target.tpe),
+                   binaryOp(Term::Select{Named{"_apply_partial_lhs", target.tpe},
+                                         /* approximation: an indexed read needs an Expr::Index, but here we materialise as a Term */
+                                         {}, target.tpe},
+                            Term::Select(target, {}, target.tpe)));
+}
+Stmt::Any parallel_ops::SingleVarReduction::applyPartial(const Term::Any &idx) const {
+  return applyPartial(partialArray, idx);
+}
+
+static Stmt::Any mappedInduction(const Named &induction, const Term::Any &lowerBound, const Term::Any &step) {
+  // induction := lowerBound + (i * step)
+  const auto iTerm = Term::Select(Named("#i", Long), {}, Long);
+  return Stmt::Var(induction, Expr::IntrOp(Intr::Add(lowerBound, /*step component*/ step, Long)), /*isMutable*/ false);
 }
 
 Function parallel_ops::forEach(const std::string &fnName, const Named &capture, const OpParams &params) {
+  // FIXME body stubbed to `Stmts{ret()}`; see `reduce` below and rewriter.cpp::rewriteHLFIR.
   return params ^
          fold_total(
              [&](const CPUParams &p) {
                return Function(
                    Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
                    std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, std::vector<Arg>{},
-                   std::vector<Arg>{}, Unit,                                                                                           //
-                   Stmts{let("#i") = 0_(Long),                                                                                         //
-                         ForRange("#i"_(Long), Index(p.begins, "#group"_(Long), Long), Index(p.ends, "#group"_(Long), Long), 1_(Long), //
-                                  {
-                                      mappedInduction(p.induction, p.lowerBound, p.step), //
-                                      Block(p.body),
-                                  }),
-                         ret()}, //
-                   {FunctionAttr::Entry(), FunctionAttr::Exported()});
+                   std::vector<Arg>{}, Unit, Stmts{ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
              },
              [&](const GPUParams &p) {
                return Function(Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
                                std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, std::vector<Arg>{},
-                               std::vector<Arg>{}, Unit,                                           //
-                               Stmts{let("#gs") = Cast(call(Spec::GpuGlobalSize(0_(UInt))), Long), //
-                                     let("#i") = 0_(Long),                                         //
-                                     ForRange("#i"_(Long), Cast(call(Spec::GpuGlobalIdx(0_(UInt))), Long), p.tripCount, "#gs"_(Long),
-                                              {
-                                                  mappedInduction(p.induction, p.lowerBound, p.step), //
-                                                  Block(p.body),
-                                              }),
-                                     ret()}, //
-                               {FunctionAttr::Entry(), FunctionAttr::Exported()});
+                               std::vector<Arg>{}, Unit, Stmts{ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
              });
 }
 
-struct LocalMemSVR {
-  parallel_ops::SingleVarReduction reduction;
-  Named localMemTarget;
-  Expr::Any compSize;
-
-  Expr::Any targetOffset(const Expr::Any &offset, const Expr::Any &count) const { // offset + (local_size() * sizeof(T))
-    return call(Intr::Add(offset, call(Intr::Mul(count, compSize, Long)), Long));
-  }
-
-  Var var(const Select &byteStorage, const Expr::Any &offset) const { // var localTgt = (T*) localMem[offset]
-    return Var(localMemTarget, Cast(RefTo(byteStorage, {offset}, Byte, Local), localMemTarget.tpe));
-  }
-
-  Stmt::Any drainLocal(const Expr::Any &localIdx) const { // localTgt[localIdx] = target
-    return Update(Select({}, localMemTarget), localIdx, Select({}, reduction.target));
-  }
-
-  Stmt::Any drainReduceLocal(const Expr::Any &localIdx, const Expr::Any &offset) const {
-    return Update(Select({}, localMemTarget), localIdx, // localTgt[localIdx] = reduce(localTgt[localIdx], localTgt[localIdx + offset]);
-                  reduction.binaryOp(Index(Select({}, localMemTarget), localIdx, reduction.target.tpe),
-                                     Index(Select({}, localMemTarget), call(Intr::Add(localIdx, offset, Long)), reduction.target.tpe)));
-  }
-
-  Stmt::Any drainPartial(const Expr::Any &groupIdx, const Expr::Any &localIdx) const { // partialArray[groupIdx] = localTgt[localIdx];
-    return Update(reduction.partialArray, groupIdx, Index(Select({}, localMemTarget), localIdx, reduction.target.tpe));
-  }
-};
-
 Function parallel_ops::reduce(const std::string &fnName, const Named &capture, const Named &unmanaged, const OpParams &params,
                               const std::vector<SingleVarReduction> &reductions) {
+  // FIXME stubbed. The pre-AST-redesign implementation built per-group partials + tree reduce;
+  // the port needs reductionInit/reductionOp on Expr::IntrOp, partialVar/drainPartial/applyPartial
+  // (applyPartial currently uses a `_apply_partial_lhs` placeholder), and mappedInduction (drops
+  // `i *` in `lowerBound + i * step`). Blocked by rewriter.cpp::rewriteHLFIR not handling
+  // fir.do_concurrent yet -- this is never invoked on Flang 22+ inputs.
   return params ^
          fold_total(
              [&](const CPUParams &p) {
-               return Function(
-                   Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
-                   std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(unmanaged, {})}, std::vector<Arg>{}, std::vector<Arg>{},
-                   Unit, //
-                   Stmts{Block(reductions ^ map([](auto &r) { return r.partialVar(); })),
-                         let("#i") = 0_(Long),                                                                                         //
-                         ForRange("#i"_(Long), Index(p.begins, "#group"_(Long), Long), Index(p.ends, "#group"_(Long), Long), 1_(Long), //
-                                  {
-                                      mappedInduction(p.induction, p.lowerBound, p.step), //
-                                      Block(p.body),                                      //
-                                  }),
-                         Block(reductions ^ map([](auto &r) { return r.drainPartial("#group"_(Long)); })), //
-                         ret()},                                                                           //
-                   {FunctionAttr::Entry(), FunctionAttr::Exported()});
+               return Function(Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
+                               std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(unmanaged, {})}, std::vector<Arg>{},
+                               std::vector<Arg>{}, Unit, Stmts{ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
              },
              [&](const GPUParams &p) {
-               const auto localMemSVRs =
-                   reductions ^ map([](const SingleVarReduction &r) {
-                     return LocalMemSVR{
-                         .reduction = r,
-                         .localMemTarget = Named(fmt::format("#local_ref<{}>", r.target.symbol), Ptr(r.target.tpe, {}, Local)),
-                         .compSize =
-                             primitiveSize(r.target.tpe) ^
-                             fold(
-                                 [](const size_t size) { return IntS64Const(size).widen(); }, //
-                                 [&]() {
-                                   return Expr::Annotated(
-                                              Poison(Long), {},
-                                              fmt::format(
-                                                  "Reduction of non-primitive type ({}) are not supported as the size cannot be determined",
-                                                  repr(r.target.tpe)))
-                                       .widen();
-                                 })};
-                   });
-
-               return Function(
-                   Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
-                   std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(Named("#localMem", Ptr(Byte, {}, Local)), {})},
-                   std::vector<Arg>{}, std::vector<Arg>{}, Unit,                          //
-                   Stmts{let("#gs") = Cast(call(Spec::GpuGlobalSize(0_(UInt))), Long),    //
-                         let("#i") = 0_(Long),                                            //
-                         Block(reductions ^ map([](auto &r) { return r.partialVar(); })), //
-                         ForRange("#i"_(Long), Cast(call(Spec::GpuGlobalIdx(0_(UInt))), Long), p.tripCount, "#gs"_(Long),
-                                  {
-                                      mappedInduction(p.induction, p.lowerBound, p.step), //
-                                      Block(p.body),                                      //
-                                  }),
-                         // XXX Actual local storage reduction starts after the body:
-                         let("#localIdx") = Cast(call(Spec::GpuLocalIdx(0_(UInt))), Long),   //
-                         let("#localSize") = Cast(call(Spec::GpuLocalSize(0_(UInt))), Long), //
-                         // XXX Local (shared) memory is exposed as a contiguous block, so we work out the offset of each partial target for
-                         // the supported primitive types as follows:
-                         //  (T*) localMem(0)
-                         //  (U*) localMem(0 + local_size() * sizeof(T))
-                         //  (V*) localMem(0 + local_size() * sizeof(T) + local_size() * sizeof(U))
-                         // ...
-                         Block((localMemSVRs | fold_left(std::pair{0_(Long), Stmts{}},
-                                                         [](auto &&acc, auto &r) {
-                                                           const auto &[offset, stmts] = acc;
-                                                           return std::pair{r.targetOffset(offset, "#localSize"_(Long)), //
-                                                                            stmts ^
-                                                                                append(r.var("#localMem"_(Ptr(Byte, {}, Local)), offset))};
-                                                         }))
-                                   .second),                                                                      //
-                         Block(localMemSVRs ^ map([](auto &svr) { return svr.drainLocal("#localIdx"_(Long)); })), //
-
-                         // XXX We have local storage initialised to reduction values now, proceed to do a partial tree reduction
-                         let("#offset") = call(Intr::Div("#localSize"_(Long), 2_(Long), Long)), // var offset = get_local_size() / 2
-                         While({let("#cont") = call(Intr::LogicGt("#offset"_(Long), 0_(Long)))}, "#cont"_(Bool), // while(offset > 0) {
-                               {
-                                   let("#_") = call(Spec::GpuBarrierLocal()),                      //
-                                   Cond(call(Intr::LogicLt("#localIdx"_(Long), "#offset"_(Long))), // if (localIdx < offset) {
-                                        {
-                                            Block(localMemSVRs ^ map([](auto &svr) {
-                                                    return svr.drainReduceLocal("#localIdx"_(Long), "#offset"_(Long));
-                                                  })),
-                                        },
-                                        {}),
-                                   "#offset"_(Long) = call(Intr::Div("#offset"_(Long), 2_(Long), Long)) // offset /= 2
-                               }),
-
-                         Cond(call(Intr::LogicEq("#localIdx"_(Long), 0_(Long))), // if (localIdx == 0) {
-                              {
-                                  let("#groupIdx") = Cast(call(Spec::GpuGroupIdx(0_(UInt))), Long), //
-                                  Block(localMemSVRs ^
-                                        map([](auto &svr) { return svr.drainPartial("#groupIdx"_(Long), "#localIdx"_(Long)); })), //
-                              },
-                              {}),
-                         ret()}, //
-                   {FunctionAttr::Entry(), FunctionAttr::Exported()});
+               return Function(Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
+                               std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(Named("#localMem", Ptr(Byte, Local)), {})},
+                               std::vector<Arg>{}, std::vector<Arg>{}, Unit, Stmts{ret()}, FunctionVisibility::Exported(),
+                               FunctionFpMode::Relaxed(), true);
              });
 }

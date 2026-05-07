@@ -38,8 +38,9 @@ object Compiler {
     fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
     fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
     (receiver, receiverTpeVars) <- owningClass match {
-      case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(t), tpeVars).success
-      case x                                   => s"Illegal receiver: $x".fail
+      case t @ p.Type.Struct(_, args) =>
+        (Some(t), args.collect { case p.Type.Var(n) => n }).success
+      case x => s"Illegal receiver: $x".fail
     }
     // TODO run outliner here
   } yield p.Signature(
@@ -52,15 +53,8 @@ object Compiler {
     fnRtnTpe
   )
 
-  private val deleteParents: PartialFunction[p.Type, p.Type] = {
-    case s: p.Type.Struct => s.copy(parents = Nil)
-    case x                => x
-  }
-
-  private def matchingSignatures(sigs: Iterable[p.Signature], target0: p.Expr.Invoke) = {
-    val target = target0.modifyAll[p.Type](deleteParents)
+  private def matchingSignatures(sigs: Iterable[p.Signature], target: p.Expr.Invoke) =
     sigs
-      .map(_.modifyAll[p.Type](deleteParents))
       .collect {
         case sig
             if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
@@ -78,7 +72,6 @@ object Compiler {
               applied.receiver == target.receiver.map(_.tpe) =>
           sig // and remember NOT to return the applied one
       }
-  }
 
   def compileAllDependencies(using q: Quoted)(
       sink: Log,
@@ -117,8 +110,6 @@ object Compiler {
                 case _ :: Nil => // We have a perfect match from existing functions, no further actions needed
                   (xs, depss, clsDepss, moduleSymDepss).success
                 case Nil => // Not there, we now look at actual dependencies
-                  println(s">>>> xs=${remaining.keys.toList.map(x => x.fullName)}")
-
                   val defDef = sym.tree.asInstanceOf[q.DefDef]
                   // scala.Array's apply/update/length etc. have stub `throw new Error` bodies in the
                   // stdlib (the JVM lowers their call sites specially). The term compiler can't
@@ -200,7 +191,6 @@ object Compiler {
                           )
                         }
                       case (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
-                        println(s"Replace: replace ${target.repr}")
                         for {
                           log <- log.subLog(s"${target.repr}").success
                           _ = log.info("Callsites", ivks.map(_.repr).toList*)
@@ -278,8 +268,9 @@ object Compiler {
       owningClass <- Retyper.clsSymTyper0(owningSymbol)
       _ = log.info(s"Method owner: $owningClass")
       (receiver, receiverTpeVars) <- owningClass match {
-        case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
-        case x                                   => s"Illegal receiver: $x".fail
+        case t @ p.Type.Struct(_, args) =>
+          (Some(p.Named("this", t)), args.collect { case p.Type.Var(n) => n }).success
+        case x => s"Illegal receiver: $x".fail
       }
 
       allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
@@ -321,7 +312,9 @@ object Compiler {
         termCaptures = Nil,
         rtn = fnRtnTpe,
         body = rhsStmts,
-        attrs = Set(p.Function.Attr.Exported)
+        visibility = p.Function.Visibility.Exported,
+        fpMode = p.Function.FpMode.Relaxed,
+        isEntry = false
       )
       _ = log.info("Result", compiledFn.repr)
     } yield (compiledFn, deps)
@@ -393,32 +386,35 @@ object Compiler {
 
       typeLut: Map[p.Type.Struct, p.Type.Struct] =
         replacedClasses
-          .flatMap((tpeAps, sdef) =>
-            tpeAps.map { case ap @ p.Type.Struct(_, _, ts, _) => ap -> sdef.tpe().copy(args = ts) }
-          )
-          .toMap ++ replacedModules.map((tpe, sdef) => tpe -> sdef.tpe()).toMap
+          .flatMap { case (tpeAps, sdef) =>
+            tpeAps.map { case ap @ p.Type.Struct(_, ts) =>
+              ap -> (p.Type.Struct(sdef.name, ts): p.Type.Struct)
+            }
+          }
+          .toMap ++ replacedModules
+            .map { case (tpe, sdef) => tpe -> (p.Type.Struct(sdef.name, Nil): p.Type.Struct) }
+            .toMap
 
       replaceTpe = (t: p.Type) =>
         t match {
-          case s @ p.Type.Struct(_, _, _, _) => typeLut.getOrElse(s, s)
-          case t                             => t
+          case s @ p.Type.Struct(_, _) => typeLut.getOrElse(s, s)
+          case t                       => t
         }
 
-      replaceTpeForTerm = (t: p.Expr) =>
+      replaceTpeForTerm = (t: p.Term) =>
         t match {
-          case s @ p.Expr.Select(_, _) => s.modifyAll[p.Type](replaceTpe(_))
-          case t                       => t
+          case s @ p.Term.Select(_, _, _) => s.modifyAll[p.Type](replaceTpe(_))
+          case t                          => t
         }
 
       mappedFn = fn.modifyAll[p.Type](replaceTpe(_))
       mappedFnDeps = deps.functions.map((defdef, ivks) =>
-        defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, captures, rtn) =>
+        defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
           p.Expr.Invoke(
             name,
             tpeArgs.map(replaceTpe(_)),
             receiver.map(replaceTpeForTerm(_)),
             args.map(replaceTpeForTerm(_)),
-            captures.map(replaceTpeForTerm(_)),
             replaceTpe(rtn)
           ): p.Expr.Invoke
         }
@@ -460,13 +456,9 @@ object Compiler {
               case i @ q.Ident(_)     => s"_capture_${i.name}_${i.pos.startLine}_"
             }
             val named = p.Named(name, t)
-            ((named -> ref) :: Nil, (ref.symbol -> p.Expr.Select(Nil, named)) :: Nil)
+            ((named -> ref) :: Nil, (ref.symbol -> p.Expr.Alias(p.Term.Select(named, Nil, t))) :: Nil)
         }
     }
-
-    _ = println(term.show)
-    _ = pprint.pprintln(term)
-    // _ = println(log.render().mkString("\n"))
 
     // Then compile the term.
     (exprStmts, exprTpe, exprDeps, exprThisCls) <- compileTerm(
@@ -487,7 +479,9 @@ object Compiler {
         exprThisCls.map((_, tpe) => p.Named("this", tpe))).map(p.Arg(_)),
       rtn = exprTpe,
       body = exprStmts,
-      attrs = Set(p.Function.Attr.Exported, p.Function.Attr.Entry)
+      visibility = p.Function.Visibility.Exported,
+      fpMode = p.Function.FpMode.Relaxed,
+      isEntry = true
     )
 
     symbolToMacroDefinedDefDefs = q
@@ -602,10 +596,13 @@ object Compiler {
         moduleCaptures = sig.moduleCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
         termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
         rtn = sig.rtn,
-        body = p.Stmt.Comment("abstract definition, assert")
-        // :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
-          :: Nil,
-        attrs = Set(p.Function.Attr.Exported)
+        // Trait/abstract method body: synthesise a single Return of poison so the function is
+        // well-formed. Actual implementation is dispatched dynamically; this body only matters
+        // for the verifier (requires at least one statement and a Return).
+        body = p.Stmt.Return(p.Expr.Alias(p.Term.Poison(sig.rtn))) :: Nil,
+        visibility = p.Function.Visibility.Exported,
+        fpMode = p.Function.FpMode.Relaxed,
+        isEntry = false
       )
       log.info(s"Abstract (trait function)", sig.repr)
       fn
@@ -708,7 +705,7 @@ object Compiler {
                       val concreteName =
                         syntheticOverrideNames.getOrElse(overrideSym, p.Sym(overrideSym.fullName))
                       val key: (p.Sym, p.Type.Struct) =
-                        (p.Sym(abstractDefDef.symbol.fullName), parentStruct.copy(parents = Nil))
+                        (p.Sym(abstractDefDef.symbol.fullName), parentStruct)
                       val value: (p.Sym, p.Type.Struct) = (concreteName, classStruct)
                       List(key -> value)
                     case _ => Nil
@@ -731,21 +728,45 @@ object Compiler {
     // implementations, inserting an upcast on the receiver so the concrete fn's signature
     // accepts it. The verifier accepts struct downcasts when the source has the target as
     // a parent (anon$1 has Monoid as a parent).
-    rewriteDispatch = (fn: p.Function) =>
-      fn.modifyAll[p.Expr] {
-        case ivk: p.Expr.Invoke =>
-          ivk.receiver.map(_.tpe) match {
-            case Some(s: p.Type.Struct) =>
-              dispatchTable.get((ivk.name, s.copy(parents = Nil))) match {
-                case Some((concreteName, classStruct)) =>
-                  val newReceiver = ivk.receiver.map(r => p.Expr.Cast(r, classStruct))
-                  ivk.copy(name = concreteName, receiver = newReceiver)
-                case None => ivk
-              }
-            case _ => ivk
-          }
-        case x => x
+    rewriteDispatch = (fn: p.Function) => {
+      // Walk the body and rewrite Stmt.Var/Stmt.Return that wrap a dispatch-eligible Invoke. We
+      // bind the upcast receiver to a fresh Stmt.Var (Cast is compound, so it cannot live in a
+      // Term position) and rebind the Invoke to use the cast result.
+      var counter = 0
+      def freshName(tpe: p.Type): p.Named = { counter += 1; p.Named(s"_dispatch_recv_${counter}", tpe) }
+      def patchInvoke(ivk: p.Expr.Invoke, prelude: scala.collection.mutable.ListBuffer[p.Stmt]): p.Expr.Invoke =
+        ivk.receiver.map(_.tpe) match {
+          case Some(s: p.Type.Struct) =>
+            dispatchTable.get((ivk.name, s)) match {
+              case Some((concreteName, classStruct)) =>
+                ivk.receiver match {
+                  case Some(r) =>
+                    val tmp = freshName(classStruct)
+                    prelude += p.Stmt.Var(tmp, Some(p.Expr.Cast(r, classStruct)), isMutable = false)
+                    val tmpSel: p.Term.Select = p.Term.Select(tmp, Nil, classStruct)
+                    ivk.copy(name = concreteName, receiver = Some(tmpSel))
+                  case None => ivk.copy(name = concreteName)
+                }
+              case None => ivk
+            }
+          case _ => ivk
+        }
+      def walk(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
+        case p.Stmt.Var(n, Some(ivk: p.Expr.Invoke), m) =>
+          val prelude = scala.collection.mutable.ListBuffer.empty[p.Stmt]
+          val newIvk = patchInvoke(ivk, prelude)
+          prelude.toList :+ p.Stmt.Var(n, Some(newIvk), m)
+        case p.Stmt.Return(ivk: p.Expr.Invoke) =>
+          val prelude = scala.collection.mutable.ListBuffer.empty[p.Stmt]
+          val newIvk = patchInvoke(ivk, prelude)
+          prelude.toList :+ p.Stmt.Return(newIvk)
+        case p.Stmt.Cond(c, t, f) => p.Stmt.Cond(c, walk(t), walk(f)) :: Nil
+        case p.Stmt.While(c, b)   => p.Stmt.While(c, walk(b)) :: Nil
+        case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, walk(b)) :: Nil
+        case other                => other :: Nil
       }
+      fn.copy(body = walk(fn.body))
+    }
 
     rootFn0              = rewriteDispatch(rootFn)
     allRootDependentFns0 = allRootDependentFns.map(rewriteDispatch)
@@ -763,7 +784,7 @@ object Compiler {
         // We can't go from a Type.Struct back to a q.Symbol cleanly, so synthesise the StructDef
         // directly from the Type.Struct. Anon classes used in dispatch are opaque (no fields),
         // matching how Monoid is handled.
-        p.StructDef(classStruct.name, classStruct.tpeVars, Nil, classStruct.parents).success
+        p.StructDef(classStruct.name, Nil, Nil, Nil).success
       }
 
     unopt = p.Program(
@@ -799,7 +820,15 @@ object Compiler {
 
     optPassLog = log.subLog("Opt Passes")
 
-    opt                                <- passes.get("Opt").fold(throw IllegalArgumentException("Opt pass not found"))(_.apply(unopt, optPassLog))
+    opt = scala.Function.chain(
+      List[ProgramPass](
+        printPass(IntrinsifyPass),
+        printPass(SpecialisationPass),
+        VarReducePass,
+        UnitExprElisionPass,
+        DeadArgEliminationPass
+      ).map(p => p(_, optPassLog))
+    )(unopt)
     (monomorphicToPolymorphicSym, opt) <- MonoStructPass(opt, log).success
 
     // Wire up Invoke captures and propagate captures transitively up to the entry. compileFn
@@ -811,20 +840,22 @@ object Compiler {
     opt <- {
       val fnByName: Map[p.Sym, p.Function] = (opt.entry :: opt.functions).map(fn => fn.name -> fn).toMap
       // Transitive module-capture types each function needs, including those from its callees.
+      // The call graph is invariant across iterations: only the per-fn capture sets grow;
+      // we collect callees once up front rather than re-walking every body each iteration.
       def computeTransitiveModuleCaps(): Map[p.Sym, List[p.Arg]] = {
-        var current: Map[p.Sym, List[p.Arg]] =
-          fnByName.view.mapValues(_.moduleCaptures).toMap
-        var changed = true
+        val callGraph: Map[p.Sym, List[p.Sym]] =
+          fnByName.view.mapValues(_.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.name }).toMap
+        var current: Map[p.Sym, List[p.Arg]] = fnByName.view.mapValues(_.moduleCaptures).toMap
+        var changed                          = true
         while (changed) {
           changed = false
           val next = current.map { case (sym, caps) =>
-            val fn      = fnByName(sym)
-            val callees = fn.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.name }
-            val merged = callees
-              .flatMap(c => current.getOrElse(c, Nil))
-              .foldLeft(caps) { (acc, cap) =>
-                if (acc.exists(_.named.tpe == cap.named.tpe)) acc else acc :+ cap
+            val seen = scala.collection.mutable.Set.from(caps.map(_.named.tpe))
+            val merged = callGraph(sym).foldLeft(caps) { (acc, callee) =>
+              current.getOrElse(callee, Nil).foldLeft(acc) { (acc1, cap) =>
+                if (seen.add(cap.named.tpe)) acc1 :+ cap else acc1
               }
+            }
             sym -> merged
           }
           if (next != current) { changed = true; current = next }
@@ -845,32 +876,42 @@ object Compiler {
         else fn.copy(moduleCaptures = transitiveCaps)
       }
 
+      // Rebuild the LUT from post-updateFnCaps functions so callee.moduleCaptures reflects
+      // the transitive set the backend will actually register.
+      val updatedFns                                = newEntry :: opt.functions.map(updateFnCaps)
+      val updatedFnByName: Map[p.Sym, p.Function] = updatedFns.map(fn => fn.name -> fn).toMap
+
       def patchFn(fn: p.Function): p.Function = {
         val ownCapByTpe: Map[p.Type, p.Named] =
           (fn.moduleCaptures ++ fn.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
+        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = updatedFnByName.get(ivk.name) match {
+          case None => ivk
+          case Some(c) =>
+            val expected = c.args.size + c.moduleCaptures.size + c.termCaptures.size
+            if (ivk.args.size >= expected) ivk
+            else {
+              val needed = c.moduleCaptures ++ c.termCaptures
+              if (needed.isEmpty) ivk
+              else
+                ivk.copy(args = needed.map { arg =>
+                  val tpe   = arg.named.tpe
+                  val named = ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
+                  selectTerm(Nil, named)
+                } ::: ivk.args)
+            }
+        }
         fn.modifyAll[p.Expr] {
-          case ivk: p.Expr.Invoke if ivk.captures.isEmpty =>
-            val needed = transitive.getOrElse(ivk.name, Nil) ++
-              fnByName.get(ivk.name).map(_.termCaptures).getOrElse(Nil)
-            if (needed.isEmpty) ivk
-            else
-              ivk.copy(captures = needed.map { arg =>
-                val tpe   = arg.named.tpe
-                val named = ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
-                p.Expr.Select(Nil, named)
-              })
-          case x => x
+          case ivk: p.Expr.Invoke => patchIvk(ivk)
+          case x                  => x
         }
       }
       opt
         .copy(
           entry = patchFn(newEntry),
-          functions = opt.functions.map(fn => patchFn(updateFnCaps(fn)))
+          functions = updatedFns.tail.map(patchFn)
         )
         .success
     }
-
-    _ = log match { case rl: RenderedLog => println(rl.render().mkString("\n")); case _ => }
 
     // verify again after optimisation
     optLog = log.subLog("Opt")

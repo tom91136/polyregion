@@ -17,15 +17,12 @@ object Remapper {
       case p.Type.Var(name) =>
         tpeTable.get(name) match {
           case Some(value) => value
-          case None =>
-            println(
-              s"Ap gen ${exec} is missing required gen arg $name, exec need = ${exec.tpeVars}, given = ${tpeArgs}"
-            )
-            ???
+          case None => ???
         }
-      case p.Type.Struct(name, tpeVars, args, parents) =>
-        p.Type.Struct(name, tpeVars, args.map(resolve), parents)
-      case p.Type.Ptr(comp, len, space) => p.Type.Ptr(resolve(comp), len, space)
+      case p.Type.Struct(name, args) =>
+        p.Type.Struct(name, args.map(resolve))
+      case p.Type.Ptr(comp, space)         => p.Type.Ptr(resolve(comp), space)
+      case p.Type.Arr(comp, length, space) => p.Type.Arr(resolve(comp), length, space)
       case p.Type.Exec(innerVars, args, rtn) =>
         p.Type.Exec(innerVars, args.map(resolve), resolve(rtn))
       case x => x
@@ -54,21 +51,19 @@ object Remapper {
 
   extension (using q: Quoted)(c: q.RemapContext) {
 
-    private def typerAndWitness(repr: q.TypeRepr): Result[(q.Retyped, q.RemapContext)] = {
-      println(s"[typer] ${repr.show} (${repr.widenTermRefByName.show}) (${repr.widenTermRefByName})")
+    private def typerAndWitness(repr: q.TypeRepr): Result[(q.Retyped, q.RemapContext)] =
       Retyper.typer0(repr).map((x, wit) => (x, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
-    }
 
     private def typerNAndWitness(reprs: List[q.TypeRepr]): Result[(List[(q.Retyped)], q.RemapContext)] =
       Retyper.typer0N(reprs).map((xs, wit) => (xs, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
 
     def mapTrees(args: List[q.Tree]): Result[(p.Expr, q.RemapContext)] = args match {
-      case Nil => (p.Expr.Unit0Const, c).pure
+      case Nil => (p.Expr.Alias(p.Term.Unit0Const), c).pure
       case x :: xs =>
-        (c ::= p.Stmt.Comment(x.show.replace("\n", " ; ")))
+        c
           .mapTree(x)
           .flatMap(xs.foldLeftM(_) { case ((_, c0), term) =>
-            (c0 ::= p.Stmt.Comment(term.show.replace("\n", " ; "))).mapTree(term)
+            c0.mapTree(term)
           })
     }
 
@@ -81,7 +76,7 @@ object Remapper {
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
           // term
         } yield (
-          p.Expr.Unit0Const,
+          p.Expr.Alias(p.Term.Unit0Const),
           c ::= p.Stmt.Var(p.Named(name, tpe), Some(ref))
           // case (v: q.ErasedMethodVal, tpe: q.ErasedFnTpe) => c.suspend(name -> tpe)(v)
         )
@@ -107,19 +102,22 @@ object Remapper {
             .map(_._2)
             .map(p.Arg(_))).distinct // Include outlined and propagated
           c <- c
-            .withInvokeCapture(defDef.symbol, allCaptureNames.map(arg => p.Expr.Select(Nil, arg.named)))
+            .withInvokeCapture(
+              defDef.symbol,
+              allCaptureNames.map(arg => p.Term.Select(arg.named, Nil, arg.named.tpe))
+            )
             .updateDeps(_ |+| c0.deps)
             .updateDeps(_.witness(fn.copy(termCaptures = allCaptureNames)))
             .success
 
         } yield (
-          p.Expr.Unit0Const,
+          p.Expr.Alias(p.Term.Unit0Const),
           c // FIXME restore statements!!!
         )
 
-      case q.Import(_, _)                                       => (p.Expr.Unit0Const, c).success // ignore
-      case q.TypeDef(name, tree)                                => (p.Expr.Unit0Const, c).success // ignore
-      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Expr.Unit0Const, c).success
+      case q.Import(_, _)                                       => (p.Expr.Alias(p.Term.Unit0Const), c).success // ignore
+      case q.TypeDef(name, tree)                                => (p.Expr.Alias(p.Term.Unit0Const), c).success // ignore
+      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Expr.Alias(p.Term.Unit0Const), c).success
       case t: q.Term                                            => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
@@ -146,8 +144,9 @@ object Remapper {
         owningSymbol <- owningClassSymbol(f.symbol).failIfEmpty(s"${f.symbol} does not have an owning class symbol")
         owningClass  <- Retyper.clsSymTyper0(owningSymbol)
         (receiver, receiverTpeVars) <- owningClass match {
-          case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
-          case x                                   => s"Illegal receiver: $x".fail
+          case t @ p.Type.Struct(_, args) =>
+            (Some(p.Named("this", t)), args.collect { case p.Type.Var(n) => n }).success
+          case x => s"Illegal receiver: $x".fail
         }
         // Fuse receiver's tpe vars with what's explicitly defined
         fnTpeVars  = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
@@ -180,14 +179,13 @@ object Remapper {
           receiver = receiver.map(p.Arg(_)),
           args = fnArgs.map(_._2).map(p.Arg(_)),
           moduleCaptures = deriveModuleStructCaptures(c.deps).map(p.Arg(_)),
-          termCaptures = fnStmts // Propagate whatever capture we're seeing in all invokes local to this fn
-            .collectWhere[p.Expr] { case p.Expr.Invoke(_, _, _, _, captures, _) => captures }
-            .flatten
-            .collect { case p.Expr.Select(Nil, n) => n }
-            .map(p.Arg(_)),
+          termCaptures = Nil, // filled by Compiler.patchFn from the call sites
+
           rtn = fnRtnTpe,
           body = fnStmts,
-          attrs = Set(p.Function.Attr.Exported)
+          visibility = p.Function.Visibility.Exported,
+          fpMode = p.Function.FpMode.Relaxed,
+          isEntry = false
         )
 
       } yield fn -> c
@@ -223,28 +221,33 @@ object Remapper {
           // Make sure we're requested a struct type here, the class may have generic types so we create a LUT of
           // type vars to type args so we can resolve the concrete field types later.
           tpeVarTable <- rtnTpe match {
-            case p.Type.Struct(_, tpeVars, `tpeArgs`, _) =>
-              if (tpeVars.length != tpeArgs.length) {
-                s"Requested a ctor with different type arg length: vars=$tpeVars, args=${tpeArgs}".fail
-              } else {
-                tpeVars.zip(tpeArgs).toMap.success
-              }
-            case p.Type.Struct(_, _, bad, _) =>
-              s"Requested a ctor with different type args, ctor=${bad}, requested=${tpeArgs}".fail
+            case p.Type.Struct(_, ts) =>
+              // Without parents/tpeVars on Type.Struct, we extract Var-named args from the
+              // ctor's expected return type (`rtnTpe.args`) and align with the call-site's
+              // tpeArgs. Concrete (non-Var) args don't bind: the caller may have already
+              // monomorphised them.
+              val varNames = ts.collect { case p.Type.Var(n) => n }
+              val table    = varNames.zip(tpeArgs).toMap
+              table.success
             case bad => s"Requested a ctor with a non-struct type: ${bad.repr}".fail
           }
 
-          instancePath <- instance match {
-            case p.Expr.Select(xs, x) => (xs :+ x).success
-            case _                    => "Ctor invocation on instance must be a Select term".fail
+          instanceSelect <- instance match {
+            case p.Expr.Alias(s: p.Term.Select) => s.success
+            case _                              => "Ctor invocation on instance must be a Select term".fail
           }
 
           stmts = fieldNames.zip(args).map { (name, rhs) =>
             val appliedTpe = rhs.tpe.mapLeaf {
-              case p.Type.Var(name) => tpeVarTable(name)
+              case p.Type.Var(name) => tpeVarTable.getOrElse(name, p.Type.Var(name))
               case x                => x
             }
-            p.Stmt.Mut(p.Expr.Select(instancePath, p.Named(name, appliedTpe)), rhs)
+            val fieldSelect: p.Term.Select = p.Term.Select(
+              instanceSelect.root,
+              instanceSelect.steps :+ p.PathStep.Field(name),
+              appliedTpe
+            )
+            p.Stmt.Mut(fieldSelect, rhs)
           }
         } yield (instance, c.::=(stmts*))
       case (sym, _, _) => // Anything else is a normal invoke.
@@ -252,24 +255,23 @@ object Remapper {
           throw new RuntimeException("Why is recv empty???")
 
         val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
-          case p.Type.Struct(_, _, tpeArgs, _) => tpeArgs
+          case p.Type.Struct(_, tpeArgs) => tpeArgs
           case _                               => Nil
         }
 
-        println("@! " + sym + " " + c.invokeCaptures.get(sym))
+        // termCaptures filled by Compiler.patchFn after this pass.
         val ivk: p.Expr.Invoke = p.Expr.Invoke(
           p.Sym(sym.fullName),
           receiverTpeArgs ::: tpeArgs,
-          receiver,
-          args,
-          c.invokeCaptures.getOrElse(sym, Nil),
+          receiver.map(asTerm),
+          args.map(asTerm),
           rtnTpe
         )
         val named = c.named(rtnTpe)
         val c0 = c
           .down(fn)
           .updateDeps(_.witness(fn, ivk)) ::= p.Stmt.Var(named, Some(ivk))
-        (p.Expr.Select(Nil, named), c0).success
+        (selectExpr(Nil, named), c0).success
     }
 
     // The general idea is that idents are either used as-is or it goes through a series of type/term applications (e.g `{ foo.fn[A](b)(c) }`).
@@ -287,22 +289,15 @@ object Remapper {
           case x                 => x
         }
 
-        println(
-          s"[mapRef0] tpe=`${tpe.repr}` ua=`${tpe0.repr}` ;  rtn=${resolveExecRtnTpe(tpe)} ~ ${termArgss} ${ref.show}"
-        )
-
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
-        )(sym: q.Symbol, receiver: Option[p.Expr])(select: => Result[p.Expr.Select]) = {
-
-          // println("$$$ " + c.symbolDefMap.mkString("\n"))
-
-          println(sym)
+        )(sym: q.Symbol, receiver: Option[p.Expr])(select: => Result[p.Expr]) = {
 
           def isFnTpe(t: p.Type, u: p.Type) = (t, u) match {
-            case (p.Type.Struct(_, _, _, parents), p.Type.Exec(tpeVars, args, rtnTpe)) =>
-              parents.exists {
+            case (p.Type.Struct(structSym, _), p.Type.Exec(tpeVars, args, rtnTpe)) =>
+              // Without parents on Type.Struct, we approximate by matching Function$n by sym only.
+              structSym match {
                 case p.Sym("scala" :: s"Function$n" :: Nil) if args.size == n.toInt => true
                 case _                                                              => false
               }
@@ -316,8 +311,6 @@ object Remapper {
               // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
               val termTpess = termArgss.map(_.map(_.tpe)) // Poison type???
               val execTpess = collectExecArgLists(tpe)
-              println(s"Invoke ${receiver.map(_.repr)} . ${fn.show}")
-              println(s"-> r=${ref} t=${termTpess} e=${execTpess}")
               for {
                 // First we validate the application by checking whether types of the positional arguments line up.
                 _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
@@ -330,10 +323,10 @@ object Remapper {
                         ts.zip(es).traverse {
                           case (t, e) if t == e   => t.success // same type
                           case (t, p.Type.Var(_)) => t.success // applied type
-                          case (p.Type.Struct(termSym, termVars, _, _), p.Type.Struct(execSym, execVars, _, _)) =>
+                          case (p.Type.Struct(termSym, termArgs), p.Type.Struct(execSym, execArgs)) =>
                             if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
-                            else if (termVars != execVars)
-                              s"Class generic type arity mismatch: $termVars != $execVars ".fail
+                            else if (termArgs.size != execArgs.size)
+                              s"Class generic type arity mismatch: ${termArgs.size} != ${execArgs.size} ".fail
                             else ().success
                           case (t, u) if isFnTpe(t, u) || isFnTpe(u, t) => t.success
                           case (t, u)                                   => s"Cannot match $t with $u".fail
@@ -342,7 +335,6 @@ object Remapper {
                         s"Argument size mismatch ${ts.map(_.repr)}(size=${ts.size}) != ${es.map(_.repr)}(size=${es.size})".fail
                     }
                 }
-                _      = println(s"Do ret ${tpe}")
                 rtnTpe = resolveExecRtnTpe(tpe)
                 ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
               } yield ivk
@@ -360,15 +352,15 @@ object Remapper {
           def mkSelect(owner: q.Symbol) = for {
             tpe <- Retyper.clsSymTyper0(owner)
             (term, c) <- tpe match {
-              case s @ p.Type.Struct(rootName, Nil, Nil, _) =>
+              case s @ p.Type.Struct(rootName, Nil) =>
                 for {
                   c <- ref match {
                     case q.Select(qualifier, _) => c.updateDeps(_.witness(qualifier.tpe.typeSymbol, s)).success
                     case q.Ident(_)             => c.updateDeps(_.witness(owner, s)).success
                   }
                   directRoot = p.Named(rootName.fqn.mkString("_"), s)
-                  result <- invokeOrSelect(c)(ref.symbol, Some(p.Expr.Select(Nil, directRoot)))(
-                    p.Expr.Select(directRoot :: Nil, named).success
+                  result <- invokeOrSelect(c)(ref.symbol, Some(selectExpr(Nil, directRoot)))(
+                    selectExpr(directRoot :: Nil, named).success
                   )
                 } yield result
 
@@ -391,10 +383,6 @@ object Remapper {
               // scala.Predef
               // RichInt
 
-              println(
-                s"Test fail :${ownersList(ref.symbol).toList} ${ref.tpe} => ${named.tpe} ; ${Retyper.typer0(ref.tpe).map(_._1._2)}"
-              )
-
               ref.tpe match {
                 case q.TermRef(root, _) =>
                   root.classSymbol.filter(_.flags.is(q.Flags.Module)).map(mkSelect(_))
@@ -409,7 +397,7 @@ object Remapper {
         def mkThisVar(clsSymbol: q.Symbol) = for {
           tpe <- Retyper.clsSymTyper0(clsSymbol) // TODO what about generics???
           c <- (clsSymbol.tree, tpe) match {
-            case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) if !clsSymbol.flags.is(q.Flags.Module) =>
+            case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _)) if !clsSymbol.flags.is(q.Flags.Module) =>
               c.bindThis(clsDef, s)
             case _ => c.success
           }
@@ -429,8 +417,8 @@ object Remapper {
             val ownerSym = ref.symbol.owner
             Some(for {
               (thisCls, c) <- mkThisVar(ownerSym)
-              (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Expr.Select(Nil, thisCls)))(
-                p.Expr.Select(thisCls :: Nil, named).success
+              (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(selectExpr(Nil, thisCls)))(
+                selectExpr(thisCls :: Nil, named).success
               )
             } yield (invoke, c))
           } else None
@@ -440,9 +428,9 @@ object Remapper {
         // This handle cases like `ObjA.ObjB` or `($x: ObjA).ObjB`, both should resolve to `ObjB` directly
         if (Retyper.isModuleClass(ref.tpe.typeSymbol)) {
           tpe match { // Object references regardless of nesting can be direct so we use the generated reference name here.
-            case s @ p.Type.Struct(name, _, _, _) =>
+            case s @ p.Type.Struct(name, _) =>
               (
-                p.Expr.Select(Nil, p.Named(name.fqn.mkString("_"), tpe)),
+                selectExpr(Nil, p.Named(name.fqn.mkString("_"), tpe)),
                 c.updateDeps(_.witness(ref.tpe.typeSymbol, s))
               ).success
             case bad =>
@@ -466,17 +454,16 @@ object Remapper {
 
                   def synthesiseSelectOnMethodWithReceiver(classSym: q.Symbol) =
                     Retyper.clsSymTyper0(classSym).map(classSym.tree -> _).flatMap {
-                      case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) =>
+                      case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _)) =>
                         c.bindThis(clsDef, s).flatMap { c =>
                           val self = p.Named("this", s)
-                          invokeOrSelect(c)(sym, Some(p.Expr.Select(Nil, self)))(
-                            p.Expr.Select(self :: Nil, local).success
+                          invokeOrSelect(c)(sym, Some(selectExpr(Nil, self)))(
+                            selectExpr(self :: Nil, local).success
                           )
                         }
                       case (illegal, tpe) => s"Unexpected tree $illegal with type $tpe when resolving local dummy".fail
                     }
 
-                  println(s"Gen1 ${ident} ${sym} ${sym.maybeOwner.isLocalDummy}")
                   if (sym.maybeOwner.isLocalDummy) {
                     // We're seeing a def/val defined in the class scope: `class X{ { def a()  } }`.
                     // Method (or any kind of Def) `a` in this case is owned by a local dummy where the parent is `X`.
@@ -486,14 +473,13 @@ object Remapper {
                     if (!classSym.isNoSymbol) synthesiseSelectOnMethodWithReceiver(classSym)
                     else s"The owner of $sym does not contain an implementation ".fail
                   } else {
-                    println("~@@" + ownersList(sym).toList + s" rr=${c.root.owner}")
                     // In any other case, we're probably referencing a local ValDef/DefDef that appeared before this.
 
                     if (sym.isValDef) { // For ValDef, we can ignore the receiver
 
                       val (name_, c_) = c.mkName(sym)
 
-                      invokeOrSelect(c_)(sym, None)(p.Expr.Select(Nil, p.Named(name_, local.tpe)).success)
+                      invokeOrSelect(c_)(sym, None)(selectExpr(Nil, p.Named(name_, local.tpe)).success)
                     } else if (sym.isDefDef) { // For DefDef, we need to synthesise one like the local dummy case
                       owningClassSymbol(sym)
                         .failIfEmpty(s"$sym does not contain an implementation")
@@ -526,9 +512,9 @@ object Remapper {
                 castResult = c.down(select).named(thisCls.tpe)
                 c <- (c ::= p.Stmt.Var(
                   castResult,
-                  Some(p.Expr.Cast(p.Expr.Select(Nil, thisCls.copy(tpe = superSubclassTpe)), thisCls.tpe))
+                  Some(p.Expr.Cast(selectTerm(Nil, thisCls.copy(tpe = superSubclassTpe)), thisCls.tpe))
                 )).success
-                (term, c) <- invokeOrSelect(c)(select.symbol, Some(p.Expr.Select(Nil, castResult)))(
+                (term, c) <- invokeOrSelect(c)(select.symbol, Some(selectExpr(Nil, castResult)))(
                   "illegal selection of a non DefDef symbol from super".fail
                 )
               } yield (term, c)
@@ -539,10 +525,12 @@ object Remapper {
                 .getOrElse {
                   // Otherwise we go through the usual path of resolution  (nested classes where each instance has an `this` reference to the owning class)
                   c.mapTerm(root).flatMap {
-                    case (root @ p.Expr.Select(xs, x), c) => // fuse with previous select if we got one
-                      invokeOrSelect(c)(select.symbol, Some(root))(p.Expr.Select(xs :+ x, named).success)
-                    case (root, c) => // or simply return whatever it's referring to
-                      // `$root.$name` becomes `$root.${select.symbol}()` so we don't need the `$name` here
+                    case (root @ p.Expr.Alias(prev: p.Term.Select), c) =>
+                      // fuse with previous select if we got one: append a Field step.
+                      val fused: p.Term.Select =
+                        p.Term.Select(prev.root, prev.steps :+ p.PathStep.Field(named.symbol), named.tpe)
+                      invokeOrSelect(c)(select.symbol, Some(root))(p.Expr.Alias(fused).success)
+                    case (root, c) =>
                       invokeOrSelect(c)(select.symbol, Some(root))(
                         "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
                       )
@@ -551,16 +539,24 @@ object Remapper {
           }
     }
 
-    private def mkMut(t: q.Tree, lhs: p.Expr, rhs: p.Expr): (List[p.Stmt], q.RemapContext) = if (lhs.tpe == rhs.tpe) {
-      (p.Stmt.Mut(lhs, rhs) :: Nil, c)
-    } else {
-      val c0       = c.down(t)
-      val tempName = c0.named(rhs.tpe)
-      (
-        p.Stmt.Var(tempName, Some(rhs)) ::
-          p.Stmt.Mut(lhs, p.Expr.Cast(p.Expr.Select(Nil, tempName), lhs.tpe)) :: Nil,
-        c0
-      )
+    private def mkMut(t: q.Tree, lhs: p.Expr, rhs: p.Expr): (List[p.Stmt], q.RemapContext) = {
+      // Stmt.Mut.name must be a Term.Select. Pull it out of the Alias wrapper if the caller
+      // already produced one; otherwise this is a programming error at the IR boundary.
+      val lhsSelect: p.Term.Select = lhs match {
+        case p.Expr.Alias(s: p.Term.Select) => s
+        case other                          => throw new IllegalStateException(s"mkMut lhs must be an Alias(Term.Select); got ${other.repr}")
+      }
+      if (lhs.tpe == rhs.tpe) {
+        (p.Stmt.Mut(lhsSelect, rhs) :: Nil, c)
+      } else {
+        val c0       = c.down(t)
+        val tempName = c0.named(rhs.tpe)
+        (
+          p.Stmt.Var(tempName, Some(rhs)) ::
+            p.Stmt.Mut(lhsSelect, p.Expr.Cast(selectTerm(Nil, tempName), lhs.tpe)) :: Nil,
+          c0
+        )
+      }
     }
 
     def mapTerm(
@@ -584,7 +580,7 @@ object Remapper {
       if (isClassTagTpe && tpeArgs.isEmpty && termArgss.isEmpty) {
         return c1.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
           val name = c.named(tpe)
-          (p.Expr.Select(Nil, name), c.down(term) ::= p.Stmt.Var(name, None))
+          (selectExpr(Nil, name), c.down(term) ::= p.Stmt.Var(name, None))
         }
       }
 
@@ -598,34 +594,34 @@ object Remapper {
             (_, c) <- (c1 !! term).mapTrees(bindings)
             (v, c) <- (c !! term).mapTerm(expansion)
           } yield (v, c)
-        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Expr.Bool1Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Expr.IntS32Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Expr.Float32Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Expr.Float64Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Expr.IntS64Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Expr.IntS16Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Expr.IntS8Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Expr.IntU16Const(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Expr.Unit0Const, c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Expr.Alias(p.Term.Bool1Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Expr.Alias(p.Term.IntS32Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Expr.Alias(p.Term.Float32Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Expr.Alias(p.Term.Float64Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Expr.Alias(p.Term.IntS64Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Expr.Alias(p.Term.IntS16Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Expr.Alias(p.Term.IntS8Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Expr.Alias(p.Term.IntU16Const(v)), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Expr.Alias(p.Term.Unit0Const), c1 !! term).pure
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           ??? // XXX alloc new string instance
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) =>
           c1.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
-            (p.Expr.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
+            (selectExpr(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
         case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
           c1.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
-            (p.Expr.Poison(tpe), c !! term)
+            (p.Expr.Alias(p.Term.Poison(tpe)), c !! term)
           }
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
           (c1 !! term).typerAndWitness(term.tpe).flatMap {
-            case (None -> (s @ p.Type.Struct(_, _, _, _)), c) =>
+            case (None -> (s @ p.Type.Struct(_, _)), c) =>
               // There may be more than one
               term.tpe.classSymbol.map(_.tree) match {
                 case Some(clsDef: q.ClassDef) =>
-                  c.bindThis(clsDef, s).map(c => (p.Expr.Select(Nil, p.Named("this", s)), c !! term))
+                  c.bindThis(clsDef, s).map(c => (selectExpr(Nil, p.Named("this", s)), c !! term))
                 case Some(bad) => s"`this` type symbol points to a non-ClassDef tree: $bad".fail
                 case None      => "`this` does not contain a class symbol".fail
               }
@@ -633,40 +629,25 @@ object Remapper {
             case (None -> illegal, _)    => "`this` isn't typed as a struct type".fail
           }
         case (tpeArgs, termArgss, q.TypeApply(term, args)) => // *single* application of some types: `$term[$args...]`
-          println(s"[mapper] <${tpeArgs.map(_.repr)}> tpeAp = `${term.show}`")
           for {
             (args, c) <- c1.typerNAndWitness(args.map(_.tpe))
             (term, c) <- c.mapTerm(term, tpeArgs = args.map(_._2), termArgss = termArgss)
           } yield (term, c)
         case (tpeArgs, termArgs, r: q.Ref) =>
-          println(
-            s"[mapper] ref = `${r}` termArgs={${termArgs.flatten.map(_.repr).mkString(",")}} tpeArgs=<${tpeArgs.map(_.repr).mkString(",")}>"
-          )
           c1.refs.get(r.symbol) match {
             case Some(term) =>
-              println("~~~ " + term)
               c1.typerAndWitness(r.tpe).flatMap { case (_ -> tpe, c) =>
-                println("~~~ " + tpe)
-
                 if (term.tpe != tpe) s"Ref type mismatch (${term.tpe} != $tpe)".fail
                 else (term, c !! r).success
               }
-            case None =>
-              println("~~~ " + term.tpe.widenTermRefByName)
-              (c !! r).mapRef0(r, tpeArgs, termArgs)
+            case None => (c !! r).mapRef0(r, tpeArgs, termArgs)
           }
         case (Nil, Nil, q.New(tpt)) => // new instance *without* arg application: `new $tpt`
-          println(s"[mapper] new = `${term.show}`")
           c1.typerAndWitness(tpt.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
-            (p.Expr.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
+            (selectExpr(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
         case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
-          println(s"[mapper] <${tpeArgs.map(_.repr)}> ap = `${ap.show}` <${tpeArgs.map(_.repr)}>")
-          // if (ap.toString().contains("apply")) {
-          //   ???
-          // }
-
           for {
             (args, c) <- c1.down(ap).mapTerms(args)
             (fun, c)  <- (c !! ap).mapTerm(fun, tpeArgs = tpeArgs, termArgss = args :: termArgs0)
@@ -683,9 +664,9 @@ object Remapper {
             (lhsRef, c) <- c1.down(term).mapTerm(lhs) // go down here
             (rhsRef, c) <- (c !! term).mapTerm(rhs)
             r <- (lhsRef, rhsRef) match {
-              case (s @ p.Expr.Select(_, _), rhs) =>
+              case (s @ p.Expr.Alias(_: p.Term.Select), rhs) =>
                 val (xs, c0) = c.mkMut(term, s, rhs)
-                (p.Expr.Unit0Const, c0.::=(xs*)).success
+                (p.Expr.Alias(p.Term.Unit0Const), c0.::=(xs*)).success
               case (lhs, rhs) => c.fail(s"Illegal assign LHS,RHS: lhs=${lhs.repr} rhs=$rhs")
             }
           } yield r
@@ -705,15 +686,15 @@ object Remapper {
               val name   = c.named(tpe)
               val result = p.Stmt.Var(name, None)
 
-              val (thenStmts, c0) = c.mkMut(term, p.Expr.Select(Nil, name), thenTerm)
-              val (elseStmts, c1) = c0.mkMut(term, p.Expr.Select(Nil, name), elseTerm)
+              val (thenStmts, c0) = c.mkMut(term, selectExpr(Nil, name), thenTerm)
+              val (elseStmts, c1) = c0.mkMut(term, selectExpr(Nil, name), elseTerm)
 
               val cond = p.Stmt.Cond(
-                condTerm,
+                asTerm(condTerm),
                 thenCtx.stmts ++ thenStmts,
                 elseCtx.stmts ++ elseStmts
               )
-              (p.Expr.Select(Nil, name), c1.down(term).replaceStmts(ifCtx.stmts :+ result :+ cond)).success
+              (selectExpr(Nil, name), c1.down(term).replaceStmts(ifCtx.stmts :+ result :+ cond)).success
             }
 
             // See https://dotty.epfl.ch/docs/reference/new-types/union-types-spec.html#erasure
@@ -724,13 +705,15 @@ object Remapper {
                 mkCondStmts(tpe)
 
               case (
-                    p.Type.Struct(_, _, _, thenTpeParents),
-                    p.Type.Struct(_, _, _, elseTpeParents),
-                    Some(widened @ p.Type.Struct(name, _, _, _))
-                  ) if thenTpeParents.contains(name) && elseTpeParents.contains(name) =>
+                    p.Type.Struct(_, _),
+                    p.Type.Struct(_, _),
+                    Some(widened @ p.Type.Struct(_, _))
+                  ) =>
                 // We got a something like:
                 // `val a : Base = if(???) ClassA() else ClassB() # ClassA <: Base, ClassB <: Base`
-                // Where the eventual type is widened by the Scala compiler
+                // Where the eventual type is widened by the Scala compiler.
+                // Without parents on Type.Struct we can't verify the subtype relation here; defer
+                // to the verifier downstream.
                 mkCondStmts(widened)
               case _ =>
                 s"condition unification failure, then=${thenTerm.repr} else=${elseTerm.repr}, expr tpe=${tpe.repr} actual=${term.tpe.widen.simplified.show}".fail
@@ -740,16 +723,37 @@ object Remapper {
           for {
             (condTerm, condCtx) <- c1.noStmts.down(term).mapTerm(cond)
             (_, bodyCtx)        <- condCtx.noStmts.mapTerm(body)
-          } yield (
-            p.Expr.Unit0Const,
-            bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
-          )
-        case (Nil, Nil, q.Closure(rhs, None)) =>
-          println(c.invokeCaptures)
-          // (p.Expr.Unit0Const, c).success
-          // TODO delete the LHS var??
-          // pprint.pprintln(rhs)
-          ???
+          } yield {
+            // ANF: hoist the cond compute -- condCtx.stmts holds Var bindings (and Cond branches
+            // for short-circuit `&&`/`||`) that produce condTerm. To re-evaluate against
+            // body-mutated state we declare every Var up front with mutable=true (one alloca per
+            // slot) and re-emit the sequence as Muts inside the body each iteration. Without
+            // hoisting, declaring Vars inside Cond branches every iteration creates a fresh
+            // alloca and the loop test reads stale state.
+            def hoistDecls(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
+              case p.Stmt.Var(n, _, _)             => List(p.Stmt.Var(n, None, isMutable = true))
+              case p.Stmt.Cond(c, t, f)            => hoistDecls(t) ++ hoistDecls(f)
+              case _                               => Nil
+            }
+            def varsToMuts(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
+              case p.Stmt.Var(n, Some(e), _) => List(p.Stmt.Mut(p.Term.Select(n, Nil, n.tpe), e))
+              case p.Stmt.Var(_, None, _)    => Nil // already declared in hoistedDecls
+              case p.Stmt.Cond(c, t, f)      => List(p.Stmt.Cond(c, varsToMuts(t), varsToMuts(f)))
+              case other                     => List(other)
+            }
+            val hoistedDecls = hoistDecls(condCtx.stmts).distinctBy {
+              case p.Stmt.Var(n, _, _) => n.symbol
+              case other               => other.toString
+            }
+            val condBody     = varsToMuts(condCtx.stmts)
+            (
+              p.Expr.Alias(p.Term.Unit0Const),
+              bodyCtx.replaceStmts(
+                c.stmts ++ hoistedDecls ++ condBody :+ p.Stmt.While(asTerm(condTerm), bodyCtx.stmts ++ condBody)
+              )
+            )
+          }
+        case (Nil, Nil, q.Closure(rhs, None)) => ???
         case _ =>
           c1.fail(
             s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"

@@ -11,47 +11,30 @@ using std::string;
 
 using namespace aspartame;
 
-string polyast::qualified(const Expr::Select &select) {
-  return select.init | append(select.last) | mk_string(".", [](auto &x) { return x.symbol; });
-}
-
-Vector<Named> polyast::path(const Expr::Select &select) { return select.init | append(select.last) | to_vector(); }
-
-Named polyast::head(const Expr::Select &select) { return select.init.empty() ? select.last : select.init.front(); }
-
-Vector<Named> polyast::tail(const Expr::Select &select) {
-  if (select.init.empty()) return {select.last};
-  else {
-    Vector<Named> xs(std::next(select.init.begin()), select.init.end());
-    xs.push_back(select.last);
-    return xs;
+string polyast::qualified(const Term::Select &select) {
+  std::string s = select.root.symbol;
+  for (auto &step : select.steps) {
+    step.match_total(                                                            //
+        [&](const PathStep::Field &f) { s += "."; s += f.name; },                //
+        [&](const PathStep::Deref &) { s += "->"; }                              //
+    );
   }
+  return s;
 }
 
-Pair<Named, Vector<Named>> polyast::uncons(const Expr::Select &select) {
-  if (select.init.empty()) return {{select.last}, {}};
-  else {
-    Vector<Named> xs(std::next(select.init.begin()), select.init.end());
-    xs.push_back(select.last);
-    return {select.init.front(), xs};
-  }
+Term::Select polyast::selectNamed(const Named &name) { return Term::Select(name, {}, name.tpe); }
+
+Term::Select polyast::selectField(const Term::Select &base, const Named &field) {
+  auto steps = base.steps;
+  steps.push_back(PathStep::Field(field.symbol));
+  return Term::Select(base.root, steps, field.tpe);
 }
 
-Expr::Select polyast::selectNamed(const Expr::Select &select, const Named &that) { return Expr::Select(path(select), that); }
-
-Expr::Select polyast::selectNamed(const Vector<Named> &names) {
-  if (names.empty()) throw std::logic_error("Cannot create select from empty name paths");
-  return Expr::Select(Vector<Named>(names.begin(), std::prev(names.end())), names.back());
+Type::Struct polyast::typeOf(const StructDef &def) {
+  Vector<Type::Any> args;
+  for (auto &v : def.tpeVars) args.push_back(Type::Var(v));
+  return Type::Struct(def.name, args);
 }
-
-Expr::Select polyast::selectNamed(const Named &name) { return Expr::Select({}, name); }
-
-Expr::Select polyast::parent(const Expr::Select &select) {
-  if (select.init.empty()) return select;
-  return Expr::Select(Vector<Named>(select.init.begin(), std::prev(select.init.end())), select.init.back());
-}
-
-Type::Struct polyast::typeOf(const StructDef &def) { return Type::Struct(def.name, def.tpeVars, {}, def.parents); }
 
 string polyast::repr(const CompileResult &compilation) {
   std::ostringstream os;
@@ -84,9 +67,9 @@ string polyast::repr(const CompileResult &compilation) {
     size_t ln = 0;
     while (std::getline(ss, l, '\n')) {
       ln++;
-      os << "    " << std::setw(3) << ln << "│" << l << '\n';
+      os << "    " << std::setw(3) << ln << "|" << l << '\n';
     }
-    os << "       ╰───\n";
+    os << "       +---\n";
   }
   os << "}";
   return os.str();
@@ -94,7 +77,7 @@ string polyast::repr(const CompileResult &compilation) {
 
 Opt<Type::Any> polyast::extractComponent(const Type::Any &t) {
   if (const auto p = t.get<Type::Ptr>()) return extractComponent(p->comp);
-  if (const auto a = t.get<Type::Annotated>()) return extractComponent(a->tpe);
+  if (const auto a = t.get<Type::Arr>()) return extractComponent(a->comp);
   return t;
 }
 
@@ -117,25 +100,30 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
                        [&](const Type::Unit0 &) -> Opt<size_t> { return 8 / 8; }, //
                        [&](const Type::Bool1 &) -> Opt<size_t> { return 8 / 8; }, //
 
-                       [&](const Type::Struct &) -> Opt<size_t> { return {}; }, [&](const Type::Ptr &) -> Opt<size_t> { return {}; },
-                       [&](const Type::Var &) -> Opt<size_t> { return {}; },  //
-                       [&](const Type::Exec &) -> Opt<size_t> { return {}; }, //
-                       [&](const Type::Annotated &x) -> Opt<size_t> { return primitiveSize(x.tpe); });
+                       [&](const Type::Struct &) -> Opt<size_t> { return {}; }, //
+                       [&](const Type::Ptr &) -> Opt<size_t> { return {}; },    //
+                       [&](const Type::Arr &) -> Opt<size_t> { return {}; },    //
+                       [&](const Type::Var &) -> Opt<size_t> { return {}; },    //
+                       [&](const Type::Exec &) -> Opt<size_t> { return {}; });
 }
 
-Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table) {
+Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t,
+                                                                     const Map<Type::Struct, StructLayout> &table) {
   if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) ^ map([](auto &sl) { return sl.sizeInBytes; })};
-  if (const auto a = t.get<Type::Annotated>()) return countIndirectionsAndComponentSize(a->tpe, table);
   if (const auto p = t.get<Type::Ptr>()) {
     auto [indirection, componentSize] = countIndirectionsAndComponentSize(p->comp, table);
-    return {p->length ? indirection : indirection + 1, componentSize};
+    return {indirection + 1, componentSize};
+  }
+  if (const auto a = t.get<Type::Arr>()) {
+    auto [indirection, componentSize] = countIndirectionsAndComponentSize(a->comp, table);
+    return {indirection, componentSize};
   }
   return {0, primitiveSize(t)};
 }
 
 bool polyast::isSelfOpaque(const Type::Any &tpe) {
-  if (const auto a = tpe.get<Type::Annotated>()) return isSelfOpaque(a->tpe);
-  if (const auto p = tpe.get<Type::Ptr>()) return p->length.has_value() && isSelfOpaque(p->comp);
+  if (const auto a = tpe.get<Type::Arr>()) return isSelfOpaque(a->comp);
+  if (const auto p = tpe.get<Type::Ptr>()) return false;
   return true;
 }
 
@@ -155,47 +143,60 @@ bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::St
 
 // ====================
 
-Type::Ptr dsl::Ptr(const Type::Any &t, Opt<int32_t> l, const ::TypeSpace::Any &s) { return Tpe::Ptr(t, l, s); }
-Expr::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
-  auto unsupported = [](auto &&t, auto &&v) -> Expr::Any {
-    throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" + std::to_string(v));
+Type::Ptr dsl::Ptr(const Type::Any &t, const TypeSpace::Any &s) { return Type::Ptr(t, s); }
+Type::Ptr dsl::Ptr(const Type::Any &t, std::optional<int32_t>, const TypeSpace::Any &s) { return Type::Ptr(t, s); }
+
+Stmt::While dsl::whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body) {
+  // Inline the prelude inside the body so the cond term gets re-bound each iteration.
+  std::vector<Stmt::Any> loopBody = prelude;
+  loopBody.insert(loopBody.end(), body.begin(), body.end());
+  return Stmt::While(cond, loopBody);
+}
+Type::Arr dsl::Arr(const Type::Any &t, int32_t length, const TypeSpace::Any &s) { return Type::Arr(t, length, s); }
+Type::Struct dsl::Struct(std::string name, Vector<Type::Any> args) { return Type::Struct(Sym({std::move(name)}), std::move(args)); }
+
+Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
+  auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
+    throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value " + std::to_string(v));
   };
-  return tpe.match_total(                                                  //
-      [&](const Type::Float16 &) -> Expr::Any { return Float16Const(x); }, //
-      [&](const Type::Float32 &) -> Expr::Any { return Float32Const(x); }, //
-      [&](const Type::Float64 &) -> Expr::Any { return Float64Const(x); }, //
+  return tpe.match_total(                                                       //
+      [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(x); },    //
+      [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(x); },    //
+      [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(x); },    //
 
-      [&](const Type::IntU8 &) -> Expr::Any { return IntU8Const(x); },   //
-      [&](const Type::IntU16 &) -> Expr::Any { return IntU16Const(x); }, //
-      [&](const Type::IntU32 &) -> Expr::Any { return IntU32Const(x); }, //
-      [&](const Type::IntU64 &) -> Expr::Any { return IntU64Const(x); }, //
+      [&](const Type::IntU8 &) -> Term::Any { return Term::IntU8Const(x); },        //
+      [&](const Type::IntU16 &) -> Term::Any { return Term::IntU16Const(x); },      //
+      [&](const Type::IntU32 &) -> Term::Any { return Term::IntU32Const(x); },      //
+      [&](const Type::IntU64 &) -> Term::Any { return Term::IntU64Const(x); },      //
 
-      [&](const Type::IntS8 &) -> Expr::Any { return IntS8Const(x); },   //
-      [&](const Type::IntS16 &) -> Expr::Any { return IntS16Const(x); }, //
-      [&](const Type::IntS32 &) -> Expr::Any { return IntS32Const(x); }, //
-      [&](const Type::IntS64 &) -> Expr::Any { return IntS64Const(x); }, //
+      [&](const Type::IntS8 &) -> Term::Any { return Term::IntS8Const(x); },        //
+      [&](const Type::IntS16 &) -> Term::Any { return Term::IntS16Const(x); },      //
+      [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(x); },      //
+      [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(x); },      //
 
-      [&](const Type::Nothing &t) -> Expr::Any { return unsupported(t, x); }, //
-      [&](const Type::Unit0 &t) -> Expr::Any { return unsupported(t, x); },   //
-      [&](const Type::Bool1 &) -> Expr::Any { return Bool1Const(x); },        //
+      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); },   //
+      [&](const Type::Unit0 &t) -> Term::Any { return unsupported(t, x); },     //
+      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(x); },        //
 
-      [&](const Type::Struct &t) -> Expr::Any { return unsupported(t, x); },   //
-      [&](const Type::Ptr &t) -> Expr::Any { return unsupported(t, x); },      //
-      [&](const Type::Var &t) -> Expr::Any { return unsupported(t, x); },      //
-      [&](const Type::Exec &t) -> Expr::Any { return unsupported(t, x); },     //
-      [&](const Type::Annotated &t) -> Expr::Any { return unsupported(t, x); } //
+      [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },    //
+      [&](const Type::Ptr &t) -> Term::Any { return unsupported(t, x); },       //
+      [&](const Type::Arr &t) -> Term::Any { return unsupported(t, x); },       //
+      [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },       //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }       //
   );
 }
-Expr::Any dsl::fractional(const Type::Any &tpe, long double x) {
-  if (tpe.is<Type::Float64>()) return Float64Const(static_cast<double>(x));
-  if (tpe.is<Type::Float32>()) return Float32Const(static_cast<float>(x));
-  if (tpe.is<Type::Float16>()) return Float16Const(static_cast<float>(x));
-  throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" + std::to_string(x));
+
+Term::Any dsl::fractional(const Type::Any &tpe, long double x) {
+  if (tpe.is<Type::Float64>()) return Term::Float64Const(static_cast<double>(x));
+  if (tpe.is<Type::Float32>()) return Term::Float32Const(static_cast<float>(x));
+  if (tpe.is<Type::Float16>()) return Term::Float16Const(static_cast<float>(x));
+  throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value " + std::to_string(x));
 }
-std::function<Expr::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
+
+std::function<Term::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
   return [=](const Type::Any &t) { return integral(t, x); };
 }
-std::function<Expr::Any(Type::Any)> dsl::operator""_(long double x) {
+std::function<Term::Any(Type::Any)> dsl::operator""_(long double x) {
   return [=](const Type::Any &t) { return fractional(t, x); };
 }
 std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, size_t) {
@@ -203,42 +204,84 @@ std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, s
   return [=](auto &&tpe) { return NamedBuilder{Named(name_, tpe)}; };
 }
 
-Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Var(Named(name, tpe), {}); }
-dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name}; }
-Expr::IntrOp dsl::call(const Intr::Any &intr) { return IntrOp(intr); }
-Expr::MathOp dsl::call(const Math::Any &intr) { return MathOp(intr); }
-Expr::SpecOp dsl::call(const Spec::Any &intr) { return SpecOp(intr); }
+Stmt::Any dsl::let(const string &name, const Type::Any &tpe) {
+  return Stmt::Var(Named(name, tpe), {}, /*isMutable*/ false);
+}
+dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name, /*isMutable*/ false}; }
+dsl::AssignmentBuilder dsl::var(const string &name) { return AssignmentBuilder{name, /*isMutable*/ true}; }
+
+Term::Select dsl::Select(const Vector<Named> &init, const Named &last) {
+  if (init.empty()) return Term::Select(last, {}, last.tpe);
+  Vector<PathStep::Any> steps;
+  for (size_t i = 1; i < init.size(); ++i) steps.push_back(PathStep::Field(init[i].symbol));
+  steps.push_back(PathStep::Field(last.symbol));
+  return Term::Select(init.front(), steps, last.tpe);
+}
+
+Term::Select dsl::selectFromBuilders(const Vector<NamedBuilder> &init, const Named &last) {
+  Vector<Named> namedInit;
+  for (auto &nb : init) namedInit.push_back(nb.named);
+  return dsl::Select(namedInit, last);
+}
+
+Expr::IntrOp dsl::call(const Intr::Any &intr) { return Expr::IntrOp(intr); }
+Expr::MathOp dsl::call(const Math::Any &intr) { return Expr::MathOp(intr); }
+Expr::SpecOp dsl::call(const Spec::Any &intr) { return Expr::SpecOp(intr); }
+
 std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, const Vector<Arg> &args, const Type::Any &rtn,
-                                                         const std::set<FunctionAttr::Any> &attrs) {
+                                                         FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode,
+                                                         bool isEntry) {
   return [=](auto &&stmts) {
-    return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, attrs);
+    return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, visibility,
+                    fpMode, isEntry);
   };
 }
-Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
+
+Stmt::Return dsl::ret(const Expr::Any &expr) { return Stmt::Return(expr); }
+Stmt::Return dsl::ret(const Term::Any &term) { return Stmt::Return(Expr::Alias(term)); }
+
 Program dsl::program(const Vector<StructDef> &structs, const Vector<Function> &functions) {
   if (functions.empty()) throw std::logic_error("dsl::program requires at least one (entry) function");
-  return Program(functions.front(), Vector<Function>(std::next(functions.begin()), functions.end()), structs);
+  return Program(functions.front(), Vector<Function>(std::next(functions.begin()), functions.end()), structs, PassPhase::Initial());
 }
-Program dsl::program(const Function &function) { return Program(function, {}, {}); }
+Program dsl::program(const Function &function) { return Program(function, {}, {}, PassPhase::Initial()); }
 
 dsl::IndexBuilder::IndexBuilder(const Index &index) : index(index) {}
 dsl::IndexBuilder::operator Expr::Any() const { return index; }
-Stmt::Update dsl::IndexBuilder::operator=(const Expr::Any &term) const { return {index.lhs, index.idx, term}; }
+Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &that) const {
+  // The new shape demands lhs be a Term::Select; carry whatever the Index wraps.
+  auto sel = index.lhs.get<Term::Select>();
+  if (!sel) throw std::logic_error("IndexBuilder requires a Term::Select lhs to materialise an Update");
+  return Stmt::Update(*sel, index.idx, that);
+}
+
 dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
-dsl::NamedBuilder::operator Expr::Any() const { return Select({}, named); }
-dsl::NamedBuilder::operator Expr::Select() const { return Select({}, named); }
-// dsl::NamedBuilder::operator const Expr::Any() const { return Alias(Select({}, named)); }
+dsl::NamedBuilder::operator Term::Any() const { return Term::Select(named, {}, named.tpe); }
+dsl::NamedBuilder::operator Term::Select() const { return Term::Select(named, {}, named.tpe); }
 dsl::NamedBuilder::operator Named() const { return named; }
 Arg dsl::NamedBuilder::operator()() const { return Arg(named, {}); }
 
-dsl::IndexBuilder dsl::NamedBuilder::operator[](const Expr::Any &idx) const {
+dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
   if (auto arr = named.tpe.get<Type::Ptr>()) {
-    return IndexBuilder({Select({}, named), idx, arr->comp});
+    return IndexBuilder(Expr::Index(Term::Select(named, {}, named.tpe), idx, arr->comp));
   }
-  throw std::logic_error("Cannot index a reference to non-array type" + to_string(named));
+  if (auto arr = named.tpe.get<Type::Arr>()) {
+    return IndexBuilder(Expr::Index(Term::Select(named, {}, named.tpe), idx, arr->comp));
+  }
+  throw std::logic_error("Cannot index a reference to non-array type " + to_string(named));
 }
-dsl::Mut dsl::NamedBuilder::operator=(const Expr::Any &that) const { return Mut(Select({}, named), that); }
 
-dsl::AssignmentBuilder::AssignmentBuilder(const string &name) : name(name) {}
-Stmt::Any dsl::AssignmentBuilder::operator=(Expr::Any rhs) const { return Var(Named(name, rhs.tpe()), {rhs}); }
-Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const { return Var(Named(name, tpe), {}); }
+dsl::Mut dsl::NamedBuilder::operator=(const Expr::Any &that) const {
+  return Stmt::Mut(Term::Select(named, {}, named.tpe), that);
+}
+
+dsl::AssignmentBuilder::AssignmentBuilder(const string &name, bool isMutable) : name(name), isMutable(isMutable) {}
+Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const {
+  return Stmt::Var(Named(name, rhs.tpe()), Expr::Alias(rhs), isMutable);
+}
+Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const {
+  return Stmt::Var(Named(name, tpe), {}, isMutable);
+}
+Stmt::Any dsl::AssignmentBuilder::operator=(const Expr::Any &rhs) const {
+  return Stmt::Var(Named(name, rhs.tpe()), rhs, isMutable);
+}

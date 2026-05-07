@@ -34,29 +34,29 @@ const static std::string This = "#this";
 const static std::string Empty = "#empty";
 
 [[nodiscard]] static Expr::Any defaultValue(const Type::Any &tpe) {
-  return tpe.match_total(                                                        //
-      [&](const Type::Float16 &) -> Expr::Any { return Expr::Float16Const(0); }, //
-      [&](const Type::Float32 &) -> Expr::Any { return Expr::Float32Const(0); }, //
-      [&](const Type::Float64 &) -> Expr::Any { return Expr::Float64Const(0); }, //
+  return tpe.match_total(                                                                       //
+      [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(0)); },   //
+      [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(0)); },   //
+      [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(0)); },   //
 
-      [&](const Type::IntU8 &) -> Expr::Any { return Expr::IntU8Const(0); },   //
-      [&](const Type::IntU16 &) -> Expr::Any { return Expr::IntU16Const(0); }, //
-      [&](const Type::IntU32 &) -> Expr::Any { return Expr::IntU32Const(0); }, //
-      [&](const Type::IntU64 &) -> Expr::Any { return Expr::IntU64Const(0); }, //
+      [&](const Type::IntU8 &) -> Expr::Any { return Expr::Alias(Term::IntU8Const(0)); },       //
+      [&](const Type::IntU16 &) -> Expr::Any { return Expr::Alias(Term::IntU16Const(0)); },     //
+      [&](const Type::IntU32 &) -> Expr::Any { return Expr::Alias(Term::IntU32Const(0)); },     //
+      [&](const Type::IntU64 &) -> Expr::Any { return Expr::Alias(Term::IntU64Const(0)); },     //
 
-      [&](const Type::IntS8 &) -> Expr::Any { return Expr::IntS8Const(0); },   //
-      [&](const Type::IntS16 &) -> Expr::Any { return Expr::IntS16Const(0); }, //
-      [&](const Type::IntS32 &) -> Expr::Any { return Expr::IntS32Const(0); }, //
-      [&](const Type::IntS64 &) -> Expr::Any { return Expr::IntS64Const(0); }, //
+      [&](const Type::IntS8 &) -> Expr::Any { return Expr::Alias(Term::IntS8Const(0)); },       //
+      [&](const Type::IntS16 &) -> Expr::Any { return Expr::Alias(Term::IntS16Const(0)); },     //
+      [&](const Type::IntS32 &) -> Expr::Any { return Expr::Alias(Term::IntS32Const(0)); },     //
+      [&](const Type::IntS64 &) -> Expr::Any { return Expr::Alias(Term::IntS64Const(0)); },     //
 
-      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Bool1Const(false); },    //
-      [&](const Type::Unit0 &) -> Expr::Any { return Expr::Unit0Const(); },         //
-      [&](const Type::Nothing &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }, //
-      [&](const Type::Struct &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },  //
-      [&](const Type::Ptr &x) -> Expr::Any { return Expr::Poison(x); },             //
-      [&](const Type::Var &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },     //
-      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },    //
-      [&](const Type::Annotated &x) -> Expr::Any { return defaultValue(x.tpe); }    //
+      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(false)); },   //
+      [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },        //
+      [&](const Type::Nothing &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },             //
+      [&](const Type::Struct &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },              //
+      [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },            //
+      [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },            //
+      [&](const Type::Var &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },                 //
+      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }                 //
   );
 }
 
@@ -67,7 +67,7 @@ const static std::string Empty = "#empty";
   if (!parents) return false;
 
   if (const auto directBases = *parents ^ filter([&](auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
-    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name, {}, {}, {}), predicate, chain); });
+    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name, {}), predicate, chain); });
   } else if (directBases.size() != 1) {
     // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
     raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
@@ -80,30 +80,43 @@ const static std::string Empty = "#empty";
 }
 
 [[nodiscard]] static Named baseMember(const StructDef &s) {
-  return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {}, {}, {}));
+  return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {}));
 }
 
-// static Expr::Select select(const Expr::Select & a, const Expr::Select & b) {
-//   const auto xs = a.init | append(a.last) | concat(b.init) | append(b.last) | to_vector();
-//   if(const auto x = xs ^ last_maybe()) return Expr::Select(xs ^ init(),*x);
-//   raise("Invariant: empty select");
-// }
+// Hits the Poison path if `expr` isn't an Alias(Select); the resulting kernel still type-checks
+// but flags the bad call site downstream.
+[[nodiscard]] static Term::Select asSelect(const Expr::Any &expr) {
+  if (auto a = expr.template get<Expr::Alias>()) {
+    if (auto s = a->ref.template get<Term::Select>()) return *s;
+  }
+  return Term::Select(Named("_invalid_select", expr.tpe()), {}, expr.tpe());
+}
 
-[[nodiscard]] static Expr::Select selectFromNames(const Vector<Named> &xs) {
+[[nodiscard]] static Term::Select selectFromNames(const Vector<Named> &xs) {
   if (const auto last = xs ^ last_maybe()) {
-    return Expr::Select(xs ^ init(), *last);
+    return dsl::Select(xs ^ init(), *last);
   }
   raise("Cannot form select from empty names");
 }
 
-[[nodiscard]] static Expr::Select select(Remapper::RemapContext &r, const Vector<Named> &init, const Named &last) {
+[[nodiscard]] static Term::Select select(Remapper::RemapContext &r, const Vector<Named> &init, const Named &last) {
+  // Members are matched by symbol only: callers sometimes pass Type::Nothing as the segment tpe
+  // because per-step types aren't carried in the IR anymore; the struct def's members have the
+  // real type, so a `Named ==` comparison would miss every reach-through.
+  const auto memberSymbolMatches = [](const Named &member) {
+    return [&member](const Named &m) { return m.symbol == member.symbol; };
+  };
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
     auto expand = [&](const Type::Struct &s) -> Vector<Named> {
-      if (r.findStruct(repr(s.name), "select")->members ^ contains(member)) return {base};
-      if (Vector<std::shared_ptr<StructDef>> path; walkParents(r, s, [&](auto &p) { return p.members ^ contains(member); }, path)) {
+      if (r.findStruct(repr(s.name), "select")->members ^ exists(memberSymbolMatches(member))) return {base};
+      if (Vector<std::shared_ptr<StructDef>> path;
+          walkParents(r, s, [&](auto &p) { return p.members ^ exists(memberSymbolMatches(member)); }, path)) {
         return path | map([&](auto &def) { return baseMember(*def); }) | prepend(base) | to_vector();
       }
-      raise(fmt::format("Cannot generate select for member {} against type {}", repr(member), repr(s)));
+      const auto sd = r.findStruct(repr(s.name), "select");
+      const auto memberDump = sd->members | mk_string(", ", [](auto &m) { return m.symbol + ":" + repr(m.tpe); });
+      raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]",
+                        member.symbol, repr(member.tpe), repr(s), memberDump));
     };
     if (const auto s = base.tpe.get<Type::Struct>()) return expand(*s);
     if (const auto ptr = base.tpe.get<Type::Ptr>()) {
@@ -112,12 +125,37 @@ const static std::string Empty = "#empty";
     raise(fmt::format("Selecting non-struct type {}", repr(base)));
   };
 
-  if (init.empty()) return Expr::Select({}, last);
+  if (init.empty()) return dsl::Select(Vector<Named>{}, last);
   if (init.size() == 1) {
-    return Expr::Select(selectWithInheritance(init[0], last), last);
+    return dsl::Select(selectWithInheritance(init[0], last), last);
   } else {
-    return Expr::Select(init ^ append(last) ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }),
-                        last);
+    // Walk the path step by step, looking up each segment's actual type from the previous
+    // segment's struct definition. The path's intermediate Nameds carry Type::Nothing
+    // (per-step types aren't preserved in the new AST), but selectWithInheritance needs a
+    // Struct/Ptr<Struct> base to dispatch on, so we re-hydrate types as we go.
+    auto resolveTpe = [&](const Named &n, const Type::Any &fallback) -> Type::Any {
+      if (!n.tpe.is<Type::Nothing>()) return n.tpe;
+      // Fallback type is the previous struct; look up the member with this symbol there.
+      auto sname = fallback.get<Type::Struct>();
+      if (!sname) {
+        if (auto p = fallback.get<Type::Ptr>()) sname = p->comp.get<Type::Struct>();
+      }
+      if (!sname) return Type::Nothing();
+      auto def = r.findStruct(repr(sname->name), "select-walk");
+      auto m = def->members | find([&](auto &mm) { return mm.symbol == n.symbol; });
+      return m ? m->tpe : Type::Nothing();
+    };
+    Vector<Named> rehydrated;
+    rehydrated.reserve(init.size() + 1);
+    auto path = init ^ append(last);
+    Type::Any prev = Type::Nothing();
+    for (auto &n : path) {
+      auto tpe = resolveTpe(n, prev);
+      rehydrated.emplace_back(n.symbol, tpe);
+      prev = tpe;
+    }
+    return dsl::Select(
+        rehydrated ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }), last);
   }
 }
 
@@ -131,22 +169,23 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
     if (r.emptyStruct(**def)) return;
     for (auto &named : (*def)->members) {
       if (named.tpe.template is<Type::Struct>()) continue;
-      if (const auto ptr = named.tpe.template get<Type::Ptr>()) {
-        if (ptr->length) {
-          // In-struct array storage (e.g. std::array<T,N>::_M_elems is `T[N]`); defaultValue would
-          // emit Poison for the Ptr, so zero each slot when the element is a primitive.
-          if (ptr->comp.template get<Type::Struct>()) continue;
-          if (ptr->comp.template is<Type::Ptr>()) continue;
-          r.push(Stmt::Comment("Zero init array member " + named.symbol));
-          const auto member = select(r, {root}, named);
-          const auto lim = static_cast<uint64_t>(*ptr->length);
-          for (uint64_t i = 0; i < lim; ++i)
-            r.push(Stmt::Update(member, Expr::IntU64Const(i), defaultValue(ptr->comp)));
-          continue;
+      if (const auto arr = named.tpe.template get<Type::Arr>()) {
+        // In-struct array storage (e.g. std::array<T,N>::_M_elems is `T[N]`); defaultValue would
+        // emit Term::Poison for the Arr, so zero each slot when the element is a primitive.
+        if (arr->comp.template get<Type::Struct>()) continue;
+        if (arr->comp.template is<Type::Ptr>()) continue;
+        if (arr->comp.template is<Type::Arr>()) continue;
+        const auto member = select(r, {root}, named);
+        const auto lim = static_cast<uint64_t>(arr->length);
+        for (uint64_t i = 0; i < lim; ++i) {
+          const auto defv = defaultValue(arr->comp);
+          const auto tmp = Named("#init_v" + std::to_string(i), arr->comp);
+          r.push(Stmt::Var(tmp, defv, /*isMutable*/ false));
+          r.push(Stmt::Update(member, Term::IntU64Const(i), select(r, {}, tmp)));
         }
         continue;
       }
-      r.push(Stmt::Comment("Zero init member"));
+      if (named.tpe.template is<Type::Ptr>()) continue;
       r.push(Stmt::Mut(select(r, {root}, named), defaultValue(named.tpe)));
     }
   } else {
@@ -180,83 +219,55 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
 void Remapper::RemapContext::push(const Vector<Stmt::Any> &xs) { stmts ^= concat_inplace(xs); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
-Expr::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
-  auto mkSelect = [&](const Expr::Any &e) {
-    const auto var = Stmt::Var(newName(e.tpe()), e);
-    stmts.push_back(var);
-    return select(*this, {}, var.name).widen();
-  };
-  return expr.match_total([&](const Expr::Float16Const &) { return expr; }, //
-                          [&](const Expr::Float32Const &) { return expr; }, //
-                          [&](const Expr::Float64Const &) { return expr; }, //
-                          [&](const Expr::IntU8Const &) { return expr; },   //
-                          [&](const Expr::IntU16Const &) { return expr; },  //
-                          [&](const Expr::IntU32Const &) { return expr; },  //
-                          [&](const Expr::IntU64Const &) { return expr; },  //
-                          [&](const Expr::IntS8Const &) { return expr; },   //
-                          [&](const Expr::IntS16Const &) { return expr; },  //
-                          [&](const Expr::IntS32Const &) { return expr; },  //
-                          [&](const Expr::IntS64Const &) { return expr; },  //
-                          [&](const Expr::Unit0Const &) { return expr; },   //
-                          [&](const Expr::Bool1Const &) { return expr; },   //
-                          [&](const Expr::NullPtrConst &) { return expr; }, //
-
-                          [&](const Expr::SpecOp &x) { return mkSelect(x); }, //
-                          [&](const Expr::MathOp &x) { return mkSelect(x); }, //
-                          [&](const Expr::IntrOp &x) { return mkSelect(x); }, //
-
-                          [&](const Expr::Select &) { return expr; }, //
-                          [&](const Expr::Poison &) { return expr; }, //
-
-                          [&](const Expr::Cast &x) { return mkSelect(x); },     //
-                          [&](const Expr::Index &x) { return mkSelect(x); },    //
-                          [&](const Expr::RefTo &x) { return mkSelect(x); },    //
-                          [&](const Expr::Alloc &x) { return mkSelect(x); },    //
-                          [&](const Expr::Invoke &x) { return mkSelect(x); },   //
-                          [&](const Expr::Annotated &x) { return mkSelect(x); } //
-  );
+Term::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
+  // Atomic Alias-wrapped terms can be used in-place; compound Exprs need a binding.
+  if (const auto a = expr.template get<Expr::Alias>()) return a->ref;
+  const auto var = Stmt::Var(newName(expr.tpe()), expr, /*isMutable*/ false);
+  stmts.push_back(var);
+  return select(*this, {}, var.name).widen();
 }
 
 Named Remapper::RemapContext::newVar(const Type::Any &tpe) {
-  auto var = Stmt::Var(newName(tpe), {});
+  auto name = newName(tpe);
+  auto var = Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true);
   stmts.push_back(var);
-  return var.name;
+  return name;
 }
 
 Expr::Any Remapper::integralConstOfType(const Type::Any &tpe, const uint64_t value) {
   return tpe.match_total(                                                                                 //
-      [&](const Type::Float16 &) -> Expr::Any { return Expr::Float16Const(static_cast<float>(value)); },  //
-      [&](const Type::Float32 &) -> Expr::Any { return Expr::Float32Const(static_cast<float>(value)); },  //
-      [&](const Type::Float64 &) -> Expr::Any { return Expr::Float64Const(static_cast<double>(value)); }, //
+      [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(static_cast<float>(value))); },  //
+      [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(static_cast<float>(value))); },  //
+      [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(static_cast<double>(value))); }, //
 
-      [&](const Type::IntU8 &) -> Expr::Any { return Expr::IntU8Const(static_cast<int8_t>(value)); },    //
-      [&](const Type::IntU16 &) -> Expr::Any { return Expr::IntU16Const(static_cast<int16_t>(value)); }, //
-      [&](const Type::IntU32 &) -> Expr::Any { return Expr::IntU32Const(static_cast<int32_t>(value)); }, //
-      [&](const Type::IntU64 &) -> Expr::Any { return Expr::IntU64Const(static_cast<int64_t>(value)); }, //
+      [&](const Type::IntU8 &) -> Expr::Any { return Expr::Alias(Term::IntU8Const(static_cast<int8_t>(value))); },    //
+      [&](const Type::IntU16 &) -> Expr::Any { return Expr::Alias(Term::IntU16Const(static_cast<int16_t>(value))); }, //
+      [&](const Type::IntU32 &) -> Expr::Any { return Expr::Alias(Term::IntU32Const(static_cast<int32_t>(value))); }, //
+      [&](const Type::IntU64 &) -> Expr::Any { return Expr::Alias(Term::IntU64Const(static_cast<int64_t>(value))); }, //
 
-      [&](const Type::IntS8 &) -> Expr::Any { return Expr::IntS8Const(static_cast<int8_t>(value)); },    //
-      [&](const Type::IntS16 &) -> Expr::Any { return Expr::IntS16Const(static_cast<int16_t>(value)); }, //
-      [&](const Type::IntS32 &) -> Expr::Any { return Expr::IntS32Const(static_cast<int32_t>(value)); }, //
-      [&](const Type::IntS64 &) -> Expr::Any { return Expr::IntS64Const(static_cast<int64_t>(value)); }, //
+      [&](const Type::IntS8 &) -> Expr::Any { return Expr::Alias(Term::IntS8Const(static_cast<int8_t>(value))); },    //
+      [&](const Type::IntS16 &) -> Expr::Any { return Expr::Alias(Term::IntS16Const(static_cast<int16_t>(value))); }, //
+      [&](const Type::IntS32 &) -> Expr::Any { return Expr::Alias(Term::IntS32Const(static_cast<int32_t>(value))); }, //
+      [&](const Type::IntS64 &) -> Expr::Any { return Expr::Alias(Term::IntS64Const(static_cast<int64_t>(value))); }, //
 
-      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Bool1Const(value != 0); }, //
-      [&](const Type::Unit0 &) -> Expr::Any { return Expr::Unit0Const(); },           //
-      [&](const Type::Nothing &x) -> Expr::Any { return Expr::Poison(x); },           //
-      [&](const Type::Struct &x) -> Expr::Any { return Expr::Poison(x); },            //
-      [&](const Type::Ptr &x) -> Expr::Any { return Expr::Poison(x); },               //
-      [&](const Type::Var &x) -> Expr::Any { return Expr::Poison(x); },               //
-      [&](const Type::Exec &x) -> Expr::Any { return Expr::Poison(x); },              //
-      [&](const Type::Annotated &x) -> Expr::Any { return Expr::Poison(x); }          //
+      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(value != 0)); }, //
+      [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },           //
+      [&](const Type::Nothing &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },           //
+      [&](const Type::Struct &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },            //
+      [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },               //
+      [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },               //
+      [&](const Type::Var &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },               //
+      [&](const Type::Exec &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); }               //
   );
 }
 
 Expr::Any Remapper::floatConstOfType(const Type::Any &tpe, const double value) {
   if (tpe.is<Type::Float16>()) {
-    return Expr::Float16Const(static_cast<float>(value));
+    return Expr::Alias(Term::Float16Const(static_cast<float>(value)));
   } else if (tpe.is<Type::Float32>()) {
-    return Expr::Float32Const(static_cast<float>(value));
+    return Expr::Alias(Term::Float32Const(static_cast<float>(value)));
   } else if (tpe.is<Type::Float64>()) {
-    return Expr::Float64Const(value);
+    return Expr::Alias(Term::Float64Const(value));
   } else {
     raise("Bad type " + repr(tpe));
   }
@@ -264,7 +275,7 @@ Expr::Any Remapper::floatConstOfType(const Type::Any &tpe, const double value) {
 
 Remapper::Remapper(clang::ASTContext &context) : context(context) {}
 
-static Type::Ptr ptrTo(const Type::Any &tpe) { return {tpe, {}, TypeSpace::Global()}; }
+static Type::Ptr ptrTo(const Type::Any &tpe) { return Type::Ptr(tpe, TypeSpace::Global()); }
 std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
   // Locals/parms get a per-decl ID suffix so shadowed names in the same function (e.g. nested
   // `for (int l = ...)` loops in miniBUDE's fasten_main) stay distinct in polyc's flat per-function
@@ -290,16 +301,20 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
   auto tgtPtrTpe = targetTpe.get<Type::Ptr>();
   auto rhsPtrTpe = rhsTpe.get<Type::Ptr>();
 
-  if (auto rhsSelect = expr.get<Expr::Select>(); tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && rhsSelect) {
+  auto exprAlias = expr.get<Expr::Alias>();
+  auto exprIndex = expr.get<Expr::Index>();
+  std::optional<Term::Select> rhsSelectTermOpt = exprAlias ? exprAlias->ref.template get<Term::Select>() : std::optional<Term::Select>{};
+  auto rhsSelectTerm = rhsSelectTermOpt ? &*rhsSelectTermOpt : nullptr;
+  if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && rhsSelectTerm) {
     // Handle decay
     //   int rhs = /* */;
     //   int &lhs = rhs;
-    return Expr::RefTo(*rhsSelect, {}, rhsTpe, TypeSpace::Global());
-  } else if (auto rhsIndex = expr.get<Expr::Index>(); tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && rhsIndex) {
+    return Expr::RefTo(*rhsSelectTerm, {}, rhsTpe, TypeSpace::Global());
+  } else if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && exprIndex) {
     // Handle decay
     //   auto rhs = xs[0];
     //   int &lhs = rhs;
-    return Expr::RefTo(rhsIndex->lhs, rhsIndex->idx, rhsIndex->comp, TypeSpace::Global());
+    return Expr::RefTo(exprIndex->lhs, exprIndex->idx, exprIndex->comp, TypeSpace::Global());
   } else if (!rhsPtrTpe && tgtPtrTpe) {
     // Handle promote
     //   int rhs = /* */;
@@ -309,15 +324,19 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     // Handle decay
     //   int &rhs = /* */;
     //   int lhs = rhs; // lhs = rhs[0];
-    return Expr::Index(r.newVar(expr), Remapper::integralConstOfType(Type::IntS64(), 0), targetTpe);
+    auto idxTerm = r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0));
+    return Expr::Index(r.newVar(expr), idxTerm, targetTpe);
   } else if (rhsPtrTpe && tgtPtrTpe) {
     if (auto tgtStruct = tgtPtrTpe->comp.get<Type::Struct>()) {
       if (auto rhsStruct = rhsPtrTpe->comp.get<Type::Struct>()) {
-        if (auto root = expr.get<Expr::Select>()) {
+        if (rhsSelectTerm) {
           if (Vector<std::shared_ptr<StructDef>> chain;
               walkParents(r, *rhsStruct, [&](auto &p) { return p.name == tgtStruct->name; }, chain)) {
-            const auto names = root->init | append(root->last) | concat(chain | map([](auto &s) { return baseMember(*s); })) | to_vector();
-            return Expr::RefTo(selectFromNames(names), {}, tgtStruct->widen(), TypeSpace::Global());
+            // Build the augmented Select: existing path + base-of links to the target struct.
+            Vector<PathStep::Any> steps = rhsSelectTerm->steps;
+            for (auto &s : chain) steps.emplace_back(PathStep::Field(baseMember(*s).symbol));
+            auto extended = Term::Select(rhsSelectTerm->root, steps, tgtStruct->widen());
+            return Expr::RefTo(extended, {}, tgtStruct->widen(), TypeSpace::Global());
           }
         }
       }
@@ -326,8 +345,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     // `__aligned_membuf<T>::_M_addr()` returning storage as `void*` poisons _M_valptr's deref.
     return Expr::Cast(r.newVar(expr), targetTpe);
   } else {
-    r.push(Stmt::Comment(fmt::format("ERROR: Cannot conform rhs {} with target {}", repr(rhsTpe), repr(targetTpe))));
-    return Expr::Poison(targetTpe);
+    return Expr::Alias(Term::Poison(targetTpe));
   }
 }
 
@@ -347,14 +365,14 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::IntS32 &) -> std::string { return "int32_t"; }, //
       [&](const Type::IntS64 &) -> std::string { return "int64_t"; }, //
 
-      [&](const Type::Bool1 &) -> std::string { return "bool"; },                  //
-      [&](const Type::Unit0 &) -> std::string { return "void"; },                  //
-      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },         //
-      [&](const Type::Struct &x) -> std::string { return repr(x.name); },          //
-      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },   //
-      [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; }, //
-      [&](const Type::Exec &) -> std::string { return "/*exec*/"; },               //
-      [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }     //
+      [&](const Type::Bool1 &) -> std::string { return "bool"; },                                                //
+      [&](const Type::Unit0 &) -> std::string { return "void"; },                                                //
+      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                       //
+      [&](const Type::Struct &x) -> std::string { return repr(x.name); },                                        //
+      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },                                 //
+      [&](const Type::Arr &x) -> std::string { return typeName(x.comp) + "[" + std::to_string(x.length) + "]"; }, //
+      [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; },                               //
+      [&](const Type::Exec &) -> std::string { return "/*exec*/"; }                                              //
   );
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -386,16 +404,14 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   // intrinsic / libm call; otherwise <cmath> falls through to the empty-body unimplemented path.
   auto emitUnaryMath = [&](auto &r, auto mkOp) {
     if (args.size() != 1) {
-      r.push(Stmt::Comment("unary math builtin expects 1 arg, got: " + std::to_string(args.size())));
-      r.push(Stmt::Return(Expr::Poison(rtnType)));
+      r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
       return;
     }
     r.push(Stmt::Return(Expr::MathOp(mkOp(select(r, {}, args[0].named), rtnType))));
   };
   auto emitBinaryMath = [&](auto &r, auto mkOp) {
     if (args.size() != 2) {
-      r.push(Stmt::Comment("binary math builtin expects 2 args, got: " + std::to_string(args.size())));
-      r.push(Stmt::Return(Expr::Poison(rtnType)));
+      r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
       return;
     }
     r.push(Stmt::Return(Expr::MathOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
@@ -405,12 +421,16 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
       [&](auto &r) {
         switch (static_cast<clang::Builtin::ID>(decl->getBuiltinID())) {
           case clang::Builtin::BImove:
-          case clang::Builtin::BIforward:
-            if (args.size() != 1)
-              r.push(Stmt::Comment("std::move/std::forward builtin is unary, got: " + (args ^ mk_string("[", ",", "]"))));
-            if (receiver) r.push(Stmt::Comment("std::move/std::forward builtin is unary, got receiver: " + repr(*receiver)));
+          case clang::Builtin::BIforward: {
+            // std::move<T>(t) and std::forward<T>(t) lower to a Cast on their single value arg.
+            // A receiver shouldn't be present (these are free functions); guard the arg count too.
+            if (args.size() != 1 || receiver) {
+              r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
+              break;
+            }
             r.push(Stmt::Return(Expr::Cast(select(r, {}, args[0].named), rtnType)));
             break;
+          }
 
 #define POLYC_UNARY_MATH_CASES(BASE)                                                                                                       \
   case clang::Builtin::BI##BASE##f:                                                                                                        \
@@ -507,10 +527,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
             if (const auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
               if (const auto instancePtr = receiver->named.tpe.get<Type::Ptr>()) {
                 if (const auto structTpe = instancePtr->comp.get<Type::Struct>()) {
-                  r.push(Stmt::Comment("Ctor: " + declName(decl)));
                   for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
                     if (init->isAnyMemberInitializer()) {
-                      r.push(Stmt::Comment("Ctor init: " + init->getMember()->getNameAsString()));
                       auto tpe = handleType(init->getAnyMember()->getType(), r);
                       auto memberName = repr(structTpe->name) + "::" + init->getMember()->getNameAsString();
                       auto member = select(r, {receiver->named}, Named(memberName, tpe));
@@ -526,15 +544,12 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       auto baseStruct = baseTpe.template get<Type::Struct>();
                       auto baseDef = baseStruct ? r.structs ^ get_maybe(repr(baseStruct->name)) : Opt<std::shared_ptr<StructDef>>{};
                       if (baseDef && r.emptyStruct(**baseDef)) {
-                        r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe) + " (empty, skipped)"));
                       } else {
                         auto chainedCtorStmts = r.scoped(
                             [&](auto &r) {
                               if (baseStruct) {
-                                r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe)));
                                 auto _ = r.newVar(handleExpr(init->getInit(), r));
                               } else {
-                                r.push(Stmt::Comment("Base initialiser is not a struct type: " + repr(baseTpe)));
                               }
                             },
                             true, rtnType, parent, true);
@@ -543,7 +558,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                     } else raise("Unknown initializer type!");
                   }
                   handleStmt(decl->getBody(), r);
-                  r.push(Stmt::Return(Expr::Unit0Const()));
+                  r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
                 } else raise("receiver is not a struct type!");
               } else raise("receiver is not a instance ptr type!");
             } else handleStmt(decl->getBody(), r);
@@ -557,7 +572,6 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
             //  forward_like
             //  move
             //  move_if_noexcept
-            r.push(Stmt::Comment("Unimplemented builtin: " + std::to_string(decl->getBuiltinID())));
             break;
         }
       },
@@ -565,16 +579,16 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 
   Vector<Stmt::Any> body = fnBody;
   if (fnBody.empty()) {
-    body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
+    
   }
 
   if (rtnType.is<Type::Unit0>() && !(body ^ last_maybe() ^ exists([](auto &x) { return x.template is<Stmt::Return>(); }))) {
-    body.emplace_back(Stmt::Return((Expr::Unit0Const())));
+    body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
   }
 
   auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args),
                                        std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body,
-                                       std::set<FunctionAttr::Any>{FunctionAttr::Internal()});
+                                       FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
   r.functions.emplace(name, fn);
   return {name, fn};
 }
@@ -590,7 +604,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   // the *name* (we form `Type::Struct(name)` in handleType, never reading members), so an empty
   // stub is enough to break the cycle. Members and parents are filled in below by overwriting the
   // shared_ptr's contents in place.
-  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Sym>{});
+  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{});
   r.structs.emplace(name, stub);
 
   auto resolveStruct = [&](const Vector<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
@@ -622,9 +636,9 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
             auto original = baseMember(*p);
             if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
             auto e = r.structs ^= get_or_emplace(Empty, [](auto &k) {
-              return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Sym>{});
+              return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{});
             });
-            return std::pair{Named(original.symbol, Type::Struct(e->name, {}, {}, {})), offsetAndSize};
+            return std::pair{Named(original.symbol, Type::Struct(e->name, {})), offsetAndSize};
           }) //
         | to_vector();
 
@@ -633,7 +647,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
         Sym({name}), std::vector<std::string>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
-        std::vector<Sym>{});
+        std::vector<Type::Struct>{});
 
     const auto declCanonicalType = context.getCanonicalTagType(decl);
     const auto sizeInBytes = context.getTypeSizeInChars(declCanonicalType).getQuantity();
@@ -679,11 +693,8 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                                     std::pair{context.getASTRecordLayout(decl).getBaseClassOffset(cxxBaseDecl).getQuantity(),
                                               context.getTypeSizeInChars(baseRecordTpe).getQuantity()}};
                  }
-                 r.push(Stmt::Comment(
-                     fmt::format("ERROR: Base class {} of {} is not a CXXRecordDecl", dump_to_string(*clsTpe, context), name)));
                  return {};
                }
-               r.push(Stmt::Comment(fmt::format("ERROR: Base class {} of {} is not a RecordType", dump_to_string(*clsTpe, context), name)));
                return {};
              }) |
              to_vector();
@@ -702,11 +713,10 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                 return resolveField(field, var->getName().str(), tpe);
               }
               case clang::LCK_ByRef: {
-                const auto tpe = Type::Ptr(handleType(var->getType(), r), {}, TypeSpace::Global());
+                const auto tpe = Type::Ptr(handleType(var->getType(), r), TypeSpace::Global());
                 return resolveField(field, var->getName().str(), tpe);
               }
               default:
-                r.push(Stmt::Comment(fmt::format("ERROR: Unknown capture type {}", magic_enum::enum_name(capture.getCaptureKind()))));
                 return {};
             }
           }) |
@@ -749,7 +759,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
     // T&              => Struct[T]
     // Prim*           => Ptr[Prim]
     // Prim&           => Ptr[Prim]
-    return Type::Ptr(tpe, {}, TypeSpace::Global());
+    return Type::Ptr(tpe, TypeSpace::Global());
   };
 
   auto desugared = qual.getDesugaredType(context);
@@ -775,10 +785,12 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         }
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType(), r)); }, // T*
-      [&](const clang::ConstantArrayType *tpe) {                                                   // T[$N]
-        return Type::Ptr(handleType(tpe->getElementType(), r),                                     //
-                         static_cast<int32_t>(tpe->getSize().getLimitedValue()),                   //
-                         TypeSpace::Global());
+      [&](const clang::ConstantArrayType *tpe) { // T[$N]
+        // Ptr no longer carries a length; sized C arrays lower to Type::Arr to preserve N. This
+        // matters for value-captured arrays in lambdas (e.g. `int xs[N]` under `[=]`) where the
+        // lambda struct stores the array inline, not a pointer.
+        return Type::Arr(handleType(tpe->getElementType(), r), //
+                         static_cast<int32_t>(tpe->getSize().getZExtValue()), TypeSpace::Global());
       },
       [&](const clang::ReferenceType *tpe) -> Type::Any { // LValue + RValue
         // Refs lower to ptrs; collapse `T*&` so libstdc++'s `__normal_iterator(const _Iterator&)`
@@ -788,7 +800,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         return refTpe(inner);
       }, // T
       [&](const clang::RecordType *tpe) -> Type::Any {
-        return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}, {}, {});
+        return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {});
       } // struct T { ... }
   );
   if (!result) {
@@ -807,40 +819,48 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     llvm::outs() << ">Pretty\n";
     root->dumpPretty(context);
     llvm::outs() << "\n";
-    return Expr::Poison(handleType(root->getType(), r));
+    return Expr::Alias(Term::Poison(handleType(root->getType(), r)));
   };
 
-  auto deref = [&r](const Expr::Any &term) {
+  auto termToSel = [&r](const Term::Any &t) -> Term::Select {
+    if (auto s = t.template get<Term::Select>()) return *s;
+    auto bound = r.newVar(Expr::Alias(t));
+    if (auto s = bound.template get<Term::Select>()) return *s;
+    return Term::Select(Named("_invalid_select", t.tpe()), {}, t.tpe());
+  };
+
+  auto deref = [&r](const Term::Any &term) -> Expr::Any {
     if (const auto arrTpe = term.tpe().get<Type::Ptr>()) {
-      return r.newVar(Expr::Index(term, integralConstOfType(Type::IntS64(), 0), arrTpe->comp));
-    } else return term;
+      auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      return Expr::Index(term, idx, arrTpe->comp);
+    }
+    return Expr::Alias(term);
   };
 
-  auto ref = [&r](const Expr::Any &term) {
-    return !term.tpe().is<Type::Ptr>() ? r.newVar(Expr::RefTo(term, {}, term.tpe(), TypeSpace::Global())) : term;
+  auto ref = [&r, termToSel](const Term::Any &term) -> Expr::Any {
+    if (!term.tpe().is<Type::Ptr>()) {
+      return Expr::RefTo(termToSel(term), {}, term.tpe(), TypeSpace::Global());
+    }
+    return Expr::Alias(term);
   };
 
-  auto assign = [&r](const Expr::Any &lhs, const Expr::Any &rhs) {
+  auto assign = [&r, termToSel](const Term::Any &lhs, const Term::Any &rhs) -> Term::Any {
     const auto lhsArrTpe = lhs.tpe().get<Type::Ptr>();
     const auto rhsArrTpe = rhs.tpe().get<Type::Ptr>();
+    auto lhsSel = termToSel(lhs);
     if (lhsArrTpe && rhsArrTpe && *lhsArrTpe == *rhsArrTpe) {
-      // Handle decay
-      //   int &rhs = /* */;
-      //   int &lhs = rhs; lhs[0] = rhs[0];
-      r.push(Stmt::Update(lhs, integralConstOfType(Type::IntS64(), 0),
-                          r.newVar(Expr::Index(rhs, integralConstOfType(Type::IntS64(), 0), rhsArrTpe->comp))));
+      auto idxLhs = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      auto rhsIdx = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      auto rhsLoad = r.newVar(Expr::Index(rhs, rhsIdx, rhsArrTpe->comp));
+      r.push(Stmt::Update(lhsSel, idxLhs, rhsLoad));
     } else if (lhsArrTpe && lhsArrTpe->comp == rhs.tpe()) {
-      // Handle decay
-      //   int rhs = /**/;
-      //   int &lhs = rhs;
-      r.push(Stmt::Update(lhs, integralConstOfType(Type::IntS64(), 0), rhs));
+      auto idxLhs = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      r.push(Stmt::Update(lhsSel, idxLhs, rhs));
     } else if (rhsArrTpe && lhs.tpe() == rhsArrTpe->comp) {
-      // Handle decay
-      //   int &rhs = /* */;
-      //   int lhs = rhs;
-      r.push(Stmt::Mut(lhs, Expr::Index(rhs, integralConstOfType(Type::IntS64(), 0), lhs.tpe())));
+      auto idxR = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      r.push(Stmt::Mut(lhsSel, Expr::Index(rhs, idxR, lhs.tpe())));
     } else {
-      r.push(Stmt::Mut(lhs, rhs));
+      r.push(Stmt::Mut(lhsSel, Expr::Alias(rhs)));
     }
     return lhs;
   };
@@ -853,28 +873,28 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         return handleType(expr->getType(), r)
             .match_total(                                                                          //
-                [&](const Type::Float16 &) -> Expr::Any { return Expr::Float16Const(asFloat()); }, //
-                [&](const Type::Float32 &) -> Expr::Any { return Expr::Float32Const(asFloat()); }, //
-                [&](const Type::Float64 &) -> Expr::Any { return Expr::Float64Const(asFloat()); }, //
+                [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(asFloat())); }, //
+                [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(asFloat())); }, //
+                [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(asFloat())); }, //
 
-                [&](const Type::IntU8 &) -> Expr::Any { return Expr::IntU8Const(asInt()); },   //
-                [&](const Type::IntU16 &) -> Expr::Any { return Expr::IntU16Const(asInt()); }, //
-                [&](const Type::IntU32 &) -> Expr::Any { return Expr::IntU32Const(asInt()); }, //
-                [&](const Type::IntU64 &) -> Expr::Any { return Expr::IntU64Const(asInt()); }, //
+                [&](const Type::IntU8 &) -> Expr::Any { return Expr::Alias(Term::IntU8Const(asInt())); },   //
+                [&](const Type::IntU16 &) -> Expr::Any { return Expr::Alias(Term::IntU16Const(asInt())); }, //
+                [&](const Type::IntU32 &) -> Expr::Any { return Expr::Alias(Term::IntU32Const(asInt())); }, //
+                [&](const Type::IntU64 &) -> Expr::Any { return Expr::Alias(Term::IntU64Const(asInt())); }, //
 
-                [&](const Type::IntS8 &) -> Expr::Any { return Expr::IntS8Const(asInt()); },   //
-                [&](const Type::IntS16 &) -> Expr::Any { return Expr::IntS16Const(asInt()); }, //
-                [&](const Type::IntS32 &) -> Expr::Any { return Expr::IntS32Const(asInt()); }, //
-                [&](const Type::IntS64 &) -> Expr::Any { return Expr::IntS64Const(asInt()); }, //
+                [&](const Type::IntS8 &) -> Expr::Any { return Expr::Alias(Term::IntS8Const(asInt())); },   //
+                [&](const Type::IntS16 &) -> Expr::Any { return Expr::Alias(Term::IntS16Const(asInt())); }, //
+                [&](const Type::IntS32 &) -> Expr::Any { return Expr::Alias(Term::IntS32Const(asInt())); }, //
+                [&](const Type::IntS64 &) -> Expr::Any { return Expr::Alias(Term::IntS64Const(asInt())); }, //
 
-                [&](const Type::Bool1 &) -> Expr::Any { return Expr::Bool1Const(asInt() != 0); },       //
-                [&](const Type::Unit0 &) -> Expr::Any { return Expr::Unit0Const(); },                   //
-                [&](const Type::Nothing &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },  //
-                [&](const Type::Struct &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },   //
-                [&](const Type::Ptr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },      //
-                [&](const Type::Var &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },      //
-                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },     //
-                [&](const Type::Annotated &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); } //
+                [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(asInt() != 0)); },                  //
+                [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },                              //
+                [&](const Type::Nothing &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                          //
+                [&](const Type::Struct &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                           //
+                [&](const Type::Ptr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                              //
+                [&](const Type::Arr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                              //
+                [&](const Type::Var &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                              //
+                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); }                              //
             );
       },
       [&](const clang::MaterializeTemporaryExpr *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
@@ -882,7 +902,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       // Substituted non-type template param (e.g. PPWI): drop in the replacement value, otherwise
       // `l < PPWI` lowers to `l < __poison__`.
       [&](const clang::SubstNonTypeTemplateParmExpr *expr) -> Expr::Any { return handleExpr(expr->getReplacement(), r); },
-      [&](const clang::CXXBoolLiteralExpr *stmt) -> Expr::Any { return Expr::Bool1Const(stmt->getValue()); },
+      [&](const clang::CXXBoolLiteralExpr *stmt) -> Expr::Any { return Expr::Alias(Term::Bool1Const(stmt->getValue())); },
       [&](const clang::CastExpr *stmt) -> Expr::Any {
         const auto targetTpe = handleType(stmt->getType(), r);
         const auto sourceExpr = handleExpr(stmt->getSubExpr(), r);
@@ -892,18 +912,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_IntegralToFloating:
           case clang::CK_FloatingToIntegral:
             if (stmt->getConversionFunction()) {
-              r.push(Stmt::Comment("Unhandled cast conversion fn" + std::string(stmt->getCastKindName())));
             }
             return Expr::Cast(r.newVar(sourceExpr), handleType(stmt->getType(), r));
 
           case clang::CK_ArrayToPointerDecay: //
           case clang::CK_NoOp:                //
-            return r.newVar(sourceExpr);
+            return Expr::Alias(r.newVar(sourceExpr));
           case clang::CK_LValueToRValue:
             if (targetTpe == sourceExpr.tpe()) {
               return sourceExpr;
             } else if (const auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && targetTpe == ptrTpe->comp) {
-              return Expr::Index(r.newVar(sourceExpr), integralConstOfType(Type::IntS64(), 0), targetTpe);
+              auto base = r.newVar(sourceExpr);
+              auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
+              return Expr::Index(base, idx, targetTpe);
             } else {
               llvm::outs() << "Unhandled L->R cast:" << stmt->getCastKindName() << "\n";
               stmt->dumpColor();
@@ -926,26 +947,25 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             const auto srcTpe = sourceExpr.tpe();
             const auto bothStruct = srcTpe.is<Type::Struct>() && targetTpe.is<Type::Struct>();
             if (bothStruct) {
-              auto rootSel = sourceExpr.get<Expr::Select>();
-              std::optional<Expr::Select> seed;
-              if (rootSel) {
-                seed = *rootSel;
-              } else {
-                auto var = Stmt::Var(r.newName(srcTpe), sourceExpr);
-                r.push(var);
-                seed = Expr::Select({}, var.name);
+              std::optional<Term::Select> seed;
+              if (auto a = sourceExpr.template get<Expr::Alias>()) {
+                if (auto s = a->ref.template get<Term::Select>()) seed = *s;
               }
-              auto curPath = seed->init;
-              curPath.emplace_back(seed->last);
+              if (!seed) {
+                auto var = Stmt::Var(r.newName(srcTpe), sourceExpr, /*isMutable*/ false);
+                r.push(var);
+                seed = Term::Select(var.name, {}, var.name.tpe);
+              }
+              Vector<PathStep::Any> steps = seed->steps;
+              Type::Any cur = seed->tpe;
               for (auto it = stmt->path_begin(); it != stmt->path_end(); ++it) {
                 const auto baseTpe = handleType((*it)->getType(), r);
                 const auto baseStruct = baseTpe.get<Type::Struct>();
                 if (!baseStruct) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
-                curPath.emplace_back(Named("#base_" + repr(baseStruct->name), *baseStruct));
+                steps.emplace_back(PathStep::Field("#base_" + repr(baseStruct->name)));
+                cur = baseStruct->widen();
               }
-              const auto last = curPath.back();
-              curPath.pop_back();
-              return Expr::Select(curPath, last);
+              return Expr::Alias(Term::Select(seed->root, steps, cur));
             }
             if (srcTpe.is<Type::Ptr>() && targetTpe.is<Type::Ptr>()) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
             return sourceExpr;
@@ -962,20 +982,25 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           }
           // Materialise the implicit `x != 0` / `p != null`: polyc's LLVM backend requires `i1`
           // for branches and would otherwise assert "May only branch on boolean predicates".
-          case clang::CK_IntegralToBoolean:
-            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), integralConstOfType(sourceExpr.tpe(), 0)));
-          case clang::CK_FloatingToBoolean:
-            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), Remapper::floatConstOfType(sourceExpr.tpe(), 0.0)));
+          case clang::CK_IntegralToBoolean: {
+            auto z = r.newVar(integralConstOfType(sourceExpr.tpe(), 0));
+            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
+          }
+          case clang::CK_FloatingToBoolean: {
+            auto z = r.newVar(Remapper::floatConstOfType(sourceExpr.tpe(), 0.0));
+            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
+          }
           case clang::CK_PointerToBoolean: {
             const auto srcTpe = sourceExpr.tpe();
             if (srcTpe.is<Type::Ptr>()) {
-              return Expr::IntrOp(
-                  Intr::LogicNeq(r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64())), integralConstOfType(Type::IntS64(), 0)));
+              auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
+              auto cast = r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64()));
+              return Expr::IntrOp(Intr::LogicNeq(cast, z));
             }
-            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), integralConstOfType(srcTpe, 0)));
+            auto z = r.newVar(integralConstOfType(srcTpe, 0));
+            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
           }
           default:
-            r.push(Stmt::Comment("Unhandled cast, using subexpr directly: " + std::string(stmt->getCastKindName())));
             return sourceExpr;
         }
       },
@@ -988,19 +1013,20 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto apFloat = stmt->getValue();
         if (auto builtin = llvm::dyn_cast<clang::BuiltinType>(stmt->getType().getDesugaredType(context))) {
           switch (builtin->getKind()) {
-            case clang::BuiltinType::Float: return Expr::Float32Const(apFloat.convertToFloat());
-            case clang::BuiltinType::Double: return Expr::Float64Const(apFloat.convertToDouble());
+            case clang::BuiltinType::Float: return Expr::Alias(Term::Float32Const(apFloat.convertToFloat()));
+            case clang::BuiltinType::Double: return Expr::Alias(Term::Float64Const(apFloat.convertToDouble()));
             default: raise("no");
           }
         }
-        return Expr::IntS64Const(0);
+        return Expr::Alias(Term::IntS64Const(0));
       },
       [&](const clang::AbstractConditionalOperator *expr) -> Expr::Any { // covers a?b:c and a?:c
         const auto lhs = select(r, {}, r.newVar(handleType(expr->getType(), r)));
-        r.push(Stmt::Cond(handleExpr(expr->getCond(), r), //
+        auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
+        r.push(Stmt::Cond(condTerm, //
                           r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, handleExpr(expr->getTrueExpr(), r_))); }),
                           r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, handleExpr(expr->getFalseExpr(), r_))); })));
-        return lhs;
+        return Expr::Alias(lhs);
       },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {
         const auto decl = expr->getDecl();
@@ -1018,9 +1044,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               if (eval.Val.isInt()) return integralConstOfType(tpe, eval.Val.getInt().getLimitedValue());
               if (eval.Val.isFloat()) {
                 const double d = eval.Val.getFloat().convertToDouble();
-                if (tpe.is<Type::Float16>()) return Expr::Any(Expr::Float16Const(d));
-                if (tpe.is<Type::Float32>()) return Expr::Any(Expr::Float32Const(d));
-                if (tpe.is<Type::Float64>()) return Expr::Any(Expr::Float64Const(d));
+                if (tpe.is<Type::Float16>()) return Expr::Alias(Term::Float16Const(d));
+                if (tpe.is<Type::Float32>()) return Expr::Alias(Term::Float32Const(d));
+                if (tpe.is<Type::Float64>()) return Expr::Alias(Term::Float64Const(d));
               }
             }
           }
@@ -1037,10 +1063,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                      ? refDeclName
                                      : decl->getDeclName().getAsString();
           if (const auto field = r.parent->members | find([&](auto &m) { return m.symbol == fieldName; })) {
-            return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})))}, *field);
+            return Expr::Alias(select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {})))}, *field));
           } else {
             const auto declName = Named(fieldName, handleType(decl->getType(), r));
-            return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})))}, declName);
+            return Expr::Alias(select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {})))}, declName));
           }
         } else {
           const auto local = decl->attrs() | exists([](const clang::Attr *a) {
@@ -1054,10 +1080,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
           const auto annotatedTpe =
               tpe.get<Type::Ptr>() ^
-              fold([&](auto &p) { return Type::Ptr(p.comp, p.length, local ? TypeSpace::Local() : p.space).widen(); }, [&] { return tpe; });
+              fold([&](auto &p) { return Type::Ptr(p.comp, local ? TypeSpace::Local() : p.space).widen(); }, [&] { return tpe; });
 
           const auto declName = Named(refDeclName, annotatedTpe);
-          return select(r, {}, declName);
+          return Expr::Alias(select(r, {}, declName));
         }
 
         //        // handle decay `int &x = /* */; int y = x;`
@@ -1072,17 +1098,35 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto idxExpr = r.newVar(handleExpr(expr->getIdx(), r));
         const auto baseExpr = handleExpr(expr->getBase(), r);
         const auto exprTpe = handleType(expr->getType(), r);
+        // A subscript always returns an lvalue, which is then cast to rvalue later if required.
+        // As such, we use RefTo (returning a Ptr) instead of Index. The backend handles the GEP
+        // shape per base type:
+        //   - Ptr[C]       -> &base[idx] (1-index GEP)
+        //   - Ptr[Ptr[C]]  -> array-of-pointers; same 1-index GEP
+        //   - Ptr[Arr[C]]  -> deref to [N x C] then [0, idx] GEP (handled in backend RefTo)
+        //   - Arr[C]       -> sized C array: [0, idx] GEP on the array type
         if (auto arrTpe = baseExpr.tpe().get<Type::Ptr>(); arrTpe) {
-          // A subscript always returns lvalue which is then cast to rvalue later if required.
-          // As such, we use a RefTo instead of Index.
-          if (auto ref = arrTpe->comp.get<Type::Ptr>(); ref && ref->comp == exprTpe) {
-            // Case 1: Ptr[Ptr[C]] => C
-            return Expr::RefTo(ref->length ? r.newVar(baseExpr) : deref(r.newVar(baseExpr)), idxExpr, exprTpe, TypeSpace::Global());
+          // Address-space of `&base[idx]` follows the base; otherwise indexing a `Local`/`shared`
+          // pointer would silently produce a `Global` pointer and the backend (NVPTX/AMDGCN)
+          // would emit generic loads/stores against a value that lives in shared memory.
+          const auto baseSpace = arrTpe->space;
+          if (auto inner = arrTpe->comp.get<Type::Arr>(); inner && inner->comp == exprTpe) {
+            // Ptr[Arr[C]] => C
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace);
+          } else if (auto ref = arrTpe->comp.get<Type::Ptr>(); ref && ref->comp == exprTpe) {
+            // Ptr[Ptr[C]] => C
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace);
           } else if (arrTpe->comp == exprTpe) {
-            // Case 2: Ptr[C]      => C
-            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, TypeSpace::Global());
+            // Ptr[C] => C
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace);
           } else {
             raise("Cannot index nested ptr expressions with mismatching expected components");
+          }
+        } else if (auto arrTpe = baseExpr.tpe().get<Type::Arr>(); arrTpe) {
+          if (arrTpe->comp == exprTpe) {
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, TypeSpace::Global());
+          } else {
+            raise("Cannot index sized-array expressions with mismatching expected components");
           }
         } else raise("Cannot index non-ptr expressions");
       },
@@ -1093,31 +1137,46 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         switch (expr->getOpcode()) {
           case clang::UO_PostInc: {
-            auto before = r.newVar(lhs);
-            assign(lhs, r.newVar(Expr::IntrOp(Intr::Add(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
-            return before;
+            auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            auto derefL = r.newVar(deref(lhs));
+            auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
+            assign(lhs, bumped);
+            return Expr::Alias(lhs);
           }
           case clang::UO_PostDec: {
-            auto before = r.newVar(lhs);
-            assign(lhs, r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
-            return before;
+            auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            auto derefL = r.newVar(deref(lhs));
+            auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));
+            assign(lhs, bumped);
+            return Expr::Alias(lhs);
           }
-          case clang::UO_PreInc:
-            return assign(lhs, r.newVar(Expr::IntrOp(Intr::Add(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
-          case clang::UO_PreDec:
-            return assign(lhs, r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
+          case clang::UO_PreInc: {
+            auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            auto derefL = r.newVar(deref(lhs));
+            auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
+            return Expr::Alias(assign(lhs, bumped));
+          }
+          case clang::UO_PreDec: {
+            auto one = r.newVar(integralConstOfType(exprTpe, 1));
+            auto derefL = r.newVar(deref(lhs));
+            auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));
+            return Expr::Alias(assign(lhs, bumped));
+          }
           case clang::UO_AddrOf:
-            if (lhs.tpe().is<Type::Ptr>()) return lhs;
-            else return Expr::RefTo(lhs, {}, lhs.tpe(), TypeSpace::Global());
-          case clang::UO_Deref: return Expr::RefTo(lhs, {integralConstOfType(Type::IntU64(), 0)}, exprTpe, TypeSpace::Global());
+            if (lhs.tpe().is<Type::Ptr>()) return Expr::Alias(lhs);
+            else return ref(lhs);
+          case clang::UO_Deref: {
+            auto idx = r.newVar(integralConstOfType(Type::IntU64(), 0));
+            return Expr::RefTo(termToSel(lhs), idx, exprTpe, TypeSpace::Global());
+          }
           case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, exprTpe));
           case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, exprTpe));
           case clang::UO_Not: return Expr::IntrOp(Intr::BNot(lhs, exprTpe));
           case clang::UO_LNot: return Expr::IntrOp(Intr::LogicNot(lhs));
-          case clang::UO_Real: return Expr::Poison(exprTpe);
-          case clang::UO_Imag: return Expr::Poison(exprTpe);
-          case clang::UO_Extension: return Expr::Poison(exprTpe);
-          case clang::UO_Coawait: return Expr::Poison(exprTpe);
+          case clang::UO_Real: return Expr::Alias(Term::Poison(exprTpe));
+          case clang::UO_Imag: return Expr::Alias(Term::Poison(exprTpe));
+          case clang::UO_Extension: return Expr::Alias(Term::Poison(exprTpe));
+          case clang::UO_Coawait: return Expr::Alias(Term::Poison(exprTpe));
         }
       },
       [&](const clang::BinaryOperator *expr) -> Expr::Any {
@@ -1130,13 +1189,17 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         auto shouldBeAssignable = expr->isLValue();
 
-        // Assignment of a value X to a lvalue iff the lvalue is an array type =>  Update(lhs, 0, X)
+        // Bind both sides to atom Terms once so each Intr ctor can take Term::Any directly.
+        auto dl = r.newVar(deref(lhs));
+        auto dr = r.newVar(deref(rhs));
 
-        auto opAssign = [&](const Intr::Any &op) {
+        auto opAssign = [&](const Intr::Any &op) -> Term::Any {
+          auto v = r.newVar(Expr::IntrOp(op));
           if (lhs.tpe().is<Type::Ptr>()) {
-            r.push(Stmt::Update(lhs, integralConstOfType(Type::IntS64(), 0), r.newVar(Expr::IntrOp(op))));
+            auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
+            r.push(Stmt::Update(termToSel(lhs), z, v));
           } else {
-            r.push(Stmt::Mut(lhs, r.newVar(Expr::IntrOp(op))));
+            r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(v)));
           }
           return lhs;
         };
@@ -1144,54 +1207,52 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         switch (expr->getOpcode()) {
           case clang::BO_Add: // Handle Ptr arithmetics for +
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
-              return Expr::RefTo(lhs, rhs, lhsPtr->comp, TypeSpace::Global());
+              return Expr::RefTo(termToSel(lhs), rhs, lhsPtr->comp, TypeSpace::Global());
             } else {
-              return Expr::IntrOp(Intr::Add(deref(lhs), deref(rhs), tpe_));
+              return Expr::IntrOp(Intr::Add(dl, dr, tpe_));
             }
           case clang::BO_Sub: // Handle Ptr arithmetics for -
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
               auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
-              return Expr::RefTo(lhs, negativeIdx, lhsPtr->comp, TypeSpace::Global());
+              return Expr::RefTo(termToSel(lhs), negativeIdx, lhsPtr->comp, TypeSpace::Global());
             } else {
-              return Expr::IntrOp(Intr::Sub(deref(lhs), deref(rhs), tpe_));
+              return Expr::IntrOp(Intr::Sub(dl, dr, tpe_));
             }
           case clang::BO_PtrMemD: return failExpr(); // TODO ???
           case clang::BO_PtrMemI: return failExpr(); // TODO ???
-          case clang::BO_Mul: return Expr::IntrOp(Intr::Mul(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_Div: return Expr::IntrOp(Intr::Div(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_Rem: return Expr::IntrOp(Intr::Rem(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_Shl: return Expr::IntrOp(Intr::BSL(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_Shr: return Expr::IntrOp(Intr::BSR(deref(lhs), deref(rhs), tpe_));
+          case clang::BO_Mul: return Expr::IntrOp(Intr::Mul(dl, dr, tpe_));
+          case clang::BO_Div: return Expr::IntrOp(Intr::Div(dl, dr, tpe_));
+          case clang::BO_Rem: return Expr::IntrOp(Intr::Rem(dl, dr, tpe_));
+          case clang::BO_Shl: return Expr::IntrOp(Intr::BSL(dl, dr, tpe_));
+          case clang::BO_Shr: return Expr::IntrOp(Intr::BSR(dl, dr, tpe_));
           case clang::BO_Cmp: return failExpr(); // TODO spaceship?
-          case clang::BO_LT: return Expr::IntrOp(Intr::LogicLt(deref(lhs), deref(rhs)));
-          case clang::BO_GT: return Expr::IntrOp(Intr::LogicGt(deref(lhs), deref(rhs)));
-          case clang::BO_LE: return Expr::IntrOp(Intr::LogicLte(deref(lhs), deref(rhs)));
-          case clang::BO_GE: return Expr::IntrOp(Intr::LogicGte(deref(lhs), deref(rhs)));
-          case clang::BO_EQ: return Expr::IntrOp(Intr::LogicEq(deref(lhs), deref(rhs)));
-          case clang::BO_NE: return Expr::IntrOp(Intr::LogicNeq(deref(lhs), deref(rhs)));
-          case clang::BO_And: return Expr::IntrOp(Intr::BAnd(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_Or: return Expr::IntrOp(Intr::BOr(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_LAnd: return Expr::IntrOp(Intr::LogicAnd(deref(lhs), deref(rhs)));
-          case clang::BO_LOr: return Expr::IntrOp(Intr::LogicOr(deref(lhs), deref(rhs)));
+          case clang::BO_LT: return Expr::IntrOp(Intr::LogicLt(dl, dr));
+          case clang::BO_GT: return Expr::IntrOp(Intr::LogicGt(dl, dr));
+          case clang::BO_LE: return Expr::IntrOp(Intr::LogicLte(dl, dr));
+          case clang::BO_GE: return Expr::IntrOp(Intr::LogicGte(dl, dr));
+          case clang::BO_EQ: return Expr::IntrOp(Intr::LogicEq(dl, dr));
+          case clang::BO_NE: return Expr::IntrOp(Intr::LogicNeq(dl, dr));
+          case clang::BO_And: return Expr::IntrOp(Intr::BAnd(dl, dr, tpe_));
+          case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(dl, dr, tpe_));
+          case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl, dr, tpe_));
+          case clang::BO_LAnd: return Expr::IntrOp(Intr::LogicAnd(dl, dr));
+          case clang::BO_LOr: return Expr::IntrOp(Intr::LogicOr(dl, dr));
           case clang::BO_Assign:
-            // handle *x = y;
-
-            return assign(lhs, rhs); // Builtin direct assignment
-          case clang::BO_MulAssign:; return opAssign(Intr::Mul(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_DivAssign:; return opAssign(Intr::Div(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_RemAssign: return opAssign(Intr::Rem(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_AddAssign: return opAssign(Intr::Add(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_SubAssign: return opAssign(Intr::Sub(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_ShlAssign: return opAssign(Intr::BSL(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_ShrAssign: return opAssign(Intr::BSR(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_AndAssign: return opAssign(Intr::BAnd(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_XorAssign: return opAssign(Intr::BXor(deref(lhs), deref(rhs), tpe_));
-          case clang::BO_OrAssign: return opAssign(Intr::BOr(deref(lhs), deref(rhs), tpe_));
+            return Expr::Alias(assign(lhs, rhs)); // Builtin direct assignment
+          case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(dl, dr, tpe_)));
+          case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(dl, dr, tpe_)));
+          case clang::BO_RemAssign: return Expr::Alias(opAssign(Intr::Rem(dl, dr, tpe_)));
+          case clang::BO_AddAssign: return Expr::Alias(opAssign(Intr::Add(dl, dr, tpe_)));
+          case clang::BO_SubAssign: return Expr::Alias(opAssign(Intr::Sub(dl, dr, tpe_)));
+          case clang::BO_ShlAssign: return Expr::Alias(opAssign(Intr::BSL(dl, dr, tpe_)));
+          case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(dl, dr, tpe_)));
+          case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(dl, dr, tpe_)));
+          case clang::BO_XorAssign: return Expr::Alias(opAssign(Intr::BXor(dl, dr, tpe_)));
+          case clang::BO_OrAssign:  return Expr::Alias(opAssign(Intr::BOr(dl, dr, tpe_)));
           case clang::BO_Comma: return failExpr(); // TODO what does this do for a builtin???
         }
 
-        return Expr::Any(Expr::IntS64Const(0));
+        return Expr::Alias(Term::IntS64Const(0));
       },
       [&](const clang::CXXConstructExpr *expr) {
         const auto [name, fn] = handleCall(expr->getConstructor(), r);
@@ -1201,20 +1262,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size() - 1) + " but was " + std::to_string(expr->getNumArgs()));
 
         if (const auto tpe = ctorTpe.get<Type::Struct>()) {
-          r.push(Stmt::Comment("CXXConstructExpr: " + repr(tpe->name)));
 
           if (r.parent && r.ctorChain) {
-            r.push(Stmt::Comment("In Ctor Chain:  " + repr(ctorTpe) + " parent=" + repr(*r.parent)));
           } else {
-            r.push(Stmt::Comment("New ctor:  " + repr(ctorTpe)));
           }
 
           auto instance = r.parent && r.ctorChain //
               ? [&]() -> Expr::Any {
-            Named instance(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})));
-            r.push(Stmt::Comment("This zero init"));
+            Named instance(This, ptrTo(Type::Struct(r.parent->name, {})));
             defaultInitialiseStruct(r, *tpe, instance);
-            return select(r, {}, instance);
+            return Expr::Alias(select(r, {}, instance));
           }()
               : [&]() -> Expr::Any {
                   auto allocated = r.newVar(ctorTpe);
@@ -1222,27 +1279,28 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                   return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global());
                 }();
 
-          Vector<Expr::Any> args;
+          Vector<Term::Any> ivArgs;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
-            args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
-          auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},
-                                         std::vector{r.newVar(conform(r, instance, ptrTo(ctorTpe)))} ^ concat(args),
-                                         std::vector<Expr::Any>{}, Type::Unit0()));
+            ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
+          auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
+          auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                                         std::vector<Term::Any>{thisArg} ^ concat(ivArgs),
+                                         Type::Unit0()));
           return instance;
         } else {
           raise("CXX ctor resulted in a non-struct type: " + repr(ctorTpe));
         }
       },
-      [&](const clang::CXXMemberCallExpr *expr) { // instance.method(...)
+      [&](const clang::CXXMemberCallExpr *expr) -> Expr::Any { // instance.method(...)
         const auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
         const auto receiver = r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
 
         if (fn->args.size() != expr->getNumArgs() + 1) {
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs() + 1));
         }
-        Vector<Expr::Any> args;
+        Vector<Term::Any> ivArgs;
         for (size_t i = 0; i < expr->getNumArgs(); ++i)
-          args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
+          ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
 
         const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
@@ -1250,21 +1308,20 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                        });
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
-        return Expr::Invoke(                                                         //
-            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},       //
-            args ^ prepend(r.newVar(conform(r, ref(receiver), *actualReceiverTpe))), //
-            std::vector<Expr::Any>{},                                                //
-            handleType(expr->getCallReturnType(context), r));
+        auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
+        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                            ivArgs ^ prepend(recvTerm),
+                            handleType(expr->getCallReturnType(context), r));
       },
-      [&](const clang::CXXOperatorCallExpr *expr) {
+      [&](const clang::CXXOperatorCallExpr *expr) -> Expr::Any {
         const auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
 
         if (fn->args.size() != expr->getNumArgs())
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
-        Vector<Expr::Any> args;
+        Vector<Term::Any> ivArgs;
         auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
         for (size_t i = 1; i < expr->getNumArgs(); ++i) {
-          args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
+          ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
         }
 
         const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
@@ -1273,11 +1330,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                        });
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
-        return Expr::Invoke(                                                         //
-            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},       //
-            args ^ prepend(r.newVar(conform(r, ref(receiver), *actualReceiverTpe))), //
-            std::vector<Expr::Any>{},                                                //
-            handleType(expr->getCallReturnType(context), r));
+        auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
+        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                            ivArgs ^ prepend(recvTerm),
+                            handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
         const static std::string builtinPrefix = "__polyregion_builtin_";
@@ -1290,89 +1346,77 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           Map<std::string, std::function<Expr::Any()>> specs{{"gpu_global_idx",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 1) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_global_idx"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalIdx(args[0])));
                                                               }},
                                                              {"gpu_global_size",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 1) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_global_size"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalSize(args[0])));
                                                               }},
 
                                                              {"gpu_group_idx",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 1) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_group_idx"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupIdx(args[0])));
                                                               }},
                                                              {"gpu_group_size",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 1) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_group_size"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupSize(args[0])));
                                                               }},
 
                                                              {"gpu_local_idx",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 1) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_local_idx"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalIdx(args[0])));
                                                               }},
                                                              {"gpu_local_size",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 1) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_local_size"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalSize(args[0])));
                                                               }},
 
                                                              {"gpu_barrier_global",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 0) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_barrier_global"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierGlobal()));
                                                               }},
                                                              {"gpu_barrier_local",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 0) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_barrier_local"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierLocal()));
                                                               }},
                                                              {"gpu_barrier_all",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 0) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_barrier_all"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierAll()));
                                                               }},
 
                                                              {"gpu_fence_global",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 0) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_fence_global"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceGlobal()));
                                                               }},
                                                              {"gpu_fence_local",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 0) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_fence_local"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceLocal()));
                                                               }},
                                                              {"gpu_fence_all",
                                                               [&]() -> Expr::Any {
                                                                 if (args.size() != 0) {
-                                                                  r.push(Stmt::Comment("illegal arg count for gpu_fence_all"));
-                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                  return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                                                                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceAll()));
                                                               }}
 
@@ -1382,24 +1426,23 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                  ^ get_maybe(builtinName)            //
                  ^ fold([](auto &f) { return f(); }, //
                         [&]() -> Expr::Any {         //
-                          r.push(Stmt::Comment("unimplemented builtin " + builtinName));
-                          return Expr::Poison(handleType(expr->getType(), r));
+                          return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                         });
         } else {
           auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
           if (fn->args.size() != expr->getNumArgs())
             raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
-          Vector<Expr::Any> args;
+          Vector<Term::Any> ivArgs;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
-            args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
-          return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{}, args, std::vector<Expr::Any>{},
+            ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
+          return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
                                         handleType(expr->getCallReturnType(context), r)));
         }
       },
-      [&](const clang::CXXThisExpr *expr) { //  method(...)
-        return select(r, {}, Named(This, handleType(expr->getType(), r)));
+      [&](const clang::CXXThisExpr *expr) -> Expr::Any { //  method(...)
+        return Expr::Alias(select(r, {}, Named(This, handleType(expr->getType(), r))));
       },
-      [&](const clang::MemberExpr *expr) { //  instance.member; instance->member
+      [&](const clang::MemberExpr *expr) -> Expr::Any { //  instance.member; instance->member
         const auto baseExpr = handleExpr(expr->getBase(), r);
         auto baseTpe = baseExpr.tpe();
         if (auto opt = baseTpe.get<Type::Ptr>(); opt) baseTpe = opt->comp;
@@ -1408,12 +1451,26 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>(); s) {
             auto member =
                 Named(repr(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
-            if (auto s1 = baseExpr.get<Expr::Select>(); s1) {
-              return select(r, s1->init ^ append(s1->last), member);
+            // Reconstruct the names list (root + path-as-fields) for the inheritance walker.
+            std::optional<Term::Select> rootSel;
+            if (auto a = baseExpr.template get<Expr::Alias>()) {
+              if (auto s1 = a->ref.template get<Term::Select>()) rootSel = *s1;
+            }
+            if (rootSel) {
+              // Approximate names list from the steps: each Field step contributes a Named with
+              // the segment's source name. Type info is no longer carried per-step in the new AST,
+              // so we leave each segment's tpe as Nothing -- the inheritance walker only uses .symbol.
+              Vector<Named> namesPath{rootSel->root};
+              for (auto &step : rootSel->steps) {
+                if (auto f = step.template get<PathStep::Field>()) {
+                  namesPath.emplace_back(Named(f->name, Type::Nothing()));
+                }
+              }
+              return Expr::Alias(select(r, namesPath, member));
             } else {
-              auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr);
+              auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr, /*isMutable*/ false);
               r.push(baseVar);
-              return select(r, {baseVar.name}, member);
+              return Expr::Alias(select(r, {baseVar.name}, member));
             }
           } else {
             raise("Member expr on non-struct type is not legal:" + repr(baseExpr));
@@ -1433,15 +1490,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
-  // llvm::errs() << "[Stmt] >>> \n";
-  // //  // r.push(Stmt::Comment(pretty_string(root, context)));
-  // //  std::string s;
-  // //  llvm::raw_string_ostream os(s);
-  // //    root->dump(os, context);
-  // //  // r.push(Stmt::Comment(s));
-  // root->dumpPretty(context);
-  // root->dump();
-  // llvm::errs() << "<<< \n";
 
   llvm_shared::visitDyn0(
       root, //
@@ -1453,11 +1501,12 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::DeclStmt *stmt) {
         for (auto decl : stmt->decls()) {
 
-          auto createInit = [](auto tpe, const Type::Any &comp) -> Opt<Expr::Any> {
+          auto createInit = [&r](auto tpe, const Type::Any &comp) -> Opt<Expr::Any> {
             if (auto ptrTpe = comp.get<Type::Ptr>(); ptrTpe) {
               if (auto constArrTpe = llvm::dyn_cast<clang::ConstantArrayType>(tpe); constArrTpe) {
                 auto lit = constArrTpe->getSize().getLimitedValue();
-                return Expr::Alloc(ptrTpe->comp, integralConstOfType(Type::IntS64(), lit), TypeSpace::Global());
+                auto sz = r.newVar(integralConstOfType(Type::IntS64(), lit));
+                return Expr::Alloc(ptrTpe->comp, sz, TypeSpace::Global());
               }
             }
 
@@ -1468,56 +1517,58 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             auto name = Named(declName(var), handleType(var->getType(), r));
 
             if (auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit())) {
-              // Aggregate-init `T x = { ... }`. Struct lhs needs declare + default-init (we don't
-              // recurse into nested InitListExprs yet -- emitting Stmt::Update on a struct lhs
-              // would round-trip as `transform.update(0) = ...` which polyc rejects). Arrays update
-              // each slot; scalars fall through to the var-with-init path below.
               if (auto structTpe = name.tpe.get<Type::Struct>(); structTpe) {
-                r.push(Stmt::Var(name, {}));
+                r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
                 defaultInitialiseStruct(r, *structTpe, name);
                 if (initList->getNumInits() != 0) {
-                  r.push(Stmt::Comment("Aggregate struct initializer with " + std::to_string(initList->getNumInits()) +
-                                       " explicit element(s) is unsupported, struct zero-initialised: " + name.symbol));
+                  // Note: explicit aggregate-init not supported; leaving struct zero-initialised.
                 }
               } else {
-                r.push(Stmt::Var(name, createInit(var->getType(), name.tpe)));
+                auto initExpr = createInit(var->getType(), name.tpe);
+                r.push(Stmt::Var(name, initExpr, /*isMutable*/ true));
                 if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
-                  // `int xs[2] = {1};` => `int xs[2]; xs[0] = 1; xs[1] = 0;`
                   for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                    r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), r.newVar(handleExpr(initList->getInit(i), r))));
+                    auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                    auto val = r.newVar(handleExpr(initList->getInit(i), r));
+                    r.push(Stmt::Update(select(r, {}, name), idx, val));
                   }
                   auto compTpe = handleType(cArr->getElementType(), r);
                   for (size_t i = initList->getNumInits(); i < cArr->getSize().getLimitedValue(); ++i) {
-                    r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), integralConstOfType(compTpe, 0)));
+                    auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                    auto z = r.newVar(integralConstOfType(compTpe, 0));
+                    r.push(Stmt::Update(select(r, {}, name), idx, z));
                   }
                 } else {
                   if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
                   for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                    r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), r.newVar(handleExpr(initList->getInit(i), r))));
+                    auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                    auto val = r.newVar(handleExpr(initList->getInit(i), r));
+                    r.push(Stmt::Update(select(r, {}, name), idx, val));
                   }
                 }
               }
             } else if (var->hasInit()) {
-              r.push(Stmt::Var(name, conform(r, handleExpr(var->getInit(), r), name.tpe)));
+              const bool isMutable = !var->getType().isConstQualified();
+              r.push(Stmt::Var(name, conform(r, handleExpr(var->getInit(), r), name.tpe), isMutable));
             } else if (auto arrInit = createInit(var->getType(), name.tpe); arrInit) {
-              r.push(Stmt::Var(name, *arrInit));
+              const bool isMutable = !var->getType().isConstQualified();
+              r.push(Stmt::Var(name, *arrInit, isMutable));
             } else if (auto structTpe = name.tpe.get<Type::Struct>(); structTpe) {
-              // don't leave struct members uninitialised before any read to avoid undef
-              r.push(Stmt::Var(name, {}));
+              r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
               defaultInitialiseStruct(r, *structTpe, name);
             } else {
               raise(std::string("unhandled var rhs: "));
             }
           } else {
-            r.push(Stmt::Comment("Unhandled Stmt Decl:" + pretty_string(stmt, context)));
-            r.push(Stmt::Return(Expr::Poison(Type::Unit0())));
+            r.push(Stmt::Return(Expr::Alias(Term::Poison(Type::Unit0()))));
           }
         }
       },
       [&](const clang::IfStmt *stmt) {
         if (stmt->hasInitStorage()) handleStmt(stmt->getInit(), r);
         if (stmt->hasVarStorage()) handleStmt(stmt->getConditionVariableDeclStmt(), r);
-        r.push(Stmt::Cond(handleExpr(stmt->getCond(), r), //
+        auto condTerm = r.newVar(handleExpr(stmt->getCond(), r));
+        r.push(Stmt::Cond(condTerm, //
                           r.scoped([&](auto &r_) { handleStmt(stmt->getThen(), r_); }, {}, {}, {}, true),
                           r.scoped([&](auto &r_) { handleStmt(stmt->getElse(), r_); }, {}, {}, {}, true)));
       },
@@ -1531,24 +1582,47 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         if (auto init = stmt->getInit()) handleStmt(init, r);
         auto cond = stmt->getCond();
 
-        auto [condTerm, condStmts] =
-            r.scoped<Expr::Any>([&](auto &r) { return r.newVar(cond ? handleExpr(cond, r) : Expr::Bool1Const(true)); });
+        // ANF: hoist the cond compute to a fresh sentinel evaluated before the loop and again at
+        // the end of the body. The sentinel name is unique per loop -- nested while loops would
+        // otherwise collide on the binding and the verifier would reject the duplicate Var.
+        auto [condTerm0, condStmts0] =
+            r.scoped<Term::Any>([&](auto &r) -> Term::Any { return r.newVar(cond ? handleExpr(cond, r) : Expr::Any(Expr::Alias(Term::Bool1Const(true)))); });
+        for (auto &s : condStmts0) r.push(s);
+        const auto loopCondName = r.newName(condTerm0.tpe()).symbol + "_loop_cond";
+        const auto loopCondTpe = condTerm0.tpe();
         auto body = r.scoped(
             [&](auto &r) {
               handleStmt(stmt->getBody(), r);
               auto _ = r.newVar(handleExpr(stmt->getInc(), r));
+              auto [condTermN, condStmtsN] =
+                  r.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return r2.newVar(cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true)))); });
+              for (auto &s : condStmtsN) r.push(s);
+              r.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
             },
             {}, {}, {}, true);
-        r.push(Stmt::While(condStmts, condTerm, body));
+        r.push(Stmt::Var(Named(loopCondName, loopCondTpe), Expr::Alias(condTerm0), /*isMutable*/ true));
+        r.push(Stmt::While(Term::Select(Named(loopCondName, loopCondTpe), {}, loopCondTpe), body));
       },
       [&](const clang::WhileStmt *stmt) {
-        auto [condTerm, condStmts] = r.scoped<Expr::Any>([&](auto &r) { return r.newVar(handleExpr(stmt->getCond(), r)); });
-        auto body = r.scoped([&](auto &r) { handleStmt(stmt->getBody(), r); }, {}, {}, {}, true);
-        r.push(Stmt::While(condStmts, condTerm, body));
+        auto [condTerm0, condStmts0] = r.scoped<Term::Any>([&](auto &r) -> Term::Any { return r.newVar(handleExpr(stmt->getCond(), r)); });
+        for (auto &s : condStmts0) r.push(s);
+        const auto loopCondName = r.newName(condTerm0.tpe()).symbol + "_loop_cond";
+        const auto loopCondTpe = condTerm0.tpe();
+        auto body = r.scoped(
+            [&](auto &r) {
+              handleStmt(stmt->getBody(), r);
+              auto [condTermN, condStmtsN] =
+                  r.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return r2.newVar(handleExpr(stmt->getCond(), r2)); });
+              for (auto &s : condStmtsN) r.push(s);
+              r.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
+            },
+            {}, {}, {}, true);
+        r.push(Stmt::Var(Named(loopCondName, loopCondTpe), Expr::Alias(condTerm0), /*isMutable*/ true));
+        r.push(Stmt::While(Term::Select(Named(loopCondName, loopCondTpe), {}, loopCondTpe), body));
       },
       [&](const clang::ReturnStmt *stmt) { r.push(Stmt::Return(conform(r, handleExpr(stmt->getRetValue(), r), r.rtnType))); },
       [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
-      [&](const clang::NullStmt *stmt) { r.push(Stmt::Comment(pretty_string(stmt, context))); },
+      [&](const clang::NullStmt *stmt) {  },
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
         auto _ = r.newVar(handleExpr(stmt, r));
       },
@@ -1559,6 +1633,5 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         llvm::outs() << ">Pretty\n";
         stmt->dumpPretty(context);
         llvm::outs() << "\n";
-        r.push(Stmt::Comment(pretty_string(stmt, context)));
       });
 }

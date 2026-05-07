@@ -36,16 +36,27 @@ void testAll(bool passthrough) {
                            variables ^ and_then(mkArgStore))}) //
         | to_vector();
 
+    const bool runtimeDebug = std::getenv("POLYTEST_DEBUG") != nullptr;
+
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
-    const auto output = fmt::format("polycpp_test_{:x}", std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) {
-                                                                                    return fmt::vformat(x.command, unevaluatedStore);
-                                                                                  })));
+    const auto testName = polyregion::polyfront::extractTestName(input);
+    const auto runsHash = std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) {
+                                                     return fmt::vformat(x.command, unevaluatedStore);
+                                                   }));
+    const auto output = fmt::format("polycpp_test_{}_{:08x}", testName.empty() ? "anon" : testName, static_cast<uint32_t>(runsHash));
     const auto evaluatedStore = augmentedArgs ^ append(std::pair{"output", output}) ^ and_then(mkArgStore);
 
+    // Catch2 reruns this lambda from scratch for each leaf section, so a local flag would reset
+    // between the compile and run passes. The static keeps state across re-entries.
+    static std::unordered_map<std::string, bool> stepFailureBy;
     for (size_t i = 0; i < case_.runs.size(); ++i) {
       const auto &[rawCommand, expect] = case_.runs[i];
       const auto command = fmt::vformat(rawCommand, evaluatedStore);
       DYNAMIC_SECTION("do: " << command) {
+        if (stepFailureBy[output]) {
+          SKIP("earlier step in this case failed; not running '" << command << "'");
+          return;
+        }
         auto fragments = command ^ split(' ');
         auto [envs, args] = fragments ^ span([](auto &x) { return x.find('=') != std::string::npos; });
 
@@ -58,10 +69,8 @@ void testAll(bool passthrough) {
         envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", fmt::vformat("{polycpp_arch}", evaluatedStore)));
         envs.emplace_back("POLYRT_HOST_FALLBACK=0");
 
-        // if host, + -fsanitize=address,undefined
         envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
-        envs.emplace_back("POLYRT_DEBUG=2");
-        //        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
+        if (runtimeDebug) envs.emplace_back("POLYRT_DEBUG=2");
 
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);
 
@@ -75,9 +84,17 @@ void testAll(bool passthrough) {
         auto stderrFile = llvm::sys::fs::TempFile::create("polycpp_stderr-%%-%%-%%-%%-%%");
         if (auto e = stderrFile.takeError()) FAIL("Cannot create stderr:" << toString(std::move(e)));
 
-        // ExecuteAndWait does PATH but not cwd; args[0] is either "polycpp" (BinaryDir) or a
-        // just-compiled binary in cwd, so resolve both without touching PATH or chdir.
+        // Resolve `polycpp_test_*` from cwd first so a stale copy in BinaryDir from a previous
+        // build can't shadow the freshly-produced one.
         auto resolveBin = [&](llvm::StringRef name) -> std::string {
+          const bool isTestBin = name.starts_with("polycpp_test_");
+          if (isTestBin) {
+            if (llvm::sys::fs::exists(name)) {
+              llvm::SmallString<256> abs(name);
+              llvm::sys::fs::make_absolute(abs);
+              return std::string(abs);
+            }
+          }
           auto inBinaryDir = fmt::format("{}/{}", BinaryDir, std::string(name));
           if (llvm::sys::fs::exists(inBinaryDir)) return inBinaryDir;
           if (llvm::sys::fs::exists(name)) {
@@ -95,13 +112,14 @@ void testAll(bool passthrough) {
         consumeError(stdoutFile->discard());
         consumeError(stderrFile->discard());
 
-        WARN("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", BinaryDir, args[0])) //
+        // INFO over WARN: only flushes on REQUIRE/CHECK failure, so passing tests stay quiet.
+        INFO("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", BinaryDir, args[0])) //
                              | mk_string(" ", [](auto &s) { return s.str(); })));
-        WARN("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
-        WARN("stderr:\n" << stderr_ << "[EOF]");
-        WARN("stdout:\n" << stdout_ << "[EOF]");
+        INFO("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
+        INFO("stderr:\n" << stderr_ << "[EOF]");
+        INFO("stdout:\n" << stdout_ << "[EOF]");
+        if (exitCode != 0) stepFailureBy[output] = true;
         REQUIRE(exitCode == 0);
-        //              CHECK(stderr_.empty());
         auto stdoutLines = stdout_ ^ split('\n');
         for (auto &[line, expected] : expect) {
           DYNAMIC_SECTION("requires: " << (line ? std::to_string(*line) : "*") << "==" << expected) {
@@ -114,11 +132,7 @@ void testAll(bool passthrough) {
             }
           }
         }
-        // Drop the compiled binary so the cwd stays clean across a sweep. Only reached when
-        // every REQUIRE in this section passed; failed runs leave the binary for triage.
-        if (i == case_.runs.size() - 1) {
-          if (auto ec = llvm::sys::fs::remove(output)) WARN("Cannot remove binary " << output << ": " << ec.message());
-        }
+        // Binaries kept on disk for triage; clean them up at the start of each sweep.
       }
     }
   };

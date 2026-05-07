@@ -22,10 +22,13 @@ object MsgPack {
   given Codec[Float] = Codec(
     upack.Float32(_),
     {
-      case upack.Float32(v)                            => v
-      case upack.Float64(v) if v.toFloat.toDouble == v => v.toFloat
-      case upack.Float64(v) => throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
-      case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+      case upack.Float32(v) => v
+      case upack.Float64(v) =>
+        val f = v.toFloat // XXX NaN != NaN
+        if (java.lang.Double.isNaN(v)) f
+        else if (f.toDouble == v) f
+        else throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
+      case x => throw new Exception(s"Expected Float32/Float64, got $x")
     }
   )
   given Codec[Double] = Codec(

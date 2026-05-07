@@ -27,8 +27,8 @@ class SpecialisationPassSuite extends munit.FunSuite {
       tpeVars = List("T")
     )
     val callSite =
-      p.Expr.Invoke(generic.name, List(p.Type.IntS32), None, List(p.Expr.IntS32Const(1)), Nil, p.Type.IntS32)
-    val e   = entry(body = List(p.Stmt.Var(named("r"), Some(callSite)), p.Stmt.Return(p.Expr.Unit0Const)))
+      p.Expr.Invoke(generic.name, List(p.Type.IntS32), None, List(p.Term.IntS32Const(1)), p.Type.IntS32)
+    val e   = entry(body = List(p.Stmt.Var(named("r"), Some(callSite)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
     val out = SpecialisationPass(program(e, List(generic)), NoopLog)
 
     val genericLeft = out.functions.exists(f => f.name == generic.name && f.tpeVars.nonEmpty)

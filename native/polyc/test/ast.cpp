@@ -13,7 +13,7 @@ using namespace polyregion::polyast::dsl;
 using namespace Stmt;
 using namespace Expr;
 
-static Type::Struct mkStruct(const std::string &name) { return Type::Struct(Sym({name}), {}, {}, {}); }
+static Type::Struct mkStruct(const std::string &name) { return Type::Struct(Sym({name}), {}); }
 static Signature mkSignature(const std::string &name, std::vector<Type::Any> args, Type::Any rtn) {
   return Signature(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn));
 }

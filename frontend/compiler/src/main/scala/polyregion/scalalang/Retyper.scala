@@ -46,7 +46,7 @@ object Retyper {
 
   def structName0(using q: Quoted)(clsSym: q.Symbol): p.Sym = p.Sym(clsSym.fullName)
 
-  private def deriveParents(using q: Quoted)(clsSym: q.Symbol): List[p.Sym] = {
+  private def deriveParents(using q: Quoted)(clsSym: q.Symbol): List[p.Type.Struct] = {
     // Find out the parents
     val roots = Set(
       q.defn.AnyClass,
@@ -59,10 +59,15 @@ object Retyper {
       q.Symbol.requiredClass("scala.reflect.OptManifest"),
       q.Symbol.requiredClass("scala.Equals")
     )
+    // Parents carry their type-arg substitutions. We don't have access to the parent's type-arg
+    // substitutions here (would require resolving the inheritance applied types via
+    // q.typeRef.baseType), so emit erased Var-typed args reflecting the parent's tpeVar count.
     clsSym.typeRef.baseClasses
-      .drop(1)                      // head is the class itself
-      .filterNot(roots.contains(_)) // don't want the roots
-      .map(structName0(_))
+      .drop(1)
+      .filterNot(roots.contains(_))
+      .map(parentSym =>
+        p.Type.Struct(structName0(parentSym), clsTypeCtorNames(parentSym).map(p.Type.Var(_)))
+      )
   }
 
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
@@ -146,8 +151,7 @@ object Retyper {
 
   @tailrec private final def resolveClsFromTpeRepr(using
       q: Quoted
-  )(r: q.TypeRepr): Result[(p.Sym, List[String], q.Symbol, q.ClassKind)] = {
-    println("~ " + r)
+  )(r: q.TypeRepr): Result[(p.Sym, List[String], q.Symbol, q.ClassKind)] =
     r.dealias.simplified match {
       case q.ThisType(tpe)                => resolveClsFromTpeRepr(tpe)
       case q.SuperType(thisTpe, superTpe) => resolveClsFromTpeRepr(superTpe)
@@ -158,11 +162,8 @@ object Retyper {
           case Some(sym)                         => resolveClsFromSymbol(sym)
         }
       case q.AppliedType(x, xs) => resolveClsFromTpeRepr(x)
-      case invalid =>
-        pprint.pprintln(invalid)
-        s"Not a class TypeRepr: ${invalid} (repr=${Try(invalid.show)})".fail
+      case invalid              => s"Not a class TypeRepr: ${invalid} (repr=${Try(invalid.show)})".fail
     }
-  }
 
   private def liftClsToTpe(using
       q: Quoted
@@ -179,7 +180,7 @@ object Retyper {
       case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.IntU16
       // TODO type ctor args for now, need to work out type member refinements
       case (sym, q.ClassKind.Class | q.ClassKind.Object) =>
-        p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
+        p.Type.Struct(sym, tpeVars.map(p.Type.Var(_)))
     }
 
   def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[p.Type] =
@@ -221,8 +222,8 @@ object Retyper {
               } yield (tpe :: Nil) -> Map.empty
             case q.TermRef(receiverTpe, _) => // we have something concrete
               typer0(receiverTpe).map {
-                case (_ -> p.Type.Struct(_, _, args, _), wit) => args         -> wit
-                case (_ -> p.Type.Ptr(arg, _, _), wit)        => (arg :: Nil) -> wit
+                case (_ -> p.Type.Struct(_, args), wit) => args         -> wit
+                case (_ -> p.Type.Ptr(arg, _), wit)        => (arg :: Nil) -> wit
                 case (_ -> _, wit)                            => Nil          -> wit
               }
             case _ => (Nil, Map.empty).success
@@ -231,10 +232,7 @@ object Retyper {
           receiverCtorTpeVars = receiverCtorTpes.collect { case p.Type.Var(name) => name }
 
           // receiverTpes = clsTypeCtorNames(repr.termSymbol.maybeOwner) // XXX use the not yet widened `repr`, not `m`!
-        } yield {
-          println(s"Exec ${repr.termSymbol.maybeOwner}.${repr} ${receiverCtorTpes} => ${receiverCtorTpeVars}")
-          (None -> p.Type.Exec(receiverCtorTpeVars, argTpes.map(_._2), rtnTpe), wit0 |+| wit1 |+| wit2)
-        }
+        } yield (None -> p.Type.Exec(receiverCtorTpeVars, argTpes.map(_._2), rtnTpe), wit0 |+| wit1 |+| wit2)
       case andOr: q.AndOrType =>
         for {
           (leftTerm -> leftTpe, leftWit)    <- typer0(andOr.left)
@@ -248,7 +246,7 @@ object Retyper {
                 case _: q.OrType  => p.Sym("#Union")
                 case _: q.AndType => p.Sym("#Intersection")
               }
-              (term -> p.Type.Struct(sym, Nil, leftTpe :: rightTpe :: Nil, Nil), leftWit |+| rightWit).success
+              (term -> p.Type.Struct(sym, leftTpe :: rightTpe :: Nil), leftWit |+| rightWit).success
             }
           //            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.widenByName.widen.simplified.show}".fail
         } yield r
@@ -264,10 +262,10 @@ object Retyper {
 
           retyped <- (name, kind, tpeCtorArgs) match {
             case (Symbols.ArrayMirror, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
-              (None -> p.Type.Ptr(comp, None, p.Type.Space.Global), wit).success
+              (None -> p.Type.Ptr(comp, p.Type.Space.Global), wit).success
             case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
               // scala.Array[A] is a kernel-side raw pointer (matching TypedBuffer's representation).
-              (None -> p.Type.Ptr(comp, None, p.Type.Space.Global), wit).success
+              (None -> p.Type.Ptr(comp, p.Type.Space.Global), wit).success
 //            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
 //              (None -> p.Type.Array(comp), wit).success
             case (_, _, ys) if tpe.isFunctionType => // FunctionN
@@ -282,7 +280,7 @@ object Retyper {
               symbol.tree match {
                 case clsDef: q.ClassDef =>
                   val appliedTpe: p.Type.Struct =
-                    p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
+                    p.Type.Struct(name, ctorArgs.map(_._2))
                   (None -> appliedTpe, wit |+| Map(symbol -> Set(appliedTpe))).success
                 case _ => s"$symbol is not a ClassDef".fail
               }
@@ -291,36 +289,33 @@ object Retyper {
       // widen singletons
       case q.ConstantType(x) =>
         x match {
-          case q.BooleanConstant(v) => (Some(p.Expr.Bool1Const(v)) -> p.Type.Bool1, Map.empty).success
-          case q.ByteConstant(v)    => (Some(p.Expr.IntS8Const(v)) -> p.Type.IntS8, Map.empty).success
-          case q.ShortConstant(v)   => (Some(p.Expr.IntS16Const(v)) -> p.Type.IntS16, Map.empty).success
-          case q.IntConstant(v)     => (Some(p.Expr.IntS32Const(v)) -> p.Type.IntS32, Map.empty).success
-          case q.LongConstant(v)    => (Some(p.Expr.IntS64Const(v)) -> p.Type.IntS64, Map.empty).success
-          case q.FloatConstant(v)   => (Some(p.Expr.Float32Const(v)) -> p.Type.Float32, Map.empty).success
-          case q.DoubleConstant(v)  => (Some(p.Expr.Float64Const(v)) -> p.Type.Float64, Map.empty).success
-          case q.CharConstant(v)    => (Some(p.Expr.IntU16Const(v)) -> p.Type.IntU16, Map.empty).success
+          case q.BooleanConstant(v) => (Some(p.Expr.Alias(p.Term.Bool1Const(v))) -> p.Type.Bool1, Map.empty).success
+          case q.ByteConstant(v)    => (Some(p.Expr.Alias(p.Term.IntS8Const(v))) -> p.Type.IntS8, Map.empty).success
+          case q.ShortConstant(v)   => (Some(p.Expr.Alias(p.Term.IntS16Const(v))) -> p.Type.IntS16, Map.empty).success
+          case q.IntConstant(v)     => (Some(p.Expr.Alias(p.Term.IntS32Const(v))) -> p.Type.IntS32, Map.empty).success
+          case q.LongConstant(v)    => (Some(p.Expr.Alias(p.Term.IntS64Const(v))) -> p.Type.IntS64, Map.empty).success
+          case q.FloatConstant(v)   => (Some(p.Expr.Alias(p.Term.Float32Const(v))) -> p.Type.Float32, Map.empty).success
+          case q.DoubleConstant(v)  => (Some(p.Expr.Alias(p.Term.Float64Const(v))) -> p.Type.Float64, Map.empty).success
+          case q.CharConstant(v)    => (Some(p.Expr.Alias(p.Term.IntU16Const(v))) -> p.Type.IntU16, Map.empty).success
           case q.StringConstant(v)  => ???
-          case q.UnitConstant       => (Some(p.Expr.Unit0Const) -> p.Type.Unit0, Map.empty).success
+          case q.UnitConstant       => (Some(p.Expr.Alias(p.Term.Unit0Const)) -> p.Type.Unit0, Map.empty).success
           case q.NullConstant       => ???
           case q.ClassOfConstant(cls) =>
             val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[?]]).appliedTo(cls)
             typer0(reifiedTpe).map { case (_ -> tpe, wit) =>
-              (Some(p.Expr.Poison(tpe)) -> tpe, wit)
+              (Some(p.Expr.Alias(p.Term.Poison(tpe))) -> tpe, wit)
             }
         }
-      case q.ParamRef(r, i) =>
-        println(s"C => ${r} ${i}")
-        ???
+      case q.ParamRef(r, i) => ???
       case expr =>
-        // println(s"[fallthrough typer] ${expr} => ${expr.show} ${expr.getClass}")
         resolveClsFromTpeRepr(expr).flatMap { (sym, tpeVars, symbol, kind) =>
           liftClsToTpe(sym, tpeVars, symbol, kind) match {
-            case s @ p.Type.Struct(_, _, _, _) if !symbol.isPackageDef =>
+            case s @ p.Type.Struct(_, _) if !symbol.isPackageDef =>
               symbol.tree match {
                 case clsDef: q.ClassDef => (None -> s, Map(symbol -> Set(s))).success
                 case _                  => s"$symbol is not a ClassDef".fail
               }
-            case s @ p.Type.Struct(_, _, _, _) =>
+            case s @ p.Type.Struct(_, _) =>
               // package symbols can't be reflected via .tree; treat them as opaque struct types
               (None -> s, Map(symbol -> Set(s))).success
             case tpe => (None -> tpe, Map.empty).success

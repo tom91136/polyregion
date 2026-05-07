@@ -206,7 +206,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
           | to_vector());
 
   auto table =
-      bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(Sym({sl.name}), {}, {}, {}), sl}; }) | to<Map>();
+      bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(Sym({sl.name}), {}), sl}; }) | to<Map>();
 
   auto primitiveTypeLayoutsDecls =
       Vector<Type::Any>{

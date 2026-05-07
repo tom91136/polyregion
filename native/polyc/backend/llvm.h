@@ -42,6 +42,7 @@ using ValPtrFn2 = std::function<ValPtr(ValPtr, ValPtr)>;
 using ValPtrFn1 = std::function<ValPtr(ValPtr)>;
 using AnyType = Type::Any;
 using AnyExpr = Expr::Any;
+using AnyTerm = Term::Any;
 using AnyStmt = Stmt::Any;
 
 struct StructInfo {
@@ -63,6 +64,10 @@ struct TargetedContext {
   [[nodiscard]] llvm::Type *i32Ty();
 
   [[nodiscard]] AS addressSpace(const TypeSpace::Any &s) const;
+  // The "load a pointer back from a stack slot" type. On targets with a Generic AS (SPIRV/OpenCL)
+  // we load via the global-AS pointer view; on targets without (NVPTX/AMDGCN/CPU) we use the
+  // builder's default ptr.
+  [[nodiscard]] llvm::PointerType *loadedPtrTy(llvm::IRBuilder<> &B) const;
   [[nodiscard]] ValPtr allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key) const;
   [[nodiscard]] ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) const;
   [[nodiscard]] ValPtr store(llvm::IRBuilder<> &B, ValPtr rhsVal, ValPtr lhsPtr) const;
@@ -78,6 +83,8 @@ struct TargetSpecificHandler {
   virtual void witnessFn(CodeGen &gen, llvm::Function &fn, const Function &source) = 0;
   virtual ValPtr mkSpecVal(CodeGen &gen, const Expr::SpecOp &op) = 0;
   virtual ValPtr mkMathVal(CodeGen &gen, const Expr::MathOp &op) = 0;
+  // Called after all kernel/function bodies have been generated. Default is a no-op.
+  virtual void postProcessModule(CodeGen &gen) {}
   virtual ~TargetSpecificHandler();
   static std::unique_ptr<TargetSpecificHandler> from(LLVMBackend::Target target);
 };
@@ -104,26 +111,27 @@ struct CodeGen {
   [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, bool functionBoundary = false);
   [[nodiscard]] llvm::Function *resolveExtFn(const AnyType &rtn, const std::string &name, const std::vector<AnyType> &args);
 
-  [[nodiscard]] ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyExpr &arg);
-  [[nodiscard]] ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs, const AnyExpr &rhs);
+  [[nodiscard]] ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg);
+  [[nodiscard]] ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs);
   [[nodiscard]] ValPtr invokeMalloc(ValPtr size);
   [[nodiscard]] ValPtr invokeAbort();
   [[nodiscard]] ValPtr intr0(llvm::Intrinsic::ID id);
-  [[nodiscard]] ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &arg);
-  [[nodiscard]] ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &lhs, const AnyExpr &rhs);
+  [[nodiscard]] ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg);
+  [[nodiscard]] ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &lhs, const AnyTerm &rhs);
 
   [[nodiscard]] ValPtr findStackVar(const Named &named);
-  [[nodiscard]] ValPtr mkSelectPtr(const Expr::Select &select);
+  [[nodiscard]] ValPtr mkSelectPtr(const Term::Select &select);
 
+  [[nodiscard]] ValPtr mkTermVal(const Term::Any &term, const std::string &key = "");
   [[nodiscard]] ValPtr mkExprVal(const Expr::Any &expr, const std::string &key = "");
   [[nodiscard]] BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx);
 
-  [[nodiscard]] ValPtr unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &rtn, const ValPtrFn1 &fn);
-  [[nodiscard]] ValPtr binaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &fn);
+  [[nodiscard]] ValPtr unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn);
+  [[nodiscard]] ValPtr binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &fn);
 
-  [[nodiscard]] ValPtr unaryNumOp(const AnyExpr &expr, const AnyExpr &arg, const AnyType &rtn, const ValPtrFn1 &integralFn,
+  [[nodiscard]] ValPtr unaryNumOp(const AnyExpr &expr, const AnyTerm &arg, const AnyType &rtn, const ValPtrFn1 &integralFn,
                                   const ValPtrFn1 &fractionalFn);
-  [[nodiscard]] ValPtr binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
+  [[nodiscard]] ValPtr binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
                                    const ValPtrFn2 &fractionalFn);
 
   Pair<Opt<std::string>, std::string> transform(const Program &program);

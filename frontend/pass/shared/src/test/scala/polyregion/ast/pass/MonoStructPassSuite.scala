@@ -24,7 +24,7 @@ class MonoStructPassSuite extends munit.FunSuite {
     // Generic struct Box[T] { v: T }, used as Box[Int] in entry.
     val genericName   = sym("Box")
     val genericDef    = p.StructDef(genericName, List("T"), List(named("v", p.Type.Var("T"))), Nil)
-    val mono          = p.Type.Struct(genericName, List("T"), List(p.Type.IntS32), Nil)
+    val mono          = p.Type.Struct(genericName, List(p.Type.IntS32))
     val a             = arg("b", mono)
     val (lookup, out) = MonoStructPass(program(entry(args = List(a)), defs = List(genericDef)), NoopLog)
     val newNames      = out.defs.map(_.name)

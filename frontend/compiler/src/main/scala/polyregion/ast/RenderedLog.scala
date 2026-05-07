@@ -6,7 +6,7 @@ import scala.util.Try
 
 case class RenderedLog(name: String, lines: ArrayBuffer[(String, Vector[String]) | RenderedLog]) extends Log {
 
-  @targetName("append") infix def subLog(name: String): RenderedLog = {
+  infix def subLog(name: String): RenderedLog = {
     val sub = RenderedLog(name); lines += sub; sub
   }
 

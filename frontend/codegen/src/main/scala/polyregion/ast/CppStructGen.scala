@@ -47,7 +47,7 @@ private[polyregion] object CppStructGen {
 
   object StructSource {
 
-    val RequiredIncludes = List("memory", "variant", "iterator", "sstream", "optional", "algorithm", "functional")
+    val RequiredIncludes = List("memory", "variant", "iterator", "sstream", "optional", "algorithm", "functional", "set", "vector")
     def emitHeader(namespace: String, xs: List[StructSource]) = {
 
       def nsStart(n: String) = if (n.isEmpty) "" else s"namespace $n { "

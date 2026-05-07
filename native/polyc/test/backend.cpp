@@ -13,8 +13,10 @@ using namespace Expr;
 using namespace Intr;
 
 static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body,
-                     std::set<FunctionAttr::Any> attrs = {FunctionAttr::Exported()}) {
-  return Function(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), std::move(body), std::move(attrs));
+                     FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
+                     FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
+  return Function(Sym({name}), {}, std::optional<Arg>{}, std::move(args), {}, {}, std::move(rtn), std::move(body),
+                  std::move(visibility), std::move(fpMode), isEntry);
 }
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
@@ -28,20 +30,20 @@ template <typename P> static void assertCompilationSucceeded(const P &p) {
 TEST_CASE("run", "[backend]") {
   polyregion::compiler::initialise();
 
+  using namespace polyregion::polyast::dsl;
+  const Named aN("a", Type::IntS32());
+  const Named bN("b", Type::IntS32());
   Function fn = mkFn("foo", {}, Type::Unit0(),
                      {
-
-                         Var(Named("a", Type::IntS32()), {IntS32Const(42)}),
-                         Var(Named("b", Type::IntS32()), {IntS32Const(42)}),
-                         Var(Named("c", Type::IntS32()),                                        //
-                             IntrOp(Add(Select({}, Named("a", Type::IntS32())),                 //
-                                        Select({}, Named("b", Type::IntS32())), Type::IntS32()) //
-                                    )                                                           //
-                             ),
-                         Return(Unit0Const()),
+                         Var(aN, Expr::Alias(Term::IntS32Const(42)).widen(), /*isMutable*/ false).widen(),
+                         Var(bN, Expr::Alias(Term::IntS32Const(42)).widen(), /*isMutable*/ false).widen(),
+                         Var(Named("c", Type::IntS32()),
+                             Expr::IntrOp(Add(selectNamed(aN), selectNamed(bN), Type::IntS32()).widen()).widen(),
+                             /*isMutable*/ false).widen(),
+                         Return(Expr::Alias(Term::Unit0Const()).widen()).widen(),
                      });
 
-  Program p(fn, {}, {});
+  Program p(fn, {}, {}, PassPhase::Initial());
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O3);
   INFO(c);

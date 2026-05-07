@@ -42,10 +42,10 @@ template <typename P> static void assertCompile(const P &p) {
 //
 //   Function fn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Unit,
 //               {
-//                   Mut(Select({Named("xs", Ptr(myStruct))}, defX), IntS32Const(42)),
-//                   Return((Unit0Const())),
+//                   Mut(Select({Named("xs", Ptr(myStruct))}, defX), Term::IntS32Const(42)),
+//                   Return((Term::Unit0Const())),
 //               },
-//               {FunctionAttr::Exported()});
+//               {FunctionVisibility::Exported()});
 //   Program p({def}, {fn});
 //   assertCompile(p);
 // }

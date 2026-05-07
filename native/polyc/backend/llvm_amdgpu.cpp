@@ -4,7 +4,7 @@
 using namespace polyregion::backend::details;
 
 void AMDGPUTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
-  if (source.attrs.contains(FunctionAttr::Exported())) {
+  if (source.isEntry) {
     fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
   }
 }
@@ -68,11 +68,11 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     return cg.B.CreateAdd(q, rem);                                                               // q + rem
   };
 
-  auto dim3OrAssert = [&](const AnyExpr &dim, const ValPtr d0, const ValPtr d1, const ValPtr d2) {
-    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntS32Const(0))), d0,
-                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntS32Const(1))), d1,
-                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntS32Const(2))),
-                                                                 d2, cg.mkExprVal(Expr::IntS32Const(0)))));
+  auto dim3OrAssert = [&](const AnyTerm &dim, const ValPtr d0, const ValPtr d1, const ValPtr d2) {
+    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Term::IntS32Const(0))), d0,
+                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Term::IntS32Const(1))), d1,
+                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Term::IntS32Const(2))),
+                                                                 d2, cg.mkTermVal(Term::IntS32Const(0)))));
   };
 
   return expr.op.match_total(                                                           //
@@ -97,15 +97,15 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
       },
       [&](const Spec::GpuFenceGlobal &) -> ValPtr {
         // atomic_work_item_fence(0, 5, 1) // FIXME
-        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Expr::IntU32Const(0xFF));
+        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
       },
       [&](const Spec::GpuFenceLocal &) -> ValPtr {
         // atomic_work_item_fence(0, 5, 1) // FIXME
-        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Expr::IntU32Const(0xFF));
+        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
       },
       [&](const Spec::GpuFenceAll &) -> ValPtr {
         // atomic_work_item_fence(0, 5, 1) // FIXME
-        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Expr::IntU32Const(0xFF));
+        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
       },
 
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr {

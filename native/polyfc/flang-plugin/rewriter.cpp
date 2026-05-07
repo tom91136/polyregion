@@ -63,11 +63,11 @@ std::optional<runtime::Type> runtimeType(const polyast::Type::Any &tpe) {
       [&](const polyast::Type::Unit0 &) -> R { return runtime::Type::Void; },  //
       [&](const polyast::Type::Bool1 &) -> R { return runtime::Type::Bool1; }, //
 
-      [&](const polyast::Type::Struct &) -> R { return {}; },               //
-      [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; },  //
-      [&](const polyast::Type::Var &) -> R { return {}; },                  //
-      [&](const polyast::Type::Exec &) -> R { return {}; },                 //
-      [&](const polyast::Type::Annotated &t) { return runtimeType(t.tpe); } //
+      [&](const polyast::Type::Struct &) -> R { return {}; },              //
+      [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; }, //
+      [&](const polyast::Type::Arr &) -> R { return runtime::Type::Ptr; }, //
+      [&](const polyast::Type::Var &) -> R { return {}; },                 //
+      [&](const polyast::Type::Exec &) -> R { return {}; }                 //
   );
 }
 
@@ -319,7 +319,7 @@ public:
     const auto table = bundle.layouts                                                                        //
                        | values()                                                                            //
                        | map([&](auto &sl) {                                                                 //
-                           return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}, {}, {}), sl}; //
+                           return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}), sl}; //
                          })                                                                                  //
                        | to<std::unordered_map>();
 
@@ -531,15 +531,28 @@ void doRewrite(ModuleOp op) {
 
 } // namespace
 
-void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &, ModuleOp &m) {
-  // XXX mark all written DoConcurrent loops first as elemental/forall are lowered to DoConcurrent too
+void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
+  // Legacy path: pre-Flang-22 lowered user `do concurrent` to `fir.do_loop unordered`. We mark
+  // those so the FIR-side walk can distinguish user-written do-concurrent from elemental/forall
+  // (which also lower unordered).
+  m.walk([&](fir::DoLoopOp doLoop) {
+    if (!doLoop.getUnordered()) return;
+    doLoop->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
+  });
 
-  m.walk([&](Operation *op) {
-    if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
-      if (!doLoop.getUnordered()) return;
-      doLoop->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
-      // doLoop.dump();
-    }
+  // FIXME Flang 22+ lowers `do concurrent` to fir.do_concurrent / fir.do_concurrent.loop, not
+  // the legacy `fir.do_loop unordered` shape this plugin walks. To re-enable offload: walk
+  // fir::DoConcurrentLoopOp, extract bounds/step/reduce/local from it, and re-port
+  // parallel.cpp::forEach + reduce onto the new Term/Expr split. Running Flang's
+  // `simplify-fir-operations` pass mid-pipeline trips "data element must be symbol or
+  // #llvm.zero" on the host-side lowering -- prefer a direct rewrite. Erroring out below keeps
+  // the regression visible instead of falling back to Fortran's sequential runtime.
+  m.walk([&](fir::DoConcurrentOp doc) {
+    diag.Report(diag.getCustomDiagID(
+        clang::DiagnosticsEngine::Error,
+        "[PolyFC] `do concurrent` lowered to fir.do_concurrent (Flang 22+) is not yet supported by this plugin. "
+        "The legacy fir.do_loop-unordered rewriter path is unreachable; offload would silently no-op. "
+        "Tracked as a FIXME in flang-plugin/rewriter.cpp::rewriteHLFIR."));
   });
 }
 
@@ -558,7 +571,11 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   Rewriter rewriter(m);
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
-      if (!doLoop.getUnordered() || !doLoop->hasAttr(DoConcurrentAsWritten)) return;
+      // After simplify-fir-operations every `do concurrent` is `fir.do_loop unordered`. The
+      // DoConcurrentAsWritten marker is dropped during the conversion (the new fir::DoLoopOp
+      // is fresh), so we accept every unordered loop and rely on the offload pipeline to
+      // bail if the body has anything it can't lower.
+      if (!doLoop.getUnordered()) return;
 
       std::string moduleId = fmt::format("kernel_{:p}", fmt::ptr(&doLoop));
       std::string diagLoc = show(doLoop.getLoc());

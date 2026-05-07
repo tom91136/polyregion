@@ -3,7 +3,6 @@ package polyregion.ast
 import scala.collection.immutable.ArraySeq
 import polyregion.ast.PolyAST.Type.Space
 import polyregion.ast.PolyAST.Type.Kind
-import polyregion.ast.PolyAST.Function.Attr
 
 object PolyAST {
 
@@ -17,7 +16,6 @@ object PolyAST {
       require(raw.trim.nonEmpty)
       Sym(raw.trim.split('.').toList)
     }
-
     def unapply(xs: List[String]): Option[(Sym, String)] =
       xs.lastOption.map(x => Sym(xs.init) -> x)
   }
@@ -49,76 +47,73 @@ object PolyAST {
     case Unit0   extends Type(Type.Kind.None)
     case Bool1   extends Type(Type.Kind.Integral)
 
-    case Struct(
-        name: Sym,
-        tpeVars: List[String],
-        args: List[Type],
-        parents: List[Sym]
-    )                                                            extends Type(Type.Kind.Ref)
-    case Ptr(comp: Type, length: Option[Int], space: Type.Space) extends Type(Type.Kind.Ref)
+    case Struct(name: Sym, args: List[Type])                          extends Type(Type.Kind.Ref)
+    case Ptr(comp: Type, space: Type.Space)                           extends Type(Type.Kind.Ref)
+    case Arr(comp: Type, length: Int, space: Type.Space)              extends Type(Type.Kind.Ref)
 
-    case Var(name: String)                                        extends Type(Type.Kind.None)
-    case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
+    case Var(name: String)                                            extends Type(Type.Kind.None)
+    case Exec(tpeVars: List[String], args: List[Type], rtn: Type)     extends Type(Type.Kind.None)
+  }
 
-    case Annotated(tpe: Type, pos: Option[SourcePosition], comment: Option[String]) extends Type(tpe.kind)
+  enum PathStep derives MsgPack.Codec {
+    case Field(name: String)
+    case Deref
+  }
+
+  enum Term(val tpe: Type) derives MsgPack.Codec {
+    case Float16Const(value: Float)  extends Term(Type.Float16)
+    case Float32Const(value: Float)  extends Term(Type.Float32)
+    case Float64Const(value: Double) extends Term(Type.Float64)
+
+    case IntU8Const(value: Byte)  extends Term(Type.IntU8)
+    case IntU16Const(value: Char) extends Term(Type.IntU16)
+    case IntU32Const(value: Int)  extends Term(Type.IntU32)
+    case IntU64Const(value: Long) extends Term(Type.IntU64)
+
+    case IntS8Const(value: Byte)   extends Term(Type.IntS8)
+    case IntS16Const(value: Short) extends Term(Type.IntS16)
+    case IntS32Const(value: Int)   extends Term(Type.IntS32)
+    case IntS64Const(value: Long)  extends Term(Type.IntS64)
+
+    case Unit0Const                                  extends Term(Type.Unit0)
+    case Bool1Const(value: Boolean)                  extends Term(Type.Bool1)
+    case NullPtrConst(comp: Type, space: Type.Space) extends Term(Type.Ptr(comp, space))
+    case Poison(t: Type)                             extends Term(t)
+
+    case Select(root: Named, steps: List[PathStep], override val tpe: Type) extends Term(tpe)
   }
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
-    case Float16Const(value: Float)  extends Expr(Type.Float16)
-    case Float32Const(value: Float)  extends Expr(Type.Float32)
-    case Float64Const(value: Double) extends Expr(Type.Float64)
-
-    case IntU8Const(value: Byte)  extends Expr(Type.IntU8)
-    case IntU16Const(value: Char) extends Expr(Type.IntU16)
-    case IntU32Const(value: Int)  extends Expr(Type.IntU32)
-    case IntU64Const(value: Long) extends Expr(Type.IntU64)
-
-    case IntS8Const(value: Byte)   extends Expr(Type.IntS8)
-    case IntS16Const(value: Short) extends Expr(Type.IntS16)
-    case IntS32Const(value: Int)   extends Expr(Type.IntS32)
-    case IntS64Const(value: Long)  extends Expr(Type.IntS64)
-
-    case Unit0Const                                  extends Expr(Type.Unit0)
-    case Bool1Const(value: Boolean)                  extends Expr(Type.Bool1)
-    case NullPtrConst(comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, None, space))
-
-    case SpecOp(op: Spec) extends Expr(op.tpe)
-    case MathOp(op: Math) extends Expr(op.tpe)
-    case IntrOp(op: Intr) extends Expr(op.tpe)
-
-    case Select(init: List[Named], last: Named) extends Expr(last.tpe)
-    case Poison(t: Type)                        extends Expr(t)
-
-    case Cast(from: Expr, as: Type)                                         extends Expr(as)
-    case Index(lhs: Expr, idx: Expr, comp: Type)                            extends Expr(comp)
-    case RefTo(lhs: Expr, idx: Option[Expr], comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, None, space))
-    case Alloc(comp: Type, size: Expr, space: Type.Space)                   extends Expr(Type.Ptr(comp, None, space))
+    case Alias(ref: Term)                       extends Expr(ref.tpe)
+    case SpecOp(op: Spec)                       extends Expr(op.tpe)
+    case MathOp(op: Math)                       extends Expr(op.tpe)
+    case IntrOp(op: Intr)                       extends Expr(op.tpe)
+    case Cast(from: Term, as: Type)             extends Expr(as)
+    case Index(lhs: Term, idx: Term, comp: Type) extends Expr(comp)
+    case RefTo(lhs: Term, idx: Option[Term], comp: Type, space: Type.Space)
+        extends Expr(Type.Ptr(comp, space))
+    case Alloc(comp: Type, size: Term, space: Type.Space) extends Expr(Type.Ptr(comp, space))
     case Invoke(
         name: Sym,
         tpeArgs: List[Type],
-        receiver: Option[Expr],
-        args: List[Expr],
-        captures: List[Expr],
+        receiver: Option[Term],
+        args: List[Term],
         rtn: Type
     ) extends Expr(rtn)
-
-    case Annotated(expr: Expr, pos: Option[SourcePosition], comment: Option[String]) extends Expr(expr.tpe)
   }
 
   enum Stmt derives MsgPack.Codec {
-    case Block(stmts: List[Stmt])
-    case Comment(value: String)
-    case Var(name: Named, expr: Option[Expr])
-    case Mut(name: Expr, expr: Expr)
-    case Update(lhs: Expr, idx: Expr, value: Expr)
-    case While(tests: List[Stmt], cond: Expr, body: List[Stmt])
-    case ForRange(induction: Expr.Select, lbIncl: Expr, ubExcl: Expr, step: Expr, body: List[Stmt])
+    case Var(name: Named, expr: Option[Expr], isMutable: Boolean = false)
+    case Mut(name: Term.Select, expr: Expr)
+    case Update(lhs: Term.Select, idx: Term, value: Term)
+    case While(cond: Term, body: List[Stmt])
+    case ForRange(induction: Named, lbIncl: Term, ubExcl: Term, step: Term, body: List[Stmt])
 
     case Break
     case Cont
-    case Cond(cond: Expr, trueBr: List[Stmt], falseBr: List[Stmt])
+    case Cond(cond: Term, trueBr: List[Stmt], falseBr: List[Stmt])
     case Return(value: Expr)
-    case Annotated(stmt: Stmt, pos: Option[SourcePosition] = None, comment: Option[String] = None)
+    case Annotated(inner: Stmt, pos: Option[SourcePosition] = None, comment: Option[String] = None)
   }
 
   case class Overload(args: List[Type], rtn: Type) derives MsgPack.Codec
@@ -127,23 +122,20 @@ object PolyAST {
     inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
   }
-  enum Spec(val overloads: List[Overload], val exprs: List[Expr], val tpe: Type) derives MsgPack.Codec {
-    // nullary misc
-    case Assert extends Spec(Spec.NullaryUnit, List[Expr](), Type.Nothing)
-    // nullary GPU control
-    case GpuBarrierGlobal extends Spec(Spec.NullaryUnit, List[Expr](), Type.Unit0)
-    case GpuBarrierLocal  extends Spec(Spec.NullaryUnit, List[Expr](), Type.Unit0)
-    case GpuBarrierAll    extends Spec(Spec.NullaryUnit, List[Expr](), Type.Unit0)
-    case GpuFenceGlobal   extends Spec(Spec.NullaryUnit, List[Expr](), Type.Unit0)
-    case GpuFenceLocal    extends Spec(Spec.NullaryUnit, List[Expr](), Type.Unit0)
-    case GpuFenceAll      extends Spec(Spec.NullaryUnit, List[Expr](), Type.Unit0)
-    //  unary GPU indexing
-    case GpuGlobalIdx(dim: Expr)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuGlobalSize(dim: Expr) extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuGroupIdx(dim: Expr)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuGroupSize(dim: Expr)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuLocalIdx(dim: Expr)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuLocalSize(dim: Expr)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+  enum Spec(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
+    case Assert extends Spec(Spec.NullaryUnit, List[Term](), Type.Nothing)
+    case GpuBarrierGlobal extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuBarrierLocal  extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuBarrierAll    extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceGlobal   extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceLocal    extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceAll      extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuGlobalIdx(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuGlobalSize(dim: Term) extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuGroupIdx(dim: Term)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuGroupSize(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuLocalIdx(dim: Term)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuLocalSize(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
   }
 
   object Intr {
@@ -221,36 +213,32 @@ object PolyAST {
     inline def GpuIndex          = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit       = List(Overload(List[Type](), Type.Unit0))
   }
-  enum Intr(val overloads: List[Overload], val exprs: List[Expr], val tpe: Type) derives MsgPack.Codec {
-    // unary
-    case BNot(x: Expr, rtn: Type) extends Intr(Intr.UnaryUniformIntegral, List(x), rtn)
-    case LogicNot(x: Expr)        extends Intr(Intr.BinaryUniformBool, List(x), Type.Bool1)
-    case Pos(x: Expr, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Neg(x: Expr, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
-    // binary math ops
-    case Add(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Sub(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Mul(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Div(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Rem(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Min(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Max(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    // binary bit manip.
-    case BAnd(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    case BOr(x: Expr, y: Expr, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    case BXor(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    case BSL(x: Expr, y: Expr, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    case BSR(x: Expr, y: Expr, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    case BZSR(x: Expr, y: Expr, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    // binary logic
-    case LogicAnd(x: Expr, y: Expr) extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
-    case LogicOr(x: Expr, y: Expr)  extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
-    case LogicEq(x: Expr, y: Expr)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicNeq(x: Expr, y: Expr) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicLte(x: Expr, y: Expr) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicGte(x: Expr, y: Expr) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicLt(x: Expr, y: Expr)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicGt(x: Expr, y: Expr)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+  enum Intr(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
+    case BNot(x: Term, rtn: Type) extends Intr(Intr.UnaryUniformIntegral, List(x), rtn)
+    case LogicNot(x: Term)        extends Intr(Intr.BinaryUniformBool, List(x), Type.Bool1)
+    case Pos(x: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Neg(x: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Add(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Sub(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Mul(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Div(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Rem(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Min(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Max(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case BAnd(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case BOr(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case BXor(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case BSL(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case BSR(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case BZSR(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case LogicAnd(x: Term, y: Term) extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
+    case LogicOr(x: Term, y: Term)  extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
+    case LogicEq(x: Term, y: Term)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicNeq(x: Term, y: Term) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicLte(x: Term, y: Term) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicGte(x: Term, y: Term) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicLt(x: Term, y: Term)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicGt(x: Term, y: Term)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
   }
 
   object Math {
@@ -265,34 +253,32 @@ object PolyAST {
       Overload(List(Type.Float64, Type.Float64), Type.Float64)
     )
   }
-  enum Math(val overloads: List[Overload], val exprs: List[Expr], val tpe: Type) derives MsgPack.Codec {
-    // --- unary ---
-    case Abs(x: Expr, rtn: Type)    extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Sin(x: Expr, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cos(x: Expr, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Tan(x: Expr, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Asin(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Acos(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Atan(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Sinh(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cosh(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Tanh(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Signum(x: Expr, rtn: Type) extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Round(x: Expr, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Ceil(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Floor(x: Expr, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Rint(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Sqrt(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cbrt(x: Expr, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Exp(x: Expr, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Expm1(x: Expr, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log(x: Expr, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log1p(x: Expr, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log10(x: Expr, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    // --- binary ---
-    case Pow(x: Expr, y: Expr, rtn: Type)   extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
-    case Atan2(x: Expr, y: Expr, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
-    case Hypot(x: Expr, y: Expr, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+  enum Math(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
+    case Abs(x: Term, rtn: Type)    extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Sin(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cos(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Tan(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Asin(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Acos(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Atan(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Sinh(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cosh(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Tanh(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Signum(x: Term, rtn: Type) extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Round(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Ceil(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Floor(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Rint(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Sqrt(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cbrt(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Exp(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Expm1(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log1p(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log10(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Pow(x: Term, y: Term, rtn: Type)   extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+    case Atan2(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
+    case Hypot(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
   }
 
   case class Signature(
@@ -310,7 +296,6 @@ object PolyAST {
       tpeVars: List[Type],
       receiver: Option[Type],
       args: List[Type],
-      captures: List[Type],
       rtn: Type
   ) derives MsgPack.Codec
 
@@ -319,7 +304,7 @@ object PolyAST {
       name: Sym,
       tpeVars: List[String],
       members: List[Named],
-      parents: List[Sym]
+      parents: List[Type.Struct]
   ) derives MsgPack.Codec
 
   case class Mirror(
@@ -331,35 +316,41 @@ object PolyAST {
   ) derives MsgPack.Codec
 
   object Function {
-    enum Attr derives MsgPack.Codec { case Internal, Exported, FPRelaxed, FPStrict, Entry }
+    enum Visibility derives MsgPack.Codec { case Internal, Exported }
+    enum FpMode     derives MsgPack.Codec { case Relaxed, Strict   }
   }
-  case class Function(           //
-      name: Sym,                 //
-      tpeVars: List[String],     //
-      receiver: Option[Arg],     //
-      args: List[Arg],           //
-      moduleCaptures: List[Arg], //
-      termCaptures: List[Arg],   //
-      rtn: Type,                 //
-      body: List[Stmt],          //
-      attrs: Set[Function.Attr]  //
+  case class Function(
+      name: Sym,
+      tpeVars: List[String],
+      receiver: Option[Arg],
+      args: List[Arg],
+      moduleCaptures: List[Arg],
+      termCaptures: List[Arg],
+      rtn: Type,
+      body: List[Stmt],
+      visibility: Function.Visibility,
+      fpMode: Function.FpMode,
+      isEntry: Boolean
   ) derives MsgPack.Codec
+
+  enum PassPhase derives MsgPack.Codec { case Initial, PostMono }
 
   case class Program(
       entry: Function,
       functions: List[Function],
-      defs: List[StructDef]
+      defs: List[StructDef],
+      phase: PassPhase = PassPhase.Initial
   ) derives MsgPack.Codec
 
   case class StructLayoutMember(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec
-  case class StructLayout( //
+  case class StructLayout(
       name: String,
       sizeInBytes: Long,
       alignment: Long,
       members: List[StructLayoutMember]
   ) derives MsgPack.Codec
 
-  case class CompileEvent( //
+  case class CompileEvent(
       epochMillis: Long,
       elapsedNanos: Long,
       name: String,
@@ -377,15 +368,15 @@ object PolyAST {
   // ==========
 
   extension (s: Sym) {
-    inline def repr: String = s.fqn.mkString(".")
+    def repr: String = s.fqn.mkString(".")
   }
 
   extension (t: SourcePosition) {
-    inline def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
+    def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
   }
 
   extension (t: Type.Space) {
-    inline def repr: String = t match {
+    def repr: String = t match {
       case Space.Global  => ""
       case Space.Local   => "^Local"
       case Space.Private => "^Private"
@@ -393,7 +384,7 @@ object PolyAST {
   }
 
   extension (k: Type.Kind) {
-    inline def repr: String = k match {
+    def repr: String = k match {
       case Kind.None       => "None"
       case Kind.Ref        => "Ref"
       case Kind.Integral   => "Integral"
@@ -401,8 +392,15 @@ object PolyAST {
     }
   }
 
+  extension (s: PathStep) {
+    def repr: String = s match {
+      case PathStep.Field(name) => s".$name"
+      case PathStep.Deref       => "->*"
+    }
+  }
+
   extension (t: Type) {
-    inline def repr: String = t match {
+    def repr: String = t match {
       case Type.Float16 => "F16"
       case Type.Float32 => "F32"
       case Type.Float64 => "F64"
@@ -421,42 +419,48 @@ object PolyAST {
       case Type.Unit0   => "Unit0"
       case Type.Bool1   => "Bool1"
 
-      case Type.Struct(name, tpeVars, args, parents) =>
-        s"${name.repr}<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) <: ${parents.map(_.repr).mkString(", ")}"
-      case Type.Ptr(comp, length, space) =>
-        s"${comp.repr}${length.map(_.toString).map(l => s"[$l]").getOrElse("*")}${space.repr}"
+      case Type.Struct(name, args) =>
+        s"${name.repr}<${args.map(_.repr).mkString(",")}>"
+      case Type.Ptr(comp, space) => s"${comp.repr}*${space.repr}"
+      case Type.Arr(comp, length, space) => s"${comp.repr}[$length]${space.repr}"
       case Type.Var(name) => s"#$name"
       case Type.Exec(tpeVars, args, rtn) =>
         s"<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
-      case Type.Annotated(tpe, pos, comment) =>
-        s"(${tpe.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")})"
     }
   }
 
   extension (n: Named) {
-    inline def repr: String = s"${n.symbol}"
+    def repr: String = s"${n.symbol}"
+  }
+
+  extension (t: Term) {
+    def repr: String = t match {
+      case Term.Float16Const(x) => s"f16($x)"
+      case Term.Float32Const(x) => s"f32($x)"
+      case Term.Float64Const(x) => s"f64($x)"
+
+      case Term.IntU8Const(x)  => s"u8($x)"
+      case Term.IntU16Const(x) => s"u16($x)"
+      case Term.IntU32Const(x) => s"u32($x)"
+      case Term.IntU64Const(x) => s"u64($x)"
+
+      case Term.IntS8Const(x)  => s"i8($x)"
+      case Term.IntS16Const(x) => s"i16($x)"
+      case Term.IntS32Const(x) => s"i32($x)"
+      case Term.IntS64Const(x) => s"i64($x)"
+
+      case Term.Unit0Const             => "unit0(())"
+      case Term.Bool1Const(x)          => s"bool1($x)"
+      case Term.NullPtrConst(x, space) => s"nullptr[${x.repr}, ${space.repr}]"
+      case Term.Poison(t)              => s"__poison__ /* poison of type ${t.repr} */"
+      case Term.Select(root, steps, tpe) =>
+        s"${root.symbol}: ${root.tpe.repr}${steps.map(_.repr).mkString("")}"
+    }
   }
 
   extension (e: Expr) {
-    inline def repr: String = e match {
-      case Expr.Float16Const(x) => s"f16($x)"
-      case Expr.Float32Const(x) => s"f32($x)"
-      case Expr.Float64Const(x) => s"f64($x)"
-
-      case Expr.IntU8Const(x)  => s"u8($x)"
-      case Expr.IntU16Const(x) => s"u16($x)"
-      case Expr.IntU32Const(x) => s"u32($x)"
-      case Expr.IntU64Const(x) => s"u64($x)"
-
-      case Expr.IntS8Const(x)  => s"i8($x)"
-      case Expr.IntS16Const(x) => s"i16($x)"
-      case Expr.IntS32Const(x) => s"i32($x)"
-      case Expr.IntS64Const(x) => s"i64($x)"
-
-      case Expr.Unit0Const             => "unit0(())"
-      case Expr.Bool1Const(x)          => s"bool1($x)"
-      case Expr.NullPtrConst(x, space) => s"nullptr[${x.repr}, ${space.repr}]"
-
+    def repr: String = e match {
+      case Expr.Alias(ref) => ref.repr
       case Expr.SpecOp(op) =>
         op match {
           case Spec.Assert             => "'assert"
@@ -500,7 +504,6 @@ object PolyAST {
           case Math.Pow(x, y, tpe)   => s"'pow(${x.repr}, ${y.repr})"
           case Math.Atan2(x, y, tpe) => s"'atan2(${x.repr}, ${y.repr})"
           case Math.Hypot(x, y, tpe) => s"'hypot(${x.repr}, ${y.repr})"
-
         }
       case Expr.IntrOp(op) =>
         op match {
@@ -532,41 +535,29 @@ object PolyAST {
           case Intr.LogicLt(x, y)  => s"(${x.repr} '< ${y.repr})"
           case Intr.LogicGt(x, y)  => s"(${x.repr} '> ${y.repr})"
         }
-      case Expr.Select(init, last) =>
-        (init :+ last)
-          .map(x => s"${x.symbol}: ${x.tpe.repr}")
-          .reduceLeftOption((acc, x) => s"($acc).$x")
-          .getOrElse("")
-      case Expr.Poison(t) => s"__poison__ /* poison of type ${t.repr} */"
 
       case Expr.Cast(from, as)        => s"(${from.repr}).to[${as.repr}]"
       case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
       case Expr.RefTo(lhs, idx, comp, space) =>
         s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}](${idx.map(_.repr).getOrElse("")})"
       case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
-      case Expr.Invoke(name, tpeArgs, receiver, args, captures, rtn) =>
+      case Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
         s"${receiver.map(r => s"${r.repr}.").getOrElse("")}${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
             .map(_.repr)
-            .mkString(", ")})[${captures.map(_.repr).mkString(", ")}]: ${rtn.repr}"
-      case Expr.Annotated(expr, pos, comment) =>
-        s"(${expr.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")})"
-
+            .mkString(", ")}): ${rtn.repr}"
     }
   }
 
   extension (stmt: Stmt) {
-    inline def repr: String = stmt match {
-      case Stmt.Block(xs) =>
-        s"${"{"}\n${xs.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
-      case Stmt.Comment(value)          => s" /* $value */"
-      case Stmt.Var(name, rhs)          => s"var ${name.symbol}: ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
+    def repr: String = stmt match {
+      case Stmt.Var(name, rhs, isMutable) =>
+        s"${if (isMutable) "var" else "val"} ${name.symbol}: ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
       case Stmt.Mut(name, expr)         => s"${name.repr} = ${expr.repr}"
       case Stmt.Update(lhs, idx, value) => s"(${lhs.repr}).update(${idx.repr}) = ${value.repr}"
-      case Stmt.While(tests, cond, body) =>
-        s"while(${"{"}${(tests.map(_.repr) :+ cond.repr)
-            .mkString(";")}${"}"})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+      case Stmt.While(cond, body) =>
+        s"while(${cond.repr})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
       case Stmt.ForRange(ind, lb, ub, step, body) =>
-        s"for(${ind.repr} = ${lb.repr}; ${ind.repr} < ${ub.repr}; ${ind.repr} += ${step.repr})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+        s"for(${ind.symbol}: ${ind.tpe.repr} = ${lb.repr}; < ${ub.repr}; += ${step.repr})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
       case Stmt.Break        => s"break;"
       case Stmt.Cont         => s"continue;"
       case Stmt.Return(expr) => s"return ${expr.repr}"
@@ -579,28 +570,32 @@ object PolyAST {
                   .mkString("\n")
                   .indent(2)}\n${"}"}"
           }"
-      case Stmt.Annotated(stmt, pos, comment) =>
-        s"${stmt.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
+      case Stmt.Annotated(inner, pos, comment) =>
+        s"${inner.repr}${pos.map(p => s" /* ${p.repr} */").getOrElse("")}${comment.map(c => s" /* $c */").getOrElse("")}"
     }
   }
 
   extension (a: Arg) {
-    inline def repr: String =
+    def repr: String =
       s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/* ${s.repr} */").getOrElse("")}"
   }
 
-  extension (a: Function.Attr) {
-    inline def repr: String = a match {
-      case Attr.Internal  => "Internal"
-      case Attr.Exported  => "Exported"
-      case Attr.FPRelaxed => "FPRelaxed"
-      case Attr.FPStrict  => "FPStrict"
-      case Attr.Entry     => "Entry"
+  extension (v: Function.Visibility) {
+    def repr: String = v match {
+      case Function.Visibility.Internal => "Internal"
+      case Function.Visibility.Exported => "Exported"
+    }
+  }
+
+  extension (m: Function.FpMode) {
+    def repr: String = m match {
+      case Function.FpMode.Relaxed => "FPRelaxed"
+      case Function.FpMode.Strict  => "FPStrict"
     }
   }
 
   extension (f: Signature) {
-    inline def repr: String =
+    def repr: String =
       s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars
           .mkString(",")}>(${f.args.map(_.repr).mkString(", ")}): ${f.rtn.repr} /* mod=${f.moduleCaptures
           .map(_.repr)
@@ -608,28 +603,28 @@ object PolyAST {
   }
 
   extension (f: Function) {
-    inline def repr: String =
+    def repr: String =
       s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.mkString(",")}>(${f.args
           .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}")
-          .mkString(", ")}): ${f.rtn.repr} /* attrs=${f.attrs.map(_.repr).mkString(",")} mod=${f.moduleCaptures.map(_.repr).mkString(",")} term=${f.termCaptures
+          .mkString(", ")}): ${f.rtn.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} entry=${f.isEntry} mod=${f.moduleCaptures.map(_.repr).mkString(",")} term=${f.termCaptures
           .map(_.repr)
           .mkString(",")} */ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
   }
 
   extension (s: StructDef) {
-    inline def repr: String =
+    def repr: String =
       s"class ${s.name.repr}<${s.tpeVars.mkString(",")}>(${s.members
           .map(m => s"${m.symbol}: ${m.tpe.repr}")
           .mkString(", ")}) <: ${s.parents.map(_.repr).mkString(", ")}"
   }
 
   extension (s: Program) {
-    inline def repr: String =
+    def repr: String =
       s"${s.defs.map(_.repr).mkString("\n")}\n${s.entry.repr}\n${s.functions.map(_.repr).mkString("\n")}"
   }
 
   extension (l: StructLayout) {
-    inline def repr: String =
+    def repr: String =
       s"StructLayout[${l.name}, sizeInBytes=${l.sizeInBytes}, align=${l.alignment}]${"{"}\n${l.members
           .map(m => s"${m.name.symbol}: ${m.name.tpe.repr} (+${m.offsetInBytes},${m.sizeInBytes})")
           .mkString("\n")

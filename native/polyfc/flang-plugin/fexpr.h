@@ -10,7 +10,7 @@ using namespace aspartame;
 polyast::Expr::Any selectAny(const polyast::Expr::Any &base, const polyast::Named &that);
 
 struct FDescExtraMirror {
-  polyast::Named derivedType{"derivedType", polyast::Type::Ptr(polyast::Type::IntU8(), {}, polyast::TypeSpace::Global())};
+  polyast::Named derivedType{"derivedType", polyast::Type::Ptr(polyast::Type::IntU8(), polyast::TypeSpace::Global())};
   polyast::Named typeParamValue{"typeParamValue", polyast::Type::IntS64()};
   static polyast::Type::Struct tpe();
   polyast::StructDef def() const;
@@ -70,7 +70,7 @@ struct FBoxedNone {
 };
 
 struct FBoxedNoneMirror {
-  polyast::Named addr{"addr", polyast::Type::Ptr(polyast::Type::IntU8(), {}, polyast::TypeSpace::Global())};
+  polyast::Named addr{"addr", polyast::Type::Ptr(polyast::Type::IntU8(), polyast::TypeSpace::Global())};
   static polyast::Type::Struct tpe();
   polyast::StructDef def() const;
   friend bool operator==(const FBoxedNoneMirror &lhs, const FBoxedNoneMirror &rhs);
@@ -120,7 +120,7 @@ struct FSlice {
 };
 
 struct FVar {
-  polyast::Expr::Select value;
+  polyast::Term::Select value;
   friend bool operator==(const FVar &lhs, const FVar &rhs);
 };
 
@@ -143,8 +143,8 @@ using FExpr = std::variant<polyast::Expr::Any, //
 std::string fRepr(const FExpr &t);
 std::string fRepr(const FType &t);
 
-std::function<polyast::Expr::Any(const polyast::Expr::Any &, const polyast::Expr::Any &)> reductionOp(const polydco::FReduction::Kind &k,
-                                                                                                      const polyast::Type::Any &t);
+std::function<polyast::Expr::Any(const polyast::Term::Any &, const polyast::Term::Any &)> reductionOp(const polydco::FReduction::Kind &k,
+                                                                                                       const polyast::Type::Any &t);
 
 polyast::Expr::Any reductionInit(const polydco::FReduction::Kind &k, const polyast::Type::Any &t);
 

@@ -38,7 +38,7 @@ object CompilerTests {
   inline def compilerAssert(inline f: Any): Unit = ${ compilerAssert('f) }
   private def compilerAssert(using q: Quotes)(expr: Expr[Any]): Expr[Unit] = {
     println("In!")
-    val l = Log("")
+    val l = RenderedLog("")
 
     try {
 

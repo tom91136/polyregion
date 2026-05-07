@@ -64,11 +64,20 @@ JsPassRunner::~JsPassRunner() {
 }
 
 String JsPassRunner::loadModule(std::string_view source, std::string_view moduleId) {
-  // Scala.js NoModule emits `let runPass;` at the script top, which doesn't create a globalThis
-  // property. Pin known exports in the same eval where the lexical binding is in scope.
+  // Scala.js NoModule emits `let runPass;` at the script top, then assigns inside an IIFE. Per ES
+  // spec, top-level `let` does NOT become a property of globalThis, so QuickJS's GetPropertyStr
+  // for `runPass` fails. Rewrite the leading `let runPass;` to `var runPass;` so it becomes a
+  // global. Also append a defensive `globalThis.runPass=runPass` after the IIFE.
+  static constexpr std::string_view LetDecl = "let runPass;";
+  static constexpr std::string_view VarDecl = "var runPass;";
   String wrapped;
   wrapped.reserve(source.size() + 64);
-  wrapped.append(source);
+  if (source.size() >= LetDecl.size() && source.substr(0, LetDecl.size()) == LetDecl) {
+    wrapped.append(VarDecl);
+    wrapped.append(source.substr(LetDecl.size()));
+  } else {
+    wrapped.append(source);
+  }
   wrapped.append("\n;try{globalThis.runPass=runPass;}catch(_){}\n");
   JSValue r = JS_Eval(ctx, wrapped.data(), wrapped.size(), String(moduleId).c_str(), JS_EVAL_TYPE_GLOBAL);
   if (JS_IsException(r)) {

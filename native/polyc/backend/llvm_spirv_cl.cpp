@@ -22,7 +22,7 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   fn.addFnAttr(llvm::Attribute::NoInline);
 
   // SPIR_KERNEL requires void return, so internal helpers (lambdas etc.) get SPIR_FUNC instead.
-  if (!source.attrs.contains(polyast::FunctionAttr::Entry())) {
+  if (!source.isEntry) {
     fn.setCallingConv(llvm::CallingConv::SPIR_FUNC);
     return;
   }
@@ -60,9 +60,9 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
             [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                //
             [&](const Type::Struct &s) -> std::string { return repr(s.name); },                                 //
             [&](const Type::Ptr &p) -> std::string { return thunk(p.comp, thunk) + "*"; },                      //
+            [&](const Type::Arr &a) -> std::string { return thunk(a.comp, thunk) + "[" + std::to_string(a.length) + "]"; }, //
             [&](const Type::Var &v) -> std::string { throw std::logic_error("Type::Var should be erased"); },   //
-            [&](const Type::Exec &e) -> std::string { throw std::logic_error("Type::Exec should be erased"); }, //
-            [&](const Type::Annotated &a) -> std::string { return thunk(a.tpe, thunk); }                        //
+            [&](const Type::Exec &e) -> std::string { throw std::logic_error("Type::Exec should be erased"); } //
         );
       };
       return impl(tpe, impl);
@@ -145,12 +145,12 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
 
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },
-      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return callOcl(cg, GET_GLOBAL_ID, v.tpe, {cg.mkExprVal(v.dim)}); },
-      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return callOcl(cg, GET_GLOBAL_SIZE, v.tpe, {cg.mkExprVal(v.dim)}); },
-      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return callOcl(cg, GET_GROUP_ID, v.tpe, {cg.mkExprVal(v.dim)}); },
-      [&](const Spec::GpuGroupSize &v) -> ValPtr { return callOcl(cg, GET_NUM_GROUPS, v.tpe, {cg.mkExprVal(v.dim)}); },
-      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return callOcl(cg, GET_LOCAL_ID, v.tpe, {cg.mkExprVal(v.dim)}); },
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return callOcl(cg, GET_LOCAL_SIZE, v.tpe, {cg.mkExprVal(v.dim)}); },
+      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return callOcl(cg, GET_GLOBAL_ID, v.tpe, {cg.mkTermVal(v.dim)}); },
+      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return callOcl(cg, GET_GLOBAL_SIZE, v.tpe, {cg.mkTermVal(v.dim)}); },
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return callOcl(cg, GET_GROUP_ID, v.tpe, {cg.mkTermVal(v.dim)}); },
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { return callOcl(cg, GET_NUM_GROUPS, v.tpe, {cg.mkTermVal(v.dim)}); },
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return callOcl(cg, GET_LOCAL_ID, v.tpe, {cg.mkTermVal(v.dim)}); },
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return callOcl(cg, GET_LOCAL_SIZE, v.tpe, {cg.mkTermVal(v.dim)}); },
       [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return callOcl(cg, BARRIER, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE)}); },
       [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return callOcl(cg, BARRIER, v.tpe, {u32(CLK_LOCAL_MEM_FENCE)}); },
       [&](const Spec::GpuBarrierAll &v) -> ValPtr {

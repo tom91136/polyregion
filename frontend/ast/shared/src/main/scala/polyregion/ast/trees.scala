@@ -7,21 +7,30 @@ import polyregion.ast.Traversal.*
 import scala.annotation.{tailrec, targetName}
 import scala.util.Success
 
+given Traversal[p.Term, p.Type] = Traversal.derived
 given Traversal[p.Expr, p.Type] = Traversal.derived
 given Traversal[p.Stmt, p.Type] = Traversal.derived
 given Traversal[p.Type, p.Type] = Traversal.derived
 
+given Traversal[p.Type, p.Term] = Traversal.derived
+given Traversal[p.Term, p.Term] = Traversal.derived
+given Traversal[p.Expr, p.Term] = Traversal.derived
+given Traversal[p.Stmt, p.Term] = Traversal.derived
+
 given Traversal[p.Type, p.Expr] = Traversal.derived
-given Traversal[p.Stmt, p.Expr] = Traversal.derived
+given Traversal[p.Term, p.Expr] = Traversal.derived
 given Traversal[p.Expr, p.Expr] = Traversal.derived
+given Traversal[p.Stmt, p.Expr] = Traversal.derived
 
 given Traversal[p.Type, p.Stmt] = Traversal.derived
+given Traversal[p.Term, p.Stmt] = Traversal.derived
 given Traversal[p.Expr, p.Stmt] = Traversal.derived
 given Traversal[p.Stmt, p.Stmt] = Traversal.derived
 
 given Traversal[p.Signature, p.Type] = Traversal.derived
 
 given Traversal[p.Function, p.Type] = Traversal.derived
+given Traversal[p.Function, p.Term] = Traversal.derived
 given Traversal[p.Function, p.Expr] = Traversal.derived
 given Traversal[p.Function, p.Stmt] = Traversal.derived
 
@@ -39,16 +48,12 @@ final class CompilerException(m: String, e: Throwable) extends Exception(m, e) {
 
 type Result[A] = Either[Throwable, A]
 
-// type Deferred[A] = Result[A] //  cats.data.EitherT[cats.Eval, Throwable, A]
-
 extension [A](a: Result[A]) {
-  //  def deferred: Deferred[A]       = cats.data.EitherT.fromEither[cats.Eval](a)
   def withFilter(p: A => Boolean) = a.flatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
 }
 
 extension [A](a: A) {
   def success: Result[A] = Right(a)
-  //  def pure: Deferred[A]  = Right(a).deferred
 }
 extension (message: => String) {
   def fail[A]: Result[A] = Left(new CompilerException(message))
@@ -67,106 +72,62 @@ extension (e: => Throwable) {
   def failE[A]: Result[A] = Left(e)
 }
 
-// extension (m: p.StructMember) {
-//   def repr: String = s"${if (m.isMutable) "var" else "val"} ${m.named.repr}"
-// }
-
 extension (sd: p.StructDef) {
-  def tpe(ref: Boolean = true): p.Type.Struct = p.Type.Struct(sd.name, sd.tpeVars, Nil, sd.parents)
-  def repr: String =
-    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}> { ${sd.members
-        .map(_.repr)
-        .mkString("; ")} } <: ${sd.parents.map(_.repr).mkString("<:")}"
-}
-
-extension (e: p.Sym) {
-  def repr: String = e.fqn.mkString(".")
-}
-
-extension (n: p.Named) {
-  def repr: String = s"(${n.symbol}: ${n.tpe.repr})"
+  def applied(args: List[p.Type]): p.Type.Struct = p.Type.Struct(sd.name, args)
+  def erasedTpe: p.Type.Struct =
+    p.Type.Struct(sd.name, sd.tpeVars.map(p.Type.Var(_)))
 }
 
 extension (e: p.Type) {
 
   def erased: p.Type = e match {
-    case p.Type.Struct(sym, vars, _, parents) =>
-      p.Type.Struct(
-        sym,
-        List.tabulate(vars.size)(i => s"T$i"),
-        List.tabulate(vars.size)(i => p.Type.Var(s"T$i")),
-        parents
-      )
+    case p.Type.Struct(sym, args) =>
+      p.Type.Struct(sym, List.tabulate(args.size)(i => p.Type.Var(s"T$i")))
     case x => x
   }
 
   @targetName("tpeEquals")
   def =:=(that: p.Type): Boolean =
     (e, that) match {
-      case (p.Type.Struct(xSym, xVars, xTpes, xParents), p.Type.Struct(ySym, yVars, yTpes, yParents)) =>
-        xSym == ySym && xVars == yVars && xTpes.zip(yTpes).forall(_ =:= _) && xParents
-          .zip(yParents)
-          .forall(_ == _)
-      case (p.Type.Nothing, p.Type.Nothing)                 => true
-      case (p.Type.Nothing, _)                              => true
-      case (_, p.Type.Nothing)                              => true
-      case (p.Type.Ptr(xt, xl, xa), p.Type.Ptr(yt, yl, ya)) => xt =:= yt && xl == yl && xa == ya
-      case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _))     => ??? // TODO impl exec
-      case (x, y)                                           => x == y
+      case (p.Type.Struct(xSym, xArgs), p.Type.Struct(ySym, yArgs)) =>
+        xSym == ySym && xArgs.sizeIs == yArgs.size && xArgs.zip(yArgs).forall(_ =:= _)
+      case (p.Type.Nothing, p.Type.Nothing)             => true
+      case (p.Type.Nothing, _)                          => true
+      case (_, p.Type.Nothing)                          => true
+      case (p.Type.Ptr(xt, xa), p.Type.Ptr(yt, ya))     => xt =:= yt && xa == ya
+      case (p.Type.Arr(xt, xl, xa), p.Type.Arr(yt, yl, ya)) =>
+        xt =:= yt && xl == yl && xa == ya
+      case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _)) => ??? // TODO impl exec
+      case (x, y)                                       => x == y
     }
 
   def mapLeaf(f: p.Type => p.Type): p.Type = e match {
-    case p.Type.Struct(name, tpeVars, args, parents) => p.Type.Struct(name, tpeVars, args.map(f), parents)
-    case p.Type.Ptr(component, length, space)        => p.Type.Ptr(f(component), length, space)
-    case p.Type.Exec(tpeVars, args, rtn)             => p.Type.Exec(tpeVars, args.map(f), f(rtn))
-    case x                                           => f(x)
+    case p.Type.Struct(name, args)            => p.Type.Struct(name, args.map(f))
+    case p.Type.Ptr(component, space)         => p.Type.Ptr(f(component), space)
+    case p.Type.Arr(component, length, space) => p.Type.Arr(f(component), length, space)
+    case p.Type.Exec(tpeVars, args, rtn)      => p.Type.Exec(tpeVars, args.map(f), f(rtn))
+    case x                                    => f(x)
   }
 
   def mapNode(f: p.Type => p.Type): p.Type = e match {
-    case p.Type.Struct(name, tpeVars, args, parents) => f(p.Type.Struct(name, tpeVars, args.map(f), parents))
-    case p.Type.Ptr(component, length, space)        => f(p.Type.Ptr(f(component), length, space))
-    case p.Type.Exec(tpeVars, args, rtn)             => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
-    case x                                           => x
+    case p.Type.Struct(name, args)            => f(p.Type.Struct(name, args.map(f)))
+    case p.Type.Ptr(component, space)         => f(p.Type.Ptr(f(component), space))
+    case p.Type.Arr(component, length, space) => f(p.Type.Arr(f(component), length, space))
+    case p.Type.Exec(tpeVars, args, rtn)      => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
+    case x                                    => x
   }
 
   def isNumeric: Boolean = e.kind match {
     case Type.Kind.Integral | Type.Kind.Fractional => true
     case _                                         => false
   }
-  def repr: String = e match {
-    case p.Type.Struct(sym, tpeVars, args, parents) =>
-      s"@${sym.repr}${tpeVars
-          .zipAll(args, "???", p.Type.Var("???"))
-          .map((v, a) => s"$v=${a.repr}")
-          .mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
-    case p.Type.Ptr(comp, length, space) => s"Array[${comp.repr}${length.fold("")(i => s"*$i")}^${space}]"
-    case p.Type.Bool1                    => "Bool"
-    case p.Type.IntU8                    => "U8"
-    case p.Type.IntU16                   => "Charc"
-    case p.Type.IntU32                   => "U32"
-    case p.Type.IntU64                   => "U64"
-    case p.Type.IntS8                    => "Byteb"
-    case p.Type.IntS16                   => "Shorts"
-    case p.Type.IntS32                   => "Inti"
-    case p.Type.IntS64                   => "Longl"
-    case p.Type.Float16                  => "F16"
-    case p.Type.Float32                  => "Floatf"
-    case p.Type.Float64                  => "Doubled"
-
-    case p.Type.Unit0     => "Unitv"
-    case p.Type.Nothing   => "Nothing"
-    case p.Type.Var(name) => s"#$name"
-    case p.Type.Exec(tpeArgs, args, rtn) =>
-      s"<${tpeArgs.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
-    case p.Type.Annotated(tpe, pos, comment) =>
-      s"${tpe.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
-  }
 
   // TODO remove
   def monomorphicName: String = e match {
-    case p.Type.Struct(sym, _, args, parents) =>
+    case p.Type.Struct(sym, args) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
-    case p.Type.Ptr(comp, length, space) => s"${comp.monomorphicName}${length.fold("")(i => s"*$i")}^$space[]"
+    case p.Type.Ptr(comp, space)         => s"${comp.monomorphicName}*^$space"
+    case p.Type.Arr(comp, length, space) => s"${comp.monomorphicName}[$length]^$space"
     case p.Type.Bool1                    => "Bool"
     case p.Type.IntU8                    => "U8"
     case p.Type.IntU16                   => "Charc"
@@ -179,180 +140,17 @@ extension (e: p.Type) {
     case p.Type.Float16                  => "F16"
     case p.Type.Float32                  => "Floatf"
     case p.Type.Float64                  => "Doubled"
-
     case p.Type.Unit0                    => "Unitv"
     case p.Type.Nothing                  => "Nothing"
     case p.Type.Var(name)                => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) => ???
-    case p.Type.Annotated(tpe, _, _)     => tpe.monomorphicName
   }
-}
-
-extension (e: p.Expr) {
-  def repr: String = e match {
-    // case p.Expr.NullaryIntrinsic(kind, rtn) =>
-    //   val fn = kind match {
-    //     case p.NullaryIntrinsicKind.Assert         => "Assert"
-    //     case p.NullaryIntrinsicKind.GpuGlobalIdxX  => "GlobalIdxX"
-    //     case p.NullaryIntrinsicKind.GpuGlobalIdxY  => "GlobalIdxY"
-    //     case p.NullaryIntrinsicKind.GpuGlobalIdxZ  => "GlobalIdxZ"
-    //     case p.NullaryIntrinsicKind.GpuGlobalSizeX => "GlobalSizeX"
-    //     case p.NullaryIntrinsicKind.GpuGlobalSizeY => "GlobalSizeY"
-    //     case p.NullaryIntrinsicKind.GpuGlobalSizeZ => "GlobalSizeZ"
-    //     case p.NullaryIntrinsicKind.GpuGroupIdxX   => "GroupIdxX"
-    //     case p.NullaryIntrinsicKind.GpuGroupIdxY   => "GroupIdxY"
-    //     case p.NullaryIntrinsicKind.GpuGroupIdxZ   => "GroupIdxZ"
-    //     case p.NullaryIntrinsicKind.GpuGroupSizeX  => "GroupSizeX"
-    //     case p.NullaryIntrinsicKind.GpuGroupSizeY  => "GroupSizeY"
-    //     case p.NullaryIntrinsicKind.GpuGroupSizeZ  => "GroupSizeZ"
-    //     case p.NullaryIntrinsicKind.GpuLocalIdxX   => "LocalIdxX"
-    //     case p.NullaryIntrinsicKind.GpuLocalIdxY   => "LocalIdxY"
-    //     case p.NullaryIntrinsicKind.GpuLocalIdxZ   => "LocalIdxZ"
-    //     case p.NullaryIntrinsicKind.GpuLocalSizeX  => "LocalSizeX"
-    //     case p.NullaryIntrinsicKind.GpuLocalSizeY  => "LocalSizeY"
-    //     case p.NullaryIntrinsicKind.GpuLocalSizeZ  => "LocalSizeZ"
-
-    //     case p.NullaryIntrinsicKind.GpuGroupBarrier => "GroupBarrier"
-    //     case p.NullaryIntrinsicKind.GpuGroupFence   => "GroupFence"
-    //   }
-    //   s"$fn'"
-    // case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
-    //   val fn = kind match {
-    //     case p.UnaryIntrinsicKind.Sin  => "sin"
-    //     case p.UnaryIntrinsicKind.Cos  => "cos"
-    //     case p.UnaryIntrinsicKind.Tan  => "tan"
-    //     case p.UnaryIntrinsicKind.Asin => "asin"
-    //     case p.UnaryIntrinsicKind.Acos => "acos"
-    //     case p.UnaryIntrinsicKind.Atan => "atan"
-    //     case p.UnaryIntrinsicKind.Sinh => "sinh"
-    //     case p.UnaryIntrinsicKind.Cosh => "cosh"
-    //     case p.UnaryIntrinsicKind.Tanh => "tanh"
-
-    //     case p.UnaryIntrinsicKind.Signum => "signum"
-    //     case p.UnaryIntrinsicKind.Abs    => "abs"
-    //     case p.UnaryIntrinsicKind.Round  => "round"
-    //     case p.UnaryIntrinsicKind.Ceil   => "ceil"
-    //     case p.UnaryIntrinsicKind.Floor  => "floor"
-    //     case p.UnaryIntrinsicKind.Rint   => "rint"
-
-    //     case p.UnaryIntrinsicKind.Sqrt  => "sqrt"
-    //     case p.UnaryIntrinsicKind.Cbrt  => "cbrt"
-    //     case p.UnaryIntrinsicKind.Exp   => "exp"
-    //     case p.UnaryIntrinsicKind.Expm1 => "expm1"
-    //     case p.UnaryIntrinsicKind.Log   => "log"
-    //     case p.UnaryIntrinsicKind.Log1p => "log1p"
-    //     case p.UnaryIntrinsicKind.Log10 => "log10"
-
-    //     case p.UnaryIntrinsicKind.BNot => "~"
-
-    //     case p.UnaryIntrinsicKind.Pos => "+"
-    //     case p.UnaryIntrinsicKind.Neg => "-"
-
-    //     case p.UnaryIntrinsicKind.LogicNot => "!"
-
-    //   }
-    //   s"$fn'(${lhs.repr})"
-    // case p.Expr.BinaryIntrinsic(lhs, rhs, kind, _) =>
-    //   val op = kind match {
-    //     case p.BinaryIntrinsicKind.Add => "+"
-    //     case p.BinaryIntrinsicKind.Sub => "-"
-    //     case p.BinaryIntrinsicKind.Mul => "*"
-    //     case p.BinaryIntrinsicKind.Div => "/"
-    //     case p.BinaryIntrinsicKind.Rem => "%"
-
-    //     case p.BinaryIntrinsicKind.Pow => "**"
-
-    //     case p.BinaryIntrinsicKind.Min => "min"
-    //     case p.BinaryIntrinsicKind.Max => "max"
-
-    //     case p.BinaryIntrinsicKind.Atan2 => "atan2"
-    //     case p.BinaryIntrinsicKind.Hypot => "hypot"
-
-    //     case p.BinaryIntrinsicKind.BAnd => "&"
-    //     case p.BinaryIntrinsicKind.BOr  => "|"
-    //     case p.BinaryIntrinsicKind.BXor => "^"
-    //     case p.BinaryIntrinsicKind.BSL  => "<<"
-    //     case p.BinaryIntrinsicKind.BSR  => ">>"
-    //     case p.BinaryIntrinsicKind.BZSR => ">>>"
-
-    //     case p.BinaryIntrinsicKind.LogicEq  => "=="
-    //     case p.BinaryIntrinsicKind.LogicNeq => "!="
-    //     case p.BinaryIntrinsicKind.LogicAnd => "&&"
-    //     case p.BinaryIntrinsicKind.LogicOr  => "||"
-    //     case p.BinaryIntrinsicKind.LogicLte => "<="
-    //     case p.BinaryIntrinsicKind.LogicGte => ">="
-    //     case p.BinaryIntrinsicKind.LogicLt  => "<"
-    //     case p.BinaryIntrinsicKind.LogicGt  => ">"
-
-    //   }
-    //   s"${lhs.repr} $op' ${rhs.repr}"
-
-    case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
-    case p.Expr.Invoke(name, tpeArgs, recv, args, captures, tpe) =>
-      s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
-          .map(_.repr)
-          .mkString(",")})[${captures.map(_.repr).mkString(",")}] : ${tpe.repr}"
-    case p.Expr.Index(lhs, idx, tpe)        => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.RefTo(lhs, idx, tpe, space) => s"&${lhs.repr}${idx.fold("")(i => s"[${i.repr}]")} : ${tpe.repr}^$space"
-    case p.Expr.Alloc(tpe, size, space)     => s"new [${tpe.repr}*${size.repr}]^${space}"
-    case p.Expr.SpecOp(op)                  => s"spec($op)"
-    case p.Expr.MathOp(op)                  => s"math($op)"
-    case p.Expr.IntrOp(op)                  => s"intr($op)"
-    case p.Expr.Annotated(expr, pos, comment) =>
-      s"${expr.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
-    case p.Expr.NullPtrConst(comp, space) => s"nullptr[${comp.repr}^$space]"
-    case p.Expr.Float16Const(x)           => s"f16($x)"
-    case p.Expr.Float32Const(x)           => s"f32($x)"
-    case p.Expr.Float64Const(x)           => s"f64($x)"
-    case p.Expr.IntU8Const(x)             => s"u8($x)"
-    case p.Expr.IntU16Const(x)            => s"u16($x)"
-    case p.Expr.IntU32Const(x)            => s"u32($x)"
-    case p.Expr.IntU64Const(x)            => s"u64($x)"
-    case p.Expr.IntS8Const(x)             => s"i8($x)"
-    case p.Expr.IntS16Const(x)            => s"i16($x)"
-    case p.Expr.IntS32Const(x)            => s"i32($x)"
-    case p.Expr.IntS64Const(x)            => s"i64($x)"
-    case p.Expr.Unit0Const                => "unit0"
-    case p.Expr.Bool1Const(x)             => s"bool1($x)"
-    case p.Expr.Select(xs, x)             => (xs :+ x).map(_.repr).mkString(".")
-    case p.Expr.Poison(t)                 => s"poison[${t.repr}]"
-  }
-}
-
-extension (stmt: p.Stmt) {
-  def repr: String = stmt match {
-    case p.Stmt.Block(xs) =>
-      s"{\n${xs.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
-    case p.Stmt.Comment(value)          => s" /* $value */"
-    case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
-    case p.Stmt.Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
-    case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
-    case p.Stmt.While(tests, cond, body) =>
-      s"while({${(tests.map(_.repr) :+ cond.repr).mkString(";")}}){\n${body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
-    case p.Stmt.Break        => s"break;"
-    case p.Stmt.Cont         => s"continue;"
-    case p.Stmt.Return(expr) => s"return ${expr.repr}"
-    case p.Stmt.Cond(cond, trueBr, falseBr) =>
-      s"if(${cond.repr}) {\n${trueBr.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n} else {\n${falseBr
-          .flatMap(_.repr.linesIterator.map("  " + _))
-          .mkString("\n")}\n}"
-    case p.Stmt.ForRange(induction, lbIncl, ubExcl, step, body) =>
-      s"for(${induction.repr} = ${lbIncl.repr}; < ${ubExcl.repr}; += ${step.repr}) {\n${body
-          .flatMap(_.repr.linesIterator.map("  " + _))
-          .mkString("\n")}\n}"
-    case p.Stmt.Annotated(s, pos, comment) =>
-      s"${s.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
-  }
-}
-
-extension (arg: p.Arg) {
-  def repr: String = s"${arg.named.repr}"
 }
 
 extension (fn: p.Function) {
 
-  def mangledName = fn.receiver.map(_.named.tpe.repr).getOrElse("") + "!" + fn.name.fqn
-    .mkString("_") + "!" + fn.args.map(_.named.tpe.repr).mkString("_") + "!" + fn.rtn.repr
+  def mangledName = fn.receiver.map(_.named.tpe.monomorphicName).getOrElse("") + "!" + fn.name.fqn
+    .mkString("_") + "!" + fn.args.map(_.named.tpe.monomorphicName).mkString("_") + "!" + fn.rtn.monomorphicName
 
   def signature = p.Signature(
     fn.name,
@@ -365,21 +163,61 @@ extension (fn: p.Function) {
   )
 
   def signatureRepr = {
-    val termCaptures   = fn.termCaptures.map(_.repr).mkString(",")
-    val moduleCaptures = fn.moduleCaptures.map(_.repr).mkString(",")
+    import p.repr as _
+    val termCaptures   = fn.termCaptures.map(a => s"${a.named.symbol}: ${typeReprOf(a.named.tpe)}").mkString(",")
+    val moduleCaptures = fn.moduleCaptures.map(a => s"${a.named.symbol}: ${typeReprOf(a.named.tpe)}").mkString(",")
     val tpeVars        = fn.tpeVars.mkString(",")
-    val args           = fn.args.map(_.repr).mkString(",")
-    s"${fn.receiver.fold("")(r => r.repr + ".")}${fn.name.repr}<$tpeVars>($args)[$moduleCaptures;${termCaptures}] : ${fn.rtn.repr}"
+    val args           = fn.args.map(a => s"${a.named.symbol}: ${typeReprOf(a.named.tpe)}").mkString(",")
+    val recv           = fn.receiver.map(a => s"${a.named.symbol}: ${typeReprOf(a.named.tpe)}.").getOrElse("")
+    s"${recv}${fn.name.fqn.mkString(".")}<$tpeVars>($args)[$moduleCaptures;${termCaptures}] : ${typeReprOf(fn.rtn)}"
   }
-
-  def repr: String =
-    s"""${fn.signatureRepr} = {
-       |${fn.body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}
-       |}""".stripMargin
 }
 
-extension (f: p.Signature) {
-  def repr: String =
-    s"<${f.tpeVars.mkString(",")}>${f.receiver
-        .fold("")(r => s"(${r.repr}).")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
+private def typeReprOf(t: p.Type): String = t match {
+  case p.Type.Struct(name, args) => s"${name.fqn.mkString(".")}<${args.map(typeReprOf).mkString(",")}>"
+  case p.Type.Ptr(c, s)          => s"${typeReprOf(c)}*$s"
+  case p.Type.Arr(c, l, s)       => s"${typeReprOf(c)}[$l]$s"
+  case p.Type.Var(name)          => s"#$name"
+  case p.Type.Exec(tv, args, rtn) =>
+    s"<${tv.mkString(",")}>(${args.map(typeReprOf).mkString(",")}) => ${typeReprOf(rtn)}"
+  case p.Type.Float16 => "F16"
+  case p.Type.Float32 => "F32"
+  case p.Type.Float64 => "F64"
+  case p.Type.IntU8   => "U8"
+  case p.Type.IntU16  => "U16"
+  case p.Type.IntU32  => "U32"
+  case p.Type.IntU64  => "U64"
+  case p.Type.IntS8   => "I8"
+  case p.Type.IntS16  => "I16"
+  case p.Type.IntS32  => "I32"
+  case p.Type.IntS64  => "I64"
+  case p.Type.Nothing => "Nothing"
+  case p.Type.Unit0   => "Unit0"
+  case p.Type.Bool1   => "Bool1"
+}
+
+def selectTerm(prefix: List[p.Named], last: p.Named): p.Term.Select = prefix match {
+  case Nil    => p.Term.Select(last, Nil, last.tpe)
+  case h :: t => p.Term.Select(h, t.map(n => p.PathStep.Field(n.symbol)) :+ p.PathStep.Field(last.symbol), last.tpe)
+}
+
+def selectExpr(prefix: List[p.Named], last: p.Named): p.Expr = p.Expr.Alias(selectTerm(prefix, last))
+
+def asTerm(e: p.Expr): p.Term = e match {
+  case p.Expr.Alias(t) => t
+  case other =>
+    throw new IllegalStateException(s"asTerm called on non-atomic Expr: ${other.repr}")
+}
+
+object Builder {
+
+  def bind(stmts: scala.collection.mutable.ListBuffer[p.Stmt], hint: String, e: p.Expr): p.Term = e match {
+    case p.Expr.Alias(t) => t
+    case other =>
+      val n = p.Named(s"_${hint}_${stmts.size}", other.tpe)
+      stmts += p.Stmt.Var(n, Some(other), isMutable = false)
+      p.Term.Select(n, Nil, n.tpe)
+  }
+
+  def lift(t: p.Term): p.Expr = p.Expr.Alias(t)
 }

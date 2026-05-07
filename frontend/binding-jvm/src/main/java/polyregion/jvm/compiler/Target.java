@@ -10,7 +10,9 @@ public enum Target implements ByteEnum {
 
   LLVM_NVPTX64(Compiler.Target_Object_LLVM_NVPTX64),
   LLVM_AMDGCN(Compiler.Target_Object_LLVM_AMDGCN),
-  LLVM_SPIRV64(Compiler.Target_Object_LLVM_SPIRV64),
+  LLVM_SPIRV32_KERNEL(Compiler.Target_Object_LLVM_SPIRV32_Kernel),
+  LLVM_SPIRV64_KERNEL(Compiler.Target_Object_LLVM_SPIRV64_Kernel),
+  LLVM_SPIRV_GLCOMPUTE(Compiler.Target_Object_LLVM_SPIRV_GLCompute),
 
   C_C11(Compiler.Target_Source_C_C11),
   C_OpenCL1_1(Compiler.Target_Source_C_OpenCL1_1),

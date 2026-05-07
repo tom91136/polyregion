@@ -56,11 +56,8 @@ object RefOutliner {
     // remove refs if already covered by the same root
     sharedValRefs = normalisedForeignValRefs
       .foldLeft(Vector.empty[(q.Ident, Vector[String], q.Ref)]) {
-        case (acc, x @ (_, _, q.Ident(_))) =>
-          println(s">>>! $x ${acc}")
-          acc :+ x
+        case (acc, x @ (_, _, q.Ident(_))) => acc :+ x
         case (acc, x @ (root, path, s @ q.Select(i, _))) =>
-          println(s">>>  $root ~ $path $i ${acc} ${s.symbol.flags.is(q.Flags.Mutable)}")
           if (s.symbol.flags.is(q.Flags.Mutable)) acc
           else {
             if (acc.exists((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0))) acc
@@ -121,7 +118,7 @@ object RefOutliner {
     // remove anything we can't use, like ClassTag
     filteredTypedRefs = uniqueTypedRefs.filter {
       // case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag,_, q.ClassKind.Class, Nil)) => false
-      case (_, _, _ -> p.Type.Struct(Symbols.ClassTag, _, p.Type.Var(_) :: Nil, _)) => false
+      case (_, _, _ -> p.Type.Struct(Symbols.ClassTag, p.Type.Var(_) :: Nil)) => false
       case _                                                                        => true
     }
 

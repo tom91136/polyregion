@@ -355,13 +355,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // XXX ignore emitDisassembly here as PTX *is* the binary
       auto [_, ptx, ptxStart, ptxElapsed] = //
           mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, true);
-      // FIXME uber hack to fix `.ptr .shared` giving CUDA_ERROR_INVALID_IMAGE at module load time
-
-      auto patchedPtx = std::string(ptx.begin(), ptx.end()) ^
-                        replace_all(".ptr .shared ", ".ptr /*.shared removed, see https://github.com/llvm/llvm-project/pull/114874 */");
-
-      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", patchedPtx);
-      return {std::vector<int8_t>(patchedPtx.begin(), patchedPtx.end()), {info.cpu.uArch}, events, {}, ""};
+      // The NVPTX backend used to grow `.ptr .shared` kernel parameters that crash `cuModuleLoad`
+      // with `CUDA_ERROR_INVALID_IMAGE` (LLVM PR 114874). The polyc NVPTX postProcessModule pass
+      // now eliminates those parameters in favour of an `extern .shared` global, so no PTX-level
+      // patching is needed.
+      auto ptxStr = std::string(ptx.begin(), ptx.end());
+      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", ptxStr);
+      return {std::vector<int8_t>(ptxStr.begin(), ptxStr.end()), {info.cpu.uArch}, events, {}, ""};
     }
     default: {
       auto features = info.cpu.features ^ split(",");

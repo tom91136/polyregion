@@ -77,7 +77,7 @@ lazy val `runtime-scala` = project
     ),
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`, compiler % Compile)
+  .dependsOn(`binding-jvm`, compiler % Compile, codegen % Compile)
 
 lazy val ast = crossProject(JVMPlatform, JSPlatform)
   .in(file("ast"))
@@ -167,7 +167,7 @@ lazy val compiler = project
       }
     }
   )
-  .dependsOn(ast.jvm, pass.jvm)
+  .dependsOn(ast.jvm, pass.jvm, `binding-jvm`)
 
 lazy val `compiler-testsuite-scala` = project
   .settings(

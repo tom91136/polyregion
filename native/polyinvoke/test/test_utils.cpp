@@ -22,11 +22,17 @@ polyregion::test_utils::findTestImage(const ImageGroups &images, const invoke::B
   // HIP accepts HSA kernels
   const auto canonicalBackend = backend == invoke::Backend::HIP ? invoke::Backend::HSA : backend;
 
+  const bool archIndependent = canonicalBackend == invoke::Backend::Vulkan ||
+                               canonicalBackend == invoke::Backend::OpenCL ||
+                               canonicalBackend == invoke::Backend::Metal ||
+                               canonicalBackend == invoke::Backend::CUDA ||
+                               canonicalBackend == invoke::Backend::HIP ||
+                               canonicalBackend == invoke::Backend::HSA;
+
   return images                                                            //
          ^ get_maybe(std::string(magic_enum::enum_name(canonicalBackend))) //
          ^ flat_map([&](auto &featureToImage) -> std::optional<std::vector<std::pair<std::string, std::string>>> {
-             // For things like OpenCL/Vulkan which is arch independent
-             if (sortedFeatures.empty())
+             if (archIndependent || sortedFeatures.empty())
                return featureToImage ^ map_values([](auto &x) { return std::string(x.begin(), x.end()); }) ^ to_vector();
 
              // Try direct match first, GPUs would just be the ISA itself

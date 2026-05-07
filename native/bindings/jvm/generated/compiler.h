@@ -12,8 +12,9 @@ static constexpr jbyte Target_Object_LLVM_AMDGCN = 21;
 static constexpr jbyte Target_Object_LLVM_ARM = 13;
 static constexpr jbyte Target_Object_LLVM_HOST = 10;
 static constexpr jbyte Target_Object_LLVM_NVPTX64 = 20;
-static constexpr jbyte Target_Object_LLVM_SPIRV32 = 22;
-static constexpr jbyte Target_Object_LLVM_SPIRV64 = 23;
+static constexpr jbyte Target_Object_LLVM_SPIRV32_Kernel = 22;
+static constexpr jbyte Target_Object_LLVM_SPIRV64_Kernel = 23;
+static constexpr jbyte Target_Object_LLVM_SPIRV_GLCompute = 24;
 static constexpr jbyte Target_Object_LLVM_x86_64 = 11;
 static constexpr jbyte Target_Source_C_C11 = 30;
 static constexpr jbyte Target_Source_C_Metal1_0 = 32;
@@ -28,7 +29,7 @@ thread_local jclass clazz = nullptr;
 
 static void unregisterMethods(JNIEnv *env) {
   if (!clazz) return;
-  if (env->UnregisterNatives(clazz) != 0) {
+  if(env->UnregisterNatives(clazz) != 0){
     throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
   env->DeleteGlobalRef(clazz);
@@ -43,7 +44,7 @@ static void registerMethods(JNIEnv *env) {
       {(char *)"hostTarget0", (char *)"()B", (void *)&hostTarget0},
       {(char *)"hostTriplet0", (char *)"()Ljava/lang/String;", (void *)&hostTriplet0},
       {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)[Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0}};
-  if (env->RegisterNatives(clazz, methods, 4) != 0) {
+  if(env->RegisterNatives(clazz, methods, 4) != 0){
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
 }

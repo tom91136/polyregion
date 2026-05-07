@@ -5,33 +5,35 @@ import polyregion.ast.Traversal.*
 
 object VarReducePass extends ProgramPass {
 
+  private def filterStmts(body: List[p.Stmt])(drop: Set[p.Stmt]): List[p.Stmt] = body.flatMap {
+    case s if drop.contains(s)             => Nil
+    case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, filterStmts(t)(drop), filterStmts(f)(drop)) :: Nil
+    case p.Stmt.While(c, b)                => p.Stmt.While(c, filterStmts(b)(drop)) :: Nil
+    case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, filterStmts(b)(drop)) :: Nil
+    case p.Stmt.Annotated(inner, pos, c)   => filterStmts(inner :: Nil)(drop).map(p.Stmt.Annotated(_, pos, c))
+    case other                             => other :: Nil
+  }
+
   private def run(f: p.Function, log: Log) = {
-    // Remove intermediate assignments, so the following:
-    //    var a: T = expr
-    //    var b: T = a
-    //    f(b)
-    // becomes
-    //    var a: T = expr
-    //    f(a)
+    // Remove intermediate val-aliases:
+    //   val a: T = expr; val b: T = a; f(b)   ==>   val a: T = expr; f(a)
+    // mutatedNames is constant across iterations because we never rewrite Mut sites; hoisting
+    // the scan out of the fixed-point loop drops one body traversal per iteration.
+    val mutatedNames: Set[p.Named] = f.collectAll[p.Stmt].collect {
+      case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name
+    }.toSet
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       f.collectFirst_[p.Stmt] {
-        // Find the first var declaration that points to an alias
-        case source @ p.Stmt.Var(name, Some(that: p.Expr.Select)) => (source, name, that)
+        case source @ p.Stmt.Var(name, Some(p.Expr.Alias(that: p.Term.Select)), false) if !mutatedNames.contains(name) =>
+          (source, name, that)
       } match {
         case Some((source, name, that)) =>
-          // Then  replace all references to that var with the alias itself
-          val modified = f.modifyAll[p.Expr] {
-            case x @ p.Expr.Select(`name` :: ys, y) => p.Expr.Select(that.init ::: that.last :: ys, y)
-            case x @ p.Expr.Select(Nil, `name`)     => that
-            case x                                  => x
+          val modified = f.modifyAll[p.Term] {
+            case p.Term.Select(`name`, ys, tpe) => p.Term.Select(that.root, that.steps ::: ys, tpe)
+            case x                              => x
           }
-          // Whether or not any reference was rewritten, the rhs is a pure Select so an unused
-          // alias is a dead store either way; drop the source var declaration in both cases.
           log.info(s"Delete `${source.repr}`")
-          modified.modifyAll[p.Stmt] {
-            case `source` => p.Stmt.Comment(s"[VarReducePass] ${source.repr}")
-            case x        => x
-          }
+          modified.copy(body = filterStmts(modified.body)(Set(source)))
         case None => f
       }
     }
@@ -43,7 +45,8 @@ object VarReducePass extends ProgramPass {
     p.Program(
       run(program.entry, log.subLog(s"VarReducePass on ${program.entry.name}")),
       program.functions.map(f => run(f, log.subLog(s"VarReducePass on ${f.name}"))),
-      program.defs
+      program.defs,
+      program.phase
     )
 
 }

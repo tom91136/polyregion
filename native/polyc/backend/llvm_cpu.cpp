@@ -3,7 +3,7 @@
 using namespace polyregion::backend::details;
 
 void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const Function &source) {
-  if (!source.attrs.contains(FunctionAttr::Exported())) {
+  if (!source.visibility.is<FunctionVisibility::Exported>()) {
     fn.setDSOLocal(true);
   }
 }
@@ -49,15 +49,15 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
               return cg.B.CreateOr(cg.B.CreateAShr(x, msbOffset), cg.B.CreateLShr(cg.B.CreateNeg(x), msbOffset));
             },
             [&](auto x) -> ValPtr {
-              auto mag = [&](const Expr::Any &magnitude) {
+              auto mag = [&](const Term::Any &magnitude) {
                 auto nan = cg.B.CreateFCmpUNO(x, x);
                 auto zero = cg.B.CreateFCmpUNO(x, llvm::ConstantFP::get(x->getType(), 0));
                 return cg.B.CreateSelect(cg.B.CreateLogicalOr(nan, zero), x, cg.intr2(llvm::Intrinsic::copysign, v.tpe, magnitude, v.x));
               };
               if (v.tpe.is<Type::Float32>())       //
-                return mag(Expr::Float32Const(1)); //
+                return mag(Term::Float32Const(1)); //
               else if (v.tpe.is<Type::Float64>())  //
-                return mag(Expr::Float64Const(1)); //
+                return mag(Term::Float64Const(1)); //
               else throw BackendException("unimplemented");
             });
       }, //

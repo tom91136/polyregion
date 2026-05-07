@@ -6,25 +6,25 @@ namespace polyregion::polyfc::parallel_ops {
 
 struct SingleVarReduction {
   polyast::Named target;
-  polyast::Expr::Any init;
-  polyast::Expr::Select partialArray;
-  std::function<polyast::Expr::Any(const polyast::Expr::Any &, const polyast::Expr::Any &)> binaryOp;
+  polyast::Term::Any init;
+  polyast::Term::Select partialArray;
+  std::function<polyast::Expr::Any(const polyast::Term::Any &, const polyast::Term::Any &)> binaryOp;
   polyast::Stmt::Any partialVar() const;
-  polyast::Stmt::Any drainPartial(const polyast::Expr::Any &lhs, const polyast::Expr::Any &idx) const;
-  polyast::Stmt::Any drainPartial(const polyast::Expr::Any &idx) const;
-  polyast::Stmt::Any applyPartial(const polyast::Expr::Any &lhs, const polyast::Expr::Any &idx) const;
-  polyast::Stmt::Any applyPartial(const polyast::Expr::Any &idx) const;
+  polyast::Stmt::Any drainPartial(const polyast::Term::Select &lhs, const polyast::Term::Any &idx) const;
+  polyast::Stmt::Any drainPartial(const polyast::Term::Any &idx) const;
+  polyast::Stmt::Any applyPartial(const polyast::Term::Any &lhs, const polyast::Term::Any &idx) const;
+  polyast::Stmt::Any applyPartial(const polyast::Term::Any &idx) const;
 };
 
 struct CPUParams {
   polyast::Named induction;                          //
-  polyast::Expr::Any lowerBound, step, begins, ends; //
+  polyast::Term::Any lowerBound, step, begins, ends; //
   std::vector<polyast::Stmt::Any> body;
 };
 
 struct GPUParams {
   polyast::Named induction;                       //
-  polyast::Expr::Any lowerBound, step, tripCount; //
+  polyast::Term::Any lowerBound, step, tripCount; //
   std::vector<polyast::Stmt::Any> body;
 };
 

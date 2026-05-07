@@ -54,6 +54,10 @@ static void collectCPUFeatures(const std::string &CPU,             //
 
   switch (arch) {
     case Triple::x86_64: {
+      // Reject unknown CPU names up front - LLVM's getFeaturesForCPU asserts on miss. Callers
+      // pass in arch strings that may name a non-x86 target (GPU device names, "vulkan-spirv",
+      // etc.) when probing whether an image can run on the host; treat those as zero features.
+      if (X86::parseArchX86(CPU) == X86::CK_None) break;
       SmallVector<StringRef> buffer;
       X86::getFeaturesForCPU(CPU, buffer);
       StringMap<bool> implied;

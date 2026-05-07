@@ -20,6 +20,7 @@ public:
 private:
   Dialect dialect;
   std::string mkTpe(const Type::Any &tpe);
+  std::string mkTerm(const Term::Any &term);
   std::string mkExpr(const Expr::Any &expr);
   std::string mkStmt(const Stmt::Any &stmt);
   std::string mkFnProto(const Function &);

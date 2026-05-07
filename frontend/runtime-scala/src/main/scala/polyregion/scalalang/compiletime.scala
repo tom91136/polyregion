@@ -186,7 +186,7 @@ object compiletime {
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
   ) = {
-    val log = Log("")
+    val log = RenderedLog("")
     val result = for {
 
       // Name actual => type actual
@@ -198,7 +198,7 @@ object compiletime {
 
       // Match up the struct types from the capture args so that we know how to copy the structs during argument pickling.
       capturesWithStructDefs <- captures.traverse {
-        case (n @ p.Named(_, p.Type.Struct(name, _, _, _)), term) =>
+        case (n @ p.Named(_, p.Type.Struct(name, _)), term) =>
           prog0.defs
             .find(_.name == name)
             .failIfEmpty(s"Missing structure def from capture args ${n.repr}")
@@ -453,28 +453,33 @@ object compiletime {
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
-        val expr = (name.tpe, structDef, ref.asExpr) match {
-          case (p.Type.Ptr(comp, _, _), None, _) =>
+        // Split the deep tuple match: dotc's patmat exhaustiveness blows up when the scrutinee is
+        // (deep-Type-ADT, Option, Expr-with-quote-pattern) - the GADT type maximizer chases
+        // every Type variant. Test the simple parts first, then the quoted ref.
+        val expr = ((name.tpe, structDef): @scala.unchecked) match {
+          case (p.Type.Ptr(_, _), None) =>
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _, _), None, _) =>
+          case (p.Type.Struct(_, _), None) =>
             throw new RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
-            println(s"$ref = " + ref.asTerm.symbol.flags.show)
-
-            val rtn = write(sdef.name, ref)
-
-            Pickler.writePrim(target, Expr(byteOffset), p.Type.IntS64, rtn)
-
-          case (t, None, '{ $ref: t }) => Pickler.writePrim(target, Expr(byteOffset), t, ref)
-          case (t, _, _) =>
+          case (p.Type.Struct(_, _), Some(sdef)) =>
+            (ref.asExpr: @scala.unchecked) match {
+              case '{ $r: t } =>
+                println(s"$r = " + r.asTerm.symbol.flags.show)
+                val rtn = write(sdef.name, r)
+                Pickler.writePrim(target, Expr(byteOffset), p.Type.IntS64, rtn)
+            }
+          case (t, None) =>
+            (ref.asExpr: @scala.unchecked) match {
+              case '{ $r: u } => Pickler.writePrim(target, Expr(byteOffset), t, r)
+            }
+          case (t, _) =>
             throw new RuntimeException(
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
             )
-
         }
         (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
     }
@@ -498,36 +503,39 @@ object compiletime {
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
-        val expr = (name.tpe, structDef, ref.asExpr) match {
-          case (p.Type.Ptr(comp, _, _), None, _) =>
+        val expr = ((name.tpe, structDef): @scala.unchecked) match {
+          case (p.Type.Ptr(_, _), None) =>
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _, _), None, _) =>
+          case (p.Type.Struct(_, _), None) =>
             throw new RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
-            println(s"$ref = " + ref.asTerm.symbol.flags.show)
-            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
-            '{
-
-              println(s"Restore ${$ref}")
-              ${
-                if (mutable) {
-                  q.Assign(ref.asTerm, read(sdef.name, ref, ptr).asTerm).asExprOf[Unit]
-                } else {
-                  update(sdef.name, ref, ptr)
+          case (p.Type.Struct(_, _), Some(sdef)) =>
+            (ref.asExpr: @scala.unchecked) match {
+              case '{ $r: t } =>
+                println(s"$r = " + r.asTerm.symbol.flags.show)
+                val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
+                '{
+                  println(s"Restore ${$r}")
+                  ${
+                    if (mutable) {
+                      q.Assign(r.asTerm, read(sdef.name, r, ptr).asTerm).asExprOf[Unit]
+                    } else {
+                      update(sdef.name, r, ptr)
+                    }
+                  }
                 }
-              }
             }
-
-          case (t, None, '{ $ref: t }) =>
-            '{
-              println(s"[Bind] skipping primitive ${$ref}")
+          case (_, None) =>
+            (ref.asExpr: @scala.unchecked) match {
+              case '{ $r: u } =>
+                '{
+                  println(s"[Bind] skipping primitive ${$r}")
+                }
             }
-          // Pickler.writePrim(target, Expr( byteOffset), t, ref)
-          case (t, _, _) =>
+          case (t, _) =>
             throw new RuntimeException(
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
             )

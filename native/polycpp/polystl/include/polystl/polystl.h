@@ -7,8 +7,11 @@
 
 template <polyregion::runtime::PlatformKind Kind, typename F>
 POLYREGION_RT_PROTECT const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
-  assert(false && "impl not replaced");
-  std::abort();
+  // Default body: returns an empty bundle so callers (e.g. polystl::details::parallel_for)
+  // skip kernel dispatch and fall through to the host path. The polycpp clang plugin replaces
+  // this body in offload-enabled builds (POLYCPP_NO_REWRITE not set).
+  static const polyregion::runtime::KernelBundle empty{"", 0, nullptr, 0, nullptr, 0, ""};
+  return empty;
 }
 namespace polyregion::polystl::details {
 

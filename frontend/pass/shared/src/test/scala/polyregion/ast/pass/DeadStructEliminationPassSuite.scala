@@ -17,7 +17,7 @@ class DeadStructEliminationPassSuite extends munit.FunSuite {
 
   test("referenced struct should be kept") {
     val s    = p.StructDef(sym("Point"), Nil, List(named("x", p.Type.IntS32)), Nil)
-    val sTpe = p.Type.Struct(s.name, Nil, Nil, Nil)
+    val sTpe = p.Type.Struct(s.name, Nil)
     val a    = arg("p", sTpe)
     val out  = DeadStructEliminationPass(program(entry(args = List(a)), defs = List(s)), NoopLog)
     assert(out.defs.exists(_.name == s.name), "referenced struct must be kept")

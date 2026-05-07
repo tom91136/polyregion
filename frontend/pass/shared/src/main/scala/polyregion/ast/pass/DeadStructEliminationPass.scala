@@ -19,7 +19,9 @@ object DeadStructEliminationPass extends ProgramPass {
     @tailrec def reach(frontier: Set[p.Sym], live: Set[p.Sym]): Set[p.Sym] = {
       val next = frontier.flatMap { s =>
         byName.get(s).toList.flatMap { d =>
-          d.parents ++ d.members.flatMap(_.tpe.collectWhere[p.Type] { case ts: p.Type.Struct => ts.name })
+          d.parents.map(_.name) ++ d.members.flatMap(
+            _.tpe.collectWhere[p.Type] { case ts: p.Type.Struct => ts.name }
+          )
         }
       } -- live
       if (next.isEmpty) live else reach(next, live ++ next)

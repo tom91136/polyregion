@@ -3,26 +3,39 @@ package polyregion.ast.pass
 import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
-import scala.collection.immutable.VectorMap
 
 // inline all calls originating from entry
 object FnInlinePass extends ProgramPass {
+
+  // Substitute root names in any Term.Select inside a tree.
+  private def substTerms(tree: p.Function, table: Map[p.Named, p.Term]): p.Function =
+    tree.modifyAll[p.Term] {
+      case p.Term.Select(root, steps, tpe) =>
+        table.get(root) match {
+          case Some(p.Term.Select(rRoot, rSteps, _)) => p.Term.Select(rRoot, rSteps ::: steps, tpe)
+          case Some(other) if steps.isEmpty          => other
+          case Some(_) =>
+            // Replacement is a non-Select Term but the call wants to apply field steps;
+            // shouldn't happen for well-typed substitutions, fall through.
+            p.Term.Select(root, steps, tpe)
+          case None => p.Term.Select(root, steps, tpe)
+        }
+      case x => x
+    }
 
   // rename all var and selects to avoid collision
   private def renameAll(f: p.Function): p.Function = {
     def rename(n: p.Named) = p.Named(s"_inline_${f.mangledName}_${n.symbol}", n.tpe)
     val captureNames       = f.moduleCaptures.map(_.named).toSet
     val body = f.body
-      .modifyAll[p.Expr] {
-        case s @ p.Expr.Select(Nil, n) if captureNames.contains(n)    => s
-        case s @ p.Expr.Select(n :: _, _) if captureNames.contains(n) => s
-        case p.Expr.Select(Nil, n)                                    => p.Expr.Select(Nil, rename(n))
-        case p.Expr.Select(n :: ns, x)                                => p.Expr.Select(rename(n) :: ns, x)
-        case x                                                        => x
+      .modifyAll[p.Term] {
+        case s @ p.Term.Select(root, _, _) if captureNames.contains(root) => s
+        case p.Term.Select(root, steps, tpe)                              => p.Term.Select(rename(root), steps, tpe)
+        case x                                                            => x
       }
       .modifyAll[p.Stmt] {
-        case p.Stmt.Var(n, expr) => p.Stmt.Var(rename(n), expr)
-        case x                   => x
+        case p.Stmt.Var(n, expr, isMutable) => p.Stmt.Var(rename(n), expr, isMutable)
+        case x                            => x
       }
     p.Function(
       f.name,
@@ -33,7 +46,9 @@ object FnInlinePass extends ProgramPass {
       f.termCaptures.map(arg => arg.copy(rename(arg.named))),
       f.rtn,
       body,
-      f.attrs
+      f.visibility,
+      f.fpMode,
+      f.isEntry
     )
   }
 
@@ -41,8 +56,8 @@ object FnInlinePass extends ProgramPass {
 
     val concreteTpeArgs = ivk.receiver
       .map(_.tpe match {
-        case p.Type.Struct(_, _, tpeArgs, _) => tpeArgs
-        case _                               => Nil
+        case p.Type.Struct(_, tpeArgs) => tpeArgs
+        case _                         => Nil
       })
       .getOrElse(Nil) ++ ivk.tpeArgs
 
@@ -53,43 +68,51 @@ object FnInlinePass extends ProgramPass {
       case x                                        => x
     }))
 
-    val substituted =
-      (renamed.receiver.map(_.named) ++ renamed.args.map(_.named) ++ renamed.termCaptures.map(_.named))
-        .zip(ivk.receiver ++ ivk.args ++ ivk.captures)
-        .foldLeft(renamed.body) { case (xs, (target, replacement)) =>
-          xs.modifyAll[p.Expr] { original =>
-            (original, replacement) match {
-              case (p.Expr.Select(Nil, `target`), r) => r
-              case (p.Expr.Select(`target` :: xs, x), p.Expr.Select(ys, y)) =>
-                p.Expr.Select(ys ::: y :: xs, x)
-              case _ => original
-            }
-          // if (original == target) replacement else original
-          }
-        }
+    // ivk.args is the flattened (args ::: moduleCaptures ::: termCaptures) per D10.
+    val targetNames =
+      renamed.receiver.map(_.named).toList ++
+        renamed.args.map(_.named) ++
+        renamed.moduleCaptures.map(_.named) ++
+        renamed.termCaptures.map(_.named)
+    val replacements = ivk.receiver.toList ++ ivk.args
+    val substTable   = targetNames.zip(replacements).toMap
+    val substituted  = substTerms(renamed, substTable)
 
     val returnExprs = substituted.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e }
 
     returnExprs match {
       case Nil =>
-        throw new AssertionError(
-          s"no return in function ${f.signature}, substituted:\n${returnExprs.map(_.repr).mkString("\n")}"
-        )
-      case expr :: Nil => // single return, just pass the expr to the call-site
-        val noReturnStmt = substituted.modifyAll[p.Stmt] {
-          case p.Stmt.Return(e) => p.Stmt.Comment(s"inlined return ${e}")
-          case x                => x
-        }
-        (expr, noReturnStmt, renamed.moduleCaptures)
-      case xs => // multiple returns, create intermediate return var
-        val returnName               = p.Named("phi", ivk.tpe)
-        val returnRef: p.Expr.Select = p.Expr.Select(Nil, returnName)
-        val returnRebound = substituted.modifyAll[p.Stmt] {
-          case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e)
-          case x                => x
-        }
-        (returnRef, p.Stmt.Var(returnName, None) :: returnRebound, renamed.moduleCaptures)
+        throw new AssertionError(s"no return in function ${f.signature}")
+      case expr :: Nil =>
+        // single return: inject the return Expr at the callsite. Drop the Return stmts.
+        val noReturnBody = substituted.body.flatMap(stripReturn)
+        (expr, noReturnBody, renamed.moduleCaptures)
+      case xs =>
+        // multi-return: bind to a phi var, replace each Return with a Mut to the phi.
+        val phiName             = p.Named("phi", ivk.tpe)
+        val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
+        val phiDecl     = p.Stmt.Var(phiName, None, isMutable = true)
+        val rebound     = substituted.body.map(rebindReturn(phiSelect))
+        (p.Expr.Alias(phiSelect), phiDecl :: rebound, renamed.moduleCaptures)
     }
+  }
+
+  private def stripReturn(s: p.Stmt): List[p.Stmt] = s match {
+    case p.Stmt.Return(_)                  => Nil
+    case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, t.flatMap(stripReturn), f.flatMap(stripReturn)) :: Nil
+    case p.Stmt.While(c, b)                => p.Stmt.While(c, b.flatMap(stripReturn)) :: Nil
+    case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, b.flatMap(stripReturn)) :: Nil
+    case p.Stmt.Annotated(inner, pos, c)   => stripReturn(inner).map(p.Stmt.Annotated(_, pos, c))
+    case other                             => other :: Nil
+  }
+
+  private def rebindReturn(phi: p.Term.Select)(s: p.Stmt): p.Stmt = s match {
+    case p.Stmt.Return(e)                  => p.Stmt.Mut(phi, e)
+    case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, t.map(rebindReturn(phi)), f.map(rebindReturn(phi)))
+    case p.Stmt.While(c, b)                => p.Stmt.While(c, b.map(rebindReturn(phi)))
+    case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, b.map(rebindReturn(phi)))
+    case p.Stmt.Annotated(inner, pos, c)   => p.Stmt.Annotated(rebindReturn(phi)(inner), pos, c)
+    case other                             => other
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
@@ -98,26 +121,17 @@ object FnInlinePass extends ProgramPass {
       val (stmts, moduleCaptures) = f.body.foldMap { x =>
 
         val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Arg])] {
-          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, captures, rtn) =>
-            // Find all viable overloads (same name and same arg count) first.
+          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, rtn) =>
             val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)
 
             overloads.filter { f =>
-              // For each overload candidate, we substitute any type variables with the actual invocation.
-              // As we're resolving overloads, failures are expected so unresolvable variables are kept as-is.
-
-              // We can still inline if method name and argument type resolution succeed but types don't match for the receiver.
-              // This is because receivers could have *different* types in the inheritance tree.
-              // `scalac` would have rejected bad receivers before this so it should be relatively safe.
-
               val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
               val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
                 case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
                 case x                 => x
               })
-              sig.receiver.size == recv.size && // make sure receivers are both Some or None
+              sig.receiver.size == recv.size &&
               sig.args.zip(args.map(_.tpe)).forall(_ =:= _) &&
-              sig.termCaptures.zip(captures.map(_.tpe)).forall(_ =:= _) &&
               sig.rtn =:= rtn
             } match {
               case Nil =>
@@ -144,7 +158,7 @@ object FnInlinePass extends ProgramPass {
     }
 
     log.info(s"converged in $n iteration(s)")
-    p.Program(f, Nil, program.defs)
+    p.Program(f, Nil, program.defs, program.phase)
 
   }
 

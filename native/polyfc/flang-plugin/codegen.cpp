@@ -56,5 +56,15 @@ polyfront::KernelBundle polyfc::compileRegion( //
           return std::nullopt;
         }) //
       | to_vector();
+  // If targets were requested for this kind but every one failed, escalate to a hard error so
+  // the user sees the failure at compile time instead of an opaque "no compatible image" abort
+  // from the runtime later on.
+  const auto requestedForKind = opts.targets ^ count([&](auto &target, auto &) { return runtime::targetPlatformKind(target) == kind; });
+  if (requestedForKind > 0 && objects.empty()) {
+    emit(diag, Level::Error,
+         "%0 [PolyDCO] No kernels compiled successfully for [%1, kind=%2] (requested %3 target(s)); see prior diagnostics for the per-target "
+         "failure",
+         diagLoc, moduleId, std::string(magic_enum::enum_name(kind)), std::to_string(static_cast<int>(requestedForKind)));
+  }
   return polyfront::KernelBundle{moduleId, objects, region.layouts, polyast::program_to_json(region.program).dump()};
 }

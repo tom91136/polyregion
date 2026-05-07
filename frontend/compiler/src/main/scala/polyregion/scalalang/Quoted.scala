@@ -78,7 +78,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
       refs: Map[Symbol, p.Expr] = Map.empty, // ident/select table
       names: Map[Symbol, Int] = Map.empty,
-      invokeCaptures: Map[Symbol, List[p.Expr]] = Map.empty,
+      invokeCaptures: Map[Symbol, List[p.Term]] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
       thisCls: Option[(ClassDef, p.Type.Struct)] = None
@@ -118,7 +118,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 //        }).toMap
 //    )
 
-    def withInvokeCapture(s: Symbol, xs: List[p.Expr]): RemapContext =
+    def withInvokeCapture(s: Symbol, xs: List[p.Term]): RemapContext =
       copy(invokeCaptures = invokeCaptures + (s -> xs))
 
     def noStmts: RemapContext = copy(stmts = Nil)

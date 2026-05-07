@@ -25,8 +25,8 @@ class FnInlinePassSuite extends munit.FunSuite {
       rtn = p.Type.IntS32,
       body = List(p.Stmt.Return(select(xArg.named)))
     )
-    val invokeExpr = p.Expr.Invoke(helper.name, Nil, None, List(p.Expr.IntS32Const(7)), Nil, p.Type.IntS32)
-    val e          = entry(body = List(p.Stmt.Var(named("r"), Some(invokeExpr)), p.Stmt.Return(p.Expr.Unit0Const)))
+    val invokeExpr = p.Expr.Invoke(helper.name, Nil, None, List(p.Term.IntS32Const(7)), p.Type.IntS32)
+    val e          = entry(body = List(p.Stmt.Var(named("r"), Some(invokeExpr)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
 
     val out = FnInlinePass(program(e, List(helper)), NoopLog)
 

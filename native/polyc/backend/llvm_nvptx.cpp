@@ -1,10 +1,14 @@
 #include "llvm_nvptx.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
+#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
 
 using namespace polyregion::backend::details;
 
 void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
-  if (source.attrs.contains(FunctionAttr::Exported())) {
+  if (source.isEntry) {
     // XXX as of LLVM 21, it seems that the annotation method of marking kernel entries is now standardised to normal calling conventions,
     // keeping both for compatibility reasons
     fn.setCallingConv(llvm::CallingConv::PTX_Kernel);
@@ -27,24 +31,24 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
   auto globalId = [&](const llvm::Intrinsic::ID ctaid, const llvm::Intrinsic::ID ntid, const llvm::Intrinsic::ID tid) -> ValPtr {
     return cg.B.CreateAdd(cg.B.CreateMul(cg.intr0(ctaid), cg.intr0(ntid)), cg.intr0(tid));
   };
-  auto dim3OrAssert = [&](const AnyExpr &dim, ValPtr const d0, ValPtr const d1, ValPtr const d2) {
+  auto dim3OrAssert = [&](const AnyTerm &dim, ValPtr const d0, ValPtr const d1, ValPtr const d2) {
     if (dim.tpe() != Type::IntU32()) {
       throw std::logic_error("dim selector should be a " + to_string(Type::IntU32()) + " but got " + to_string(dim.tpe()));
     }
-    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(0))), d0,
-                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(1))), d1,
-                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(2))),
-                                                                 d2, cg.mkExprVal(Expr::IntU32Const(0)))));
+    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Term::IntU32Const(0))), d0,
+                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Term::IntU32Const(1))), d1,
+                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Term::IntU32Const(2))),
+                                                                 d2, cg.mkTermVal(Term::IntU32Const(0)))));
   };
 
   auto barrier0 = [&] {
     const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_barrier_cta_sync_aligned_all, {});
-    return cg.B.CreateCall(callee, cg.mkExprVal(Expr::IntU32Const(0)));
+    return cg.B.CreateCall(callee, cg.mkTermVal(Term::IntU32Const(0)));
   };
 
   return expr.op.match_total( //
       [&](const Spec::Assert &v) -> ValPtr {
-        // cg.extFn1(  "__assertfail", Type::Unit0(), Expr::Unit0Const()); // TODO
+        // cg.extFn1(  "__assertfail", Type::Unit0(), Term::Unit0Const()); // TODO
         throw BackendException("unimplemented");
       },
       // Migrating from nvvm_barrier0, see https://github.com/llvm/llvm-project/pull/140615
@@ -93,6 +97,96 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_y), //
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_z));
       });
+}
+
+void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
+  // CUDA reaches dynamic shared memory through an `extern .shared` symbol fed by
+  // `cuLaunchKernel(..., sharedMemBytes, ...)`, not through a kernel parameter. A `ptr
+  // addrspace(3)` param emits `.param .u64 .ptr .shared`, which `cuModuleLoad` rejects (LLVM PR
+  // 114874); stripping the `.shared` annotation keeps the load happy but leaves the kernel
+  // dereferencing an unpopulated 0, faulting at runtime. Lower each addrspace(3) param into a
+  // single module-level `extern addrspace(3) global` and rewrite uses; the CUDA runtime side
+  // drops `Type::Scratch` from the arg buffer to keep the remaining params aligned.
+  llvm::Module &M = cg.M;
+  llvm::LLVMContext &ctx = cg.C.actual;
+  llvm::GlobalVariable *sharedGlobal = nullptr;
+  auto getSharedGlobal = [&]() {
+    if (sharedGlobal) return sharedGlobal;
+    auto *arrTy = llvm::ArrayType::get(llvm::Type::getInt8Ty(ctx), 0);
+    sharedGlobal = new llvm::GlobalVariable(M, arrTy, /*isConstant*/ false, llvm::GlobalValue::ExternalLinkage,
+                                            /*Initializer*/ nullptr, "polyc_dyn_shared", /*InsertBefore*/ nullptr,
+                                            llvm::GlobalValue::NotThreadLocal, /*addressSpace*/ 3);
+    sharedGlobal->setAlignment(llvm::Align(16));
+    return sharedGlobal;
+  };
+
+  std::vector<llvm::Function *> kernels;
+  for (auto &fn : M)
+    if (!fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel) kernels.push_back(&fn);
+
+  for (auto *fn : kernels) {
+    bool hasSharedParam = false;
+    for (auto &arg : fn->args()) {
+      if (auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType()); pty && pty->getAddressSpace() == 3) {
+        hasSharedParam = true;
+        break;
+      }
+    }
+    if (!hasSharedParam) continue;
+
+    auto *sg = getSharedGlobal();
+    std::vector<llvm::Type *> newParamTys;
+    std::vector<bool> keepArg;
+    keepArg.reserve(fn->arg_size());
+    for (auto &arg : fn->args()) {
+      auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType());
+      const bool isShared = pty && pty->getAddressSpace() == 3;
+      keepArg.push_back(!isShared);
+      if (!isShared) newParamTys.push_back(arg.getType());
+    }
+    auto *newFnTy = llvm::FunctionType::get(fn->getReturnType(), newParamTys, false);
+    auto *newFn = llvm::Function::Create(newFnTy, fn->getLinkage(), fn->getAddressSpace(), "", &M);
+    newFn->copyAttributesFrom(fn);
+    newFn->setCallingConv(fn->getCallingConv());
+    newFn->takeName(fn);
+
+    // Kept args -> their new positional index; dropped shared args -> @polyc_dyn_shared.
+    llvm::ValueToValueMapTy vmap;
+    auto newArgIt = newFn->arg_begin();
+    auto oldArgIt = fn->arg_begin();
+    for (size_t i = 0; i < keepArg.size(); ++i, ++oldArgIt) {
+      if (keepArg[i]) {
+        newArgIt->setName(oldArgIt->getName());
+        vmap[&*oldArgIt] = &*newArgIt;
+        ++newArgIt;
+      } else {
+        vmap[&*oldArgIt] = sg;
+      }
+    }
+    newFn->splice(newFn->begin(), fn);
+    for (auto &bb : *newFn)
+      for (auto &inst : bb)
+        llvm::RemapInstruction(&inst, vmap, llvm::RF_IgnoreMissingLocals);
+
+    // Repoint the kernel-entry annotation; without this, `nvvm.annotations` would dangle after
+    // we erase the old function and the verifier rejects the module.
+    if (auto *md = M.getNamedMetadata("nvvm.annotations")) {
+      for (unsigned i = 0; i < md->getNumOperands(); ++i) {
+        auto *node = md->getOperand(i);
+        if (node->getNumOperands() < 1) continue;
+        auto *first = llvm::dyn_cast_or_null<llvm::ValueAsMetadata>(node->getOperand(0).get());
+        if (first && first->getValue() == fn) {
+          std::vector<llvm::Metadata *> newOps;
+          newOps.reserve(node->getNumOperands());
+          newOps.push_back(llvm::ValueAsMetadata::get(newFn));
+          for (unsigned j = 1; j < node->getNumOperands(); ++j)
+            newOps.push_back(node->getOperand(j).get());
+          md->setOperand(i, llvm::MDNode::get(ctx, newOps));
+        }
+      }
+    }
+    fn->eraseFromParent();
+  }
 }
 ValPtr NVPTXTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   return expr.op.match_total( //                                                     //
