@@ -13,7 +13,7 @@ lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)gen
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.7.4"
+lazy val scala3Version = "3.8.3"
 lazy val catsVersion   = "2.12.0"
 lazy val munitVersion  = "1.0.2"
 
@@ -150,10 +150,9 @@ lazy val compiler = project
       Seq("-Yretain-trees") ++
         Seq("-Xmax-inlines", "80"),
     libraryDependencies ++= Seq(
-      "net.bytebuddy"   % "byte-buddy"                        % "1.15.10",
-      "org.scala-lang" %% "scala2-library-tasty-experimental" % scala3Version,
-      "com.lihaoyi"    %% "pprint"                            % "0.9.0",
-      "org.scalameta"  %% "munit"                             % munitVersion % Test
+      "net.bytebuddy"  % "byte-buddy" % "1.15.10",
+      "com.lihaoyi"   %% "pprint"     % "0.9.0",
+      "org.scalameta" %% "munit"      % munitVersion % Test
     ),
     (Compile / unmanagedJars) := {
       val xs       = (Compile / unmanagedJars).value

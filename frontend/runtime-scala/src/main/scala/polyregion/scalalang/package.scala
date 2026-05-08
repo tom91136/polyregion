@@ -224,7 +224,7 @@ object Target {
   // val code = scala.compiletime.codeOf(Aux.deriveArchNames[Target])
 
   import cp.Target as cpt
-  private transparent inline def valueOf[T <: Singleton: ValueOf] = summon[ValueOf[T]].value
+  private transparent inline def valueOf[T <: Singleton: ValueOf] = scala.compiletime.summonInline[ValueOf[T]].value
 
   type OpenCL_C = OpenCL_C.type
   val OpenCL_C = new Target {
