@@ -47,27 +47,23 @@ static Term::Select asSelectF(const Expr::Any &expr) {
   return Term::Select(Named("_invalid_select", expr.tpe()), {}, expr.tpe());
 }
 
-static Stmt::Any update0(const Expr::Any &expr, const Expr::Any &rhs) {
+static Stmt::Any update0(const Expr::Any &expr, const Term::Any &rhsT) {
   if (expr.tpe().is<Type::Ptr>()) {
     auto sel = asSelectF(expr);
     auto idx = Term::IntU64Const(0);
-    auto rhsT = rhs.template get<Expr::Alias>()
-                    ? rhs.template get<Expr::Alias>()->ref
-                    : Term::Any(Term::Poison(rhs.tpe()).widen());
     return Stmt::Update(sel, idx, rhsT).widen();
   }
-  return Stmt::Mut(asSelectF(expr), rhs).widen();
+  return Stmt::Mut(asSelectF(expr), Expr::Alias(rhsT)).widen();
 }
 
 static Expr::Any index0(const Expr::Any &rhs) {
-  return rhs.tpe().get<Type::Ptr>()                                                                          //
-         ^ map([&](auto &ptr) {
-             auto base = rhs.template get<Expr::Alias>()
-                             ? rhs.template get<Expr::Alias>()->ref
-                             : Term::Any(Term::Poison(rhs.tpe()).widen());
-             return Expr::Index(base, Term::IntU64Const(0), ptr.comp).widen();
-           })                                                                                                //
-         ^ get_or_else(rhs);                                                                                 //
+  return rhs.tpe().get<Type::Ptr>() //
+         ^
+         map([&](auto &ptr) {
+           auto base = rhs.template get<Expr::Alias>() ? rhs.template get<Expr::Alias>()->ref : Term::Any(Term::Poison(rhs.tpe()).widen());
+           return Expr::Index(base, Term::IntU64Const(0), ptr.comp).widen();
+         })                  //
+         ^ get_or_else(rhs); //
 }
 
 static std::optional<mlir::Value> maybe(mlir::Value v) { return v ? std::optional{v} : std::nullopt; }
@@ -112,11 +108,11 @@ mlir::Type polyfc::Remapper::resolveType(const Type::Any &tpe) {
                          | find([&](auto &d) { return d.name == x.name; });
         if (!def) raise(fmt::format("Unseen struct type {}", repr(x)));
         return mlir::LLVM::LLVMStructType::getLiteral(C, def->members ^ map([&](auto &m) { return resolveType(m.tpe); }));
-      }, //
-      [&](const Type::Ptr &x) -> mlir::Type { return mlir::LLVM::LLVMPointerType::get(C); },                                //
-      [&](const Type::Arr &x) -> mlir::Type { return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), x.length); },      //
-      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); },                  //
-      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }                 //
+      },                                                                                                               //
+      [&](const Type::Ptr &x) -> mlir::Type { return mlir::LLVM::LLVMPointerType::get(C); },                           //
+      [&](const Type::Arr &x) -> mlir::Type { return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), x.length); }, //
+      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); },             //
+      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }            //
   );
 }
 
@@ -210,7 +206,16 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global());
              },
              [&](const fir::HeapType t) -> Type::Any { return handleType(t.getEleTy()); },
-             [&](const fir::SequenceType t) -> Type::Any { return handleSeq(t); },
+             [&](fir::SequenceType t) -> Type::Any {
+               // Bare fir.array (no enclosing fir.ref) shows up as an inline aggregate, e.g. a
+               // sized array field of a record type. handleSeq returns a Ptr (since fir.ref is
+               // handled above), but inline arrays need Type::Arr so struct GEP indexes the
+               // bytes that live alongside the other fields.
+               if (!t.hasDynamicExtents() && !t.hasUnknownShape() && t.getDimension() == 1) {
+                 return Type::Arr(handleType(t.getEleTy()), static_cast<int32_t>(t.getConstantArraySize()), TypeSpace::Global());
+               }
+               return handleSeq(t);
+             },
              [&](const fir::CharacterType) -> Type::Any { return Type::Ptr(Type::IntU8(), TypeSpace::Global()); },
              [&](fir::RecordType t) -> Type::Any {
                const StructDef def(Sym({t.getName().str()}), {},
@@ -415,9 +420,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
     auto r = newVar(handleValueAsScalar(x.getRhs()));
     witness(x.getResult(), Expr::IntrOp(ap(l, r, handleType(x.getType())).widen()));
   };
-  const auto poison = [&](auto x, const std::string &reason) -> void {
-    witness(x, Expr::Alias(Term::Poison(handleType(x.getType()))));
-  };
+  const auto poison = [&](auto x, const std::string &reason) -> void { witness(x, Expr::Alias(Term::Poison(handleType(x.getType())))); };
   const auto poison0 = [&](const std::string &reason) { ; };
   const auto push = [&](const auto &x) { stmts.emplace_back(x); };
 
@@ -480,9 +483,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         auto condT = newVar(cond);
         Term::Any oneT = dsl::integral(cond.tpe(), 1);
         auto eqT = newVar(Expr::IntrOp(Intr::LogicEq(condT, oneT)).widen());
-        push(Stmt::Cond(eqT,                                                                                               //
-                        {Stmt::Mut(value, handleValueAsScalar(x.getTrueValue())).widen()},                                 //
-                        {Stmt::Mut(value, handleValueAsScalar(x.getFalseValue())).widen()}).widen());
+        push(Stmt::Cond(eqT,                                                               //
+                        {Stmt::Mut(value, handleValueAsScalar(x.getTrueValue())).widen()}, //
+                        {Stmt::Mut(value, handleValueAsScalar(x.getFalseValue())).widen()})
+                 .widen());
         witness(x.getResult(), Expr::Alias(value));
       },
       [&](mlir::arith::CmpIOp x) {
@@ -504,8 +508,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
 
       [&](mlir::arith::CmpFOp x) {
         switch (x.getPredicate()) {
-          case mlir::arith::CmpFPredicate::AlwaysFalse: return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
-          case mlir::arith::CmpFPredicate::AlwaysTrue: return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
+          case mlir::arith::CmpFPredicate::AlwaysFalse:
+            return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
+          case mlir::arith::CmpFPredicate::AlwaysTrue:
+            return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
 
           case mlir::arith::CmpFPredicate::OEQ: return intr2(x, Bind<Intr::LogicEq>());
           case mlir::arith::CmpFPredicate::OGT: return intr2(x, Bind<Intr::LogicGt>());
@@ -565,24 +571,45 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       },
       [&](fir::CoordinateOp c) {
         const auto handleBoxed = [&](const Expr::Any &base) {
-          // if (const auto x = t.get<Type::Struct>(); !x) poison(c.getResult(), fmt::format("FBOX !PTR IMPL {}# {}", show(c), repr(t)));
-          const auto field = handleValueAs<FFieldIndex>(c.getCoor()[0]).field;
+          const auto indices = c.getIndices();
+          if (indices.empty()) {
+            poison(c.getResult(), fmt::format("CoordinateOf has no coordinate (op=`{}`)", show(c)));
+            return;
+          }
+          Named field("invalid", Type::Nothing());
+          const auto first = indices[0];
+          if (auto v = mlir::dyn_cast_if_present<mlir::Value>(first)) {
+            field = handleValueAs<FFieldIndex>(v).field;
+          } else if (auto attr = mlir::dyn_cast_if_present<mlir::IntegerAttr>(first)) {
+            const auto idx = static_cast<size_t>(attr.getInt());
+            const auto baseTy = handleType(c.getBaseType());
+            const auto resolveFieldByIdx = [&](const Type::Any &t) -> std::optional<Named> {
+              if (auto s = t.get<Type::Struct>())
+                if (auto def = defs ^ get_maybe(*s); def && idx < def->members.size()) return def->members[idx];
+              return std::nullopt;
+            };
+            // The base type can be the record itself or a fir.ref/fir.box wrapping it.
+            const auto resolved =         //
+                resolveFieldByIdx(baseTy) //
+                ^ or_else([&]() { return baseTy.get<Type::Ptr>() ^ flat_map([&](auto &p) { return resolveFieldByIdx(p.comp); }); });
+            field = resolved ^
+                    fold([](auto &n) { return n; }, [&]() { return Named(fmt::format("invalid_static_field_{}", idx), Type::Nothing()); });
+          }
           const auto select = selectAny(base, field);
-          const auto expr =
-              field.tpe.get<Type::Ptr>()                                               //
-              ^ flat_map([&](auto &p) { return p.comp.template get<Type::Struct>(); }) //
-              ^ or_else([&]() { return field.tpe.get<Type::Struct>(); })               //
-              ^ flat_map([&](auto &s) { return boxTypes ^ get_maybe(s); })             //
-              ^ map([&](auto &m) { // we're pointing to a Ptr|FBox field, retain boxed semantic
-                  return m ^ fold_total([&](const FBoxedMirror &bm) -> FExpr { return FBoxed(select, bm); },    //
-                                        [&](const FBoxedNoneMirror &) -> FExpr { return FBoxedNone{select}; }); //
-                })                                                                                              //
-              ^ fold([&]() -> FExpr { // pointing to scalar, like fir.alloca, use FVar semantic
-                  if (auto a = select.template get<Expr::Alias>()) {
-                    if (auto s = a->ref.template get<Term::Select>()) return FVar{*s};
-                  }
-                  return Expr::Any(Expr::Alias(Term::Poison(select.tpe())));
-                });
+          const auto expr = field.tpe.get<Type::Ptr>()                                               //
+                            ^ flat_map([&](auto &p) { return p.comp.template get<Type::Struct>(); }) //
+                            ^ or_else([&]() { return field.tpe.get<Type::Struct>(); })               //
+                            ^ flat_map([&](auto &s) { return boxTypes ^ get_maybe(s); })             //
+                            ^ map([&](auto &m) { // we're pointing to a Ptr|FBox field, retain boxed semantic
+                                return m ^ fold_total([&](const FBoxedMirror &bm) -> FExpr { return FBoxed(select, bm); },    //
+                                                      [&](const FBoxedNoneMirror &) -> FExpr { return FBoxedNone{select}; }); //
+                              })                                                                                              //
+                            ^ fold([&]() -> FExpr { // pointing to scalar, like fir.alloca, use FVar semantic
+                                if (auto a = select.template get<Expr::Alias>()) {
+                                  if (auto s = a->ref.template get<Term::Select>()) return FVar{*s};
+                                }
+                                return Expr::Any(Expr::Alias(Term::Poison(select.tpe())));
+                              });
 
           witness(c.getResult(), expr);
         };
@@ -593,6 +620,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           *ref ^ foreach_total([&](const Expr::Any &e) { handleBoxed(e); }, [&](const FBoxed &e) { handleBoxed(e.addr()); });
         } else poison0(fmt::format("CoordinateOf ref value not an Expr|FBoxed, was {}", show(c)));
       },
+      [&](fir::DeclareOp d) { witness(d.getResult(), handleValue(d.getMemref())); },
       [&](fir::ConvertOp c) {
         const auto as = handleType(c.getType());
         if (const auto from = handleValue(c.getOperand()); from ^ holds_any<FVar, FBoxed, FBoxedNone>()) {
@@ -602,17 +630,18 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                                  [&](const FVarMirror &) { witness(c.getResult(), from); });
           } else {
             from ^ foreach_partial(
-                [&](const FVar &e) {
-                  // Expr::Cast now requires Term::Any.
-                  witness(c.getResult(), Expr::Cast(e.value.widen(), as).widen());
-                },
-                [&](const FBoxed &e) {
-                  auto base = newVar(index0(e.addr()));
-                  witness(c.getResult(), Expr::Cast(base, as).widen());
-                },
-                [&](const FBoxedNone &e) {
-                  poison(c.getResult(), fmt::format("Cast source is an FBoxNone ({}) but output type is not an FType {}", fRepr(e), repr(as)));
-                });
+                       [&](const FVar &e) {
+                         // Expr::Cast now requires Term::Any.
+                         witness(c.getResult(), Expr::Cast(e.value.widen(), as).widen());
+                       },
+                       [&](const FBoxed &e) {
+                         auto base = newVar(index0(e.addr()));
+                         witness(c.getResult(), Expr::Cast(base, as).widen());
+                       },
+                       [&](const FBoxedNone &e) {
+                         poison(c.getResult(),
+                                fmt::format("Cast source is an FBoxNone ({}) but output type is not an FType {}", fRepr(e), repr(as)));
+                       });
           }
         } else {
           if (const auto tpe = fTypeOf(c.getType())) {
@@ -668,30 +697,123 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             if (!lhs) return poison0(fmt::format("Unknown LHS {} in call to {}", show(args[0]), name));
             if (!rhs) return poison0(fmt::format("Unknown RHS {} in call to {}", show(args[1]), name));
 
-            const auto rhs0 = *rhs ^ fold_total(
-                                         [&](const Expr::Any &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
-                                         [&](const FVar &x) -> Expr::Any { return Expr::Alias(x.value).widen(); },
-                                         [&](const FBoxed &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
-                                         [&](const FBoxedNone &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); });
+            const auto rhs0 =
+                *rhs ^ fold_total([&](const Expr::Any &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
+                                  [&](const FVar &x) -> Expr::Any { return Expr::Alias(x.value).widen(); },
+                                  [&](const FBoxed &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); },
+                                  [&](const FBoxedNone &x) -> Expr::Any { return Expr::Alias(Term::Poison(rhsTye)).widen(); });
 
             *lhs ^ foreach_total(
                        [&](const Expr::Any &x) {
                          // Stmt::Mut needs Term::Select lhs.
                          push(Stmt::Mut(asSelectF(x), rhs0));
-                       },                                                                  //
-                       [&](const FVar &x) { push(Stmt::Mut(x.value, rhs0)); },             //
-                       [&](const FBoxed &x) { push(update0(x.addr(), rhs0)); },            //
+                       },                                                               //
+                       [&](const FVar &x) { push(Stmt::Mut(x.value, rhs0)); },          //
+                       [&](const FBoxed &x) { push(update0(x.addr(), newVar(rhs0))); }, //
                        [&](const FBoxedNone &x) { poison0("IMPL"); });
           } else poison0(fmt::format("Unimplemented intrinsic in {}", show(a)));
         } else poison0(fmt::format("Unknown callee in {}", show(a)));
       },
 
       [&](fir::ArrayCoorOp c) {
-        // FIXME re-port ArrayCoor lowering to ANF form. The original implementation built a chain of
-        // Intr::{Sub,Add,Mul} over Expr::Any operands; the new schema requires Term::Any args, so the
-        // entire offset/stride accumulator needs to thread temp Vars. Stubbed out so the rest of the
-        // plugin links; any kernel hitting this path will surface as a poison FArrayCoord at runtime.
-        poison(c, "FIXME: ArrayCoorOp not yet ported to new AST schema");
+        // XXX see `XArrayCoorOpConversion` / `ArrayCoorConversion` in flang. Invariants:
+        //   indices.size() == rank
+        //   shape  empty || shape.size()  == rank
+        //   shift  empty || shift.size()  == rank
+        //   slice  empty || slice has 3*rank entries (lb, ub, stride)
+        const auto seqTy = fir::unwrapUntilSeqType(c.getMemref().getType());
+        if (!seqTy) return poison(c, fmt::format("Memref {} type does not contain a sequence type", show(c.getMemref().getType())));
+        auto maybeRef = handleValue(c.getMemref());
+        const auto ref = maybeRef ^ narrow<FBoxed, FVar, Expr::Any>();
+        if (!ref) return poison(c, fmt::format("Memref is not a FBoxed|Expr|FVar (was {})", fRepr(maybeRef)));
+        if (seqTy.hasUnknownShape()) return poison(c, "Unknown shape not yet implemented");
+
+        const auto i64 = Type::IntS64();
+        const auto asTerm = [&](const Expr::Any &e) { return Term::Any(newVar(e).widen()); };
+        const auto onesT = [&](size_t n) {
+          std::vector<Term::Any> out(n, Term::IntS64Const(1).widen());
+          return out;
+        };
+        const size_t ranks = seqTy.getDimension();
+
+        std::vector<Term::Any> actualShape;
+        if (seqTy.hasDynamicExtents()) {
+          const auto boxed = *ref ^ get_maybe<FBoxed>();
+          if (!boxed) return poison(c, fmt::format("array {} has dynamic extent but is not boxed", show(c.getMemref())));
+          for (size_t rank = 0; rank < ranks; ++rank)
+            actualShape.emplace_back(asTerm(selectAny(Expr::Alias(newVar(boxed->dimAt(rank))).widen(), FDimM.extent)));
+        } else {
+          for (auto extent : seqTy.getShape())
+            actualShape.emplace_back(Term::IntS64Const(extent).widen());
+        }
+
+        std::vector<Term::Any> indicesT;
+        for (auto v : asView(c.getIndices()))
+          indicesT.emplace_back(asTerm(handleValueAs(v)));
+
+        std::vector<Term::Any> shapeT, shiftT;
+        if (auto sh = c.getShape()) {
+          if (auto val = handleValue(sh) ^ narrow<FShift, FShape, FShapeShift>()) {
+            *val ^ foreach_total( //
+                       [&](const FShift &x) {
+                         shapeT = actualShape;
+                         for (auto &b : x.lowerBounds)
+                           shiftT.emplace_back(asTerm(b));
+                       },
+                       [&](const FShape &x) {
+                         for (auto &e : x.extents)
+                           shapeT.emplace_back(asTerm(e));
+                         shiftT = onesT(ranks);
+                       },
+                       [&](const FShapeShift &x) {
+                         for (auto &e : x.extents)
+                           shapeT.emplace_back(asTerm(e));
+                         for (auto &b : x.lowerBounds)
+                           shiftT.emplace_back(asTerm(b));
+                       });
+          }
+        }
+        if (shapeT.empty()) shapeT = actualShape;
+        if (shiftT.empty()) shiftT = onesT(ranks);
+
+        std::vector<Term::Any> sliceLB, sliceStep;
+        if (auto slice = c.getSlice()) {
+          const auto val = handleValueAs<FSlice>(slice);
+          for (auto &b : val.lowerBounds)
+            sliceLB.emplace_back(asTerm(b));
+          for (auto &s : val.strides)
+            sliceStep.emplace_back(asTerm(s));
+        }
+        if (sliceLB.empty()) sliceLB = shiftT;
+        if (sliceStep.empty()) sliceStep = onesT(ranks);
+
+        if (indicesT.size() != ranks || shapeT.size() != ranks || shiftT.size() != ranks || sliceLB.size() != ranks ||
+            sliceStep.size() != ranks) {
+          return poison(c, fmt::format("rank mismatch in ArrayCoor (rank={}, sizes: idx={} shape={} shift={} sliceLB={} sliceStep={})",
+                                       ranks, indicesT.size(), shapeT.size(), shiftT.size(), sliceLB.size(), sliceStep.size()));
+        }
+
+        // offset = sum_i (((idx[i] - shift[i]) * sliceStep[i] + (sliceLB[i] - shift[i])) * stride_i)
+        // stride_i = product_{j<i} shape[j]
+        Term::Any offset = Term::IntS64Const(0).widen();
+        Term::Any stride = Term::IntS64Const(1).widen();
+        for (size_t i = 0; i < ranks; ++i) {
+          const auto idxMinusShift = Term::Any(newVar(Expr::IntrOp(Intr::Sub(indicesT[i], shiftT[i], i64)).widen()).widen());
+          const auto scaled = Term::Any(newVar(Expr::IntrOp(Intr::Mul(idxMinusShift, sliceStep[i], i64)).widen()).widen());
+          const auto sliceShift = Term::Any(newVar(Expr::IntrOp(Intr::Sub(sliceLB[i], shiftT[i], i64)).widen()).widen());
+          const auto diff = Term::Any(newVar(Expr::IntrOp(Intr::Add(scaled, sliceShift, i64)).widen()).widen());
+          const auto contribution = Term::Any(newVar(Expr::IntrOp(Intr::Mul(diff, stride, i64)).widen()).widen());
+          offset = Term::Any(newVar(Expr::IntrOp(Intr::Add(offset, contribution, i64)).widen()).widen());
+          stride = Term::Any(newVar(Expr::IntrOp(Intr::Mul(stride, shapeT[i], i64)).widen()).widen());
+        }
+
+        const auto offsetExpr = Expr::Alias(offset).widen();
+        *ref ^ foreach_total( //
+                   [&](const FBoxed &e) { witness(c.getResult(), FArrayCoord{e.addr(), offsetExpr, e.comp()}); },
+                   [&](const FVar &e) {
+                     witness(c.getResult(), FArrayCoord{Expr::Alias(e.value).widen(), offsetExpr, handleType(seqTy.getEleTy())});
+                   },
+                   [&](const Expr::Any &e) { witness(c.getResult(), FArrayCoord{e, offsetExpr, handleType(seqTy.getEleTy())}); });
       },
 
       [&](fir::AllocaOp a) {
@@ -707,28 +829,26 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](fir::LoadOp l) {
         const auto expr = handleValue(l.getMemref());
         if (const auto ref = expr ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
-          *ref ^ foreach_total(
-                     [&](const Expr::Any &e) { witness(l.getResult(), index0(e)); },                            //
-                     [&](const FVar &e) { witness(l.getResult(), Expr::Alias(e.value).widen()); },              //
-                     [&](const FArrayCoord &e) {
-                       auto base = newVar(e.array);
-                       auto off = newVar(e.offset);
-                       witness(l.getResult(), Expr::Index(base, off, e.comp).widen());
-                     },                                                                                         //
-                     [&](const FBoxed &e) { witness(l.getResult(), e); });                                      //
+          *ref ^ foreach_total([&](const Expr::Any &e) { witness(l.getResult(), index0(e)); },               //
+                               [&](const FVar &e) { witness(l.getResult(), Expr::Alias(e.value).widen()); }, //
+                               [&](const FArrayCoord &e) {
+                                 auto base = newVar(e.array);
+                                 auto off = newVar(e.offset);
+                                 witness(l.getResult(), Expr::Index(base, off, e.comp).widen());
+                               },                                                    //
+                               [&](const FBoxed &e) { witness(l.getResult(), e); }); //
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
       },
       [&](fir::StoreOp s) {
         const auto rhs = handleValueAs(s.getValue());
         if (const auto lhs = handleValue(s.getMemref()) ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
-          *lhs ^ foreach_total(
-                     [&](const Expr::Any &e) { push(update0(e, rhs)); },                                  //
-                     [&](const FVar &a) { push(Stmt::Mut(a.value, rhs).widen()); },                       //
-                     [&](const FArrayCoord &e) {
-                       auto rhsT = newVar(rhs);
-                       push(Stmt::Update(asSelectF(e.array), newVar(e.offset), rhsT).widen());
-                     },                                                                                   //
-                     [&](const FBoxed &e) { push(update0(e.addr(), rhs)); });
+          *lhs ^ foreach_total([&](const Expr::Any &e) { push(update0(e, newVar(rhs))); },    //
+                               [&](const FVar &a) { push(Stmt::Mut(a.value, rhs).widen()); }, //
+                               [&](const FArrayCoord &e) {
+                                 auto rhsT = newVar(rhs);
+                                 push(Stmt::Update(asSelectF(e.array), newVar(e.offset), rhsT).widen());
+                               }, //
+                               [&](const FBoxed &e) { push(update0(e.addr(), newVar(rhs))); });
         } else poison0(fmt::format("StoreOp LHS value not an Expr|FBoxed|FArrayCoord, was {}", show(s.getValue())));
       },
       [&](const fir::ResultOp r) {
@@ -873,8 +993,8 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                               if (auto f = s.template get<PathStep::Field>()) leaf = f->name;
                             }
                             const Named leafNamed(leaf, p.second.tpe);
-                            return DoConcurrentRegion::Capture{.named = leafNamed,    //
-                                                               .value = p.first,      //
+                            return DoConcurrentRegion::Capture{.named = leafNamed, //
+                                                               .value = p.first,   //
                                                                .locality = DoConcurrentRegion::Locality::Default};
                           }) //
                         | to_vector();
@@ -886,8 +1006,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                               std::vector<Type::Struct>{});
 
   const StructDef reductionsDef(ReductionType.name, {}, //
-                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }),
-                                std::vector<Type::Struct>{});
+                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }), std::vector<Type::Struct>{});
 
   r.syntheticDefs.emplace(preludeDef);
   r.syntheticDefs.emplace(capturesDef);
@@ -896,9 +1015,8 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   const auto svrs = exprWithReductions ^ map([&](auto &, auto &rd) {
                       // SingleVarReduction.init is Term::Any. reductionInit returns Expr::Any (Alias-wrapped Term).
                       auto initExpr = reductionInit(rd.kind, rd.named.tpe);
-                      Term::Any initTerm = initExpr.template get<Expr::Alias>()
-                                               ? initExpr.template get<Expr::Alias>()->ref
-                                               : Term::Any(Term::Poison(rd.named.tpe).widen());
+                      Term::Any initTerm = initExpr.template get<Expr::Alias>() ? initExpr.template get<Expr::Alias>()->ref
+                                                                                : Term::Any(Term::Poison(rd.named.tpe).widen());
                       return SingleVarReduction{.target = rd.named,                                   //
                                                 .init = initTerm,                                     //
                                                 .partialArray = Select({Reduction}, rd.partialArray), //

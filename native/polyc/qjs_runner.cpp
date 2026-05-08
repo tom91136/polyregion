@@ -1,5 +1,6 @@
 #include "qjs_runner.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 
@@ -53,9 +54,37 @@ String formatException(JSContext *ctx) {
 
 } // namespace
 
+namespace {
+JSValue consolePrint(JSContext *ctx, JSValueConst /*this_val*/, int argc, JSValueConst *argv, FILE *stream) {
+  for (int i = 0; i < argc; ++i) {
+    if (i != 0) std::fputc(' ', stream);
+    if (const char *s = JS_ToCString(ctx, argv[i])) {
+      std::fputs(s, stream);
+      JS_FreeCString(ctx, s);
+    }
+  }
+  std::fputc('\n', stream);
+  return JS_UNDEFINED;
+}
+JSValue consoleLog(JSContext *ctx, JSValueConst t, int argc, JSValueConst *argv) { return consolePrint(ctx, t, argc, argv, stderr); }
+JSValue consoleErr(JSContext *ctx, JSValueConst t, int argc, JSValueConst *argv) { return consolePrint(ctx, t, argc, argv, stderr); }
+} // namespace
+
 JsPassRunner::JsPassRunner() {
   rt = JS_NewRuntime();
   ctx = JS_NewContext(rt);
+  // Scala.js `println` lowers to `console.log`; without a binding QuickJS sees an undefined
+  // global and fails silently. Wire log/error/warn/info/debug to stderr so pass-side tree
+  // logs surface alongside polyc's own diagnostics.
+  JSValue global = JS_GetGlobalObject(ctx);
+  JSValue console = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, console, "log", JS_NewCFunction(ctx, consoleLog, "log", 1));
+  JS_SetPropertyStr(ctx, console, "error", JS_NewCFunction(ctx, consoleErr, "error", 1));
+  JS_SetPropertyStr(ctx, console, "warn", JS_NewCFunction(ctx, consoleErr, "warn", 1));
+  JS_SetPropertyStr(ctx, console, "info", JS_NewCFunction(ctx, consoleLog, "info", 1));
+  JS_SetPropertyStr(ctx, console, "debug", JS_NewCFunction(ctx, consoleLog, "debug", 1));
+  JS_SetPropertyStr(ctx, global, "console", console);
+  JS_FreeValue(ctx, global);
 }
 
 JsPassRunner::~JsPassRunner() {

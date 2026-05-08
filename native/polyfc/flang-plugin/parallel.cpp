@@ -57,18 +57,18 @@ Stmts parallel_ops::SingleVarReduction::applyPartial(const Term::Any &lhs, const
 Stmts parallel_ops::SingleVarReduction::applyPartial(const Term::Any &idx) const { return applyPartial(partialArray, idx); }
 
 Function parallel_ops::forEach(const std::string &fnName, const Named &capture, const OpParams &params) {
-  return params ^
+  return params ^ //
          fold_total(
              [&](const CPUParams &p) {
                Stmts body;
-               const auto begin = letBind(body, "begin", Expr::Index(p.begins, "#group"_(Long), Long));
-               const auto end = letBind(body, "end", Expr::Index(p.ends, "#group"_(Long), Long));
+               const auto begin = letBind(body, "begin", Expr::Index(p.begins, "__tid"_(Long), Long));
+               const auto end = letBind(body, "end", Expr::Index(p.ends, "__tid"_(Long), Long));
                body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1),
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
                body.emplace_back(ret());
                return Function(Sym({fnName}), {}, std::optional<Arg>{},
-                               std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {},
-                               Unit, body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+                               std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit, body,
+                               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
              },
              [&](const GPUParams &p) {
                Stmts body;
@@ -91,16 +91,17 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
          fold_total(
              [&](const CPUParams &p) {
                Stmts body;
-               for (auto &r : reductions) body.emplace_back(r.partialVar());
-               const auto begin = letBind(body, "begin", Expr::Index(p.begins, "#group"_(Long), Long));
-               const auto end = letBind(body, "end", Expr::Index(p.ends, "#group"_(Long), Long));
+               for (auto &r : reductions)
+                 body.emplace_back(r.partialVar());
+               const auto begin = letBind(body, "begin", Expr::Index(p.begins, "__tid"_(Long), Long));
+               const auto end = letBind(body, "end", Expr::Index(p.ends, "__tid"_(Long), Long));
                body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1),
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
-               for (auto &r : reductions) body.emplace_back(r.drainPartial("#group"_(Long)));
+               for (auto &r : reductions)
+                 body.emplace_back(r.drainPartial("__tid"_(Long)));
                body.emplace_back(ret());
-               return Function(Sym({fnName}), {}, std::optional<Arg>{},
-                               std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(unmanaged, {})}, {}, {}, Unit, body,
-                               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+               return Function(Sym({fnName}), {}, std::optional<Arg>{}, std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {})}, {}, {},
+                               Unit, body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
              },
              [&](const GPUParams &p) {
                // GPU tree reduction: per-thread accumulate into target, drain to local memory, tree-reduce, drain group result.
@@ -113,7 +114,8 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                const auto gs = letBind(body, "gs", Expr::Cast(gsU, Long));
                const auto gidU = letBind(body, "gidU", call(Spec::GpuGlobalIdx(0_(UInt))));
                const auto gid = letBind(body, "gid", Expr::Cast(gidU, Long));
-               for (auto &r : reductions) body.emplace_back(r.partialVar());
+               for (auto &r : reductions)
+                 body.emplace_back(r.partialVar());
                body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs,
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
 
@@ -141,11 +143,17 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                // localTgt[li] = target
                for (size_t i = 0; i < reductions.size(); ++i) {
                  const auto &r = reductions[i];
-                 body.emplace_back(Stmt::Update(Term::Select(localTargets[i], {}, localTargets[i].tpe), li,
-                                                Term::Select(r.target, {}, r.target.tpe)));
+                 body.emplace_back(
+                     Stmt::Update(Term::Select(localTargets[i], {}, localTargets[i].tpe), li, Term::Select(r.target, {}, r.target.tpe)));
                }
 
-               // Tree reduction: var #off = ls / 2; while (#off > 0) { barrier; if (li < #off) localTgt[li] = op(localTgt[li], localTgt[li+#off]); #off /= 2 }
+               // Tree reduction:
+               //  var #off = ls / 2;
+               //  while (#off > 0) {
+               //    barrier;
+               //    if (li < #off) localTgt[li] = op(localTgt[li], localTgt[li+#off]);
+               //    #off /= 2;
+               //  }
                const Named offVar("#off", Long);
                body.emplace_back(Stmt::Var(offVar, Expr::IntrOp(Intr::Div(ls, Term::IntS64Const(2), Long)), /*isMutable*/ true));
 
@@ -153,8 +161,7 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                whileBody.emplace_back(Stmt::Var(Named(fresh("barrier"), Unit), call(Spec::GpuBarrierLocal()), /*isMutable*/ false));
 
                Stmts ifBody;
-               const auto liPlusOff =
-                   letBind(ifBody, "liOff", Expr::IntrOp(Intr::Add(li, Term::Select(offVar, {}, Long), Long)));
+               const auto liPlusOff = letBind(ifBody, "liOff", Expr::IntrOp(Intr::Add(li, Term::Select(offVar, {}, Long), Long)));
                for (size_t i = 0; i < reductions.size(); ++i) {
                  const auto &r = reductions[i];
                  const auto localTgtSel = Term::Select(localTargets[i], {}, localTargets[i].tpe);
@@ -168,7 +175,8 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                whileBody.emplace_back(Stmt::Mut(Term::Select(offVar, {}, Long),
                                                 Expr::IntrOp(Intr::Div(Term::Select(offVar, {}, Long), Term::IntS64Const(2), Long))));
 
-               const auto whileCond = letBind(body, "whileCond", Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0))));
+               const auto whileCond =
+                   letBind(body, "whileCond", Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0))));
                body.emplace_back(Stmt::While(whileCond, whileBody));
 
                // if (li == 0) { partialArray[groupIdx] = localTgt[li] }

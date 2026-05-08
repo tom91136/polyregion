@@ -176,8 +176,8 @@ ValPtr CodeGen::mkSelectPtr(const Term::Select &select) {
     const auto info = structTypeOf(tpe);
     const auto idxOpt = info.memberIndices ^ get_maybe(fieldStep->name);
     if (!idxOpt) {
-      auto pool = info.memberIndices |
-                  mk_string("\n", "\n", "\n", [](auto &k, auto &v) { return " -> `" + k + "` = " + std::to_string(v) + ")"; });
+      auto pool =
+          info.memberIndices | mk_string("\n", "\n", "\n", [](auto &k, auto &v) { return " -> `" + k + "` = " + std::to_string(v) + ")"; });
       throw BackendException("Illegal select path with unknown struct member index of name `" + fieldStep->name + "`, pool=" + pool +
                              fail());
     }
@@ -187,8 +187,7 @@ ValPtr CodeGen::mkSelectPtr(const Term::Select &select) {
                                  {llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
                                  qualified(select) + "_select_ptr");
     } else {
-      root = B.CreateInBoundsGEP(info.tpe, root,
-                                 {llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
+      root = B.CreateInBoundsGEP(info.tpe, root, {llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
                                  qualified(select) + "_select_ptr");
     }
     // Advance the type cursor to the member's declared type (looked up via StructDef).
@@ -491,9 +490,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               const auto arrLlvmTy = resolveType(*innerArr);
               const auto compLlvmTy = resolveType(innerArr->comp);
               const auto basePtr = mkTermVal(*lhs); // Ptr-typed Select loads the pointer value
-              const auto ptr = B.CreateInBoundsGEP(arrLlvmTy, basePtr,
-                                                  {ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)},
-                                                  key + "_idx_ptr");
+              const auto ptr =
+                  B.CreateInBoundsGEP(arrLlvmTy, basePtr, {ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}, key + "_idx_ptr");
               if (innerArr->comp.is<Type::Bool1>()) {
                 return B.CreateICmpNE(C.load(B, ptr, compLlvmTy), ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0, true));
               }
@@ -509,8 +507,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             }
           } else if (const auto arrTpe = lhs->tpe.template get<Type::Arr>()) {
             const auto ty = resolveType(*arrTpe);
-            const auto ptr =
-                B.CreateInBoundsGEP(ty, mkTermVal(*lhs), {ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}, key + "_idx_ptr");
+            const auto ptr = B.CreateInBoundsGEP(ty, mkTermVal(*lhs), {ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}, key + "_idx_ptr");
             return C.load(B, ptr, resolveType(arrTpe->comp));
           } else {
             throw BackendException("Semantic error: array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
@@ -525,8 +522,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             // deref to the [N x T] aggregate then take a single element address via [0, idx] GEP.
             if (auto innerArr = arrTpe->comp.get<Type::Arr>()) {
               auto arrLlvmTy = resolveType(*innerArr);
-              return B.CreateInBoundsGEP(arrLlvmTy, mkTermVal(*lhs),
-                                         {llvm::ConstantInt::get(C.i32Ty(), 0), offset},
+              return B.CreateInBoundsGEP(arrLlvmTy, mkTermVal(*lhs), {llvm::ConstantInt::get(C.i32Ty(), 0), offset},
                                          key + "_ref_to_ptr_arr");
             }
             auto ty = arrTpe->comp.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->comp);
@@ -536,8 +532,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             // the type passed to GEP must be the array type itself, not the element type.
             auto offset = x.idx ? mkTermVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C.actual), 0, true);
             auto arrLlvmTy = resolveType(*arrTpe);
-            return B.CreateInBoundsGEP(arrLlvmTy, mkTermVal(*lhs),
-                                       {llvm::ConstantInt::get(C.i32Ty(), 0), offset},
+            return B.CreateInBoundsGEP(arrLlvmTy, mkTermVal(*lhs), {llvm::ConstantInt::get(C.i32Ty(), 0), offset},
                                        key + "_ref_to_" + llvm_tostring(arrLlvmTy));
           } else {
             if (x.idx) throw BackendException("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
@@ -629,18 +624,18 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
                                : resolveType(x.value.tpe());
         const auto gepTy = componentIsSizedArray ? resolveType(lhs.tpe) : valTy;
         if (x.value.tpe().template is<Type::Bool1>() || x.value.tpe().template is<Type::Unit0>()) {
-          auto ptr = B.CreateInBoundsGEP(gepTy, dest,
-                                         componentIsSizedArray
-                                             ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}
-                                             : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
-                                         qualified(lhs) + "_update_ptr");
+          auto ptr =
+              B.CreateInBoundsGEP(gepTy, dest,
+                                  componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}
+                                                        : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
+                                  qualified(lhs) + "_update_ptr");
           const auto _ = C.store(B, B.CreateIntCast(mkTermVal(x.value), valTy, true), ptr);
         } else {
-          auto ptr = B.CreateInBoundsGEP(gepTy, dest,
-                                         componentIsSizedArray
-                                             ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}
-                                             : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
-                                         qualified(lhs) + "_update_ptr");
+          auto ptr =
+              B.CreateInBoundsGEP(gepTy, dest,
+                                  componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}
+                                                        : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
+                                  qualified(lhs) + "_update_ptr");
           const auto _ = C.store(B, mkTermVal(x.value), ptr);
         }
         return BlockKind::Normal;
@@ -677,6 +672,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         const auto inductionSelect = Term::Select(x.induction, {}, x.induction.tpe);
         const auto inductionTerm = Term::Any(inductionSelect);
+        auto _alloc = mkStmt(Stmt::Var(x.induction, std::optional<Expr::Any>{}, /*isMutable*/ true), fn, whileCtx);
         auto _ = mkStmt(Stmt::Mut(inductionSelect, Expr::Alias(x.lbIncl)), fn, whileCtx);
         WhileCtx ctx{.exit = loopExit, .test = loopTest};
         B.CreateBr(loopTest);
@@ -690,8 +686,8 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           for (auto &body : x.body)
             kind = mkStmt(body, fn, {ctx});
           if (kind != BlockKind::Terminal) {
-            [[maybe_unused]] auto _0 = mkStmt(
-                Stmt::Mut(inductionSelect, Expr::IntrOp(Intr::Add(inductionTerm, x.step, x.induction.tpe))), fn, {ctx});
+            [[maybe_unused]] auto _0 =
+                mkStmt(Stmt::Mut(inductionSelect, Expr::IntrOp(Intr::Add(inductionTerm, x.step, x.induction.tpe))), fn, {ctx});
             B.CreateBr(loopTest);
           }
         }

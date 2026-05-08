@@ -27,7 +27,7 @@ Type::Struct polyfc::FDimMirror::tpe() { return Type::Struct(Sym({"FDim"}), {});
 StructDef polyfc::FDimMirror::def() const { return StructDef(tpe().name, {}, {lowerBound, extent, stride}, {}); }
 polyfc::FBoxedMirror::FBoxedMirror(const Type::Any &t, size_t ranks)
     : addr("addr", t), //
-      ranks(ranks), dims("dim", Type::Ptr(FDimMirror::tpe(), TypeSpace::Global())),
+      ranks(ranks), dims("dim", Type::Arr(FDimMirror::tpe(), static_cast<int32_t>(ranks), TypeSpace::Global())),
       derivedTypeInfo(t.is<Type::Struct>() ? std::optional{Named("descExtra", FDescExtraMirror::tpe())} : std::nullopt) {}
 
 polyfc::FBoxedMirror::FBoxedMirror() : FBoxedMirror(Type::Nothing(), 0) {}
@@ -35,9 +35,7 @@ Type::Any polyfc::FBoxedMirror::comp() const {
   return addr.tpe.get<Type::Ptr>() ^ fold([&](auto &t) { return t.comp; }, [&] { return Type::Nothing().widen(); });
 }
 
-Type::Struct polyfc::FBoxedMirror::tpe() const {
-  return Type::Struct(Sym({fmt::format("FBoxed<{}, {}>", repr(comp()), ranks)}), {});
-}
+Type::Struct polyfc::FBoxedMirror::tpe() const { return Type::Struct(Sym({fmt::format("FBoxed<{}, {}>", repr(comp()), ranks)}), {}); }
 StructDef polyfc::FBoxedMirror::def() const {
   return StructDef(tpe().name, {},
                    std::vector{addr,        //
@@ -119,8 +117,7 @@ std::string polyfc::fRepr(const FType &t) {
                         [&](const FVarMirror &p) -> std::string { return fmt::format("FVar<{}>", repr(p.comp)); });
 }
 
-std::function<Expr::Any(const Term::Any &, const Term::Any &)> polyfc::reductionOp(const polydco::FReduction::Kind &k,
-                                                                                    const Type::Any &t) {
+std::function<Expr::Any(const Term::Any &, const Term::Any &)> polyfc::reductionOp(const polydco::FReduction::Kind &k, const Type::Any &t) {
   switch (k) {
     case polydco::FReduction::Kind::Add: return [t](auto &l, auto &r) -> Expr::Any { return Expr::IntrOp(Intr::Add(l, r, t)); };
     case polydco::FReduction::Kind::Mul: return [t](auto &l, auto &r) -> Expr::Any { return Expr::IntrOp(Intr::Mul(l, r, t)); };
@@ -153,14 +150,10 @@ Expr::Any polyfc::reductionInit(const polydco::FReduction::Kind &k, const Type::
           case polydco::FReduction::Kind::IAnd: return liftTerm(dsl::numeric(t, [](auto _) { return static_cast<decltype(_)>(~0); }));
           case polydco::FReduction::Kind::IOr: return liftTerm(dsl::numeric(t, [](auto _) { return static_cast<decltype(_)>(0); }));
           case polydco::FReduction::Kind::IEor: return liftTerm(dsl::numeric(t, [](auto _) { return static_cast<decltype(_)>(0); }));
-          case polydco::FReduction::Kind::And:
-            return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(true)) : unsupported();
-          case polydco::FReduction::Kind::Or:
-            return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(false)) : unsupported();
-          case polydco::FReduction::Kind::Eqv:
-            return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(true)) : unsupported();
-          case polydco::FReduction::Kind::Neqv:
-            return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(false)) : unsupported();
+          case polydco::FReduction::Kind::And: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(true)) : unsupported();
+          case polydco::FReduction::Kind::Or: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(false)) : unsupported();
+          case polydco::FReduction::Kind::Eqv: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(true)) : unsupported();
+          case polydco::FReduction::Kind::Neqv: return t.is<Type::Bool1>() ? Expr::Alias(Term::Bool1Const(false)) : unsupported();
           default: return unsupported();
         }
       },

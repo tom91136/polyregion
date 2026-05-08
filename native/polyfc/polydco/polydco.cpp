@@ -233,6 +233,9 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, threadsPerBlock);
   polyrt::currentQueue->enqueueWaitBlocking();
 
+  allocations.syncRemoteToLocal(captures);
+  polyrt::currentQueue->enqueueWaitBlocking();
+
   allocations.disassociate(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 

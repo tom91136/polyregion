@@ -824,6 +824,7 @@ object Compiler {
       List[ProgramPass](
         printPass(IntrinsifyPass),
         printPass(SpecialisationPass),
+        ConstantFoldPass,
         VarReducePass,
         UnitExprElisionPass,
         DeadArgEliminationPass

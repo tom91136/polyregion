@@ -17,7 +17,6 @@ object DeadArgEliminationPass extends ProgramPass {
     val refs = referencedRoots(f)
     f.copy(
       receiver = f.receiver.filter(arg => refs.contains(arg.named)),
-      args = f.args.filter(arg => refs.contains(arg.named)),
       moduleCaptures = f.moduleCaptures.filter(arg => refs.contains(arg.named)),
       termCaptures = f.termCaptures.filter(arg => refs.contains(arg.named))
     )

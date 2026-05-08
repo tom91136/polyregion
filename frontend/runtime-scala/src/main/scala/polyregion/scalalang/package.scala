@@ -258,7 +258,7 @@ object Target {
     type UArch = A; type Arch = cpt.LLVM_AMDGCN.type; val arch = valueOf[Arch]
   }
   case class SPIRV64[A <: SString](uarch: A) extends Target {
-    type UArch = A; type Arch = cpt.LLVM_SPIRV64.type; val arch = valueOf[Arch]
+    type UArch = A; type Arch = cpt.LLVM_SPIRV64_KERNEL.type; val arch = valueOf[Arch]
   }
 
   object X86 {

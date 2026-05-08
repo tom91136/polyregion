@@ -204,8 +204,17 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
 
   //  TODO need to check if object.feature is a strict subset of device feature
 
-  if (!currentDevice->moduleLoaded(moduleName)) //
+  if (!currentDevice->moduleLoaded(moduleName)) {
+    if (auto dumpDir = std::getenv("POLYRT_DUMP_KERNEL")) {
+      static int counter = 0;
+      auto path = std::string(dumpDir) + "/kernel_" + std::to_string(counter++) + ".o";
+      if (FILE *f = std::fopen(path.c_str(), "wb")) {
+        std::fwrite(object.image, 1, object.imageLength, f);
+        std::fclose(f);
+      }
+    }
     currentDevice->loadModule(moduleName, std::string(object.image, object.image + object.imageLength));
+  }
   return true;
 }
 

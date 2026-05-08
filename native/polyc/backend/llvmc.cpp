@@ -167,7 +167,8 @@ static std::string module2Ir(const llvm::Module &m) {
 // See
 // https://github.com/pytorch/pytorch/blob/6d4d9840cd4f18232e201cbcd843ea4f6cb4aabb/torch/csrc/jit/tensorexpr/llvm_codegen.cpp#L2466
 static void optimise(llvm::TargetMachine &TM, llvm::Module &M, const llvm::OptimizationLevel &level) {
-  // Create the analysis managers.
+  if (level == llvm::OptimizationLevel::O0) return;
+
   llvm::LoopAnalysisManager LAM;
   llvm::FunctionAnalysisManager FAM;
   llvm::CGSCCAnalysisManager CGAM;
@@ -253,14 +254,16 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   using TargetMachine = llvm::TargetMachine;
 
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
-    // XXX We *MUST* use the large code model as we will be ingesting the object later with RuntimeDyld
-    // The code model here has nothing to do with the actual object code size, it's about controlling the relocation.
-    // See https://stackoverflow.com/questions/40493448/what-does-the-codemodel-in-clang-llvm-refer-to
+    // XXX We need a code model that supports far relocations for RuntimeDyld (objects can land anywhere
+    // in the address space). Large places functions into `.ltext` (a large-code section), which
+    // RuntimeDyld's SectionMemoryManager doesn't currently recognise as a code section -- the
+    // function loads but the page is left non-executable, so calling it segfaults at the entry.
+    // Medium keeps functions in `.text` while still allowing large data references.
     auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
         info.triple,                                                         //
         info.cpu.uArch,                                                      //
         info.cpu.features,                                                   //
-        options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, level));
+        options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Medium, level));
     return std::unique_ptr<TargetMachine>(tm);
   };
 

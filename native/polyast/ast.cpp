@@ -14,9 +14,12 @@ using namespace aspartame;
 string polyast::qualified(const Term::Select &select) {
   std::string s = select.root.symbol;
   for (auto &step : select.steps) {
-    step.match_total(                                                            //
-        [&](const PathStep::Field &f) { s += "."; s += f.name; },                //
-        [&](const PathStep::Deref &) { s += "->"; }                              //
+    step.match_total( //
+        [&](const PathStep::Field &f) {
+          s += ".";
+          s += f.name;
+        },                                          //
+        [&](const PathStep::Deref &) { s += "->"; } //
     );
   }
   return s;
@@ -32,7 +35,8 @@ Term::Select polyast::selectField(const Term::Select &base, const Named &field) 
 
 Type::Struct polyast::typeOf(const StructDef &def) {
   Vector<Type::Any> args;
-  for (auto &v : def.tpeVars) args.push_back(Type::Var(v));
+  for (auto &v : def.tpeVars)
+    args.push_back(Type::Var(v));
   return Type::Struct(def.name, args);
 }
 
@@ -67,9 +71,9 @@ string polyast::repr(const CompileResult &compilation) {
     size_t ln = 0;
     while (std::getline(ss, l, '\n')) {
       ln++;
-      os << "    " << std::setw(3) << ln << "|" << l << '\n';
+      os << "    " << std::setw(3) << ln << "│" << l << '\n';
     }
-    os << "       +---\n";
+    os << "       ╰───\n";
   }
   os << "}";
   return os.str();
@@ -107,8 +111,7 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
                        [&](const Type::Exec &) -> Opt<size_t> { return {}; });
 }
 
-Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t,
-                                                                     const Map<Type::Struct, StructLayout> &table) {
+Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table) {
   if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) ^ map([](auto &sl) { return sl.sizeInBytes; })};
   if (const auto p = t.get<Type::Ptr>()) {
     auto [indirection, componentSize] = countIndirectionsAndComponentSize(p->comp, table);
@@ -159,30 +162,30 @@ Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
     throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value " + std::to_string(v));
   };
-  return tpe.match_total(                                                       //
-      [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(x); },    //
-      [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(x); },    //
-      [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(x); },    //
+  return tpe.match_total(                                                        //
+      [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(x); }, //
+      [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(x); }, //
+      [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(x); }, //
 
-      [&](const Type::IntU8 &) -> Term::Any { return Term::IntU8Const(x); },        //
-      [&](const Type::IntU16 &) -> Term::Any { return Term::IntU16Const(x); },      //
-      [&](const Type::IntU32 &) -> Term::Any { return Term::IntU32Const(x); },      //
-      [&](const Type::IntU64 &) -> Term::Any { return Term::IntU64Const(x); },      //
+      [&](const Type::IntU8 &) -> Term::Any { return Term::IntU8Const(x); },   //
+      [&](const Type::IntU16 &) -> Term::Any { return Term::IntU16Const(x); }, //
+      [&](const Type::IntU32 &) -> Term::Any { return Term::IntU32Const(x); }, //
+      [&](const Type::IntU64 &) -> Term::Any { return Term::IntU64Const(x); }, //
 
-      [&](const Type::IntS8 &) -> Term::Any { return Term::IntS8Const(x); },        //
-      [&](const Type::IntS16 &) -> Term::Any { return Term::IntS16Const(x); },      //
-      [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(x); },      //
-      [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(x); },      //
+      [&](const Type::IntS8 &) -> Term::Any { return Term::IntS8Const(x); },   //
+      [&](const Type::IntS16 &) -> Term::Any { return Term::IntS16Const(x); }, //
+      [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(x); }, //
+      [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(x); }, //
 
-      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); },   //
-      [&](const Type::Unit0 &t) -> Term::Any { return unsupported(t, x); },     //
-      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(x); },        //
+      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); }, //
+      [&](const Type::Unit0 &t) -> Term::Any { return unsupported(t, x); },   //
+      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(x); },  //
 
-      [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },    //
-      [&](const Type::Ptr &t) -> Term::Any { return unsupported(t, x); },       //
-      [&](const Type::Arr &t) -> Term::Any { return unsupported(t, x); },       //
-      [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },       //
-      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }       //
+      [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); }, //
+      [&](const Type::Ptr &t) -> Term::Any { return unsupported(t, x); },    //
+      [&](const Type::Arr &t) -> Term::Any { return unsupported(t, x); },    //
+      [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },    //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }    //
   );
 }
 
@@ -204,23 +207,23 @@ std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, s
   return [=](auto &&tpe) { return NamedBuilder{Named(name_, tpe)}; };
 }
 
-Stmt::Any dsl::let(const string &name, const Type::Any &tpe) {
-  return Stmt::Var(Named(name, tpe), {}, /*isMutable*/ false);
-}
+Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Stmt::Var(Named(name, tpe), {}, /*isMutable*/ false); }
 dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name, /*isMutable*/ false}; }
 dsl::AssignmentBuilder dsl::var(const string &name) { return AssignmentBuilder{name, /*isMutable*/ true}; }
 
 Term::Select dsl::Select(const Vector<Named> &init, const Named &last) {
   if (init.empty()) return Term::Select(last, {}, last.tpe);
   Vector<PathStep::Any> steps;
-  for (size_t i = 1; i < init.size(); ++i) steps.push_back(PathStep::Field(init[i].symbol));
+  for (size_t i = 1; i < init.size(); ++i)
+    steps.push_back(PathStep::Field(init[i].symbol));
   steps.push_back(PathStep::Field(last.symbol));
   return Term::Select(init.front(), steps, last.tpe);
 }
 
 Term::Select dsl::selectFromBuilders(const Vector<NamedBuilder> &init, const Named &last) {
   Vector<Named> namedInit;
-  for (auto &nb : init) namedInit.push_back(nb.named);
+  for (auto &nb : init)
+    namedInit.push_back(nb.named);
   return dsl::Select(namedInit, last);
 }
 
@@ -229,11 +232,10 @@ Expr::MathOp dsl::call(const Math::Any &intr) { return Expr::MathOp(intr); }
 Expr::SpecOp dsl::call(const Spec::Any &intr) { return Expr::SpecOp(intr); }
 
 std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, const Vector<Arg> &args, const Type::Any &rtn,
-                                                         FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode,
-                                                         bool isEntry) {
+                                                         FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode, bool isEntry) {
   return [=](auto &&stmts) {
-    return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, visibility,
-                    fpMode, isEntry);
+    return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, visibility, fpMode,
+                    isEntry);
   };
 }
 
@@ -271,17 +273,9 @@ dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
   throw std::logic_error("Cannot index a reference to non-array type " + to_string(named));
 }
 
-dsl::Mut dsl::NamedBuilder::operator=(const Expr::Any &that) const {
-  return Stmt::Mut(Term::Select(named, {}, named.tpe), that);
-}
+dsl::Mut dsl::NamedBuilder::operator=(const Expr::Any &that) const { return Stmt::Mut(Term::Select(named, {}, named.tpe), that); }
 
 dsl::AssignmentBuilder::AssignmentBuilder(const string &name, bool isMutable) : name(name), isMutable(isMutable) {}
-Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const {
-  return Stmt::Var(Named(name, rhs.tpe()), Expr::Alias(rhs), isMutable);
-}
-Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const {
-  return Stmt::Var(Named(name, tpe), {}, isMutable);
-}
-Stmt::Any dsl::AssignmentBuilder::operator=(const Expr::Any &rhs) const {
-  return Stmt::Var(Named(name, rhs.tpe()), rhs, isMutable);
-}
+Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const { return Stmt::Var(Named(name, rhs.tpe()), Expr::Alias(rhs), isMutable); }
+Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const { return Stmt::Var(Named(name, tpe), {}, isMutable); }
+Stmt::Any dsl::AssignmentBuilder::operator=(const Expr::Any &rhs) const { return Stmt::Var(Named(name, rhs.tpe()), rhs, isMutable); }

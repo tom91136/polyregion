@@ -316,11 +316,11 @@ public:
                    << magic_enum::enum_name(c.locality) << ")\n";
     }
 
-    const auto table = bundle.layouts                                                                        //
-                       | values()                                                                            //
-                       | map([&](auto &sl) {                                                                 //
+    const auto table = bundle.layouts                                                                //
+                       | values()                                                                    //
+                       | map([&](auto &sl) {                                                         //
                            return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}), sl}; //
-                         })                                                                                  //
+                         })                                                                          //
                        | to<std::unordered_map>();
 
     auto structLayoutsArray = TypeLayout.global(M, [&](OpBuilder &B0) {
@@ -536,13 +536,12 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     auto &wrapperBlock = doc.getRegion().front();
     auto loopOp = mlir::cast<fir::DoConcurrentLoopOp>(wrapperBlock.getTerminator());
     if (loopOp.getLowerBound().size() != 1) {
-      diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                       "[PolyFC] multi-dimensional `do concurrent` is not yet supported"));
+      diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolyFC] multi-dimensional `do concurrent` is not yet supported"));
       return;
     }
     if (loopOp.getNumLocalOperands() != 0) {
-      diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                       "[PolyFC] `do concurrent ... local(...)` clause is not yet supported"));
+      diag.Report(
+          diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolyFC] `do concurrent ... local(...)` clause is not yet supported"));
       return;
     }
     OpBuilder B(doc);
@@ -550,19 +549,18 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     // they survive the erase below.
     for (auto &op : llvm::make_early_inc_range(wrapperBlock.without_terminator()))
       op.moveBefore(doc);
-    auto unordered = fir::DoLoopOp::create(B, doc.getLoc(),                                                            //
+    llvm::SmallVector<mlir::Attribute> reduceAttrs;
+    if (auto attrs = loopOp.getReduceAttrsAttr()) reduceAttrs.assign(attrs.begin(), attrs.end());
+    auto unordered = fir::DoLoopOp::create(B, doc.getLoc(),                                                           //
                                            loopOp.getLowerBound()[0], loopOp.getUpperBound()[0], loopOp.getStep()[0], //
                                            /*unordered=*/true, /*finalCountValue=*/false,
-                                           /*iterArgs=*/mlir::ValueRange{}, loopOp.getReduceVars(), loopOp.getReduceAttrsAttr());
+                                           /*iterArgs=*/mlir::ValueRange{}, loopOp.getReduceVars(), reduceAttrs);
     unordered->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
     auto &loopBlock = loopOp.getRegion().front();
-    // Block args of the source loop are [induction, reduce_args...]; the new fir.do_loop body
-    // already binds those itself, so map them onto the destination block args before splicing.
     loopBlock.getArgument(0).replaceAllUsesWith(unordered.getInductionVar());
-    for (auto [src, dst] : llvm::zip_equal(
-             loopBlock.getArguments().drop_front(loopOp.getNumInductionVars()).take_front(loopOp.getNumReduceOperands()),
-             unordered.getRegionIterArgs())) {
-      src.replaceAllUsesWith(dst);
+    auto srcReduceArgs = loopBlock.getArguments().drop_front(loopOp.getNumInductionVars() + loopOp.getNumLocalOperands());
+    for (auto [src, ext] : llvm::zip_equal(srcReduceArgs, loopOp.getReduceVars())) {
+      src.replaceAllUsesWith(ext);
     }
     auto *destBody = unordered.getBody();
     destBody->getOperations().splice(destBody->getTerminator()->getIterator(), loopBlock.getOperations());

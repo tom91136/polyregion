@@ -6,23 +6,23 @@ import PassTest.*
 
 class DeadArgEliminationPassSuite extends munit.FunSuite {
 
-  test("entry function: unused arg is dropped") {
+  test("entry function: positional args are preserved") {
     val used   = arg("x")
     val unused = arg("y")
     val e      = entry(args = List(used, unused), body = List(p.Stmt.Return(select(used.named))))
     val out    = DeadArgEliminationPass(program(e), NoopLog)
-    assertEquals(out.entry.args.map(_.named.symbol), List("x"))
+    assertEquals(out.entry.args.map(_.named.symbol), List("x", "y"))
   }
 
-  test("entry function: referenced arg is preserved") {
-    val a    = arg("a")
-    val b    = arg("b")
-    val body = List(p.Stmt.Var(named("tmp"), Some(select(a.named))), p.Stmt.Return(select(b.named)))
-    val out  = DeadArgEliminationPass(program(entry(args = List(a, b), body = body)), NoopLog)
-    assertEquals(out.entry.args.map(_.named.symbol).toSet, Set("a", "b"))
+  test("entry function: unused module captures are still pruned") {
+    val used   = arg("a")
+    val unused = arg("u")
+    val e      = entry(args = Nil, moduleCaptures = List(used, unused), body = List(p.Stmt.Return(select(used.named))))
+    val out    = DeadArgEliminationPass(program(e), NoopLog)
+    assertEquals(out.entry.moduleCaptures.map(_.named.symbol), List("a"))
   }
 
-  test("non-entry function: receiver and args are not swept (calling-convention stable)") {
+  test("non-entry function: receiver and args are not swept") {
     val recv   = arg("self")
     val unused = arg("p")
     val helper = fn("h", args = List(unused)).copy(receiver = Some(recv))

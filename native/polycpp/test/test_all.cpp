@@ -40,9 +40,8 @@ void testAll(bool passthrough) {
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
     const auto testName = polyregion::polyfront::extractTestName(input);
-    const auto runsHash = std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) {
-                                                     return fmt::vformat(x.command, unevaluatedStore);
-                                                   }));
+    const auto runsHash =
+        std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) { return fmt::vformat(x.command, unevaluatedStore); }));
     const auto output = fmt::format("polycpp_test_{}_{:08x}", testName.empty() ? "anon" : testName, static_cast<uint32_t>(runsHash));
     const auto evaluatedStore = augmentedArgs ^ append(std::pair{"output", output}) ^ and_then(mkArgStore);
 
@@ -113,11 +112,11 @@ void testAll(bool passthrough) {
         consumeError(stderrFile->discard());
 
         // INFO over WARN: only flushes on REQUIRE/CHECK failure, so passing tests stay quiet.
-        INFO("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", BinaryDir, args[0])) //
+        WARN("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", BinaryDir, args[0])) //
                              | mk_string(" ", [](auto &s) { return s.str(); })));
-        INFO("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
-        INFO("stderr:\n" << stderr_ << "[EOF]");
-        INFO("stdout:\n" << stdout_ << "[EOF]");
+        WARN("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
+        WARN("stderr:\n" << stderr_ << "[EOF]");
+        WARN("stdout:\n" << stdout_ << "[EOF]");
         if (exitCode != 0) stepFailureBy[output] = true;
         REQUIRE(exitCode == 0);
         auto stdoutLines = stdout_ ^ split('\n');
