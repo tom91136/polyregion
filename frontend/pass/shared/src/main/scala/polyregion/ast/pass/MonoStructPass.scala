@@ -19,7 +19,7 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
     log.info("uses", structsInFunction.map(_.repr)*)
     log.info("defs", program.defs.map(_.repr)*)
     val monoStructDefs = for {
-      sdef <- program.defs
+      sdef   <- program.defs
       struct <- structsInFunction
       if struct.name == sdef.name
       table = sdef.tpeVars.zip(struct.args).toMap

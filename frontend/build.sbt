@@ -88,7 +88,6 @@ lazy val ast = crossProject(JVMPlatform, JSPlatform)
       Seq("-Yretain-trees") ++
         Seq("-Xmax-inlines", "80"),
     libraryDependencies ++= Seq(
-      "com.lihaoyi"   %%% "upickle"   % "4.0.2",
       "org.typelevel" %%% "cats-core" % catsVersion
     )
   )
@@ -124,7 +123,7 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform)
   )
   .jsSettings(
     scalaJSUseMainModuleInitializer := false,
-    scalaJSLinkerConfig ~= { _.withModuleKind(SJSModuleKind.NoModule) },
+    scalaJSLinkerConfig ~= { _.withModuleKind(SJSModuleKind.CommonJSModule) },
     passBundleDest := nativeDir / "polyc" / "polypass.js",
     exportPassBundle := {
       // fastLinkJS does IR-level DCE (tree-shaking) without Closure's name mangling, leaving the

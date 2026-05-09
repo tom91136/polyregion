@@ -1,7 +1,8 @@
 #include "mlir_utils.h"
-#include "utils.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+
+#include "utils.h"
 
 std::optional<mlir::func::FuncOp> polyregion::polyfc::resolveDefiningFunction(Operation *op) {
   while (op) {

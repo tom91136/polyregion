@@ -1,4 +1,5 @@
 #include "llvm_amdgpu.h"
+
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 
 using namespace polyregion::backend::details;

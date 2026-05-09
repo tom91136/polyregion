@@ -1,21 +1,30 @@
-#include "polyregion/compat.h"
-
-#include <mutex>
-
-#include "ast.h"
 #include "compiler.h"
 
-#include "backend/c_source.h"
-#include "backend/llvm.h"
-#include "backend/llvmc.h"
-#include "qjs_runner.h"
+#include <cstdlib>
+#include <mutex>
+
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
+
+#include "polyregion/compat.h"
 #include "polyregion/io.hpp"
 #include "polyregion/llvm_utils.hpp"
+
+#include "ast.h"
+#include "backend/c_source.h"
+#include "backend/llvm.h"
+#include "backend/llvmc.h"
+#include "qjs_runner.h"
+
+#ifndef POLYPASS_JS_DEV_PATH
+  #define POLYPASS_JS_DEV_PATH ""
+#endif
 
 using namespace polyregion;
 using namespace aspartame;
@@ -35,13 +44,23 @@ void compiler::initialise() {
   std::call_once(flag, []() { backend::llvmc::initialise(); });
 }
 
-static json deserialiseAst(const polyast::Bytes &astBytes) {
+static const uint8_t *bytesBegin(const polyast::Bytes &bytes) { return reinterpret_cast<const uint8_t *>(bytes.data()); }
+
+static const uint8_t *bytesEnd(const polyast::Bytes &bytes) { return bytesBegin(bytes) + bytes.size(); }
+
+static polyast::Program deserialiseProgram(const polyast::Bytes &astBytes) {
   try {
-    const auto json = nlohmann::json::from_msgpack(astBytes.data(), astBytes.data() + astBytes.size());
-    // the JSON comes in versioned with the hash
-    return polyast::hashed_from_json(json);
-  } catch (nlohmann::json::exception &e) {
+    return polyast::hashed_program_from_msgpack(bytesBegin(astBytes), bytesEnd(astBytes));
+  } catch (const std::exception &e) {
     throw std::logic_error(fmt::format("Unable to parse packed ast: {}", e.what()));
+  }
+}
+
+static std::vector<polyast::StructDef> deserialiseStructDefs(const polyast::Bytes &astBytes) {
+  try {
+    return polyast::hashed_structdefs_from_msgpack(bytesBegin(astBytes), bytesEnd(astBytes));
+  } catch (const std::exception &e) {
+    throw std::logic_error(fmt::format("Unable to parse packed struct defs: {}", e.what()));
   }
 }
 
@@ -113,20 +132,44 @@ std::vector<polyast::StructLayout> compiler::layoutOf(const std::vector<polyast:
 }
 
 std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &bytes, const Options &options) {
-  const json json = deserialiseAst(bytes);
-  const auto structs = json | map([](auto &x) { return polyast::structdef_from_json(x); }) | to_vector();
-  return layoutOf(structs, options);
+  return layoutOf(deserialiseStructDefs(bytes), options);
 }
 
 static void sortEvents(polyast::CompileResult &c) {
   c.events = c.events ^ sort_by([](auto &x) { return x.epochMillis; });
 }
 
+namespace {
+[[maybe_unused]] void polypassJsAnchor() {}
+
+// Resolution order: $POLYPASS_JS env, <exe-dir>/polypass.js, <exe-dir>/../lib/polypass.js,
+// then the build-time POLYPASS_JS_DEV_PATH baked in by CMake. Returns "" if unfound.
+std::string findPolypassJs() {
+  namespace fs = llvm::sys::fs;
+  namespace path = llvm::sys::path;
+  if (auto env = std::getenv("POLYPASS_JS"); env && *env && fs::exists(env)) return env;
+  const auto exe = fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&polypassJsAnchor));
+  if (!exe.empty()) {
+    const auto dir = path::parent_path(exe);
+    for (const llvm::StringRef rel : {"polypass.js", "../lib/polypass.js"}) {
+      llvm::SmallString<256> candidate(dir);
+      path::append(candidate, rel);
+      if (!fs::exists(candidate)) continue;
+      llvm::SmallString<256> resolved;
+      if (fs::real_path(candidate, resolved)) return candidate.str().str();
+      return resolved.str().str();
+    }
+  }
+  if (constexpr std::string_view dev = POLYPASS_JS_DEV_PATH; !dev.empty() && fs::exists(dev)) return std::string(dev);
+  return {};
+}
+} // namespace
+
 static polypass::JsPassRunner &sharedJsRunner() {
   static polypass::JsPassRunner runner;
   static std::once_flag loaded;
   std::call_once(loaded, [] {
-    const auto path = polypass::JsPassRunner::findBundle();
+    const auto path = findPolypassJs();
     if (path.empty()) throw std::logic_error("polyc: polypass.js not found (set $POLYPASS_JS or install the dist)");
     if (auto err = runner.loadModule(read_string(path), path); !err.empty())
       throw std::logic_error("polyc: failed to load polypass.js: " + err);
@@ -135,14 +178,12 @@ static polypass::JsPassRunner &sharedJsRunner() {
 }
 
 static polyast::Program runJsPass(const polyast::Program &p, std::string_view passName) {
-  auto bytes = nlohmann::json::to_msgpack(polyast::program_to_json(p));
-  std::vector<uint8_t> in(bytes.begin(), bytes.end());
+  auto in = polyast::program_to_msgpack(p);
   std::string err;
   auto out = sharedJsRunner().runPass(passName, in, err);
   // auto out = in;
   if (!err.empty()) throw std::logic_error(fmt::format("polypass {}: {}", passName, err));
-  const auto outJson = nlohmann::json::from_msgpack(out.data(), out.data() + out.size());
-  return polyast::program_from_json(outJson);
+  return polyast::program_from_msgpack(out.data(), out.data() + out.size());
 }
 
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
@@ -190,13 +231,9 @@ polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const O
 
   std::vector<polyast::CompileEvent> events;
 
-  auto jsonStart = nowMono();
-  json json = deserialiseAst(astBytes);
-  events.emplace_back(nowMs(), elapsedNs(jsonStart), "ast_deserialise", "");
-
-  auto astLift = nowMono();
-  auto program = polyast::program_from_json(json);
-  events.emplace_back(nowMs(), elapsedNs(astLift), "ast_lift", "");
+  auto astStart = nowMono();
+  auto program = deserialiseProgram(astBytes);
+  events.emplace_back(nowMs(), elapsedNs(astStart), "ast_deserialise", "");
 
   auto c = compile(program, options, opt);
   c.events ^= concat_inplace(events);

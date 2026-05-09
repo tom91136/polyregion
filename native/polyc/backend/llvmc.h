@@ -1,12 +1,13 @@
 #pragma once
 
+#include "llvm/IR/Module.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Target/TargetMachine.h"
+
 #include "polyregion/compat.h"
 
 #include "ast.h"
 #include "compiler.h"
-#include "llvm/IR/Module.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Target/TargetMachine.h"
 
 namespace polyregion::backend::llvmc {
 

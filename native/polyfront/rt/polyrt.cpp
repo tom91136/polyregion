@@ -3,6 +3,7 @@
 
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
+
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/types.h"
 #include "polyrt/rt.h"
@@ -144,6 +145,12 @@ void polyregion::polyrt::initialise() {
   });
 }
 
+void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
+  std::fprintf(stderr, "[PolyRT] %s: no kernel object matched any enumerated device, exiting 77 (skip)\n", site);
+  std::fflush(stderr);
+  std::_Exit(77);
+}
+
 bool polyregion::polyrt::hostFallback() {
   static bool fallback = []() {
     if (const auto env = std::getenv(HostFallbackEnv); env) {
@@ -202,7 +209,34 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       magic_enum::enum_name(object.format).data(), //
       magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
 
-  //  TODO need to check if object.feature is a strict subset of device feature
+  const auto deviceFeatures = currentDevice->features();
+  for (size_t i = 0; i < object.featureCount; ++i) {
+    std::string_view req(object.features[i]);
+    if (req != "fp64" && req != "fp16" && req != "int64") continue;
+    bool found = false;
+    for (auto &f : deviceFeatures) {
+      if (f.size() != req.size()) continue;
+      bool eq = true;
+      for (size_t j = 0; j < f.size(); ++j) {
+        char x = f[j], y = req[j];
+        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x + 32);
+        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y + 32);
+        if (x != y) {
+          eq = false;
+          break;
+        }
+      }
+      if (eq) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),
+          std::string(req).c_str(), moduleName);
+      return false;
+    }
+  }
 
   if (!currentDevice->moduleLoaded(moduleName)) {
     if (auto dumpDir = std::getenv("POLYRT_DUMP_KERNEL")) {

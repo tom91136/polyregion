@@ -1,11 +1,14 @@
 #include "lld_lite.h"
-#include "lld/Common/CommonLinkerContext.h"
-#include "lld/Common/Driver.h"
-#include "memoryfs.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/MemoryBuffer.h"
+
 #include <atomic>
 #include <fstream>
+
+#include "lld/Common/CommonLinkerContext.h"
+#include "lld/Common/Driver.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+
+#include "memoryfs.h"
 
 namespace lld::elf {
 bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_ostream &stderrOS, bool exitEarly, bool disableOutput);

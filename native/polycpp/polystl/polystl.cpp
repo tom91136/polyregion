@@ -1,7 +1,9 @@
 #include "polystl/polystl.h"
+
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
+
 #include "reflect-rt/rt_reflect.hpp"
 
 using namespace polyregion;

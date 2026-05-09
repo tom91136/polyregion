@@ -1,5 +1,6 @@
-#include "ast.h"
 #include "catch2/catch_all.hpp"
+
+#include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
@@ -20,8 +21,8 @@ using namespace polyast::dsl;
 static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body,
                      FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
                      FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
-  return Function(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), std::move(body),
-                  std::move(visibility), std::move(fpMode), isEntry);
+  return Function(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), std::move(body), std::move(visibility), std::move(fpMode),
+                  isEntry);
 }
 
 static Expr::Invoke mkInvoke(const std::string &name, std::vector<Term::Any> args, Type::Any rtn) {
@@ -29,32 +30,29 @@ static Expr::Invoke mkInvoke(const std::string &name, std::vector<Term::Any> arg
 }
 
 // Stmt::Mut takes Expr::Any. The DSL helper auto-wraps a Term in Expr::Alias.
-static Stmt::Mut MutT(const Term::Select &name, const Term::Any &term) {
-  return Stmt::Mut(name, Expr::Any(Expr::Alias(term)));
-}
-
+static Stmt::Mut MutT(const Term::Select &name, const Term::Any &term) { return Stmt::Mut(name, Expr::Any(Expr::Alias(term))); }
 
 static Term::Any generateConstTerm(const Tpe::Any &t) {
   const auto unsupported = [&]() -> Term::Any { throw std::logic_error("No constant for type " + to_string(t)); };
-  return t.match_total(                                                              //
-      [&](const Type::Float16 &) -> Term::Any { return 42.0_(t); },                  //
-      [&](const Type::Float32 &) -> Term::Any { return 42.0_(t); },                  //
-      [&](const Type::Float64 &) -> Term::Any { return 42.0_(t); },                  //
-      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(true); },      //
-      [&](const Type::IntS8 &) -> Term::Any { return 0xFF_(t); },                    //
-      [&](const Type::IntS16 &) -> Term::Any { return 42_(t); },                     //
-      [&](const Type::IntS32 &) -> Term::Any { return 42_(t); },                     //
-      [&](const Type::IntS64 &) -> Term::Any { return 0xDEADBEEF_(t); },             //
-      [&](const Type::IntU8 &) -> Term::Any { return 0xFF_(t); },                    //
-      [&](const Type::IntU16 &) -> Term::Any { return 42_(t); },                     //
-      [&](const Type::IntU32 &) -> Term::Any { return 42_(t); },                     //
-      [&](const Type::IntU64 &) -> Term::Any { return 0xDEADBEEF_(t); },             //
-      [&](const Type::Unit0 &) -> Term::Any { return Term::Unit0Const(); },          //
-      [&](const Type::Nothing &) -> Term::Any { return unsupported(); },             //
-      [&](const Type::Struct &) -> Term::Any { return unsupported(); },              //
-      [&](const Type::Ptr &) -> Term::Any { return unsupported(); },                 //
-      [&](const Type::Arr &) -> Term::Any { return unsupported(); },                 //
-      [&](const Type::Var &) -> Term::Any { return unsupported(); },                 //
+  return t.match_total(                                                         //
+      [&](const Type::Float16 &) -> Term::Any { return 42.0_(t); },             //
+      [&](const Type::Float32 &) -> Term::Any { return 42.0_(t); },             //
+      [&](const Type::Float64 &) -> Term::Any { return 42.0_(t); },             //
+      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(true); }, //
+      [&](const Type::IntS8 &) -> Term::Any { return 0xFF_(t); },               //
+      [&](const Type::IntS16 &) -> Term::Any { return 42_(t); },                //
+      [&](const Type::IntS32 &) -> Term::Any { return 42_(t); },                //
+      [&](const Type::IntS64 &) -> Term::Any { return 0xDEADBEEF_(t); },        //
+      [&](const Type::IntU8 &) -> Term::Any { return 0xFF_(t); },               //
+      [&](const Type::IntU16 &) -> Term::Any { return 42_(t); },                //
+      [&](const Type::IntU32 &) -> Term::Any { return 42_(t); },                //
+      [&](const Type::IntU64 &) -> Term::Any { return 0xDEADBEEF_(t); },        //
+      [&](const Type::Unit0 &) -> Term::Any { return Term::Unit0Const(); },     //
+      [&](const Type::Nothing &) -> Term::Any { return unsupported(); },        //
+      [&](const Type::Struct &) -> Term::Any { return unsupported(); },         //
+      [&](const Type::Ptr &) -> Term::Any { return unsupported(); },            //
+      [&](const Type::Arr &) -> Term::Any { return unsupported(); },            //
+      [&](const Type::Var &) -> Term::Any { return unsupported(); },            //
       [&](const Type::Exec &) -> Term::Any { return unsupported(); });
 }
 
@@ -90,10 +88,10 @@ static std::vector<Tpe::Any> PrimitiveTypes = {
 Expr::Any generateConstValue(const Tpe::Any &t) {
   const auto unsupported = [&]() -> Expr::Any { throw std::logic_error("No constant for type " + to_string(t)); };
   auto liftTerm = [](const Term::Any &term) -> Expr::Any { return Expr::Alias(term); };
-  return t.match_total(                                                                //
-      [&](const Type::Float16 &) -> Expr::Any { return liftTerm(42.0_(t)); },          //
-      [&](const Type::Float32 &) -> Expr::Any { return liftTerm(42.0_(t)); },          //
-      [&](const Type::Float64 &) -> Expr::Any { return liftTerm(42.0_(t)); },          //
+  return t.match_total(                                                       //
+      [&](const Type::Float16 &) -> Expr::Any { return liftTerm(42.0_(t)); }, //
+      [&](const Type::Float32 &) -> Expr::Any { return liftTerm(42.0_(t)); }, //
+      [&](const Type::Float64 &) -> Expr::Any { return liftTerm(42.0_(t)); }, //
       [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(true)); },
 
       [&](const Type::IntS8 &) -> Expr::Any { return liftTerm(0xFF_(t)); },        //
@@ -107,12 +105,9 @@ Expr::Any generateConstValue(const Tpe::Any &t) {
       [&](const Type::IntU64 &) -> Expr::Any { return liftTerm(0xDEADBEEF_(t)); }, //
 
       [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },
-      [&](const Type::Nothing &) -> Expr::Any { return unsupported(); },
-      [&](const Type::Struct &) -> Expr::Any { return unsupported(); },
-      [&](const Type::Ptr &) -> Expr::Any { return unsupported(); },
-      [&](const Type::Arr &) -> Expr::Any { return unsupported(); },
-      [&](const Type::Var &) -> Expr::Any { return unsupported(); },
-      [&](const Type::Exec &) -> Expr::Any { return unsupported(); });
+      [&](const Type::Nothing &) -> Expr::Any { return unsupported(); }, [&](const Type::Struct &) -> Expr::Any { return unsupported(); },
+      [&](const Type::Ptr &) -> Expr::Any { return unsupported(); }, [&](const Type::Arr &) -> Expr::Any { return unsupported(); },
+      [&](const Type::Var &) -> Expr::Any { return unsupported(); }, [&](const Type::Exec &) -> Expr::Any { return unsupported(); });
 }
 
 template <typename P> static void assertCompile(const P &p) {
@@ -151,6 +146,19 @@ TEST_CASE("initialise more than once", "[compiler]") {
   compiler::initialise();
   compiler::initialise();
   compiler::initialise();
+}
+
+TEST_CASE("spirv64 minimal", "[compiler]") {
+  compiler::initialise();
+  auto fn = function("k", {"p"_(Ptr(SInt))()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Strict(), true)({
+      "p"_(Ptr(SInt))[0_(SInt)] = 42_(SInt), //
+      ret()                                  //
+  });
+  auto p = program({}, {fn});
+  CAPTURE(repr(p));
+  auto c = compiler::compile(p, compiler::Options{Target::Object_LLVM_SPIRV64_Kernel, "intel"}, OptLevel::O3);
+  CAPTURE(c.messages);
+  CHECK(c.binary.has_value());
 }
 
 TEST_CASE("recursive struct", "[compiler]") {
@@ -226,7 +234,7 @@ TEST_CASE("nested nested if", "[compiler]") {
 TEST_CASE("if", "[compiler]") {
   compiler::initialise();
 
-  auto entry = function("foo", {"in0"_(SInt)()}, SInt)({let("c") = IntrOp(LogicEq("in0"_(SInt), 42_(SInt))),
+  auto entry = function("foo", {"in0"_(SInt)()}, SInt)({let("c") = IntrOp(LogicEq("in0"_(SInt), 42_(SInt))), //
                                                         Cond("c"_(Bool),
                                                              {
                                                                  ret(1_(SInt)) //
@@ -327,10 +335,10 @@ TEST_CASE("return struct and take ref", "[compiler]") {
   auto aux = function("aux", {"out"_(Ptr(barTpe))(), "in"_(Ptr(barTpe))()}, Ptr(barTpe))({
       MutT(Select({"out"_(Ptr(barTpe))}, z), //
            Select({"in"_(Ptr(barTpe))}, z)), //
-      ret("out"_(Ptr(barTpe)))              //
+      ret("out"_(Ptr(barTpe)))               //
   });
 
-  auto gen = function("gen", {}, barTpe)({let("a") = barTpe,                        //
+  auto gen = function("gen", {}, barTpe)({let("a") = barTpe,                         //
                                           MutT(Select({"a"_(barTpe)}, z), 0_(SInt)), //
                                           ret("a"_(barTpe))});
 
@@ -338,7 +346,7 @@ TEST_CASE("return struct and take ref", "[compiler]") {
       let("a") = mkInvoke("gen", {}, barTpe),                                                         //
       let("ar") = RefTo("a"_(barTpe), {}, barTpe, Global),                                            //
       let("r") = mkInvoke("aux", {Select({"in"_(Ptr(fooTpe))}, y), "ar"_(Ptr(barTpe))}, Ptr(barTpe)), //
-      ret(Term::Unit0Const())                                                                               //
+      ret(Term::Unit0Const())                                                                         //
   });
 
   assertCompile(program({fooDef, barDef}, {entry, gen, aux}));
@@ -523,8 +531,8 @@ TEST_CASE("index prim array", "[compiler]") {
     CAPTURE(tpe, idx);
     assertCompile(program(function("foo", {}, tpe)({
         let("xs") = Alloc(tpe, 42_(SInt), Global), "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
-        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                           //
-        ret("x"_(tpe))                                                                                             //
+        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                          //
+        ret("x"_(tpe))                                                                                            //
     })));
   }
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
@@ -566,7 +574,7 @@ TEST_CASE("update prim array by ref", "[compiler]") {
   DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt), Global),                                  //
+        let("xs") = Alloc(tpe, 42_(SInt), Global),                                 //
         "xs"_(Ptr(tpe))[integral(SInt, idx.value_or(0))] = generateConstTerm(tpe), //
         let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
@@ -615,7 +623,7 @@ TEST_CASE("index struct array member", "[compiler]") {
 
                          Var(Named("a", myStruct), {Index(Select({}, Named("s", Ptr(myStruct))), Term::IntS32Const(0), myStruct)}, false),
 
-                         Var(Named("b", Type::IntS32()),{Expr::Alias(Select({Named("a", myStruct)}, defX))}, false),
+                         Var(Named("b", Type::IntS32()), {Expr::Alias(Select({Named("a", myStruct)}, defX))}, false),
 
                          //                  Mut(Select({Named("s",  Ptr(myStruct ))}, defX),  (Term::IntS32Const(42 ),
                          Return(Expr::Alias(Term::IntS32Const(69))),
@@ -683,7 +691,8 @@ TEST_CASE("alias struct member", "[compiler]") {
                              {
                                  Expr::Alias(Select({arg}, Named("y", SInt))) //
                              } //
-                             , false),
+                             ,
+                             false),
                          Return(Expr::Alias(Term::Unit0Const())),
                      },
                      {FunctionVisibility::Exported()});
@@ -699,7 +708,7 @@ TEST_CASE("alias array", "[compiler]") {
   Function fn = mkFn("foo", {}, arr,
                      {
                          Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global)}, false),
-                         Var(Named("t", arr),{Expr::Alias(Select({}, Named("s", arr)))}, false),
+                         Var(Named("t", arr), {Expr::Alias(Select({}, Named("s", arr)))}, false),
                          Return(Expr::Alias(Select({}, Named("s", arr)))),
                      },
                      {FunctionVisibility::Exported()});
@@ -759,7 +768,7 @@ TEST_CASE("mut prim", "[compiler]") {
 
   Function fn = mkFn("foo", {}, SInt,
                      {
-                         Var(Named("s", SInt),{Expr::Alias(Term::IntS32Const(10))}, false),
+                         Var(Named("s", SInt), {Expr::Alias(Term::IntS32Const(10))}, false),
                          MutT(Select({}, Named("s", SInt)), Term::IntS32Const(20)),
                          Return(Expr::Alias(Select({}, Named("s", SInt)))),
                      },
@@ -881,7 +890,7 @@ TEST_CASE("cond", "[compiler]") {
   Function fn = mkFn("foo", {}, SInt,
                      {
                          Var(Named("out", SInt), {}, false),
-                         Cond(Term::Bool1Const(true),                                       //
+                         Cond(Term::Bool1Const(true),                                        //
                               {MutT(Select({}, Named("out", SInt)), Term::IntS32Const(42))}, //
                               {MutT(Select({}, Named("out", SInt)), Term::IntS32Const(43))}  //
                               ),

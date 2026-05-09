@@ -1,9 +1,48 @@
 #include "test_utils.h"
+
+#include <cstdlib>
+#include <cstring>
+
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
+
 #include "polyregion/llvm_utils.hpp"
 
 using namespace aspartame;
+
+namespace {
+bool envContainsToken(const char *envName, std::string_view needle) {
+  const auto v = std::getenv(envName);
+  if (!v || !*v) return false;
+  std::string_view s(v);
+  for (size_t i = 0, j = 0; i <= s.size(); ++i)
+    if (i == s.size() || s[i] == ',') {
+      if (i > j && s.substr(j, i - j) == needle) return true;
+      j = i + 1;
+    }
+  return false;
+}
+
+bool envContainsSubstring(const char *envName, std::string_view haystack) {
+  const auto v = std::getenv(envName);
+  if (!v || !*v) return false;
+  std::string_view s(v);
+  for (size_t i = 0, j = 0; i <= s.size(); ++i)
+    if (i == s.size() || s[i] == ',') {
+      if (i > j && haystack.find(s.substr(j, i - j)) != std::string_view::npos) return true;
+      j = i + 1;
+    }
+  return false;
+}
+} // namespace
+
+bool polyregion::test_utils::isBackendDisabled(invoke::Backend backend) {
+  return envContainsToken("POLYINVOKE_DISABLE_BACKENDS", magic_enum::enum_name(backend));
+}
+
+bool polyregion::test_utils::isDeviceDisabled(std::string_view deviceName) {
+  return envContainsSubstring("POLYINVOKE_DISABLE_DEVICE_NAMES", deviceName);
+}
 
 std::unique_ptr<polyregion::invoke::Platform> polyregion::test_utils::makePlatform(const invoke::Backend backend) {
   if (auto errorOrPlatform = invoke::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
@@ -22,12 +61,10 @@ polyregion::test_utils::findTestImage(const ImageGroups &images, const invoke::B
   // HIP accepts HSA kernels
   const auto canonicalBackend = backend == invoke::Backend::HIP ? invoke::Backend::HSA : backend;
 
-  const bool archIndependent = canonicalBackend == invoke::Backend::Vulkan ||
-                               canonicalBackend == invoke::Backend::OpenCL ||
-                               canonicalBackend == invoke::Backend::Metal ||
-                               canonicalBackend == invoke::Backend::CUDA ||
-                               canonicalBackend == invoke::Backend::HIP ||
-                               canonicalBackend == invoke::Backend::HSA;
+  // Truly arch-independent backends emit a single image per kernel (SPIR-V/CL-C/MSL stay portable
+  // at the test image level). CUDA/HSA/HIP need an exact sm_XX/gfx_XX match against the device.
+  const bool archIndependent = canonicalBackend == invoke::Backend::Vulkan || canonicalBackend == invoke::Backend::OpenCL ||
+                               canonicalBackend == invoke::Backend::Metal;
 
   return images                                                            //
          ^ get_maybe(std::string(magic_enum::enum_name(canonicalBackend))) //

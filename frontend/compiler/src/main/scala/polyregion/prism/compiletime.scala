@@ -2,6 +2,7 @@ package polyregion.prism
 
 import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.MsgPack.Codec.given
 import polyregion.scalalang.*
 import polyregion.ast.Traversal.*
 
@@ -107,7 +108,8 @@ object compiletime {
           )
         }.unzip
         val decodeExpr = '{
-          val data    = Array.concat(${ Varargs(refs) }*)
+          import polyregion.ast.MsgPack.Codec.given
+          val data    = Array.concat[Byte](${ Varargs(refs) }*)
           val mirrors = MsgPack.decode[List[p.Mirror]](data).fold(throw _, x => x)
           val terms   = $termPrisms
           assert(terms.size == mirrors.size, "Term prism size and mirror size mismatch")

@@ -3,16 +3,17 @@
 #include <cstdlib>
 #include <vector>
 
-#include "options.hpp"
-#include "polyast_codec.h"
-
-#include "aspartame/all.hpp"
-#include "nlohmann/json.hpp"
-#include "polyregion/types.h"
-
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
+
+#include "aspartame/all.hpp"
+#include "nlohmann/json.hpp"
+
+#include "polyregion/types.h"
+
+#include "options.hpp"
+#include "polyast_codec.h"
 
 template <> struct std::hash<std::pair<polyregion::compiletime::Target, std::string>> {
   std::size_t operator()(const std::pair<polyregion::compiletime::Target, std::string> &p) const noexcept {
@@ -95,7 +96,7 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
                                                                         const polyast::Program &p,         //
                                                                         const compiletime::Target &target, //
                                                                         const std::string &arch) {
-  auto data = nlohmann::json::to_msgpack(polyast::hashed_to_json(polyast::program_to_json(p)));
+  auto data = polyast::hashed_program_to_msgpack(p);
 
   llvm::SmallString<64> inputPath;
   auto inputCreateEC = llvm::sys::fs::createTemporaryFile("", "", inputPath);
@@ -136,7 +137,9 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   if ((*BufferOrErr)->getBufferSize() == 0)
     return "Empty output from polyc subprocess (likely failed to deserialise input or codegen aborted) for task: " +
            (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
-  return polyast::compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
+  const auto *begin = reinterpret_cast<const uint8_t *>((*BufferOrErr)->getBufferStart());
+  const auto *end = begin + (*BufferOrErr)->getBufferSize();
+  return polyast::compileresult_from_msgpack(begin, end);
 }
 
 } // namespace polyregion::polyfront

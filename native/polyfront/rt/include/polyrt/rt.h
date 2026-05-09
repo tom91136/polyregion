@@ -26,6 +26,10 @@ enum class DebugLevel : uint8_t { None = 0, Info = 1, Debug = 2, Trace = 3 };
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void initialise();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool hostFallback();
+
+// XXX Exits with code 77 (autotools "skipped") so test runners can distinguish "no compatible
+// target on this device" from a real wrong-output / crash failure.
+[[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void noCompatibleKernelExit(const char *site);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT DebugLevel debugLevel();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT __attribute__((format(printf, 2, 3))) void log(DebugLevel level, const char *fmt, ...);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *moduleName, const KernelObject &object);

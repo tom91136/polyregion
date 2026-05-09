@@ -1,9 +1,10 @@
 #pragma once
 
-#include "llvm/Support/MemoryBufferRef.h"
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "llvm/Support/MemoryBufferRef.h"
 
 namespace polyregion::backend::lld_lite {
 

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <clang/AST/ASTContext.h>
 #include <string>
+
+#include <clang/AST/ASTContext.h>
 
 namespace polyregion::polystl {
 template <typename Node> std::string pretty_string(Node *node, const clang::ASTContext &c) {

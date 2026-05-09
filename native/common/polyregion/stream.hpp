@@ -8,8 +8,9 @@
 
 #include "magic_enum/magic_enum.hpp"
 
-#include "concurrency_utils.hpp"
 #include "polyinvoke/runtime.h"
+
+#include "concurrency_utils.hpp"
 
 namespace polyregion::stream {
 

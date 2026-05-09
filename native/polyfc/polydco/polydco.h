@@ -3,8 +3,9 @@
 #include <cassert>
 #include <cstdio>
 
-#include "ftypes.h"
 #include "polyregion/types.h"
+
+#include "ftypes.h"
 
 extern "C" {
 

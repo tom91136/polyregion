@@ -1,3 +1,5 @@
+#include "remapper.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
@@ -7,10 +9,9 @@
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Optimizer/Dialect/Support/FIRContext.h"
-#include "flang/Optimizer/Support/Utils.h"
-
 #include "flang/Optimizer/Support/InternalNames.h"
-
+#include "flang/Optimizer/Support/Utils.h"
+#include "llvm/Support/Casting.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/Transform/IR/TransformOps.h"
@@ -19,16 +20,14 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Value.h"
 
-#include "llvm/Support/Casting.h"
-
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
+
 #include "polyregion/llvm_dyn.hpp"
 
 #include "ftypes.h"
 #include "parallel.h"
-#include "remapper.h"
 #include "rewriter.h"
 #include "utils.h"
 
@@ -967,14 +966,9 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
       });
 
   for (auto &[expr, rd] : exprWithReductions) {
-    llvm::errs() << "XXXX R " << fRepr(expr) << " = " << repr(rd.named) << repr(rd.named.tpe) << "\n";
     for (auto &entry : r.valuesLUT) {
       if (entry.second == expr) entry.second = Expr::Any(Expr::Alias(Term::Select(rd.named, {}, rd.named.tpe)));
     }
-  }
-
-  for (auto &x : r.valuesLUT) {
-    llvm::errs() << "@@@@R " << show(x.first) << " = " << fRepr(x.second) << "\n";
   }
 
   // Then inject induction

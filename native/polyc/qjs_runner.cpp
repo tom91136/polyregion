@@ -1,36 +1,10 @@
 #include "qjs_runner.h"
 
 #include <cstdio>
-#include <cstdlib>
-#include <filesystem>
 
-#include "fmt/format.h"
 #include "quickjs.h"
 
-#include "llvm/Support/FileSystem.h"
-
-#ifndef POLYPASS_JS_DEV_PATH
-  #define POLYPASS_JS_DEV_PATH ""
-#endif
-
 namespace polyregion::polypass {
-
-namespace {
-[[maybe_unused]] void addrAnchor() {}
-} // namespace
-
-String JsPassRunner::findBundle() {
-  namespace fs = std::filesystem;
-  if (auto env = std::getenv("POLYPASS_JS"); env && *env && fs::exists(env)) return env;
-  const auto exe = llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&addrAnchor));
-  if (!exe.empty()) {
-    const fs::path dir = fs::path(exe).parent_path();
-    for (const fs::path candidate : {dir / "polypass.js", dir / ".." / "lib" / "polypass.js"})
-      if (fs::exists(candidate)) return fs::canonical(candidate).string();
-  }
-  if (constexpr std::string_view dev = POLYPASS_JS_DEV_PATH; !dev.empty() && fs::exists(dev)) return String(dev);
-  return {};
-}
 
 namespace {
 
@@ -52,9 +26,6 @@ String formatException(JSContext *ctx) {
   return out;
 }
 
-} // namespace
-
-namespace {
 JSValue consolePrint(JSContext *ctx, JSValueConst /*this_val*/, int argc, JSValueConst *argv, FILE *stream) {
   for (int i = 0; i < argc; ++i) {
     if (i != 0) std::fputc(' ', stream);
@@ -68,6 +39,9 @@ JSValue consolePrint(JSContext *ctx, JSValueConst /*this_val*/, int argc, JSValu
 }
 JSValue consoleLog(JSContext *ctx, JSValueConst t, int argc, JSValueConst *argv) { return consolePrint(ctx, t, argc, argv, stderr); }
 JSValue consoleErr(JSContext *ctx, JSValueConst t, int argc, JSValueConst *argv) { return consolePrint(ctx, t, argc, argv, stderr); }
+
+void noopFreeArrayBuffer(JSRuntime * /*rt*/, void * /*opaque*/, void * /*ptr*/) {}
+
 } // namespace
 
 JsPassRunner::JsPassRunner() {
@@ -93,22 +67,13 @@ JsPassRunner::~JsPassRunner() {
 }
 
 String JsPassRunner::loadModule(std::string_view source, std::string_view moduleId) {
-  // Scala.js NoModule emits `let runPass;` at the script top, then assigns inside an IIFE. Per ES
-  // spec, top-level `let` does NOT become a property of globalThis, so QuickJS's GetPropertyStr
-  // for `runPass` fails. Rewrite the leading `let runPass;` to `var runPass;` so it becomes a
-  // global. Also append a defensive `globalThis.runPass=runPass` after the IIFE.
-  static constexpr std::string_view LetDecl = "let runPass;";
-  static constexpr std::string_view VarDecl = "var runPass;";
-  String wrapped;
-  wrapped.reserve(source.size() + 64);
-  if (source.size() >= LetDecl.size() && source.substr(0, LetDecl.size()) == LetDecl) {
-    wrapped.append(VarDecl);
-    wrapped.append(source.substr(LetDecl.size()));
-  } else {
-    wrapped.append(source);
-  }
-  wrapped.append("\n;try{globalThis.runPass=runPass;}catch(_){}\n");
-  JSValue r = JS_Eval(ctx, wrapped.data(), wrapped.size(), String(moduleId).c_str(), JS_EVAL_TYPE_GLOBAL);
+  // Scala.js CommonJSModule emits `exports.runPass = ...`; install a fresh `exports` object so
+  // reloading the bundle does not retain stale exports.
+  JSValue global = JS_GetGlobalObject(ctx);
+  JS_SetPropertyStr(ctx, global, "exports", JS_NewObject(ctx));
+  JS_FreeValue(ctx, global);
+
+  JSValue r = JS_Eval(ctx, source.data(), source.size(), String(moduleId).c_str(), JS_EVAL_TYPE_GLOBAL);
   if (JS_IsException(r)) {
     JS_FreeValue(ctx, r);
     return formatException(ctx);
@@ -120,22 +85,43 @@ String JsPassRunner::loadModule(std::string_view source, std::string_view module
 Vector<uint8_t> JsPassRunner::runPass(std::string_view passName, const Vector<uint8_t> &programBytes, String &error) {
   Vector<uint8_t> out;
   JSValue global = JS_GetGlobalObject(ctx);
-  JSValue runPass = JS_GetPropertyStr(ctx, global, "runPass");
+  JSValue exports = JS_GetPropertyStr(ctx, global, "exports");
+  JSValue runPass = JS_GetPropertyStr(ctx, exports, "runPass");
+  JSValueConst thisVal = exports;
   if (!JS_IsFunction(ctx, runPass)) {
-    error = "runPass: JS bundle does not export a global `runPass` function";
     JS_FreeValue(ctx, runPass);
+    runPass = JS_GetPropertyStr(ctx, global, "runPass");
+    thisVal = global;
+  }
+  if (!JS_IsFunction(ctx, runPass)) {
+    error = "runPass: JS bundle does not export `exports.runPass`";
+    JS_FreeValue(ctx, runPass);
+    JS_FreeValue(ctx, exports);
     JS_FreeValue(ctx, global);
     return out;
   }
 
   JSValue nameVal = JS_NewStringLen(ctx, passName.data(), passName.size());
-  JSValue bufVal = JS_NewArrayBufferCopy(ctx, reinterpret_cast<const uint8_t *>(programBytes.data()), programBytes.size());
+  static uint8_t empty = 0;
+  auto *inputData = programBytes.empty() ? &empty : const_cast<uint8_t *>(programBytes.data());
+  // Pass an aliasing free_func so QuickJS does not memcpy programBytes into a fresh ArrayBuffer.
+  // Safe because runPass is synchronous and the input is freed only after JS_Call returns.
+  JSValue bufVal = JS_NewUint8Array(ctx, inputData, programBytes.size(), noopFreeArrayBuffer, nullptr, false);
+  if (JS_IsException(bufVal)) {
+    error = formatException(ctx);
+    JS_FreeValue(ctx, nameVal);
+    JS_FreeValue(ctx, runPass);
+    JS_FreeValue(ctx, exports);
+    JS_FreeValue(ctx, global);
+    return out;
+  }
 
   JSValue argv[2] = {nameVal, bufVal};
-  JSValue result = JS_Call(ctx, runPass, global, 2, argv);
+  JSValue result = JS_Call(ctx, runPass, thisVal, 2, argv);
   JS_FreeValue(ctx, nameVal);
   JS_FreeValue(ctx, bufVal);
   JS_FreeValue(ctx, runPass);
+  JS_FreeValue(ctx, exports);
   JS_FreeValue(ctx, global);
 
   if (JS_IsException(result)) {
@@ -144,19 +130,14 @@ Vector<uint8_t> JsPassRunner::runPass(std::string_view passName, const Vector<ui
     return out;
   }
 
-  size_t size = 0;
-  uint8_t *data = JS_GetArrayBuffer(ctx, &size, result);
-  if (!data) {
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, result, nullptr, nullptr, nullptr);
-    if (JS_IsException(buf)) {
-      error = "runPass: return value is neither an ArrayBuffer nor a typed array";
-      JS_FreeValue(ctx, buf);
-      JS_FreeValue(ctx, result);
-      return out;
-    }
-    data = JS_GetArrayBuffer(ctx, &size, buf);
-    JS_FreeValue(ctx, buf);
+  if (JS_GetTypedArrayType(result) != JS_TYPED_ARRAY_UINT8) {
+    error = "runPass: return value must be Uint8Array";
+    JS_FreeValue(ctx, result);
+    return out;
   }
+  size_t size = 0;
+  uint8_t *data = JS_GetUint8Array(ctx, &size, result);
+  if (!data && size != 0) error = "runPass: failed to read Uint8Array result";
   if (data && size > 0) out.assign(data, data + size);
   JS_FreeValue(ctx, result);
   return out;

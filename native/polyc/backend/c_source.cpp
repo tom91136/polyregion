@@ -1,9 +1,10 @@
 
 #include "c_source.h"
-#include "aspartame/all.hpp"
-#include "fmt/core.h"
 
 #include <set>
+
+#include "aspartame/all.hpp"
+#include "fmt/core.h"
 
 using namespace aspartame;
 using namespace polyregion;
@@ -35,8 +36,8 @@ struct CLAddressSpaceTracePass {
       // Walk the steps to recover a final type and any pointer-space hints from struct fields.
       // Since PathStep::Field carries no type, we just take the result type from sel->tpe and the
       // space from rebound's tpe if it is a Ptr (as the most common origin for spaced selects).
-      const auto space = rebound.tpe.template get<Type::Ptr>() ^                  //
-                         map([](auto &p) { return p.space; }) ^                   //
+      const auto space = rebound.tpe.template get<Type::Ptr>() ^ //
+                         map([](auto &p) { return p.space; }) ^  //
                          get_or_else(TypeSpace::Private().widen());
       return SpacedTerm{Term::Select(rebound, sel->steps, sel->tpe), space};
     }
@@ -101,8 +102,8 @@ struct CLAddressSpaceTracePass {
                                | map([&](auto &r) { return r.value.tpe(); })                               //
                                | distinct()                                                                //
                                | to_vector();                                                              //
-    return Function(fn.name, fn.tpeVars, fn.receiver, fn.args, fn.moduleCaptures, fn.termCaptures, tracedRtnTpes[0], body,
-                    fn.visibility, fn.fpMode, fn.isEntry);
+    return Function(fn.name, fn.tpeVars, fn.receiver, fn.args, fn.moduleCaptures, fn.termCaptures, tracedRtnTpes[0], body, fn.visibility,
+                    fn.fpMode, fn.isEntry);
   }
 
   static Program execute(const Program &p) {
@@ -179,8 +180,8 @@ struct CLAddressSpaceTracePass {
         | to_vector();
 
     if (spaceSpecialisedFns.empty()) return p;
-    return Program(spaceSpecialisedFns.front(), Vector<Function>(std::next(spaceSpecialisedFns.begin()), spaceSpecialisedFns.end()),
-                   p.defs, p.phase);
+    return Program(spaceSpecialisedFns.front(), Vector<Function>(std::next(spaceSpecialisedFns.begin()), spaceSpecialisedFns.end()), p.defs,
+                   p.phase);
   }
 };
 
@@ -228,11 +229,11 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Unit0 &) { return "void"s; },          //
                              [&](const Type::Bool1 &) { return "bool"s; },          //
 
-                             [&](const Type::Struct &x) { return normalise(x.name); },              //
-                             [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.comp)); }, //
+                             [&](const Type::Struct &x) { return normalise(x.name); },                           //
+                             [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.comp)); },              //
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
-                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); }      );
+                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); });
     case Dialect::OpenCL1_1:
       return tpe.match_total([&](const Type::Float16 &) { return "half"s; },   //
                              [&](const Type::Float32 &) { return "float"s; },  //
@@ -270,42 +271,41 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                                return fmt::format("{} {}[{}]", prefix, comp, x.length);
                              }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
-                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); }      );
+                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); });
   }
 }
 
 std::string backend::CSource::mkTerm(const Term::Any &term) {
-  return term.match_total(
-      [](const Term::Float16Const &x) { return fmt::format("{}", x.value); },   //
-      [](const Term::Float32Const &x) { return fmt::format("{}.f", x.value); }, //
-      [](const Term::Float64Const &x) { return fmt::format("{}", x.value); },   //
+  return term.match_total([](const Term::Float16Const &x) { return fmt::format("{}", x.value); },   //
+                          [](const Term::Float32Const &x) { return fmt::format("{}.f", x.value); }, //
+                          [](const Term::Float64Const &x) { return fmt::format("{}", x.value); },   //
 
-      [](const Term::IntU8Const &x) { return fmt::format("{}", x.value); },  //
-      [](const Term::IntU16Const &x) { return fmt::format("{}", x.value); }, //
-      [](const Term::IntU32Const &x) { return fmt::format("{}", x.value); }, //
-      [](const Term::IntU64Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntU8Const &x) { return fmt::format("{}", x.value); },  //
+                          [](const Term::IntU16Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntU32Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntU64Const &x) { return fmt::format("{}", x.value); }, //
 
-      [](const Term::IntS8Const &x) { return fmt::format("{}", x.value); },  //
-      [](const Term::IntS16Const &x) { return fmt::format("{}", x.value); }, //
-      [](const Term::IntS32Const &x) { return fmt::format("{}", x.value); }, //
-      [](const Term::IntS64Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntS8Const &x) { return fmt::format("{}", x.value); },  //
+                          [](const Term::IntS16Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntS32Const &x) { return fmt::format("{}", x.value); }, //
+                          [](const Term::IntS64Const &x) { return fmt::format("{}", x.value); }, //
 
-      [](const Term::Unit0Const &) { return "/*void*/"s; },                                   //
-      [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },                 //
-      [&](const Term::NullPtrConst &x) { return fmt::format("NULL /*{}*/", mkTpe(x.comp)); }, //
-      [&](const Term::Poison &x) { return fmt::format("(NULL /*{}*/)", repr(x.tpe)); },       //
-      [&](const Term::Select &x) {
-        std::string acc = normalise(x.root.symbol);
-        for (auto &step : x.steps) {
-          step.match_total(
-              [&](const PathStep::Field &f) {
-                acc += ".";
-                acc += normalise(f.name);
-              },
-              [&](const PathStep::Deref &) { acc = "(*" + acc + ")"; });
-        }
-        return acc;
-      });
+                          [](const Term::Unit0Const &) { return "/*void*/"s; },                                   //
+                          [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },                 //
+                          [&](const Term::NullPtrConst &x) { return fmt::format("NULL /*{}*/", mkTpe(x.comp)); }, //
+                          [&](const Term::Poison &x) { return fmt::format("(NULL /*{}*/)", repr(x.tpe)); },       //
+                          [&](const Term::Select &x) {
+                            std::string acc = normalise(x.root.symbol);
+                            for (auto &step : x.steps) {
+                              step.match_total(
+                                  [&](const PathStep::Field &f) {
+                                    acc += ".";
+                                    acc += normalise(f.name);
+                                  },
+                                  [&](const PathStep::Deref &) { acc = "(*" + acc + ")"; });
+                            }
+                            return acc;
+                          });
 }
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr) {
@@ -427,8 +427,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         if (x.idx) str += fmt::format("[{}]", mkTerm(*x.idx));
         return str;
       },
-      [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); }
-  );
+      [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); });
 }
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
@@ -446,8 +445,8 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::ForRange &x) {
         const auto body = x.body | mk_string("\n", [&](auto &s) { return mkStmt(s); });
         const auto induction = normalise(x.induction.symbol);
-        return fmt::format("for({} {} = {}; {} < {}; {} += {}) {{\n{}\n}}",                           //
-                           mkTpe(x.induction.tpe), induction, mkTerm(x.lbIncl),                       //
+        return fmt::format("for({} {} = {}; {} < {}; {} += {}) {{\n{}\n}}",     //
+                           mkTpe(x.induction.tpe), induction, mkTerm(x.lbIncl), //
                            induction, mkTerm(x.ubExcl), induction, mkTerm(x.step), body ^ indent(2));
       },
       [&](const Stmt::Break &) { return "break;"s; },   //

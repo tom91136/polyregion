@@ -1,10 +1,10 @@
 #pragma once
 
-#include "polyregion/aliases.h"
-
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
+
+#include "polyregion/aliases.h"
 
 namespace polyregion {
 

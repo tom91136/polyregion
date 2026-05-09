@@ -1,11 +1,11 @@
+#include "interpose.h"
+
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Passes/PassBuilder.h"
 
 #include "aspartame/all.hpp"
-
-#include "interpose.h"
 
 using namespace aspartame;
 using namespace polyregion;

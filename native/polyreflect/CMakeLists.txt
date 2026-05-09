@@ -31,6 +31,7 @@ target_link_options(polyreflect-rt-tests PRIVATE ${LINK_OPTIONS})
 if (APPLE)
     target_link_options(polyreflect-rt-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()
+add_test(NAME polyreflect-rt-tests COMMAND polyreflect-rt-tests)
 
 if (NOT WIN32)
     target_include_directories(polyreflect-plugin PRIVATE ${LLVM_INCLUDE_DIRS})

@@ -115,4 +115,20 @@ target_compile_options(polyinvoke-exec PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyinvoke-tests PRIVATE ${COMPILE_OPTIONS})
 
 target_link_options(polyinvoke-exec PRIVATE ${LINK_OPTIONS})
-target_link_options(polyinvoke-tests PRIVATE ${LINK_OPTIONS})
+# XXX libstdc++.so must come before libLLVM.so on DT_NEEDED order; libLLVM was built with
+# -static-libstdc++ and re-exports template instantiations that conflict with the dlopen'd
+# vendor libs (codecvt SEGV in AMD's populateOCLDeviceConstants otherwise).
+target_link_options(polyinvoke-tests PRIVATE
+        "SHELL:-Wl,--push-state,--no-as-needed -lstdc++ -lgcc_s -Wl,--pop-state"
+        ${GPU_RUNTIME_LINK_OPTIONS})
+
+# XXX `glibc.rtld.optional_static_tls=8192` bumps the static-TLS reserve so libamdhip64.so.6
+# (built with -ftls-model=initial-exec, DT_FLAGS STATIC_TLS) can dlopen.
+# XXX `POLYINVOKE_DISABLE_BACKENDS=HIP` because hipModuleLaunchKernel doesn't fill OpenCL-style
+# hidden args (hidden_block_count_x etc.) for kernels emitted by clang's nvptx-ocl pipeline.
+set(_polyinvoke_test_env "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=8192;POLYINVOKE_DISABLE_BACKENDS=HIP")
+foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "CPU Args" "GPU Args" "SPIRV Args" "CPU BabelStream" "GPU BabelStream" "SPIRV BabelStream")
+    string(REPLACE " " "-" _name "polyinvoke-${_case}")
+    add_test(NAME ${_name} COMMAND polyinvoke-tests "${_case}")
+    set_tests_properties(${_name} PROPERTIES ENVIRONMENT "${_polyinvoke_test_env}")
+endforeach ()

@@ -1,18 +1,31 @@
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
+
 #include "aspartame/all.hpp"
-#include "driver_polyc.h"
 #include "fmt/core.h"
+
 #include "polyfront/options_frontend.hpp"
 #include "polyregion/env.h"
-#include "llvm/Support/Program.h"
+
+#include "driver_polyc.h"
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
 
 [[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */ }
+
+static std::string joinPath(llvm::StringRef a, llvm::StringRef b, llvm::StringRef c = {}, llvm::StringRef d = {}) {
+  llvm::SmallString<256> p(a);
+  if (!b.empty()) llvm::sys::path::append(p, b);
+  if (!c.empty()) llvm::sys::path::append(p, c);
+  if (!d.empty()) llvm::sys::path::append(p, d);
+  return p.str().str();
+}
 
 int main(int argc, const char *argv[]) {
   CliArgs args(std::vector(argv, argv + argc));
@@ -20,21 +33,19 @@ int main(int argc, const char *argv[]) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-  namespace fs = std::filesystem;
+  const std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
+  const std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
-  const fs::path execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
-  const fs::path execParentPath = execPath.parent_path();
-
-  fs::path flangPath;
+  std::string flangPath;
   if (const auto driverArg = args.popValue("--driver")) flangPath = *driverArg;        // Explicit driver takes precedence
   else if (const auto driverEnv = std::getenv("POLYFC_DRIVER")) flangPath = driverEnv; // Then try environment vars
-  else if (fs::path flangBin = execParentPath / "flang-new";
-           fs::exists(flangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
+  else if (auto flangBin = joinPath(execParentPath, "flang-new");
+           llvm::sys::fs::exists(flangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
     flangPath = flangBin;
   } else {
     std::cerr << fmt::format(
                      "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`",
-                     execPath.string())
+                     execPath)
               << std::endl;
     return EXIT_FAILURE;
   }
@@ -58,18 +69,18 @@ int main(int argc, const char *argv[]) {
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
-                 auto polyfcResourcePath = execParentPath / "lib/polyfc";
-                 if (!fs::exists(polyfcResourcePath)) polyfcResourcePath = execParentPath / ".." / "lib" / "polyfc";
-                 const auto polyfcLibPath = polyfcResourcePath / "lib";
-                 const auto polyreflectPlugin = polyfcLibPath / fmt::format("polyreflect-plugin.{}", dynamicLibSuffix());
-                 const auto polyfcFlangPlugin = polyfcLibPath / fmt::format("polyfc-flang-plugin.{}", dynamicLibSuffix());
+                 std::string polyfcResourcePath = joinPath(execParentPath, "lib", "polyfc");
+                 if (!llvm::sys::fs::exists(polyfcResourcePath)) polyfcResourcePath = joinPath(execParentPath, "..", "lib", "polyfc");
+                 const auto polyfcLibPath = joinPath(polyfcResourcePath, "lib");
+                 const auto polyreflectPlugin = joinPath(polyfcLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
+                 const auto polyfcFlangPlugin = joinPath(polyfcLibPath, fmt::format("polyfc-flang-plugin.{}", dynamicLibSuffix()));
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
 
                  if (const bool noRewrite = std::getenv("POLYFC_NO_REWRITE") != nullptr; !noRewrite) {
-                   append({"-Xflang", "-load", "-Xflang", polyfcFlangPlugin.string()});
+                   append({"-Xflang", "-load", "-Xflang", polyfcFlangPlugin});
                    append({"-Xflang", "-plugin", "-Xflang", "polyfc"});
-                   envs.emplace_back(PolyfrontExe, execPath.string());
+                   envs.emplace_back(PolyfrontExe, execPath);
                    envs.emplace_back(PolyfrontVerbose, debug ? "1" : "0");
                    envs.emplace_back(PolyfrontTargets, opts->targets);
                  }
@@ -91,7 +102,7 @@ int main(int argc, const char *argv[]) {
                    }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
-                       remaining.insert(remaining.end(), (polyfcLibPath / fmt::format("libpolydco-static.{}", staticLibSuffix())).string());
+                       remaining.insert(remaining.end(), joinPath(polyfcLibPath, fmt::format("libpolydco-static.{}", staticLibSuffix())));
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
@@ -102,7 +113,7 @@ int main(int argc, const char *argv[]) {
                              << fmt::format(
                                     "[PolyFC] Dynamic linking of PolyDCO runtime requested, if you would like to relocate your binary, "
                                     "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
-                                    (polyfcLibPath / fmt::format("libpolydco.{}", dynamicLibSuffix())).string())
+                                    joinPath(polyfcLibPath, fmt::format("libpolydco.{}", dynamicLibSuffix())))
                              << std::endl;
                        }
                        break;
@@ -115,7 +126,6 @@ int main(int argc, const char *argv[]) {
                remaining[0] = "flang-new";
                for (auto [k, v] : envs)
                  polyregion::env::put(k, v.c_str(), true);
-               return llvm::sys::ExecuteAndWait(flangPath.string(),
-                                                remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
+               return llvm::sys::ExecuteAndWait(flangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
              });
 }

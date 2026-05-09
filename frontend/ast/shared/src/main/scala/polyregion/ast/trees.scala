@@ -91,10 +91,10 @@ extension (e: p.Type) {
     (e, that) match {
       case (p.Type.Struct(xSym, xArgs), p.Type.Struct(ySym, yArgs)) =>
         xSym == ySym && xArgs.sizeIs == yArgs.size && xArgs.zip(yArgs).forall(_ =:= _)
-      case (p.Type.Nothing, p.Type.Nothing)             => true
-      case (p.Type.Nothing, _)                          => true
-      case (_, p.Type.Nothing)                          => true
-      case (p.Type.Ptr(xt, xa), p.Type.Ptr(yt, ya))     => xt =:= yt && xa == ya
+      case (p.Type.Nothing, p.Type.Nothing)         => true
+      case (p.Type.Nothing, _)                      => true
+      case (_, p.Type.Nothing)                      => true
+      case (p.Type.Ptr(xt, xa), p.Type.Ptr(yt, ya)) => xt =:= yt && xa == ya
       case (p.Type.Arr(xt, xl, xa), p.Type.Arr(yt, yl, ya)) =>
         xt =:= yt && xl == yl && xa == ya
       case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _)) => ??? // TODO impl exec

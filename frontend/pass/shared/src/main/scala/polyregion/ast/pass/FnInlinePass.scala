@@ -14,7 +14,7 @@ object FnInlinePass extends ProgramPass {
         table.get(root) match {
           case Some(p.Term.Select(rRoot, rSteps, _)) => p.Term.Select(rRoot, rSteps ::: steps, tpe)
           case Some(other) if steps.isEmpty          => other
-          case Some(_) =>
+          case Some(_)                               =>
             // Replacement is a non-Select Term but the call wants to apply field steps;
             // shouldn't happen for well-typed substitutions, fall through.
             p.Term.Select(root, steps, tpe)
@@ -35,7 +35,7 @@ object FnInlinePass extends ProgramPass {
       }
       .modifyAll[p.Stmt] {
         case p.Stmt.Var(n, expr, isMutable) => p.Stmt.Var(rename(n), expr, isMutable)
-        case x                            => x
+        case x                              => x
       }
     p.Function(
       f.name,
@@ -89,10 +89,10 @@ object FnInlinePass extends ProgramPass {
         (expr, noReturnBody, renamed.moduleCaptures)
       case xs =>
         // multi-return: bind to a phi var, replace each Return with a Mut to the phi.
-        val phiName             = p.Named("phi", ivk.tpe)
+        val phiName                  = p.Named("phi", ivk.tpe)
         val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
-        val phiDecl     = p.Stmt.Var(phiName, None, isMutable = true)
-        val rebound     = substituted.body.map(rebindReturn(phiSelect))
+        val phiDecl                  = p.Stmt.Var(phiName, None, isMutable = true)
+        val rebound                  = substituted.body.map(rebindReturn(phiSelect))
         (p.Expr.Alias(phiSelect), phiDecl :: rebound, renamed.moduleCaptures)
     }
   }

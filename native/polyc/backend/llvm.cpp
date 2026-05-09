@@ -1,25 +1,24 @@
+#include "llvm.h"
+
 #include <iostream>
 #include <unordered_set>
-
-#include "aspartame/all.hpp"
-
-#include "ast.h"
-#include "llvm.h"
-#include "llvmc.h"
-
-#include "fmt/core.h"
-#include "magic_enum/magic_enum.hpp"
-
-#include "llvm_amdgpu.h"
-#include "llvm_cpu.h"
-#include "llvm_nvptx.h"
-#include "llvm_spirv_cl.h"
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/TargetParser/Host.h"
+
+#include "aspartame/all.hpp"
+#include "fmt/core.h"
+#include "magic_enum/magic_enum.hpp"
+
+#include "ast.h"
+#include "llvm_amdgpu.h"
+#include "llvm_cpu.h"
+#include "llvm_nvptx.h"
+#include "llvm_spirv_cl.h"
+#include "llvmc.h"
 
 using namespace aspartame;
 using namespace polyregion;

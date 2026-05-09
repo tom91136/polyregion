@@ -1,15 +1,17 @@
+#include "codegen.h"
+
 #include <iostream>
+
+#include "clang/AST/Attr.h"
+#include "clang/AST/RecordLayout.h"
 
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
-#include "clang_utils.h"
-#include "codegen.h"
 #include "polyregion/types.h"
-#include "remapper.h"
 
-#include "clang/AST/Attr.h"
-#include "clang/AST/RecordLayout.h"
+#include "clang_utils.h"
+#include "remapper.h"
 
 using namespace polyregion;
 using namespace polyregion::polyast;
@@ -49,8 +51,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
     // declName() carries the per-decl ID suffix so the alias matches what DeclRefExpr emits.
     auto name = declName(userParams.front());
     if (!name.empty()) {
-      tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()),
-                                     Expr::Alias(dsl::Select(Vector<Named>{}, Named("__tid", Type::IntS64()))),
+      tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()), Expr::Alias(dsl::Select(Vector<Named>{}, Named("__tid", Type::IntS64()))),
                                      /*isMutable*/ false));
     }
     userParams.erase(userParams.begin());
@@ -67,9 +68,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
 
                 auto tpe = remapper.handleType(x->getType(), r);
 
-                auto annotatedTpe = tpe.get<Type::Ptr>() ^
-                                    fold([&](auto p) { return Type::Ptr(p.comp, local ? TypeSpace::Local() : p.space).widen(); },
-                                         [&]() { return tpe; });
+                auto annotatedTpe =
+                    tpe.get<Type::Ptr>() ^
+                    fold([&](auto p) { return Type::Ptr(p.comp, local ? TypeSpace::Local() : p.space).widen(); }, [&]() { return tpe; });
 
                 return Arg(Named(declName(x), annotatedTpe), {});
               })             //
@@ -77,19 +78,16 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
               | to_vector();
 
   auto f0 = std::make_shared<Function>(Sym({"_main"}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
-                                       std::vector<Arg>{}, rtnTpe, stmts,
-                                       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+                                       std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
 
-  auto program = Program(*f0,
-                         r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         PassPhase::Initial());
+  auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
+                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial());
 
-  auto exportedFns = (std::vector<Function>{program.entry} ^ concat(program.functions))                                                //
-                     | filter([](auto &f) { return f.visibility.template is<FunctionVisibility::Exported>(); })                         //
+  auto exportedFns = (std::vector<Function>{program.entry} ^ concat(program.functions))                         //
+                     | filter([](auto &f) { return f.visibility.template is<FunctionVisibility::Exported>(); }) //
                      | to_vector();
   auto exportedStructNames =
-      exportedFns                                                                                                                        //
+      exportedFns                                                                                                                         //
       | flat_map([](auto &f) { return f.args; })                                                                                          //
       | collect([](auto &a) { return extractComponent(a.named.tpe) ^ flat_map([](auto &t) { return t.template get<Type::Struct>(); }); }) //
       | map([](auto &s) { return repr(s.name); })                                                                                         //
@@ -146,10 +144,10 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
 
           if (auto format = runtime::moduleFormatOf(target)) {
             return polyfront::KernelObject{
-                *format,                                                                                                         //
-                *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
-                result.features,                                                                                                 //
-                std::string(bin->begin(), bin->end())                                                                            //
+                *format,                              //
+                runtime::targetPlatformKind(target),  //
+                result.features,                      //
+                std::string(bin->begin(), bin->end()) //
             };
           } else {
             diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,

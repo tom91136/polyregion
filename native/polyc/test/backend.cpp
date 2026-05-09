@@ -1,10 +1,11 @@
-#include "ast.h"
+#include <iostream>
+
 #include "catch2/catch_all.hpp"
+
+#include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
-
-#include <iostream>
 
 using namespace polyregion::polyast;
 using namespace polyregion::compiletime;
@@ -15,8 +16,8 @@ using namespace Intr;
 static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body,
                      FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
                      FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
-  return Function(Sym({name}), {}, std::optional<Arg>{}, std::move(args), {}, {}, std::move(rtn), std::move(body),
-                  std::move(visibility), std::move(fpMode), isEntry);
+  return Function(Sym({name}), {}, std::optional<Arg>{}, std::move(args), {}, {}, std::move(rtn), std::move(body), std::move(visibility),
+                  std::move(fpMode), isEntry);
 }
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
@@ -33,15 +34,16 @@ TEST_CASE("run", "[backend]") {
   using namespace polyregion::polyast::dsl;
   const Named aN("a", Type::IntS32());
   const Named bN("b", Type::IntS32());
-  Function fn = mkFn("foo", {}, Type::Unit0(),
-                     {
-                         Var(aN, Expr::Alias(Term::IntS32Const(42)).widen(), /*isMutable*/ false).widen(),
-                         Var(bN, Expr::Alias(Term::IntS32Const(42)).widen(), /*isMutable*/ false).widen(),
-                         Var(Named("c", Type::IntS32()),
-                             Expr::IntrOp(Add(selectNamed(aN), selectNamed(bN), Type::IntS32()).widen()).widen(),
-                             /*isMutable*/ false).widen(),
-                         Return(Expr::Alias(Term::Unit0Const()).widen()).widen(),
-                     });
+  Function fn =
+      mkFn("foo", {}, Type::Unit0(),
+           {
+               Var(aN, Expr::Alias(Term::IntS32Const(42)).widen(), /*isMutable*/ false).widen(),
+               Var(bN, Expr::Alias(Term::IntS32Const(42)).widen(), /*isMutable*/ false).widen(),
+               Var(Named("c", Type::IntS32()), Expr::IntrOp(Add(selectNamed(aN), selectNamed(bN), Type::IntS32()).widen()).widen(),
+                   /*isMutable*/ false)
+                   .widen(),
+               Return(Expr::Alias(Term::Unit0Const()).widen()).widen(),
+           });
 
   Program p(fn, {}, {}, PassPhase::Initial());
   INFO(repr(p));

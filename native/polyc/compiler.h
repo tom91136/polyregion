@@ -5,9 +5,10 @@
 #include <string>
 #include <vector>
 
-#include "ast.h"
 #include "polyregion/export.h"
 #include "polyregion/types.h"
+
+#include "ast.h"
 
 namespace polyregion::compiler {
 

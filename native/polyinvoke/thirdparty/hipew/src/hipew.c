@@ -215,6 +215,9 @@ static DynamicLibrary dynamic_library_open_find(const char **paths) {
       if (lib != NULL) {
         return lib;
       }
+#ifndef _WIN32
+      fprintf(stderr, "[HIPEW] dlopen(%s) failed: %s\n", paths[i], dlerror());
+#endif
       ++i;
   }
   return NULL;

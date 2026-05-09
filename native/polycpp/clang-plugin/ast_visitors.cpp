@@ -1,11 +1,11 @@
+#include "ast_visitors.h"
+
 #include <optional>
 #include <vector>
 
 #include "clang/AST/Decl.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "llvm/Support/Casting.h"
-
-#include "ast_visitors.h"
 
 using namespace polyregion::polystl;
 using namespace aspartame;

@@ -1,10 +1,10 @@
-#include <catch2/catch_test_macros.hpp>
-
 #include <fstream>
 #include <numeric>
 
 #include "aspartame/all.hpp"
 #include "fmt/args.h"
+#include <catch2/catch_test_macros.hpp>
+
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 

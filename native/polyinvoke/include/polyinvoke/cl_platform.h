@@ -50,6 +50,7 @@ class POLYREGION_EXPORT ClDevice final : public Device {
   details::SVMFns svm{};                        // populated iff device advertises buffer SVM
   details::ClModuleStore store;                 // must be dropped before the device
   detail::MemoryObjects<cl_mem> memoryObjects;
+  std::optional<std::vector<std::string>> cachedFeatures; // XXX features() probes via clBuildProgram; cache so we pay once.
 
 public:
   explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, details::SVMFns svm);

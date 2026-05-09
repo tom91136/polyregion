@@ -280,7 +280,9 @@ endif ()
 
 if (UNIX AND NOT APPLE)
     set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
-            -static-libgcc -static-libstdc++)
+            -static-libgcc -static-libstdc++
+            # XXX Hide statically-embedded libstdc++ symbols from the dynsym table
+            LINKER:--exclude-libs=libstdc++.a)
 endif ()
 
 
@@ -297,13 +299,13 @@ else ()
     set(LLVM_VARIANT dylib)
 endif ()
 set(LLVM_BUILD_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}")
-set(LLVM_DIR  "${LLVM_BUILD_PREFIX}/lib/cmake/llvm")
-set(LLD_DIR   "${LLVM_BUILD_PREFIX}/lib/cmake/lld")
+set(LLVM_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/llvm")
+set(LLD_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/lld")
 set(Clang_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/clang")
 set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist")
 
 set(Flang_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/flang")
-set(MLIR_DIR  "${LLVM_BUILD_PREFIX}/lib/cmake/mlir")
+set(MLIR_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/mlir")
 
 message(STATUS "Using LLVM at ${LLVM_DIR}")
 message(STATUS "Using LLD at ${LLD_DIR}")
@@ -343,6 +345,20 @@ set(LINK_OPTIONS
         CACHE INTERNAL ""
 )
 
+# Link options for binaries that dlopen vendor GPU runtimes (HIP, HSA, OpenCL ICDs).
+# XXX AMD's  libamdhip64 / libamdocl64 / libamdrocclr_static call libstdc++'s codecvt::do_in inside
+# `populateOCLDeviceConstants`; if the host process embeds its own static libstdc++, the locale
+# facet registry diverges from libstdc++.so.6's and AMD SEGVs. Linking dynamic libstdc++ keeps
+# one libstdc++ in the process.
+# To support AMD, we basically cannot static link libstdc++
+set(GPU_RUNTIME_LINK_OPTIONS ${LINK_OPTIONS} CACHE INTERNAL "")
+if (UNIX AND NOT APPLE)
+    list(REMOVE_ITEM GPU_RUNTIME_LINK_OPTIONS
+            -static-libstdc++
+            -static-libgcc
+            "LINKER:--exclude-libs=libstdc++.a")
+endif ()
+
 set(PLUGIN_LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${PLUGIN_LINK_OPTIONS}
@@ -350,22 +366,47 @@ set(PLUGIN_LINK_OPTIONS
         CACHE INTERNAL ""
 )
 
+enable_testing()
+set(CMAKE_CTEST_ARGUMENTS
+        "-j${NPROC}"
+        "--output-on-failure"
+        "--output-junit;${CMAKE_BINARY_DIR}/test-results.xml"
+        CACHE INTERNAL "")
+
 add_subdirectory(common)
 add_subdirectory(polyast)
 add_subdirectory(polyc)
 add_subdirectory(polyinvoke)
 add_subdirectory(polyfront)
 add_subdirectory(polyreflect)
+add_subdirectory(polytest)
 add_subdirectory(polycpp)
 add_subdirectory(polyfc)
 add_subdirectory(bindings)
 
-# ---- format / format-check -------------------------------------------------
-# `cmake --build <build> --target format`        -> clang-format -i across the tree
-# `cmake --build <build> --target format-check`  -> clang-format --dry-run --Werror (CI gate)
-#
-# Vendored sources (`polyinvoke/thirdparty/`) and build/dependency dirs are skipped;
-# generated files under `polyast/generated/` are intentionally included.
+# ## test_all
+# `cmake --build <build> --target test_all` => ${CMAKE_BINARY_DIR}/test-results.xml.
+set(POLYREGION_TEST_BINARIES
+        polycommon-tests
+        polyc-tests
+        polyinvoke-tests
+        polyrt-tests
+        polyreflect-rt-tests
+        polycpp-tests
+        polyfc-tests)
+
+
+add_custom_target(test_all
+        COMMAND ${CMAKE_CTEST_COMMAND} ${CMAKE_CTEST_ARGUMENTS}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DEPENDS ${POLYREGION_TEST_BINARIES}
+        USES_TERMINAL
+        VERBATIM
+        COMMENT "ctest -j${NPROC} --output-junit test-results.xml")
+
+# ## format/format-check
+# `cmake --build <build> --target format`        => clang-format -i across the tree
+# `cmake --build <build> --target format-check`  => clang-format --dry-run --Werror (CI gate)
 file(GLOB_RECURSE POLYREGION_FORMAT_SOURCES
         LIST_DIRECTORIES false
         CONFIGURE_DEPENDS
@@ -374,7 +415,7 @@ file(GLOB_RECURSE POLYREGION_FORMAT_SOURCES
         "${CMAKE_SOURCE_DIR}/*.h"
         "${CMAKE_SOURCE_DIR}/*.hpp")
 list(FILTER POLYREGION_FORMAT_SOURCES EXCLUDE REGEX
-        "/(_deps|llvm-[^/]+|vcpkg_installed|cmake-build-[^/]+|CMakeFiles)/|/polyinvoke/thirdparty/|/(debian-sysroot-image-creator|sysroot-[^/]+)/")
+        "/(_deps|llvm-[^/]+|polyregion-[^/]+-dist|vcpkg_installed|build-[^/]+|cmake-build-[^/]+|CMakeFiles)/|/polyinvoke/thirdparty/|/(debian-sysroot-image-creator|sysroot-[^/]+)/")
 
 # Prefer the bundled LLVM dist's clang-format so output is reproducible across hosts.
 file(GLOB POLYREGION_LLVM_DIST_BIN "${CMAKE_SOURCE_DIR}/llvm-*-dist/bin")

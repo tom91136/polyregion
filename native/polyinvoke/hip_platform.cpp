@@ -1,4 +1,5 @@
 #include "polyinvoke/hip_platform.h"
+
 #include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::invoke;

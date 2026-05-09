@@ -1,12 +1,12 @@
 #pragma once
 
+#include "aspartame/all.hpp"
+#include "fmt/core.h"
+
 #include "fexpr.h"
 #include "ftypes.h"
 #include "polyast.h"
 #include "utils.h"
-
-#include "aspartame/all.hpp"
-#include "fmt/core.h"
 
 namespace polyregion::polyfc {
 

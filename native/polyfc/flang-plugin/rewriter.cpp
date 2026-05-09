@@ -1,3 +1,5 @@
+#include "rewriter.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
@@ -9,7 +11,8 @@
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Optimizer/Support/Utils.h"
 #include "flang/Optimizer/Transforms/Passes.h"
-
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Path.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
@@ -19,11 +22,9 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/Path.h"
-
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
+
 #include "polyfront/options_backend.hpp"
 #include "polyregion/types.h"
 
@@ -32,7 +33,6 @@
 #include "mirrors.h"
 #include "mlir_utils.h"
 #include "remapper.h"
-#include "rewriter.h"
 #include "utils.h"
 
 namespace {

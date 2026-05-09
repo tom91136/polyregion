@@ -2,11 +2,13 @@
 
 #include <optional>
 
-#include "ast.h"
+#include "clang/AST/ASTContext.h"
+
 #include "fmt/format.h"
+
 #include "polyregion/error.h"
 
-#include "clang/AST/ASTContext.h"
+#include "ast.h"
 
 namespace polyregion::polystl {
 

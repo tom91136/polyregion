@@ -1,21 +1,22 @@
+#include "driver_polyc.h"
+
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "magic_enum/magic_enum.hpp"
-
 #include "aspartame/optional.hpp"
 #include "aspartame/string.hpp"
 #include "aspartame/unordered_map.hpp"
 #include "aspartame/vector.hpp"
+#include "magic_enum/magic_enum.hpp"
+
+#include "polyregion/io.hpp"
 
 #include "ast.h"
 #include "compiler.h"
-#include "driver_polyc.h"
 #include "fire.hpp"
 #include "polyast_codec.h"
-#include "polyregion/io.hpp"
 
 using namespace polyregion;
 using namespace aspartame;
@@ -76,9 +77,13 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                auto isJson = bytes ^ forall([](auto c) { return c <= 127; });
 
                try {
-                 auto raw =
-                     isJson ? nlohmann::json::parse(bytes.begin(), bytes.end()) : nlohmann::json::from_msgpack(bytes.begin(), bytes.end());
-                 auto program = polyast::program_from_json(polyast::hashed_from_json(raw));
+                 auto program = [&]() {
+                   if (isJson) {
+                     auto raw = nlohmann::json::parse(bytes.begin(), bytes.end());
+                     return polyast::program_from_json(polyast::hashed_from_json(raw));
+                   }
+                   return polyast::hashed_program_from_msgpack(bytes.data(), bytes.data() + bytes.size());
+                 }();
 
                  compiler::initialise();
                  std::cout << "[POLYC] Compiling program:\n";
@@ -90,7 +95,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                    auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
                    if (verbose) std::cerr << repr(compilation) << std::endl;
                    if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
-                   auto resultBytes = nlohmann::json::to_msgpack(compileresult_to_json(compilation));
+                   auto resultBytes = compileresult_to_msgpack(compilation);
                    if (out == "-") {
                      std::freopen(nullptr, "wb", stdout);
                      std::fwrite(resultBytes.data(), resultBytes.size(), sizeof(std::byte), stdout);
@@ -102,7 +107,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                    std::cerr << e.what() << std::endl;
                  }
 
-               } catch (nlohmann::json::exception &e) {
+               } catch (const std::exception &e) {
                  std::cerr << "Unable to parse packed ast:" << e.what() << std::endl;
                }
                return EXIT_SUCCESS;

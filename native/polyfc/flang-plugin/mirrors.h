@@ -1,11 +1,12 @@
 #pragma once
 
-#include "mlir_utils.h"
-#include "polyregion/types.h"
-
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+
+#include "polyregion/types.h"
+
+#include "mlir_utils.h"
 
 namespace polyregion::polyfc {
 

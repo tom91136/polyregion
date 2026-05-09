@@ -144,7 +144,7 @@ std::string fRepr(const FExpr &t);
 std::string fRepr(const FType &t);
 
 std::function<polyast::Expr::Any(const polyast::Term::Any &, const polyast::Term::Any &)> reductionOp(const polydco::FReduction::Kind &k,
-                                                                                                       const polyast::Type::Any &t);
+                                                                                                      const polyast::Type::Any &t);
 
 polyast::Expr::Any reductionInit(const polydco::FReduction::Kind &k, const polyast::Type::Any &t);
 

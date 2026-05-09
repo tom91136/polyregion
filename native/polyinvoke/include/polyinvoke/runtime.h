@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "polyregion/compat.h"
-
 #include "polyregion/error.h"
 #include "polyregion/export.h"
 #include "polyregion/types.h"

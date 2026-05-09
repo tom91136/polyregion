@@ -1,8 +1,9 @@
-#include "magic_enum/magic_enum.hpp"
+#include "polyinvoke/vulkan_platform.h"
+
 #include <iostream>
 #include <utility>
 
-#include "polyinvoke/vulkan_platform.h"
+#include "magic_enum/magic_enum.hpp"
 
 #ifndef _MSC_VER
   #pragma clang diagnostic push
@@ -284,7 +285,12 @@ static std::string normaliseVulkanVendor(std::string s) {
 
 std::vector<std::string> VulkanDevice::features() {
   POLYINVOKE_TRACE();
-  return {"vulkan", "spirv_glcompute", normaliseVulkanVendor(device.getProperties().deviceName)};
+  std::vector<std::string> out{"vulkan", "spirv_glcompute", normaliseVulkanVendor(device.getProperties().deviceName)};
+  const auto f = device.getFeatures();
+  if (f.shaderFloat64) out.emplace_back("fp64");
+  if (f.shaderInt64) out.emplace_back("int64");
+  if (f.shaderInt16) out.emplace_back("int16");
+  return out;
 }
 void VulkanDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();

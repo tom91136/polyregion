@@ -1,18 +1,17 @@
 #pragma once
 
-#include "polyregion/compat.h"
-
 #include <vector>
+
+#include "polyregion/compat.h"
 #ifdef NO_ERROR
   #undef NO_ERROR
 #endif
 
-#include "llvm/TargetParser/Host.h"
-#include "llvm/TargetParser/Triple.h"
-
 #include "llvm/TargetParser/AArch64TargetParser.h"
 #include "llvm/TargetParser/ARMTargetParser.h"
+#include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/TargetParser.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/TargetParser/X86TargetParser.h"
 
 namespace polyregion::llvm_shared {

@@ -1,22 +1,22 @@
-#include "magic_enum/magic_enum.hpp"
 #include <mutex>
 #include <system_error>
 #include <thread>
 #include <utility>
 
+#include "magic_enum/magic_enum.hpp"
+
 #if defined(__linux__) || defined(__APPLE__)
   #include <dlfcn.h>
 #endif
-
-#include "polyregion/compat.h"
-
-#include "polyinvoke/object_platform.h"
-#include "polyregion/llvm_utils.hpp"
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/TargetParser/Host.h"
+
+#include "polyinvoke/object_platform.h"
+#include "polyregion/compat.h"
+#include "polyregion/llvm_utils.hpp"
 
 // XXX Make sure this goes last as libffi pollutes the global namespace with macros
 #include "ffi_wrapped.h"
@@ -81,6 +81,10 @@ std::vector<std::string> ObjectDevice::features() {
 
   polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(),
                                               llvm::Triple(llvm::sys::getDefaultTargetTriple()).getArch(), features);
+
+  features.emplace_back("fp64");
+  features.emplace_back("fp16");
+  features.emplace_back("int64");
 
   return features;
 }

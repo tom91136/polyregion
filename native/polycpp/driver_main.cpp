@@ -1,17 +1,32 @@
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 
-#include "aspartame/all.hpp"
-#include "driver_polyc.h"
-#include "fmt/core.h"
-#include "polyfront/options_frontend.hpp"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
+
+#include "aspartame/all.hpp"
+#include "fmt/core.h"
+
+#include "polyfront/options_frontend.hpp"
+
+#include "driver_polyc.h"
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
 
 [[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */ }
+
+static std::string joinPath(llvm::StringRef a, llvm::StringRef b, llvm::StringRef c = {}, llvm::StringRef d = {}) {
+  llvm::SmallString<256> p(a);
+  // Skip empty components: llvm::sys::path::append unconditionally inserts a separator before
+  // each non-null Twine, which would yield a trailing `/` for unused trailing args.
+  if (!b.empty()) llvm::sys::path::append(p, b);
+  if (!c.empty()) llvm::sys::path::append(p, c);
+  if (!d.empty()) llvm::sys::path::append(p, d);
+  return p.str().str();
+}
 
 int main(int argc, const char *argv[]) {
   CliArgs args(std::vector(argv, argv + argc));
@@ -19,22 +34,20 @@ int main(int argc, const char *argv[]) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-  namespace fs = std::filesystem;
+  std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
+  std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
-  fs::path execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
-  fs::path execParentPath = execPath.parent_path();
-
-  fs::path clangPath;
+  std::string clangPath;
 
   if (auto driverArg = args.popValue("--driver")) clangPath = *driverArg;         // Explicit driver takes precedence
   else if (auto driverEnv = std::getenv("POLYCPP_DRIVER")) clangPath = driverEnv; // Then try environment vars
-  else if (fs::path clangBin = execParentPath / "clang++";
-           fs::exists(clangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
+  else if (auto clangBin = joinPath(execParentPath, "clang++");
+           llvm::sys::fs::exists(clangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
     clangPath = clangBin;
   } else {
     std::cerr << fmt::format(
                      "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`",
-                     execPath.string())
+                     execPath)
               << std::endl;
     return EXIT_FAILURE;
   }
@@ -54,21 +67,21 @@ int main(int argc, const char *argv[]) {
                  remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator));
                  remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_LIB", {}, llvm::sys::EnvPathSeparator));
 
-                 auto polycppResourcePath = execParentPath / "lib/polycpp";
-                 if (!fs::exists(polycppResourcePath)) polycppResourcePath = execParentPath / ".." / "lib" / "polycpp";
-                 const auto polycppIncludePath = polycppResourcePath / "include";
-                 const auto polycppLibPath = polycppResourcePath / "lib";
-                 const auto polyreflectPlugin = polycppLibPath / fmt::format("polyreflect-plugin.{}", dynamicLibSuffix());
-                 const auto polycppClangPlugin = polycppLibPath / fmt::format("polycpp-clang-plugin.{}", dynamicLibSuffix());
-                 append({"-isystem", polycppIncludePath.string()});
+                 std::string polycppResourcePath = joinPath(execParentPath, "lib", "polycpp");
+                 if (!llvm::sys::fs::exists(polycppResourcePath)) polycppResourcePath = joinPath(execParentPath, "..", "lib", "polycpp");
+                 const auto polycppIncludePath = joinPath(polycppResourcePath, "include");
+                 const auto polycppLibPath = joinPath(polycppResourcePath, "lib");
+                 const auto polyreflectPlugin = joinPath(polycppLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
+                 const auto polycppClangPlugin = joinPath(polycppLibPath, fmt::format("polycpp-clang-plugin.{}", dynamicLibSuffix()));
+                 append({"-isystem", polycppIncludePath});
                  append({"-include", "polystl/polystl.h"});
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
                  const bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
                  if (!noRewrite) {
-                   append({"-Xclang", "-load", "-Xclang", polycppClangPlugin.string()});
+                   append({"-Xclang", "-load", "-Xclang", polycppClangPlugin});
                    append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
-                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontExe, execPath.string())});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontExe, execPath)});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontVerbose, debug ? "1" : "0")});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontTargets, opts->targets)});
                  }
@@ -106,8 +119,7 @@ int main(int argc, const char *argv[]) {
                    }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
-                       remaining.insert(remaining.end(),
-                                        (polycppLibPath / fmt::format("libpolystl-static.{}", staticLibSuffix())).string());
+                       remaining.insert(remaining.end(), joinPath(polycppLibPath, fmt::format("libpolystl-static.{}", staticLibSuffix())));
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
@@ -118,7 +130,7 @@ int main(int argc, const char *argv[]) {
                              << fmt::format(
                                     "[PolyCpp] Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "
                                     "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
-                                    (polycppLibPath / fmt::format("libpolystl.{}", dynamicLibSuffix())).string())
+                                    joinPath(polycppLibPath, fmt::format("libpolystl.{}", dynamicLibSuffix())))
                              << std::endl;
                        }
                        break;
@@ -131,7 +143,6 @@ int main(int argc, const char *argv[]) {
                remaining[0] = "clang++";
                std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
 
-               return llvm::sys::ExecuteAndWait(clangPath.string(),
-                                                remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
+               return llvm::sys::ExecuteAndWait(clangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
              });
 }

@@ -3,12 +3,12 @@
 #include <string>
 #include <vector>
 
-#include "polyast.h"
-#include "polyregion/types.h"
+#include "clang/AST/ASTContext.h"
 
 #include "polyfront/options_backend.hpp"
+#include "polyregion/types.h"
 
-#include "clang/AST/ASTContext.h"
+#include "polyast.h"
 
 namespace polyregion::polystl {
 

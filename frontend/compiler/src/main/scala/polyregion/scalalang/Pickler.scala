@@ -25,18 +25,18 @@ object Pickler {
   }
 
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
-    case p.Type.Bool1              => rt.Type.BOOL
-    case p.Type.IntS8              => rt.Type.BYTE
-    case p.Type.IntU16             => rt.Type.CHAR
-    case p.Type.IntS16             => rt.Type.SHORT
-    case p.Type.IntS32             => rt.Type.INT
-    case p.Type.IntS64             => rt.Type.LONG
-    case p.Type.Float32            => rt.Type.FLOAT
-    case p.Type.Float64            => rt.Type.DOUBLE
-    case p.Type.Ptr(_, _)       => rt.Type.PTR
+    case p.Type.Bool1        => rt.Type.BOOL
+    case p.Type.IntS8        => rt.Type.BYTE
+    case p.Type.IntU16       => rt.Type.CHAR
+    case p.Type.IntS16       => rt.Type.SHORT
+    case p.Type.IntS32       => rt.Type.INT
+    case p.Type.IntS64       => rt.Type.LONG
+    case p.Type.Float32      => rt.Type.FLOAT
+    case p.Type.Float64      => rt.Type.DOUBLE
+    case p.Type.Ptr(_, _)    => rt.Type.PTR
     case p.Type.Struct(_, _) => rt.Type.PTR
-    case p.Type.Unit0              => rt.Type.VOID
-    case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
+    case p.Type.Unit0        => rt.Type.VOID
+    case illegal             => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
   def readPrim(using q: Quotes) //
@@ -171,9 +171,9 @@ object Pickler {
           }
         }
       (sdef, repr.widenTermRefByName) :: sdef.members.flatMap {
-        case p.Named(member, p.Type.Struct(name, _))              => descend(name, member)
+        case p.Named(member, p.Type.Struct(name, _))           => descend(name, member)
         case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _), _)) => descendArrayElement(name)
-        case _                                                          => Nil
+        case _                                                 => Nil
       }
     }
     go(sdef, repr, Set()).toMap

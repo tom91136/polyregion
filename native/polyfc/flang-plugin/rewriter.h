@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mlir/IR/BuiltinOps.h"
 #include "clang/Basic/Diagnostic.h"
+#include "mlir/IR/BuiltinOps.h"
 
 namespace polyregion::polyfc {
 

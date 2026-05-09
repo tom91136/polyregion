@@ -22,14 +22,14 @@ endif ()
 add_executable(polyfc driver_main.cpp)
 add_dependencies(polyfc polyfc-lib-resource)
 
-add_executable(polyfc-test test/test_all.cpp)
-add_dependencies(polyfc-test polyfc polydco)
-target_include_directories(polyfc-test PRIVATE
+add_executable(polyfc-tests test/test_all.cpp)
+add_dependencies(polyfc-tests polyfc polydco)
+target_include_directories(polyfc-tests PRIVATE
         ../include
         polydco
         ${LLVM_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(polyfc-test PRIVATE
+target_compile_definitions(polyfc-tests PRIVATE
         POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 
 # === test_all.h.in variables ===
@@ -59,11 +59,8 @@ target_link_libraries(polyfc PRIVATE
         Aspartame::Aspartame
         fmt::fmt
 )
-target_link_libraries(polyfc-test PRIVATE
-        polyfront-lit
-        LLVMSupport
-        fmt::fmt
-        Aspartame::Aspartame
+target_link_libraries(polyfc-tests PRIVATE
+        polytest
         Catch2::Catch2WithMain
 )
 
@@ -71,8 +68,19 @@ target_link_libraries(polyfc-test PRIVATE
 target_compile_options(polyfc PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyfc PRIVATE ${LINK_OPTIONS})
 
-target_compile_options(polyfc-test PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyfc-test PRIVATE ${LINK_OPTIONS})
+target_compile_options(polyfc-tests PRIVATE ${COMPILE_OPTIONS})
+target_link_options(polyfc-tests PRIVATE ${LINK_OPTIONS})
+
+# XXX one ctest entry per test file x {offload, passthrough}; --allow-running-no-tests so
+# Catch2 returns 0 when every section SKIPs (polyrt reports no compatible target).
+foreach (_test_file IN LISTS TEST_FILE_PATHS)
+    get_filename_component(_test_name "${_test_file}" NAME_WE)
+    string(REGEX REPLACE "^check_" "" _test_short "${_test_name}")
+    foreach (_mode IN ITEMS offload passthrough)
+        set(_name "polyfc-${_test_short}-${_mode}")
+        add_test(NAME ${_name} COMMAND polyfc-tests "${_mode}" -c "${_test_short}" --allow-running-no-tests)
+    endforeach ()
+endforeach ()
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

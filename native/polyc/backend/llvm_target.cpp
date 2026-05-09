@@ -1,14 +1,14 @@
 #include <unordered_set>
 
+#include "llvm/TargetParser/Host.h"
+
 #include "aspartame/all.hpp"
+#include "fmt/core.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "ast.h"
 #include "llvm.h"
 #include "llvmc.h"
-
-#include "fmt/core.h"
-#include "llvm/TargetParser/Host.h"
 
 using namespace aspartame;
 using namespace polyregion;
@@ -59,9 +59,7 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
       [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return GlobalAS; });
 }
 
-llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B) const {
-  return GenericAS != 0 ? B.getPtrTy(GlobalAS) : B.getPtrTy();
-}
+llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B) const { return GenericAS != 0 ? B.getPtrTy(GlobalAS) : B.getPtrTy(); }
 
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {
   // SPIRV slots must use the value's AS (stores would otherwise cross disjoint spaces); other
@@ -134,10 +132,8 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
                                                            return fmt::format(" -> {}", to_string(ty.def));
                                                          })));
                     });
-      }, //
-      [&](const Type::Ptr &x) -> llvm::Type * {
-        return llvm::PointerType::get(actual, addressSpace(x.space));
-      }, //
+      },                                                                                                         //
+      [&](const Type::Ptr &x) -> llvm::Type * { return llvm::PointerType::get(actual, addressSpace(x.space)); }, //
       [&](const Type::Arr &x) -> llvm::Type * {
         // At a function boundary, a sized array travels as a pointer to its element type (matching
         // C array decay). Inside the function body, the LLVM `[N x T]` aggregate is kept so a
@@ -146,7 +142,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
         return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
       }, //
       [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },
-      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); }  );
+      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); });
 }
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {

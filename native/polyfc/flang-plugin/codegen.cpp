@@ -1,9 +1,10 @@
+#include "codegen.h"
+
 #include <iostream>
 
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
-#include "codegen.h"
 #include "utils.h"
 
 using namespace polyregion;
@@ -62,7 +63,8 @@ polyfront::KernelBundle polyfc::compileRegion( //
   const auto requestedForKind = opts.targets ^ count([&](auto &target, auto &) { return runtime::targetPlatformKind(target) == kind; });
   if (requestedForKind > 0 && objects.empty()) {
     emit(diag, Level::Error,
-         "%0 [PolyDCO] No kernels compiled successfully for [%1, kind=%2] (requested %3 target(s)); see prior diagnostics for the per-target "
+         "%0 [PolyDCO] No kernels compiled successfully for [%1, kind=%2] (requested %3 target(s)); see prior diagnostics for the "
+         "per-target "
          "failure",
          diagLoc, moduleId, std::string(magic_enum::enum_name(kind)), std::to_string(static_cast<int>(requestedForKind)));
   }

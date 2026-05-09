@@ -24,3 +24,5 @@ target_link_options(polyrt-tests PRIVATE ${LINK_OPTIONS})
 if (APPLE)
     target_link_options(polyrt-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()
+
+add_test(NAME polyrt-tests COMMAND polyrt-tests)

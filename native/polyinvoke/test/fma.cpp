@@ -1,17 +1,17 @@
+#include "aspartame/all.hpp"
 #include "catch2/catch_test_macros.hpp"
 #include "catch2/generators/catch_generators_range.hpp"
 #include "catch2/matchers/catch_matchers_floating_point.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/concurrency_utils.hpp"
+#include "polyregion/io.hpp"
+
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
 #include "kernels/generated_msl_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
-#include "polyregion/concurrency_utils.hpp"
-#include "polyregion/io.hpp"
 #include "test_utils.h"
-
-#include "aspartame/all.hpp"
 
 using namespace polyregion::invoke;
 using namespace polyregion::test_utils;
@@ -28,10 +28,18 @@ const static std::vector xs{0.f,
                             std::numeric_limits<float>::min()};
 
 template <typename I> void testFma(I images, std::initializer_list<Backend> backends) {
-  auto backend = GENERATE_REF(values(backends));
+  std::vector<Backend> enabled;
+  for (auto b : backends)
+    if (!polyregion::test_utils::isBackendDisabled(b)) enabled.push_back(b);
+  if (enabled.empty()) return;
+  auto backend = GENERATE_COPY(from_range(enabled));
   auto platform = polyregion::test_utils::makePlatform(backend);
   DYNAMIC_SECTION("backend=" << magic_enum::enum_name(backend)) {
     for (auto &d : platform->enumerate()) {
+      if (polyregion::test_utils::isDeviceDisabled(d->name())) continue;
+      // XXX skip OpenCL SPIR-V-format duplicate; polyinvoke ships only source kernels.
+      const auto df = d->features();
+      if (backend == Backend::OpenCL && std::find(df.begin(), df.end(), "spirv_kernel") != df.end()) continue;
       DYNAMIC_SECTION("device=" << d->name()) {
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
 

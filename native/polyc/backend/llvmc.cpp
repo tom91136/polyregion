@@ -1,14 +1,18 @@
+#include "llvmc.h"
+
 #include <fstream>
 #include <iostream>
 
-#include "llvmc.h"
-
-#include "compiler.h"
-#include "lld_lite.h"
-#include "polyregion/llvm_utils.hpp"
-
 #include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/Analysis/RuntimeLibcallInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+
+namespace llvm {
+class Module;
+// XXX SPIRVTranslate is `extern "C"` in lib/Target/SPIRV/SPIRVAPI.cpp but lacks a public header.
+extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &ErrMsg, const std::vector<std::string> &AllowExtNames,
+                               llvm::CodeGenOptLevel OLevel, llvm::Triple TargetTriple);
+} // namespace llvm
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -43,6 +47,11 @@
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
 #include "aspartame/all.hpp"
+
+#include "polyregion/llvm_utils.hpp"
+
+#include "compiler.h"
+#include "lld_lite.h"
 
 using namespace polyregion;
 using namespace aspartame;
@@ -239,8 +248,10 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     throw std::logic_error(info.triple.str() + " has no known data layout or registered LLVM target.");
   }
 
+  const auto isSpirvTriple = info.triple.getArch() == llvm::Triple::spirv32 || info.triple.getArch() == llvm::Triple::spirv64 ||
+                             info.triple.getArch() == llvm::Triple::spirv;
   for (llvm::Function &F : M.functions())
-    setFunctionAttributes(info.cpu.uArch, info.cpu.features, F);
+    setFunctionAttributes(isSpirvTriple ? "" : info.cpu.uArch, isSpirvTriple ? "" : info.cpu.features, F);
 
   llvm::OptimizationLevel optLevel;
   switch (opt) {
@@ -259,10 +270,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     // RuntimeDyld's SectionMemoryManager doesn't currently recognise as a code section -- the
     // function loads but the page is left non-executable, so calling it segfaults at the entry.
     // Medium keeps functions in `.text` while still allowing large data references.
+    //
+    const auto isSpirv = info.triple.getArch() == llvm::Triple::spirv32 || info.triple.getArch() == llvm::Triple::spirv64 ||
+                         info.triple.getArch() == llvm::Triple::spirv;
     auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
         info.triple,                                                         //
-        info.cpu.uArch,                                                      //
-        info.cpu.features,                                                   //
+        isSpirv ? "" : info.cpu.uArch,                                       //
+        isSpirv ? "" : info.cpu.features,                                    //
         options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Medium, level));
     return std::unique_ptr<TargetMachine>(tm);
   };
@@ -271,12 +285,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     if (M.getDataLayout().isDefault()) {
       M.setDataLayout(TM.createDataLayout());
     }
+    M.setTargetTriple(TM.getTargetTriple());
   };
 
-  auto mkLLVMTargetMachineArtefact = [optLevel](TargetMachine &TM,                               //
-                                                const std::optional<llvm::CodeGenFileType> &tpe, //
-                                                const llvm::Module &m0,                          //
-                                                std::vector<polyast::CompileEvent> &events, const bool emplaceEvent) {
+  auto mkLLVMTargetMachineArtefact = [optLevel, genOpt](TargetMachine &TM,                               //
+                                                        const std::optional<llvm::CodeGenFileType> &tpe, //
+                                                        const llvm::Module &m0,                          //
+                                                        std::vector<polyast::CompileEvent> &events, const bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
     auto iselPassStart = compiler::nowMono();
     llvm::SmallVector<char, 0> objBuffer;
@@ -290,26 +305,33 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
                            TM.getTargetTriple().getArch() == llvm::Triple::spirv64 || TM.getTargetTriple().getArch() == llvm::Triple::spirv;
       if (!isSpirv) optimise(TM, *m, optLevel);
 
-      llvm::legacy::PassManager PM;
-      auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
-      PM.add(MMIWP);
-      PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
-      llvm::TargetPassConfig *PassConfig = TM.createPassConfig(PM);
-      // Set PassConfig options provided by TargetMachine.
-      PassConfig->setDisableVerify(true);
-      PM.add(PassConfig);
-      // PM done
+      if (isSpirv) {
+        // XXX SPIR-V uses its own translate API; the generic addPassesToEmitFile path crashes
+        // inside RegAlloc on SPIR-V due to subtarget init order.
+        std::string spvBlob, errMsg;
+        const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, /*AllowExtNames*/ {}, genOpt, TM.getTargetTriple());
+        if (!ok) throw std::logic_error("SPIRVTranslate failed: " + errMsg);
+        objBuffer.append(spvBlob.begin(), spvBlob.end());
+      } else {
+        llvm::legacy::PassManager PM;
+        auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
+        PM.add(MMIWP);
+        PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+        llvm::TargetPassConfig *PassConfig = TM.createPassConfig(PM);
+        PassConfig->setDisableVerify(true);
+        PM.add(PassConfig);
 
-      if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
-      PassConfig->addMachinePasses();
-      PassConfig->setInitialized();
+        if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
+        PassConfig->addMachinePasses();
+        PassConfig->setInitialized();
 
-      if (tpe) {
-        if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
-          TM.addAsmPrinter(PM, objStream, nullptr, *tpe, MMIWP->getMMI().getContext());
+        if (tpe) {
+          if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
+            TM.addAsmPrinter(PM, objStream, nullptr, *tpe, MMIWP->getMMI().getContext());
+          }
         }
+        PM.run(*m);
       }
-      PM.run(*m);
       if (emplaceEvent) {
         events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m));
       }
@@ -319,6 +341,30 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
 
   auto objectSize = [](const llvm::SmallVector<char, 0> &xs) {
     return std::to_string(static_cast<float>(xs.size_in_bytes()) / 1024) + "KiB";
+  };
+
+  auto collectPrecisionFeatures = [](const llvm::Module &M) {
+    bool usesFp64 = false, usesFp16 = false, usesInt64 = false;
+    auto inspect = [&](const llvm::Type *t, auto &self) -> void {
+      if (!t) return;
+      if (t->isDoubleTy()) usesFp64 = true;
+      else if (t->isHalfTy()) usesFp16 = true;
+      else if (t->isIntegerTy(64)) usesInt64 = true;
+      for (auto *sub : t->subtypes())
+        self(sub, self);
+    };
+    for (const auto &F : M)
+      for (const auto &BB : F)
+        for (const auto &I : BB) {
+          inspect(I.getType(), inspect);
+          for (const auto &op : I.operands())
+            inspect(op->getType(), inspect);
+        }
+    std::vector<std::string> out;
+    if (usesFp64) out.emplace_back("fp64");
+    if (usesFp16) out.emplace_back("fp16");
+    if (usesInt64) out.emplace_back("int64");
+    return out;
   };
 
   std::vector<polyast::CompileEvent> events;
@@ -347,7 +393,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       if (!result) { // linker failed
         return {{}, {info.cpu.uArch}, events, {}, "Linker did not complete normally: " + err.value_or("(no message reported)")};
       } else { // linker succeeded, still report any stdout to as message
-        return {std::vector<int8_t>(result->begin(), result->end()), {info.cpu.uArch}, events, {}, err.value_or("")};
+        auto features = collectPrecisionFeatures(M);
+        features.insert(features.begin(), info.cpu.uArch);
+        return {std::vector<int8_t>(result->begin(), result->end()), features, events, {}, err.value_or("")};
       }
     }
     case llvm::Triple::CUDA: {
@@ -364,7 +412,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // patching is needed.
       auto ptxStr = std::string(ptx.begin(), ptx.end());
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", ptxStr);
-      return {std::vector<int8_t>(ptxStr.begin(), ptxStr.end()), {info.cpu.uArch}, events, {}, ""};
+      auto features = collectPrecisionFeatures(M);
+      features.insert(features.begin(), info.cpu.uArch);
+      return {std::vector<int8_t>(ptxStr.begin(), ptxStr.end()), features, events, {}, ""};
     }
     default: {
       auto features = info.cpu.features ^ split(",");
@@ -386,6 +436,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
             mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
         events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
       }
+      for (auto &f : collectPrecisionFeatures(M))
+        features.push_back(f);
       return {binary, features, events, {}, ""};
     }
   }

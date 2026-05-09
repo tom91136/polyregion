@@ -1,7 +1,5 @@
 #pragma once
 
-#include "utils.h"
-
 #include <string>
 
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
@@ -10,6 +8,8 @@
 
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
+
+#include "utils.h"
 
 namespace polyregion::polyfc {
 

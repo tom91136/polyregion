@@ -385,15 +385,13 @@ object Compiler {
           modules).map(_._2).toSet
 
       typeLut: Map[p.Type.Struct, p.Type.Struct] =
-        replacedClasses
-          .flatMap { case (tpeAps, sdef) =>
-            tpeAps.map { case ap @ p.Type.Struct(_, ts) =>
-              ap -> (p.Type.Struct(sdef.name, ts): p.Type.Struct)
-            }
+        replacedClasses.flatMap { case (tpeAps, sdef) =>
+          tpeAps.map { case ap @ p.Type.Struct(_, ts) =>
+            ap -> (p.Type.Struct(sdef.name, ts): p.Type.Struct)
           }
-          .toMap ++ replacedModules
-            .map { case (tpe, sdef) => tpe -> (p.Type.Struct(sdef.name, Nil): p.Type.Struct) }
-            .toMap
+        }.toMap ++ replacedModules.map { case (tpe, sdef) =>
+          tpe -> (p.Type.Struct(sdef.name, Nil): p.Type.Struct)
+        }.toMap
 
       replaceTpe = (t: p.Type) =>
         t match {
@@ -732,7 +730,7 @@ object Compiler {
       // Walk the body and rewrite Stmt.Var/Stmt.Return that wrap a dispatch-eligible Invoke. We
       // bind the upcast receiver to a fresh Stmt.Var (Cast is compound, so it cannot live in a
       // Term position) and rebind the Invoke to use the cast result.
-      var counter = 0
+      var counter                         = 0
       def freshName(tpe: p.Type): p.Named = { counter += 1; p.Named(s"_dispatch_recv_${counter}", tpe) }
       def patchInvoke(ivk: p.Expr.Invoke, prelude: scala.collection.mutable.ListBuffer[p.Stmt]): p.Expr.Invoke =
         ivk.receiver.map(_.tpe) match {
@@ -754,16 +752,16 @@ object Compiler {
       def walk(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
         case p.Stmt.Var(n, Some(ivk: p.Expr.Invoke), m) =>
           val prelude = scala.collection.mutable.ListBuffer.empty[p.Stmt]
-          val newIvk = patchInvoke(ivk, prelude)
+          val newIvk  = patchInvoke(ivk, prelude)
           prelude.toList :+ p.Stmt.Var(n, Some(newIvk), m)
         case p.Stmt.Return(ivk: p.Expr.Invoke) =>
           val prelude = scala.collection.mutable.ListBuffer.empty[p.Stmt]
-          val newIvk = patchInvoke(ivk, prelude)
+          val newIvk  = patchInvoke(ivk, prelude)
           prelude.toList :+ p.Stmt.Return(newIvk)
-        case p.Stmt.Cond(c, t, f) => p.Stmt.Cond(c, walk(t), walk(f)) :: Nil
-        case p.Stmt.While(c, b)   => p.Stmt.While(c, walk(b)) :: Nil
+        case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, walk(t), walk(f)) :: Nil
+        case p.Stmt.While(c, b)                => p.Stmt.While(c, walk(b)) :: Nil
         case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, walk(b)) :: Nil
-        case other                => other :: Nil
+        case other                             => other :: Nil
       }
       fn.copy(body = walk(fn.body))
     }
@@ -879,7 +877,7 @@ object Compiler {
 
       // Rebuild the LUT from post-updateFnCaps functions so callee.moduleCaptures reflects
       // the transitive set the backend will actually register.
-      val updatedFns                                = newEntry :: opt.functions.map(updateFnCaps)
+      val updatedFns                              = newEntry :: opt.functions.map(updateFnCaps)
       val updatedFnByName: Map[p.Sym, p.Function] = updatedFns.map(fn => fn.name -> fn).toMap
 
       def patchFn(fn: p.Function): p.Function = {

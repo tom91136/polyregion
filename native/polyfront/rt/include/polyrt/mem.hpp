@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -10,8 +11,6 @@
 #include <unordered_set>
 
 #include "polyregion/types.h"
-
-#include <cmath>
 
 namespace polyregion::polyrt {
 
@@ -285,7 +284,8 @@ public:
 
       const size_t maxObjCount = alloc->remote.sizeInBytes / objSize;
       const size_t objIdxBegin = integralFloor(offsetInBytes, objSize);
-      const size_t objIdxEnd = std::min(maxObjCount, objIdxBegin + integralCeil(sizeInByte.value_or(objSize), objSize));
+      const size_t requestedBytes = sizeInByte.value_or(alloc->remote.sizeInBytes - objIdxBegin * objSize);
+      const size_t objIdxEnd = std::min(maxObjCount, objIdxBegin + integralCeil(requestedBytes, objSize));
       const size_t totalObjBytes = (objIdxEnd - objIdxBegin) * objSize;
 
       remoteRead(baseAtObjIdx, alloc->remote.ptr, objIdxBegin * objSize, totalObjBytes);

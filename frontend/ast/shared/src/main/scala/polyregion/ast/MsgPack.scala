@@ -1,153 +1,739 @@
 package polyregion.ast
 
-import scala.reflect.ClassTag
-import scala.compiletime.{constValue, erasedValue, summonInline}
-import scala.deriving.Mirror
+import java.nio.charset.StandardCharsets
+
 import scala.collection.immutable.ArraySeq
+import scala.collection.mutable
+import scala.compiletime.{constValue, erasedValue, summonFrom}
+import scala.deriving.Mirror
+import scala.reflect.ClassTag
 
 object MsgPack {
 
-  enum Kind        { case Compact, Verbose         }
-  trait Encoder[A] { def encode(a: A): upack.Msg   }
-  trait Decoder[A] { def decode(msg: upack.Msg): A }
+  trait Encoder[A] {
+    def encode(w: Writer, a: A): Unit
+    final def encode(a: A): Array[Byte] = {
+      val w = new Writer
+      encode(w, a)
+      w.toByteArray
+    }
+  }
+  trait Decoder[A] { def decode(r: Reader): A }
   trait Codec[A] extends Encoder[A], Decoder[A]
 
-  given Codec[Boolean] = Codec(upack.Bool(_), _.bool)
-  given Codec[String]  = Codec(upack.Str(_), _.str)
-  given Codec[Byte]    = Codec(upack.Int32(_), _.int32.toByte)
-  given Codec[Char]    = Codec(upack.Int32(_), _.int32.toChar)
-  given Codec[Short]   = Codec(upack.Int32(_), _.int32.toShort)
-  given Codec[Int]     = Codec(upack.Int32(_), _.int32)
-  given Codec[Long]    = Codec(upack.Int64(_), _.int64)
-  given Codec[Float] = Codec(
-    upack.Float32(_),
-    {
-      case upack.Float32(v) => v
-      case upack.Float64(v) =>
-        val f = v.toFloat // XXX NaN != NaN
-        if (java.lang.Double.isNaN(v)) f
-        else if (f.toDouble == v) f
-        else throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
-      case x => throw new Exception(s"Expected Float32/Float64, got $x")
+  final class MsgPackException(message: String) extends RuntimeException(message)
+
+  trait ByteInput {
+    def length: Int
+    def unsignedByteAt(index: Int): Int
+    def unsignedShortBE(index: Int): Int =
+      (unsignedByteAt(index) << 8) | unsignedByteAt(index + 1)
+    def int32BE(index: Int): Int =
+      (unsignedByteAt(index) << 24) |
+        (unsignedByteAt(index + 1) << 16) |
+        (unsignedByteAt(index + 2) << 8) |
+        unsignedByteAt(index + 3)
+    def int64BE(index: Int): Long =
+      (unsignedByteAt(index).toLong << 56) |
+        (unsignedByteAt(index + 1).toLong << 48) |
+        (unsignedByteAt(index + 2).toLong << 40) |
+        (unsignedByteAt(index + 3).toLong << 32) |
+        (unsignedByteAt(index + 4).toLong << 24) |
+        (unsignedByteAt(index + 5).toLong << 16) |
+        (unsignedByteAt(index + 6).toLong << 8) |
+        unsignedByteAt(index + 7).toLong
+    def copyToArray(srcPos: Int, dest: Array[Byte], destPos: Int, length: Int): Unit = {
+      var i = 0
+      while (i < length) {
+        dest(destPos + i) = unsignedByteAt(srcPos + i).toByte
+        i += 1
+      }
     }
-  )
-  given Codec[Double] = Codec(
-    upack.Float64(_),
-    {
-      case upack.Float64(v) => v
-      case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+    def utf8String(srcPos: Int, length: Int): String = {
+      val out = new Array[Byte](length)
+      copyToArray(srcPos, out, 0, length)
+      new String(out, StandardCharsets.UTF_8)
     }
-  )
-  given [A](using C: Codec[A]): Codec[List[A]] =
-    Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
+  }
 
-  given [A](using C: Codec[A]): Codec[Set[A]] =
-    Codec(xs => upack.Arr(xs.map(C.encode(_)).toArray*), _.arr.map(m => C.decode(m)).toSet)
+  final class ArrayByteInput(private val bytes: Array[Byte]) extends ByteInput {
+    def length: Int                     = bytes.length
+    def unsignedByteAt(index: Int): Int = bytes(index) & 0xff
+    override def copyToArray(srcPos: Int, dest: Array[Byte], destPos: Int, length: Int): Unit =
+      Array.copy(bytes, srcPos, dest, destPos, length)
+    override def utf8String(srcPos: Int, length: Int): String =
+      new String(bytes, srcPos, length, StandardCharsets.UTF_8)
+  }
 
-  given [A: ClassTag](using C: Codec[A]): Codec[ArraySeq[A]] =
-    Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).to(ArraySeq))
+  trait ByteOutput {
+    def size: Int
+    def writeByte(x: Int): Unit
+    final def writeBytes(xs: Array[Byte]): Unit = writeBytes(xs, 0, xs.length)
+    def writeBytes(xs: Array[Byte], srcPos: Int, length: Int): Unit = {
+      var i = 0
+      while (i < length) {
+        writeByte(xs(srcPos + i))
+        i += 1
+      }
+    }
+    def writeShortBE(x: Int): Unit = {
+      writeByte(x >>> 8)
+      writeByte(x)
+    }
+    def writeIntBE(x: Int): Unit = {
+      writeByte(x >>> 24)
+      writeByte(x >>> 16)
+      writeByte(x >>> 8)
+      writeByte(x)
+    }
+    def writeLongBE(x: Long): Unit = {
+      writeByte((x >>> 56).toInt)
+      writeByte((x >>> 48).toInt)
+      writeByte((x >>> 40).toInt)
+      writeByte((x >>> 32).toInt)
+      writeByte((x >>> 24).toInt)
+      writeByte((x >>> 16).toInt)
+      writeByte((x >>> 8).toInt)
+      writeByte(x.toInt)
+    }
+    def toByteArray: Array[Byte]
+  }
 
-  given [A, B](using C: Codec[(A, B)]): Codec[Map[A, B]] =
-    Codec(
-      xs => upack.Arr(xs.toList.map(C.encode(_))*),
-      _.arr.map(C.decode(_)).toMap
-    )
+  object NullByteOutput extends ByteOutput {
+    def size: Int                                                            = 0
+    def writeByte(x: Int): Unit                                              = ()
+    override def writeBytes(xs: Array[Byte], srcPos: Int, length: Int): Unit = ()
+    override def writeShortBE(x: Int): Unit                                  = ()
+    override def writeIntBE(x: Int): Unit                                    = ()
+    override def writeLongBE(x: Long): Unit                                  = ()
+    def toByteArray: Array[Byte]                                             = Array.emptyByteArray
+  }
 
-  given [T0, T1](using C0: Codec[T0], C1: Codec[T1]): Codec[(T0, T1)] =
-    Codec(
-      (t0, t1) => upack.Arr(C0.encode(t0), C1.encode(t1)),
-      x => { val xs = x.arr; (C0.decode(xs(0)), C1.decode(xs(1))) }
-    )
+  final class ArrayByteOutput(initialSize: Int = 256) extends ByteOutput {
+    private var bytes  = new Array[Byte](math.max(16, initialSize))
+    private var cursor = 0
 
-  given [A](using C: Codec[A]): Codec[Option[A]] =
-    Codec(_.fold(upack.Null)(C.encode(_)), x => if (x.isNull) None else Some(C.decode(x)))
+    def size: Int = cursor
+
+    def toByteArray: Array[Byte] = {
+      val out = new Array[Byte](cursor)
+      Array.copy(bytes, 0, out, 0, cursor)
+      out
+    }
+
+    private def ensure(extra: Int): Unit = {
+      val needed = cursor + extra
+      if (needed > bytes.length) {
+        var next = bytes.length
+        while (next < needed) next = next << 1
+        val resized = new Array[Byte](next)
+        Array.copy(bytes, 0, resized, 0, cursor)
+        bytes = resized
+      }
+    }
+
+    def writeByte(x: Int): Unit = {
+      ensure(1)
+      bytes(cursor) = x.toByte
+      cursor += 1
+    }
+
+    override def writeBytes(xs: Array[Byte], srcPos: Int, length: Int): Unit = {
+      ensure(length)
+      Array.copy(xs, srcPos, bytes, cursor, length)
+      cursor += length
+    }
+
+    override def writeShortBE(x: Int): Unit = {
+      ensure(2)
+      bytes(cursor) = (x >>> 8).toByte
+      bytes(cursor + 1) = x.toByte
+      cursor += 2
+    }
+
+    override def writeIntBE(x: Int): Unit = {
+      ensure(4)
+      bytes(cursor) = (x >>> 24).toByte
+      bytes(cursor + 1) = (x >>> 16).toByte
+      bytes(cursor + 2) = (x >>> 8).toByte
+      bytes(cursor + 3) = x.toByte
+      cursor += 4
+    }
+
+    override def writeLongBE(x: Long): Unit = {
+      ensure(8)
+      bytes(cursor) = (x >>> 56).toByte
+      bytes(cursor + 1) = (x >>> 48).toByte
+      bytes(cursor + 2) = (x >>> 40).toByte
+      bytes(cursor + 3) = (x >>> 32).toByte
+      bytes(cursor + 4) = (x >>> 24).toByte
+      bytes(cursor + 5) = (x >>> 16).toByte
+      bytes(cursor + 6) = (x >>> 8).toByte
+      bytes(cursor + 7) = x.toByte
+      cursor += 8
+    }
+  }
+
+  final class StringInterner {
+    private val ids            = mutable.LinkedHashMap.empty[String, Int]
+    def id(x: String): Int     = ids.getOrElseUpdate(x, ids.size)
+    def entries: Array[String] = ids.keysIterator.toArray
+  }
+
+  final class Writer(output: ByteOutput = new ArrayByteOutput(), private var interner: StringInterner | Null = null) {
+    def size: Int                                  = output.size
+    def setStringInterner(x: StringInterner): Unit = interner = x
+    def toByteArray: Array[Byte]                   = output.toByteArray
+
+    private def byte(x: Int): Unit              = output.writeByte(x)
+    private def rawBytes(xs: Array[Byte]): Unit = output.writeBytes(xs)
+    private def raw16(x: Int): Unit             = output.writeShortBE(x)
+    private def raw32(x: Int): Unit             = output.writeIntBE(x)
+    private def raw64(x: Long): Unit            = output.writeLongBE(x)
+
+    def writeNil(): Unit = byte(0xc0)
+
+    def writeBoolean(x: Boolean): Unit = byte(if (x) 0xc3 else 0xc2)
+
+    def writeInt32(x: Int): Unit =
+      if (x >= 0 && x <= 0x7f) byte(x)
+      else if (x >= -32 && x < 0) byte(x & 0xff)
+      else if (x >= Byte.MinValue && x <= Byte.MaxValue) {
+        byte(0xd0)
+        byte(x)
+      } else if (x >= Short.MinValue && x <= Short.MaxValue) {
+        byte(0xd1)
+        raw16(x)
+      } else {
+        byte(0xd2)
+        raw32(x)
+      }
+
+    def writeInt64(x: Long): Unit =
+      if (x >= Int.MinValue && x <= Int.MaxValue) writeInt32(x.toInt)
+      else {
+        byte(0xd3)
+        raw64(x)
+      }
+
+    def writeFloat32(x: Float): Unit = {
+      byte(0xca)
+      raw32(java.lang.Float.floatToRawIntBits(x))
+    }
+
+    def writeFloat64(x: Double): Unit = {
+      byte(0xcb)
+      raw64(java.lang.Double.doubleToRawLongBits(x))
+    }
+
+    def writeString(x: String): Unit = interner match {
+      case null              => writeStringLiteral(x)
+      case s: StringInterner => writeInt32(s.id(x))
+    }
+
+    def writeStringLiteral(x: String): Unit = {
+      val data = x.getBytes(StandardCharsets.UTF_8)
+      val n    = data.length
+      if (n <= 31) byte(0xa0 | n)
+      else if (n <= 0xff) {
+        byte(0xd9)
+        byte(n)
+      } else if (n <= 0xffff) {
+        byte(0xda)
+        raw16(n)
+      } else {
+        byte(0xdb)
+        raw32(n)
+      }
+      rawBytes(data)
+    }
+
+    def writeArrayHeader(n: Int): Unit =
+      if (n < 0) throw new MsgPackException(s"Negative array size: $n")
+      else if (n <= 15) byte(0x90 | n)
+      else if (n <= 0xffff) {
+        byte(0xdc)
+        raw16(n)
+      } else {
+        byte(0xdd)
+        raw32(n)
+      }
+  }
+
+  final class Reader(private val bytes: ByteInput, private var stringTable: Array[String] | Null = null) {
+    private var cursor = 0
+
+    def offset: Int                             = cursor
+    def isAtEnd: Boolean                        = cursor == bytes.length
+    def setStringTable(xs: Array[String]): Unit = stringTable = xs
+    def nextIsArray: Boolean =
+      cursor < bytes.length && {
+        val m = bytes.unsignedByteAt(cursor)
+        ((m & 0xf0) == 0x90) || m == 0xdc || m == 0xdd
+      }
+
+    private def fail(message: String): Nothing =
+      throw new MsgPackException(s"$message at byte $cursor")
+
+    private def require(n: Int): Unit =
+      if (cursor + n > bytes.length) fail(s"Unexpected end of input, need $n byte(s)")
+
+    private def u8(): Int = {
+      require(1)
+      val x = bytes.unsignedByteAt(cursor)
+      cursor += 1
+      x
+    }
+
+    private def i8(): Int = u8().toByte.toInt
+
+    private def u16(): Int = {
+      require(2)
+      val x = bytes.unsignedShortBE(cursor)
+      cursor += 2
+      x
+    }
+
+    private def i16(): Int = u16().toShort.toInt
+
+    private def i32(): Int = {
+      require(4)
+      val x = bytes.int32BE(cursor)
+      cursor += 4
+      x
+    }
+
+    private def i64(): Long = {
+      require(8)
+      val x = bytes.int64BE(cursor)
+      cursor += 8
+      x
+    }
+
+    private def u32ToInt(): Int = {
+      val x = i32()
+      if (x < 0) fail("Length exceeds Int.MaxValue")
+      x
+    }
+
+    private def markerName(marker: Int): String = f"0x$marker%02x"
+
+    def readNil(): Unit = {
+      val m = u8()
+      if (m != 0xc0) fail(s"Expected nil, got ${markerName(m)}")
+    }
+
+    def tryReadNil(): Boolean =
+      if (cursor < bytes.length && bytes.unsignedByteAt(cursor) == 0xc0) {
+        cursor += 1
+        true
+      } else false
+
+    def readBoolean(): Boolean = u8() match {
+      case 0xc2 => false
+      case 0xc3 => true
+      case m    => fail(s"Expected boolean, got ${markerName(m)}")
+    }
+
+    private def readIntegralLong(): Long = {
+      val m = u8()
+      if (m <= 0x7f) m.toLong
+      else if (m >= 0xe0) m.toByte.toLong
+      else
+        m match {
+          case 0xcc => u8().toLong
+          case 0xcd => u16().toLong
+          case 0xce => i32().toLong & 0xffffffffL
+          case 0xcf =>
+            val x = i64()
+            if (x < 0) fail("uint64 value exceeds Long.MaxValue")
+            x
+          case 0xd0 => i8().toLong
+          case 0xd1 => i16().toLong
+          case 0xd2 => i32().toLong
+          case 0xd3 => i64()
+          case _    => fail(s"Expected integer, got ${markerName(m)}")
+        }
+    }
+
+    def readInt32(): Int = {
+      val x = readIntegralLong()
+      if (x < Int.MinValue || x > Int.MaxValue) fail(s"Integer out of Int range: $x")
+      x.toInt
+    }
+
+    def readInt64(): Long = readIntegralLong()
+
+    def readFloat32(): Float = u8() match {
+      case 0xca => java.lang.Float.intBitsToFloat(i32())
+      case 0xcb =>
+        val d = java.lang.Double.longBitsToDouble(i64())
+        val f = d.toFloat
+        if (java.lang.Double.isNaN(d)) f
+        else if (f.toDouble == d) f
+        else fail(s"Float64 to Float32 conversion with loss of precision: $d")
+      case m => fail(s"Expected Float32/Float64, got ${markerName(m)}")
+    }
+
+    def readFloat64(): Double = u8() match {
+      case 0xcb => java.lang.Double.longBitsToDouble(i64())
+      case m    => fail(s"Expected Float64, got ${markerName(m)}")
+    }
+
+    def readString(): String =
+      if (stringTable == null) readStringLiteral()
+      else {
+        val xs = stringTable.asInstanceOf[Array[String]]
+        val id = readInt32()
+        if (id < 0 || id >= xs.length) fail(s"Bad string table id: $id")
+        xs(id)
+      }
+
+    def readStringLiteral(): String = {
+      val m = u8()
+      val n =
+        if ((m & 0xe0) == 0xa0) m & 0x1f
+        else
+          m match {
+            case 0xd9 => u8()
+            case 0xda => u16()
+            case 0xdb => u32ToInt()
+            case _    => fail(s"Expected string, got ${markerName(m)}")
+          }
+      require(n)
+      val out = bytes.utf8String(cursor, n)
+      cursor += n
+      out
+    }
+
+    def readArrayHeader(): Int = {
+      val m = u8()
+      if ((m & 0xf0) == 0x90) m & 0x0f
+      else
+        m match {
+          case 0xdc => u16()
+          case 0xdd => u32ToInt()
+          case _    => fail(s"Expected array, got ${markerName(m)}")
+        }
+    }
+  }
 
   object Codec {
 
-    import upack.*
-
-    def apply[A](f: A => upack.Msg, g: upack.Msg => A) = new Codec[A] {
-      def encode(x: A): upack.Msg = f(x)
-      def decode(x: upack.Msg): A = g(x)
+    def apply[A](f: (Writer, A) => Unit, g: Reader => A): Codec[A] = new Codec[A] {
+      def encode(w: Writer, x: A): Unit = f(w, x)
+      def decode(r: Reader): A          = g(r)
     }
 
-    private inline def summonAll[T <: Tuple, TC[_]]: Vector[TC[Any]] = inline erasedValue[T] match {
-      case _: EmptyTuple => Vector()
-      case _: (t *: ts)  => summonInline[TC[t]].asInstanceOf[TC[Any]] +: summonAll[ts, TC]
+    private inline def summonOrDerive[A]: Codec[A] = summonFrom {
+      case c: Codec[A]     => c
+      case m: Mirror.Of[A] => derived[A](using m)
     }
 
-    inline given derived[T](using m: Mirror.Of[T]): Codec[T] = inline m match {
+    given Codec[Boolean] = Codec(_.writeBoolean(_), _.readBoolean())
+    given Codec[String]  = Codec(_.writeString(_), _.readString())
+    given Codec[Byte]    = Codec((w, x) => w.writeInt32(x.toInt), _.readInt32().toByte)
+    given Codec[Char]    = Codec((w, x) => w.writeInt32(x.toInt), _.readInt32().toChar)
+    given Codec[Short]   = Codec((w, x) => w.writeInt32(x.toInt), _.readInt32().toShort)
+    given Codec[Int]     = Codec(_.writeInt32(_), _.readInt32())
+    given Codec[Long]    = Codec(_.writeInt64(_), _.readInt64())
+    given Codec[Float]   = Codec(_.writeFloat32(_), _.readFloat32())
+    given Codec[Double]  = Codec(_.writeFloat64(_), _.readFloat64())
+
+    inline given [A]: Codec[List[A]] = {
+      val C = summonOrDerive[A]
+      Codec(
+        (w, xs) => {
+          w.writeArrayHeader(xs.size)
+          var rest = xs
+          while (rest.nonEmpty) {
+            C.encode(w, rest.head)
+            rest = rest.tail
+          }
+        },
+        r => {
+          val n = r.readArrayHeader()
+          val b = List.newBuilder[A]
+          var i = 0
+          while (i < n) {
+            b += C.decode(r)
+            i += 1
+          }
+          b.result()
+        }
+      )
+    }
+
+    inline given [A]: Codec[Set[A]] = {
+      val C = summonOrDerive[A]
+      Codec(
+        (w, xs) => {
+          w.writeArrayHeader(xs.size)
+          xs.foreach(C.encode(w, _))
+        },
+        r => {
+          val n = r.readArrayHeader()
+          val b = Set.newBuilder[A]
+          var i = 0
+          while (i < n) {
+            b += C.decode(r)
+            i += 1
+          }
+          b.result()
+        }
+      )
+    }
+
+    inline given [A: ClassTag]: Codec[ArraySeq[A]] = {
+      val C = summonOrDerive[A]
+      Codec(
+        (w, xs) => {
+          w.writeArrayHeader(xs.length)
+          var i = 0
+          while (i < xs.length) {
+            C.encode(w, xs(i))
+            i += 1
+          }
+        },
+        r => {
+          val n  = r.readArrayHeader()
+          val xs = new Array[A](n)
+          var i  = 0
+          while (i < n) {
+            xs(i) = C.decode(r)
+            i += 1
+          }
+          ArraySeq.unsafeWrapArray(xs)
+        }
+      )
+    }
+
+    inline given [A, B]: Codec[Map[A, B]] = {
+      val C = summonOrDerive[(A, B)]
+      Codec(
+        (w, xs) => {
+          w.writeArrayHeader(xs.size)
+          xs.foreach(C.encode(w, _))
+        },
+        r => {
+          val n = r.readArrayHeader()
+          val b = Map.newBuilder[A, B]
+          var i = 0
+          while (i < n) {
+            b += C.decode(r)
+            i += 1
+          }
+          b.result()
+        }
+      )
+    }
+
+    inline given [T0, T1]: Codec[(T0, T1)] = {
+      val C0 = summonOrDerive[T0]
+      val C1 = summonOrDerive[T1]
+      Codec(
+        (w, x) => {
+          w.writeArrayHeader(2)
+          C0.encode(w, x._1)
+          C1.encode(w, x._2)
+        },
+        r => {
+          val n = r.readArrayHeader()
+          if (n != 2) throw new MsgPackException(s"Expected tuple array of size 2, got $n")
+          (C0.decode(r), C1.decode(r))
+        }
+      )
+    }
+
+    inline given [A]: Codec[Option[A]] = {
+      val C = summonOrDerive[A]
+      Codec(
+        (w, x) => x.fold(w.writeNil())(C.encode(w, _)),
+        r => if (r.tryReadNil()) None else Some(C.decode(r))
+      )
+    }
+
+    private trait SumCase {
+      def arity: Int
+      def encodeFields(w: Writer, x: Any): Unit
+      def decodeFields(r: Reader, fieldCount: Int): Any
+    }
+
+    private inline def sumCase[A]: SumCase = summonFrom { case p: Mirror.ProductOf[A] =>
+      val fieldCount = constValue[Tuple.Size[p.MirroredElemTypes]]
+      new SumCase {
+        def arity: Int = fieldCount
+        def encodeFields(w: Writer, x: Any): Unit =
+          writeFields[p.MirroredElemTypes](w, x.asInstanceOf[Product], 0)
+        def decodeFields(r: Reader, n: Int): Any = {
+          if (n != fieldCount) throw new MsgPackException(s"Expected sum case with $fieldCount field(s), got $n")
+          p.fromProduct(readFields[p.MirroredElemTypes](r))
+        }
+      }
+    }
+
+    private inline def summonCases[T <: Tuple]: Array[SumCase] = inline erasedValue[T] match {
+      case _: EmptyTuple => Array.empty
+      case _: (t *: ts) =>
+        val head = sumCase[t]
+        val tail = summonCases[ts]
+        val out  = new Array[SumCase](tail.length + 1)
+        out(0) = head
+        Array.copy(tail, 0, out, 1, tail.length)
+        out
+    }
+
+    inline def derived[T](using m: Mirror.Of[T]): Codec[T] = inline m match {
       case s: Mirror.SumOf[T] =>
-        val sum      = constValue[s.MirroredLabel].toString
-        lazy val tcs = summonAll[s.MirroredElemTypes, Codec]
-        val kind     = Kind.Compact
+        lazy val cases = summonCases[s.MirroredElemTypes]
         Codec[T](
-          { x =>
+          (w, x) => {
             val ord = s.ordinal(x)
-            val t   = tcs(ord).encode(x)
-            kind match {
-              case Kind.Compact => Arr(Int32(ord), t)
-              case Kind.Verbose => Obj(Str("sum") -> Str(sum), Str("ord") -> Int32(ord), Str("val") -> t)
+            val c   = cases(ord)
+            if (c.arity == 0) w.writeInt32(ord)
+            else {
+              w.writeArrayHeader(c.arity + 1)
+              w.writeInt32(ord)
+              c.encodeFields(w, x)
             }
           },
-          msg =>
-            kind match {
-              case Kind.Compact =>
-                msg.arr.toList match {
-                  case Int32(ord) :: t :: Nil =>
-                    tcs(ord).decode(t).asInstanceOf[T]
-                  case xs => throw new RuntimeException(s"Bad structure ${xs}")
-                }
-              case Kind.Verbose =>
-                msg.obj.toList match {
-                  case (Str("sum"), Str(sum)) :: (Str("ord"), Int32(ord)) :: (Str("val"), t) :: Nil =>
-                    tcs(ord).decode(t).asInstanceOf[T]
-                  case xs => throw new RuntimeException(s"Bad structure ${xs}")
-                }
+          r =>
+            if (r.nextIsArray) {
+              val n   = r.readArrayHeader()
+              val ord = r.readInt32()
+              if (ord < 0 || ord >= cases.length) throw new MsgPackException(s"Bad sum ordinal: $ord")
+              cases(ord).decodeFields(r, n - 1).asInstanceOf[T]
+            } else {
+              val ord = r.readInt32()
+              if (ord < 0 || ord >= cases.length) throw new MsgPackException(s"Bad sum ordinal: $ord")
+              val c = cases(ord)
+              if (c.arity != 0) throw new MsgPackException(s"Expected array payload for non-nullary sum ordinal: $ord")
+              c.decodeFields(r, 0).asInstanceOf[T]
             }
         )
       case p: Mirror.ProductOf[T] =>
-        lazy val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
-        val kind    = Kind.Compact
+        val arity = constValue[Tuple.Size[p.MirroredElemTypes]]
         Codec[T](
-          x =>
-            kind match {
-              case Kind.Compact => Arr(xs.zip(iterator(x)).map { case ((_, e), v) => e.encode(v) }*)
-              case Kind.Verbose =>
-                xs.zip(iterator(x)).map { case ((k, e), v) => (Str(k), e.encode(v)) } match {
-                  case (x :: xs) => Obj(x, xs*)
-                  case Nil       => Obj()
-                }
-            },
-          msg =>
-            p.fromProduct(Tuple.fromArray(kind match {
-              case Kind.Compact => msg.arr.zip(xs).map { case (msg, (_, c)) => c.decode(msg) }.toArray
-              case Kind.Verbose => xs.map((field, c) => c.decode(msg.obj(Str(field)))).toArray
-            }))
+          (w, x) => {
+            w.writeArrayHeader(arity)
+            writeFields[p.MirroredElemTypes](w, x.asInstanceOf[Product], 0)
+          },
+          r => {
+            val n = r.readArrayHeader()
+            if (n != arity) throw new MsgPackException(s"Expected product array of size $arity, got $n")
+            p.fromProduct(readFields[p.MirroredElemTypes](r))
+          }
         )
     }
 
-    private def iterator[T](p: T) = p.asInstanceOf[Product].productIterator
+    private inline def writeFields[T <: Tuple](w: Writer, p: Product, idx: Int): Unit =
+      inline erasedValue[T] match {
+        case _: EmptyTuple => ()
+        case _: (t *: ts) =>
+          summonOrDerive[t].encode(w, p.productElement(idx).asInstanceOf[t])
+          writeFields[ts](w, p, idx + 1)
+      }
 
-    private inline def deriveProduct[L <: Tuple, T <: Tuple]: List[(String, Codec[Any])] =
-      inline (erasedValue[L], erasedValue[T]) match {
-        case (_: EmptyTuple, _: EmptyTuple) => Nil
-        case (_: (l *: ls), _: (t *: ts)) =>
-          (constValue[l].toString, summonInline[Codec[t]].asInstanceOf[Codec[Any]]) ::
-            deriveProduct[ls, ts]
+    private inline def readFields[T <: Tuple](r: Reader): Tuple =
+      inline erasedValue[T] match {
+        case _: EmptyTuple => EmptyTuple
+        case _: (t *: ts)  => summonOrDerive[t].decode(r) *: readFields[ts](r)
       }
 
   }
 
   case class Versioned[T](hash: String, t: T) derives MsgPack.Codec
 
-  def decodeMsg(xs: Array[Byte]): Either[Exception, upack.Msg] =
-    try Right(upack.read(xs))
-    catch { case e: Exception => Left(e) }
-  def encodeMsg[A: Encoder](x: A): upack.Msg = summon[Encoder[A]].encode(x)
+  private val InternedMagic = 0x4d504349 // "MPCI"
 
-  def encode[A: Encoder](x: A): Array[Byte] = upack.write(encodeMsg[A](x))
+  private def isInternedEnvelope(xs: ByteInput): Boolean =
+    xs.length >= 6 &&
+      xs.unsignedByteAt(0) == 0x93 &&
+      xs.unsignedByteAt(1) == 0xd2 &&
+      xs.unsignedByteAt(2) == 0x4d &&
+      xs.unsignedByteAt(3) == 0x50 &&
+      xs.unsignedByteAt(4) == 0x43 &&
+      xs.unsignedByteAt(5) == 0x49
+
+  def encodeRawTo[A: Encoder](x: A, out: ByteOutput): Unit =
+    summon[Encoder[A]].encode(new Writer(out), x)
+
+  def encodeRaw[A: Encoder](x: A): Array[Byte] = {
+    val out = new ArrayByteOutput()
+    encodeRawTo(x, out)
+    out.toByteArray
+  }
+
+  def encodeInternedTo[A: Encoder](x: A, out: ByteOutput): Unit = {
+    val C     = summon[Encoder[A]]
+    val table = new StringInterner
+    C.encode(new Writer(NullByteOutput, table), x)
+
+    val entries = table.entries
+    val w       = new Writer(out)
+    w.writeArrayHeader(3)
+    w.writeInt32(InternedMagic)
+    w.writeArrayHeader(entries.length)
+    var i = 0
+    while (i < entries.length) {
+      w.writeStringLiteral(entries(i))
+      i += 1
+    }
+    w.setStringInterner(table)
+    C.encode(w, x)
+  }
+
+  def encodeInterned[A: Encoder](x: A): Array[Byte] = {
+    val out = new ArrayByteOutput()
+    encodeInternedTo(x, out)
+    out.toByteArray
+  }
+
+  def encodeTo[A: Encoder](x: A, out: ByteOutput): Unit = encodeInternedTo(x, out)
+
+  def encode[A: Encoder](x: A): Array[Byte] = encodeInterned(x)
+
+  def decodeRawInput[A: Decoder](xs: ByteInput): Either[Exception, A] =
+    try {
+      val r = new Reader(xs)
+      val a = summon[Decoder[A]].decode(r)
+      if (!r.isAtEnd) throw new MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
+      Right(a)
+    } catch {
+      case e: Exception => Left(e)
+    }
+
+  def decodeRaw[A: Decoder](xs: Array[Byte]): Either[Exception, A] =
+    decodeRawInput(new ArrayByteInput(xs))
+
+  def decodeInternedInput[A: Decoder](xs: ByteInput): Either[Exception, A] =
+    try {
+      val r = new Reader(xs)
+      val n = r.readArrayHeader()
+      if (n != 3) throw new MsgPackException(s"Expected interned envelope array of size 3, got $n")
+      val magic = r.readInt32()
+      if (magic != InternedMagic) throw new MsgPackException(s"Bad interned envelope magic: $magic")
+      val tableSize = r.readArrayHeader()
+      val table     = new Array[String](tableSize)
+      var i         = 0
+      while (i < tableSize) {
+        table(i) = r.readStringLiteral()
+        i += 1
+      }
+      r.setStringTable(table)
+      val a = summon[Decoder[A]].decode(r)
+      if (!r.isAtEnd) throw new MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
+      Right(a)
+    } catch {
+      case e: Exception => Left(e)
+    }
+
+  def decodeInterned[A: Decoder](xs: Array[Byte]): Either[Exception, A] =
+    decodeInternedInput(new ArrayByteInput(xs))
+
+  def decodeInput[A: Decoder](xs: ByteInput): Either[Exception, A] =
+    if (isInternedEnvelope(xs)) decodeInternedInput(xs) else decodeRawInput(xs)
+
   def decode[A: Decoder](xs: Array[Byte]): Either[Exception, A] =
-    decodeMsg(xs).map(summon[Decoder[A]].decode(_))
-
+    decodeInput(new ArrayByteInput(xs))
 }

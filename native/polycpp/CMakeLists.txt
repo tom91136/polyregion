@@ -52,14 +52,14 @@ endif ()
 add_executable(polycpp driver_main.cpp)
 add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource)
 
-add_executable(polycpp-test test/test_all.cpp)
-add_dependencies(polycpp-test polycpp polystl)
-target_include_directories(polycpp-test PRIVATE
+add_executable(polycpp-tests test/test_all.cpp)
+add_dependencies(polycpp-tests polycpp polystl)
+target_include_directories(polycpp-tests PRIVATE
         ../include
         polystl
         ${LLVM_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(polycpp-test PRIVATE
+target_compile_definitions(polycpp-tests PRIVATE
         POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 
 # === test_all.h.in variables ===
@@ -92,11 +92,8 @@ target_link_libraries(polycpp PRIVATE
         Aspartame::Aspartame
         fmt::fmt
 )
-target_link_libraries(polycpp-test PRIVATE
-        polyfront-lit
-        LLVMSupport
-        fmt::fmt
-        Aspartame::Aspartame
+target_link_libraries(polycpp-tests PRIVATE
+        polytest
         Catch2::Catch2WithMain
 )
 
@@ -104,8 +101,19 @@ target_link_libraries(polycpp-test PRIVATE
 target_compile_options(polycpp PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polycpp PRIVATE ${LINK_OPTIONS})
 
-target_compile_options(polycpp-test PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polycpp-test PRIVATE ${LINK_OPTIONS})
+target_compile_options(polycpp-tests PRIVATE ${COMPILE_OPTIONS})
+target_link_options(polycpp-tests PRIVATE ${LINK_OPTIONS})
+
+# XXX one ctest entry per test file x {offload, passthrough}; --allow-running-no-tests so
+# Catch2 returns 0 when every section SKIPs (polyrt reports no compatible target).
+foreach (_test_file IN LISTS TEST_FILE_PATHS)
+    get_filename_component(_test_name "${_test_file}" NAME_WE)
+    string(REGEX REPLACE "^check_" "" _test_short "${_test_name}")
+    foreach (_mode IN ITEMS offload passthrough)
+        set(_name "polycpp-${_test_short}-${_mode}")
+        add_test(NAME ${_name} COMMAND polycpp-tests "${_mode}" -c "${_test_short}" --allow-running-no-tests)
+    endforeach ()
+endforeach ()
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

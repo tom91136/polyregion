@@ -1,14 +1,7 @@
-#include <csignal>
+#include "remapper.h"
+
 #include <iostream>
 #include <utility>
-
-#include "aspartame/all.hpp"
-
-#include "ast.h"
-#include "clang_utils.h"
-#include "magic_enum/magic_enum.hpp"
-#include "polyregion/llvm_dyn.hpp"
-#include "remapper.h"
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
@@ -20,10 +13,17 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Lex/PreprocessorOptions.h"
-
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
+
+#include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
+
+#include "polyregion/llvm_dyn.hpp"
+
+#include "ast.h"
+#include "clang_utils.h"
 
 using namespace polyregion::polyast;
 using namespace polyregion::polystl;
@@ -34,29 +34,29 @@ const static std::string This = "#this";
 const static std::string Empty = "#empty";
 
 [[nodiscard]] static Expr::Any defaultValue(const Type::Any &tpe) {
-  return tpe.match_total(                                                                       //
-      [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(0)); },   //
-      [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(0)); },   //
-      [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(0)); },   //
+  return tpe.match_total(                                                                     //
+      [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(0)); }, //
+      [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(0)); }, //
+      [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(0)); }, //
 
-      [&](const Type::IntU8 &) -> Expr::Any { return Expr::Alias(Term::IntU8Const(0)); },       //
-      [&](const Type::IntU16 &) -> Expr::Any { return Expr::Alias(Term::IntU16Const(0)); },     //
-      [&](const Type::IntU32 &) -> Expr::Any { return Expr::Alias(Term::IntU32Const(0)); },     //
-      [&](const Type::IntU64 &) -> Expr::Any { return Expr::Alias(Term::IntU64Const(0)); },     //
+      [&](const Type::IntU8 &) -> Expr::Any { return Expr::Alias(Term::IntU8Const(0)); },   //
+      [&](const Type::IntU16 &) -> Expr::Any { return Expr::Alias(Term::IntU16Const(0)); }, //
+      [&](const Type::IntU32 &) -> Expr::Any { return Expr::Alias(Term::IntU32Const(0)); }, //
+      [&](const Type::IntU64 &) -> Expr::Any { return Expr::Alias(Term::IntU64Const(0)); }, //
 
-      [&](const Type::IntS8 &) -> Expr::Any { return Expr::Alias(Term::IntS8Const(0)); },       //
-      [&](const Type::IntS16 &) -> Expr::Any { return Expr::Alias(Term::IntS16Const(0)); },     //
-      [&](const Type::IntS32 &) -> Expr::Any { return Expr::Alias(Term::IntS32Const(0)); },     //
-      [&](const Type::IntS64 &) -> Expr::Any { return Expr::Alias(Term::IntS64Const(0)); },     //
+      [&](const Type::IntS8 &) -> Expr::Any { return Expr::Alias(Term::IntS8Const(0)); },   //
+      [&](const Type::IntS16 &) -> Expr::Any { return Expr::Alias(Term::IntS16Const(0)); }, //
+      [&](const Type::IntS32 &) -> Expr::Any { return Expr::Alias(Term::IntS32Const(0)); }, //
+      [&](const Type::IntS64 &) -> Expr::Any { return Expr::Alias(Term::IntS64Const(0)); }, //
 
-      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(false)); },   //
-      [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },        //
-      [&](const Type::Nothing &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },             //
-      [&](const Type::Struct &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },              //
-      [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },            //
-      [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },            //
-      [&](const Type::Var &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },                 //
-      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }                 //
+      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(false)); }, //
+      [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },      //
+      [&](const Type::Nothing &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },           //
+      [&](const Type::Struct &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },            //
+      [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
+      [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
+      [&](const Type::Var &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },               //
+      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }               //
   );
 }
 
@@ -79,9 +79,7 @@ const static std::string Empty = "#empty";
   }
 }
 
-[[nodiscard]] static Named baseMember(const StructDef &s) {
-  return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {}));
-}
+[[nodiscard]] static Named baseMember(const StructDef &s) { return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {})); }
 
 // Hits the Poison path if `expr` isn't an Alias(Select); the resulting kernel still type-checks
 // but flags the bad call site downstream.
@@ -103,9 +101,7 @@ const static std::string Empty = "#empty";
   // Members are matched by symbol only: callers sometimes pass Type::Nothing as the segment tpe
   // because per-step types aren't carried in the IR anymore; the struct def's members have the
   // real type, so a `Named ==` comparison would miss every reach-through.
-  const auto memberSymbolMatches = [](const Named &member) {
-    return [&member](const Named &m) { return m.symbol == member.symbol; };
-  };
+  const auto memberSymbolMatches = [](const Named &member) { return [&member](const Named &m) { return m.symbol == member.symbol; }; };
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
     auto expand = [&](const Type::Struct &s) -> Vector<Named> {
       if (r.findStruct(repr(s.name), "select")->members ^ exists(memberSymbolMatches(member))) return {base};
@@ -115,8 +111,8 @@ const static std::string Empty = "#empty";
       }
       const auto sd = r.findStruct(repr(s.name), "select");
       const auto memberDump = sd->members | mk_string(", ", [](auto &m) { return m.symbol + ":" + repr(m.tpe); });
-      raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]",
-                        member.symbol, repr(member.tpe), repr(s), memberDump));
+      raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]", member.symbol,
+                        repr(member.tpe), repr(s), memberDump));
     };
     if (const auto s = base.tpe.get<Type::Struct>()) return expand(*s);
     if (const auto ptr = base.tpe.get<Type::Ptr>()) {
@@ -154,8 +150,7 @@ const static std::string Empty = "#empty";
       rehydrated.emplace_back(n.symbol, tpe);
       prev = tpe;
     }
-    return dsl::Select(
-        rehydrated ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }), last);
+    return dsl::Select(rehydrated ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }), last);
   }
 }
 
@@ -235,7 +230,7 @@ Named Remapper::RemapContext::newVar(const Type::Any &tpe) {
 }
 
 Expr::Any Remapper::integralConstOfType(const Type::Any &tpe, const uint64_t value) {
-  return tpe.match_total(                                                                                 //
+  return tpe.match_total(                                                                                              //
       [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(static_cast<float>(value))); },  //
       [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(static_cast<float>(value))); },  //
       [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(static_cast<double>(value))); }, //
@@ -334,7 +329,8 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
               walkParents(r, *rhsStruct, [&](auto &p) { return p.name == tgtStruct->name; }, chain)) {
             // Build the augmented Select: existing path + base-of links to the target struct.
             Vector<PathStep::Any> steps = rhsSelectTerm->steps;
-            for (auto &s : chain) steps.emplace_back(PathStep::Field(baseMember(*s).symbol));
+            for (auto &s : chain)
+              steps.emplace_back(PathStep::Field(baseMember(*s).symbol));
             auto extended = Term::Select(rhsSelectTerm->root, steps, tgtStruct->widen());
             return Expr::RefTo(extended, {}, tgtStruct->widen(), TypeSpace::Global());
           }
@@ -365,14 +361,14 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::IntS32 &) -> std::string { return "int32_t"; }, //
       [&](const Type::IntS64 &) -> std::string { return "int64_t"; }, //
 
-      [&](const Type::Bool1 &) -> std::string { return "bool"; },                                                //
-      [&](const Type::Unit0 &) -> std::string { return "void"; },                                                //
-      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                       //
-      [&](const Type::Struct &x) -> std::string { return repr(x.name); },                                        //
-      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },                                 //
+      [&](const Type::Bool1 &) -> std::string { return "bool"; },                                                 //
+      [&](const Type::Unit0 &) -> std::string { return "void"; },                                                 //
+      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                        //
+      [&](const Type::Struct &x) -> std::string { return repr(x.name); },                                         //
+      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },                                  //
       [&](const Type::Arr &x) -> std::string { return typeName(x.comp) + "[" + std::to_string(x.length) + "]"; }, //
-      [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; },                               //
-      [&](const Type::Exec &) -> std::string { return "/*exec*/"; }                                              //
+      [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; },                                //
+      [&](const Type::Exec &) -> std::string { return "/*exec*/"; }                                               //
   );
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -579,7 +575,6 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 
   Vector<Stmt::Any> body = fnBody;
   if (fnBody.empty()) {
-    
   }
 
   if (rtnType.is<Type::Unit0>() && !(body ^ last_maybe() ^ exists([](auto &x) { return x.template is<Stmt::Return>(); }))) {
@@ -587,8 +582,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   }
 
   auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args),
-                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body,
-                                       FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body, FunctionVisibility::Internal(),
+                                       FunctionFpMode::Relaxed(), false);
   r.functions.emplace(name, fn);
   return {name, fn};
 }
@@ -704,23 +699,22 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
     if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields());
     else {
-      const auto members =
-          cxxRecord->fields() | zip(cxxRecord->captures()) | collect([&](auto &field, auto &capture) -> Opt<StructLayoutMember> {
-            const auto var = capture.getCapturedVar();
-            switch (capture.getCaptureKind()) {
-              case clang::LCK_ByCopy: {
-                const auto tpe = handleType(var->getType(), r);
-                return resolveField(field, var->getName().str(), tpe);
-              }
-              case clang::LCK_ByRef: {
-                const auto tpe = Type::Ptr(handleType(var->getType(), r), TypeSpace::Global());
-                return resolveField(field, var->getName().str(), tpe);
-              }
-              default:
-                return {};
-            }
-          }) |
-          to_vector();
+      const auto members = cxxRecord->fields() | zip(cxxRecord->captures()) |
+                           collect([&](auto &field, auto &capture) -> Opt<StructLayoutMember> {
+                             const auto var = capture.getCapturedVar();
+                             switch (capture.getCaptureKind()) {
+                               case clang::LCK_ByCopy: {
+                                 const auto tpe = handleType(var->getType(), r);
+                                 return resolveField(field, var->getName().str(), tpe);
+                               }
+                               case clang::LCK_ByRef: {
+                                 const auto tpe = Type::Ptr(handleType(var->getType(), r), TypeSpace::Global());
+                                 return resolveField(field, var->getName().str(), tpe);
+                               }
+                               default: return {};
+                             }
+                           }) |
+                           to_vector();
       return resolveStruct(parents, members);
     }
   } else return resolveStruct({}, resolveFields());
@@ -785,7 +779,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         }
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType(), r)); }, // T*
-      [&](const clang::ConstantArrayType *tpe) { // T[$N]
+      [&](const clang::ConstantArrayType *tpe) {                                                   // T[$N]
         // Ptr no longer carries a length; sized C arrays lower to Type::Arr to preserve N. This
         // matters for value-captured arrays in lambdas (e.g. `int xs[N]` under `[=]`) where the
         // lambda struct stores the array inline, not a pointer.
@@ -798,10 +792,8 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         auto inner = handleType(tpe->getPointeeType(), r);
         if (inner.is<Type::Ptr>()) return inner;
         return refTpe(inner);
-      }, // T
-      [&](const clang::RecordType *tpe) -> Type::Any {
-        return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {});
-      } // struct T { ... }
+      },                                                                                                                 // T
+      [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}); } // struct T { ... }
   );
   if (!result) {
     llvm::outs() << "Unhandled type:\n";
@@ -872,7 +864,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         auto asInt = [&] { return expr->getAPValueResult().getInt().getLimitedValue(); };
 
         return handleType(expr->getType(), r)
-            .match_total(                                                                          //
+            .match_total(                                                                                       //
                 [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(asFloat())); }, //
                 [&](const Type::Float32 &) -> Expr::Any { return Expr::Alias(Term::Float32Const(asFloat())); }, //
                 [&](const Type::Float64 &) -> Expr::Any { return Expr::Alias(Term::Float64Const(asFloat())); }, //
@@ -887,14 +879,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 [&](const Type::IntS32 &) -> Expr::Any { return Expr::Alias(Term::IntS32Const(asInt())); }, //
                 [&](const Type::IntS64 &) -> Expr::Any { return Expr::Alias(Term::IntS64Const(asInt())); }, //
 
-                [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(asInt() != 0)); },                  //
-                [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },                              //
-                [&](const Type::Nothing &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                          //
-                [&](const Type::Struct &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                           //
-                [&](const Type::Ptr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                              //
-                [&](const Type::Arr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                              //
-                [&](const Type::Var &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },                              //
-                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); }                              //
+                [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(asInt() != 0)); }, //
+                [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },             //
+                [&](const Type::Nothing &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },         //
+                [&](const Type::Struct &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },          //
+                [&](const Type::Ptr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },             //
+                [&](const Type::Arr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },             //
+                [&](const Type::Var &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },             //
+                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); }             //
             );
       },
       [&](const clang::MaterializeTemporaryExpr *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
@@ -1000,8 +992,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             auto z = r.newVar(integralConstOfType(srcTpe, 0));
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
           }
-          default:
-            return sourceExpr;
+          default: return sourceExpr;
         }
       },
       [&](const clang::IntegerLiteral *stmt) -> Expr::Any {
@@ -1237,8 +1228,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl, dr, tpe_));
           case clang::BO_LAnd: return Expr::IntrOp(Intr::LogicAnd(dl, dr));
           case clang::BO_LOr: return Expr::IntrOp(Intr::LogicOr(dl, dr));
-          case clang::BO_Assign:
-            return Expr::Alias(assign(lhs, rhs)); // Builtin direct assignment
+          case clang::BO_Assign: return Expr::Alias(assign(lhs, rhs)); // Builtin direct assignment
           case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(dl, dr, tpe_)));
           case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(dl, dr, tpe_)));
           case clang::BO_RemAssign: return Expr::Alias(opAssign(Intr::Rem(dl, dr, tpe_)));
@@ -1248,7 +1238,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(dl, dr, tpe_)));
           case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(dl, dr, tpe_)));
           case clang::BO_XorAssign: return Expr::Alias(opAssign(Intr::BXor(dl, dr, tpe_)));
-          case clang::BO_OrAssign:  return Expr::Alias(opAssign(Intr::BOr(dl, dr, tpe_)));
+          case clang::BO_OrAssign: return Expr::Alias(opAssign(Intr::BOr(dl, dr, tpe_)));
           case clang::BO_Comma: return failExpr(); // TODO what does this do for a builtin???
         }
 
@@ -1284,8 +1274,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
           auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
           auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                                         std::vector<Term::Any>{thisArg} ^ concat(ivArgs),
-                                         Type::Unit0()));
+                                         std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
           return instance;
         } else {
           raise("CXX ctor resulted in a non-struct type: " + repr(ctorTpe));
@@ -1309,8 +1298,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
-        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                            ivArgs ^ prepend(recvTerm),
+        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CXXOperatorCallExpr *expr) -> Expr::Any {
@@ -1331,8 +1319,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
-        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                            ivArgs ^ prepend(recvTerm),
+        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
@@ -1585,18 +1572,21 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         // ANF: hoist the cond compute to a fresh sentinel evaluated before the loop and again at
         // the end of the body. The sentinel name is unique per loop -- nested while loops would
         // otherwise collide on the binding and the verifier would reject the duplicate Var.
-        auto [condTerm0, condStmts0] =
-            r.scoped<Term::Any>([&](auto &r) -> Term::Any { return r.newVar(cond ? handleExpr(cond, r) : Expr::Any(Expr::Alias(Term::Bool1Const(true)))); });
-        for (auto &s : condStmts0) r.push(s);
+        auto [condTerm0, condStmts0] = r.scoped<Term::Any>(
+            [&](auto &r) -> Term::Any { return r.newVar(cond ? handleExpr(cond, r) : Expr::Any(Expr::Alias(Term::Bool1Const(true)))); });
+        for (auto &s : condStmts0)
+          r.push(s);
         const auto loopCondName = r.newName(condTerm0.tpe()).symbol + "_loop_cond";
         const auto loopCondTpe = condTerm0.tpe();
         auto body = r.scoped(
             [&](auto &r) {
               handleStmt(stmt->getBody(), r);
               auto _ = r.newVar(handleExpr(stmt->getInc(), r));
-              auto [condTermN, condStmtsN] =
-                  r.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return r2.newVar(cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true)))); });
-              for (auto &s : condStmtsN) r.push(s);
+              auto [condTermN, condStmtsN] = r.template scoped<Term::Any>([&](auto &r2) -> Term::Any {
+                return r2.newVar(cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true))));
+              });
+              for (auto &s : condStmtsN)
+                r.push(s);
               r.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
             },
             {}, {}, {}, true);
@@ -1605,7 +1595,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::WhileStmt *stmt) {
         auto [condTerm0, condStmts0] = r.scoped<Term::Any>([&](auto &r) -> Term::Any { return r.newVar(handleExpr(stmt->getCond(), r)); });
-        for (auto &s : condStmts0) r.push(s);
+        for (auto &s : condStmts0)
+          r.push(s);
         const auto loopCondName = r.newName(condTerm0.tpe()).symbol + "_loop_cond";
         const auto loopCondTpe = condTerm0.tpe();
         auto body = r.scoped(
@@ -1613,7 +1604,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               handleStmt(stmt->getBody(), r);
               auto [condTermN, condStmtsN] =
                   r.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return r2.newVar(handleExpr(stmt->getCond(), r2)); });
-              for (auto &s : condStmtsN) r.push(s);
+              for (auto &s : condStmtsN)
+                r.push(s);
               r.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
             },
             {}, {}, {}, true);
@@ -1622,7 +1614,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::ReturnStmt *stmt) { r.push(Stmt::Return(conform(r, handleExpr(stmt->getRetValue(), r), r.rtnType))); },
       [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
-      [&](const clang::NullStmt *stmt) {  },
+      [&](const clang::NullStmt *stmt) {},
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
         auto _ = r.newVar(handleExpr(stmt, r));
       },

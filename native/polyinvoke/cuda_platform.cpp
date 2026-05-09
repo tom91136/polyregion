@@ -1,4 +1,5 @@
 #include "polyinvoke/cuda_platform.h"
+
 #include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::invoke;
@@ -135,7 +136,9 @@ std::vector<std::string> CudaDevice::features() {
   int ccMajor = 0, ccMinor = 0;
   CHECKED(cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
   CHECKED(cuDeviceGetAttribute(&ccMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
-  return {"cuda", "nvidia", "sm_" + std::to_string((ccMajor * 10) + ccMinor)};
+  std::vector<std::string> out{"cuda", "nvidia", "sm_" + std::to_string((ccMajor * 10) + ccMinor), "fp64", "int64"};
+  if (ccMajor > 5 || (ccMajor == 5 && ccMinor >= 3)) out.emplace_back("fp16");
+  return out;
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
@@ -230,12 +233,14 @@ void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const st
   auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto args = detail::argDataAsPointers(types, argData);
-  // CUDA has no kernel-arg ABI for dynamic shared memory; the polyc NVPTX backend rewrites
-  // shared-memory parameters into an `extern __shared__` global, so we must drop `Type::Scratch`
-  // entries here. Rewrite in place to avoid a per-launch heap alloc on the dispatch hot path.
+  // XXX `Type::Scratch` slot must be 0 (start of dynamic shared); kernel signature keeps the
+  // slot, the OpenCL kernarg ABI expects this value.
+  static const uint64_t scratchPlaceholder = 0;
   size_t out = 0;
-  for (size_t i = 0; i < types.size(); ++i)
-    if (types[i] != Type::Scratch && types[i] != Type::Void) args[out++] = args[i];
+  for (size_t i = 0; i < types.size(); ++i) {
+    if (types[i] == Type::Void) continue;
+    args[out++] = types[i] == Type::Scratch ? const_cast<void *>(static_cast<const void *>(&scratchPlaceholder)) : args[i];
+  }
   CHECKED(cuLaunchKernel(fn,                        //
                          grid.x, grid.y, grid.z,    //
                          block.x, block.y, block.z, //

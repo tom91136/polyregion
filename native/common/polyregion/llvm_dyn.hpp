@@ -1,7 +1,8 @@
 #pragma once
 
-#include "llvm/Support/Casting.h"
 #include <optional>
+
+#include "llvm/Support/Casting.h"
 
 namespace polyregion::llvm_shared {
 

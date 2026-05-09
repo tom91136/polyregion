@@ -1,18 +1,19 @@
+#include "polyinvoke/runtime.h"
+
 #include <mutex>
 #include <string>
 #include <thread>
-
-#include "magic_enum/magic_enum.hpp"
 #include <utility>
 #include <vector>
 
 #include "aspartame/optional.hpp"
 #include "aspartame/vector.hpp"
+#include "magic_enum/magic_enum.hpp"
+
 #include "generated/mirror.h"
 #include "generated/platform.h"
 #include "generated/platforms.h"
 #include "jni_utils.h"
-#include "polyinvoke/runtime.h"
 
 using namespace polyregion;
 namespace rt = ::invoke;

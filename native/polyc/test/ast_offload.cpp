@@ -1,10 +1,11 @@
-#include "ast.h"
+#include <iostream>
+
 #include "catch2/catch_all.hpp"
+
+#include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
-
-#include <iostream>
 
 using namespace polyregion::polyast;
 using namespace polyregion::compiletime;

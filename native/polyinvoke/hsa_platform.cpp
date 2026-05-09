@@ -1,12 +1,13 @@
-#include "magic_enum/magic_enum.hpp"
+#include "polyinvoke/hsa_platform.h"
+
 #include <atomic>
 #include <cstring>
 
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 
+#include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
-#include "polyinvoke/hsa_platform.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hsa;
@@ -288,7 +289,7 @@ std::vector<Property> HsaDevice::properties() {
 std::vector<std::string> HsaDevice::features() {
   POLYINVOKE_TRACE();
   auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
-  return {"hsa", "amd", gfxArch};
+  return {"hsa", "amd", gfxArch, "fp64", "fp16", "int64"};
 }
 void HsaDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();

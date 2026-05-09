@@ -65,9 +65,7 @@ object Retyper {
     clsSym.typeRef.baseClasses
       .drop(1)
       .filterNot(roots.contains(_))
-      .map(parentSym =>
-        p.Type.Struct(structName0(parentSym), clsTypeCtorNames(parentSym).map(p.Type.Var(_)))
-      )
+      .map(parentSym => p.Type.Struct(structName0(parentSym), clsTypeCtorNames(parentSym).map(p.Type.Var(_))))
   }
 
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
@@ -223,8 +221,8 @@ object Retyper {
             case q.TermRef(receiverTpe, _) => // we have something concrete
               typer0(receiverTpe).map {
                 case (_ -> p.Type.Struct(_, args), wit) => args         -> wit
-                case (_ -> p.Type.Ptr(arg, _), wit)        => (arg :: Nil) -> wit
-                case (_ -> _, wit)                            => Nil          -> wit
+                case (_ -> p.Type.Ptr(arg, _), wit)     => (arg :: Nil) -> wit
+                case (_ -> _, wit)                      => Nil          -> wit
               }
             case _ => (Nil, Map.empty).success
           }

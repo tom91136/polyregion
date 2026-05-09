@@ -1,4 +1,5 @@
 #include "llvm_spirv_cl.h"
+
 #include "aspartame/all.hpp"
 
 using namespace polyregion::backend::details;
@@ -43,26 +44,26 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
 
     auto typeName = [](const Type::Any &tpe) -> std::string {
       auto impl = [](const Type::Any &x, auto &thunk) -> std::string {
-        return x.match_total(                                                                                   //
-            [&](const Type::Float16 &) -> std::string { return "half"; },                                       //
-            [&](const Type::Float32 &) -> std::string { return "float"; },                                      //
-            [&](const Type::Float64 &) -> std::string { return "double"; },                                     //
-            [&](const Type::IntU8 &) -> std::string { return "uchar"; },                                        //
-            [&](const Type::IntU16 &) -> std::string { return "ushort"; },                                      //
-            [&](const Type::IntU32 &) -> std::string { return "uint"; },                                        //
-            [&](const Type::IntU64 &) -> std::string { return "ulong"; },                                       //
-            [&](const Type::IntS8 &) -> std::string { return "char"; },                                         //
-            [&](const Type::IntS16 &) -> std::string { return "short"; },                                       //
-            [&](const Type::IntS32 &) -> std::string { return "int"; },                                         //
-            [&](const Type::IntS64 &) -> std::string { return "long"; },                                        //
-            [&](const Type::Bool1 &) -> std::string { return "char"; },                                         //
-            [&](const Type::Unit0 &) -> std::string { return "void"; },                                         //
-            [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                //
-            [&](const Type::Struct &s) -> std::string { return repr(s.name); },                                 //
-            [&](const Type::Ptr &p) -> std::string { return thunk(p.comp, thunk) + "*"; },                      //
+        return x.match_total(                                                                                               //
+            [&](const Type::Float16 &) -> std::string { return "half"; },                                                   //
+            [&](const Type::Float32 &) -> std::string { return "float"; },                                                  //
+            [&](const Type::Float64 &) -> std::string { return "double"; },                                                 //
+            [&](const Type::IntU8 &) -> std::string { return "uchar"; },                                                    //
+            [&](const Type::IntU16 &) -> std::string { return "ushort"; },                                                  //
+            [&](const Type::IntU32 &) -> std::string { return "uint"; },                                                    //
+            [&](const Type::IntU64 &) -> std::string { return "ulong"; },                                                   //
+            [&](const Type::IntS8 &) -> std::string { return "char"; },                                                     //
+            [&](const Type::IntS16 &) -> std::string { return "short"; },                                                   //
+            [&](const Type::IntS32 &) -> std::string { return "int"; },                                                     //
+            [&](const Type::IntS64 &) -> std::string { return "long"; },                                                    //
+            [&](const Type::Bool1 &) -> std::string { return "char"; },                                                     //
+            [&](const Type::Unit0 &) -> std::string { return "void"; },                                                     //
+            [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                            //
+            [&](const Type::Struct &s) -> std::string { return repr(s.name); },                                             //
+            [&](const Type::Ptr &p) -> std::string { return thunk(p.comp, thunk) + "*"; },                                  //
             [&](const Type::Arr &a) -> std::string { return thunk(a.comp, thunk) + "[" + std::to_string(a.length) + "]"; }, //
-            [&](const Type::Var &v) -> std::string { throw std::logic_error("Type::Var should be erased"); },   //
-            [&](const Type::Exec &e) -> std::string { throw std::logic_error("Type::Exec should be erased"); } //
+            [&](const Type::Var &v) -> std::string { throw std::logic_error("Type::Var should be erased"); },               //
+            [&](const Type::Exec &e) -> std::string { throw std::logic_error("Type::Exec should be erased"); }              //
         );
       };
       return impl(tpe, impl);

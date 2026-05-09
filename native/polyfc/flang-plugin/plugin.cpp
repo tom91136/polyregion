@@ -5,12 +5,11 @@
   #include <crt_externs.h>
 #endif
 
+#include "clang/Options/Options.h"
 #include "flang/Frontend/CompilerInstance.h"
 #include "flang/Frontend/CompilerInvocation.h"
 #include "flang/Frontend/FrontendActions.h"
 #include "flang/Frontend/FrontendPluginRegistry.h"
-
-#include "clang/Options/Options.h"
 #include "llvm/Option/ArgList.h"
 
 #include "rewriter.h"

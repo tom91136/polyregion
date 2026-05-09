@@ -18,7 +18,13 @@ object ConstantFoldPass extends ProgramPass {
   private def run(f: p.Function, log: Log): p.Function = {
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       val mutated = f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
-      f.copy(body = foldStmts(f.body, Map.empty, mutated, log)._1)
+      // Names whose address is taken via RefTo can be mutated indirectly through the resulting
+      // pointer; const-binding them and substituting their reads would be unsound. The backend
+      // also rejects RefTo of a constant, so even a pure-read const-bind followed by RefTo
+      // produces a semantic error -- exclude these names from the const env entirely.
+      val addressTaken =
+        f.collectAll[p.Expr].collect { case p.Expr.RefTo(p.Term.Select(name, _, _), _, _, _) => name }.toSet
+      f.copy(body = foldStmts(f.body, Map.empty, mutated ++ addressTaken, log)._1)
     }
     log.info(s"Constant fold is stable after ${n} passes")
     reduced
@@ -96,9 +102,9 @@ object ConstantFoldPass extends ProgramPass {
   }
 
   private def foldExpr(e: p.Expr, env: Env): p.Expr = e match {
-    case p.Expr.Alias(t)     => p.Expr.Alias(foldTerm(t, env))
-    case p.Expr.SpecOp(op)   => p.Expr.SpecOp(op.modifyAll[p.Term](foldTerm(_, env)))
-    case p.Expr.MathOp(op)   => p.Expr.MathOp(op.modifyAll[p.Term](foldTerm(_, env)))
+    case p.Expr.Alias(t)   => p.Expr.Alias(foldTerm(t, env))
+    case p.Expr.SpecOp(op) => p.Expr.SpecOp(op.modifyAll[p.Term](foldTerm(_, env)))
+    case p.Expr.MathOp(op) => p.Expr.MathOp(op.modifyAll[p.Term](foldTerm(_, env)))
     case p.Expr.IntrOp(op) =>
       val op2 = op.modifyAll[p.Term](foldTerm(_, env))
       tryFoldIntr(op2) match {
@@ -125,10 +131,10 @@ object ConstantFoldPass extends ProgramPass {
   }
 
   private def isConstTerm(t: p.Term): Boolean = t match {
-    case _: p.Term.Float16Const | _: p.Term.Float32Const | _: p.Term.Float64Const |
-        _: p.Term.IntU8Const | _: p.Term.IntU16Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const |
-        _: p.Term.IntS8Const | _: p.Term.IntS16Const | _: p.Term.IntS32Const | _: p.Term.IntS64Const |
-        _: p.Term.Bool1Const | p.Term.Unit0Const | _: p.Term.NullPtrConst =>
+    case _: p.Term.Float16Const | _: p.Term.Float32Const | _: p.Term.Float64Const | _: p.Term.IntU8Const |
+        _: p.Term.IntU16Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const | _: p.Term.IntS8Const |
+        _: p.Term.IntS16Const | _: p.Term.IntS32Const | _: p.Term.IntS64Const | _: p.Term.Bool1Const |
+        p.Term.Unit0Const | _: p.Term.NullPtrConst =>
       true
     case _ => false
   }
@@ -190,7 +196,7 @@ object ConstantFoldPass extends ProgramPass {
       // never fold integer /0; preserve the runtime trap.
       (asLong(x), asLong(y)) match {
         case (Some(_), Some(0L)) if t.kind == p.Type.Kind.Integral => None
-        case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral => intTerm(t, signExtend(t, a) / signExtend(t, b))
+        case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral  => intTerm(t, signExtend(t, a) / signExtend(t, b))
         case _ =>
           (asDouble(x), asDouble(y)) match {
             case (Some(a), Some(b)) => floatTerm(t, a / b)
@@ -200,7 +206,7 @@ object ConstantFoldPass extends ProgramPass {
     case p.Intr.Rem(x, y, t) =>
       (asLong(x), asLong(y)) match {
         case (Some(_), Some(0L)) if t.kind == p.Type.Kind.Integral => None
-        case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral => intTerm(t, signExtend(t, a) % signExtend(t, b))
+        case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral  => intTerm(t, signExtend(t, a) % signExtend(t, b))
         case _ =>
           (asDouble(x), asDouble(y)) match {
             case (Some(a), Some(b)) => floatTerm(t, a % b)
@@ -210,17 +216,50 @@ object ConstantFoldPass extends ProgramPass {
     case p.Intr.Min(x, y, t) => foldBinNumeric(x, y, t)(math.min(_, _))(math.min(_, _))
     case p.Intr.Max(x, y, t) => foldBinNumeric(x, y, t)(math.max(_, _))(math.max(_, _))
 
-    case p.Intr.BAnd(x, y, t) => for { a <- asLong(x); b <- asLong(y); r <- intTerm(t, a & b) } yield r
-    case p.Intr.BOr(x, y, t)  => for { a <- asLong(x); b <- asLong(y); r <- intTerm(t, a | b) } yield r
-    case p.Intr.BXor(x, y, t) => for { a <- asLong(x); b <- asLong(y); r <- intTerm(t, a ^ b) } yield r
-    case p.Intr.BSL(x, y, t)  => for { a <- asLong(x); b <- asLong(y); r <- intTerm(t, a << b) } yield r
-    case p.Intr.BSR(x, y, t)  => for { a <- asLong(x); b <- asLong(y); r <- intTerm(t, a >> b) } yield r
-    case p.Intr.BZSR(x, y, t) => for { a <- asLong(x); b <- asLong(y); r <- intTerm(t, a >>> b) } yield r
+    case p.Intr.BAnd(x, y, t) =>
+      for {
+        a <- asLong(x)
+        b <- asLong(y)
+        r <- intTerm(t, a & b)
+      } yield r
+    case p.Intr.BOr(x, y, t) =>
+      for {
+        a <- asLong(x)
+        b <- asLong(y)
+        r <- intTerm(t, a | b)
+      } yield r
+    case p.Intr.BXor(x, y, t) =>
+      for {
+        a <- asLong(x)
+        b <- asLong(y)
+        r <- intTerm(t, a ^ b)
+      } yield r
+    case p.Intr.BSL(x, y, t) =>
+      for {
+        a <- asLong(x)
+        b <- asLong(y)
+        r <- intTerm(t, a << b)
+      } yield r
+    case p.Intr.BSR(x, y, t) =>
+      for {
+        a <- asLong(x)
+        b <- asLong(y)
+        r <- intTerm(t, a >> b)
+      } yield r
+    case p.Intr.BZSR(x, y, t) =>
+      for {
+        a <- asLong(x)
+        b <- asLong(y)
+        r <- intTerm(t, a >>> b)
+      } yield r
 
-    case p.Intr.LogicAnd(x, y) => (asBool(x), asBool(y)) match { case (Some(a), Some(b)) => Some(p.Term.Bool1Const(a && b)); case _ => None }
-    case p.Intr.LogicOr(x, y)  => (asBool(x), asBool(y)) match { case (Some(a), Some(b)) => Some(p.Term.Bool1Const(a || b)); case _ => None }
-    case p.Intr.LogicEq(x, y)  => foldCmp(x, y)(_ == _)(_ == _).orElse(boolEq(x, y))
-    case p.Intr.LogicNeq(x, y) => foldCmp(x, y)(_ != _)(_ != _).orElse(boolEq(x, y).map(b => p.Term.Bool1Const(!b.value)))
+    case p.Intr.LogicAnd(x, y) =>
+      (asBool(x), asBool(y)) match { case (Some(a), Some(b)) => Some(p.Term.Bool1Const(a && b)); case _ => None }
+    case p.Intr.LogicOr(x, y) =>
+      (asBool(x), asBool(y)) match { case (Some(a), Some(b)) => Some(p.Term.Bool1Const(a || b)); case _ => None }
+    case p.Intr.LogicEq(x, y) => foldCmp(x, y)(_ == _)(_ == _).orElse(boolEq(x, y))
+    case p.Intr.LogicNeq(x, y) =>
+      foldCmp(x, y)(_ != _)(_ != _).orElse(boolEq(x, y).map(b => p.Term.Bool1Const(!b.value)))
     case p.Intr.LogicLt(x, y)  => foldCmp(x, y)(_ < _)(_ < _)
     case p.Intr.LogicLte(x, y) => foldCmp(x, y)(_ <= _)(_ <= _)
     case p.Intr.LogicGt(x, y)  => foldCmp(x, y)(_ > _)(_ > _)
@@ -262,24 +301,27 @@ object ConstantFoldPass extends ProgramPass {
   private def tryFoldCast(from: p.Term, as: p.Type): Option[p.Term] =
     if (from.tpe == as) Some(from)
     else
-      asLong(from).flatMap { v =>
-        as match {
-          case p.Type.Float16 => Some(p.Term.Float16Const(v.toFloat))
-          case p.Type.Float32 => Some(p.Term.Float32Const(v.toFloat))
-          case p.Type.Float64 => Some(p.Term.Float64Const(v.toDouble))
-          case _              => intTerm(as, v)
+      asLong(from)
+        .flatMap { v =>
+          as match {
+            case p.Type.Float16 => Some(p.Term.Float16Const(v.toFloat))
+            case p.Type.Float32 => Some(p.Term.Float32Const(v.toFloat))
+            case p.Type.Float64 => Some(p.Term.Float64Const(v.toDouble))
+            case _              => intTerm(as, v)
+          }
         }
-      }.orElse(asDouble(from).flatMap { v =>
-        as match {
-          case p.Type.Float16 | p.Type.Float32 | p.Type.Float64 => floatTerm(as, v)
-          case _                                                => intTerm(as, v.toLong)
-        }
-      }).orElse(asBool(from).flatMap { v =>
-        as match {
-          case p.Type.Bool1 => Some(p.Term.Bool1Const(v))
-          case _            => intTerm(as, if (v) 1L else 0L)
-        }
-      })
+        .orElse(asDouble(from).flatMap { v =>
+          as match {
+            case p.Type.Float16 | p.Type.Float32 | p.Type.Float64 => floatTerm(as, v)
+            case _                                                => intTerm(as, v.toLong)
+          }
+        })
+        .orElse(asBool(from).flatMap { v =>
+          as match {
+            case p.Type.Bool1 => Some(p.Term.Bool1Const(v))
+            case _            => intTerm(as, if (v) 1L else 0L)
+          }
+        })
 
   // Sign-extend so narrower signed types (IntS8/16/32) match runtime semantics after the
   // surrounding intTerm truncation; IntS64 and unsigned types pass through unchanged.

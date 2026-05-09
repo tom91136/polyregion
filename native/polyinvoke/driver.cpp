@@ -1,10 +1,12 @@
-#include "magic_enum/magic_enum.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/cl_platform.h"
 #include "polyinvoke/cuda_platform.h"
@@ -15,8 +17,6 @@
 #include "polyinvoke/runtime.h"
 #include "polyinvoke/vulkan_platform.h"
 #include "polyregion/io.hpp"
-
-#include "aspartame/all.hpp"
 
 using namespace aspartame;
 

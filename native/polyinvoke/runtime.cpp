@@ -1,9 +1,10 @@
-#include "magic_enum/magic_enum.hpp"
-#include "polyregion/compat.h"
+#include "polyinvoke/runtime.h"
 
 #include <iostream>
 #include <mutex>
 #include <utility>
+
+#include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/cl_platform.h"
 #include "polyinvoke/cuda_platform.h"
@@ -11,8 +12,8 @@
 #include "polyinvoke/hsa_platform.h"
 #include "polyinvoke/metal_platform.h"
 #include "polyinvoke/object_platform.h"
-#include "polyinvoke/runtime.h"
 #include "polyinvoke/vulkan_platform.h"
+#include "polyregion/compat.h"
 
 #include "libm.h"
 

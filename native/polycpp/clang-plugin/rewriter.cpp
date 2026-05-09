@@ -1,3 +1,5 @@
+#include "rewriter.h"
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -10,13 +12,12 @@
 #include "clang/Sema/Sema.h"
 #include "llvm/Support/Casting.h"
 
+#include "aspartame/all.hpp"
+#include "magic_enum/magic_enum.hpp"
+
 #include "ast_visitors.h"
 #include "clang_utils.h"
 #include "codegen.h"
-#include "rewriter.h"
-
-#include "aspartame/all.hpp"
-#include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::polystl;
 using namespace aspartame;
@@ -205,8 +206,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
             }) //
           | to_vector());
 
-  auto table =
-      bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(Sym({sl.name}), {}), sl}; }) | to<Map>();
+  auto table = bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(Sym({sl.name}), {}), sl}; }) | to<Map>();
 
   auto primitiveTypeLayoutsDecls =
       Vector<Type::Any>{

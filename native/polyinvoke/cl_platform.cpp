@@ -1,10 +1,13 @@
-#include "magic_enum/magic_enum.hpp"
+#include "polyinvoke/cl_platform.h"
+
 #include <cstring>
-#include <dlfcn.h>
 #include <iostream>
 #include <thread>
 
-#include "polyinvoke/cl_platform.h"
+#include <dlfcn.h>
+
+#include "magic_enum/magic_enum.hpp"
+
 #include "polyregion/env.h"
 
 using namespace polyregion::invoke;
@@ -108,19 +111,23 @@ PlatformKind ClPlatform::kind() {
 std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   POLYINVOKE_TRACE();
   cl_uint numPlatforms = 0;
-  CHECKED(clGetPlatformIDs(0, nullptr, &numPlatforms));
+  if (const auto r = clGetPlatformIDs(0, nullptr, &numPlatforms); r == -1001 || numPlatforms == 0) return {};
+  else CHECKED(r);
   std::vector<cl_platform_id> platforms(numPlatforms);
   CHECKED(clGetPlatformIDs(numPlatforms, platforms.data(), nullptr));
   std::vector<std::unique_ptr<Device>> clDevices;
+  // XXX OpenCL CPU ICDs duplicate the SharedObject/RelocatableObject paths and tend to
+  // misbehave; restrict to GPU/accelerator devices only.
+  const cl_device_type kAcceleratorMask = CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR;
   for (const auto &platform : platforms) {
     cl_uint numDevices = 0;
-    if (const auto deviceIdResult = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numDevices);
+    if (const auto deviceIdResult = clGetDeviceIDs(platform, kAcceleratorMask, 0, nullptr, &numDevices);
         deviceIdResult == CL_DEVICE_NOT_FOUND) {
       continue; // no device
     } else CHECKED(deviceIdResult);
 
     std::vector<cl_device_id> devices(numDevices);
-    CHECKED(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevices, devices.data(), nullptr));
+    CHECKED(clGetDeviceIDs(platform, kAcceleratorMask, numDevices, devices.data(), nullptr));
     auto ilFn =
         reinterpret_cast<details::ClCreateProgramWithIL_fn>(clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithIL"));
     if (!ilFn)
@@ -129,7 +136,6 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
     for (auto &device : devices) {
       auto svm = resolveSVM(platform, device);
       clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm));
-      // If the physical device also accepts SPIRV IL, expose a second logical device for it.
       if (ilFn && deviceSupportsIL(device)) clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::SPIRV_Kernel, ilFn, svm));
     }
   }
@@ -256,11 +262,37 @@ static std::string normaliseVendor(std::string vendor) {
 
 std::vector<std::string> ClDevice::features() {
   POLYINVOKE_TRACE();
-  // `opencl` matches an unconstrained selector; the vendor token disambiguates multi-ICD
-  // systems; `source` / `spirv_kernel` is what the TargetSpec required-features filter uses.
+  if (cachedFeatures) return *cachedFeatures;
   std::vector<std::string> out{"opencl"};
   out.push_back(normaliseVendor(queryDeviceInfo(*device, CL_DEVICE_VENDOR)));
   out.emplace_back(format == ModuleFormat::SPIRV_Kernel ? "spirv_kernel" : "source");
+  // XXX Cap-query and extension string both lie on some ICDs (Intel Arc DG2 in particular);
+  // probe with a real clBuildProgram to find out whether the device's compiler accepts the type.
+  const auto probePrecision = [&](const char *type, cl_device_fp_config cfgEnum, const char *cfgQuery) {
+    const auto exts = queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS);
+    cl_device_fp_config cfg = 0;
+    if (clGetDeviceInfo(*device, cfgEnum, sizeof(cfg), &cfg, nullptr) != CL_SUCCESS || cfg == 0) return false;
+    const std::string ext = std::string("cl_khr_") + type;
+    if (exts.find(ext) == std::string::npos) return false;
+    const std::string src = std::string("kernel void __polyinvoke_probe(global ") + type + "* p){p[0]=(" + type + ")1.0;}";
+    const char *srcPtr = src.c_str();
+    const size_t srcLen = src.size();
+    cl_int err = CL_SUCCESS;
+    cl_device_id devId = *device;
+    cl_context ctx = clCreateContext(nullptr, 1, &devId, nullptr, nullptr, &err);
+    if (err != CL_SUCCESS) return false;
+    cl_program prog = clCreateProgramWithSource(ctx, 1, &srcPtr, &srcLen, &err);
+    bool ok = false;
+    if (err == CL_SUCCESS) ok = clBuildProgram(prog, 1, &devId, nullptr, nullptr, nullptr) == CL_SUCCESS;
+    if (prog) clReleaseProgram(prog);
+    clReleaseContext(ctx);
+    (void)cfgQuery;
+    return ok;
+  };
+  if (probePrecision("double", CL_DEVICE_DOUBLE_FP_CONFIG, "double")) out.emplace_back("fp64");
+  if (probePrecision("half", /*CL_DEVICE_HALF_FP_CONFIG=*/0x1033, "half")) out.emplace_back("fp16");
+  if (queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS).find("cl_khr_int64_base_atomics") != std::string::npos) out.emplace_back("int64");
+  cachedFeatures = out;
   return out;
 }
 void ClDevice::loadModule(const std::string &name, const std::string &image) {
@@ -343,6 +375,13 @@ ClDeviceQueue::~ClDeviceQueue() {
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   POLYINVOKE_TRACE();
   if (!cb) return;
+  // SVM transfer paths use blocking memcpy and don't produce an event; the operation has
+  // already completed synchronously by the time we get here, so invoke the callback directly
+  // (clSetEventCallback would return CL_INVALID_EVENT on a null event).
+  if (!event) {
+    (*cb)();
+    return;
+  }
   static detail::CountedCallbackHandler handler;
   CHECKED(clSetEventCallback(
       event, CL_COMPLETE,

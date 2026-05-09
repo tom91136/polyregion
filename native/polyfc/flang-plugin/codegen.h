@@ -3,12 +3,12 @@
 #include <string>
 #include <vector>
 
-#include "polyregion/types.h"
-#include "remapper.h"
+#include "clang/AST/ASTContext.h"
 
 #include "polyfront/options_backend.hpp"
+#include "polyregion/types.h"
 
-#include "clang/AST/ASTContext.h"
+#include "remapper.h"
 
 namespace polyregion::polyfc {
 

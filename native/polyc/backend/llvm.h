@@ -3,13 +3,13 @@
 #include <unordered_map>
 #include <utility>
 
-#include "ast.h"
-#include "backend.h"
-#include "llvmc.h"
-
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
+
+#include "ast.h"
+#include "backend.h"
+#include "llvmc.h"
 
 namespace polyregion::backend {
 

@@ -39,12 +39,14 @@ object VerifyPass {
       case _: p.Term.IntS32Const | _: p.Term.IntS64Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const => true
       case _                                                                                             => false
     }
-    (program.entry :: program.functions).flatMap { f =>
-      f.collectWhere[p.Expr] { case a: p.Expr.Alloc => (f, a) }
-    }.collect {
-      case (f, p.Expr.Alloc(_, size, p.Type.Space.Local)) if !isConstSize(size) =>
-        s"Alloc Local in ${f.name.repr} requires a constant size; got ${size.repr}"
-    }
+    (program.entry :: program.functions)
+      .flatMap { f =>
+        f.collectWhere[p.Expr] { case a: p.Expr.Alloc => (f, a) }
+      }
+      .collect {
+        case (f, p.Expr.Alloc(_, size, p.Type.Space.Local)) if !isConstSize(size) =>
+          s"Alloc Local in ${f.name.repr} requires a constant size; got ${size.repr}"
+      }
   }
 
   // Reject Type.Var / Type.Exec when the program is in the PostMono phase.
@@ -78,39 +80,41 @@ object VerifyPass {
     def validatePath(c: Context, term: p.Term.Select): Context = {
       val termRepr = term.repr
       val initial  = c !! (term.root, termRepr)
-      term.steps.foldLeft((initial, term.root.tpe: p.Type)) { case ((acc, currTpe), step) =>
-        step match {
-          case p.PathStep.Deref =>
-            currTpe match {
-              case p.Type.Ptr(comp, _) => (acc, comp)
-              case other =>
-                (acc ~ s"Deref step on non-pointer type ${other.repr} in `$termRepr`", other)
-            }
-          case p.PathStep.Field(name) =>
-            currTpe match {
-              case s @ p.Type.Struct(sym, args) =>
-                sdefLUT.get(sym) match {
-                  case None =>
-                    (acc ~ s"Unknown struct type ${sym.repr} in `$termRepr`", currTpe)
-                  case Some(sdef) =>
-                    val apTable = sdef.tpeVars.zip(args).toMap
-                    val members = sdef.members.map(m =>
-                      m.modifyAll[p.Type](_.mapLeaf {
-                        case p.Type.Var(n) => apTable.getOrElse(n, p.Type.Var(n))
-                        case x             => x
-                      })
-                    )
-                    members.find(_.symbol == name) match {
-                      case Some(m) => (acc, m.tpe)
-                      case None =>
-                        (acc ~ s"Struct ${sdef.repr} does not contain field $name in `$termRepr`", currTpe)
-                    }
-                }
-              case other =>
-                (acc ~ s"Field step on non-struct type ${other.repr} in `$termRepr`", other)
-            }
+      term.steps
+        .foldLeft((initial, term.root.tpe: p.Type)) { case ((acc, currTpe), step) =>
+          step match {
+            case p.PathStep.Deref =>
+              currTpe match {
+                case p.Type.Ptr(comp, _) => (acc, comp)
+                case other =>
+                  (acc ~ s"Deref step on non-pointer type ${other.repr} in `$termRepr`", other)
+              }
+            case p.PathStep.Field(name) =>
+              currTpe match {
+                case s @ p.Type.Struct(sym, args) =>
+                  sdefLUT.get(sym) match {
+                    case None =>
+                      (acc ~ s"Unknown struct type ${sym.repr} in `$termRepr`", currTpe)
+                    case Some(sdef) =>
+                      val apTable = sdef.tpeVars.zip(args).toMap
+                      val members = sdef.members.map(m =>
+                        m.modifyAll[p.Type](_.mapLeaf {
+                          case p.Type.Var(n) => apTable.getOrElse(n, p.Type.Var(n))
+                          case x             => x
+                        })
+                      )
+                      members.find(_.symbol == name) match {
+                        case Some(m) => (acc, m.tpe)
+                        case None =>
+                          (acc ~ s"Struct ${sdef.repr} does not contain field $name in `$termRepr`", currTpe)
+                      }
+                  }
+                case other =>
+                  (acc ~ s"Field step on non-struct type ${other.repr} in `$termRepr`", other)
+              }
+          }
         }
-      }._1
+        ._1
     }
 
     def validateTerm(c: Context, t: p.Term): Context = t match {
@@ -127,7 +131,7 @@ object VerifyPass {
         val c0                   = validateTerm(c, from)
         def isNumeric(t: p.Type) = t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
         (from.tpe, as) match {
-          case (a, b) if a == b => c0
+          case (a, b) if a == b                              => c0
           case (p.Type.Struct(_, _), p.Type.Struct(name, _)) =>
             // upcast/downcast permission requires a parents lookup against StructDefs.
             sdefLUT.get(name) match {
@@ -183,7 +187,7 @@ object VerifyPass {
         falseBr.foldLeft(trueBr.foldLeft(c0)(validateStmt(_, _)))(validateStmt(_, _))
       case p.Stmt.Return(value) => validateExpr(c, value)
       case p.Stmt.ForRange(induction, lbIncl, ubExcl, step, body) =>
-        val c0 = (c + induction)
+        val c0 = c + induction
         val c1 = validateTerm(c0, lbIncl)
         val c2 = validateTerm(c1, ubExcl)
         val c3 = validateTerm(c2, step)
@@ -255,12 +259,14 @@ object VerifyPass {
     val allFunctions = program.entry :: program.functions
     val sdefLUT      = program.defs.iterator.map(d => d.name -> d).toMap
     val allFnLUT     = allFunctions.groupBy(_.name)
-    val perFn        = allFunctions.map(f => f -> validateSingle(f, program.defs, allFunctions, verifyFunction, sdefLUT, allFnLUT))
-    val global       = validateAlloc(program) ::: validatePostMono(program)
+    val perFn =
+      allFunctions.map(f => f -> validateSingle(f, program.defs, allFunctions, verifyFunction, sdefLUT, allFnLUT))
+    val global = validateAlloc(program) ::: validatePostMono(program)
     if (global.isEmpty) perFn
-    else perFn match {
-      case (entry, errs) :: rest => (entry, errs ::: global) :: rest
-      case Nil                   => (program.entry, global) :: Nil
-    }
+    else
+      perFn match {
+        case (entry, errs) :: rest => (entry, errs ::: global) :: rest
+        case Nil                   => (program.entry, global) :: Nil
+      }
   }
 }

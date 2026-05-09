@@ -1,4 +1,5 @@
 #include "llvm_nvptx.h"
+
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
@@ -100,13 +101,9 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
 }
 
 void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
-  // CUDA reaches dynamic shared memory through an `extern .shared` symbol fed by
-  // `cuLaunchKernel(..., sharedMemBytes, ...)`, not through a kernel parameter. A `ptr
-  // addrspace(3)` param emits `.param .u64 .ptr .shared`, which `cuModuleLoad` rejects (LLVM PR
-  // 114874); stripping the `.shared` annotation keeps the load happy but leaves the kernel
-  // dereferencing an unpopulated 0, faulting at runtime. Lower each addrspace(3) param into a
-  // single module-level `extern addrspace(3) global` and rewrite uses; the CUDA runtime side
-  // drops `Type::Scratch` from the arg buffer to keep the remaining params aligned.
+  // XXX Lower addrspace(3) kernel params to a module-level `extern addrspace(3) global` and
+  // coerce the param's AS to default; positional arg layout is preserved so the launcher slot
+  // stays aligned with the OpenCL kernarg ABI.
   llvm::Module &M = cg.M;
   llvm::LLVMContext &ctx = cg.C.actual;
   llvm::GlobalVariable *sharedGlobal = nullptr;
@@ -135,14 +132,15 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     if (!hasSharedParam) continue;
 
     auto *sg = getSharedGlobal();
+    auto *defaultPtrTy = llvm::PointerType::get(ctx, 0);
     std::vector<llvm::Type *> newParamTys;
-    std::vector<bool> keepArg;
-    keepArg.reserve(fn->arg_size());
+    std::vector<bool> coerceArg;
+    coerceArg.reserve(fn->arg_size());
     for (auto &arg : fn->args()) {
       auto *pty = llvm::dyn_cast<llvm::PointerType>(arg.getType());
       const bool isShared = pty && pty->getAddressSpace() == 3;
-      keepArg.push_back(!isShared);
-      if (!isShared) newParamTys.push_back(arg.getType());
+      coerceArg.push_back(isShared);
+      newParamTys.push_back(isShared ? defaultPtrTy : arg.getType());
     }
     auto *newFnTy = llvm::FunctionType::get(fn->getReturnType(), newParamTys, false);
     auto *newFn = llvm::Function::Create(newFnTy, fn->getLinkage(), fn->getAddressSpace(), "", &M);
@@ -150,17 +148,15 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     newFn->setCallingConv(fn->getCallingConv());
     newFn->takeName(fn);
 
-    // Kept args -> their new positional index; dropped shared args -> @polyc_dyn_shared.
     llvm::ValueToValueMapTy vmap;
     auto newArgIt = newFn->arg_begin();
     auto oldArgIt = fn->arg_begin();
-    for (size_t i = 0; i < keepArg.size(); ++i, ++oldArgIt) {
-      if (keepArg[i]) {
+    for (size_t i = 0; i < coerceArg.size(); ++i, ++oldArgIt, ++newArgIt) {
+      if (coerceArg[i]) {
+        vmap[&*oldArgIt] = sg;
+      } else {
         newArgIt->setName(oldArgIt->getName());
         vmap[&*oldArgIt] = &*newArgIt;
-        ++newArgIt;
-      } else {
-        vmap[&*oldArgIt] = sg;
       }
     }
     newFn->splice(newFn->begin(), fn);

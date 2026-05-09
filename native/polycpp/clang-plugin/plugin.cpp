@@ -1,12 +1,13 @@
 #include <iostream>
 
-#include "rewriter.h"
-
-#include "aspartame/all.hpp"
-#include "polyfront/options_backend.hpp"
-
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
+
+#include "aspartame/all.hpp"
+
+#include "polyfront/options_backend.hpp"
+
+#include "rewriter.h"
 
 using namespace aspartame;
 using namespace polyregion;

@@ -1,7 +1,8 @@
-#include "magic_enum/magic_enum.hpp"
+#include "polyinvoke/metal_platform.h"
+
 #include <cstring>
 
-#include "polyinvoke/metal_platform.h"
+#include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::metal;

@@ -25,10 +25,6 @@ public:
   String loadModule(std::string_view source, std::string_view moduleId = "polypass.js");
 
   Vector<uint8_t> runPass(std::string_view passName, const Vector<uint8_t> &programBytes, String &error);
-
-  // Resolution order: $POLYPASS_JS env, <exe-dir>/polypass.js, <exe-dir>/../lib/polypass.js,
-  // then the build-time POLYPASS_JS_DEV_PATH baked in by CMake. Returns "" if unfound.
-  static String findBundle();
 };
 
 } // namespace polyregion::polypass

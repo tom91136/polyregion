@@ -1,11 +1,11 @@
 #pragma once
 
-#include "polyregion/types.h"
-
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+
+#include "polyregion/types.h"
 
 namespace polyregion::polydco {
 

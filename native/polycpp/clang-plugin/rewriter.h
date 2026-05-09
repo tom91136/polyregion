@@ -1,9 +1,9 @@
 #pragma once
 
-#include "polyfront/options_backend.hpp"
-
 #include "clang/AST/ASTConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
+
+#include "polyfront/options_backend.hpp"
 
 namespace polyregion::polystl {
 

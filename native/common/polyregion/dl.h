@@ -3,9 +3,10 @@
 #include "compat.h"
 
 #ifdef _WIN32
-  #include <Windows.h>
   #include <string>
   #include <system_error>
+
+  #include <Windows.h>
 
 inline const char *polyregion_dl_error_() {
   thread_local std::string msg;

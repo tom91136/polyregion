@@ -6,10 +6,11 @@
 
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
+
 #include "polyregion/export.h"
+#include "polyregion/llvm_ir.hpp"
 
 #include "interpose.h"
-#include "polyregion/llvm_ir.hpp"
 #include "reflect-mem.h"
 #include "reflect-stack.h"
 

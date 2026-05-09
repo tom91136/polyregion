@@ -17,7 +17,7 @@ object Remapper {
       case p.Type.Var(name) =>
         tpeTable.get(name) match {
           case Some(value) => value
-          case None => ???
+          case None        => ???
         }
       case p.Type.Struct(name, args) =>
         p.Type.Struct(name, args.map(resolve))
@@ -115,8 +115,8 @@ object Remapper {
           c // FIXME restore statements!!!
         )
 
-      case q.Import(_, _)                                       => (p.Expr.Alias(p.Term.Unit0Const), c).success // ignore
-      case q.TypeDef(name, tree)                                => (p.Expr.Alias(p.Term.Unit0Const), c).success // ignore
+      case q.Import(_, _)        => (p.Expr.Alias(p.Term.Unit0Const), c).success // ignore
+      case q.TypeDef(name, tree) => (p.Expr.Alias(p.Term.Unit0Const), c).success // ignore
       case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Expr.Alias(p.Term.Unit0Const), c).success
       case t: q.Term                                            => (c !! tree).mapTerm(t)
 
@@ -256,7 +256,7 @@ object Remapper {
 
         val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
           case p.Type.Struct(_, tpeArgs) => tpeArgs
-          case _                               => Nil
+          case _                         => Nil
         }
 
         // termCaptures filled by Compiler.patchFn after this pass.
@@ -544,7 +544,7 @@ object Remapper {
       // already produced one; otherwise this is a programming error at the IR boundary.
       val lhsSelect: p.Term.Select = lhs match {
         case p.Expr.Alias(s: p.Term.Select) => s
-        case other                          => throw new IllegalStateException(s"mkMut lhs must be an Alias(Term.Select); got ${other.repr}")
+        case other => throw new IllegalStateException(s"mkMut lhs must be an Alias(Term.Select); got ${other.repr}")
       }
       if (lhs.tpe == rhs.tpe) {
         (p.Stmt.Mut(lhsSelect, rhs) :: Nil, c)
@@ -731,9 +731,9 @@ object Remapper {
             // hoisting, declaring Vars inside Cond branches every iteration creates a fresh
             // alloca and the loop test reads stale state.
             def hoistDecls(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
-              case p.Stmt.Var(n, _, _)             => List(p.Stmt.Var(n, None, isMutable = true))
-              case p.Stmt.Cond(c, t, f)            => hoistDecls(t) ++ hoistDecls(f)
-              case _                               => Nil
+              case p.Stmt.Var(n, _, _)  => List(p.Stmt.Var(n, None, isMutable = true))
+              case p.Stmt.Cond(c, t, f) => hoistDecls(t) ++ hoistDecls(f)
+              case _                    => Nil
             }
             def varsToMuts(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
               case p.Stmt.Var(n, Some(e), _) => List(p.Stmt.Mut(p.Term.Select(n, Nil, n.tpe), e))
@@ -745,7 +745,7 @@ object Remapper {
               case p.Stmt.Var(n, _, _) => n.symbol
               case other               => other.toString
             }
-            val condBody     = varsToMuts(condCtx.stmts)
+            val condBody = varsToMuts(condCtx.stmts)
             (
               p.Expr.Alias(p.Term.Unit0Const),
               bodyCtx.replaceStmts(

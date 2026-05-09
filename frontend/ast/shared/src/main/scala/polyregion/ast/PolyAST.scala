@@ -47,12 +47,12 @@ object PolyAST {
     case Unit0   extends Type(Type.Kind.None)
     case Bool1   extends Type(Type.Kind.Integral)
 
-    case Struct(name: Sym, args: List[Type])                          extends Type(Type.Kind.Ref)
-    case Ptr(comp: Type, space: Type.Space)                           extends Type(Type.Kind.Ref)
-    case Arr(comp: Type, length: Int, space: Type.Space)              extends Type(Type.Kind.Ref)
+    case Struct(name: Sym, args: List[Type])             extends Type(Type.Kind.Ref)
+    case Ptr(comp: Type, space: Type.Space)              extends Type(Type.Kind.Ref)
+    case Arr(comp: Type, length: Int, space: Type.Space) extends Type(Type.Kind.Ref)
 
-    case Var(name: String)                                            extends Type(Type.Kind.None)
-    case Exec(tpeVars: List[String], args: List[Type], rtn: Type)     extends Type(Type.Kind.None)
+    case Var(name: String)                                        extends Type(Type.Kind.None)
+    case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
   }
 
   enum PathStep derives MsgPack.Codec {
@@ -84,15 +84,14 @@ object PolyAST {
   }
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
-    case Alias(ref: Term)                       extends Expr(ref.tpe)
-    case SpecOp(op: Spec)                       extends Expr(op.tpe)
-    case MathOp(op: Math)                       extends Expr(op.tpe)
-    case IntrOp(op: Intr)                       extends Expr(op.tpe)
-    case Cast(from: Term, as: Type)             extends Expr(as)
-    case Index(lhs: Term, idx: Term, comp: Type) extends Expr(comp)
-    case RefTo(lhs: Term, idx: Option[Term], comp: Type, space: Type.Space)
-        extends Expr(Type.Ptr(comp, space))
-    case Alloc(comp: Type, size: Term, space: Type.Space) extends Expr(Type.Ptr(comp, space))
+    case Alias(ref: Term)                                                   extends Expr(ref.tpe)
+    case SpecOp(op: Spec)                                                   extends Expr(op.tpe)
+    case MathOp(op: Math)                                                   extends Expr(op.tpe)
+    case IntrOp(op: Intr)                                                   extends Expr(op.tpe)
+    case Cast(from: Term, as: Type)                                         extends Expr(as)
+    case Index(lhs: Term, idx: Term, comp: Type)                            extends Expr(comp)
+    case RefTo(lhs: Term, idx: Option[Term], comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, space))
+    case Alloc(comp: Type, size: Term, space: Type.Space)                   extends Expr(Type.Ptr(comp, space))
     case Invoke(
         name: Sym,
         tpeArgs: List[Type],
@@ -123,13 +122,13 @@ object PolyAST {
     inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
   }
   enum Spec(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
-    case Assert extends Spec(Spec.NullaryUnit, List[Term](), Type.Nothing)
-    case GpuBarrierGlobal extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuBarrierLocal  extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuBarrierAll    extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuFenceGlobal   extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuFenceLocal    extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuFenceAll      extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case Assert                   extends Spec(Spec.NullaryUnit, List[Term](), Type.Nothing)
+    case GpuBarrierGlobal         extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuBarrierLocal          extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuBarrierAll            extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceGlobal           extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceLocal            extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceAll              extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
     case GpuGlobalIdx(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
     case GpuGlobalSize(dim: Term) extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
     case GpuGroupIdx(dim: Term)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
@@ -214,31 +213,31 @@ object PolyAST {
     inline def NullaryUnit       = List(Overload(List[Type](), Type.Unit0))
   }
   enum Intr(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
-    case BNot(x: Term, rtn: Type) extends Intr(Intr.UnaryUniformIntegral, List(x), rtn)
-    case LogicNot(x: Term)        extends Intr(Intr.BinaryUniformBool, List(x), Type.Bool1)
-    case Pos(x: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Neg(x: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Add(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Sub(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Mul(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Div(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Rem(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Min(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    case Max(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case BNot(x: Term, rtn: Type)          extends Intr(Intr.UnaryUniformIntegral, List(x), rtn)
+    case LogicNot(x: Term)                 extends Intr(Intr.BinaryUniformBool, List(x), Type.Bool1)
+    case Pos(x: Term, rtn: Type)           extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Neg(x: Term, rtn: Type)           extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Add(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Sub(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Mul(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Div(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Rem(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Min(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
+    case Max(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
     case BAnd(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BOr(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BXor(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BSL(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BSR(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BZSR(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
-    case LogicAnd(x: Term, y: Term) extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
-    case LogicOr(x: Term, y: Term)  extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
-    case LogicEq(x: Term, y: Term)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicNeq(x: Term, y: Term) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicLte(x: Term, y: Term) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicGte(x: Term, y: Term) extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicLt(x: Term, y: Term)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
-    case LogicGt(x: Term, y: Term)  extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicAnd(x: Term, y: Term)        extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
+    case LogicOr(x: Term, y: Term)         extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
+    case LogicEq(x: Term, y: Term)         extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicNeq(x: Term, y: Term)        extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicLte(x: Term, y: Term)        extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicGte(x: Term, y: Term)        extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicLt(x: Term, y: Term)         extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
+    case LogicGt(x: Term, y: Term)         extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
   }
 
   object Math {
@@ -254,28 +253,28 @@ object PolyAST {
     )
   }
   enum Math(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
-    case Abs(x: Term, rtn: Type)    extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Sin(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cos(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Tan(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Asin(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Acos(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Atan(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Sinh(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cosh(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Tanh(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Signum(x: Term, rtn: Type) extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Round(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Ceil(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Floor(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Rint(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Sqrt(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Cbrt(x: Term, rtn: Type)   extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Exp(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Expm1(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log1p(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
-    case Log10(x: Term, rtn: Type)  extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Abs(x: Term, rtn: Type)            extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Sin(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cos(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Tan(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Asin(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Acos(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Atan(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Sinh(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cosh(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Tanh(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Signum(x: Term, rtn: Type)         extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Round(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Ceil(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Floor(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Rint(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Sqrt(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Cbrt(x: Term, rtn: Type)           extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Exp(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Expm1(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log(x: Term, rtn: Type)            extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log1p(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
+    case Log10(x: Term, rtn: Type)          extends Math(Math.UnaryUniformFractional, List(x), rtn)
     case Pow(x: Term, y: Term, rtn: Type)   extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
     case Atan2(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
     case Hypot(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
@@ -317,7 +316,7 @@ object PolyAST {
 
   object Function {
     enum Visibility derives MsgPack.Codec { case Internal, Exported }
-    enum FpMode     derives MsgPack.Codec { case Relaxed, Strict   }
+    enum FpMode derives MsgPack.Codec     { case Relaxed, Strict    }
   }
   case class Function(
       name: Sym,
@@ -421,9 +420,9 @@ object PolyAST {
 
       case Type.Struct(name, args) =>
         s"${name.repr}<${args.map(_.repr).mkString(",")}>"
-      case Type.Ptr(comp, space) => s"${comp.repr}*${space.repr}"
+      case Type.Ptr(comp, space)         => s"${comp.repr}*${space.repr}"
       case Type.Arr(comp, length, space) => s"${comp.repr}[$length]${space.repr}"
-      case Type.Var(name) => s"#$name"
+      case Type.Var(name)                => s"#$name"
       case Type.Exec(tpeVars, args, rtn) =>
         s"<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
     }
@@ -606,7 +605,9 @@ object PolyAST {
     def repr: String =
       s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.mkString(",")}>(${f.args
           .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}")
-          .mkString(", ")}): ${f.rtn.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} entry=${f.isEntry} mod=${f.moduleCaptures.map(_.repr).mkString(",")} term=${f.termCaptures
+          .mkString(", ")}): ${f.rtn.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} entry=${f.isEntry} mod=${f.moduleCaptures
+          .map(_.repr)
+          .mkString(",")} term=${f.termCaptures
           .map(_.repr)
           .mkString(",")} */ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
   }

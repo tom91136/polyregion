@@ -1,11 +1,12 @@
 #include "ast.h"
 
+#include <iostream>
+
 #include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
+
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
-
-#include <iostream>
 
 using namespace polyregion::polyast;
 using namespace polyregion::polyast::dsl;

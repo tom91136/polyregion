@@ -5,11 +5,13 @@
 #include <shared_mutex>
 #include <thread>
 
-#include "polyregion/compat.h"
-#include "polyregion/dl.h"
-#include "runtime.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Object/ObjectFile.h"
+
+#include "polyregion/compat.h"
+#include "polyregion/dl.h"
+
+#include "runtime.h"
 
 namespace polyregion::invoke::object {
 

@@ -1,3 +1,5 @@
+#include "reflect-stack.h"
+
 #include <unordered_set>
 
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -6,10 +8,10 @@
 #include "llvm/Passes/PassBuilder.h"
 
 #include "aspartame/all.hpp"
-#include "reflect-rt/rt_reflect.hpp"
 
 #include "polyregion/llvm_ir.hpp"
-#include "reflect-stack.h"
+
+#include "reflect-rt/rt_reflect.hpp"
 
 using namespace aspartame;
 using namespace polyregion;

@@ -62,7 +62,7 @@ class ConstantFoldPassSuite extends munit.FunSuite {
   }
 
   test("integer divide-by-zero is preserved") {
-    val v = named("v", p.Type.IntS32)
+    val v        = named("v", p.Type.IntS32)
     val expected = p.Expr.IntrOp(p.Intr.Div(p.Term.IntS32Const(10), p.Term.IntS32Const(0), p.Type.IntS32))
     val out = fold(
       List(p.Stmt.Var(v, Some(expected)), p.Stmt.Return(p.Expr.Alias(selectT(v)))),
@@ -76,7 +76,8 @@ class ConstantFoldPassSuite extends munit.FunSuite {
     val v = named("v", p.Type.Float64)
     val out = fold(
       List(
-        p.Stmt.Var(v, Some(p.Expr.IntrOp(p.Intr.Mul(p.Term.Float64Const(2.5), p.Term.Float64Const(4.0), p.Type.Float64)))),
+        p.Stmt
+          .Var(v, Some(p.Expr.IntrOp(p.Intr.Mul(p.Term.Float64Const(2.5), p.Term.Float64Const(4.0), p.Type.Float64)))),
         p.Stmt.Return(p.Expr.Alias(selectT(v)))
       ),
       rtn = p.Type.Float64
@@ -128,7 +129,11 @@ class ConstantFoldPassSuite extends munit.FunSuite {
     val v = named("v", p.Type.IntS32)
     val out = fold(
       List(
-        p.Stmt.Cond(p.Term.Bool1Const(true), List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(1))))), List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(2)))))),
+        p.Stmt.Cond(
+          p.Term.Bool1Const(true),
+          List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(1))))),
+          List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(2)))))
+        ),
         p.Stmt.Return(p.Expr.Alias(selectT(v)))
       ),
       rtn = p.Type.IntS32
@@ -143,7 +148,11 @@ class ConstantFoldPassSuite extends munit.FunSuite {
     val v = named("v", p.Type.IntS32)
     val out = fold(
       List(
-        p.Stmt.Cond(p.Term.Bool1Const(false), List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(1))))), List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(2)))))),
+        p.Stmt.Cond(
+          p.Term.Bool1Const(false),
+          List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(1))))),
+          List(p.Stmt.Var(v, Some(p.Expr.Alias(p.Term.IntS32Const(2)))))
+        ),
         p.Stmt.Return(p.Expr.Alias(selectT(v)))
       ),
       rtn = p.Type.IntS32
@@ -168,7 +177,9 @@ class ConstantFoldPassSuite extends munit.FunSuite {
       List(
         p.Stmt.ForRange(
           named("i", p.Type.IntS64),
-          p.Term.IntS64Const(10), p.Term.IntS64Const(10), p.Term.IntS64Const(1),
+          p.Term.IntS64Const(10),
+          p.Term.IntS64Const(10),
+          p.Term.IntS64Const(1),
           List(p.Stmt.Break)
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))

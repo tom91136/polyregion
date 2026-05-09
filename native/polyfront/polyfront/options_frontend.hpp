@@ -4,9 +4,9 @@
 #include <optional>
 #include <vector>
 
-#include "options.hpp"
-
 #include "aspartame/all.hpp"
+
+#include "options.hpp"
 
 namespace polyregion::polyfront {
 

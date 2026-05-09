@@ -1,15 +1,20 @@
-#include "ast.h"
-#include "compiler.h"
-#include "generated/polyast.h"
+#include <thread>
+
+#include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/runtime.h"
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/stream.hpp"
 
-#include "aspartame/all.hpp"
+#include "ast.h"
+#include "compiler.h"
+#include "generated/polyast.h"
+#include "polytest/profile.hpp"
 
-#include <thread>
+#ifndef POLYREGION_TEST_PROFILE_DIR
+  #define POLYREGION_TEST_PROFILE_DIR ""
+#endif
 
 using namespace polyregion;
 using namespace polyregion::concurrency_utils;
@@ -48,8 +53,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       loopBody.push_back(Mut("i"_(Long), call(Add("i"_(Long), 1_(Long), Long)))); // i++
 
       stmts.push_back(whileLoop({let("bound") = "end"_(Ptr(Long))["id"_(Long)], let("cont") = call(LogicLt("i"_(Long), "bound"_(Long)))},
-                            "cont"_(Bool),
-                            loopBody)); // while(i < end[id])
+                                "cont"_(Bool),
+                                loopBody)); // while(i < end[id])
 
       stmts ^= concat_inplace(mkEpilogue("id"_(Long), "i"_(Long)));
     } else {
@@ -145,33 +150,33 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                     let("global_size") = call(GpuGlobalSize(0_(UInt))),
                     "wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type),
                     whileLoop({let("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                          {let("ai") = "a"_(Ptr(type))[i],                                     // ai = a[i]
-                           let("bi") = "b"_(Ptr(type))[i],                                     // bi = b[i]
-                           let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],            // sumid = sum[local_i]
-                           let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),              // r0 = ai * bi
-                           let("r1") = call(Add("r0"_(type), "sumid"_(type), type)),           // r1 = r0 + sumid
-                           "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),             // a[i] = bi
-                           ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))}), // i += array_size
-                    let("offset") = call(GpuLocalSize(0_(UInt))),                              // offset = get_local_size()
-                    "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)),              // offset /= 2
-                    whileLoop({let("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
-                          {
-                              let("_") = call(GpuBarrierLocal()),
-                              let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
-                              Cond("__cond_lt"_(Bool), //
-                                   {
-                                       let("new_offset") =
-                                           call(Add("local_i"_(UInt), "offset"_(UInt), UInt)),       // new_offset = local_i + offset
-                                       let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i], // wg_sum_old = wg_sum[local_i]
-                                       let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
-                                                                                                                       // wg_sum[new_offset]
-                                       "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
+                              {let("ai") = "a"_(Ptr(type))[i],                                     // ai = a[i]
+                               let("bi") = "b"_(Ptr(type))[i],                                     // bi = b[i]
+                               let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],            // sumid = sum[local_i]
+                               let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),              // r0 = ai * bi
+                               let("r1") = call(Add("r0"_(type), "sumid"_(type), type)),           // r1 = r0 + sumid
+                               "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),             // a[i] = bi
+                               ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))}), // i += array_size
+                    let("offset") = call(GpuLocalSize(0_(UInt))),                                  // offset = get_local_size()
+                    "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)),                  // offset /= 2
+                    whileLoop(
+                        {let("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
+                        {
+                            let("_") = call(GpuBarrierLocal()), let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
+                            Cond(
+                                "__cond_lt"_(Bool), //
+                                {
+                                    let("new_offset") = call(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // new_offset = local_i + offset
+                                    let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i],           // wg_sum_old = wg_sum[local_i]
+                                    let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
+                                                                                                                    // wg_sum[new_offset]
+                                    "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
 
-                                       "wg_sum"_(Ptr(type, {}, Local))[local_i] = "wg_sum_at_offset"_(type), // a[i] = bi
-                                   },
-                                   {}),
-                              "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
-                          }),
+                                    "wg_sum"_(Ptr(type, {}, Local))[local_i] = "wg_sum_at_offset"_(type), // a[i] = bi
+                                },
+                                {}),
+                            "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
+                        }),
                     let("group_id") = call(GpuGroupIdx(0_(UInt))),
                     let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))),
                     Cond("__cond_eq"_(Bool), //
@@ -199,27 +204,17 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
 
 int main() {
 
-  // x86-64 CMOV
-  // x86-64-v2 CMPXCHG16B
-  // x86-64-v3 AVX,AVX2
-  // x86-64-v4 AVX512
+  const auto resolved = polytest::resolveTestTargets(POLYREGION_TEST_PROFILE_DIR);
+  if (resolved.empty()) {
+    std::cerr << "babelstream: no test targets resolved (set POLYREGION_TEST_TARGETS or provide a"
+                 " profile under " POLYREGION_TEST_PROFILE_DIR ")\n";
+    return EXIT_FAILURE;
+  }
 
-  std::vector<std::tuple<invoke::Backend, compiletime::Target, std::string>> configs = {
-      // CL runs everywhere
-      {invoke::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
-  // {invoke::Backend::Vulkan, compiletime::Target::Object_LLVM_SPIRV64, ""},
-#ifdef __APPLE__
-      {invoke::Backend::RelocatableObject, compiletime::Target::Object_LLVM_AArch64, "apple-m1"},
-      {invoke::Backend::Metal, compiletime::Target::Source_C_Metal1_0, ""},
-#else
-      {invoke::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_89"},
-      {invoke::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-      {invoke::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-      {invoke::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
-#endif
-  };
-
-  for (auto [backend, target, arch] : configs) {
+  for (const auto &r : resolved) {
+    const auto backend = r.spec.runtime;
+    const auto target = r.spec.codegen;
+    const auto arch = r.arch;
 
     auto cpu = backend == invoke::Backend::RelocatableObject || backend == invoke::Backend::SharedObject;
 

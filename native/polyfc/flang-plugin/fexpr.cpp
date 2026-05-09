@@ -1,3 +1,5 @@
+#include "fexpr.h"
+
 #include <optional>
 #include <vector>
 
@@ -5,7 +7,6 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
-#include "fexpr.h"
 #include "ftypes.h"
 
 using namespace polyregion;

@@ -1,3 +1,7 @@
+#include "reflect-mem.h"
+
+#include <cmath>
+#include <stack>
 #include <unordered_set>
 
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -44,10 +48,6 @@
 #include "polyregion/interval.hpp"
 #include "polyregion/llvm_dyn.hpp"
 #include "polyregion/llvm_ir.hpp"
-#include "reflect-mem.h"
-
-#include <cmath>
-#include <stack>
 
 namespace {
 

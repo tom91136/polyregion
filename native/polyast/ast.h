@@ -2,10 +2,11 @@
 
 #include <functional>
 
-#include "generated/polyast.h"
-#include "generated/polyast_repr.h"
 #include "polyregion/aliases.h"
 #include "polyregion/compat.h"
+
+#include "generated/polyast.h"
+#include "generated/polyast_repr.h"
 
 namespace polyregion::polyast {
 
@@ -80,8 +81,8 @@ struct AssignmentBuilder {
   std::string name;
   bool isMutable;
   AssignmentBuilder(const std::string &name, bool isMutable);
-  Stmt::Any operator=(Term::Any t) const;       // NOLINT(misc-unconventional-assign-operator)
-  Stmt::Any operator=(Type::Any) const;         // NOLINT(misc-unconventional-assign-operator)
+  Stmt::Any operator=(Term::Any t) const;        // NOLINT(misc-unconventional-assign-operator)
+  Stmt::Any operator=(Type::Any) const;          // NOLINT(misc-unconventional-assign-operator)
   Stmt::Any operator=(const Expr::Any &e) const; // NOLINT(misc-unconventional-assign-operator)
 };
 
@@ -96,9 +97,9 @@ struct IndexBuilder {
 struct NamedBuilder {
   Named named;
   explicit NamedBuilder(const Named &named);
-  operator Term::Any() const;     // NOLINT(google-explicit-constructor)
+  operator Term::Any() const; // NOLINT(google-explicit-constructor)
   operator Term::Select() const;
-  operator Named() const;         // NOLINT(google-explicit-constructor)
+  operator Named() const; // NOLINT(google-explicit-constructor)
   Arg operator()() const;
   IndexBuilder operator[](const Term::Any &idx) const;
   Mut operator=(const Expr::Any &that) const;
@@ -108,26 +109,24 @@ Term::Any integral(const Type::Any &tpe, unsigned long long int x);
 Term::Any fractional(const Type::Any &tpe, long double x);
 
 template <typename F> Term::Any numeric(const Type::Any &tpe, F tagged) {
-  auto unsupported = [](auto &&t) -> Term::Any {
-    throw std::logic_error("Cannot create numeric constant of type " + to_string(t));
-  };
-  return tpe.match_total(                                                                    //
-      [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(tagged(float{})); },   //
-      [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(tagged(float{})); },   //
-      [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(tagged(double{})); },  //
+  auto unsupported = [](auto &&t) -> Term::Any { throw std::logic_error("Cannot create numeric constant of type " + to_string(t)); };
+  return tpe.match_total(                                                                       //
+      [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(tagged(float{})); },  //
+      [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(tagged(float{})); },  //
+      [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(tagged(double{})); }, //
 
-      [&](const Type::IntU8 &) -> Term::Any { return Term::IntU8Const(tagged(uint8_t{})); },     //
-      [&](const Type::IntU16 &) -> Term::Any { return Term::IntU16Const(tagged(uint16_t{})); },  //
-      [&](const Type::IntU32 &) -> Term::Any { return Term::IntU32Const(tagged(uint32_t{})); },  //
-      [&](const Type::IntU64 &) -> Term::Any { return Term::IntU64Const(tagged(uint64_t{})); },  //
+      [&](const Type::IntU8 &) -> Term::Any { return Term::IntU8Const(tagged(uint8_t{})); },    //
+      [&](const Type::IntU16 &) -> Term::Any { return Term::IntU16Const(tagged(uint16_t{})); }, //
+      [&](const Type::IntU32 &) -> Term::Any { return Term::IntU32Const(tagged(uint32_t{})); }, //
+      [&](const Type::IntU64 &) -> Term::Any { return Term::IntU64Const(tagged(uint64_t{})); }, //
 
-      [&](const Type::IntS8 &) -> Term::Any { return Term::IntS8Const(tagged(int8_t{})); },      //
-      [&](const Type::IntS16 &) -> Term::Any { return Term::IntS16Const(tagged(int16_t{})); },   //
-      [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(tagged(int32_t{})); },   //
-      [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(tagged(int64_t{})); },   //
+      [&](const Type::IntS8 &) -> Term::Any { return Term::IntS8Const(tagged(int8_t{})); },    //
+      [&](const Type::IntS16 &) -> Term::Any { return Term::IntS16Const(tagged(int16_t{})); }, //
+      [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(tagged(int32_t{})); }, //
+      [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(tagged(int64_t{})); }, //
 
-      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t); }, //
-      [&](const Type::Unit0 &t) -> Term::Any { return unsupported(t); },   //
+      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t); },                //
+      [&](const Type::Unit0 &t) -> Term::Any { return unsupported(t); },                  //
       [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(tagged(bool{})); }, //
 
       [&](const Type::Struct &t) -> Term::Any { return unsupported(t); }, //
@@ -158,8 +157,7 @@ SpecOp call(const Spec::Any &);
 
 std::function<Function(Vector<Stmt::Any>)> function(const std::string &name, const Vector<Arg> &args, const Type::Any &rtn,
                                                     FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
-                                                    FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(),
-                                                    bool isEntry = false);
+                                                    FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false);
 
 Program program(const Vector<StructDef> &structs = {}, const Vector<Function> &functions = {});
 Program program(const Function &function);

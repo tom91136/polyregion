@@ -1,8 +1,9 @@
+#include "ast.h"
+
 #include <iomanip>
 #include <string>
 
 #include "aspartame/all.hpp"
-#include "ast.h"
 
 using namespace std::string_literals;
 using namespace polyregion::polyast;

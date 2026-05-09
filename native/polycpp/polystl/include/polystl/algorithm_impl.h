@@ -9,6 +9,7 @@
 
 #include "polyregion/concurrency_utils.hpp"
 #include "polyrt/rt.h"
+
 #include "polystl.h"
 
 [[nodiscard]] uint32_t __polyregion_builtin_gpu_global_idx(uint32_t);  // NOLINT(*-reserved-identifier)
@@ -36,9 +37,7 @@ using polyrt::DebugLevel;
 // In POLYCPP_NO_REWRITE / passthrough builds the polycpp clang plugin doesn't replace the
 // __polyregion_offload__ template body, so it returns the empty sentinel and we should just
 // execute the host loop directly instead of trying to dispatch a non-existent kernel.
-inline bool bundleIsRewritten(const polyrt::KernelBundle &bundle) {
-  return bundle.moduleName != nullptr && bundle.moduleName[0] != '\0';
-}
+inline bool bundleIsRewritten(const polyrt::KernelBundle &bundle) { return bundle.moduleName != nullptr && bundle.moduleName[0] != '\0'; }
 
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   polyrt::initialise();
@@ -59,7 +58,8 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
       // No rewriter (passthrough build) -> run host loop directly.
       if (!bundleIsRewritten(bundle)) {
-        for (int64_t i = 0; i < global; ++i) f(i);
+        for (int64_t i = 0; i < global; ++i)
+          f(i);
         return;
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
@@ -82,7 +82,8 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
       if (!bundleIsRewritten(bundle)) {
-        for (int64_t i = 0; i < global; ++i) f(i);
+        for (int64_t i = 0; i < global; ++i)
+          f(i);
         return;
       }
 
@@ -104,7 +105,10 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
     }
   }
 
-  if (!polyrt::hostFallback()) return;
+  if (!polyrt::hostFallback()) {
+    polyrt::noCompatibleKernelExit("parallel_for");
+    return;
+  }
   log(DebugLevel::Debug, "<%s, %d> Host fallback", __func__, global);
   for (int64_t i = 0; i < global; ++i) {
     f(i);
@@ -135,7 +139,8 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
       if (!bundleIsRewritten(bundle)) {
         T acc = init;
-        for (int64_t i = 0; i < global; ++i) acc = reduce(acc, f(i));
+        for (int64_t i = 0; i < global; ++i)
+          acc = reduce(acc, f(i));
         return acc;
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
@@ -180,7 +185,8 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
       if (!bundleIsRewritten(bundle)) {
         T acc = init;
-        for (int64_t i = 0; i < global; ++i) acc = reduce(acc, f(i));
+        for (int64_t i = 0; i < global; ++i)
+          acc = reduce(acc, f(i));
         return acc;
       }
       [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
@@ -197,7 +203,10 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
     }
   }
 
-  if (!polyrt::hostFallback()) return init;
+  if (!polyrt::hostFallback()) {
+    polyrt::noCompatibleKernelExit("parallel_reduce");
+    return init;
+  }
   log(DebugLevel::Debug, "<%s, %ld> Host fallback", __func__, global);
 
   T acc = init;

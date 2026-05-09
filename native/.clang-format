@@ -7,4 +7,20 @@ ColumnLimit: 140
 CompactNamespaces: true
 FixNamespaceComments: true
 IndentPPDirectives: BeforeHash
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeIsMainRegex: '(_test)?$'
+IncludeCategories:
+  - Regex:    '^[<"](llvm|clang|lld|flang|mlir)/'
+    Priority: 3
+  - Regex:    '^[<"](aspartame|fmt|nlohmann|magic_enum|catch2|spirv|Vulkan|vk_mem_alloc)/|^[<"]quickjs\.h[>"]$'
+    Priority: 4
+  - Regex:    '^[<"](polyregion|polyast|polyc|polycpp|polyfc|polyfront|polyinvoke|polyrt|polystl|polyreflect)/'
+    Priority: 5
+  - Regex:    '^<[a-z_]+\.h>$'
+    Priority: 2
+  - Regex:    '^<[a-z_]+>$'
+    Priority: 1
+  - Regex:    '.*'
+    Priority: 6
 ...
