@@ -24,6 +24,12 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> curr
 
 enum class DebugLevel : uint8_t { None = 0, Info = 1, Debug = 2, Trace = 3 };
 
+#if defined(__GNUC__) || defined(__clang__)
+  #define POLYREGION_PRINTF_FORMAT(fmt_index, first_arg) __attribute__((format(printf, fmt_index, first_arg)))
+#else
+  #define POLYREGION_PRINTF_FORMAT(fmt_index, first_arg)
+#endif
+
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void initialise();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool hostFallback();
 
@@ -31,9 +37,11 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool hostFallback();
 // target on this device" from a real wrong-output / crash failure.
 [[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void noCompatibleKernelExit(const char *site);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT DebugLevel debugLevel();
-POLYREGION_RT_PROTECT POLYREGION_EXPORT __attribute__((format(printf, 2, 3))) void log(DebugLevel level, const char *fmt, ...);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT POLYREGION_PRINTF_FORMAT(2, 3) void log(DebugLevel level, const char *fmt, ...);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *moduleName, const KernelObject &object);
 } // namespace polyregion::polyrt
+
+#undef POLYREGION_PRINTF_FORMAT
 
 extern "C" {
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_read(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);

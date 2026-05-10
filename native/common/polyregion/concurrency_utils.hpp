@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
