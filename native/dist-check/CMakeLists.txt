@@ -24,8 +24,14 @@ enable_testing()
 set(STDPAR_FLAGS -fstdpar -fstdpar-arch=host@native -fstdpar-mem=direct -fstdpar-rt=static)
 set(CHECK_DEPS ${CMAKE_CURRENT_SOURCE_DIR}/check_no_dist_dso.cmake)
 if (WIN32)
-    set(DIST_TEST_ENV
-            "PATH=${BIN};${POLYREGION_DIST}/lib;${POLYREGION_DIST}/lib/polycpp/lib;${POLYREGION_DIST}/lib/polyfc/lib;$ENV{PATH}")
+    set(DIST_TEST_PATHS
+            "${BIN}"
+            "${POLYREGION_DIST}/lib"
+            "${POLYREGION_DIST}/lib/polycpp/lib"
+            "${POLYREGION_DIST}/lib/polyfc/lib")
+    cmake_path(CONVERT "${DIST_TEST_PATHS}" TO_NATIVE_PATH_LIST DIST_TEST_PATH)
+    set(DIST_TEST_ENV "PATH=${DIST_TEST_PATH};$ENV{PATH}")
+    string(REPLACE ";" "\\;" DIST_TEST_ENV "${DIST_TEST_ENV}")
 endif ()
 
 function(add_dist_check name driver source)
@@ -35,7 +41,7 @@ function(add_dist_check name driver source)
     add_test(NAME ${name}-run COMMAND ${out})
     set_tests_properties(${name}-run PROPERTIES DEPENDS ${name}-build)
     add_test(NAME ${name}-deps
-            COMMAND ${CMAKE_COMMAND} -DBIN=${out} -P ${CHECK_DEPS})
+            COMMAND ${CMAKE_COMMAND} -DBIN=${out} -DCONFIG=$<CONFIG> -P ${CHECK_DEPS})
     set_tests_properties(${name}-deps PROPERTIES DEPENDS ${name}-build)
     if (DIST_TEST_ENV)
         set_tests_properties(${name}-build ${name}-run ${name}-deps PROPERTIES ENVIRONMENT "${DIST_TEST_ENV}")
