@@ -110,10 +110,6 @@ jobs:
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=DIST -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
-      - name: Package dist
-        working-directory: ./native
-        run: tar -cJf polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}.tar.xz -C polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist .
-
       - name: Check artefact
         working-directory: ./native
         if: always()
@@ -138,7 +134,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
-          path: ./native/polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}.tar.xz
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
           if-no-files-found: error
 
   dist-check:
@@ -148,22 +144,22 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install dependencies
-        # XXX tbb is needed for the polycpp-offload dist-check
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libtbb-dev
+          sudo apt-get install -y cmake
 
       - name: Download dist
         uses: actions/download-artifact@v4
         with:
           name: polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
-          path: ./native
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
 
-      - name: Extract dist
+      - name: Restore executable bits
         working-directory: ./native
         run: |
-          mkdir -p polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
-          tar -xJf polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}.tar.xz -C polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          DIST=polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          find "$DIST/bin" -type f -exec chmod +x {} +
+          find "$DIST/lib" -type f -name '*.so' -exec chmod +x {} +
 
       - name: Run dist-check
         working-directory: ./native

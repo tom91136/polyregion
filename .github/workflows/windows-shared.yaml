@@ -94,11 +94,6 @@ jobs:
           call setup_msvc_env.bat ${{ inputs.build_arch }}
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=DIST -P build.cmake
 
-      - name: Package dist
-        shell: pwsh
-        working-directory: ./native
-        run: Compress-Archive -Path .\polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist\* -DestinationPath polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}.zip
-
       - name: Check artefact
         if: always()
         working-directory: ./native
@@ -121,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
-          path: ./native/polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}.zip
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
           if-no-files-found: error
 
   dist-check:
@@ -139,15 +134,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
-          path: ./native
-
-      - name: Extract dist
-        shell: pwsh
-        working-directory: ./native
-        run: |
-          $dest = "polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist"
-          New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Expand-Archive -Path "polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}.zip" -DestinationPath $dest
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
 
       - name: Run dist-check
         working-directory: ./native
