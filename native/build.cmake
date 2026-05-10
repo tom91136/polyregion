@@ -222,6 +222,13 @@ elseif (ACTION STREQUAL "DIST")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
             --build ${BUILD_NAME}
+            --target polyregion-dist
+            COMMAND_ECHO STDERR
+            RESULT_VARIABLE SUCCESS)
+    check_process_return(${SUCCESS} "polyregion dist build")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND}
+            --build ${BUILD_NAME}
             --target install
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)

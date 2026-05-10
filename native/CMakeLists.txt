@@ -384,6 +384,15 @@ add_subdirectory(polycpp)
 add_subdirectory(polyfc)
 add_subdirectory(bindings)
 
+add_custom_target(polyregion-dist
+        DEPENDS
+        polyc-bin
+        polycpp
+        polyfc
+        polyc-JNI
+        polyc-JNIshim
+        polyinvoke-JNI)
+
 # ## test_all
 # `cmake --build <build> --target test_all` => ${CMAKE_BINARY_DIR}/test-results.xml.
 set(POLYREGION_TEST_BINARIES
