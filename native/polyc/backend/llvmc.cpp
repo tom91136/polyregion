@@ -273,11 +273,12 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     //
     const auto isSpirv = info.triple.getArch() == llvm::Triple::spirv32 || info.triple.getArch() == llvm::Triple::spirv64 ||
                          info.triple.getArch() == llvm::Triple::spirv;
+    const auto codeModel = info.triple.getArch() == llvm::Triple::aarch64 ? llvm::CodeModel::Small : llvm::CodeModel::Medium;
     auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
         info.triple,                                                         //
         isSpirv ? "" : info.cpu.uArch,                                       //
         isSpirv ? "" : info.cpu.features,                                    //
-        options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Medium, level));
+        options, llvm::Reloc::Model::PIC_, codeModel, level));
     return std::unique_ptr<TargetMachine>(tm);
   };
 

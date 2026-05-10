@@ -270,6 +270,7 @@ elseif (ACTION STREQUAL "CHECK")
             -S ${CMAKE_CURRENT_SOURCE_DIR}/dist-check
             -B ${CHECK_BUILD_DIR}
             -DPOLYREGION_DIST=${LLVM_DIST_DIR}
+            -DPOLYREGION_ARCH=${ARCH}
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "dist check configure")
