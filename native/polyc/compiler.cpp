@@ -20,6 +20,7 @@
 #include "backend/c_source.h"
 #include "backend/llvm.h"
 #include "backend/llvmc.h"
+#include "polyast_codec.h"
 #include "qjs_runner.h"
 
 #ifndef POLYPASS_JS_DEV_PATH
