@@ -60,15 +60,22 @@ details::SVMFns resolveSVM(cl_platform_id /*platform*/, cl_device_id device) {
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return fns;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return fns;
   static void *clHandle = []() -> void * {
-    void *h = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_NOLOAD);
+    void *h = nullptr;
+#ifdef RTLD_NOLOAD
+    h = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_NOLOAD);
     if (!h) h = dlopen("libOpenCL.so", RTLD_LAZY | RTLD_NOLOAD);
+#endif
     if (!h) h = dlopen("libOpenCL.so.1", RTLD_LAZY);
     if (!h) h = dlopen("libOpenCL.so", RTLD_LAZY);
     return h;
   }();
   static auto resolve = [](const char *name) -> void * {
     if (clHandle) return dlsym(clHandle, name);
+#ifdef RTLD_DEFAULT
     return dlsym(RTLD_DEFAULT, name);
+#else
+    return nullptr;
+#endif
   };
   fns.alloc = reinterpret_cast<details::ClSVMAlloc_fn>(resolve("clSVMAlloc"));
   fns.free = reinterpret_cast<details::ClSVMFree_fn>(resolve("clSVMFree"));

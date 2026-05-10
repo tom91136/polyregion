@@ -292,6 +292,16 @@ else ()
     set(DL_LIB dl)
 endif ()
 
+if (UNIX)
+    find_package(Threads REQUIRED)
+    set(POLYREGION_SYSTEM_LIBS Threads::Threads)
+    if (NOT APPLE)
+        list(APPEND POLYREGION_SYSTEM_LIBS rt)
+    endif ()
+else ()
+    set(POLYREGION_SYSTEM_LIBS)
+endif ()
+
 
 if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
     set(LLVM_VARIANT static)

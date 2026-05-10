@@ -101,6 +101,7 @@ target_link_libraries(polyc
         magic_enum::magic_enum
         fmt::fmt
         qjs
+        ${POLYREGION_SYSTEM_LIBS}
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )
