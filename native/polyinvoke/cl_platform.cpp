@@ -103,6 +103,10 @@ details::SVMFns resolveSVM(cl_platform_id /*platform*/, cl_device_id device) {
 } // namespace
 
 std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
+  // XXX FP64 is emulated on Intel Arc and needs to be enabled via environment variable
+  // we set it unless it's already defined with some other value
+  env::put("OverrideDefaultFP64Settings", "1", false);
+  env::put("IGC_EnableDPEmulation", "1", false);
   switch (auto result = clewInit(); result) {
     case CLEW_SUCCESS: break;
     case CLEW_ERROR_OPEN_FAILED: return "CLEW: failed to open the dynamic library";
@@ -111,12 +115,7 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
   }
   return std::unique_ptr<Platform>(new ClPlatform());
 }
-ClPlatform::ClPlatform() {
-  POLYINVOKE_TRACE();
-  // XXX FP64 is emulated on Intel Arc and needs to be enabled via environment variable
-  // we set it unless it's already defined with some other value
-  env::put("OverrideDefaultFP64Settings", "1", false);
-}
+ClPlatform::ClPlatform() { POLYINVOKE_TRACE(); }
 std::string ClPlatform::name() {
   POLYINVOKE_TRACE();
   return "OpenCL";
@@ -287,32 +286,11 @@ std::vector<std::string> ClDevice::features() {
   std::vector<std::string> out{"opencl"};
   out.push_back(normaliseVendor(queryDeviceInfo(*device, CL_DEVICE_VENDOR)));
   out.emplace_back(format == ModuleFormat::SPIRV_Kernel ? "spirv_kernel" : "source");
-  // XXX Cap-query and extension string both lie on some ICDs (Intel Arc DG2 in particular);
-  // probe with a real clBuildProgram to find out whether the device's compiler accepts the type.
-  const auto probePrecision = [&](const char *type, cl_device_fp_config cfgEnum, const char *cfgQuery) {
-    const auto exts = queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS);
-    cl_device_fp_config cfg = 0;
-    if (clGetDeviceInfo(*device, cfgEnum, sizeof(cfg), &cfg, nullptr) != CL_SUCCESS || cfg == 0) return false;
-    const std::string ext = std::string("cl_khr_") + type;
-    if (exts.find(ext) == std::string::npos) return false;
-    const std::string src = std::string("kernel void __polyinvoke_probe(global ") + type + "* p){p[0]=(" + type + ")1.0;}";
-    const char *srcPtr = src.c_str();
-    const size_t srcLen = src.size();
-    cl_int err = CL_SUCCESS;
-    cl_device_id devId = *device;
-    cl_context ctx = clCreateContext(nullptr, 1, &devId, nullptr, nullptr, &err);
-    if (err != CL_SUCCESS) return false;
-    cl_program prog = clCreateProgramWithSource(ctx, 1, &srcPtr, &srcLen, &err);
-    bool ok = false;
-    if (err == CL_SUCCESS) ok = clBuildProgram(prog, 1, &devId, nullptr, nullptr, nullptr) == CL_SUCCESS;
-    if (prog) clReleaseProgram(prog);
-    clReleaseContext(ctx);
-    (void)cfgQuery;
-    return ok;
-  };
-  if (probePrecision("double", CL_DEVICE_DOUBLE_FP_CONFIG, "double")) out.emplace_back("fp64");
-  if (probePrecision("half", /*CL_DEVICE_HALF_FP_CONFIG=*/0x1033, "half")) out.emplace_back("fp16");
-  if (queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS).find("cl_khr_int64_base_atomics") != std::string::npos) out.emplace_back("int64");
+  const auto exts = queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS);
+  const auto hasExt = [&](std::string_view e) { return exts.find(e) != std::string::npos; };
+  if (hasExt("cl_khr_fp64")) out.emplace_back("fp64");
+  if (hasExt("cl_khr_fp16")) out.emplace_back("fp16");
+  if (hasExt("cl_khr_int64_base_atomics")) out.emplace_back("int64");
   cachedFeatures = out;
   return out;
 }
