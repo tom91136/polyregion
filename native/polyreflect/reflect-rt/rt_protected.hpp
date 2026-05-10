@@ -1,12 +1,27 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdlib>
 
 #if defined(__linux__) || defined(__APPLE__)
   #include <dlfcn.h>
 #endif
 
-#define __RT_ODR [[clang::annotate("polyreflect-rt-odr")]]
+#if defined(__clang__)
+  #define __RT_ANNOTATE(name) [[clang::annotate(name)]]
+#else
+  #define __RT_ANNOTATE(name)
+#endif
+
+#if defined(_MSC_VER)
+  #define __RT_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+  #define __RT_NOINLINE __attribute__((noinline))
+#else
+  #define __RT_NOINLINE
+#endif
+
+#define __RT_ODR __RT_ANNOTATE("polyreflect-rt-odr")
 
 #if defined(__linux__) || defined(__APPLE__)
 
@@ -37,12 +52,24 @@ extern "C" inline void __interposed_free(void *ptr) {
   _free(ptr);
 }
 
+#else
+
+extern "C" inline void *__interposed_malloc(const size_t size) { return std::malloc(size); }
+extern "C" inline void *__interposed_calloc(const size_t nmemb, const size_t size) { return std::calloc(nmemb, size); }
+extern "C" inline void *__interposed_realloc(void *ptr, const size_t size) { return std::realloc(ptr, size); }
+extern "C" inline void *__interposed_memalign(size_t, const size_t size) { return std::malloc(size); }
+extern "C" inline void __interposed_free(void *ptr) { std::free(ptr); }
+
 #endif
 
+#if defined(_MSC_VER)
+  #define __RT_ALTERNATIVE(func) __interposed_##func
+#else
 extern "C" __attribute__((weak)) void *__interceptor_malloc(size_t size);
 extern "C" __attribute__((weak)) void *__interceptor_calloc(size_t nmemb, size_t size);
 extern "C" __attribute__((weak)) void *__interceptor_realloc(void *ptr, size_t size);
 extern "C" __attribute__((weak)) void *__interceptor_memalign(size_t alignment, size_t size);
 extern "C" __attribute__((weak)) void __interceptor_free(void *ptr);
 
-#define __RT_ALTERNATIVE(func) (__interceptor_##func ? __interceptor_##func : __interposed_##func)
+  #define __RT_ALTERNATIVE(func) (__interceptor_##func ? __interceptor_##func : __interposed_##func)
+#endif

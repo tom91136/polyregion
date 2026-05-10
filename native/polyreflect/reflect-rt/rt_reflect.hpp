@@ -73,13 +73,24 @@ constexpr const char *to_string(const Type t) {
 }
 
 #ifndef __RT_IMPL
+#if defined(_MSC_VER)
+extern "C" inline PtrMeta _rt_reflect_p(const void *) { return PtrMeta{0, 0, Type::Unknown}; }
+extern "C" inline PtrMeta _rt_reflect_v(uintptr_t) { return PtrMeta{0, 0, Type::Unknown}; }
+#else
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
+#endif
 #endif
 
 #ifdef __RT_IMPL
 
-  #define __RT_EXPORTED __attribute__((noinline)) __attribute__((visibility("default")))
+  #if defined(_MSC_VER)
+    #define __RT_EXPORTED __RT_NOINLINE
+    #define __RT_PRINTF_FORMAT(fmt_index, first_arg)
+  #else
+    #define __RT_EXPORTED __RT_NOINLINE __attribute__((visibility("default")))
+    #define __RT_PRINTF_FORMAT(fmt_index, first_arg) __attribute__((format(printf, fmt_index, first_arg)))
+  #endif
 
 namespace details {
 
@@ -108,7 +119,7 @@ __RT_ODR int safe_vasprintf(char **buffer, const char *format, va_list args) {
   return size;
 }
 
-__RT_ODR __attribute__((format(printf, 2, 3))) int safe_snprintf(char **buffer, const char *format, ...) {
+__RT_ODR __RT_PRINTF_FORMAT(2, 3) int safe_snprintf(char **buffer, const char *format, ...) {
   va_list args;
   va_start(args, format);
   int size = safe_vasprintf(buffer, format, args);
@@ -116,7 +127,7 @@ __RT_ODR __attribute__((format(printf, 2, 3))) int safe_snprintf(char **buffer, 
   return size;
 }
 
-__RT_ODR __attribute__((format(printf, 2, 3))) int safe_fprintf(FILE *stream, const char *format, ...) {
+__RT_ODR __RT_PRINTF_FORMAT(2, 3) int safe_fprintf(FILE *stream, const char *format, ...) {
   if (!stream) return 0;
   va_list args;
   va_start(args, format);

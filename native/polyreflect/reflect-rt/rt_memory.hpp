@@ -6,8 +6,8 @@
 #include "rt_protected.hpp"
 #include "rt_reflect.hpp"
 
-#define __ALLOC __RT_ODR [[clang::annotate("polyreflect-rt-alloc")]] __attribute__((noinline))
-#define __FREE __RT_ODR [[clang::annotate("polyreflect-rt-free")]]
+#define __ALLOC __RT_ODR __RT_ANNOTATE("polyreflect-rt-alloc") __RT_NOINLINE
+#define __FREE __RT_ODR __RT_ANNOTATE("polyreflect-rt-free")
 
 #if __cpp_exceptions == 199711
   #define __THROW_OF_ABORT(e) throw e
