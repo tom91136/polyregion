@@ -100,7 +100,7 @@ jobs:
         # XXX dumpbin needs an MSVC env to find link.exe
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }}
-          set "DIST=polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist"
+          set "DIST=polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist"
           dir "%DIST%\bin"
           dir "%DIST%\lib"
           for %%B in (polyc.exe polycpp.exe polyfc.exe clang++.exe flang-new.exe) do (
@@ -116,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
-          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist/**
           if-no-files-found: error
 
   dist-check:
@@ -134,7 +134,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
-          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist
 
       - name: Run dist-check
         working-directory: ./native
