@@ -23,6 +23,10 @@ enable_testing()
 
 set(STDPAR_FLAGS -fstdpar -fstdpar-arch=host@native -fstdpar-mem=direct -fstdpar-rt=static)
 set(CHECK_DEPS ${CMAKE_CURRENT_SOURCE_DIR}/check_no_dist_dso.cmake)
+if (WIN32)
+    set(DIST_TEST_ENV
+            "PATH=${BIN};${POLYREGION_DIST}/lib;${POLYREGION_DIST}/lib/polycpp/lib;${POLYREGION_DIST}/lib/polyfc/lib;$ENV{PATH}")
+endif ()
 
 function(add_dist_check name driver source)
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}${EXE_SUFFIX})
@@ -33,6 +37,9 @@ function(add_dist_check name driver source)
     add_test(NAME ${name}-deps
             COMMAND ${CMAKE_COMMAND} -DBIN=${out} -P ${CHECK_DEPS})
     set_tests_properties(${name}-deps PROPERTIES DEPENDS ${name}-build)
+    if (DIST_TEST_ENV)
+        set_tests_properties(${name}-build ${name}-run ${name}-deps PROPERTIES ENVIRONMENT "${DIST_TEST_ENV}")
+    endif ()
 endfunction()
 
 add_dist_check(clang-plain     clang++   hello.cpp)
@@ -51,6 +58,9 @@ function(add_target_compile_check name driver source arch)
             COMMAND ${BIN}/${driver}${EXE_SUFFIX}
             -fstdpar -fstdpar-arch=${arch} -fstdpar-mem=direct -fstdpar-rt=static
             -c ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${out})
+    if (DIST_TEST_ENV)
+        set_tests_properties(${name} PROPERTIES ENVIRONMENT "${DIST_TEST_ENV}")
+    endif ()
 endfunction()
 
 set(POLYCPP_TARGETS c11@host)
