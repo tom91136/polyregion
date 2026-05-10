@@ -277,7 +277,7 @@ elseif (ACTION STREQUAL "CHECK")
     get_filename_component(CMAKE_BIN_DIR "${CMAKE_COMMAND}" DIRECTORY)
     find_program(CTEST_EXE ctest HINTS "${CMAKE_BIN_DIR}" REQUIRED)
     execute_process(
-            COMMAND ${CTEST_EXE} --output-on-failure
+            COMMAND ${CTEST_EXE} -C ${CMAKE_BUILD_TYPE} --output-on-failure
             WORKING_DIRECTORY ${CHECK_BUILD_DIR}
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
