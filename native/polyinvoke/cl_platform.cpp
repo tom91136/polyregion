@@ -4,7 +4,11 @@
 #include <iostream>
 #include <thread>
 
-#include <dlfcn.h>
+#ifdef _WIN32
+  #include <windows.h>
+#else
+  #include <dlfcn.h>
+#endif
 
 #include "magic_enum/magic_enum.hpp"
 
@@ -60,21 +64,31 @@ details::SVMFns resolveSVM(cl_platform_id /*platform*/, cl_device_id device) {
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return fns;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return fns;
   static void *clHandle = []() -> void * {
+#ifdef _WIN32
+    if (HMODULE h = GetModuleHandleA("OpenCL.dll")) return reinterpret_cast<void *>(h);
+    return reinterpret_cast<void *>(LoadLibraryA("OpenCL.dll"));
+#else
     void *h = nullptr;
-#ifdef RTLD_NOLOAD
+  #ifdef RTLD_NOLOAD
     h = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_NOLOAD);
     if (!h) h = dlopen("libOpenCL.so", RTLD_LAZY | RTLD_NOLOAD);
-#endif
+  #endif
     if (!h) h = dlopen("libOpenCL.so.1", RTLD_LAZY);
     if (!h) h = dlopen("libOpenCL.so", RTLD_LAZY);
     return h;
+#endif
   }();
   static auto resolve = [](const char *name) -> void * {
-    if (clHandle) return dlsym(clHandle, name);
-#ifdef RTLD_DEFAULT
-    return dlsym(RTLD_DEFAULT, name);
+#ifdef _WIN32
+    if (!clHandle) return nullptr;
+    return reinterpret_cast<void *>(GetProcAddress(reinterpret_cast<HMODULE>(clHandle), name));
 #else
+    if (clHandle) return dlsym(clHandle, name);
+  #ifdef RTLD_DEFAULT
+    return dlsym(RTLD_DEFAULT, name);
+  #else
     return nullptr;
+  #endif
 #endif
   };
   fns.alloc = reinterpret_cast<details::ClSVMAlloc_fn>(resolve("clSVMAlloc"));

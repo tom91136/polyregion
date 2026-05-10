@@ -37,8 +37,12 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Tools land in bin/, runtime/plugin libs in lib/{,polycpp,polyfc}/lib — find libLLVM.so via $ORIGIN.
-set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../../../lib")
+# Tools land in bin/, runtime/plugin libs in lib/{,polycpp,polyfc}/lib.
+if (APPLE)
+    set(CMAKE_INSTALL_RPATH "@loader_path/../lib;@loader_path/../../../lib")
+else ()
+    set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../../../lib")
+endif ()
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 
 
