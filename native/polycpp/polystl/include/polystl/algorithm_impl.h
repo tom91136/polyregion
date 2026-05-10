@@ -316,9 +316,13 @@ transform_reduce(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, Forwar
   if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
     return std::transform_reduce(first1, last1, first2, init, reduce, transform);
   }
+  // XXX Wrap `reduce` in a by-value lambda: libstdc++'s `std::plus<>::operator()` perfect-forwards
+  // via `std::forward<T>` and polyc's SPIR-V codegen can't track storage classes through those
+  // references, so Intel IGC produces null pointers and the reduction silently returns init.
   return polyregion::polystl::details::parallel_reduce(
       std::distance(first1, last1), init, //
-      [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); }, reduce);
+      [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); },
+      [reduce](auto l, auto r) { return reduce(l, r); });
 }
 
 template <class ExecutionPolicy, class ForwardIt, class T, class BinaryReductionOp,
@@ -328,7 +332,9 @@ transform_reduce(ExecutionPolicy &&, ForwardIt first, ForwardIt last, T init, Bi
   if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
     return std::transform_reduce(first, last, init, reduce, transform);
   }
-  return polyregion::polystl::details::parallel_reduce(std::distance(first, last), init, transform, reduce);
+  // See note above on the by-value `reduce` wrap.
+  return polyregion::polystl::details::parallel_reduce(
+      std::distance(first, last), init, transform, [reduce](auto l, auto r) { return reduce(l, r); });
 }
 
 } // namespace std

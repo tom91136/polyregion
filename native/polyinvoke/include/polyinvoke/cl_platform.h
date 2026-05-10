@@ -1,5 +1,9 @@
 #pragma once
 
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+
 #include "polyregion/compat.h"
 
 #include "clew.h"
@@ -28,6 +32,9 @@ using ClEnqueueSVMMemcpy_fn = cl_int(CL_API_CALL *)(cl_command_queue, cl_bool, v
                                                     cl_event *);
 using ClSetKernelArgSVMPointer_fn = cl_int(CL_API_CALL *)(cl_kernel, cl_uint, const void *);
 using ClSetKernelExecInfo_fn = cl_int(CL_API_CALL *)(cl_kernel, cl_uint, size_t, const void *);
+using ClEnqueueSVMMap_fn = cl_int(CL_API_CALL *)(cl_command_queue, cl_bool, cl_bitfield, void *, size_t, cl_uint, const cl_event *,
+                                                 cl_event *);
+using ClEnqueueSVMUnmap_fn = cl_int(CL_API_CALL *)(cl_command_queue, void *, cl_uint, const cl_event *, cl_event *);
 
 struct SVMFns {
   ClSVMAlloc_fn alloc;
@@ -35,8 +42,23 @@ struct SVMFns {
   ClEnqueueSVMMemcpy_fn memcpy;
   ClSetKernelArgSVMPointer_fn setKernelArg;
   ClSetKernelExecInfo_fn setKernelExecInfo;
-  cl_bitfield memFlags; // CL_MEM_SVM_FINE_GRAIN_BUFFER, else 0 for coarse-grain
+  ClEnqueueSVMMap_fn map;     // optional; null means caller must skip coarse-grain handshake
+  ClEnqueueSVMUnmap_fn unmap; // optional; ditto
+  cl_bitfield memFlags;       // CL_MEM_SVM_FINE_GRAIN_BUFFER, else 0 for coarse-grain
   explicit operator bool() const { return alloc && free && memcpy && setKernelArg && setKernelExecInfo; }
+  bool coarseGrain() const { return memFlags == 0; }
+};
+
+// Coarse-grain SVM allocations require explicit clEnqueueSVMMap/clEnqueueSVMUnmap around host
+// access. Track size + current map state here so the queue can flip allocs in/out around kernel
+// dispatch. Fine-grain SVM ignores this (map/unmap are no-ops in spec, but we skip the calls).
+struct SVMTracker {
+  struct Entry {
+    size_t size;
+    bool mappedForHost; // true while host may safely read/write the alloc
+  };
+  std::mutex mtx;
+  std::unordered_map<void *, Entry> entries;
 };
 } // namespace details
 
@@ -48,6 +70,7 @@ class POLYREGION_EXPORT ClDevice final : public Device {
   ModuleFormat format;
   details::ClCreateProgramWithIL_fn ilCreateFn; // non-null iff format==SPIRV_Kernel
   details::SVMFns svm{};                        // populated iff device advertises buffer SVM
+  std::shared_ptr<details::SVMTracker> svmTracker;
   details::ClModuleStore store;                 // must be dropped before the device
   detail::MemoryObjects<cl_mem> memoryObjects;
   std::optional<std::vector<std::string>> cachedFeatures; // XXX features() probes via clBuildProgram; cache so we pay once.
@@ -79,12 +102,19 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
   cl_command_queue queue = {};
   std::function<cl_mem(uintptr_t)> queryMemObject;
   details::SVMFns svm; // forwarded from ClDevice; when set, use SVM ops instead of cl_mem
+  std::shared_ptr<details::SVMTracker> svmTracker;
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
+  // Coarse-grain SVM only: unmap all host-mapped allocs so the GPU can read/write them, then
+  // remap them on completion so subsequent host accesses see the new contents. No-op if svm is
+  // not coarse-grain or the impl lacks map/unmap.
+  void unmapAllSvmForDevice();
+  void mapAllSvmForHost();
 
 public:
   POLYREGION_EXPORT ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                                  decltype(queryMemObject) queryMemObject, details::SVMFns svm);
+                                  decltype(queryMemObject) queryMemObject, details::SVMFns svm,
+                                  std::shared_ptr<details::SVMTracker> svmTracker);
   POLYREGION_EXPORT ~ClDeviceQueue() override;
   POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                     const MaybeCallback &cb) override;

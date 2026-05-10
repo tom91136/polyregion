@@ -96,6 +96,8 @@ details::SVMFns resolveSVM(cl_platform_id /*platform*/, cl_device_id device) {
   fns.memcpy = reinterpret_cast<details::ClEnqueueSVMMemcpy_fn>(resolve("clEnqueueSVMMemcpy"));
   fns.setKernelArg = reinterpret_cast<details::ClSetKernelArgSVMPointer_fn>(resolve("clSetKernelArgSVMPointer"));
   fns.setKernelExecInfo = reinterpret_cast<details::ClSetKernelExecInfo_fn>(resolve("clSetKernelExecInfo"));
+  fns.map = reinterpret_cast<details::ClEnqueueSVMMap_fn>(resolve("clEnqueueSVMMap"));
+  fns.unmap = reinterpret_cast<details::ClEnqueueSVMUnmap_fn>(resolve("clEnqueueSVMUnmap"));
   fns.memFlags = (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER_) ? CL_MEM_SVM_FINE_GRAIN_BUFFER_ : 0;
   if (!fns) return {};
   return fns;
@@ -191,6 +193,7 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
             CHECKED(clReleaseContext(c));
           }),
       deviceName(queryDeviceInfo(device, CL_DEVICE_NAME)), format(format), ilCreateFn(ilCreateFn), svm(svm),
+      svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
       store(
           PREFIX,
           [this](auto &&image) {
@@ -339,12 +342,20 @@ std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
   if (!svm) return std::nullopt;
   void *p = svm.alloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | svm.memFlags, size, 0);
   if (!p) return std::nullopt;
+  if (svmTracker) {
+    std::lock_guard lock(svmTracker->mtx);
+    svmTracker->entries.emplace(p, details::SVMTracker::Entry{size, /*mappedForHost*/ false});
+  }
   return p;
 }
 void ClDevice::freeShared(void *ptr) {
   POLYINVOKE_TRACE();
   context.touch();
   if (!svm) POLYINVOKE_FATAL(PREFIX, "Unsupported: %p", ptr);
+  if (svmTracker) {
+    std::lock_guard lock(svmTracker->mtx);
+    svmTracker->entries.erase(ptr);
+  }
   svm.free(*context, ptr);
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
@@ -356,20 +367,42 @@ std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<i
           return *mem;
         } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
       },
-      svm);
+      svm, svmTracker);
 }
 ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 
 // ---
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                             decltype(queryMemObject) queryMemObject, details::SVMFns svm)
-    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm) {
+                             decltype(queryMemObject) queryMemObject, details::SVMFns svm,
+                             std::shared_ptr<details::SVMTracker> svmTracker)
+    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
 }
 ClDeviceQueue::~ClDeviceQueue() {
   POLYINVOKE_TRACE();
   CHECKED(clReleaseCommandQueue(queue));
+}
+void ClDeviceQueue::unmapAllSvmForDevice() {
+  // Fine-grain SVM is auto-coherent; coarse-grain needs explicit map/unmap. If the impl didn't
+  // expose map/unmap symbols there's nothing safe we can do, so silently fall through.
+  if (!svmTracker || !svm.unmap || !svm.coarseGrain()) return;
+  std::lock_guard lock(svmTracker->mtx);
+  for (auto &[ptr, entry] : svmTracker->entries) {
+    if (!entry.mappedForHost) continue;
+    CHECKED(svm.unmap(queue, ptr, 0, nullptr, nullptr));
+    entry.mappedForHost = false;
+  }
+}
+void ClDeviceQueue::mapAllSvmForHost() {
+  if (!svmTracker || !svm.map || !svm.coarseGrain()) return;
+  std::lock_guard lock(svmTracker->mtx);
+  for (auto &[ptr, entry] : svmTracker->entries) {
+    if (entry.mappedForHost) continue;
+    // CL_MAP_READ | CL_MAP_WRITE = 0x1 | 0x2 -- blocking so the caller can read immediately.
+    CHECKED(svm.map(queue, CL_TRUE, 0x3, ptr, entry.size, 0, nullptr, nullptr));
+    entry.mappedForHost = true;
+  }
 }
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   POLYINVOKE_TRACE();
@@ -476,18 +509,27 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   }
   if (svm) {
+    // Indirect SVM allocs (e.g. one captured inside a marshalled lambda struct) must be
+    // declared via CL_KERNEL_EXEC_INFO_SVM_PTRS or the runtime treats them as unused by the
+    // kernel and skips coherency for them.
     std::vector<void *> svmPtrs;
+    svmPtrs.reserve(types.size() + (svmTracker ? svmTracker->entries.size() : 0));
     for (cl_uint i = 0; i < types.size() - 1; ++i) {
       if (types[i] != Type::Ptr) continue;
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
       svmPtrs.push_back(reinterpret_cast<void *>(ptr));
     }
+    if (svmTracker) {
+      std::lock_guard lock(svmTracker->mtx);
+      for (auto &[ptr, _] : svmTracker->entries) svmPtrs.push_back(ptr);
+    }
     if (!svmPtrs.empty())
-      CHECKED(svm.setKernelExecInfo(kernel, /*CL_KERNEL_EXEC_INFO_SVM_PTRS*/ 0x11B6, svmPtrs.size() * sizeof(void *), svmPtrs.data()));
+      CHECKED(svm.setKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, svmPtrs.size() * sizeof(void *), svmPtrs.data()));
   }
 
   POLYINVOKE_TRACE();
+  unmapAllSvmForDevice();
   cl_event event = {};
   CHECKED(clEnqueueNDRangeKernel(queue, kernel,         //
                                  3,                     //
@@ -503,6 +545,7 @@ void ClDeviceQueue::enqueueWaitBlocking() {
   cl_event event = {};
   CHECKED(clEnqueueBarrierWithWaitList(queue, 0, nullptr, &event));
   CHECKED(clWaitForEvents(1, &event));
+  mapAllSvmForHost();
 }
 
 #undef CHECKED

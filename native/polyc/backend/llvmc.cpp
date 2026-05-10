@@ -1,7 +1,8 @@
 #include "llvmc.h"
 
-#include <fstream>
 #include <iostream>
+#include <unordered_set>
+#include <vector>
 
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/RuntimeLibcallInfo.h"
@@ -166,6 +167,38 @@ Pair<Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
   }
 }
 
+// Rewrite `OpConstantNull %u32 %id` -> `OpConstant %u32 %id 0`. Intel IGC rejects OpConstantNull
+// as the structure-member index of OpInBoundsPtrAccessChain even though SPIR-V semantically
+// treats it as a zero u32 (Khronos SPIRV-Headers#50, still open). Opcodes are spec-stable.
+static std::string patchSpirvConstantNull(std::string spv) {
+  constexpr uint16_t OpTypeInt = 21, OpConstant = 43, OpConstantNull = 46;
+  if (spv.size() < 5 * sizeof(uint32_t)) return spv;
+  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  std::unordered_set<uint32_t> u32Types;
+  bool needsRewrite = false;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]);
+    if (wc == 0 || i + wc > nWords) return spv;
+    if (opcode(src[i]) == OpTypeInt && wc == 4 && src[i + 2] == 32) u32Types.insert(src[i + 1]);
+    else if (opcode(src[i]) == OpConstantNull && wc == 3 && u32Types.count(src[i + 1])) needsRewrite = true;
+    i += wc;
+  }
+  if (!needsRewrite) return spv;
+  std::vector<uint32_t> out(src, src + 5);
+  out.reserve(nWords + 16);
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]);
+    if (opcode(src[i]) == OpConstantNull && wc == 3 && u32Types.count(src[i + 1])) {
+      out.insert(out.end(), {(4u << 16) | OpConstant, src[i + 1], src[i + 2], 0u});
+    } else out.insert(out.end(), src + i, src + i + wc);
+    i += wc;
+  }
+  return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
 static std::string module2Ir(const llvm::Module &m) {
   std::string ir;
   llvm::raw_string_ostream irOut(ir);
@@ -301,7 +334,10 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       auto optPassStart = compiler::nowMono();
 
       // SPIRV: skip the host-side opt pipeline; FunctionAttrs would infer memory(none) -> Pure ->
-      // OpUnreachable. The driver / SPIRV-Tools run their own passes on the blob.
+      // OpUnreachable. The driver / SPIRV-Tools run their own passes on the blob. We do still
+      // need to inline `inline`/`always_inline` callees -- IGC's SPIR-V loader doesn't reliably
+      // resolve nested empty-functor wrappers (e.g. polystl `transform_reduce` with
+      // `std::multiplies<>`/`std::plus<>`), and uninlined calls produce zero results.
       const auto isSpirv = TM.getTargetTriple().getArch() == llvm::Triple::spirv32 ||
                            TM.getTargetTriple().getArch() == llvm::Triple::spirv64 || TM.getTargetTriple().getArch() == llvm::Triple::spirv;
       if (!isSpirv) optimise(TM, *m, optLevel);
@@ -312,6 +348,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         std::string spvBlob, errMsg;
         const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, /*AllowExtNames*/ {}, genOpt, TM.getTargetTriple());
         if (!ok) throw std::logic_error("SPIRVTranslate failed: " + errMsg);
+        // XXX LLVM SPIRVTranslate emits OpConstantNull for u32 zero constants. SPIR-V's
+        // OpInBoundsPtrAccessChain forbids that for the structure-member index (must be
+        // OpConstant). Intel IGC silently miscompiles such kernels (e.g. polystl
+        // `transform_reduce` with `std::multiplies<>` returns 0). Rewrite each
+        // `OpConstantNull %u32 %id` into `OpConstant %u32 %id 0` (u32 only, leaving
+        // `OpConstantNull %ulong` and pointer-null alone).
+        spvBlob = patchSpirvConstantNull(std::move(spvBlob));
         objBuffer.append(spvBlob.begin(), spvBlob.end());
       } else {
         llvm::legacy::PassManager PM;

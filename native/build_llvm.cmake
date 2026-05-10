@@ -24,9 +24,12 @@ endif ()
 set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT})
 set(LLVM_DIST_DIR ${CMAKE_CURRENT_BINARY_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist)
 
+set(LLVM_TARBALL_NAME llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
+set(LLVM_SRC_DIRNAME llvm-project-${LLVM_SRC_VERSION}.src)
+
 set(DOWNLOAD_LLVM OFF)
-if (EXISTS ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
-    file(SHA256 ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz EXISTING_HASH)
+if (EXISTS ${LLVM_BUILD_DIR}/${LLVM_TARBALL_NAME})
+    file(SHA256 ${LLVM_BUILD_DIR}/${LLVM_TARBALL_NAME} EXISTING_HASH)
     if (NOT "${EXISTING_HASH}" STREQUAL "${LLVM_SOURCE_SHA256}")
         message(STATUS "LLVM source hash did not match, downloading a fresh copy...")
         set(DOWNLOAD_LLVM ON)
@@ -39,10 +42,28 @@ if (DOWNLOAD_LLVM)
     message(STATUS "Downloading LLVM source...")
     file(DOWNLOAD
             ${LLVM_SOURCE_URL}
-            ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz
+            ${LLVM_BUILD_DIR}/${LLVM_TARBALL_NAME}
             EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
     )
-    file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
+endif ()
+
+if (NOT EXISTS ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm/CMakeLists.txt)
+    message(STATUS "Extracting LLVM source...")
+    file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/${LLVM_TARBALL_NAME} DESTINATION "${LLVM_BUILD_DIR}")
+    if (DEFINED LLVM_PATCH_DIR AND IS_DIRECTORY ${LLVM_PATCH_DIR})
+        file(GLOB LLVM_PATCHES "${LLVM_PATCH_DIR}/*.patch")
+        list(SORT LLVM_PATCHES)
+        foreach (PATCH ${LLVM_PATCHES})
+            message(STATUS "Applying ${PATCH}")
+            execute_process(
+                    COMMAND patch -p1 --forward --batch -i ${PATCH}
+                    WORKING_DIRECTORY ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}
+                    RESULT_VARIABLE PATCH_RC)
+            if (NOT PATCH_RC EQUAL 0)
+                message(FATAL_ERROR "Failed to apply ${PATCH} (exit ${PATCH_RC})")
+            endif ()
+        endforeach ()
+    endif ()
 endif ()
 
 if (UNIX AND NOT APPLE)
@@ -99,7 +120,7 @@ endif ()
 
 execute_process(
         COMMAND ${CMAKE_COMMAND}
-        -S ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/llvm
+        -S ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm
         -B ${LLVM_BUILD_DIR}
         -C ${CMAKE_CURRENT_BINARY_DIR}/build_llvm_cache.cmake
         --fresh
