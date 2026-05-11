@@ -304,13 +304,13 @@ public:
     return {};
   }
 
-  void disassociate(const void *p) { // any valid pointer, not just base
+  void disassociate(const void *p, bool releaseRemote = true) { // any valid pointer, not just base
     if (const auto query = offsetQueryIt(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [it, offsetInBytes] = *query;
       if (debug)
-        std::fprintf(stderr, "[SMA] disassociate(host=0x%jx, remote=%jx, size=%ld)\n", it->first, it->second.remote.ptr,
-                     it->second.remote.sizeInBytes);
-      remoteRelease(it->second.remote.ptr);
+        std::fprintf(stderr, "[SMA] disassociate(host=0x%jx, remote=%jx, size=%ld, releaseRemote=%d)\n", it->first, it->second.remote.ptr,
+                     it->second.remote.sizeInBytes, releaseRemote);
+      if (releaseRemote) remoteRelease(it->second.remote.ptr);
       remoteToLocalPtr.erase(it->second.remote.ptr);
       localToRemoteAlloc.erase(it);
     }

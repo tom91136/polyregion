@@ -107,7 +107,10 @@ int main(int argc, const char *argv[]) {
                        break;
                      }
                      case StdParOptions::LinkKind::Dynamic: {
-                       append(Driver::dynamicOriginLinkFlags(polyfcLibPath, "polydco"));
+                       // XXX libpolydco's DT_NEEDED must precede user-supplied -lstdc++ or
+                       // libhsa-runtime64 segfaults inside std::codecvt during dispatch.
+                       auto flags = Driver::dynamicOriginLinkFlags(polyfcLibPath, "polydco");
+                       remaining.insert(remaining.begin() + 1, flags.begin(), flags.end());
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(

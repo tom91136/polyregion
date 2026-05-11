@@ -89,7 +89,9 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release(void *ptr) {
   std::unique_lock lock(mutex);
   log(DebugLevel::Debug, "polydco_release(%p)", ptr);
   ptrRecords.erase(reinterpret_cast<uintptr_t>(ptr));
-  allocations.disassociate(ptr);
+  // XXX Keep the SVM mirror; Intel coarse-grain clSVMAlloc reuses freed addresses and collides
+  // with still-live allocs in the same dispatch chain.
+  allocations.disassociate(ptr, /*releaseRemote*/ false);
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_typelayout(const runtime::TypeLayout *layout) {
@@ -237,7 +239,8 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   allocations.syncRemoteToLocal(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 
-  allocations.disassociate(captures);
+  // XXX See polydco_release: keep SVM, drop only host tracking.
+  allocations.disassociate(captures, /*releaseRemote*/ false);
   polyrt::currentQueue->enqueueWaitBlocking();
 
   mpr.releaseAndReduce();

@@ -311,6 +311,10 @@ uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
   if (svm) {
     void *p = svm.alloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | svm.memFlags, size, 0);
     if (!p) POLYINVOKE_FATAL(PREFIX, "clSVMAlloc failed for %zu bytes", size);
+    if (svmTracker) {
+      std::lock_guard lock(svmTracker->mtx);
+      svmTracker->entries.emplace(p, details::SVMTracker::Entry{size, /*mappedForHost*/ false});
+    }
     return reinterpret_cast<uintptr_t>(p);
   }
   cl_mem_flags flags = {};
@@ -328,6 +332,10 @@ void ClDevice::freeDevice(uintptr_t ptr) {
   context.touch();
 
   if (svm) {
+    if (svmTracker) {
+      std::lock_guard lock(svmTracker->mtx);
+      svmTracker->entries.erase(reinterpret_cast<void *>(ptr));
+    }
     svm.free(*context, reinterpret_cast<void *>(ptr));
     return;
   }
@@ -432,6 +440,8 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
   POLYINVOKE_TRACE();
   cl_event event = {};
   if (svm) {
+    // XXX Coarse-grain SVMMemcpy is UB if either region is host-mapped; unmap first.
+    unmapAllSvmForDevice();
     auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
     // XXX must be blocking on the host side as the src needs to be valid until the copy completes
@@ -446,6 +456,7 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
   cl_event event = {};
   if (!src) POLYINVOKE_FATAL(PREFIX, "Source pointer is NULL, destination=%lu", dst);
   if (svm) {
+    unmapAllSvmForDevice();
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
     CHECKED(svm.memcpy(queue, CL_TRUE, dstP, src, size, 0, nullptr, nullptr));
   } else {
@@ -458,6 +469,7 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   cl_event event = {};
   if (!dst) POLYINVOKE_FATAL(PREFIX, "Destination pointer is NULL, source=%lu", src);
   if (svm) {
+    unmapAllSvmForDevice();
     auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
     CHECKED(svm.memcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
   } else {
@@ -518,7 +530,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
       if (types[i] != Type::Ptr) continue;
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
-      svmPtrs.push_back(reinterpret_cast<void *>(ptr));
+      // NVIDIA OpenCL rejects clSetKernelExecInfo on a null entry with CL_INVALID_VALUE.
+      if (ptr) svmPtrs.push_back(reinterpret_cast<void *>(ptr));
     }
     if (svmTracker) {
       std::lock_guard lock(svmTracker->mtx);
