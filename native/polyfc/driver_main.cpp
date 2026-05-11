@@ -27,6 +27,14 @@ static std::string joinPath(llvm::StringRef a, llvm::StringRef b, llvm::StringRe
   return p.str().str();
 }
 
+static std::string executableName(llvm::StringRef name) {
+#if defined(_WIN32)
+  return name.str() + ".exe";
+#else
+  return name.str();
+#endif
+}
+
 int main(int argc, const char *argv[]) {
   CliArgs args(std::vector(argv, argv + argc));
   if (args.has("--polyc", 1)) {
@@ -39,7 +47,7 @@ int main(int argc, const char *argv[]) {
   std::string flangPath;
   if (const auto driverArg = args.popValue("--driver")) flangPath = *driverArg;        // Explicit driver takes precedence
   else if (const auto driverEnv = std::getenv("POLYFC_DRIVER")) flangPath = driverEnv; // Then try environment vars
-  else if (auto flangBin = joinPath(execParentPath, "flang-new");
+  else if (auto flangBin = joinPath(execParentPath, executableName("flang-new"));
            llvm::sys::fs::exists(flangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
     flangPath = flangBin;
   } else {
