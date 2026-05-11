@@ -382,8 +382,7 @@ ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 // ---
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                             decltype(queryMemObject) queryMemObject, details::SVMFns svm,
-                             std::shared_ptr<details::SVMTracker> svmTracker)
+                             decltype(queryMemObject) queryMemObject, details::SVMFns svm, std::shared_ptr<details::SVMTracker> svmTracker)
     : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
 }
@@ -535,7 +534,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
     if (svmTracker) {
       std::lock_guard lock(svmTracker->mtx);
-      for (auto &[ptr, _] : svmTracker->entries) svmPtrs.push_back(ptr);
+      for (auto &[ptr, _] : svmTracker->entries)
+        svmPtrs.push_back(ptr);
     }
     if (!svmPtrs.empty())
       CHECKED(svm.setKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, svmPtrs.size() * sizeof(void *), svmPtrs.data()));

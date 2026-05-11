@@ -1,5 +1,6 @@
 #include "qjs_runner.h"
 
+#include <chrono>
 #include <cstdio>
 
 #include "quickjs.h"
@@ -40,6 +41,16 @@ JSValue consolePrint(JSContext *ctx, JSValueConst /*this_val*/, int argc, JSValu
 JSValue consoleLog(JSContext *ctx, JSValueConst t, int argc, JSValueConst *argv) { return consolePrint(ctx, t, argc, argv, stderr); }
 JSValue consoleErr(JSContext *ctx, JSValueConst t, int argc, JSValueConst *argv) { return consolePrint(ctx, t, argc, argv, stderr); }
 
+JSValue nowNanos(JSContext *ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst * /*argv*/) {
+  const auto now = std::chrono::steady_clock::now().time_since_epoch();
+  return JS_NewFloat64(ctx, std::chrono::duration<double, std::nano>(now).count());
+}
+
+JSValue epochMillis(JSContext *ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst * /*argv*/) {
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  return JS_NewFloat64(ctx, std::chrono::duration<double, std::milli>(now).count());
+}
+
 void noopFreeArrayBuffer(JSRuntime * /*rt*/, void * /*opaque*/, void * /*ptr*/) {}
 
 } // namespace
@@ -47,9 +58,7 @@ void noopFreeArrayBuffer(JSRuntime * /*rt*/, void * /*opaque*/, void * /*ptr*/) 
 JsPassRunner::JsPassRunner() {
   rt = JS_NewRuntime();
   ctx = JS_NewContext(rt);
-  // Scala.js `println` lowers to `console.log`; without a binding QuickJS sees an undefined
-  // global and fails silently. Wire log/error/warn/info/debug to stderr so pass-side tree
-  // logs surface alongside polyc's own diagnostics.
+  // Scala.js `println` lowers to `console.log`; bind to stderr or it fails silently.
   JSValue global = JS_GetGlobalObject(ctx);
   JSValue console = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, console, "log", JS_NewCFunction(ctx, consoleLog, "log", 1));
@@ -58,6 +67,8 @@ JsPassRunner::JsPassRunner() {
   JS_SetPropertyStr(ctx, console, "info", JS_NewCFunction(ctx, consoleLog, "info", 1));
   JS_SetPropertyStr(ctx, console, "debug", JS_NewCFunction(ctx, consoleLog, "debug", 1));
   JS_SetPropertyStr(ctx, global, "console", console);
+  JS_SetPropertyStr(ctx, global, "__polyregionNowNanos", JS_NewCFunction(ctx, nowNanos, "__polyregionNowNanos", 0));
+  JS_SetPropertyStr(ctx, global, "__polyregionEpochMillis", JS_NewCFunction(ctx, epochMillis, "__polyregionEpochMillis", 0));
   JS_FreeValue(ctx, global);
 }
 
@@ -67,8 +78,7 @@ JsPassRunner::~JsPassRunner() {
 }
 
 String JsPassRunner::loadModule(std::string_view source, std::string_view moduleId) {
-  // Scala.js CommonJSModule emits `exports.runPass = ...`; install a fresh `exports` object so
-  // reloading the bundle does not retain stale exports.
+  // Reset `exports` so reloading the bundle does not retain stale exports.
   JSValue global = JS_GetGlobalObject(ctx);
   JS_SetPropertyStr(ctx, global, "exports", JS_NewObject(ctx));
   JS_FreeValue(ctx, global);
@@ -82,45 +92,44 @@ String JsPassRunner::loadModule(std::string_view source, std::string_view module
   return {};
 }
 
-Vector<uint8_t> JsPassRunner::runPass(std::string_view passName, const Vector<uint8_t> &programBytes, String &error) {
+Vector<uint8_t> JsPassRunner::runPipeline(std::string_view spec, const Vector<uint8_t> &programBytes, String &error) {
   Vector<uint8_t> out;
   JSValue global = JS_GetGlobalObject(ctx);
   JSValue exports = JS_GetPropertyStr(ctx, global, "exports");
-  JSValue runPass = JS_GetPropertyStr(ctx, exports, "runPass");
+  JSValue runPipeline = JS_GetPropertyStr(ctx, exports, "runPipeline");
   JSValueConst thisVal = exports;
-  if (!JS_IsFunction(ctx, runPass)) {
-    JS_FreeValue(ctx, runPass);
-    runPass = JS_GetPropertyStr(ctx, global, "runPass");
+  if (!JS_IsFunction(ctx, runPipeline)) {
+    JS_FreeValue(ctx, runPipeline);
+    runPipeline = JS_GetPropertyStr(ctx, global, "runPipeline");
     thisVal = global;
   }
-  if (!JS_IsFunction(ctx, runPass)) {
-    error = "runPass: JS bundle does not export `exports.runPass`";
-    JS_FreeValue(ctx, runPass);
+  if (!JS_IsFunction(ctx, runPipeline)) {
+    error = "runPipeline: JS bundle does not export `exports.runPipeline`";
+    JS_FreeValue(ctx, runPipeline);
     JS_FreeValue(ctx, exports);
     JS_FreeValue(ctx, global);
     return out;
   }
 
-  JSValue nameVal = JS_NewStringLen(ctx, passName.data(), passName.size());
+  JSValue specVal = JS_NewStringLen(ctx, spec.data(), spec.size());
   static uint8_t empty = 0;
   auto *inputData = programBytes.empty() ? &empty : const_cast<uint8_t *>(programBytes.data());
-  // Pass an aliasing free_func so QuickJS does not memcpy programBytes into a fresh ArrayBuffer.
-  // Safe because runPass is synchronous and the input is freed only after JS_Call returns.
+  // Aliasing free_func avoids a memcpy; safe because runPipeline is synchronous.
   JSValue bufVal = JS_NewUint8Array(ctx, inputData, programBytes.size(), noopFreeArrayBuffer, nullptr, false);
   if (JS_IsException(bufVal)) {
     error = formatException(ctx);
-    JS_FreeValue(ctx, nameVal);
-    JS_FreeValue(ctx, runPass);
+    JS_FreeValue(ctx, specVal);
+    JS_FreeValue(ctx, runPipeline);
     JS_FreeValue(ctx, exports);
     JS_FreeValue(ctx, global);
     return out;
   }
 
-  JSValue argv[2] = {nameVal, bufVal};
-  JSValue result = JS_Call(ctx, runPass, thisVal, 2, argv);
-  JS_FreeValue(ctx, nameVal);
+  JSValue argv[2] = {specVal, bufVal};
+  JSValue result = JS_Call(ctx, runPipeline, thisVal, 2, argv);
+  JS_FreeValue(ctx, specVal);
   JS_FreeValue(ctx, bufVal);
-  JS_FreeValue(ctx, runPass);
+  JS_FreeValue(ctx, runPipeline);
   JS_FreeValue(ctx, exports);
   JS_FreeValue(ctx, global);
 
@@ -131,13 +140,13 @@ Vector<uint8_t> JsPassRunner::runPass(std::string_view passName, const Vector<ui
   }
 
   if (JS_GetTypedArrayType(result) != JS_TYPED_ARRAY_UINT8) {
-    error = "runPass: return value must be Uint8Array";
+    error = "runPipeline: return value must be Uint8Array";
     JS_FreeValue(ctx, result);
     return out;
   }
   size_t size = 0;
   uint8_t *data = JS_GetUint8Array(ctx, &size, result);
-  if (!data && size != 0) error = "runPass: failed to read Uint8Array result";
+  if (!data && size != 0) error = "runPipeline: failed to read Uint8Array result";
   if (data && size > 0) out.assign(data, data + size);
   JS_FreeValue(ctx, result);
   return out;

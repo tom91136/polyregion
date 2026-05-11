@@ -173,7 +173,7 @@ Event::Instance::Instance(const Event &meta, jobject instance) : meta(meta), ins
 
 Event::Event(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Event")))),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "(JJLjava/lang/String;Ljava/lang/String;)V")) {};
+      ctor0Method(env->GetMethodID(clazz, "<init>", "(JJLjava/lang/String;Ljava/lang/String;[Lpolyregion/jvm/compiler/Event;)V")) {};
 thread_local std::unique_ptr<Event> Event::cached = {};
 Event &Event::of(JNIEnv *env) {
   if (!cached) cached = std::unique_ptr<Event>(new Event(env));
@@ -186,8 +186,9 @@ void Event::drop(JNIEnv *env) {
   }
 }
 Event::Instance Event::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Event::Instance Event::operator()(JNIEnv *env, jlong epochMillis, jlong elapsedNanos, jstring name, jstring data) const {
-  return {*this, env->NewObject(clazz, ctor0Method, epochMillis, elapsedNanos, name, data)};
+Event::Instance Event::operator()(JNIEnv *env, jlong epochMillis, jlong elapsedNanos, jstring name, jstring data,
+                                  jobjectArray items) const {
+  return {*this, env->NewObject(clazz, ctor0Method, epochMillis, elapsedNanos, name, data, items)};
 }
 
 Layout::Instance::Instance(const Layout &meta, jobject instance) : meta(meta), instance(instance) {}

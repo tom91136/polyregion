@@ -209,3 +209,6 @@ typings/
 .codex
 .ivy
 .boot
+
+# ctest scratch dir written at the repo root when ctest runs out-of-build
+/Testing/

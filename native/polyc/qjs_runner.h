@@ -24,7 +24,7 @@ public:
 
   String loadModule(std::string_view source, std::string_view moduleId = "polypass.js");
 
-  Vector<uint8_t> runPass(std::string_view passName, const Vector<uint8_t> &programBytes, String &error);
+  Vector<uint8_t> runPipeline(std::string_view spec, const Vector<uint8_t> &programBytes, String &error);
 };
 
 } // namespace polyregion::polypass

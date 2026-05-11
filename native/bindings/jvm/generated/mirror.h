@@ -179,7 +179,7 @@ public:
   static Event &of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap(JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jlong epochMillis, jlong elapsedNanos, jstring name, jstring data) const;
+  Instance operator()(JNIEnv *env, jlong epochMillis, jlong elapsedNanos, jstring name, jstring data, jobjectArray items) const;
 };
 struct Layout {
   struct Instance {

@@ -12,6 +12,28 @@ using std::string;
 
 using namespace aspartame;
 
+static void renderCompileEvent(std::ostringstream &os, const CompileEvent &e, size_t depth) {
+  const std::string prefix(4 + depth * 2, ' ');
+  os << prefix << "[" << e.epochMillis << ", +" << static_cast<double>(e.elapsedNanos) / 1e6 << "ms] " << e.name;
+  if (e.data.empty()) {
+    os << '\n';
+  } else if (e.data.find('\n') == std::string::npos) {
+    os << ": " << e.data << '\n';
+  } else {
+    os << ":\n";
+    std::stringstream ss(e.data);
+    string l;
+    size_t ln = 0;
+    while (std::getline(ss, l, '\n')) {
+      ln++;
+      os << prefix << std::setw(3) << ln << "│" << l << '\n';
+    }
+    os << prefix << "   ╰───\n";
+  }
+  for (auto &child : e.items)
+    renderCompileEvent(os, child, depth + 1);
+}
+
 string polyast::qualified(const Term::Select &select) {
   std::string s = select.root.symbol;
   for (auto &step : select.steps) {
@@ -56,26 +78,8 @@ string polyast::repr(const CompileResult &compilation) {
   if (compilation.events.empty()) os << " (none)";
   else os << '\n';
 
-  for (auto &e : compilation.events) {
-    os << "    [" << e.epochMillis << ", +" << static_cast<double>(e.elapsedNanos) / 1e6 << "ms] " << e.name;
-    if (e.data.empty()) {
-      os << '\n';
-      continue;
-    }
-    if (e.data.find('\n') == std::string::npos) {
-      os << ": " << e.data << '\n';
-      continue;
-    }
-    os << ":\n";
-    std::stringstream ss(e.data);
-    string l;
-    size_t ln = 0;
-    while (std::getline(ss, l, '\n')) {
-      ln++;
-      os << "    " << std::setw(3) << ln << "│" << l << '\n';
-    }
-    os << "       ╰───\n";
-  }
+  for (auto &e : compilation.events)
+    renderCompileEvent(os, e, 0);
   os << "}";
   return os.str();
 }

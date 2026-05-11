@@ -133,6 +133,10 @@ private[polyregion] object CodeGen {
         :: deriveStruct[StructLayoutMember]()
         :: deriveStruct[StructLayout]()
         :: deriveStruct[CompileEvent]()
+        :: deriveStruct[PassArg]()
+        :: deriveStruct[PassSpec]()
+        :: deriveStruct[PassPipeline]()
+        :: deriveStruct[PassRunResult]()
         :: deriveStruct[CompileResult]()
         :: Nil //
 

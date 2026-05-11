@@ -336,6 +336,14 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json structlayout_to_json(const StructLayout &);
 [[nodiscard]] POLYREGION_EXPORT CompileEvent compileevent_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileevent_to_json(const CompileEvent &);
+[[nodiscard]] POLYREGION_EXPORT PassArg passarg_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json passarg_to_json(const PassArg &);
+[[nodiscard]] POLYREGION_EXPORT PassSpec passspec_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json passspec_to_json(const PassSpec &);
+[[nodiscard]] POLYREGION_EXPORT PassPipeline passpipeline_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json passpipeline_to_json(const PassPipeline &);
+[[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json passrunresult_to_json(const PassRunResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
 namespace TypeKind {
@@ -378,4 +386,8 @@ namespace FunctionVisibility {
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> compileresult_to_msgpack(const CompileResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_msgpack(const std::vector<uint8_t> &);
+
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> passrunresult_to_msgpack(const PassRunResult &);
+[[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_msgpack(const std::vector<uint8_t> &);
 } // namespace polyregion::polyast

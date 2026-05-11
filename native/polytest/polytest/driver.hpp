@@ -19,12 +19,12 @@
 #include "llvm/Support/Program.h"
 
 #include "aspartame/all.hpp"
-#include "fire.hpp"
 #include "fmt/args.h"
 #include "fmt/format.h"
 
 #include "polyregion/io.hpp"
 
+#include "fire.hpp"
 #include "polytest/lit.hpp"
 #include "polytest/profile.hpp"
 
@@ -194,8 +194,16 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
     auto r = runStep(task, cfg, task.runs[i].command);
     const auto exit = r.exitCode;
     absorbStep(o, std::move(r));
-    if (exit == 77) { o.status = TaskStatus::Skip; o.failReason = "polyrt: no compatible target (exit 77)"; break; }
-    if (exit != 0) { o.status = TaskStatus::Fail; o.failReason = fmt::format("run step {} failed (exit {})", i, exit); break; }
+    if (exit == 77) {
+      o.status = TaskStatus::Skip;
+      o.failReason = "polyrt: no compatible target (exit 77)";
+      break;
+    }
+    if (exit != 0) {
+      o.status = TaskStatus::Fail;
+      o.failReason = fmt::format("run step {} failed (exit {})", i, exit);
+      break;
+    }
     const auto lines = o.stdoutCapture ^ split('\n');
     if (!(task.runs[i].expect | forall([&](const auto &e) { return checkExpect(e, lines, o.stdoutCapture, o); }))) break;
   }
@@ -281,8 +289,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
 
-  const int jobs = opts.compileJobs > 0 ? opts.compileJobs
-                                        : static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+  const int jobs = opts.compileJobs > 0 ? opts.compileJobs : static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
   std::fprintf(stderr, "polytest: %zu tasks; compile -j%d, run -j1\n", tasks.size(), jobs);
 
   std::vector<TaskOutcome> compileOutcomes(tasks.size());
@@ -306,7 +313,8 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
       auto &o = (compileOutcomes[i] = detail::compileTask(tasks[i], cfg));
       auto done = ++compileDone;
       std::lock_guard lk(logMtx);
-      std::fprintf(stderr, "[compile %zu/%zu] %s %s (%.2fs)\n", done, tasks.size(), statusTag(o.status), tasks[i].display().c_str(), o.secs);
+      std::fprintf(stderr, "[compile %zu/%zu] %s %s (%.2fs)\n", done, tasks.size(), statusTag(o.status), tasks[i].display().c_str(),
+                   o.secs);
       dumpDetails(o, /*includeStdout*/ false);
       // XXX Drop captures on Pass to bound peak RSS over a 1500-task batch; only failures need to keep them for the summary.
       if (o.status == TaskStatus::Pass && !opts.verbose) std::string{}.swap(o.stdoutCapture), std::string{}.swap(o.stderrCapture);
@@ -337,15 +345,13 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
 
-  const auto countBy = [&](TaskStatus s) {
-    return finalOutcomes | aspartame::count([s](auto &o) { return o.status == s; });
-  };
+  const auto countBy = [&](TaskStatus s) { return finalOutcomes | aspartame::count([s](auto &o) { return o.status == s; }); };
   const auto pass = countBy(TaskStatus::Pass);
   const auto skip = countBy(TaskStatus::Skip);
   const auto fail = countBy(TaskStatus::Fail);
   if (fail > 0) {
-    const auto failedDisplay = tasks                                                       //
-                               | zip(finalOutcomes)                                        //
+    const auto failedDisplay = tasks                                                                  //
+                               | zip(finalOutcomes)                                                   //
                                | filter([](auto &, auto &o) { return o.status == TaskStatus::Fail; }) //
                                | mk_string("\n", [](auto &t, auto &) { return "  - " + t.display(); });
     std::fprintf(stderr, "polytest: failures (%zu):\n%s\n", fail, failedDisplay.c_str());

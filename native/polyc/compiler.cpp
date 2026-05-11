@@ -1,5 +1,6 @@
 #include "compiler.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 
@@ -136,10 +137,6 @@ std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &byte
   return layoutOf(deserialiseStructDefs(bytes), options);
 }
 
-static void sortEvents(polyast::CompileResult &c) {
-  c.events = c.events ^ sort_by([](auto &x) { return x.epochMillis; });
-}
-
 namespace {
 [[maybe_unused]] void polypassJsAnchor() {}
 
@@ -178,13 +175,31 @@ static polypass::JsPassRunner &sharedJsRunner() {
   return runner;
 }
 
-static polyast::Program runJsPass(const polyast::Program &p, std::string_view passName) {
-  auto in = polyast::program_to_msgpack(p);
+static polyast::PassRunResult runJsPipeline(const polyast::Program &p, std::string_view spec) {
+  const auto rootEpoch = compiler::nowMs();
+  const auto rootStart = compiler::nowMono();
+  auto timed = [](auto &&name, auto &&data, auto &&f) {
+    const auto epoch = compiler::nowMs();
+    const auto start = compiler::nowMono();
+    auto out = f();
+    return std::pair{std::move(out), polyast::CompileEvent(epoch, compiler::elapsedNs(start), name, data, {})};
+  };
+
+  auto [in, serialiseEvent] = timed("polyast_msgpack_serialise_cpp", "", [&] { return polyast::program_to_msgpack(p); });
+  serialiseEvent.data = fmt::format("bytes={}", in.size());
+
   std::string err;
-  auto out = sharedJsRunner().runPass(passName, in, err);
-  // auto out = in;
-  if (!err.empty()) throw std::logic_error(fmt::format("polypass {}: {}", passName, err));
-  return polyast::program_from_msgpack(out.data(), out.data() + out.size());
+  auto [out, jsEvent] = timed("polypass_js", "", [&] { return sharedJsRunner().runPipeline(spec, in, err); });
+  if (!err.empty()) throw std::logic_error(fmt::format("polypass {}: {}", spec, err));
+  jsEvent.data = fmt::format("bytes={}", out.size());
+
+  auto [result, deserialiseEvent] = timed("polyast_msgpack_deserialise_cpp", fmt::format("bytes={}", out.size()),
+                                          [&] { return polyast::passrunresult_from_msgpack(out.data(), out.data() + out.size()); });
+
+  jsEvent.items = std::move(result.event.items);
+  std::vector<polyast::CompileEvent> items{std::move(serialiseEvent), std::move(jsEvent), std::move(deserialiseEvent)};
+  result.event = polyast::CompileEvent(rootEpoch, compiler::elapsedNs(rootStart), "polypass", std::string(spec), std::move(items));
+  return result;
 }
 
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
@@ -214,30 +229,23 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   std::vector<polyast::CompileEvent> preEvents;
   auto effective = program;
   {
-    const auto t0 = nowMono();
-    auto before = polyast::repr(effective);
-    effective = runJsPass(effective, "Opt");
-    auto after = polyast::repr(effective);
-    auto data = "; before:\n" + before + "\n; after:\n" + after;
-    preEvents.emplace_back(nowMs(), elapsedNs(t0), "polypass_opt", data);
+    auto passRun = runJsPipeline(effective, "FullOpt");
+    effective = std::move(passRun.program);
+    preEvents.emplace_back(std::move(passRun.event));
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
   c.events ^= concat_inplace(preEvents);
-  sortEvents(c);
+  std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;
 }
 
 polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt) {
-
-  std::vector<polyast::CompileEvent> events;
-
   auto astStart = nowMono();
   auto program = deserialiseProgram(astBytes);
-  events.emplace_back(nowMs(), elapsedNs(astStart), "ast_deserialise", "");
-
+  // XXX `ast_deserialise` happens strictly before any event from compile(Program), so prepend
+  // rather than re-running stable_sort over the merged list.
   auto c = compile(program, options, opt);
-  c.events ^= concat_inplace(events);
-  sortEvents(c);
+  c.events.insert(c.events.begin(), polyast::CompileEvent(nowMs(), elapsedNs(astStart), "ast_deserialise", "", {}));
   return c;
 }

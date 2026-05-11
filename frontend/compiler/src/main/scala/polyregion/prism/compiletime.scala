@@ -174,10 +174,10 @@ object compiletime {
             fn.copy(
               name = sourceSignature.name
               // Note: previously filtered out the intrinsic$ moduleCapture, but the function body
-              // still references intrinsics$ until IntrinsifyPass runs in opt passes. Keeping the
+              // still references intrinsics$ until Intrinsify runs in opt passes. Keeping the
               // capture allows the unopt verifier (which runs before intrinsify) to pass. After
-              // IntrinsifyPass replaces the call with a direct intrinsic, the capture becomes
-              // unused and is removed by DeadArgEliminationPass / LLVM dead-arg elimination.
+              // Intrinsify replaces the call with a direct intrinsic, the capture becomes
+              // unused and is removed by DeadArgElimination / LLVM dead-arg elimination.
 //              receiver = sourceSignature.receiver.map(p.Named("this", _)),
 //              tpeVars = fn.tpeVars
 //                        ++ fn.receiver.map(_.tpe).fold(Nil){

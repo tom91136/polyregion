@@ -333,8 +333,8 @@ transform_reduce(ExecutionPolicy &&, ForwardIt first, ForwardIt last, T init, Bi
     return std::transform_reduce(first, last, init, reduce, transform);
   }
   // See note above on the by-value `reduce` wrap.
-  return polyregion::polystl::details::parallel_reduce(
-      std::distance(first, last), init, transform, [reduce](auto l, auto r) { return reduce(l, r); });
+  return polyregion::polystl::details::parallel_reduce(std::distance(first, last), init, transform,
+                                                       [reduce](auto l, auto r) { return reduce(l, r); });
 }
 
 } // namespace std

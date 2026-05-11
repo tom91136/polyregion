@@ -563,6 +563,10 @@ struct Program;
 struct StructLayoutMember;
 struct StructLayout;
 struct CompileEvent;
+struct PassArg;
+struct PassSpec;
+struct PassPipeline;
+struct PassRunResult;
 struct CompileResult;
 
 struct POLYREGION_EXPORT Sym {
@@ -6892,18 +6896,23 @@ struct POLYREGION_EXPORT CompileEvent {
   int64_t elapsedNanos;
   std::string name;
   std::string data;
+  std::vector<CompileEvent> items;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
   [[nodiscard]] POLYREGION_EXPORT CompileEvent withEpochMillis(const int64_t &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileEvent withElapsedNanos(const int64_t &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileEvent withName(const std::string &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileEvent withData(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT CompileEvent withItems(const std::vector<CompileEvent> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, CompileEvent>) {
       if (auto x_ = f(*this)) {
         results_.emplace_back(*x_);
       }
+    }
+    for (auto it = items.begin(); it != items.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
     }
   }
   template <typename T, typename U>
@@ -6919,12 +6928,174 @@ struct POLYREGION_EXPORT CompileEvent {
     if constexpr (std::is_same_v<T, CompileEvent>) {
       return f(*this);
     }
-    return CompileEvent(epochMillis, elapsedNanos, name, data);
+    std::vector<CompileEvent> items__;
+    for (auto it = items.begin(); it != items.end(); ++it) {
+      items__.emplace_back((*it).modify_all<T>(f));
+    }
+    return CompileEvent(epochMillis, elapsedNanos, name, data, items__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const CompileEvent &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const CompileEvent &) const;
-  CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data) noexcept;
+  CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data, std::vector<CompileEvent> items) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const CompileEvent &);
+};
+
+struct POLYREGION_EXPORT PassArg {
+  std::string name;
+  std::string value;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT PassArg withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PassArg withValue(const std::string &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassArg>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PassArg modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassArg>) {
+      return f(*this);
+    }
+    return PassArg(name, value);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PassArg &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PassArg &) const;
+  PassArg(std::string name, std::string value) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const PassArg &);
+};
+
+struct POLYREGION_EXPORT PassSpec {
+  std::string name;
+  std::vector<PassArg> args;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT PassSpec withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PassSpec withArgs(const std::vector<PassArg> &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassSpec>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PassSpec modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassSpec>) {
+      return f(*this);
+    }
+    std::vector<PassArg> args__;
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      args__.emplace_back((*it).modify_all<T>(f));
+    }
+    return PassSpec(name, args__);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PassSpec &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PassSpec &) const;
+  PassSpec(std::string name, std::vector<PassArg> args) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const PassSpec &);
+};
+
+struct POLYREGION_EXPORT PassPipeline {
+  std::vector<PassSpec> steps;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT PassPipeline withSteps(const std::vector<PassSpec> &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassPipeline>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    for (auto it = steps.begin(); it != steps.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PassPipeline modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassPipeline>) {
+      return f(*this);
+    }
+    std::vector<PassSpec> steps__;
+    for (auto it = steps.begin(); it != steps.end(); ++it) {
+      steps__.emplace_back((*it).modify_all<T>(f));
+    }
+    return PassPipeline(steps__);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PassPipeline &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PassPipeline &) const;
+  explicit PassPipeline(std::vector<PassSpec> steps) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const PassPipeline &);
+};
+
+struct POLYREGION_EXPORT PassRunResult {
+  Program program;
+  CompileEvent event;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT PassRunResult withProgram(const Program &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PassRunResult withEvent(const CompileEvent &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassRunResult>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    program.collect_where<T, U>(results_, f);
+    event.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PassRunResult modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PassRunResult>) {
+      return f(*this);
+    }
+    return PassRunResult(program.modify_all<T>(f), event.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PassRunResult &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PassRunResult &) const;
+  PassRunResult(Program program, CompileEvent event) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const PassRunResult &);
 };
 
 struct POLYREGION_EXPORT CompileResult {
@@ -8622,6 +8793,18 @@ template <> struct hash<polyregion::polyast::StructLayout> {
 };
 template <> struct hash<polyregion::polyast::CompileEvent> {
   std::size_t operator()(const polyregion::polyast::CompileEvent &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PassArg> {
+  std::size_t operator()(const polyregion::polyast::PassArg &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PassSpec> {
+  std::size_t operator()(const polyregion::polyast::PassSpec &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PassPipeline> {
+  std::size_t operator()(const polyregion::polyast::PassPipeline &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PassRunResult> {
+  std::size_t operator()(const polyregion::polyast::PassRunResult &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::CompileResult> {
   std::size_t operator()(const polyregion::polyast::CompileResult &) const noexcept;

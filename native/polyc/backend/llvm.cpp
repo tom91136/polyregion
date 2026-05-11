@@ -923,11 +923,11 @@ CompileResult LLVMBackend::compileProgram(const Program &program, const compilet
   CodeGen cg(options, "program");
   auto transformStart = compiler::nowMono();
   auto [maybeTransformErr, transformMsg] = cg.transform(program);
-  CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg);
+  CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg, {});
 
   auto verifyStart = compiler::nowMono();
   auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(cg.M);
-  CompileEvent astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg);
+  CompileEvent astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg, {});
 
   if (maybeTransformErr || maybeVerifyErr) {
     std::vector<std::string> errors;

@@ -16,14 +16,14 @@ object Compiler {
   import Retyper.*
 
 //   private val ProgramPasses: List[ProgramPass] = List(
-//     printPass(IntrinsifyPass),
-//     // printPass(DynamicDispatchPass),
-//     printPass(SpecialisationPass),
+//     printPass(Intrinsify),
+//     // printPass(DynamicDispatch),
+//     printPass(Specialisation),
 
-// //    FnInlinePass,
-//     VarReducePass,
-//     UnitExprElisionPass,
-//     DeadArgEliminationPass
+// //    FnInline,
+//     VarReduce,
+//     UnitExprElision,
+//     DeadArgElimination
 //   )
 
 //   private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
@@ -113,7 +113,7 @@ object Compiler {
                   val defDef = sym.tree.asInstanceOf[q.DefDef]
                   // scala.Array's apply/update/length etc. have stub `throw new Error` bodies in the
                   // stdlib (the JVM lowers their call sites specially). The term compiler can't
-                  // handle `throw`, but IntrinsifyPass handles xs.apply/update/length on Ptr<T>
+                  // handle `throw`, but Intrinsify handles xs.apply/update/length on Ptr<T>
                   // receivers directly at IR level. So just skip compiling these — they'll never
                   // be called as functions.
                   val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
@@ -800,7 +800,7 @@ object Compiler {
     _ = unoptLog.info(s"Entry", unopt.entry.repr)
 
     // verify before optimisation
-    unoptVerification <- VerifyPass(unopt, unoptLog, verifyFunction = false).success
+    unoptVerification <- Verify(unopt, unoptLog, verifyFunction = false).success
     _ = unoptLog.info(
       s"Verifier",
       unoptVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
@@ -820,15 +820,15 @@ object Compiler {
 
     opt = scala.Function.chain(
       List[ProgramPass](
-        printPass(IntrinsifyPass),
-        printPass(SpecialisationPass),
-        ConstantFoldPass,
-        VarReducePass,
-        UnitExprElisionPass,
-        DeadArgEliminationPass
+        printPass(Intrinsify),
+        printPass(Specialisation),
+        ConstantFold,
+        VarReduce,
+        UnitExprElision,
+        DeadArgElimination
       ).map(p => p(_, optPassLog))
     )(unopt)
-    (monomorphicToPolymorphicSym, opt) <- MonoStructPass(opt, log).success
+    (monomorphicToPolymorphicSym, opt) <- MonoStruct(opt, log).success
 
     // Wire up Invoke captures and propagate captures transitively up to the entry. compileFn
     // doesn't know what captures a function will need until its body is compiled (in a separate
@@ -914,7 +914,7 @@ object Compiler {
 
     // verify again after optimisation
     optLog = log.subLog("Opt")
-    optVerification <- VerifyPass(opt, optLog, verifyFunction = true).success
+    optVerification <- Verify(opt, optLog, verifyFunction = true).success
 
     _ = optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
     _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.repr)*)

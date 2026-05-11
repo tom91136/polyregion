@@ -552,7 +552,7 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
 CompileResult backend::CSource::compileProgram(const Program &program_, const compiletime::OptLevel &opt) {
   const auto tracePassStart = compiler::nowMono();
   auto program = CLAddressSpaceTracePass::execute(program_);
-  CompileEvent cltpEvent(compiler::nowMs(), compiler::elapsedNs(tracePassStart), "polyast_cltp", repr(program));
+  CompileEvent cltpEvent(compiler::nowMs(), compiler::elapsedNs(tracePassStart), "polyast_cltp", repr(program), {});
 
   const auto start = compiler::nowMono();
 
@@ -614,7 +614,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
 
   return {std::vector<int8_t>(code.begin(), code.end()),
           {},
-          {cltpEvent, {compiler::nowMs(), compiler::elapsedNs(start), fmt::format("polyast_to_{}_c", dialectName), code}},
+          {cltpEvent, {compiler::nowMs(), compiler::elapsedNs(start), fmt::format("polyast_to_{}_c", dialectName), code, {}}},
           {},
           ""};
 }

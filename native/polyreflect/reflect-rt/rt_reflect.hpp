@@ -73,13 +73,13 @@ constexpr const char *to_string(const Type t) {
 }
 
 #ifndef __RT_IMPL
-#if defined(_MSC_VER)
+  #if defined(_MSC_VER)
 extern "C" inline PtrMeta _rt_reflect_p(const void *) { return PtrMeta{0, 0, Type::Unknown}; }
 extern "C" inline PtrMeta _rt_reflect_v(uintptr_t) { return PtrMeta{0, 0, Type::Unknown}; }
-#else
+  #else
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
-#endif
+  #endif
 #endif
 
 #ifdef __RT_IMPL

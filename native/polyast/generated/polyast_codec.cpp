@@ -2450,7 +2450,11 @@ CompileEvent compileevent_from_json(const json &j_) {
   auto elapsedNanos = j_.at(1).get<int64_t>();
   auto name = j_.at(2).get<std::string>();
   auto data = j_.at(3).get<std::string>();
-  return {epochMillis, elapsedNanos, name, data};
+  std::vector<CompileEvent> items;
+  for (const auto &v_ : j_.at(4)) {
+    items.emplace_back(compileevent_from_json(v_));
+  }
+  return {epochMillis, elapsedNanos, name, data, items};
 }
 
 json compileevent_to_json(const CompileEvent &x_) {
@@ -2458,7 +2462,69 @@ json compileevent_to_json(const CompileEvent &x_) {
   auto elapsedNanos = x_.elapsedNanos;
   auto name = x_.name;
   auto data = x_.data;
-  return json::array({epochMillis, elapsedNanos, name, data});
+  std::vector<json> items;
+  for (const auto &v_ : x_.items) {
+    items.emplace_back(compileevent_to_json(v_));
+  }
+  return json::array({epochMillis, elapsedNanos, name, data, items});
+}
+
+PassArg passarg_from_json(const json &j_) {
+  auto name = j_.at(0).get<std::string>();
+  auto value = j_.at(1).get<std::string>();
+  return {name, value};
+}
+
+json passarg_to_json(const PassArg &x_) {
+  auto name = x_.name;
+  auto value = x_.value;
+  return json::array({name, value});
+}
+
+PassSpec passspec_from_json(const json &j_) {
+  auto name = j_.at(0).get<std::string>();
+  std::vector<PassArg> args;
+  for (const auto &v_ : j_.at(1)) {
+    args.emplace_back(passarg_from_json(v_));
+  }
+  return {name, args};
+}
+
+json passspec_to_json(const PassSpec &x_) {
+  auto name = x_.name;
+  std::vector<json> args;
+  for (const auto &v_ : x_.args) {
+    args.emplace_back(passarg_to_json(v_));
+  }
+  return json::array({name, args});
+}
+
+PassPipeline passpipeline_from_json(const json &j_) {
+  std::vector<PassSpec> steps;
+  for (const auto &v_ : j_.at(0)) {
+    steps.emplace_back(passspec_from_json(v_));
+  }
+  return PassPipeline(steps);
+}
+
+json passpipeline_to_json(const PassPipeline &x_) {
+  std::vector<json> steps;
+  for (const auto &v_ : x_.steps) {
+    steps.emplace_back(passspec_to_json(v_));
+  }
+  return json::array({steps});
+}
+
+PassRunResult passrunresult_from_json(const json &j_) {
+  auto program = program_from_json(j_.at(0));
+  auto event = compileevent_from_json(j_.at(1));
+  return {program, event};
+}
+
+json passrunresult_to_json(const PassRunResult &x_) {
+  auto program = program_to_json(x_.program);
+  auto event = compileevent_to_json(x_.event);
+  return json::array({program, event});
 }
 
 CompileResult compileresult_from_json(const json &j_) {
@@ -2493,13 +2559,13 @@ json compileresult_to_json(const CompileResult &x_) {
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if (hash_ != "5ef323cbe7e50326aaf864ddbfce3efd") {
-    throw std::runtime_error("Expecting ADT hash to be 5ef323cbe7e50326aaf864ddbfce3efd, but was " + hash_);
+  if (hash_ != "be1cbb5eccae9f05972502f1e909cb07") {
+    throw std::runtime_error("Expecting ADT hash to be be1cbb5eccae9f05972502f1e909cb07, but was " + hash_);
   }
   return data_;
 }
 
-json hashed_to_json(const json &x_) { return json::array({"5ef323cbe7e50326aaf864ddbfce3efd", x_}); }
+json hashed_to_json(const json &x_) { return json::array({"be1cbb5eccae9f05972502f1e909cb07", x_}); }
 
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
@@ -3105,6 +3171,22 @@ CompileEvent compileevent_fields_from_msgpack(MsgpackReader &, size_t);
 void compileevent_fields_to_msgpack(MsgpackWriter &, const CompileEvent &);
 CompileEvent compileevent_from_msgpack(MsgpackReader &);
 void compileevent_to_msgpack(MsgpackWriter &, const CompileEvent &);
+PassArg passarg_fields_from_msgpack(MsgpackReader &, size_t);
+void passarg_fields_to_msgpack(MsgpackWriter &, const PassArg &);
+PassArg passarg_from_msgpack(MsgpackReader &);
+void passarg_to_msgpack(MsgpackWriter &, const PassArg &);
+PassSpec passspec_fields_from_msgpack(MsgpackReader &, size_t);
+void passspec_fields_to_msgpack(MsgpackWriter &, const PassSpec &);
+PassSpec passspec_from_msgpack(MsgpackReader &);
+void passspec_to_msgpack(MsgpackWriter &, const PassSpec &);
+PassPipeline passpipeline_fields_from_msgpack(MsgpackReader &, size_t);
+void passpipeline_fields_to_msgpack(MsgpackWriter &, const PassPipeline &);
+PassPipeline passpipeline_from_msgpack(MsgpackReader &);
+void passpipeline_to_msgpack(MsgpackWriter &, const PassPipeline &);
+PassRunResult passrunresult_fields_from_msgpack(MsgpackReader &, size_t);
+void passrunresult_fields_to_msgpack(MsgpackWriter &, const PassRunResult &);
+PassRunResult passrunresult_from_msgpack(MsgpackReader &);
+void passrunresult_to_msgpack(MsgpackWriter &, const PassRunResult &);
 CompileResult compileresult_fields_from_msgpack(MsgpackReader &, size_t);
 void compileresult_fields_to_msgpack(MsgpackWriter &, const CompileResult &);
 CompileResult compileresult_from_msgpack(MsgpackReader &);
@@ -7601,12 +7683,21 @@ void structlayout_to_msgpack(MsgpackWriter &w_, const StructLayout &x_) {
 }
 
 CompileEvent compileevent_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected CompileEvent with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected CompileEvent with 5 field(s)");
   auto epochMillis = r_.readInt64();
   auto elapsedNanos = r_.readInt64();
   auto name = r_.readString();
   auto data = r_.readString();
-  return {epochMillis, elapsedNanos, name, data};
+  std::vector<CompileEvent> items;
+  {
+    auto items_size = r_.readArrayHeader();
+    items.reserve(items_size);
+    for (size_t items_idx = 0; items_idx < items_size; ++items_idx) {
+      auto items_elem = compileevent_from_msgpack(r_);
+      items.emplace_back(std::move(items_elem));
+    }
+  }
+  return {epochMillis, elapsedNanos, name, data, items};
 }
 
 void compileevent_fields_to_msgpack(MsgpackWriter &w_, const CompileEvent &x_) {
@@ -7614,6 +7705,10 @@ void compileevent_fields_to_msgpack(MsgpackWriter &w_, const CompileEvent &x_) {
   w_.writeInt64(x_.elapsedNanos);
   w_.writeString(x_.name);
   w_.writeString(x_.data);
+  w_.writeArrayHeader(x_.items.size());
+  for (const auto &v0_ : x_.items) {
+    compileevent_to_msgpack(w_, v0_);
+  }
 }
 
 CompileEvent compileevent_from_msgpack(MsgpackReader &r_) {
@@ -7622,8 +7717,116 @@ CompileEvent compileevent_from_msgpack(MsgpackReader &r_) {
 }
 
 void compileevent_to_msgpack(MsgpackWriter &w_, const CompileEvent &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   compileevent_fields_to_msgpack(w_, x_);
+}
+
+PassArg passarg_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PassArg with 2 field(s)");
+  auto name = r_.readString();
+  auto value = r_.readString();
+  return {name, value};
+}
+
+void passarg_fields_to_msgpack(MsgpackWriter &w_, const PassArg &x_) {
+  w_.writeString(x_.name);
+  w_.writeString(x_.value);
+}
+
+PassArg passarg_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return passarg_fields_from_msgpack(r_, n_);
+}
+
+void passarg_to_msgpack(MsgpackWriter &w_, const PassArg &x_) {
+  w_.writeArrayHeader(2);
+  passarg_fields_to_msgpack(w_, x_);
+}
+
+PassSpec passspec_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PassSpec with 2 field(s)");
+  auto name = r_.readString();
+  std::vector<PassArg> args;
+  {
+    auto args_size = r_.readArrayHeader();
+    args.reserve(args_size);
+    for (size_t args_idx = 0; args_idx < args_size; ++args_idx) {
+      auto args_elem = passarg_from_msgpack(r_);
+      args.emplace_back(std::move(args_elem));
+    }
+  }
+  return {name, args};
+}
+
+void passspec_fields_to_msgpack(MsgpackWriter &w_, const PassSpec &x_) {
+  w_.writeString(x_.name);
+  w_.writeArrayHeader(x_.args.size());
+  for (const auto &v0_ : x_.args) {
+    passarg_to_msgpack(w_, v0_);
+  }
+}
+
+PassSpec passspec_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return passspec_fields_from_msgpack(r_, n_);
+}
+
+void passspec_to_msgpack(MsgpackWriter &w_, const PassSpec &x_) {
+  w_.writeArrayHeader(2);
+  passspec_fields_to_msgpack(w_, x_);
+}
+
+PassPipeline passpipeline_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected PassPipeline with 1 field(s)");
+  std::vector<PassSpec> steps;
+  {
+    auto steps_size = r_.readArrayHeader();
+    steps.reserve(steps_size);
+    for (size_t steps_idx = 0; steps_idx < steps_size; ++steps_idx) {
+      auto steps_elem = passspec_from_msgpack(r_);
+      steps.emplace_back(std::move(steps_elem));
+    }
+  }
+  return PassPipeline(steps);
+}
+
+void passpipeline_fields_to_msgpack(MsgpackWriter &w_, const PassPipeline &x_) {
+  w_.writeArrayHeader(x_.steps.size());
+  for (const auto &v0_ : x_.steps) {
+    passspec_to_msgpack(w_, v0_);
+  }
+}
+
+PassPipeline passpipeline_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return passpipeline_fields_from_msgpack(r_, n_);
+}
+
+void passpipeline_to_msgpack(MsgpackWriter &w_, const PassPipeline &x_) {
+  w_.writeArrayHeader(1);
+  passpipeline_fields_to_msgpack(w_, x_);
+}
+
+PassRunResult passrunresult_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PassRunResult with 2 field(s)");
+  auto program = program_from_msgpack(r_);
+  auto event = compileevent_from_msgpack(r_);
+  return {program, event};
+}
+
+void passrunresult_fields_to_msgpack(MsgpackWriter &w_, const PassRunResult &x_) {
+  program_to_msgpack(w_, x_.program);
+  compileevent_to_msgpack(w_, x_.event);
+}
+
+PassRunResult passrunresult_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return passrunresult_fields_from_msgpack(r_, n_);
+}
+
+void passrunresult_to_msgpack(MsgpackWriter &w_, const PassRunResult &x_) {
+  w_.writeArrayHeader(2);
+  passrunresult_fields_to_msgpack(w_, x_);
 }
 
 CompileResult compileresult_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -7734,7 +7937,7 @@ Program program_from_msgpack(const std::vector<uint8_t> &xs_) { return program_f
 std::vector<uint8_t> hashed_program_to_msgpack(const Program &x_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string("5ef323cbe7e50326aaf864ddbfce3efd"));
+    w_.writeString(std::string("be1cbb5eccae9f05972502f1e909cb07"));
     program_to_msgpack(w_, x_);
   });
 }
@@ -7744,8 +7947,8 @@ Program hashed_program_from_msgpack(const uint8_t *begin_, const uint8_t *end_) 
     auto n_ = r_.readArrayHeader();
     if (n_ != 2) throw std::runtime_error("Expected versioned Program array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != "5ef323cbe7e50326aaf864ddbfce3efd")
-      throw std::runtime_error("Expecting ADT hash to be 5ef323cbe7e50326aaf864ddbfce3efd, but was " + hash_);
+    if (hash_ != "be1cbb5eccae9f05972502f1e909cb07")
+      throw std::runtime_error("Expecting ADT hash to be be1cbb5eccae9f05972502f1e909cb07, but was " + hash_);
     return program_from_msgpack(r_);
   });
 }
@@ -7769,7 +7972,7 @@ std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t> &xs_) 
 std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string("5ef323cbe7e50326aaf864ddbfce3efd"));
+    w_.writeString(std::string("be1cbb5eccae9f05972502f1e909cb07"));
     structdefs_value_to_msgpack(w_, xs_);
   });
 }
@@ -7779,8 +7982,8 @@ std::vector<StructDef> hashed_structdefs_from_msgpack(const uint8_t *begin_, con
     auto n_ = r_.readArrayHeader();
     if (n_ != 2) throw std::runtime_error("Expected versioned StructDef list array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != "5ef323cbe7e50326aaf864ddbfce3efd")
-      throw std::runtime_error("Expecting ADT hash to be 5ef323cbe7e50326aaf864ddbfce3efd, but was " + hash_);
+    if (hash_ != "be1cbb5eccae9f05972502f1e909cb07")
+      throw std::runtime_error("Expecting ADT hash to be be1cbb5eccae9f05972502f1e909cb07, but was " + hash_);
     return structdefs_value_from_msgpack(r_);
   });
 }
@@ -7799,6 +8002,18 @@ CompileResult compileresult_from_msgpack(const uint8_t *begin_, const uint8_t *e
 
 CompileResult compileresult_from_msgpack(const std::vector<uint8_t> &xs_) {
   return compileresult_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> passrunresult_to_msgpack(const PassRunResult &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) { passrunresult_to_msgpack(w_, x_); });
+}
+
+PassRunResult passrunresult_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) { return passrunresult_from_msgpack(r_); });
+}
+
+PassRunResult passrunresult_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return passrunresult_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
 
 } // namespace polyregion::polyast

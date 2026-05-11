@@ -188,8 +188,7 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
 
                // XXX Stmt::While does not re-evaluate its cond Term; carry it in a mutable var.
                const Named whileCondVar(fresh("whileCond"), Bool);
-               body.emplace_back(Stmt::Var(whileCondVar,
-                                           Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0))),
+               body.emplace_back(Stmt::Var(whileCondVar, Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0))),
                                            /*isMutable*/ true));
                whileBody.emplace_back(Stmt::Mut(Term::Select(whileCondVar, {}, Bool),
                                                 Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0)))));

@@ -377,7 +377,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         PM.run(*m);
       }
       if (emplaceEvent) {
-        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m));
+        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m),
+                            std::vector<polyast::CompileEvent>{});
       }
     }
     return std::make_tuple(std::move(m), objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));
@@ -421,11 +422,12 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // This can only be done with LLD so just do it here after compiling.
       auto [_, object, objectStart, objectElapsed] = //
           mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, M, events, true);
-      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object), std::vector<polyast::CompileEvent>{});
       if (emitDisassembly) {
         auto [m, assembly, assemblyStart, assemblyElapsed] = //
             mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
-        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
+        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()),
+                            std::vector<polyast::CompileEvent>{});
       }
       llvm::StringRef objectString(object.begin(), object.size());
       llvm::MemoryBufferRef kernelObject(objectString, "kernel.hsaco");
@@ -433,7 +435,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       auto linkerStart = compiler::nowMono();
       auto [err, result] = backend::lld_lite::linkElf({"-shared", "--gc-sections", "-O3"}, {kernelObject});
       auto linkerElapsed = compiler::elapsedNs(linkerStart);
-      events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "");
+      events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "", std::vector<polyast::CompileEvent>{});
       if (!result) { // linker failed
         return {{}, {info.cpu.uArch}, events, {}, "Linker did not complete normally: " + err.value_or("(no message reported)")};
       } else { // linker succeeded, still report any stdout to as message
@@ -455,7 +457,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // now eliminates those parameters in favour of an `extern .shared` global, so no PTX-level
       // patching is needed.
       auto ptxStr = std::string(ptx.begin(), ptx.end());
-      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", ptxStr);
+      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", ptxStr, std::vector<polyast::CompileEvent>{});
       auto features = collectPrecisionFeatures(M);
       features.insert(features.begin(), info.cpu.uArch);
       return {std::vector<int8_t>(ptxStr.begin(), ptxStr.end()), features, events, {}, ""};
@@ -472,13 +474,14 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       bindLLVMTargetMachineDataLayout(*llvmTM, M);
       auto [_, object, objectStart, objectElapsed] =
           mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, M, events, true);
-      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object), std::vector<polyast::CompileEvent>{});
 
       std::vector<int8_t> binary(object.begin(), object.end());
       if (emitDisassembly) {
         auto [_, assembly, assemblyStart, assemblyElapsed] =
             mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
-        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
+        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()),
+                            std::vector<polyast::CompileEvent>{});
       }
       for (auto &f : collectPrecisionFeatures(M))
         features.push_back(f);

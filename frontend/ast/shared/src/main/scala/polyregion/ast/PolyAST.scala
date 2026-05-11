@@ -353,8 +353,14 @@ object PolyAST {
       epochMillis: Long,
       elapsedNanos: Long,
       name: String,
-      data: String
+      data: String,
+      items: List[CompileEvent] = Nil
   ) derives MsgPack.Codec
+
+  case class PassArg(name: String, value: String) derives MsgPack.Codec
+  case class PassSpec(name: String, args: List[PassArg]) derives MsgPack.Codec
+  case class PassPipeline(steps: List[PassSpec]) derives MsgPack.Codec
+  case class PassRunResult(program: Program, event: CompileEvent) derives MsgPack.Codec
 
   case class CompileResult(
       binary: Option[ArraySeq[Byte]],

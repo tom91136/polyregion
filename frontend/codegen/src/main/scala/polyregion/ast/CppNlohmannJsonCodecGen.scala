@@ -330,6 +330,10 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> compileresult_to_msgpack(const CompileResult&);
           |[[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_msgpack(const uint8_t*, const uint8_t*);
           |[[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_msgpack(const std::vector<uint8_t>&);
+          |
+          |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> passrunresult_to_msgpack(const PassRunResult&);
+          |[[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_msgpack(const uint8_t*, const uint8_t*);
+          |[[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_msgpack(const std::vector<uint8_t>&);
           |} // namespace $namespace
           |
           |""".stripMargin
@@ -809,6 +813,18 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |
           |CompileResult compileresult_from_msgpack(const std::vector<uint8_t>& xs_) {
           |  return compileresult_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+          |}
+          |
+          |std::vector<uint8_t> passrunresult_to_msgpack(const PassRunResult& x_) {
+          |  return encodeInterned([&](MsgpackWriter& w_) { passrunresult_to_msgpack(w_, x_); });
+          |}
+          |
+          |PassRunResult passrunresult_from_msgpack(const uint8_t* begin_, const uint8_t* end_) {
+          |  return decodeMaybeInterned(begin_, end_, [](MsgpackReader& r_) { return passrunresult_from_msgpack(r_); });
+          |}
+          |
+          |PassRunResult passrunresult_from_msgpack(const std::vector<uint8_t>& xs_) {
+          |  return passrunresult_from_msgpack(xs_.data(), xs_.data() + xs_.size());
           |}
           |""".stripMargin
 

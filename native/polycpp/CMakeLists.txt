@@ -102,7 +102,9 @@ target_link_options(polycpp PRIVATE ${LINK_OPTIONS})
 target_compile_options(polycpp-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polycpp-tests PRIVATE ${LINK_OPTIONS})
 
+add_test(NAME polycpp-offload COMMAND polycpp-tests --offload-only)
 add_test(NAME polycpp-passthrough COMMAND polycpp-tests --passthrough-only)
+set_tests_properties(polycpp-offload PROPERTIES RESOURCE_LOCK "gpu-cuda;gpu-hsa;gpu-spirv")
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

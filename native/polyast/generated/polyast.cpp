@@ -4851,14 +4851,16 @@ POLYREGION_EXPORT bool StructLayout::operator==(const StructLayout &rhs) const {
   return (name == rhs.name) && (sizeInBytes == rhs.sizeInBytes) && (alignment == rhs.alignment) && (members == rhs.members);
 }
 
-CompileEvent::CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data) noexcept
-    : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
+CompileEvent::CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data,
+                           std::vector<CompileEvent> items) noexcept
+    : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)), items(std::move(items)) {}
 size_t CompileEvent::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(epochMillis)>()(epochMillis) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(elapsedNanos)>()(elapsedNanos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(data)>()(data) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(items)>()(items) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::ostream &operator<<(std::ostream &os, const CompileEvent &x) { return x.dump(os); }
@@ -4871,16 +4873,119 @@ std::ostream &CompileEvent::dump(std::ostream &os) const {
   os << '"' << name << '"';
   os << ',';
   os << '"' << data << '"';
+  os << ',';
+  os << '{';
+  for (auto it = items.begin(); it != items.end(); ++it) {
+    os << *it;
+    os << '"' << (std::next(it) != items.end() ? "," : "") << '"';
+  }
+  os << '}';
   os << ')';
   return os;
 }
-CompileEvent CompileEvent::withEpochMillis(const int64_t &v_) const { return CompileEvent(v_, elapsedNanos, name, data); }
-CompileEvent CompileEvent::withElapsedNanos(const int64_t &v_) const { return CompileEvent(epochMillis, v_, name, data); }
-CompileEvent CompileEvent::withName(const std::string &v_) const { return CompileEvent(epochMillis, elapsedNanos, v_, data); }
-CompileEvent CompileEvent::withData(const std::string &v_) const { return CompileEvent(epochMillis, elapsedNanos, name, v_); }
+CompileEvent CompileEvent::withEpochMillis(const int64_t &v_) const { return CompileEvent(v_, elapsedNanos, name, data, items); }
+CompileEvent CompileEvent::withElapsedNanos(const int64_t &v_) const { return CompileEvent(epochMillis, v_, name, data, items); }
+CompileEvent CompileEvent::withName(const std::string &v_) const { return CompileEvent(epochMillis, elapsedNanos, v_, data, items); }
+CompileEvent CompileEvent::withData(const std::string &v_) const { return CompileEvent(epochMillis, elapsedNanos, name, v_, items); }
+CompileEvent CompileEvent::withItems(const std::vector<CompileEvent> &v_) const {
+  return CompileEvent(epochMillis, elapsedNanos, name, data, v_);
+}
 POLYREGION_EXPORT bool CompileEvent::operator!=(const CompileEvent &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileEvent::operator==(const CompileEvent &rhs) const {
-  return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data);
+  return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data) &&
+         (items == rhs.items);
+}
+
+PassArg::PassArg(std::string name, std::string value) noexcept : name(std::move(name)), value(std::move(value)) {}
+size_t PassArg::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::ostream &operator<<(std::ostream &os, const PassArg &x) { return x.dump(os); }
+std::ostream &PassArg::dump(std::ostream &os) const {
+  os << "PassArg(";
+  os << '"' << name << '"';
+  os << ',';
+  os << '"' << value << '"';
+  os << ')';
+  return os;
+}
+PassArg PassArg::withName(const std::string &v_) const { return PassArg(v_, value); }
+PassArg PassArg::withValue(const std::string &v_) const { return PassArg(name, v_); }
+POLYREGION_EXPORT bool PassArg::operator!=(const PassArg &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PassArg::operator==(const PassArg &rhs) const { return (name == rhs.name) && (value == rhs.value); }
+
+PassSpec::PassSpec(std::string name, std::vector<PassArg> args) noexcept : name(std::move(name)), args(std::move(args)) {}
+size_t PassSpec::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::ostream &operator<<(std::ostream &os, const PassSpec &x) { return x.dump(os); }
+std::ostream &PassSpec::dump(std::ostream &os) const {
+  os << "PassSpec(";
+  os << '"' << name << '"';
+  os << ',';
+  os << '{';
+  for (auto it = args.begin(); it != args.end(); ++it) {
+    os << *it;
+    os << '"' << (std::next(it) != args.end() ? "," : "") << '"';
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+PassSpec PassSpec::withName(const std::string &v_) const { return PassSpec(v_, args); }
+PassSpec PassSpec::withArgs(const std::vector<PassArg> &v_) const { return PassSpec(name, v_); }
+POLYREGION_EXPORT bool PassSpec::operator!=(const PassSpec &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PassSpec::operator==(const PassSpec &rhs) const { return (name == rhs.name) && (args == rhs.args); }
+
+PassPipeline::PassPipeline(std::vector<PassSpec> steps) noexcept : steps(std::move(steps)) {}
+size_t PassPipeline::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(steps)>()(steps) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::ostream &operator<<(std::ostream &os, const PassPipeline &x) { return x.dump(os); }
+std::ostream &PassPipeline::dump(std::ostream &os) const {
+  os << "PassPipeline(";
+  os << '{';
+  for (auto it = steps.begin(); it != steps.end(); ++it) {
+    os << *it;
+    os << '"' << (std::next(it) != steps.end() ? "," : "") << '"';
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+PassPipeline PassPipeline::withSteps(const std::vector<PassSpec> &v_) const { return PassPipeline(v_); }
+POLYREGION_EXPORT bool PassPipeline::operator!=(const PassPipeline &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PassPipeline::operator==(const PassPipeline &rhs) const { return (steps == rhs.steps); }
+
+PassRunResult::PassRunResult(Program program, CompileEvent event) noexcept : program(std::move(program)), event(std::move(event)) {}
+size_t PassRunResult::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(event)>()(event) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::ostream &operator<<(std::ostream &os, const PassRunResult &x) { return x.dump(os); }
+std::ostream &PassRunResult::dump(std::ostream &os) const {
+  os << "PassRunResult(";
+  os << program;
+  os << ',';
+  os << event;
+  os << ')';
+  return os;
+}
+PassRunResult PassRunResult::withProgram(const Program &v_) const { return PassRunResult(v_, event); }
+PassRunResult PassRunResult::withEvent(const CompileEvent &v_) const { return PassRunResult(program, v_); }
+POLYREGION_EXPORT bool PassRunResult::operator!=(const PassRunResult &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PassRunResult::operator==(const PassRunResult &rhs) const {
+  return (program == rhs.program) && (event == rhs.event);
 }
 
 CompileResult::CompileResult(std::optional<std::vector<int8_t>> binary, std::vector<std::string> features, std::vector<CompileEvent> events,
@@ -5450,6 +5555,18 @@ std::size_t std::hash<polyregion::polyast::StructLayout>::operator()(const polyr
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::CompileEvent>::operator()(const polyregion::polyast::CompileEvent &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PassArg>::operator()(const polyregion::polyast::PassArg &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PassSpec>::operator()(const polyregion::polyast::PassSpec &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PassPipeline>::operator()(const polyregion::polyast::PassPipeline &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PassRunResult>::operator()(const polyregion::polyast::PassRunResult &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::CompileResult>::operator()(const polyregion::polyast::CompileResult &x) const noexcept {

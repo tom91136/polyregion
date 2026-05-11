@@ -73,7 +73,8 @@ static generated::Layout::Instance toJni(JNIEnv *env, const polyast::StructLayou
 }
 
 static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent &e) {
-  return gen::Event::of(env)(env, e.epochMillis, e.elapsedNanos, toJni(env, e.name), toJni(env, e.data));
+  return gen::Event::of(env)(env, e.epochMillis, e.elapsedNanos, toJni(env, e.name), toJni(env, e.data),
+                             toJni(env, e.items, gen::Event::of(env).clazz, [&](auto &item) { return toJni(env, item).instance; }));
 }
 
 static cp::Options fromJni(JNIEnv *env, jobject options) {
