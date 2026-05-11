@@ -18,8 +18,7 @@ jobs:
   build:
     runs-on: ${{ inputs.build_arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env:
-      # Intel macOS runners are memory-tight enough that two LLVM compile jobs can stall.
-      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ inputs.build_arch == 'x86_64' && '1' || '2' }}
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ inputs.build_arch == 'x86_64' && '1' || '2' }}
     steps:
       - uses: actions/checkout@v5
 
