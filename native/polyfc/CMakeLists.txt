@@ -28,6 +28,7 @@ target_include_directories(polyfc-tests PRIVATE
         ../include
         polydco
         ${LLVM_INCLUDE_DIRS}
+        ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(polyfc-tests PRIVATE
         POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
@@ -59,10 +60,7 @@ target_link_libraries(polyfc PRIVATE
         Aspartame::Aspartame
         fmt::fmt
 )
-target_link_libraries(polyfc-tests PRIVATE
-        polytest
-        Catch2::Catch2WithMain
-)
+target_link_libraries(polyfc-tests PRIVATE polytest)
 
 
 target_compile_options(polyfc PRIVATE ${COMPILE_OPTIONS})
@@ -71,19 +69,9 @@ target_link_options(polyfc PRIVATE ${LINK_OPTIONS})
 target_compile_options(polyfc-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyfc-tests PRIVATE ${LINK_OPTIONS})
 
-# XXX one ctest entry per test file x {offload, passthrough}; --allow-running-no-tests so
-# Catch2 returns 0 when every section SKIPs (polyrt reports no compatible target).
-foreach (_test_file IN LISTS TEST_FILE_PATHS)
-    get_filename_component(_test_name "${_test_file}" NAME_WE)
-    string(REGEX REPLACE "^check_" "" _test_short "${_test_name}")
-    foreach (_mode IN ITEMS offload passthrough)
-        set(_name "polyfc-${_test_short}-${_mode}")
-        add_test(NAME ${_name} COMMAND polyfc-tests "${_mode}" -c "${_test_short}" --allow-running-no-tests)
-        if (_mode STREQUAL "offload")
-            set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-cuda;gpu-hsa;gpu-spirv")
-        endif ()
-    endforeach ()
-endforeach ()
+add_test(NAME polyfc-offload COMMAND polyfc-tests --offload-only)
+add_test(NAME polyfc-passthrough COMMAND polyfc-tests --passthrough-only)
+set_tests_properties(polyfc-offload PROPERTIES RESOURCE_LOCK "gpu-cuda;gpu-hsa;gpu-spirv")
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

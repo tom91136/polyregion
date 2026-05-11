@@ -1,8 +1,16 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <mutex>
+#include <stdexcept>
 #include <string>
-#include <unordered_map>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -11,7 +19,7 @@
 #include "llvm/Support/Program.h"
 
 #include "aspartame/all.hpp"
-#include "catch2/catch_test_macros.hpp"
+#include "fire.hpp"
 #include "fmt/args.h"
 #include "fmt/format.h"
 
@@ -25,165 +33,352 @@ namespace polyregion::polytest {
 using namespace aspartame;
 
 struct DriverConfig {
-  std::string driverPath;                       // path to clang++ / flang-new
-  std::string binaryDir;                        // build dir to resolve test binaries against
-  std::vector<std::string> testFiles;           // LIT-style source files to scan
-  std::string profileDir;                       // directory holding `<host>.env` test profiles
-  std::string archVar;                          // matrix variable, e.g. "polycpp_arch", "polyfc_arch"
-  std::pair<std::string, std::string> defaults; // {name, value} format-string pair injected as a variable
-  std::pair<std::string, std::string> stdpar;   // {name, template} -- template may reference `{archVar}`
-  std::string driverEnvVar;                     // env var to set the wrapper's driver-binary path
-  std::vector<std::string> passthroughEnvs;     // envs added when `passthrough` is true
-  std::string outputPrefix;                     // generated binary name prefix
-  std::string tempPrefix;                       // tempfile name prefix
-  std::string directive;                        // line prefix for LIT directives (e.g. "#pragma region")
-  bool cleanupOnSuccess;                        // whether to remove generated binaries after passing runs
+  std::string driverPath;
+  std::string binaryDir;
+  std::vector<std::string> testFiles;
+  std::string profileDir;
+  std::string archVar;                          // matrix variable name, e.g. "polycpp_arch"
+  std::pair<std::string, std::string> defaults; // {name, value} injected as a format variable
+  std::pair<std::string, std::string> stdpar;   // {name, template}; template may reference `{archVar}`
+  std::string driverEnvVar;
+  std::vector<std::string> passthroughEnvs;
+  std::string outputPrefix;
+  std::string tempPrefix;
+  std::string directive;
+  bool cleanupOnSuccess;
 };
 
-inline void runTestSuite(const DriverConfig &cfg, bool passthrough) {
-  auto run = [&](TestCase &case_, const std::string &input, const std::vector<std::pair<std::string, std::string>> &variables) {
-    const auto mkArgStore = [](auto &&xs) {
-      fmt::dynamic_format_arg_store<fmt::format_context> s;
-      for (auto &&[k, v] : xs)
-        s.push_back(fmt::arg(k.c_str(), v));
-      return s;
-    };
+enum class Mode : std::uint8_t { Offload, Passthrough };
+inline constexpr const char *modeName(Mode m) { return m == Mode::Offload ? "offload" : "passthrough"; }
 
-    const auto userArgs = variables ^ map([&](auto &k, auto &v) { return std::pair{k, v}; });
-    const auto augmentedArgs = userArgs                                                            //
-                               | append(std::pair{"input", input})                                 //
-                               | append(std::pair{cfg.defaults.first, cfg.defaults.second})        //
-                               | append(std::pair{cfg.stdpar.first,                                //
-                                                  fmt::vformat(cfg.stdpar.second,                  //
-                                                               variables ^ and_then(mkArgStore))}) //
-                               | to_vector();
+struct Task {
+  Mode mode;
+  std::string testFile;
+  std::string caseName;
+  std::vector<std::pair<std::string, std::string>> variables;
+  std::string output;
+  std::vector<TestCase::Run> runs; // templates already expanded against (variables + defaults + stdpar + input + output)
 
-    const bool runtimeDebug = std::getenv("POLYTEST_DEBUG") != nullptr;
+  std::string display() const {
+    return fmt::format("[{}] {}/{} {}", modeName(mode), extractTestName(testFile), caseName,
+                       variables | mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; }));
+  }
+};
 
-    const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
-    const auto testName = extractTestName(input);
-    const auto runsHash =
-        std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) { return fmt::vformat(x.command, unevaluatedStore); }));
-    const auto output = fmt::format("{}{}_{:08x}", cfg.outputPrefix, testName.empty() ? "anon" : testName, static_cast<uint32_t>(runsHash));
-    const auto evaluatedStore = augmentedArgs ^ append(std::pair{"output", output}) ^ and_then(mkArgStore);
+enum class TaskStatus : std::uint8_t { Pass = 0, Fail = 1, Skip = 2 };
 
-    // XXX Catch2 reruns this lambda from scratch for each leaf section, so a local flag would reset
-    // between the compile and run passes. The static keeps state across re-entries.
-    static std::unordered_map<std::string, bool> stepFailureBy;
-    for (size_t i = 0; i < case_.runs.size(); ++i) {
-      const auto &[rawCommand, expect] = case_.runs[i];
-      const auto command = fmt::vformat(rawCommand, evaluatedStore);
-      DYNAMIC_SECTION("do: " << command) {
-        if (stepFailureBy[output]) {
-          SKIP("earlier step in this case failed; not running '" << command << "'");
-          return;
-        }
-        auto fragments = command ^ split(' ');
-        auto [envs, args] = fragments ^ span([](auto &x) { return x.find('=') != std::string::npos; });
+struct TaskOutcome {
+  TaskStatus status = TaskStatus::Pass;
+  std::string failReason;
+  std::string stdoutCapture;
+  std::string stderrCapture;
+  std::string cmdline;
+  double secs = 0.0;
+};
 
-        if (passthrough) envs ^= concat_inplace(cfg.passthroughEnvs);
+namespace detail {
 
-        envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
-        envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", fmt::vformat("{" + cfg.archVar + "}", evaluatedStore)));
-        envs.emplace_back("POLYRT_HOST_FALLBACK=0");
+inline std::string archFor(const Task &t, const DriverConfig &cfg) {
+  return (t.variables                                                                                            //
+          | collect_first([&](auto &k, auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; })) //
+         ^ get_or_else(std::string{});
+}
 
-        envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
-        if (runtimeDebug) envs.emplace_back("POLYRT_DEBUG=2");
+inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg) {
+  std::vector<std::string> envs;
+  if (t.mode == Mode::Passthrough) envs ^= concat_inplace(cfg.passthroughEnvs);
+  envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
+  envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", archFor(t, cfg)));
+  envs.emplace_back("POLYRT_HOST_FALLBACK=0");
+  envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
+  if (std::getenv("POLYTEST_DEBUG")) envs.emplace_back("POLYRT_DEBUG=2");
+  if (auto p = std::getenv("PATH")) envs.emplace_back(std::string("PATH=") + p);
+  return envs;
+}
 
-        if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);
-
-        if (args.empty()) throw std::logic_error("Bad command: " + command);
-
-        std::vector<llvm::StringRef> envs_ = envs ^ map([&](auto &x) { return llvm::StringRef(x); });
-        std::vector<llvm::StringRef> args_ = args ^ map([&](auto &x) { return llvm::StringRef(x); });
-
-        auto stdoutFile = llvm::sys::fs::TempFile::create(cfg.tempPrefix + "stdout-%%-%%-%%-%%-%%");
-        if (auto e = stdoutFile.takeError()) FAIL("Cannot create stdout:" << toString(std::move(e)));
-        auto stderrFile = llvm::sys::fs::TempFile::create(cfg.tempPrefix + "stderr-%%-%%-%%-%%-%%");
-        if (auto e = stderrFile.takeError()) FAIL("Cannot create stderr:" << toString(std::move(e)));
-
-        // Resolve `<outputPrefix>*` from cwd first so a stale copy in BinaryDir from a previous
-        // build can't shadow the freshly-produced one.
-        auto resolveBin = [&](llvm::StringRef name) -> std::string {
-          const bool isTestBin = name.starts_with(cfg.outputPrefix);
-          if (isTestBin && llvm::sys::fs::exists(name)) {
-            llvm::SmallString<256> abs(name);
-            llvm::sys::fs::make_absolute(abs);
-            return std::string(abs);
-          }
-          auto inBinaryDir = fmt::format("{}/{}", cfg.binaryDir, std::string(name));
-          if (llvm::sys::fs::exists(inBinaryDir)) return inBinaryDir;
-          if (llvm::sys::fs::exists(name)) {
-            llvm::SmallString<256> abs(name);
-            llvm::sys::fs::make_absolute(abs);
-            return std::string(abs);
-          }
-          return std::string(name);
-        };
-        const auto resolved = resolveBin(args[0]);
-        auto exitCode = llvm::sys::ExecuteAndWait(resolved, args_, envs_, {std::nullopt, stdoutFile->TmpName, stderrFile->TmpName});
-
-        auto stdout_ = polyregion::read_string(stdoutFile->TmpName);
-        auto stderr_ = polyregion::read_string(stderrFile->TmpName);
-        consumeError(stdoutFile->discard());
-        consumeError(stderrFile->discard());
-
-        // INFO over WARN: only flushes on REQUIRE/CHECK failure, so passing tests stay quiet.
-        WARN("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", cfg.binaryDir, args[0])) //
-                             | mk_string(" ", [](auto &s) { return s.str(); })));
-        WARN("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
-        WARN("stderr:\n" << stderr_ << "[EOF]");
-        WARN("stdout:\n" << stdout_ << "[EOF]");
-        // XXX exit 77 is the autotools "skipped" convention; polyrt emits this when no
-        // compatible target is available and host fallback is disabled.
-        if (exitCode == 77) {
-          stepFailureBy[output] = true;
-          SKIP("polyrt reports no compatible target for this iteration (exit 77)");
-        }
-        if (exitCode != 0) stepFailureBy[output] = true;
-        REQUIRE(exitCode == 0);
-        auto stdoutLines = stdout_ ^ split('\n');
-        for (auto &[line, expected] : expect) {
-          DYNAMIC_SECTION("requires: " << (line ? std::to_string(*line) : "*") << "==" << expected) {
-            if (line) {
-              INFO(stdoutLines.size());
-              auto idx = *line < 0 ? stdoutLines.size() + *line : *line;
-              CHECK(stdoutLines[idx] == expected);
-            } else {
-              CHECK(stdout_ == expected);
-            }
-          }
-        }
-        if (cfg.cleanupOnSuccess && i == case_.runs.size() - 1) {
-          if (auto ec = llvm::sys::fs::remove(output)) WARN("Cannot remove binary " << output << ": " << ec.message());
-        }
-      }
-    }
+inline std::string resolveBin(const std::string &name, const DriverConfig &cfg) {
+  // XXX Prefer cwd for generated test binaries: a stale copy in binaryDir from a previous build would otherwise shadow the fresh one.
+  auto toAbs = [&] {
+    llvm::SmallString<256> abs(name);
+    llvm::sys::fs::make_absolute(abs);
+    return std::string(abs);
   };
+  if ((name ^ starts_with(cfg.outputPrefix)) && llvm::sys::fs::exists(name)) return toAbs();
+  if (auto inBin = fmt::format("{}/{}", cfg.binaryDir, name); llvm::sys::fs::exists(inBin)) return inBin;
+  if (llvm::sys::fs::exists(name)) return toAbs();
+  return name;
+}
 
-  for (const auto &test : cfg.testFiles) {
-    DYNAMIC_SECTION(extractTestName(test)) {
-      std::ifstream source(test, std::ios::in | std::ios::binary);
+struct StepResult {
+  int exitCode = 0;
+  std::string stdoutText;
+  std::string stderrText;
+  std::string cmdline;
+};
 
-      auto cases = TestCase::parseTestCase(source, cfg.directive, {{cfg.archVar, loadTestTargets(cfg.profileDir)}});
+inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {
+  auto fragments = command ^ split(' ');
+  auto [envBits, args] = fragments ^ span([](auto &x) { return x.find('=') != std::string::npos; });
 
-      if (cases.empty()) FAIL("No test cases found");
+  auto envs = baseEnvs(task, cfg);
+  envs ^= concat_inplace(envBits);
 
-      for (auto &testCase : cases) {
-        DYNAMIC_SECTION("case: " << testCase.name) {
-          if (testCase.matrices.empty()) FAIL("Test matrix yielded zero tests");
+  const std::vector<llvm::StringRef> envRefs = envs | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
+  const std::vector<llvm::StringRef> argRefs = args | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
 
-          for (const auto &variables : testCase.matrices) {
-            auto name = variables ^ mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; });
-            DYNAMIC_SECTION("using: " << name) {
-              CAPTURE(test + ":1"); // XXX glue a fake line number so that the test runner can turn it into a URL
-              run(testCase, test, variables);
-            }
-          }
+  auto out = llvm::sys::fs::TempFile::create(cfg.tempPrefix + "stdout-%%-%%-%%-%%-%%");
+  if (auto e = out.takeError()) return {-1, {}, "Cannot create stdout: " + toString(std::move(e)), command};
+  auto err = llvm::sys::fs::TempFile::create(cfg.tempPrefix + "stderr-%%-%%-%%-%%-%%");
+  if (auto e = err.takeError()) {
+    consumeError(out->discard());
+    return {-1, {}, "Cannot create stderr: " + toString(std::move(e)), command};
+  }
+
+  if (args.empty()) {
+    consumeError(out->discard());
+    consumeError(err->discard());
+    return {-1, {}, "empty command", command};
+  }
+  auto resolved = resolveBin(args[0], cfg);
+  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, out->TmpName, err->TmpName});
+
+  auto stdoutText = polyregion::read_string(out->TmpName);
+  auto stderrText = polyregion::read_string(err->TmpName);
+  consumeError(out->discard());
+  consumeError(err->discard());
+
+  std::string cmdline = argRefs | drop(1) | prepend(llvm::StringRef(resolved)) | mk_string(" ", [](auto &s) { return s.str(); });
+  return {code, std::move(stdoutText), std::move(stderrText), std::move(cmdline)};
+}
+
+inline void absorbStep(TaskOutcome &o, StepResult &&r) {
+  o.cmdline = std::move(r.cmdline);
+  o.stdoutCapture = std::move(r.stdoutText);
+  o.stderrCapture = std::move(r.stderrText);
+}
+
+inline bool checkExpect(const TestCase::Run::Expect &e, const std::vector<std::string> &lines, const std::string &stdoutCapture,
+                        TaskOutcome &o) {
+  const auto &[lineNum, expected] = e;
+  if (!lineNum) {
+    if (stdoutCapture == expected) return true;
+    o.status = TaskStatus::Fail;
+    o.failReason = fmt::format("expect mismatch: got '{}', want '{}'", stdoutCapture, expected);
+    return false;
+  }
+  const auto idx = *lineNum < 0 ? lines.size() + static_cast<std::size_t>(*lineNum) : static_cast<std::size_t>(*lineNum);
+  const auto &got = idx < lines.size() ? lines[idx] : std::string("<out-of-bounds>");
+  if (got == expected) return true;
+  o.status = TaskStatus::Fail;
+  o.failReason = fmt::format("expect mismatch at line {}: got '{}', want '{}'", idx, got, expected);
+  return false;
+}
+
+inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
+  if (task.runs.empty()) return {};
+  const auto start = std::chrono::steady_clock::now();
+  auto r = runStep(task, cfg, task.runs[0].command);
+  const auto exit = r.exitCode;
+  TaskOutcome o;
+  absorbStep(o, std::move(r));
+  o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  if (exit == 77) o.failReason = "polyrt: no compatible target during compile (exit 77)", o.status = TaskStatus::Skip;
+  else if (exit != 0) o.failReason = fmt::format("compile failed (exit {})", exit), o.status = TaskStatus::Fail;
+  return o;
+}
+
+inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
+  TaskOutcome o;
+  const auto start = std::chrono::steady_clock::now();
+  for (std::size_t i = 1; i < task.runs.size(); ++i) {
+    auto r = runStep(task, cfg, task.runs[i].command);
+    const auto exit = r.exitCode;
+    absorbStep(o, std::move(r));
+    if (exit == 77) { o.status = TaskStatus::Skip; o.failReason = "polyrt: no compatible target (exit 77)"; break; }
+    if (exit != 0) { o.status = TaskStatus::Fail; o.failReason = fmt::format("run step {} failed (exit {})", i, exit); break; }
+    const auto lines = o.stdoutCapture ^ split('\n');
+    if (!(task.runs[i].expect | forall([&](const auto &e) { return checkExpect(e, lines, o.stdoutCapture, o); }))) break;
+  }
+  o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  return o;
+}
+
+} // namespace detail
+
+inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, bool passthrough,
+                                        const std::vector<std::string> &caseFilters) {
+  auto mkArgStore = [](const std::vector<std::pair<std::string, std::string>> &xs) {
+    fmt::dynamic_format_arg_store<fmt::format_context> s;
+    for (auto &[k, v] : xs)
+      s.push_back(fmt::arg(k.c_str(), v));
+    return s;
+  };
+  const auto matches = [&](const std::string &shortName, const std::string &caseName) {
+    return caseFilters.empty() || (caseFilters | exists([&](auto &f) { return f == shortName || f == caseName; }));
+  };
+  std::vector<Mode> modes;
+  if (offload) modes.emplace_back(Mode::Offload);
+  if (passthrough) modes.emplace_back(Mode::Passthrough);
+  const auto targets = loadTestTargets(cfg.profileDir);
+
+  std::vector<Task> tasks;
+  for (const auto &file : cfg.testFiles) {
+    std::ifstream src(file, std::ios::in | std::ios::binary);
+    const auto cases = TestCase::parseTestCase(src, cfg.directive, {{cfg.archVar, targets}});
+    const auto shortName = extractTestName(file);
+    for (const auto &tc : cases) {
+      if (!matches(shortName, tc.name)) continue;
+      for (const auto &vars : tc.matrices) {
+        const auto augmented = vars                                                                                     //
+                               | append(std::pair{cfg.defaults.first, cfg.defaults.second})                             //
+                               | append(std::pair{cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(vars))}) //
+                               | append(std::pair{std::string("input"), file})                                          //
+                               | to_vector();
+        const auto unevalStore =
+            mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
+        const auto runsHash =
+            std::hash<std::string>{}(tc.runs | mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); }));
+        const auto baseOutput =
+            fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
+        for (const auto mode : modes) {
+          const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
+          const auto store = mkArgStore(augmented | append(std::pair{std::string("output"), output}) | to_vector());
+          auto resolvedRuns = tc.runs | map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; }) | to_vector();
+          tasks.push_back({mode, file, tc.name, vars, output, std::move(resolvedRuns)});
         }
       }
     }
   }
+  return tasks;
+}
+
+struct RunnerOptions {
+  std::vector<std::string> caseFilters;
+  int compileJobs = -1;
+  bool verbose = false;
+  bool offload = true;
+  bool passthrough = true;
+  bool list = false;
+};
+
+inline const char *statusTag(TaskStatus s) {
+  switch (s) {
+    case TaskStatus::Pass: return "PASS";
+    case TaskStatus::Skip: return "SKIP";
+    case TaskStatus::Fail: return "FAIL";
+  }
+  return "?";
+}
+
+inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
+  const auto tasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
+  if (tasks.empty()) {
+    std::fprintf(stderr, "polytest: no tasks discovered (filters=%zu)\n", opts.caseFilters.size());
+    return 0;
+  }
+  if (opts.list) {
+    tasks | for_each([](auto &t) { std::fprintf(stdout, "%s\n", t.display().c_str()); });
+    return 0;
+  }
+
+  const int jobs = opts.compileJobs > 0 ? opts.compileJobs
+                                        : static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+  std::fprintf(stderr, "polytest: %zu tasks; compile -j%d, run -j1\n", tasks.size(), jobs);
+
+  std::vector<TaskOutcome> compileOutcomes(tasks.size());
+  std::atomic<std::size_t> nextIdx{0};
+  std::atomic<std::size_t> compileDone{0};
+  std::mutex logMtx;
+
+  auto dumpDetails = [&](const TaskOutcome &o, bool includeStdout) {
+    if (o.status != TaskStatus::Fail && !opts.verbose) return;
+    if (!o.failReason.empty()) std::fprintf(stderr, "  reason: %s\n", o.failReason.c_str());
+    if (!o.cmdline.empty()) std::fprintf(stderr, "  cmd: %s\n", o.cmdline.c_str());
+    if (includeStdout) std::fprintf(stderr, "  stdout:\n%s\n", o.stdoutCapture.c_str());
+    std::fprintf(stderr, "  stderr:\n%s\n", o.stderrCapture.c_str());
+  };
+
+  const auto compileStart = std::chrono::steady_clock::now();
+  auto worker = [&]() {
+    for (;;) {
+      auto i = nextIdx.fetch_add(1);
+      if (i >= tasks.size()) return;
+      auto &o = (compileOutcomes[i] = detail::compileTask(tasks[i], cfg));
+      auto done = ++compileDone;
+      std::lock_guard lk(logMtx);
+      std::fprintf(stderr, "[compile %zu/%zu] %s %s (%.2fs)\n", done, tasks.size(), statusTag(o.status), tasks[i].display().c_str(), o.secs);
+      dumpDetails(o, /*includeStdout*/ false);
+      // XXX Drop captures on Pass to bound peak RSS over a 1500-task batch; only failures need to keep them for the summary.
+      if (o.status == TaskStatus::Pass && !opts.verbose) std::string{}.swap(o.stdoutCapture), std::string{}.swap(o.stderrCapture);
+    }
+  };
+  std::vector<std::thread> pool;
+  pool.reserve(jobs);
+  for (int t = 0; t < jobs; ++t)
+    pool.emplace_back(worker);
+  pool | for_each([](auto &t) { t.join(); });
+  const auto compileSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - compileStart).count();
+
+  std::vector<TaskOutcome> finalOutcomes(tasks.size());
+  const auto runStart = std::chrono::steady_clock::now();
+  for (std::size_t i = 0; i < tasks.size(); ++i) {
+    const auto &co = compileOutcomes[i];
+    if (co.status != TaskStatus::Pass) {
+      finalOutcomes[i] = co;
+      const char *label = co.status == TaskStatus::Skip ? "compile-skip" : "compile-fail";
+      std::fprintf(stderr, "[run %zu/%zu] %s %s (%s)\n", i + 1, tasks.size(), statusTag(co.status), tasks[i].display().c_str(), label);
+      continue;
+    }
+    auto out = detail::runTask(tasks[i], cfg);
+    finalOutcomes[i] = out;
+    std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
+    dumpDetails(out, /*includeStdout*/ true);
+    if (cfg.cleanupOnSuccess && out.status == TaskStatus::Pass) llvm::sys::fs::remove(tasks[i].output);
+  }
+  const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
+
+  const auto countBy = [&](TaskStatus s) {
+    return finalOutcomes | aspartame::count([s](auto &o) { return o.status == s; });
+  };
+  const auto pass = countBy(TaskStatus::Pass);
+  const auto skip = countBy(TaskStatus::Skip);
+  const auto fail = countBy(TaskStatus::Fail);
+  if (fail > 0) {
+    const auto failedDisplay = tasks                                                       //
+                               | zip(finalOutcomes)                                        //
+                               | filter([](auto &, auto &o) { return o.status == TaskStatus::Fail; }) //
+                               | mk_string("\n", [](auto &t, auto &) { return "  - " + t.display(); });
+    std::fprintf(stderr, "polytest: failures (%zu):\n%s\n", fail, failedDisplay.c_str());
+  }
+  std::fprintf(stderr, "polytest: pass=%zu skip=%zu fail=%zu total=%zu compile=%.1fs run=%.1fs\n", pass, skip, fail, tasks.size(),
+               compileSecs, runSecs);
+  return fail == 0 ? 0 : 1;
+}
+
+namespace detail {
+// XXX fire introspects `fired_main` by name with default-arg `fire::arg(...)` placeholders, so the
+// driver config has to be threaded in through a side channel rather than as a normal parameter.
+inline const DriverConfig *firedCfg = nullptr;
+} // namespace detail
+
+inline int fired_main( //
+    fire::optional<std::string> caseFilter = fire::arg({"-c", "--case", "Filter by file shortname or case name"}),
+    int jobs = fire::arg({"-j", "--jobs", "Compile parallelism (default: hardware_concurrency)"}, -1),
+    bool verbose = fire::arg({"-v", "--verbose", "Dump stdout/stderr for every task"}),
+    bool offloadOnly = fire::arg({"--offload-only", "Skip passthrough mode"}),
+    bool passthroughOnly = fire::arg({"--passthrough-only", "Skip offload mode"}),
+    bool list = fire::arg({"-l", "--list", "Enumerate tasks and exit without running"})) {
+  RunnerOptions opts{.compileJobs = jobs, .verbose = verbose, .offload = !passthroughOnly, .passthrough = !offloadOnly, .list = list};
+  if (caseFilter) opts.caseFilters.push_back(caseFilter.value());
+  return runTasks(*detail::firedCfg, opts);
+}
+
+inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
+  detail::firedCfg = &cfg;
+  constexpr const char *descr = "polytest runner: parallel compile, serial run";
+  PREPARE_FIRE_(argc, argv, false, fired_main, descr);
+  fire::_::logger.set_program_descr(FIRE_EXTRACT_2_PAD_(fired_main, descr));
+  return FIRE_EXTRACT_1_PAD_(fired_main, descr)();
 }
 
 } // namespace polyregion::polytest

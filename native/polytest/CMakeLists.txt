@@ -7,5 +7,5 @@ target_sources(polytest
         polytest/profile.hpp
         polytest/lit.hpp
         polytest/driver.hpp)
-target_link_libraries(polytest INTERFACE Aspartame polycommon LLVMSupport fmt::fmt Catch2::Catch2)
+target_link_libraries(polytest INTERFACE Aspartame polycommon LLVMSupport fmt::fmt)
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
