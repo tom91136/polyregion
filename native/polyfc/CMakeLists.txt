@@ -13,7 +13,7 @@ function(add_copy_lib_targets target)
             ${commands})
 endfunction()
 if (WIN32)
-    add_copy_lib_targets(polyfc-lib-resource polydco-static polydco)
+    add_copy_lib_targets(polyfc-lib-resource polyfc-flang-plugin polydco-static polydco)
 else ()
     add_copy_lib_targets(polyfc-lib-resource polyfc-flang-plugin polyreflect-plugin polydco-static polydco)
 endif ()
@@ -100,9 +100,12 @@ install(TARGETS polydco polydco-static
         ARCHIVE DESTINATION lib/polyfc/lib
         RUNTIME DESTINATION lib/polyfc/lib
         FILE_SET HEADERS DESTINATION lib/polyfc/include)
-if (NOT WIN32)
+if (WIN32)
+    install(TARGETS polyfc-flang-plugin
+            LIBRARY DESTINATION lib/polyfc/lib
+            RUNTIME DESTINATION lib/polyfc/lib)
+else ()
     install(TARGETS polyfc-flang-plugin polyreflect-plugin
             LIBRARY DESTINATION lib/polyfc/lib
             RUNTIME DESTINATION lib/polyfc/lib)
 endif ()
-

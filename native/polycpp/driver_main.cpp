@@ -36,6 +36,14 @@ static std::string executableName(llvm::StringRef name) {
 #endif
 }
 
+static std::string staticLibraryName(llvm::StringRef name) {
+#if defined(_WIN32)
+  return name.str() + ".lib";
+#else
+  return "lib" + name.str() + ".a";
+#endif
+}
+
 int main(int argc, const char *argv[]) {
   CliArgs args(std::vector(argv, argv + argc));
   if (args.has("--polyc", 1)) {
@@ -127,7 +135,7 @@ int main(int argc, const char *argv[]) {
                    }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
-                       remaining.insert(remaining.end(), joinPath(polycppLibPath, fmt::format("libpolystl-static.{}", staticLibSuffix())));
+                       remaining.insert(remaining.end(), joinPath(polycppLibPath, staticLibraryName("polystl-static")));
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
