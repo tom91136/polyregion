@@ -56,23 +56,26 @@ struct TargetedContext {
   using AS = unsigned int;
   LLVMBackend::Options options;
   llvm::LLVMContext actual;
-  // GenericAS routes inter-AS casts through OpenCL's Generic (4) on targets that have it; 0
-  // means the target has no AS distinction.
   AS AllocaAS = 0, GlobalAS = 0, LocalAS = 0, GenericAS = 0;
   explicit TargetedContext(const LLVMBackend::Options &options);
 
   [[nodiscard]] llvm::Type *i32Ty();
+  [[nodiscard]] llvm::Type *i64Ty();
+  [[nodiscard]] bool isSpirv() const {
+    return options.target == LLVMBackend::Target::SPIRV32_Kernel ||
+           options.target == LLVMBackend::Target::SPIRV64_Kernel ||
+           options.target == LLVMBackend::Target::SPIRV_GLCompute;
+  }
 
   [[nodiscard]] AS addressSpace(const TypeSpace::Any &s) const;
-  // The "load a pointer back from a stack slot" type. On targets with a Generic AS (SPIRV/OpenCL)
-  // we load via the global-AS pointer view; on targets without (NVPTX/AMDGCN/CPU) we use the
-  // builder's default ptr.
+  [[nodiscard]] AS addressSpaceForKernelArg(const TypeSpace::Any &s) const;
   [[nodiscard]] llvm::PointerType *loadedPtrTy(llvm::IRBuilder<> &B) const;
   [[nodiscard]] ValPtr allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key) const;
   [[nodiscard]] ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) const;
   [[nodiscard]] ValPtr store(llvm::IRBuilder<> &B, ValPtr rhsVal, ValPtr lhsPtr) const;
   [[nodiscard]] ValPtr sizeOf(llvm::IRBuilder<> &B, llvm::Type *ptrTpe);
-  [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, const Map<std::string, StructInfo> &structs, bool functionBoundary = false);
+  [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, const Map<std::string, StructInfo> &structs, bool functionBoundary = false,
+                                        bool kernelEntryArg = false);
   [[nodiscard]] StructInfo resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs);
   [[nodiscard]] Map<std::string, StructInfo> resolveLayouts(const std::vector<StructDef> &structs);
 };
@@ -105,11 +108,23 @@ struct CodeGen {
   Map<std::string, Pair<AnyType, llvm::Value *>> stackVarPtrs{};
   Map<std::string, StructInfo> structTypes{};
   Map<Signature, llvm::Function *> functions{};
+  // Out-pointer for sret-transformed bodies; `Stmt::Return` writes through it. Reset per body.
+  llvm::Value *currentSretParam = nullptr;
+
+  // XXX SPIR-V: keep struct values in memory and address fields by byte arithmetic. The LLVM
+  // backend's pre-legaliser truncates `load/store %struct` to i32, and IGC mis-routes
+  // `OpInBoundsPtrAccessChain` with an `OpConstantNull` element to field 0.
+  [[nodiscard]] bool spirvStructByMemcpy() const { return C.isSpirv(); }
 
   explicit CodeGen(const LLVMBackend::Options &options, const std::string &moduleName);
 
-  [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, bool functionBoundary = false);
+  [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, bool functionBoundary = false, bool kernelEntryArg = false);
   [[nodiscard]] llvm::Function *resolveExtFn(const AnyType &rtn, const std::string &name, const std::vector<AnyType> &args);
+
+  // XXX Lowers to `OpConvertPtrToU` + `OpIAdd` + `OpConvertUToPtr` on SPIR-V; preserves the source
+  // pointer's address space across the round-trip.
+  [[nodiscard]] llvm::Value *byteOffsetPtr(llvm::Value *base, llvm::Value *byteOff, const std::string &name);
+  [[nodiscard]] llvm::Value *i64SExt(llvm::Value *v);
 
   [[nodiscard]] ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg);
   [[nodiscard]] ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs);

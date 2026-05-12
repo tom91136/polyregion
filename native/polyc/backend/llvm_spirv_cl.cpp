@@ -37,7 +37,7 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   llvm::SmallVector<llvm::Metadata *, 8> argNames;         // MDNode for the kernel argument names.
 
   for (auto arg : source.args) {
-    const auto ty = cg.resolveType(arg.named.tpe, true);
+    const auto ty = cg.resolveType(arg.named.tpe, true, /*kernelEntryArg*/ true);
     addressQuals.push_back(llvm::ConstantAsMetadata::get( //
         cg.B.getInt32(ty->isPointerTy() ? ty->getPointerAddressSpace() : 0)));
     accessQuals.push_back(llvm::MDString::get(cg.C.actual, "none")); // write_only | read_only | read_write | none

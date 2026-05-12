@@ -1,6 +1,7 @@
 #include "llvmc.h"
 
 #include <iostream>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -167,9 +168,11 @@ Pair<Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
   }
 }
 
-// Rewrite `OpConstantNull %u32 %id` -> `OpConstant %u32 %id 0`. Intel IGC rejects OpConstantNull
-// as the structure-member index of OpInBoundsPtrAccessChain even though SPIR-V semantically
-// treats it as a zero u32 (Khronos SPIRV-Headers#50, still open). Opcodes are spec-stable.
+// Rewrite `OpConstantNull %int %id` -> `OpConstant %int %id 0...0`. Intel IGC mis-handles
+// OpConstantNull when used as a scalar integer constant (the structure-member index of
+// OpInBoundsPtrAccessChain, an OpIAdd operand, etc.) even though SPIR-V semantically treats
+// it as a zero of the given integer type (Khronos SPIRV-Headers#50, still open). We catch
+// every integer width; pointer/null OpConstantNull entries are left alone.
 static std::string patchSpirvConstantNull(std::string spv) {
   constexpr uint16_t OpTypeInt = 21, OpConstant = 43, OpConstantNull = 46;
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
@@ -177,13 +180,13 @@ static std::string patchSpirvConstantNull(std::string spv) {
   const size_t nWords = spv.size() / sizeof(uint32_t);
   auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
   auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
-  std::unordered_set<uint32_t> u32Types;
+  std::unordered_map<uint32_t, uint32_t> intTypeWidth;
   bool needsRewrite = false;
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
-    if (opcode(src[i]) == OpTypeInt && wc == 4 && src[i + 2] == 32) u32Types.insert(src[i + 1]);
-    else if (opcode(src[i]) == OpConstantNull && wc == 3 && u32Types.count(src[i + 1])) needsRewrite = true;
+    if (opcode(src[i]) == OpTypeInt && wc == 4) intTypeWidth[src[i + 1]] = src[i + 2];
+    else if (opcode(src[i]) == OpConstantNull && wc == 3 && intTypeWidth.count(src[i + 1])) needsRewrite = true;
     i += wc;
   }
   if (!needsRewrite) return spv;
@@ -191,8 +194,13 @@ static std::string patchSpirvConstantNull(std::string spv) {
   out.reserve(nWords + 16);
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
-    if (opcode(src[i]) == OpConstantNull && wc == 3 && u32Types.count(src[i + 1])) {
-      out.insert(out.end(), {(4u << 16) | OpConstant, src[i + 1], src[i + 2], 0u});
+    const auto it = (opcode(src[i]) == OpConstantNull && wc == 3) ? intTypeWidth.find(src[i + 1]) : intTypeWidth.end();
+    if (it != intTypeWidth.end()) {
+      const uint32_t literalWords = (it->second + 31u) / 32u;
+      out.push_back(((3u + literalWords) << 16) | OpConstant);
+      out.push_back(src[i + 1]);
+      out.push_back(src[i + 2]);
+      for (uint32_t w = 0; w < literalWords; ++w) out.push_back(0u);
     } else out.insert(out.end(), src + i, src + i + wc);
     i += wc;
   }

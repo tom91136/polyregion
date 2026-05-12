@@ -39,22 +39,29 @@ class SynchronisedMemAllocation {
     return ptr;
   }
 
+  // XXX `allowPastEnd` enables matching `localPtr == base + size` (one-past-end). Off by default
+  // because forward lookups in `mirrorToRemote` would otherwise attribute an unmapped allocation's
+  // base to an adjacent mapped record's past-end.
   template <typename M, typename F>
-  static std::optional<std::pair<typename M::iterator, size_t>> offsetQueryIt(M &map, const void *p, F selectSize) {
+  static std::optional<std::pair<typename M::iterator, size_t>> offsetQueryIt(M &map, const void *p, F selectSize,
+                                                                              const bool allowPastEnd = false) {
     const auto localPtr = reinterpret_cast<uintptr_t>(p);
     if (const auto it = map.find(localPtr); it != map.end()) return std::pair{it, 0};
+    typename M::iterator pastEnd = map.end();
     for (auto it = map.begin(); it != map.end(); ++it) {
       const uintptr_t base = it->first;
-      if (const size_t size = selectSize(it->second); localPtr >= base && localPtr < base + size) {
-        return std::pair{it, localPtr - base};
-      }
+      const size_t size = selectSize(it->second);
+      if (localPtr >= base && localPtr < base + size) return std::pair{it, localPtr - base};
+      if (allowPastEnd && localPtr == base + size) pastEnd = it;
     }
+    if (pastEnd != map.end()) return std::pair{pastEnd, localPtr - pastEnd->first};
     return {};
   }
 
   template <typename V, typename F>
-  static std::optional<std::pair<V *, size_t>> offsetQuery(std::unordered_map<uintptr_t, V> &map, const void *p, F selectSize) {
-    if (const auto query = offsetQueryIt(map, p, selectSize)) {
+  static std::optional<std::pair<V *, size_t>> offsetQuery(std::unordered_map<uintptr_t, V> &map, const void *p, F selectSize,
+                                                           const bool allowPastEnd = false) {
+    if (const auto query = offsetQueryIt(map, p, selectSize, allowPastEnd)) {
       auto [it, offset] = *query;
       return std::pair{&it->second, offset};
     }
@@ -94,8 +101,13 @@ class SynchronisedMemAllocation {
       if (debug)
         std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%ld, offset=%ld}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
                      meta.offsetInBytes); //
-      const size_t effectiveSize = meta.sizeInBytes - meta.offsetInBytes;
-      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize);
+      // XXX Anchor at the allocation base so past-end pointers (offset == size) still map; passing
+      // the past-end pointer as host data would request a zero-byte device alloc and fail.
+      const bool pastEnd = meta.offsetInBytes == meta.sizeInBytes;
+      const char *baseLocalPtr = pastEnd ? memberLocalPtr - meta.offsetInBytes : memberLocalPtr;
+      const size_t effectiveSize = pastEnd ? meta.sizeInBytes : meta.sizeInBytes - meta.offsetInBytes;
+      const uintptr_t baseRemotePtr = mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize);
+      const uintptr_t memberRemotePtr = pastEnd ? baseRemotePtr + meta.offsetInBytes : baseRemotePtr;
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
       std::fprintf(stderr, "[SMA] Warning: encountered foreign pointer %p when writing type @%s at offset %zu\n",
@@ -182,7 +194,8 @@ class SynchronisedMemAllocation {
       std::fprintf(stderr, "[SMA] readSubObject(p=%p, memberOffsetInBytes=%zu)\n", static_cast<const void *>(p), memberOffsetInBytes);
     if (char *memberRemotePtr = readPtrValue(p + memberOffsetInBytes); !memberRemotePtr) {
       std::memset(p + memberOffsetInBytes, 0, sizeof(uintptr_t));
-    } else if (const auto query = offsetQuery(remoteToLocalPtr, memberRemotePtr, [](auto &x) { return x.sizeInBytes; })) {
+    } else if (const auto query = offsetQuery(remoteToLocalPtr, memberRemotePtr, [](auto &x) { return x.sizeInBytes; },
+                                              /*allowPastEnd*/ true)) {
       auto [alloc, offset] = *query;
       syncRemoteToLocal(reinterpret_cast<void *>(alloc->ptr), alloc->sizeInBytes);
       // The remote pointer can target an interior position — e.g. the std::list last-node

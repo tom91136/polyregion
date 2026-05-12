@@ -52,14 +52,27 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
 }
 
 llvm::Type *TargetedContext::i32Ty() { return llvm::Type::getInt32Ty(actual); }
+llvm::Type *TargetedContext::i64Ty() { return llvm::Type::getInt64Ty(actual); }
 
 TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const {
+  // SPIR-V routes internal pointers through Generic so Function-storage allocas can flow
+  // through pointer slots without `addrspacecast Function -> CrossWorkgroup` (which the spec
+  // forbids); Generic accepts both via `OpPtrCastToGeneric`.
+  const auto defaultAS = GenericAS != 0 ? GenericAS : GlobalAS;
+  return s.match_total(                                  //
+      [&](const TypeSpace::Local &) { return LocalAS; }, //
+      [&](const TypeSpace::Global &) { return defaultAS; }, [&](const TypeSpace::Private &) { return defaultAS; });
+}
+
+TargetedContext::AS TargetedContext::addressSpaceForKernelArg(const TypeSpace::Any &s) const {
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
       [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return GlobalAS; });
 }
 
-llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B) const { return GenericAS != 0 ? B.getPtrTy(GlobalAS) : B.getPtrTy(); }
+llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B) const {
+  return GenericAS != 0 ? B.getPtrTy(GenericAS) : B.getPtrTy();
+}
 
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {
   // SPIRV slots must use the value's AS (stores would otherwise cross disjoint spaces); other
@@ -100,7 +113,11 @@ ValPtr TargetedContext::sizeOf(llvm::IRBuilder<> &B, llvm::Type *ptrTpe) {
   return B.CreatePtrToInt(sizePtr, llvm::Type::getInt64Ty(actual));
 }
 
-llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::string, StructInfo> &structs, const bool functionBoundary) {
+llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::string, StructInfo> &structs, const bool functionBoundary,
+                                         const bool kernelEntryArg) {
+  const auto ptrAS = [&](const TypeSpace::Any &space) {
+    return (kernelEntryArg && functionBoundary) ? addressSpaceForKernelArg(space) : addressSpace(space);
+  };
   return tpe.match_total(                                                                     //
       [&](const Type::Float16 &) -> llvm::Type * { return llvm::Type::getHalfTy(actual); },   //
       [&](const Type::Float32 &) -> llvm::Type * { return llvm::Type::getFloatTy(actual); },  //
@@ -123,7 +140,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       [&](const Type::Struct &x) -> llvm::Type * {
         // At a function boundary, structs travel as opaque pointers (the kernel runtime passes a
         // ptr to the encoded struct). Inside the function body, they're materialised on the stack.
-        if (functionBoundary) return llvm::PointerType::get(actual, addressSpace(TypeSpace::Global()));
+        if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(TypeSpace::Global()));
         return structs ^ get_maybe(repr(x.name)) ^
                fold([](auto &info) { return info.tpe; },
                     [&]() -> llvm::StructType * {
@@ -133,12 +150,12 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
                                                          })));
                     });
       },                                                                                                         //
-      [&](const Type::Ptr &x) -> llvm::Type * { return llvm::PointerType::get(actual, addressSpace(x.space)); }, //
+      [&](const Type::Ptr &x) -> llvm::Type * { return llvm::PointerType::get(actual, ptrAS(x.space)); }, //
       [&](const Type::Arr &x) -> llvm::Type * {
         // At a function boundary, a sized array travels as a pointer to its element type (matching
         // C array decay). Inside the function body, the LLVM `[N x T]` aggregate is kept so a
         // [0, idx] GEP can index it.
-        if (functionBoundary) return llvm::PointerType::get(actual, addressSpace(TypeSpace::Global()));
+        if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(TypeSpace::Global()));
         return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
       }, //
       [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },

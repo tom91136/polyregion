@@ -163,17 +163,19 @@ class ReflectService {
   __RT_ODR const PtrRecord *queryUnsafe(const uintptr_t ptr, const bool allowSubrange) const {
     const PtrRecord *result = data.find(ptr);
     if (result) return result;
-    if (allowSubrange) {
-      data.walk([&](uintptr_t, const PtrRecord *value) {
-        if (ptr >= value->info.base && ptr < value->info.base + value->info.size) {
-          result = value;
-          return true;
-        }
-        return false;
-      });
-      return result;
-    }
-    return nullptr;
+    if (!allowSubrange) return nullptr;
+    // XXX Prefer strict containment; fall back to past-end (`int xs[n]; xs + n` is legitimate).
+    // Without the preference one record's past-end would hijack the next record's base lookup.
+    const PtrRecord *pastEnd = nullptr;
+    data.walk([&](uintptr_t, const PtrRecord *value) {
+      if (ptr >= value->info.base && ptr < value->info.base + value->info.size) {
+        result = value;
+        return true;
+      }
+      if (ptr == value->info.base + value->info.size) pastEnd = value;
+      return false;
+    });
+    return result ? result : pastEnd;
   }
 
 public:
