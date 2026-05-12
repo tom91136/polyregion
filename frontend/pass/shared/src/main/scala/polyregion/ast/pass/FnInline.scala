@@ -115,45 +115,71 @@ object FnInline extends ProgramPass {
     case other                             => other
   }
 
+  private def resolveOverload(ivk: p.Expr.Invoke, program: p.Program): p.Function = {
+    val candidates = program.functions.distinct.filter(f => f.name == ivk.name && f.args.size == ivk.args.size)
+    candidates.filter { f =>
+      val varToTpeLut = f.tpeVars.zip(ivk.tpeArgs).toMap
+      val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
+        case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
+        case x                 => x
+      })
+      sig.receiver.size == ivk.receiver.size &&
+      sig.args.zip(ivk.args.map(_.tpe)).forall(_ =:= _) &&
+      sig.rtn =:= ivk.rtn
+    } match {
+      case f :: Nil => f
+      case Nil      =>
+        throw new IllegalStateException(
+          s"FnInline: no matching overload for ${ivk.repr}; candidates were ${candidates.map(_.repr).mkString("; ")}"
+        )
+      case xs =>
+        throw new IllegalStateException(s"FnInline: ambiguous overloads for ${ivk.repr}: ${xs.map(_.repr).mkString("; ")}")
+    }
+  }
+
+  // Inlined statements stay in the enclosing scope of the original Invoke. Hoisting them to the
+  // body root previously let inlined references to loop- or branch-local vars escape their scope.
+  private def inlineExpr(expr: p.Expr, program: p.Program): (p.Expr, List[p.Stmt], List[p.Arg]) =
+    expr match {
+      case ivk: p.Expr.Invoke =>
+        val (resultExpr, inlineStmts, caps) = inlineOne(ivk, resolveOverload(ivk, program))
+        val (rewrittenStmts, nestedCaps) = inlineStmts.foldMap(s => inlineStmt(s, program))
+        (resultExpr, rewrittenStmts, caps ++ nestedCaps)
+      case _ => (expr, Nil, Nil)
+    }
+
+  private def inlineStmt(stmt: p.Stmt, program: p.Program): (List[p.Stmt], List[p.Arg]) = stmt match {
+    case p.Stmt.Var(n, Some(e), mut) =>
+      val (newE, prepend, caps) = inlineExpr(e, program)
+      (prepend :+ p.Stmt.Var(n, Some(newE), mut), caps)
+    case p.Stmt.Var(_, None, _) => (List(stmt), Nil)
+    case p.Stmt.Mut(name, e)    =>
+      val (newE, prepend, caps) = inlineExpr(e, program)
+      (prepend :+ p.Stmt.Mut(name, newE), caps)
+    case _: p.Stmt.Update => (List(stmt), Nil)
+    case p.Stmt.Return(e) =>
+      val (newE, prepend, caps) = inlineExpr(e, program)
+      (prepend :+ p.Stmt.Return(newE), caps)
+    case p.Stmt.While(cond, body) =>
+      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program))
+      (List(p.Stmt.While(cond, newBody)), caps)
+    case p.Stmt.Cond(cond, t, e) =>
+      val (newT, capsT) = t.foldMap(s => inlineStmt(s, program))
+      val (newE, capsE) = e.foldMap(s => inlineStmt(s, program))
+      (List(p.Stmt.Cond(cond, newT, newE)), capsT ++ capsE)
+    case p.Stmt.ForRange(i, lb, ub, step, body) =>
+      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program))
+      (List(p.Stmt.ForRange(i, lb, ub, step, newBody)), caps)
+    case p.Stmt.Annotated(inner, pos, c) =>
+      val (rewritten, caps) = inlineStmt(inner, program)
+      (rewritten.map(p.Stmt.Annotated(_, pos, c)), caps)
+    case _ => (List(stmt), Nil)
+  }
+
   override def apply(program: p.Program, log: Log): p.Program = {
 
     val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
-      val (stmts, moduleCaptures) = f.body.foldMap { x =>
-
-        val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Arg])] {
-          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, rtn) =>
-            val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)
-
-            overloads.filter { f =>
-              val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
-              val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
-                case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
-                case x                 => x
-              })
-              sig.receiver.size == recv.size &&
-              sig.args.zip(args.map(_.tpe)).forall(_ =:= _) &&
-              sig.rtn =:= rtn
-            } match {
-              case Nil =>
-                throw new IllegalStateException(
-                  s"FnInline: no matching overload for ${ivk.repr}; candidates were ${overloads.map(_.repr).mkString("; ")}"
-                )
-              case f :: Nil =>
-                val (expr, stmts, names) = inlineOne(ivk, f)
-                (expr, stmts -> names)
-              case xs =>
-                throw new IllegalStateException(
-                  s"FnInline: ambiguous overloads for ${ivk.repr}: ${xs.map(_.repr).mkString("; ")}"
-                )
-            }
-
-          case x => (x, Nil -> Nil)
-        }
-
-        val (stmts, moduleCaptures) = xs.combineAll
-        (stmts :+ y, moduleCaptures)
-      }
-
+      val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, program))
       f.copy(body = stmts, moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct)
     }
 

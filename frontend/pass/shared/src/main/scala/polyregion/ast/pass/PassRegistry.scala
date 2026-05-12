@@ -14,10 +14,12 @@ object FullOpt {
   private val baseline: Vector[ProgramPass] =
     Vector(ConstantFold, VarReduce, UnitExprElision, DeadArgElimination)
 
+  // XXX FnInline runs after Specialisation: folds helpers into the kernel entry, removing the
+  // struct-by-value function boundary that the SPIR-V backend silently coerces to i32.
   def children(level: Int): Vector[ProgramPass] =
     if (level <= 0) Vector.empty
     else if (level == 1) baseline
-    else Vector(printPass(Intrinsify), printPass(Specialisation)) ++ baseline
+    else Vector(printPass(Intrinsify), printPass(Specialisation), printPass(FnInline)) ++ baseline
 }
 
 object PassRegistry {
