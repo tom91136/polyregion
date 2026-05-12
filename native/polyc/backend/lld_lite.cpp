@@ -1,6 +1,5 @@
 #include "lld_lite.h"
 
-#include <atomic>
 #include <fstream>
 
 #include "lld/Common/CommonLinkerContext.h"
@@ -17,8 +16,6 @@ bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_os
 std::pair<std::optional<std::string>, std::optional<std::string>>
 polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files) {
 
-  static std::atomic_size_t id;
-
   std::vector<std::string> inMemoryFiles;
 
   std::vector<const char *> allArgs{""}; // arg[0] is lld program name, not used so empty string
@@ -26,7 +23,7 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, con
   for (auto &a : args)
     allArgs.push_back(a.c_str());
   for (auto f : files) {
-    if (auto path = memoryfs::open(f.getBufferIdentifier().str() + "." + std::to_string(id++)); path) {
+    if (auto path = memoryfs::open(f.getBufferIdentifier().str()); path) {
       inMemoryFiles.push_back(*path);
       allArgs.push_back(inMemoryFiles.back().c_str());
       std::ofstream outFile(*path, std::ios::out | std::ios::binary);
@@ -35,7 +32,7 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, con
     } else throw std::logic_error("Cannot create temp file " + f.getBufferIdentifier().str());
   }
 
-  auto output = memoryfs::open("out." + std::to_string(id++));
+  auto output = memoryfs::open("out");
   if (!output) throw std::logic_error("Cannot create output temp file out");
   inMemoryFiles.push_back(*output);
 

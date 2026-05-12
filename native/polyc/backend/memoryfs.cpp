@@ -22,17 +22,18 @@ std::optional<std::string> open(const std::string &name) {
   CloseHandle(h);
   return name;
 #else
-  auto ns = "/" + name;
-  int shmFd = shm_open(ns.data(), O_RDWR | O_CREAT, S_IRWXU);
-  if (shmFd < 0) {
-    auto tmp = name + "-XXXXXX";
-    int tmpFd = mkstemp(tmp.data());
-    if (tmpFd < 0) return {};
-    ::close(tmpFd);
-    return tmp;
-  }
-  ::close(shmFd);
-  return "/dev/shm" + ns;
+  auto tryMkstemp = [&](const std::string &dir) -> std::optional<std::string> {
+    auto tmp = dir + "/" + name + "-XXXXXX";
+    if (int fd = mkstemp(tmp.data()); fd < 0) return {};
+    else {
+      ::close(fd);
+      return tmp;
+    }
+  };
+  #ifdef __linux__
+  if (auto p = tryMkstemp("/dev/shm")) return p;
+  #endif
+  return tryMkstemp("/tmp");
 #endif
 }
 
@@ -41,11 +42,7 @@ bool close(const std::string &name) {
   std::wstring wname(name.begin(), name.end());
   return DeleteFileW(wname.c_str());
 #else
-  auto ns = "/" + name;
-  if (shm_unlink(ns.data()) != 0) {
-    return unlink(ns.data()) == 0;
-  }
-  return true;
+  return unlink(name.data()) == 0;
 #endif
 }
 
