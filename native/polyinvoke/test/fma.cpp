@@ -9,6 +9,7 @@
 
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
+#include "kernels/generated_ze_fma.hpp"
 #include "kernels/generated_msl_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
 #include "test_utils.h"
@@ -132,6 +133,10 @@ TEST_CASE("SPIRV FMA") {
           {Backend::Vulkan}           //
   );
 #endif
+}
+
+TEST_CASE("ZE FMA") {
+  testFma(generated::ze::fma, {Backend::LevelZero});
 }
 
 TEST_CASE("CPU FMA") {

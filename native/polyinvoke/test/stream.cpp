@@ -15,6 +15,8 @@
 #include "kernels/generated_gpu_stream_float.hpp"
 #include "kernels/generated_msl_stream_float.hpp"
 #include "kernels/generated_spirv_glsl_stream.hpp"
+#include "kernels/generated_ze_stream_double.hpp"
+#include "kernels/generated_ze_stream_float.hpp"
 #include "test_utils.h"
 
 using namespace polyregion::invoke;
@@ -47,10 +49,10 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
             if (backend == Backend::OpenCL &&
                 std::find(deviceFeatures.begin(), deviceFeatures.end(), "spirv_kernel") != deviceFeatures.end())
               continue;
-            // XXX skip fp64 iterations on devices that don't expose fp64 (Vulkan/OpenCL drivers
-            // tend to SEGV rather than reject cleanly).
+            // XXX skip fp64 iterations on devices that don't expose fp64 (Vulkan/OpenCL/LevelZero
+            // drivers tend to SEGV rather than reject cleanly).
             if (tpe == Type::Float64 && std::find(deviceFeatures.begin(), deviceFeatures.end(), "fp64") == deviceFeatures.end() &&
-                (backend == Backend::Vulkan || backend == Backend::OpenCL))
+                (backend == Backend::Vulkan || backend == Backend::OpenCL || backend == Backend::LevelZero))
               continue;
             DYNAMIC_SECTION("device=" << d->name()) {
               if (auto imageGroups = polyregion::test_utils::findTestImage(images, backend, deviceFeatures); !imageGroups.empty()) {
@@ -187,5 +189,22 @@ TEST_CASE("CPU BabelStream") {
                       {1, 2, 10},                                              //
                       {Backend::RelocatableObject, Backend::SharedObject}      //
     );
+  }
+}
+
+TEST_CASE("ZE BabelStream") {
+  DYNAMIC_SECTION("float") {
+    testStream<float>(generated::ze::stream_float, Type::Float32, "_float", 0.008f, //
+                      {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},        //
+                      {32, 64, 128, 256},                                           //
+                      {1, 2, 10},                                                   //
+                      {Backend::LevelZero});
+  }
+  DYNAMIC_SECTION("double") {
+    testStream<double>(generated::ze::stream_double, Type::Float64, "_double", 0.008f, //
+                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},          //
+                       {32, 64, 128, 256},                                              //
+                       {1, 2, 10},                                                      //
+                       {Backend::LevelZero});
   }
 }

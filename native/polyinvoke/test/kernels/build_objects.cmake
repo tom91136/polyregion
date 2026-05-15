@@ -1,4 +1,28 @@
 
+# cmake -P build_objects.cmake -DTARGETS=$targetA;$targetB...
+# Target names: Vulkan, RelocatableObject, SharedObject, Metal, OpenCL, CUDA, HSA, LevelZero
+
+set(TARGETS "" CACHE STRING "Semicolon-separated platforms to build; empty = all")
+
+function(target_enabled NAME OUT)
+    if ("${TARGETS}" STREQUAL "" OR NAME IN_LIST TARGETS)
+        set(${OUT} TRUE PARENT_SCOPE)
+    else ()
+        set(${OUT} FALSE PARENT_SCOPE)
+    endif ()
+endfunction()
+
+function(any_target_enabled OUT)
+    foreach (NAME IN LISTS ARGN)
+        target_enabled(${NAME} _en)
+        if (_en)
+            set(${OUT} TRUE PARENT_SCOPE)
+            return()
+        endif ()
+    endforeach ()
+    set(${OUT} FALSE PARENT_SCOPE)
+endfunction()
+
 set(NV_ARCHS "\
 sm_35;sm_37;\
 sm_50;sm_52;sm_53;\
@@ -65,148 +89,204 @@ macro(read_to_hex FILE OUT_VAR)
     to_hex_array("${HEX_STRING}" ${OUT_VAR})
 endmacro()
 
-foreach (GLSL_DIR ${GLSL_SRC_DIRS})
-    message(STATUS "Building ${GLSL_DIR}...")
-    get_filename_component(PROGRAM_NAME ${GLSL_DIR} NAME_WE)
-    set(PROGRAM_ENTRIES "")
-    set(CONST_DATA_BLOCKS "")
-    set(SPIRV_MODULE_ENTRIES "")
-    file(GLOB GLSL_SRC_FILES ${GLSL_DIR}/*.glsl)
-    foreach (FILE_NAME ${GLSL_SRC_FILES})
-        get_filename_component(MODULE_NAME "${FILE_NAME}" NAME_WE)
-        set(CLI glslangValidator --target-env vulkan1.1 ${FILE_NAME} -o data.bin)
-        string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[GLSL-SPIRV-VK1_1] ${CLI_NS}")
-        execute_process(COMMAND ${CLI})
-        read_to_hex(data.bin SPIRV_ENTRY_HEX)
-        make_data_block(CONST_DATA_BLOCKS SPIRV_MODULE_ENTRIES "${PROGRAM_NAME}" "${MODULE_NAME}" "${SPIRV_ENTRY_HEX}")
+
+any_target_enabled(_spirv_any "Vulkan")
+if (_spirv_any)
+    foreach (GLSL_DIR ${GLSL_SRC_DIRS})
+        message(STATUS "Building ${GLSL_DIR}...")
+        get_filename_component(PROGRAM_NAME ${GLSL_DIR} NAME_WE)
+        set(PROGRAM_ENTRIES "")
+        set(CONST_DATA_BLOCKS "")
+        set(SPIRV_MODULE_ENTRIES "")
+        file(GLOB GLSL_SRC_FILES ${GLSL_DIR}/*.glsl)
+        foreach (FILE_NAME ${GLSL_SRC_FILES})
+            get_filename_component(MODULE_NAME "${FILE_NAME}" NAME_WE)
+            set(CLI glslangValidator --target-env vulkan1.1 ${FILE_NAME} -o data.bin)
+            string(REPLACE ";" " " CLI_NS "${CLI}")
+            message(STATUS "[GLSL-SPIRV-VK1_1] ${CLI_NS}")
+            execute_process(COMMAND ${CLI})
+            read_to_hex(data.bin SPIRV_ENTRY_HEX)
+            make_data_block(CONST_DATA_BLOCKS SPIRV_MODULE_ENTRIES "${PROGRAM_NAME}" "${MODULE_NAME}" "${SPIRV_ENTRY_HEX}")
+        endforeach ()
+        configure_platform("Vulkan" SPIRV_MODULE_ENTRIES PROGRAM_ENTRIES)
+        list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
+        list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
+        set(VARIANT spirv)
+        configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_spirv_${PROGRAM_NAME}.hpp" @ONLY)
     endforeach ()
-    configure_platform("Vulkan" SPIRV_MODULE_ENTRIES PROGRAM_ENTRIES)
-    list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
-    list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
-    set(VARIANT spirv)
-    configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_spirv_${PROGRAM_NAME}.hpp" @ONLY)
+endif ()
 
-endforeach ()
+any_target_enabled(_cpu_any "RelocatableObject" "SharedObject")
+if (_cpu_any)
+    foreach (C_SOURCE ${C_SRC_FILES})
+        message(STATUS "Building ${C_SOURCE}...")
+        get_filename_component(PROGRAM_NAME ${C_SOURCE} NAME_WE)
+        set(PROGRAM_ENTRIES "")
+        set(CONST_DATA_BLOCKS "")
 
-foreach (C_SOURCE ${C_SRC_FILES})
-    message(STATUS "Building ${C_SOURCE}...")
-    get_filename_component(PROGRAM_NAME ${C_SOURCE} NAME_WE)
-    set(PROGRAM_ENTRIES "")
-    set(CONST_DATA_BLOCKS "")
+        target_enabled("RelocatableObject" _reloc)
+        if (_reloc)
+            set(RELOCATABLE_OBJ_PROGRAM_ENTRIES "")
+            foreach (CPU_ARCH ${CPU_ARCHS})
+                set(CLI clang
+                        -target x86_64-pc-linux-gnu
+                        -fPIC -Os -g0
+                        -std=c11 -march=${CPU_ARCH}
+                        -xc ${C_SOURCE}
+                        -c
+                        -o data.bin)
+                string(REPLACE ";" " " CLI_NS "${CLI}")
+                message(STATUS "[RelocatableObject] ${CLI_NS}")
+                execute_process(COMMAND ${CLI})
+                read_to_hex(data.bin RELOCATABLE_OBJ_ENTRY_HEX)
+                make_data_block(CONST_DATA_BLOCKS RELOCATABLE_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_relocatable" "${CPU_ARCH}" "${RELOCATABLE_OBJ_ENTRY_HEX}")
+            endforeach ()
+            configure_platform("RelocatableObject" RELOCATABLE_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+        endif ()
 
-    set(RELOCATABLE_OBJ_PROGRAM_ENTRIES "")
-    foreach (CPU_ARCH ${CPU_ARCHS})
+        target_enabled("SharedObject" _shared)
+        if (_shared)
+            set(SHARED_OBJ_PROGRAM_ENTRIES "")
+            foreach (CPU_ARCH ${CPU_ARCHS})
+                set(CLI clang
+                        -target x86_64-pc-linux-gnu
+                        -Os -g0
+                        -std=c11 -march=${CPU_ARCH}
+                        -xc ${C_SOURCE}
+                        -shared
+                        -o data.bin)
+                string(REPLACE ";" " " CLI_NS "${CLI}")
+                message(STATUS "[SharedObject] ${CLI_NS}")
+                execute_process(COMMAND ${CLI})
+                read_to_hex(data.bin SHARED_OBJ_ENTRY_HEX)
+                make_data_block(CONST_DATA_BLOCKS SHARED_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_shared" "${CPU_ARCH}" "${SHARED_OBJ_ENTRY_HEX}")
+            endforeach ()
+            configure_platform("SharedObject" SHARED_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+        endif ()
+
+        list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
+        list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
+        set(VARIANT cpu)
+        configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_cpu_${PROGRAM_NAME}.hpp" @ONLY)
+    endforeach ()
+endif ()
+
+any_target_enabled(_msl_any "Metal")
+if (_msl_any)
+    foreach (MSL_SOURCE ${MSL_SRC_FILES})
+        message(STATUS "Building ${MSL_SOURCE}...")
+        get_filename_component(PROGRAM_NAME ${MSL_SOURCE} NAME_WE)
+        set(PROGRAM_ENTRIES "")
+        set(CONST_DATA_BLOCKS "")
+
+        # MSL, just embed the source directly
+        set(MSL_PROGRAM_ENTRIES "")
+        file(READ ${MSL_SOURCE} MSL_SOURCE_STRING HEX)
+        to_hex_array("${MSL_SOURCE_STRING}" MSL_ENTRY_HEX)
+        make_data_block(CONST_DATA_BLOCKS MSL_PROGRAM_ENTRIES "${PROGRAM_NAME}" "" "${MSL_ENTRY_HEX}")
+        configure_platform("Metal" MSL_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+
+        list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
+        list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
+        set(VARIANT msl)
+        configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_msl_${PROGRAM_NAME}.hpp" @ONLY)
+    endforeach ()
+endif ()
+
+any_target_enabled(_gpu_any "OpenCL" "CUDA" "HSA")
+if (_gpu_any)
+    foreach (CL_SOURCE ${CL_SRC_FILES})
+        message(STATUS "Building ${CL_SOURCE}...")
+        get_filename_component(PROGRAM_NAME ${CL_SOURCE} NAME_WE)
+        set(PROGRAM_ENTRIES "")
+        set(CONST_DATA_BLOCKS "")
+
+        target_enabled("OpenCL" _opencl)
+        if (_opencl)
+            set(CL_PROGRAM_ENTRIES "")
+            file(READ ${CL_SOURCE} CL_SOURCE_STRING HEX)
+            to_hex_array("${CL_SOURCE_STRING}" CL_ENTRY_HEX)
+            make_data_block(CONST_DATA_BLOCKS CL_PROGRAM_ENTRIES "${PROGRAM_NAME}" "" "${CL_ENTRY_HEX}")
+            configure_platform("OpenCL" CL_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+        endif ()
+
+        target_enabled("CUDA" _cuda)
+        if (_cuda)
+            set(NV_PROGRAM_ENTRIES "")
+            foreach (NV_ARCH ${NV_ARCHS})
+                set(CLI clang
+                        -target nvptx64--nvidiacl
+                        -cl-std=CL1.2 -march=${NV_ARCH}
+                        -O3 -g0
+                        -xcl ${CL_SOURCE} -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/nvptx64--nvidiacl.bc
+                        -S -o-)
+                string(REPLACE ";" " " CLI_NS "${CLI}")
+                message(STATUS "[CUDA] ${CLI_NS}")
+                execute_process(COMMAND ${CLI} OUTPUT_VARIABLE PTX_STRING)
+                file(WRITE data.bin "${PTX_STRING}")
+                read_to_hex(data.bin NV_ENTRY_HEX)
+                make_data_block(CONST_DATA_BLOCKS NV_PROGRAM_ENTRIES "${PROGRAM_NAME}" "${NV_ARCH}" "${NV_ENTRY_HEX}")
+            endforeach ()
+            configure_platform("CUDA" NV_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+        endif ()
+
+        target_enabled("HSA" _hsa)
+        if (_hsa)
+            set(AMD_PROGRAM_ENTRIES "")
+            foreach (AMDGPU_ARCH ${AMDGPU_ARCHS})
+                set(CLI clang
+                        -target amdgcn--amdhsa -nogpulib
+                        -cl-std=CL1.2 -mcpu=${AMDGPU_ARCH}
+                        -O3 -g0
+                        -xcl ${CL_SOURCE} -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/amdgcn--amdhsa.bc
+                        -o data.bin)
+                string(REPLACE ";" " " CLI_NS "${CLI}")
+                message(STATUS "[HSA] ${CLI_NS}")
+                execute_process(COMMAND ${CLI})
+                read_to_hex(data.bin AMDGPU_ENTRY_HEX)
+                make_data_block(CONST_DATA_BLOCKS AMD_PROGRAM_ENTRIES "${PROGRAM_NAME}" "${AMDGPU_ARCH}" "${AMDGPU_ENTRY_HEX}")
+            endforeach ()
+            configure_platform("HSA" AMD_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+        endif ()
+
+        list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
+        list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
+        set(VARIANT gpu)
+        configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_gpu_${PROGRAM_NAME}.hpp" @ONLY)
+    endforeach ()
+endif ()
+
+any_target_enabled(_lz_any "LevelZero")
+if (_lz_any)
+    foreach (CL_SOURCE ${CL_SRC_FILES})
+        message(STATUS "Building ${CL_SOURCE}...")
+        get_filename_component(PROGRAM_NAME ${CL_SOURCE} NAME_WE)
+        set(PROGRAM_ENTRIES "")
+        set(CONST_DATA_BLOCKS "")
+
+        set(ZE_PROGRAM_ENTRIES "")
         set(CLI clang
-                -target x86_64-pc-linux-gnu
-                -fPIC -Os -g0
-                -std=c11 -march=${CPU_ARCH}
-                -xc ${C_SOURCE}
+                -target spirv64
+                -cl-std=CL1.2
+                -O3 -g0
+                -xcl ${CL_SOURCE}
                 -c
                 -o data.bin)
         string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[RelocatableObject] ${CLI_NS}")
-        execute_process(COMMAND ${CLI})
-        read_to_hex(data.bin RELOCATABLE_OBJ_ENTRY_HEX)
-        make_data_block(CONST_DATA_BLOCKS RELOCATABLE_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_relocatable" "${CPU_ARCH}" "${RELOCATABLE_OBJ_ENTRY_HEX}")
+        message(STATUS "[LevelZero] ${CLI_NS}")
+        execute_process(COMMAND ${CLI} RESULT_VARIABLE _rc)
+        if (NOT _rc EQUAL 0)
+            message(FATAL_ERROR "clang spirv64 compile failed (rc=${_rc}) for ${CL_SOURCE}")
+        endif ()
+        read_to_hex(data.bin ZE_ENTRY_HEX)
+        make_data_block(CONST_DATA_BLOCKS ZE_PROGRAM_ENTRIES "${PROGRAM_NAME}" "" "${ZE_ENTRY_HEX}")
+        configure_platform("LevelZero" ZE_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+
+        list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
+        list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
+        set(VARIANT ze)
+        configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_ze_${PROGRAM_NAME}.hpp" @ONLY)
     endforeach ()
-    configure_platform("RelocatableObject" RELOCATABLE_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
-
-
-    set(SHARED_OBJ_PROGRAM_ENTRIES "")
-    foreach (CPU_ARCH ${CPU_ARCHS})
-        set(CLI clang
-                -target x86_64-pc-linux-gnu
-                -Os -g0
-                -std=c11 -march=${CPU_ARCH}
-                -xc ${C_SOURCE}
-                -shared
-                -o data.bin)
-        string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[SharedObject] ${CLI_NS}")
-        execute_process(COMMAND ${CLI})
-        read_to_hex(data.bin SHARED_OBJ_ENTRY_HEX)
-        make_data_block(CONST_DATA_BLOCKS SHARED_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_shared" "${CPU_ARCH}" "${SHARED_OBJ_ENTRY_HEX}")
-    endforeach ()
-    configure_platform("SharedObject" SHARED_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
-
-    list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
-    list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
-    set(VARIANT cpu)
-    configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_cpu_${PROGRAM_NAME}.hpp" @ONLY)
-endforeach ()
-
-foreach (MSL_SOURCE ${MSL_SRC_FILES})
-    message(STATUS "Building ${MSL_SOURCE}...")
-    get_filename_component(PROGRAM_NAME ${MSL_SOURCE} NAME_WE)
-    set(PROGRAM_ENTRIES "")
-    set(CONST_DATA_BLOCKS "")
-
-    # MSL, just embed the source directly
-    set(MSL_PROGRAM_ENTRIES "")
-    file(READ ${MSL_SOURCE} MSL_SOURCE_STRING HEX)
-    to_hex_array("${MSL_SOURCE_STRING}" MSL_ENTRY_HEX)
-    make_data_block(CONST_DATA_BLOCKS MSL_PROGRAM_ENTRIES "${PROGRAM_NAME}" "" "${MSL_ENTRY_HEX}")
-    configure_platform("Metal" MSL_PROGRAM_ENTRIES PROGRAM_ENTRIES)
-
-    list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
-    list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
-    set(VARIANT msl)
-    configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_msl_${PROGRAM_NAME}.hpp" @ONLY)
-endforeach ()
-
-foreach (CL_SOURCE ${CL_SRC_FILES})
-    message(STATUS "Building ${CL_SOURCE}...")
-    get_filename_component(PROGRAM_NAME ${CL_SOURCE} NAME_WE)
-    set(PROGRAM_ENTRIES "")
-    set(CONST_DATA_BLOCKS "")
-
-
-    # OpenCL, just embed the source directly
-    set(CL_PROGRAM_ENTRIES "")
-    file(READ ${CL_SOURCE} CL_SOURCE_STRING HEX)
-    to_hex_array("${CL_SOURCE_STRING}" CL_ENTRY_HEX)
-    make_data_block(CONST_DATA_BLOCKS CL_PROGRAM_ENTRIES "${PROGRAM_NAME}" "" "${CL_ENTRY_HEX}")
-    configure_platform("OpenCL" CL_PROGRAM_ENTRIES PROGRAM_ENTRIES)
-
-    set(NV_PROGRAM_ENTRIES "")
-    foreach (NV_ARCH ${NV_ARCHS})
-        set(CLI clang
-                -target nvptx64--nvidiacl
-                -cl-std=CL1.2 -march=${NV_ARCH}
-                -O3 -g0
-                -xcl ${CL_SOURCE} -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/nvptx64--nvidiacl.bc
-                -S -o-)
-        string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[CUDA] ${CLI_NS}")
-        execute_process(COMMAND ${CLI} OUTPUT_VARIABLE PTX_STRING)
-        file(WRITE data.bin "${PTX_STRING}")
-        read_to_hex(data.bin NV_ENTRY_HEX)
-        make_data_block(CONST_DATA_BLOCKS NV_PROGRAM_ENTRIES "${PROGRAM_NAME}" "${NV_ARCH}" "${NV_ENTRY_HEX}")
-    endforeach ()
-    configure_platform("CUDA" NV_PROGRAM_ENTRIES PROGRAM_ENTRIES)
-
-
-    set(AMD_PROGRAM_ENTRIES "")
-    foreach (AMDGPU_ARCH ${AMDGPU_ARCHS})
-        set(CLI clang
-                -target amdgcn--amdhsa -nogpulib
-                -cl-std=CL1.2 -mcpu=${AMDGPU_ARCH}
-                -O3 -g0
-                -xcl ${CL_SOURCE} -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/amdgcn--amdhsa.bc
-                -o data.bin)
-        string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[HSA] ${CLI_NS}")
-        execute_process(COMMAND ${CLI})
-        read_to_hex(data.bin AMDGPU_ENTRY_HEX)
-        make_data_block(CONST_DATA_BLOCKS AMD_PROGRAM_ENTRIES "${PROGRAM_NAME}" "${AMDGPU_ARCH}" "${AMDGPU_ENTRY_HEX}")
-    endforeach ()
-    configure_platform("HSA" AMD_PROGRAM_ENTRIES PROGRAM_ENTRIES)
-
-    list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
-    list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)
-    set(VARIANT gpu)
-    configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in "generated_gpu_${PROGRAM_NAME}.hpp" @ONLY)
-endforeach ()
+endif ()
 
 message(STATUS "Done!")

@@ -13,6 +13,7 @@
 #include "kernels/generated_gpu_args.hpp"
 #include "kernels/generated_msl_args.hpp"
 #include "kernels/generated_spirv_glsl_args.hpp"
+#include "kernels/generated_ze_args.hpp"
 #include "test_utils.h"
 
 using namespace polyregion::invoke;
@@ -135,4 +136,8 @@ TEST_CASE("CPU Args") {
   testArgs(generated::cpu::args,                               //
            {Backend::RelocatableObject, Backend::SharedObject} //
   );
+}
+
+TEST_CASE("ZE Args") {
+  testArgs(generated::ze::args, {Backend::LevelZero});
 }

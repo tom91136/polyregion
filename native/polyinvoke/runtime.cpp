@@ -13,6 +13,7 @@
 #include "polyinvoke/metal_platform.h"
 #include "polyinvoke/object_platform.h"
 #include "polyinvoke/vulkan_platform.h"
+#include "polyinvoke/ze_platform.h"
 #include "polyregion/compat.h"
 
 #include "libm.h"
@@ -69,6 +70,7 @@ std::variant<std::string, std::unique_ptr<invoke::Platform>> invoke::Platform::o
 #else
       POLYINVOKE_FATAL("Runtime", "%s backend not available", magic_enum::enum_name(b).data());
 #endif
+    case Backend::LevelZero: return ze::ZePlatform::create();
     case Backend::SharedObject: return object::SharedPlatform::create();
     case Backend::RelocatableObject: return object::RelocatablePlatform::create();
   }

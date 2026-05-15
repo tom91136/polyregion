@@ -66,6 +66,7 @@ set(POLYINVOKE_SRC
         cuda_platform.cpp
         hip_platform.cpp
         cl_platform.cpp
+        ze_platform.cpp
         object_platform.cpp
         ${POLYINVOKE_WRANGLER_SRCS}
         ${RUNTIME_SRC_FILES})
@@ -129,7 +130,7 @@ target_link_options(polyinvoke-tests PRIVATE
 # XXX `POLYINVOKE_DISABLE_BACKENDS=HIP` because hipModuleLaunchKernel doesn't fill OpenCL-style
 # hidden args (hidden_block_count_x etc.) for kernels emitted by clang's nvptx-ocl pipeline.
 set(_polyinvoke_test_env "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=8192;POLYINVOKE_DISABLE_BACKENDS=HIP")
-foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "CPU Args" "GPU Args" "SPIRV Args" "CPU BabelStream" "GPU BabelStream" "SPIRV BabelStream")
+foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "ZE FMA" "CPU Args" "GPU Args" "SPIRV Args" "ZE Args" "CPU BabelStream" "GPU BabelStream" "SPIRV BabelStream" "ZE BabelStream")
     string(REPLACE " " "-" _name "polyinvoke-${_case}")
     add_test(NAME ${_name} COMMAND polyinvoke-tests "${_case}")
     set_tests_properties(${_name} PROPERTIES ENVIRONMENT "${_polyinvoke_test_env}")
@@ -137,5 +138,7 @@ foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "CPU Args" "GPU Args" "S
         set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-cuda")
     elseif (_case MATCHES "^SPIRV ")
         set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-spirv")
+    elseif (_case MATCHES "^ZE ")
+        set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-ze")
     endif ()
 endforeach ()

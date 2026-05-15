@@ -30,6 +30,7 @@ enum class POLYREGION_EXPORT Backend : uint8_t {
   Metal,
   SharedObject,
   RelocatableObject,
+  LevelZero,
 };
 
 } // namespace polyregion::invoke

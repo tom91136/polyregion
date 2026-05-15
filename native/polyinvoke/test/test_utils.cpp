@@ -61,10 +61,10 @@ polyregion::test_utils::findTestImage(const ImageGroups &images, const invoke::B
   // HIP accepts HSA kernels
   const auto canonicalBackend = backend == invoke::Backend::HIP ? invoke::Backend::HSA : backend;
 
-  // Truly arch-independent backends emit a single image per kernel (SPIR-V/CL-C/MSL stay portable
-  // at the test image level). CUDA/HSA/HIP need an exact sm_XX/gfx_XX match against the device.
+  // Truly arch-independent backends emit a single image per kernel (SPIR-V via Vulkan or LevelZero, OpenCL source, and MSL all stay
+  // portable at the test image level). CUDA/HSA/HIP need an exact sm_XX/gfx_XX match against the device.
   const bool archIndependent = canonicalBackend == invoke::Backend::Vulkan || canonicalBackend == invoke::Backend::OpenCL ||
-                               canonicalBackend == invoke::Backend::Metal;
+                               canonicalBackend == invoke::Backend::Metal || canonicalBackend == invoke::Backend::LevelZero;
 
   return images                                                            //
          ^ get_maybe(std::string(magic_enum::enum_name(canonicalBackend))) //
