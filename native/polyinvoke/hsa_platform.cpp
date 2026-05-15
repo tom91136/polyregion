@@ -9,6 +9,8 @@
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
 
+#include "dl_util.h"
+
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hsa;
 
@@ -26,11 +28,15 @@ static constexpr const char *PREFIX = "HSA";
   } while (0)
 
 std::variant<std::string, std::unique_ptr<Platform>> HsaPlatform::create() {
-  switch (hsaew_open("libhsa-runtime64.so.1")) {
-    // both cases are fine, keep going
-    case HSAEW_SUCCESS: break;
-    case HSAEW_ALREADY_OPENED: break;
-  }
+#ifdef _WIN32
+  void *lib = nullptr;
+#elif defined(__APPLE__)
+  void *lib = nullptr;
+#else
+  void *lib = dl::open_first({"libhsa-runtime64.so.1"});
+#endif
+  if (!lib) return "HSA: failed to open libhsa-runtime64.so.1, no ROCm runtime present?";
+  hsaew_hsa_resolve(dl::lookup, lib);
   if (auto result = hsa_init(); result != HSA_STATUS_SUCCESS) {
     const char *status = nullptr;
     hsa_status_string(result, &status);

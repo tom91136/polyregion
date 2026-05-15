@@ -2,6 +2,8 @@
 
 #include "magic_enum/magic_enum.hpp"
 
+#include "dl_util.h"
+
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hip;
 
@@ -16,16 +18,15 @@ static constexpr auto PREFIX = "HIP";
   } while (0)
 
 std::variant<std::string, std::unique_ptr<Platform>> HipPlatform::create() {
-  if (const auto result = hipewInit(HIPEW_INIT_HIP); result != HIPEW_SUCCESS) {
-    std::string description;
-    switch (result) {
-      case HIPEW_ERROR_OPEN_FAILED: return "HIPEW initialisation failed: error opening amdhip64 dynamic library, no HIP driver present?";
-      case HIPEW_ERROR_ATEXIT_FAILED: return "HIPEW initialisation failed: error setting up atexit() handler!";
-      case HIPEW_ERROR_OLD_DRIVER: // see https://developer.blender.org/D13324
-        return "HIPEW initialisation failed: driver version too old, requires AMD Radeon Pro 21.Q4 driver or newer";
-      default: return "HIPEW initialisation failed: Unknown error (" + std::to_string(result) + ")";
-    }
-  }
+#ifdef _WIN32
+  void *lib = dl::open_first({"amdhip64.dll"});
+#elif defined(__APPLE__)
+  void *lib = nullptr;
+#else
+  void *lib = dl::open_first({"libamdhip64.so.6", "libamdhip64.so", "/opt/rocm/lib/libamdhip64.so"});
+#endif
+  if (!lib) return "HIP: failed to open amdhip64 dynamic library, no HIP driver present?";
+  hipew_hip_resolve(dl::lookup, lib);
   if (const auto result = hipInit(0); result != hipSuccess) {
     return std::string(hipGetErrorName(result)) + ": " + std::string(hipGetErrorString(result));
   }
@@ -145,12 +146,12 @@ uintptr_t HipDevice::mallocDevice(size_t size, Access) {
   if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
   hipDeviceptr_t ptr = {};
   CHECKED(hipMalloc(&ptr, size));
-  return ptr;
+  return reinterpret_cast<uintptr_t>(ptr);
 }
 void HipDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
   context.touch();
-  CHECKED(hipFree(ptr));
+  CHECKED(hipFree(reinterpret_cast<hipDeviceptr_t>(ptr)));
 }
 std::optional<void *> HipDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
@@ -202,17 +203,18 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
 void HipDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                 const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  CHECKED(hipMemcpyDtoDAsync(dst + dstOffset, src + srcOffset, size, stream));
+  CHECKED(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst + dstOffset),
+                             reinterpret_cast<hipDeviceptr_t>(src + srcOffset), size, stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  CHECKED(hipMemcpyHtoDAsync(dst + dstOffset, src, size, stream));
+  CHECKED(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst + dstOffset), const_cast<void *>(src), size, stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  CHECKED(hipMemcpyDtoHAsync(dst, src + srcOffset, size, stream));
+  CHECKED(hipMemcpyDtoHAsync(dst, reinterpret_cast<hipDeviceptr_t>(src + srcOffset), size, stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,

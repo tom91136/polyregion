@@ -10,6 +10,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 lazy val passBundleDest   = settingKey[File]("Destination of the JS pass bundle in the native tree.")
 lazy val exportPassBundle = taskKey[File]("Build pass.js (fullLinkJS) and copy it into the native tree.")
 lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)generate native C++/JNI sources.")
+lazy val genEw     = taskKey[Unit]("Run ewgen.Main to (re)generate the polyinvoke wrangler sources.")
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
@@ -90,6 +91,28 @@ lazy val ast = crossProject(JVMPlatform, JSPlatform)
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-core" % catsVersion
     )
+  )
+
+lazy val ewgen = project
+  .in(file("ewgen"))
+  .settings(
+    commonSettings,
+    name                 := "ewgen",
+    fork                 := true,
+    Compile / mainClass  := Some("ewgen.Main"),
+    libraryDependencies ++= Seq(
+      "com.lihaoyi"                  %% "upickle"          % "4.0.2",
+      "com.lihaoyi"                  %% "mainargs"         % "0.7.8",
+      "com.softwaremill.sttp.client4" %% "core"            % "4.0.9",
+      "org.apache.commons"            % "commons-compress" % "1.27.1",
+      "org.scalameta"                %% "munit"            % munitVersion % Test
+    ),
+    genEw := Def.taskDyn {
+      val outRoot = (nativeDir / "polyinvoke" / "thirdparty").getAbsoluteFile
+      val cache   = target.value / "ewgen-cache"
+      val work    = target.value / "ewgen-work"
+      (Compile / runMain).toTask(s" ewgen.Main --out $outRoot --cache $cache --work $work")
+    }.value
   )
 
 lazy val codegen = project
@@ -246,6 +269,7 @@ lazy val root = project
     ast.jvm,
     ast.js,
     codegen,
+    ewgen,
     pass.jvm,
     pass.js,
     `runtime-scala`,

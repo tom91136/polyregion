@@ -4,20 +4,59 @@
 #include <iostream>
 #include <thread>
 
-#ifdef _WIN32
-  #include <windows.h>
-#else
-  #include <dlfcn.h>
-#endif
-
 #include "magic_enum/magic_enum.hpp"
 
+#include "dl_util.h"
 #include "polyregion/env.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cl;
 
 static constexpr const char *PREFIX = "OpenCL";
+
+static const char *clewErrorString(cl_int error) {
+  static const char *strings[] = {
+      "CL_SUCCESS",                                       "CL_DEVICE_NOT_FOUND",
+      "CL_DEVICE_NOT_AVAILABLE",                          "CL_COMPILER_NOT_AVAILABLE",
+      "CL_MEM_OBJECT_ALLOCATION_FAILURE",                 "CL_OUT_OF_RESOURCES",
+      "CL_OUT_OF_HOST_MEMORY",                            "CL_PROFILING_INFO_NOT_AVAILABLE",
+      "CL_MEM_COPY_OVERLAP",                              "CL_IMAGE_FORMAT_MISMATCH",
+      "CL_IMAGE_FORMAT_NOT_SUPPORTED",                    "CL_BUILD_PROGRAM_FAILURE",
+      "CL_MAP_FAILURE",                                   "CL_MISALIGNED_SUB_BUFFER_OFFSET",
+      "CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",     "CL_COMPILE_PROGRAM_FAILURE",
+      "CL_LINKER_NOT_AVAILABLE",                          "CL_LINK_PROGRAM_FAILURE",
+      "CL_DEVICE_PARTITION_FAILED",                       "CL_KERNEL_ARG_INFO_NOT_AVAILABLE",
+      "",                                                 "",
+      "",                                                 "",
+      "",                                                 "",
+      "",                                                 "",
+      "",                                                 "",
+      "CL_INVALID_VALUE",                                 "CL_INVALID_DEVICE_TYPE",
+      "CL_INVALID_PLATFORM",                              "CL_INVALID_DEVICE",
+      "CL_INVALID_CONTEXT",                               "CL_INVALID_QUEUE_PROPERTIES",
+      "CL_INVALID_COMMAND_QUEUE",                         "CL_INVALID_HOST_PTR",
+      "CL_INVALID_MEM_OBJECT",                            "CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
+      "CL_INVALID_IMAGE_SIZE",                            "CL_INVALID_SAMPLER",
+      "CL_INVALID_BINARY",                                "CL_INVALID_BUILD_OPTIONS",
+      "CL_INVALID_PROGRAM",                               "CL_INVALID_PROGRAM_EXECUTABLE",
+      "CL_INVALID_KERNEL_NAME",                           "CL_INVALID_KERNEL_DEFINITION",
+      "CL_INVALID_KERNEL",                                "CL_INVALID_ARG_INDEX",
+      "CL_INVALID_ARG_VALUE",                             "CL_INVALID_ARG_SIZE",
+      "CL_INVALID_KERNEL_ARGS",                           "CL_INVALID_WORK_DIMENSION",
+      "CL_INVALID_WORK_GROUP_SIZE",                       "CL_INVALID_WORK_ITEM_SIZE",
+      "CL_INVALID_GLOBAL_OFFSET",                         "CL_INVALID_EVENT_WAIT_LIST",
+      "CL_INVALID_EVENT",                                 "CL_INVALID_OPERATION",
+      "CL_INVALID_GL_OBJECT",                             "CL_INVALID_BUFFER_SIZE",
+      "CL_INVALID_MIP_LEVEL",                             "CL_INVALID_GLOBAL_WORK_SIZE",
+      "CL_INVALID_PROPERTY",                              "CL_INVALID_IMAGE_DESCRIPTOR",
+      "CL_INVALID_COMPILER_OPTIONS",                      "CL_INVALID_LINKER_OPTIONS",
+      "CL_INVALID_DEVICE_PARTITION_COUNT",
+  };
+  static const int num_errors = sizeof(strings) / sizeof(strings[0]);
+  if (error == -1001) return "CL_PLATFORM_NOT_FOUND_KHR";
+  if (error > 0 || -error >= num_errors) return "Unknown OpenCL error";
+  return strings[-error];
+}
 
 #define CHECKED(f__)                                                                                                                       \
   do {                                                                                                                                     \
@@ -58,49 +97,14 @@ bool deviceSupportsIL(cl_device_id device) {
   return queryDeviceInfo(device, CL_DEVICE_EXTENSIONS).find("cl_khr_il_program") != std::string::npos;
 }
 
-details::SVMFns resolveSVM(cl_platform_id /*platform*/, cl_device_id device) {
-  details::SVMFns fns{};
+// Returns the buffer memflags to OR into clSVMAlloc when SVM is usable (0 = coarse-grain,
+// CL_MEM_SVM_FINE_GRAIN_BUFFER otherwise); nullopt means fall back to cl_mem buffers.
+std::optional<cl_bitfield> resolveSVM(cl_device_id device) {
   cl_bitfield caps = 0;
-  if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return fns;
-  if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return fns;
-  static void *clHandle = []() -> void * {
-#ifdef _WIN32
-    if (HMODULE h = GetModuleHandleA("OpenCL.dll")) return reinterpret_cast<void *>(h);
-    return reinterpret_cast<void *>(LoadLibraryA("OpenCL.dll"));
-#else
-    void *h = nullptr;
-  #ifdef RTLD_NOLOAD
-    h = dlopen("libOpenCL.so.1", RTLD_LAZY | RTLD_NOLOAD);
-    if (!h) h = dlopen("libOpenCL.so", RTLD_LAZY | RTLD_NOLOAD);
-  #endif
-    if (!h) h = dlopen("libOpenCL.so.1", RTLD_LAZY);
-    if (!h) h = dlopen("libOpenCL.so", RTLD_LAZY);
-    return h;
-#endif
-  }();
-  static auto resolve = [](const char *name) -> void * {
-#ifdef _WIN32
-    if (!clHandle) return nullptr;
-    return reinterpret_cast<void *>(GetProcAddress(reinterpret_cast<HMODULE>(clHandle), name));
-#else
-    if (clHandle) return dlsym(clHandle, name);
-  #ifdef RTLD_DEFAULT
-    return dlsym(RTLD_DEFAULT, name);
-  #else
-    return nullptr;
-  #endif
-#endif
-  };
-  fns.alloc = reinterpret_cast<details::ClSVMAlloc_fn>(resolve("clSVMAlloc"));
-  fns.free = reinterpret_cast<details::ClSVMFree_fn>(resolve("clSVMFree"));
-  fns.memcpy = reinterpret_cast<details::ClEnqueueSVMMemcpy_fn>(resolve("clEnqueueSVMMemcpy"));
-  fns.setKernelArg = reinterpret_cast<details::ClSetKernelArgSVMPointer_fn>(resolve("clSetKernelArgSVMPointer"));
-  fns.setKernelExecInfo = reinterpret_cast<details::ClSetKernelExecInfo_fn>(resolve("clSetKernelExecInfo"));
-  fns.map = reinterpret_cast<details::ClEnqueueSVMMap_fn>(resolve("clEnqueueSVMMap"));
-  fns.unmap = reinterpret_cast<details::ClEnqueueSVMUnmap_fn>(resolve("clEnqueueSVMUnmap"));
-  fns.memFlags = (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER_) ? CL_MEM_SVM_FINE_GRAIN_BUFFER_ : 0;
-  if (!fns) return {};
-  return fns;
+  if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return std::nullopt;
+  if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return std::nullopt;
+  if (!clSVMAlloc || !clSVMFree || !clEnqueueSVMMemcpy || !clSetKernelArgSVMPointer || !clSetKernelExecInfo) return std::nullopt;
+  return (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER_) ? cl_bitfield(CL_MEM_SVM_FINE_GRAIN_BUFFER_) : cl_bitfield(0);
 }
 } // namespace
 
@@ -109,12 +113,16 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
   // we set it unless it's already defined with some other value
   env::put("OverrideDefaultFP64Settings", "1", false);
   env::put("IGC_EnableDPEmulation", "1", false);
-  switch (auto result = clewInit(); result) {
-    case CLEW_SUCCESS: break;
-    case CLEW_ERROR_OPEN_FAILED: return "CLEW: failed to open the dynamic library";
-    case CLEW_ERROR_ATEXIT_FAILED: return "CLEW: cannot queue atexit for closing the dynamic library";
-    default: return "Unknown error: " + std::to_string(result);
-  }
+#ifdef _WIN32
+  void *lib = dl::open_first({"OpenCL.dll"});
+#elif defined(__APPLE__)
+  void *lib = dl::open_first({"/Library/Frameworks/OpenCL.framework/OpenCL",
+                              "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
+#else
+  void *lib = dl::open_first({"libOpenCL.so.1", "libOpenCL.so", "libOpenCL.so.0", "libOpenCL.so.2"});
+#endif
+  if (!lib) return "OpenCL: failed to open libOpenCL dynamic library";
+  clew_cl_resolve(dl::lookup, lib);
   return std::unique_ptr<Platform>(new ClPlatform());
 }
 ClPlatform::ClPlatform() { POLYINVOKE_TRACE(); }
@@ -156,7 +164,7 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
       ilFn = reinterpret_cast<details::ClCreateProgramWithIL_fn>(
           clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithILKHR"));
     for (auto &device : devices) {
-      auto svm = resolveSVM(platform, device);
+      auto svm = resolveSVM(device);
       clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm));
       if (ilFn && deviceSupportsIL(device)) clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::SPIRV_Kernel, ilFn, svm));
     }
@@ -167,7 +175,7 @@ ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 
 // ---
 
-ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, details::SVMFns svm)
+ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm)
     : device(
           [&, device]() {
             POLYINVOKE_TRACE();
@@ -309,7 +317,7 @@ uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
   if (svm) {
-    void *p = svm.alloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | svm.memFlags, size, 0);
+    void *p = clSVMAlloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | *svm, size, 0);
     if (!p) POLYINVOKE_FATAL(PREFIX, "clSVMAlloc failed for %zu bytes", size);
     if (svmTracker) {
       std::lock_guard lock(svmTracker->mtx);
@@ -336,7 +344,7 @@ void ClDevice::freeDevice(uintptr_t ptr) {
       std::lock_guard lock(svmTracker->mtx);
       svmTracker->entries.erase(reinterpret_cast<void *>(ptr));
     }
-    svm.free(*context, reinterpret_cast<void *>(ptr));
+    clSVMFree(*context, reinterpret_cast<void *>(ptr));
     return;
   }
   if (auto mem = memoryObjects.query(ptr); mem) {
@@ -348,7 +356,7 @@ std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
   if (!svm) return std::nullopt;
-  void *p = svm.alloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | svm.memFlags, size, 0);
+  void *p = clSVMAlloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | *svm, size, 0);
   if (!p) return std::nullopt;
   if (svmTracker) {
     std::lock_guard lock(svmTracker->mtx);
@@ -364,7 +372,7 @@ void ClDevice::freeShared(void *ptr) {
     std::lock_guard lock(svmTracker->mtx);
     svmTracker->entries.erase(ptr);
   }
-  svm.free(*context, ptr);
+  clSVMFree(*context, ptr);
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
@@ -382,7 +390,7 @@ ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 // ---
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                             decltype(queryMemObject) queryMemObject, details::SVMFns svm, std::shared_ptr<details::SVMTracker> svmTracker)
+                             decltype(queryMemObject) queryMemObject, std::optional<cl_bitfield> svm, std::shared_ptr<details::SVMTracker> svmTracker)
     : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
 }
@@ -393,21 +401,21 @@ ClDeviceQueue::~ClDeviceQueue() {
 void ClDeviceQueue::unmapAllSvmForDevice() {
   // Fine-grain SVM is auto-coherent; coarse-grain needs explicit map/unmap. If the impl didn't
   // expose map/unmap symbols there's nothing safe we can do, so silently fall through.
-  if (!svmTracker || !svm.unmap || !svm.coarseGrain()) return;
+  if (!svmTracker || !clEnqueueSVMUnmap || *svm != 0) return;
   std::lock_guard lock(svmTracker->mtx);
   for (auto &[ptr, entry] : svmTracker->entries) {
     if (!entry.mappedForHost) continue;
-    CHECKED(svm.unmap(queue, ptr, 0, nullptr, nullptr));
+    CHECKED(clEnqueueSVMUnmap(queue, ptr, 0, nullptr, nullptr));
     entry.mappedForHost = false;
   }
 }
 void ClDeviceQueue::mapAllSvmForHost() {
-  if (!svmTracker || !svm.map || !svm.coarseGrain()) return;
+  if (!svmTracker || !clEnqueueSVMMap || *svm != 0) return;
   std::lock_guard lock(svmTracker->mtx);
   for (auto &[ptr, entry] : svmTracker->entries) {
     if (entry.mappedForHost) continue;
     // CL_MAP_READ | CL_MAP_WRITE = 0x1 | 0x2 -- blocking so the caller can read immediately.
-    CHECKED(svm.map(queue, CL_TRUE, 0x3, ptr, entry.size, 0, nullptr, nullptr));
+    CHECKED(clEnqueueSVMMap(queue, CL_TRUE, 0x3, ptr, entry.size, 0, nullptr, nullptr));
     entry.mappedForHost = true;
   }
 }
@@ -444,7 +452,7 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
     auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
     // XXX must be blocking on the host side as the src needs to be valid until the copy completes
-    CHECKED(svm.memcpy(queue, CL_TRUE, dstP, srcP, size, 0, nullptr, nullptr));
+    CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, srcP, size, 0, nullptr, nullptr));
   } else {
     CHECKED(clEnqueueCopyBuffer(queue, queryMemObject(src), queryMemObject(dst), srcOffset, dstOffset, size, 0, nullptr, &event));
   }
@@ -457,7 +465,7 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
   if (svm) {
     unmapAllSvmForDevice();
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
-    CHECKED(svm.memcpy(queue, CL_TRUE, dstP, src, size, 0, nullptr, nullptr));
+    CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, src, size, 0, nullptr, nullptr));
   } else {
     CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, dstOffset, size, src, 0, nullptr, &event));
   }
@@ -470,7 +478,7 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   if (svm) {
     unmapAllSvmForDevice();
     auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
-    CHECKED(svm.memcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
+    CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
   } else {
     CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, srcOffset, size, dst, 0, nullptr, &event));
   }
@@ -503,7 +511,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
         uintptr_t ptr = {};
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
         if (svm) {
-          CHECKED(svm.setKernelArg(kernel, i, reinterpret_cast<void *>(ptr)));
+          CHECKED(clSetKernelArgSVMPointer(kernel, i, reinterpret_cast<void *>(ptr)));
         } else {
           cl_mem mem = queryMemObject(ptr);
           CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));
@@ -538,7 +546,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
         svmPtrs.push_back(ptr);
     }
     if (!svmPtrs.empty())
-      CHECKED(svm.setKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, svmPtrs.size() * sizeof(void *), svmPtrs.data()));
+      CHECKED(clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, svmPtrs.size() * sizeof(void *), svmPtrs.data()));
   }
 
   POLYINVOKE_TRACE();

@@ -50,6 +50,14 @@ else ()
 endif ()
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
+set(POLYINVOKE_WRANGLERS cuew hipew clew hsaew zeew)
+set(POLYINVOKE_WRANGLER_SRCS "")
+set(POLYINVOKE_WRANGLER_INCLUDES "")
+foreach (_w IN LISTS POLYINVOKE_WRANGLERS)
+    list(APPEND POLYINVOKE_WRANGLER_SRCS thirdparty/${_w}/src/${_w}.c)
+    list(APPEND POLYINVOKE_WRANGLER_INCLUDES thirdparty/${_w}/include)
+endforeach ()
+
 set(POLYINVOKE_SRC
         libm.cpp
         runtime.cpp
@@ -59,10 +67,7 @@ set(POLYINVOKE_SRC
         hip_platform.cpp
         cl_platform.cpp
         object_platform.cpp
-        thirdparty/cuew/src/cuew.c
-        thirdparty/hipew/src/hipew.c
-        thirdparty/clew/src/clew.c
-        thirdparty/hsaew/src/hsaew.c
+        ${POLYINVOKE_WRANGLER_SRCS}
         ${RUNTIME_SRC_FILES})
 
 set(POLYINVOKE_LIBS
@@ -92,10 +97,7 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
             include/polyinvoke/runtime.h)
     target_include_directories(${TARGET} PUBLIC
             thirdparty/
-            thirdparty/clew/include
-            thirdparty/hipew/include
-            thirdparty/cuew/include
-            thirdparty/hsaew/include
+            ${POLYINVOKE_WRANGLER_INCLUDES}
             ${LLVM_INCLUDE_DIRS}
             ${RUNTIME_INCLUDE_DIRS})
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS} _POSIX_C_SOURCE=200809L)

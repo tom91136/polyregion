@@ -2,6 +2,8 @@
 
 #include "magic_enum/magic_enum.hpp"
 
+#include "dl_util.h"
+
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cuda;
 
@@ -30,8 +32,15 @@ static constexpr auto PREFIX = "CUDA";
   } while (0)
 
 std::variant<std::string, std::unique_ptr<Platform>> CudaPlatform::create() {
-  if (const auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS)
-    return "CUEW initialisation failed (" + std::to_string(result) + "), no CUDA driver present?";
+#ifdef _WIN32
+  void *lib = dl::open_first({"nvcuda.dll"});
+#elif defined(__APPLE__)
+  void *lib = dl::open_first({"/usr/local/cuda/lib/libcuda.dylib"});
+#else
+  void *lib = dl::open_first({"libcuda.so.1", "libcuda.so"});
+#endif
+  if (!lib) return "CUDA: failed to open libcuda dynamic library, no CUDA driver present?";
+  cuew_cuda_resolve(dl::lookup, lib);
   if (const auto result = cuInit(0); result != CUDA_SUCCESS) {
     auto name = "(unknown)", desc = "(unknown)";
     cuGetErrorName(result, &name);

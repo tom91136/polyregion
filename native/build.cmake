@@ -38,8 +38,8 @@ else ()
 endif ()
 
 string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${ARCH}-${LLVM_VARIANT}" BUILD_NAME)
-set(LLVM_BUILD_DIR  "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${ARCH}-${LLVM_VARIANT}")
-set(LLVM_DIST_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${ARCH}-${LLVM_VARIANT}-dist")
+set(LLVM_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${ARCH}-${LLVM_VARIANT}")
+set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${ARCH}-${LLVM_VARIANT}-dist")
 
 message(STATUS "Architecture  = `${ARCH}`")
 message(STATUS "LLVM variant  = `${LLVM_VARIANT}`")
@@ -70,6 +70,13 @@ if (NOT CMAKE_TOOLCHAIN_FILE)
     endif ()
 endif ()
 message(STATUS "Toolchain    = `${CMAKE_TOOLCHAIN_FILE}`")
+
+# XXX CMake makes absolute RUNPATH entries sysroot-relative, so a `/` sysroot strips the leading slash and the
+# loader falls through to the system # libLLVM.so instead of our pinned build. Drop the trivial value.
+if (CMAKE_SYSROOT STREQUAL "/")
+    set(CMAKE_SYSROOT "")
+    unset(ENV{CMAKE_SYSROOT})
+endif ()
 
 if (CMAKE_SYSROOT)
     if (NOT EXISTS "${CMAKE_SYSROOT}")

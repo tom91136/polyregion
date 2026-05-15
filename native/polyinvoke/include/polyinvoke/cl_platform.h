@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 #include "polyregion/compat.h"
@@ -26,28 +27,6 @@ public:
 namespace details {
 using ClModuleStore = detail::ModuleStore<cl_program, cl_kernel>;
 using ClCreateProgramWithIL_fn = cl_program(CL_API_CALL *)(cl_context, const void *, size_t, cl_int *);
-using ClSVMAlloc_fn = void *(CL_API_CALL *)(cl_context, cl_bitfield, size_t, cl_uint);
-using ClSVMFree_fn = void(CL_API_CALL *)(cl_context, void *);
-using ClEnqueueSVMMemcpy_fn = cl_int(CL_API_CALL *)(cl_command_queue, cl_bool, void *, const void *, size_t, cl_uint, const cl_event *,
-                                                    cl_event *);
-using ClSetKernelArgSVMPointer_fn = cl_int(CL_API_CALL *)(cl_kernel, cl_uint, const void *);
-using ClSetKernelExecInfo_fn = cl_int(CL_API_CALL *)(cl_kernel, cl_uint, size_t, const void *);
-using ClEnqueueSVMMap_fn = cl_int(CL_API_CALL *)(cl_command_queue, cl_bool, cl_bitfield, void *, size_t, cl_uint, const cl_event *,
-                                                 cl_event *);
-using ClEnqueueSVMUnmap_fn = cl_int(CL_API_CALL *)(cl_command_queue, void *, cl_uint, const cl_event *, cl_event *);
-
-struct SVMFns {
-  ClSVMAlloc_fn alloc;
-  ClSVMFree_fn free;
-  ClEnqueueSVMMemcpy_fn memcpy;
-  ClSetKernelArgSVMPointer_fn setKernelArg;
-  ClSetKernelExecInfo_fn setKernelExecInfo;
-  ClEnqueueSVMMap_fn map;     // optional; null means caller must skip coarse-grain handshake
-  ClEnqueueSVMUnmap_fn unmap; // optional; ditto
-  cl_bitfield memFlags;       // CL_MEM_SVM_FINE_GRAIN_BUFFER, else 0 for coarse-grain
-  explicit operator bool() const { return alloc && free && memcpy && setKernelArg && setKernelExecInfo; }
-  bool coarseGrain() const { return memFlags == 0; }
-};
 
 // Coarse-grain SVM allocations require explicit clEnqueueSVMMap/clEnqueueSVMUnmap around host
 // access. Track size + current map state here so the queue can flip allocs in/out around kernel
@@ -69,14 +48,16 @@ class POLYREGION_EXPORT ClDevice final : public Device {
   std::string deviceName;
   ModuleFormat format;
   details::ClCreateProgramWithIL_fn ilCreateFn; // non-null iff format==SPIRV_Kernel
-  details::SVMFns svm{};                        // populated iff device advertises buffer SVM
+  // Present iff device advertises buffer SVM; value is the memflags to OR into clSVMAlloc
+  // (0 for coarse-grain, CL_MEM_SVM_FINE_GRAIN_BUFFER for fine-grain).
+  std::optional<cl_bitfield> svm;
   std::shared_ptr<details::SVMTracker> svmTracker;
   details::ClModuleStore store; // must be dropped before the device
   detail::MemoryObjects<cl_mem> memoryObjects;
   std::optional<std::vector<std::string>> cachedFeatures; // XXX features() probes via clBuildProgram; cache so we pay once.
 
 public:
-  explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, details::SVMFns svm);
+  explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm);
   ~ClDevice() override;
   POLYREGION_EXPORT int64_t id() override;
   POLYREGION_EXPORT std::string name() override;
@@ -101,7 +82,7 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
   details::ClModuleStore &store;
   cl_command_queue queue = {};
   std::function<cl_mem(uintptr_t)> queryMemObject;
-  details::SVMFns svm; // forwarded from ClDevice; when set, use SVM ops instead of cl_mem
+  std::optional<cl_bitfield> svm; // forwarded from ClDevice; when set, use SVM ops instead of cl_mem
   std::shared_ptr<details::SVMTracker> svmTracker;
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
@@ -113,7 +94,7 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
 
 public:
   POLYREGION_EXPORT ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                                  decltype(queryMemObject) queryMemObject, details::SVMFns svm,
+                                  decltype(queryMemObject) queryMemObject, std::optional<cl_bitfield> svm,
                                   std::shared_ptr<details::SVMTracker> svmTracker);
   POLYREGION_EXPORT ~ClDeviceQueue() override;
   POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
