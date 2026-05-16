@@ -106,6 +106,7 @@ if (POLYREGION_SHARED_LIB)
     add_library(polyinvoke-static SHARED)
 else ()
     merge_static_libs(polyinvoke-static ${POLYINVOKE_LIBS})
+    dead_strip_archive(polyinvoke-static)
 endif ()
 
 

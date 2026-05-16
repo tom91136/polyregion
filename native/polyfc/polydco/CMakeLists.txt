@@ -4,6 +4,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_library(polydco-static SHARED)
 else ()
     merge_static_libs(polydco-static ${POLYINVOKE_LIBS})
+    dead_strip_archive(polydco-static)
 endif ()
 
 foreach (TARGET polydco polydco-static)

@@ -26,6 +26,7 @@ include(FetchContent)
 include(ProcessorCount)
 include(ProjectConfig.cmake)
 include(cmake/mergestaticlibs.cmake)
+include(cmake/deadstriparchive.cmake)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
@@ -297,6 +298,13 @@ else ()
                     LINKER:--compress-debug-sections=zlib
                     # LINKER:--strip-all        # strip symbols not used for DSO
             )
+            # Hide LLVM* from dynsym so --gc-sections can drop unreachable code.
+            # -fvisibility=hidden only marks our code; LLVM .o files export by default.
+            if (NOT POLYREGION_LLVM_DYLIB)
+                set(COMMON_LINK_OPTIONS
+                        ${COMMON_LINK_OPTIONS}
+                        LINKER:--exclude-libs,ALL)
+            endif ()
         endif ()
     endif ()
 endif ()

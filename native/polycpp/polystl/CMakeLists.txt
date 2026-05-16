@@ -4,6 +4,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_library(polystl-static SHARED)
 else ()
     merge_static_libs(polystl-static ${POLYINVOKE_LIBS})
+    dead_strip_archive(polystl-static)
 endif ()
 
 foreach (TARGET polystl polystl-static)
