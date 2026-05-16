@@ -30,11 +30,19 @@ endif ()
 if (POLYREGION_LLVM_DYLIB)
     set(LLVM_LIBS LLVM)
 else ()
-    # XXX LLVMMC/LLVMObject transitively reference debug-info symbols (MCDwarfFrameEmitter ->
-    # llvm::dwarf::*); lld-link is stricter on archive order than LLD, so list them explicitly.
+    # XXX explicit transitives: merge_static_libs sees only literal libs, not interface chains,
+    # and lld-link is stricter on order than LLD.
     llvm_map_components_to_libnames(LLVM_LIBS
             executionengine
-            runtimedyld
+            orcjit
+            orcshared
+            orctargetprocess
+            jitlink        # transitive of orcjit on some LLVM versions
+            runtimedyld    # RTDyldObjectLinkingLayer drives RuntimeDyld directly
+            option         # JITLink ObjectLinkingLayer uses llvm::opt::OptTable
+            bitwriter      # ThreadSafeModule serialises via BitcodeWriter
+            transformutils # CloneModule
+            analysis
             object
             core
             mc

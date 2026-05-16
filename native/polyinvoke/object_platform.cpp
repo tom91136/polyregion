@@ -10,9 +10,13 @@
 #endif
 
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
+#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
+#include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include "polyinvoke/object_platform.h"
 #include "polyregion/compat.h"
@@ -160,35 +164,71 @@ std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
 
 static constexpr const char *RELOBJ_PREFIX = "RelocatableObject";
 
-RelocatableDevice::RelocatableDevice() { POLYINVOKE_TRACE(); }
+static std::string withGlobalPrefix(char prefix, std::string_view name) {
+  return prefix ? std::string(1, prefix) + std::string(name) : std::string(name);
+}
+
+static void *malloc_(size_t size) { return std::malloc(size); }
+
+RelocatableDevice::RelocatableDevice() {
+  POLYINVOKE_TRACE();
+  auto epc = llvm::orc::SelfExecutorProcessControl::Create();
+  if (!epc) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create executor process control: %s", toString(epc.takeError()).c_str());
+  es = std::make_unique<llvm::orc::ExecutionSession>(std::move(*epc));
+  ol = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(
+      *es, [](const llvm::MemoryBuffer &) { return std::make_unique<llvm::SectionMemoryManager>(); });
+
+  globalPrefix = llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSBinFormatMachO() ? '_' : '\0';
+
+  // XXX object files we load have their own visibility/weak flags; promote ours so duplicates
+  // across modules don't fail materialisation.
+  ol->setOverrideObjectFlagsWithResponsibilityFlags(true);
+  ol->setAutoClaimResponsibilityForObjectSymbols(true);
+
+  processJD = &es->createBareJITDylib("<process>");
+
+  llvm::orc::SymbolMap absSyms;
+  absSyms[es->intern(withGlobalPrefix(globalPrefix, "malloc"))] = llvm::orc::ExecutorSymbolDef(
+      llvm::orc::ExecutorAddr::fromPtr(&malloc_), llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable);
+  if (auto err = processJD->define(llvm::orc::absoluteSymbols(std::move(absSyms))))
+    POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot define malloc override: %s", toString(std::move(err)).c_str());
+
+  // libm::exportAll (called from invoke::init) registers sincosf et al. via sys::DynamicLibrary;
+  // the process generator below picks them up.
+  if (auto gen = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(globalPrefix))
+    processJD->addGenerator(std::move(*gen));
+  else POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create process symbol generator: %s", toString(gen.takeError()).c_str());
+}
+
+RelocatableDevice::~RelocatableDevice() {
+  POLYINVOKE_TRACE();
+  if (es) {
+    if (auto err = es->endSession())
+      std::fprintf(stderr, "[%s] ExecutionSession::endSession failed: %s\n", RELOBJ_PREFIX, toString(std::move(err)).c_str());
+  }
+}
 
 std::string RelocatableDevice::name() {
   POLYINVOKE_TRACE();
-  return "RelocatableObjectDevice(llvm::RuntimeDyld)";
-}
-
-MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
-details::LoadedCodeObject::LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj) : ld(mm, mm), rawObject(std::move(obj)) {
-  ld.loadObject(*this->rawObject);
+  return "RelocatableObjectDevice(llvm::orc::RTDyldObjectLinkingLayer)";
 }
 
 void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
-  // polyregion::abort
   WriteLock rw(mutex);
   if (auto it = objects.find(name); it != objects.end()) {
     POLYINVOKE_FATAL(RELOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
   } else {
-    if (auto object = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
-        auto e = object.takeError()) {
-      POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot load module: %s", toString(std::move(e)).c_str());
-    } else {
-      const auto inserted = objects.emplace_hint(it, name, std::make_unique<details::LoadedCodeObject>(std::move(*object)));
-      if (inserted->second->ld.finalizeWithMemoryManagerLocking(); inserted->second->ld.hasError()) {
-        POLYINVOKE_FATAL(RELOBJ_PREFIX, "Module `%s` failed to finalise for execution: %s", name.c_str(),
-                         inserted->second->ld.getErrorString().data());
-      }
+    auto jdOrErr = es->createJITDylib(name);
+    if (!jdOrErr) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITDylib for %s: %s", name.c_str(), toString(jdOrErr.takeError()).c_str());
+    llvm::orc::JITDylib &jd = *jdOrErr;
+    jd.addToLinkOrder(*processJD);
+
+    auto buf = llvm::MemoryBuffer::getMemBufferCopy(llvm::StringRef(image), name);
+    if (auto err = ol->add(jd, std::move(buf))) {
+      POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot load module: %s", toString(std::move(err)).c_str());
     }
+    objects.emplace_hint(it, name, std::make_unique<details::LoadedCodeObject>(jd));
   }
 }
 
@@ -199,39 +239,13 @@ bool RelocatableDevice::moduleLoaded(const std::string &name) {
 }
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
-  return std::make_unique<RelocatableDeviceQueue>(timeout, objects, mutex);
+  return std::make_unique<RelocatableDeviceQueue>(timeout, objects, mutex, *es, globalPrefix);
 }
 
 RelocatableDeviceQueue::RelocatableDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(objects) objects,
-                                               decltype(mutex) mutex)
-    : ObjectDeviceQueue(timeout), objects(objects), mutex(mutex) {
+                                               decltype(mutex) mutex, llvm::orc::ExecutionSession &es, char globalPrefix)
+    : ObjectDeviceQueue(timeout), objects(objects), mutex(mutex), es(es), globalPrefix(globalPrefix) {
   POLYINVOKE_TRACE();
-}
-
-void *malloc_(size_t size) {
-  auto p = std::malloc(size);
-  fprintf(stderr, "kernel malloc(%zu) = %p\n", size, p);
-  return p;
-}
-
-uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
-  if (Name == "malloc") return reinterpret_cast<uint64_t>(&malloc_);
-  if (auto addr = llvm::RTDyldMemoryManager::getSymbolAddress(Name)) return addr;
-  // RTDyldMemoryManager defaults to dlsym(RTLD_DEFAULT, ...), which on some glibc/loader configs
-  // misses sincosf etc. (LLVM fuses paired sin/cos into sincosf). Open libm directly.
-#if defined(__linux__) || defined(__APPLE__)
-  static void *libm = []() -> void * {
-  #if defined(__APPLE__)
-    return dlopen("libm.dylib", RTLD_LAZY | RTLD_GLOBAL);
-  #else
-    return dlopen("libm.so.6", RTLD_LAZY | RTLD_GLOBAL);
-  #endif
-  }();
-  if (libm) {
-    if (auto sym = dlsym(libm, Name.c_str())) return reinterpret_cast<uint64_t>(sym);
-  }
-#endif
-  return 0;
 }
 
 template <typename F> static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, const MaybeCallback &cb, F f) {
@@ -291,19 +305,38 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
   POLYINVOKE_TRACE();
   validatePolicyAndArgs(RELOBJ_PREFIX, types, policy);
 
-  ReadLock r(mutex);
-  const auto moduleIt = objects.find(moduleName);
-  if (moduleIt == objects.end()) POLYINVOKE_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
-  auto &[_, obj] = *moduleIt;
-  const auto fnName = (obj->rawObject->isMachO() || obj->rawObject->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
-  const auto sym = obj->ld.getSymbol(fnName);
-  if (!sym) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object", fnName.c_str());
+  details::LoadedCodeObject *obj = nullptr;
+  {
+    ReadLock r(mutex);
+    const auto moduleIt = objects.find(moduleName);
+    if (moduleIt == objects.end()) POLYINVOKE_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
+    obj = moduleIt->second.get();
+  }
+  uint64_t symAddr;
+  {
+    ReadLock r(obj->symbolCacheMutex);
+    if (const auto it = obj->symbolCache.find(symbol); it != obj->symbolCache.end()) symAddr = it->second;
+    else {
+      r.unlock();
+      WriteLock w(obj->symbolCacheMutex);
+      if (const auto it = obj->symbolCache.find(symbol); it != obj->symbolCache.end()) symAddr = it->second;
+      else {
+        const auto fnName = withGlobalPrefix(globalPrefix, symbol);
+        auto symOrErr = es.lookup({obj->jd}, fnName);
+        if (!symOrErr)
+          POLYINVOKE_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object: %s", fnName.c_str(),
+                           toString(symOrErr.takeError()).c_str());
+        symAddr = symOrErr->getAddress().getValue();
+        obj->symbolCache.emplace(symbol, symAddr);
+      }
+    }
+  }
   this->threadedLaunch(
       policy.global.x,
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },
-      [sym, types, argData](size_t tid) {
+      [symAddr, types, argData](size_t tid) {
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         if (types[0] != Type::IntS64) {
@@ -312,7 +345,7 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
         }
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;
-        ffiInvoke(RELOBJ_PREFIX, sym.getAddress(), types, argPtrs);
+        ffiInvoke(RELOBJ_PREFIX, symAddr, types, argPtrs);
       });
 }
 

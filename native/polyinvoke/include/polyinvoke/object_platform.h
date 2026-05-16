@@ -5,9 +5,8 @@
 #include <shared_mutex>
 #include <thread>
 
-#include "llvm/ExecutionEngine/SectionMemoryManager.h"
-#include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/Memory.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 
 #include "polyregion/compat.h"
 #include "polyregion/dl.h"
@@ -93,21 +92,13 @@ public:
   POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
-class MemoryManager final : public llvm::SectionMemoryManager {
-public:
-  MemoryManager();
-
-private:
-  uint64_t getSymbolAddress(const std::string &Name) override;
-};
-
 namespace details {
 
 struct LoadedCodeObject {
-  MemoryManager mm;
-  llvm::RuntimeDyld ld;
-  std::unique_ptr<llvm::object::ObjectFile> rawObject;
-  explicit LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj);
+  llvm::orc::JITDylib *jd; // borrowed; owned by the ExecutionSession
+  std::unordered_map<std::string, uint64_t> symbolCache;
+  std::shared_mutex symbolCacheMutex;
+  explicit LoadedCodeObject(llvm::orc::JITDylib &jd) : jd(&jd) {}
 };
 
 using ObjectModules = std::unordered_map<std::string, std::unique_ptr<LoadedCodeObject>>;
@@ -126,12 +117,17 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-class POLYREGION_EXPORT RelocatableDevice final : public ObjectDevice { //, private llvm::SectionMemoryManager {
+class POLYREGION_EXPORT RelocatableDevice final : public ObjectDevice {
+  std::unique_ptr<llvm::orc::ExecutionSession> es;
+  std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> ol;
+  llvm::orc::JITDylib *processJD = nullptr; // borrowed; owned by es
+  char globalPrefix = '\0';
   details::ObjectModules objects = {};
   std::shared_mutex mutex;
 
 public:
   RelocatableDevice();
+  ~RelocatableDevice() override;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
@@ -141,9 +137,12 @@ public:
 class POLYREGION_EXPORT RelocatableDeviceQueue final : public ObjectDeviceQueue {
   details::ObjectModules &objects;
   std::shared_mutex &mutex;
+  llvm::orc::ExecutionSession &es;
+  char globalPrefix;
 
 public:
-  RelocatableDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(objects) objects, decltype(mutex) mutex);
+  RelocatableDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(objects) objects, decltype(mutex) mutex,
+                         llvm::orc::ExecutionSession &es, char globalPrefix);
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                             std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
 };
