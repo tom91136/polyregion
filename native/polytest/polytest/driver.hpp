@@ -362,7 +362,12 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     finalOutcomes[i] = out;
     std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
     dumpDetails(out, /*includeStdout*/ true);
-    if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) llvm::sys::fs::remove(tasks[i].output);
+    if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) {
+      llvm::sys::fs::remove(tasks[i].output);
+      // XXX Windows debug builds emit <output>.{exe,pdb,ilk,lib,exp} next to the bare name.
+      for (auto ext : {".exe", ".pdb", ".ilk", ".lib", ".exp"})
+        llvm::sys::fs::remove(tasks[i].output + ext);
+    }
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
 
