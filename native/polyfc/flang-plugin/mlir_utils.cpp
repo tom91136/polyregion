@@ -2,6 +2,8 @@
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
+#include "fmt/format.h"
+
 #include "utils.h"
 
 std::optional<mlir::func::FuncOp> polyregion::polyfc::resolveDefiningFunction(Operation *op) {

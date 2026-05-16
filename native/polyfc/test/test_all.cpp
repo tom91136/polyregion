@@ -13,7 +13,14 @@ int main(int argc, const char **argv) {
                      .archVar = "polyfc_arch",
                      .defaults = {"polyfc_defaults", "-O1 -g -cpp"},
                      .stdpar = {"polyfc_stdpar",
-                                "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -lstdc++ -fstdpar-rt=dynamic"},
+#ifdef _WIN32
+                                // polyreflect-plugin is not built on Windows; force mem=direct + static rt
+                                // to exercise the static-fold compile path.
+                                "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fstdpar-mem=direct -fstdpar-rt=static"
+#else
+                                "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -lstdc++ -fstdpar-rt=dynamic"
+#endif
+                     },
                      .driverEnvVar = "POLYFC_DRIVER",
                      .passthroughEnvs = {"POLYFC_NO_REWRITE=1", "POLYDCO_NO_OFFLOAD=1"},
                      .outputPrefix = "polyfc_test_",

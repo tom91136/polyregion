@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aspartame/all.hpp"
+
 #include "ftypes.h"
 #include "polyast.h"
 

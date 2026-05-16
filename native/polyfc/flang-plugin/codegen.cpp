@@ -5,6 +5,7 @@
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "ast.h"
 #include "utils.h"
 
 using namespace polyregion;

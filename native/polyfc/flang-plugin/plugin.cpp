@@ -3,6 +3,17 @@
 
 #if defined(__APPLE__)
   #include <crt_externs.h>
+#elif defined(_WIN32)
+// XXX Forward-declare the Win32 command-line APIs; including <windows.h> clashes with flang's
+// macro vocabulary.
+extern "C" {
+__declspec(dllimport) wchar_t *__stdcall GetCommandLineW(void);
+__declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *lpCmdLine, int *pNumArgs);
+__declspec(dllimport) void *__stdcall LocalFree(void *hMem);
+__declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned CodePage, unsigned long dwFlags, const wchar_t *lpWideCharStr,
+                                                        int cchWideChar, char *lpMultiByteStr, int cbMultiByte, const char *lpDefaultChar,
+                                                        int *lpUsedDefaultChar);
+}
 #endif
 
 #include "clang/Options/Options.h"
@@ -36,6 +47,20 @@ std::vector<std::string> getCmdLine() {
   for (int i = 0; i < *argcp; ++i) {
     args.push_back(argvp[0][i]);
   }
+  return args;
+#elif defined(_WIN32)
+  int argc = 0;
+  wchar_t **wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  std::vector<std::string> args;
+  if (!wargv) return args;
+  for (int i = 0; i < argc; ++i) {
+    const unsigned CP_UTF8 = 65001;
+    int len = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+    std::string s(len > 0 ? len - 1 : 0, '\0');
+    if (len > 0) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, s.data(), len, nullptr, nullptr);
+    args.push_back(std::move(s));
+  }
+  LocalFree(wargv);
   return args;
 #else
   #error "getCmdLine unimplemented for OS"

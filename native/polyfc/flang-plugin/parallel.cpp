@@ -3,10 +3,14 @@
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
 
+#include "ast.h"
+#include "utils.h"
+
 using namespace aspartame;
 using namespace polyregion::polyast;
 using namespace polyregion::polyfc;
 using namespace dsl;
+using polyregion::raise;
 
 using Stmts = std::vector<Stmt::Any>;
 
@@ -136,11 +140,11 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                Term::Any offset = letBind(body, "off", Expr::Alias(Term::IntS64Const(0)));
                std::vector<Named> localTargets;
                for (auto &r : reductions) {
+                 // Slot size must match ManagedPartialReduction::allocatePartialsAsync
+                 // (typeSizeInBytes() * blockSize), or shared-memory access goes out of bounds
+                 // for mixed primitive widths.
                  const auto primSize = polyast::primitiveSize(r.target.tpe);
-                 if (!primSize) {
-                   llvm::errs() << "polyfc: GPU reduction target type has no primitive size: " << polyast::repr(r.target.tpe) << "\n";
-                   std::abort();
-                 }
+                 if (!primSize) raise(fmt::format("Unsupported reduction primitive type {}", polyast::repr(r.target.tpe)));
                  const Term::Any compSize = Term::IntS64Const(static_cast<int64_t>(*primSize));
                  const auto localPtrTpe = Ptr(r.target.tpe, TypeSpace::Local());
                  const Named localTgt(fresh("lref"), localPtrTpe);
@@ -158,15 +162,14 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                      Stmt::Update(Term::Select(localTargets[i], {}, localTargets[i].tpe), li, Term::Select(r.target, {}, r.target.tpe)));
                }
 
-               // Tree reduction:
-               //  var #off = ls / 2;
-               //  while (#off > 0) {
-               //    barrier;
-               //    if (li < #off) localTgt[li] = op(localTgt[li], localTgt[li+#off]);
-               //    #off /= 2;
-               //  }
+               // Tree reduction. Stmt::While's condition is a Term, not an Expr; bind the
+               // predicate to a mutable named slot updated in the body, or LLVM folds the
+               // let-bound value into a constant and the loop never exits.
                const Named offVar("#off", Long);
                body.emplace_back(Stmt::Var(offVar, Expr::IntrOp(Intr::Div(ls, Term::IntS64Const(2), Long)), /*isMutable*/ true));
+               const Named whileCondVar(fresh("whileCond"), Bool);
+               body.emplace_back(Stmt::Var(whileCondVar, Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0))),
+                                           /*isMutable*/ true));
 
                Stmts whileBody;
                whileBody.emplace_back(Stmt::Var(Named(fresh("barrier"), Unit), call(Spec::GpuBarrierLocal()), /*isMutable*/ false));
@@ -185,13 +188,9 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                whileBody.emplace_back(Stmt::Cond(cond, ifBody, {}));
                whileBody.emplace_back(Stmt::Mut(Term::Select(offVar, {}, Long),
                                                 Expr::IntrOp(Intr::Div(Term::Select(offVar, {}, Long), Term::IntS64Const(2), Long))));
-
-               // XXX Stmt::While does not re-evaluate its cond Term; carry it in a mutable var.
-               const Named whileCondVar(fresh("whileCond"), Bool);
-               body.emplace_back(Stmt::Var(whileCondVar, Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0))),
-                                           /*isMutable*/ true));
                whileBody.emplace_back(Stmt::Mut(Term::Select(whileCondVar, {}, Bool),
                                                 Expr::IntrOp(Intr::LogicGt(Term::Select(offVar, {}, Long), Term::IntS64Const(0)))));
+
                body.emplace_back(Stmt::While(Term::Select(whileCondVar, {}, Bool), whileBody));
 
                // if (li == 0) { partialArray[groupIdx] = localTgt[li] }

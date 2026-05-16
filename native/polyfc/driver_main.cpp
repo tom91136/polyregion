@@ -6,6 +6,10 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 
+#ifdef POLYREGION_FUSED_DRIVER
+int flang_main(int argc, const char **argv);
+#endif
+
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
 
@@ -53,10 +57,13 @@ int main(int argc, const char *argv[]) {
   const std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
   std::string flangPath;
-  if (const auto driverArg = args.popValue("--driver")) flangPath = *driverArg;        // Explicit driver takes precedence
-  else if (const auto driverEnv = std::getenv("POLYFC_DRIVER")) flangPath = driverEnv; // Then try environment vars
-  else if (auto flangBin = joinPath(execParentPath, executableName("flang-new"));
-           llvm::sys::fs::exists(flangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
+#ifdef POLYREGION_FUSED_DRIVER
+  // XXX fused build has no external driver; --driver/POLYFC_DRIVER are accepted but ignored.
+  (void)args.popValue("--driver");
+#else
+  if (const auto driverArg = args.popValue("--driver")) flangPath = *driverArg;
+  else if (const auto driverEnv = std::getenv("POLYFC_DRIVER")) flangPath = driverEnv;
+  else if (auto flangBin = joinPath(execParentPath, executableName("flang-new")); llvm::sys::fs::exists(flangBin)) {
     flangPath = flangBin;
   } else {
     std::cerr << fmt::format(
@@ -65,6 +72,7 @@ int main(int argc, const char *argv[]) {
               << std::endl;
     return EXIT_FAILURE;
   }
+#endif
 
   return StdParOptions::parse(args) ^
          fold_total(
@@ -94,7 +102,9 @@ int main(int argc, const char *argv[]) {
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
 
                  if (const bool noRewrite = std::getenv("POLYFC_NO_REWRITE") != nullptr; !noRewrite) {
+#ifndef POLYREGION_FUSED_DRIVER
                    append({"-Xflang", "-load", "-Xflang", polyfcFlangPlugin});
+#endif
                    append({"-Xflang", "-plugin", "-Xflang", "polyfc"});
                    envs.emplace_back(PolyfrontExe, execPath);
                    envs.emplace_back(PolyfrontVerbose, debug ? "1" : "0");
@@ -119,6 +129,23 @@ int main(int argc, const char *argv[]) {
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), joinPath(polyfcLibPath, staticLibraryName("polydco-static")));
+#if defined(_WIN32)
+                       // flang Fortran sources cannot use #pragma comment(lib); inject the
+                       // Windows system imports that polydco-static depends on directly.
+                       append({"-Xlinker", "Version.lib", "-Xlinker", "psapi.lib", "-Xlinker", "ntdll.lib", "-Xlinker", "ws2_32.lib",
+                               "-Xlinker", "ole32.lib", "-Xlinker", "shell32.lib", "-Xlinker", "advapi32.lib", "-Xlinker", "uuid.lib",
+                               "-Xlinker", "delayimp.lib"});
+                       // flang_rt uses __udivti3 (128-bit div); pull clang_rt.builtins from
+                       // the resource dir since MSVC libucrt lacks it.
+                       for (const auto &resRoot :
+                            {joinPath(execParentPath, "..", "lib", "clang/22"), std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")}) {
+                         const auto builtins = joinPath(resRoot, "lib", "windows", "clang_rt.builtins-x86_64.lib");
+                         if (llvm::sys::fs::exists(builtins)) {
+                           append({"-Xlinker", builtins});
+                           break;
+                         }
+                       }
+#endif
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
@@ -142,9 +169,37 @@ int main(int argc, const char *argv[]) {
                  }
                }
 
-               remaining[0] = "flang-new";
                for (auto [k, v] : envs)
                  polyregion::env::put(k, v.c_str(), true);
+#ifdef POLYREGION_FUSED_DRIVER
+               // Probe install-relative paths first so the binary works both installed and
+               // from the build tree. XXX flang_rt sentinel hard-codes the MSVC triple;
+               // non-Windows fused builds skip this path until parameterised.
+               auto firstWith = [](llvm::StringRef sentinel, std::initializer_list<std::string> roots) -> std::string {
+                 for (const auto &root : roots)
+                   if (llvm::sys::fs::exists(joinPath(root, sentinel))) return root;
+                 return {};
+               };
+               if (auto modDir = firstWith("iso_fortran_env.mod", {joinPath(execParentPath, "..", "include", "flang"),
+                                                                   std::string(POLYFC_FUSED_LLVM_BUILD_DIR "/include/flang")});
+                   !modDir.empty()) {
+                 remaining.push_back("-fintrinsic-modules-path=" + modDir);
+               }
+               if (auto resDir =
+                       firstWith("lib/x86_64-pc-windows-msvc/flang_rt.runtime.static.lib",
+                                 {joinPath(execParentPath, "..", "lib", "clang/22"), std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")});
+                   !resDir.empty()) {
+                 remaining.push_back("-resource-dir");
+                 remaining.push_back(resDir);
+               }
+               remaining[0] = execPath;
+               std::vector<const char *> rawArgs;
+               rawArgs.reserve(remaining.size());
+               for (auto &arg : remaining)
+                 rawArgs.push_back(arg.c_str());
+               return flang_main(static_cast<int>(rawArgs.size()), rawArgs.data());
+#else
                return llvm::sys::ExecuteAndWait(flangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
+#endif
              });
 }

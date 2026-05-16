@@ -1,5 +1,10 @@
 #pragma once
 
+#include "llvm/ADT/DenseMap.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Value.h"
+#include "mlir/Interfaces/DataLayoutInterfaces.h"
+
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
 

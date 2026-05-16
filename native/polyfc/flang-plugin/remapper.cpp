@@ -26,6 +26,7 @@
 
 #include "polyregion/llvm_dyn.hpp"
 
+#include "ast.h"
 #include "ftypes.h"
 #include "parallel.h"
 #include "rewriter.h"

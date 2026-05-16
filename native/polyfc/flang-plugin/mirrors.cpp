@@ -1,5 +1,8 @@
 #include "mirrors.h"
 
+#include "aspartame/all.hpp"
+
+#include "ast.h"
 #include "ftypes.h"
 
 using namespace polyregion::polyfc;

@@ -12,8 +12,10 @@
 
 #include "ftypes.h"
 
-static std::unordered_map<uintptr_t, size_t> ptrRecords;
-static std::mutex mutex;
+// XXX Intentionally leaked: the SMA destructor below runs free callbacks at shutdown that
+// route through these maps; file-scope statics would already be gone by then.
+static auto &ptrRecords = *new std::unordered_map<uintptr_t, size_t>();
+static auto &recordsMutex = *new std::mutex();
 
 using namespace polyregion;
 using polyrt::DebugLevel;
@@ -80,13 +82,13 @@ static void dumpAllocations() {
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_record(void *ptr, const size_t size) {
-  std::unique_lock lock(mutex);
+  std::unique_lock lock(recordsMutex);
   log(DebugLevel::Debug, "polydco_record(%p, %ld)", ptr, size);
   ptrRecords[reinterpret_cast<uintptr_t>(ptr)] = size;
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release(void *ptr) {
-  std::unique_lock lock(mutex);
+  std::unique_lock lock(recordsMutex);
   log(DebugLevel::Debug, "polydco_release(%p)", ptr);
   ptrRecords.erase(reinterpret_cast<uintptr_t>(ptr));
   // XXX Keep the SVM mirror; Intel coarse-grain clSVMAlloc reuses freed addresses and collides
@@ -267,6 +269,23 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   const polydco::FHostThreadedPrelude prelude{lowerBoundInclusive, upperBoundInclusive, step, tripCount, begins.data(), ends.data()};
   std::memcpy(captures, &prelude, sizeof(polydco::FHostThreadedPrelude));
 
+  if (polyrt::debugLevel() >= DebugLevel::Debug) {
+    const auto preludeSize = sizeof(polydco::FHostThreadedPrelude);
+    std::fprintf(stderr, "[HostTrace] captures=%p, layout->sizeInBytes=%zu, preludeSize=%zu\n", static_cast<void *>(captures),
+                 layout->sizeInBytes, preludeSize);
+    for (size_t i = 0; i < layout->memberCount; ++i) {
+      std::fprintf(stderr, "[HostTrace] member[%zu] %s offset=%zu size=%zu", i, layout->members[i].name, layout->members[i].offsetInBytes,
+                   layout->members[i].sizeInBytes);
+      if (layout->members[i].sizeInBytes == sizeof(void *)) {
+        void *ptr;
+        std::memcpy(&ptr, captures + layout->members[i].offsetInBytes, sizeof(ptr));
+        std::fprintf(stderr, " ptr=%p", ptr);
+      }
+      std::fprintf(stderr, "\n");
+    }
+    std::fflush(stderr);
+  }
+
   ManagedPartialReduction mpr(reductions, groups);
   mpr.allocatePartialsAsync();
   using namespace invoke;
@@ -274,12 +293,27 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch hostthreaded", __func__, moduleId, tripCount);
   polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{groups, 1, 1}}, [&]() { mpr.releaseAndReduce(); });
   polyrt::currentQueue->enqueueWaitBlocking();
+  if (polyrt::debugLevel() >= DebugLevel::Debug) {
+    for (size_t i = 0; i < layout->memberCount; ++i) {
+      if (layout->members[i].sizeInBytes == sizeof(void *)) {
+        void *ptr;
+        std::memcpy(&ptr, captures + layout->members[i].offsetInBytes, sizeof(ptr));
+        if (ptr) {
+          int32_t val32 = 0;
+          std::memcpy(&val32, ptr, sizeof(val32));
+          std::fprintf(stderr, "[HostTrace] post-kernel: %s ptr=%p *(i32)=%d\n", layout->members[i].name, ptr, val32);
+        }
+      }
+    }
+    std::fflush(stderr);
+  }
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, tripCount);
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_is_platformkind(const runtime::PlatformKind kind) {
   polyrt::initialise();
-  return polyrt::currentPlatform->kind() == kind;
+  // currentPlatform may be null when backend init fails (missing runtime library).
+  return polyrt::currentPlatform && polyrt::currentPlatform->kind() == kind;
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive,
@@ -341,11 +375,12 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
   }
 
   if (!polyrt::hostFallback()) {
+    // Exit 77 (autotools SKIP convention) so unsupported (backend, device, image) combos
+    // are reported as skipped, not failed.
     log(DebugLevel::None,
-        "Dispatch failed for %s: No compatible backend found after trying %zu different objects and host fallback is disabled, "
-        "terminating program...",
+        "Dispatch failed for %s: no compatible backend after trying %zu kernel objects, host fallback disabled - exiting 77 (skip)",
         bundle->moduleName, attempts);
-    std::abort();
+    polyrt::noCompatibleKernelExit("polydco_dispatch");
   }
 
   return false;

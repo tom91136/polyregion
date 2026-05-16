@@ -23,6 +23,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/options_backend.hpp"
@@ -471,21 +472,25 @@ public:
     auto noDispatchIf = fir::IfOp::create(B, uLoc(B), noDispatch, true);
     {
       auto ifNoDispatchB = noDispatchIf.getThenBodyBuilder();
+      // Backend declined or no kernel loaded; fall through to the host doLoop.
       LLVM::StoreOp::create(ifNoDispatchB, uLoc(B), boolConst(ifNoDispatchB, true), executeOriginal);
     }
     {
       auto ifDispatchB = noDispatchIf.getElseBodyBuilder();
+      LLVM::StoreOp::create(ifDispatchB, uLoc(B), boolConst(ifDispatchB, false), executeOriginal);
       binder.releaseTemporaries(ifDispatchB);
     }
   }
 };
 
 constexpr auto DoConcurrentAsWritten = "dco-as-written";
+// XXX file-scope rather than function-scope so inner-class methods (HoistInductionStore) can
+// access them; MSVC's strict conformance rejects nested-class access to enclosing function
+// constexpr names (C2326).
+constexpr auto InductionStoreHoisted = "dco-induction-store-hoisted";
+constexpr auto HoistedStoreOp = "dco-hoisted-store-op";
 
 void doRewrite(ModuleOp op) {
-
-  constexpr auto InductionStoreHoisted = "dco-induction-store-hoisted";
-  constexpr auto HoistedStoreOp = "dco-hoisted-store-op";
 
   // this is OK because redefinition of DO variable is not legal (e.g. so we don't expect a store)
   struct HoistInductionStore : OpRewritePattern<fir::DoLoopOp> {
@@ -605,21 +610,21 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       llvm::errs() << " === Rewrite: " << moduleId << " === ";
 
       // The overall outlining logic is as follows:
-      //   bool executeOriginal = false;
+      //   bool executeOriginal = true;
       //   if (isPlatformKind($Kind)) {
       //     Capture capture = <create $Kind captures>
-      //     if(!dispatch(layout, capture, $Kind)) executeOriginal = true;
+      //     if (dispatch(layout, capture, $Kind)) executeOriginal = false;
       //   } else if(isPlatformKind($Kind)) {
       //     (repeat)
-      //   } else { assert("Unknown kind") }
+      //   }
       //   if (executeOriginal) (call original DoConcurrent)
+      //
+      // Default-true so unmatched platforms (no backend init succeeded, no compatible GPU)
+      // still run the host doLoop instead of silently no-op'ing.
 
-      // At just before the doLoop
       B.setInsertionPoint(doLoop);
-      // Create the guard variable
       auto executeOriginal = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());
-      // Guard is false by default
-      LLVM::StoreOp::create(B, uLoc(B), boolConst(B, false), executeOriginal);
+      LLVM::StoreOp::create(B, uLoc(B), boolConst(B, true), executeOriginal);
       const auto dispatchKind = [&](OpBuilder &B0, const runtime::PlatformKind kind) {
         rewriter.invokeDispatch(B0, executeOriginal, kind, diag, diagLoc, opts, moduleId, doLoop);
       };
