@@ -74,8 +74,8 @@ constexpr const char *to_string(const Type t) {
 
 #ifndef __RT_IMPL
   #if defined(_MSC_VER)
-extern "C" inline PtrMeta _rt_reflect_p(const void *) { return PtrMeta{0, 0, Type::Unknown}; }
-extern "C" inline PtrMeta _rt_reflect_v(uintptr_t) { return PtrMeta{0, 0, Type::Unknown}; }
+extern "C" PtrMeta _rt_reflect_p(const void *ptr);
+extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
   #else
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
@@ -199,14 +199,10 @@ public:
 
   __RT_ODR void blockingRecord(const PtrInfo &info, const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
-    // safe_fprintf(stderr, "[PtrReflect] record %p(size=%ld, type=%s)\n", reinterpret_cast<void *>(info.ptr), info.size,
-    //              to_string(info.type));
-
-    auto inserted = data.emplace(info.base, PtrRecord{now, info});
-    if (!inserted) {
-      safe_fprintf(stderr, "[PtrReflect] failed to insert %p (size=%ld, type=%s)\n", reinterpret_cast<void *>(info.base), info.size,
-                   to_string(info.type));
-      fail();
+    // XXX upsert: foreign HeapFree paths can recycle addresses without notifying us.
+    if (!data.emplace(info.base, PtrRecord{now, info})) {
+      data.erase(info.base);
+      data.emplace(info.base, PtrRecord{now, info});
     }
   }
 
@@ -271,10 +267,8 @@ __RT_ODR inline ReflectService *_rt_get() {
 }
 inline auto _ = _rt_get();
 
-// Thread-local re-entry flag. Without it, a throw inside a service call (e.g. EDEADLK from
-// double-locking the shared_mutex) calls `__cxa_allocate_exception` which calls `malloc`,
-// re-enters `_rt_record`, locks the same mutex, throws EDEADLK again — recursing until the
-// stack is exhausted. Internal allocations (HashMap rehash/emplace) trip the same path.
+// XXX TLS re-entry flag: a throw inside a service call mallocs an exception, which would
+// re-enter _rt_record on the same mutex; same for internal HashMap rehash/emplace.
 __RT_ODR inline bool &_rt_in_service() {
   thread_local bool inService = false;
   return inService;

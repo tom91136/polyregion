@@ -18,16 +18,15 @@ using namespace polyregion;
 
 static bool runSplice(llvm::Module &M, const bool verbose) {
   auto &C = M.getContext();
-  auto RecordFn = M.getFunction("_rt_record");
-  auto ReleaseFn = M.getFunction("_rt_release");
-  if (!RecordFn) {
-    llvm::errs() << "[RecordStackPass] _rt_record not found, giving up\n";
-    return false;
-  }
-  if (!ReleaseFn) {
-    llvm::errs() << "[RecordStackPass] _rt_release not found, giving up\n";
-    return false;
-  }
+  // XXX getOrInsertFunction: bodies live in polystl-static / polydco-static.
+  auto *i8Ty = llvm::Type::getInt8Ty(C);
+  auto *i64Ty = llvm::Type::getInt64Ty(C);
+  auto *voidTy = llvm::Type::getVoidTy(C);
+  auto *ptrTy = llvm::PointerType::get(C, 0);
+  auto *recordTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i8Ty}, false);
+  auto *releaseTy = llvm::FunctionType::get(voidTy, {ptrTy, i8Ty}, false);
+  auto RecordFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_record", recordTy).getCallee());
+  auto ReleaseFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_release", releaseTy).getCallee());
 
   std::unordered_set<llvm::Function *> Protected;
   llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {

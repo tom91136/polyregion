@@ -54,11 +54,20 @@ extern "C" inline void __interposed_free(void *ptr) {
 
 #else
 
-extern "C" inline void *__interposed_malloc(const size_t size) { return std::malloc(size); }
-extern "C" inline void *__interposed_calloc(const size_t nmemb, const size_t size) { return std::calloc(nmemb, size); }
-extern "C" inline void *__interposed_realloc(void *ptr, const size_t size) { return std::realloc(ptr, size); }
-extern "C" inline void *__interposed_memalign(size_t, const size_t size) { return std::malloc(size); }
-extern "C" inline void __interposed_free(void *ptr) { std::free(ptr); }
+// XXX HeapAlloc bypasses InterposePass; std::malloc would recurse via _rt_record during init.
+  #include <windows.h>
+extern "C" inline void *__interposed_malloc(const size_t size) { return ::HeapAlloc(::GetProcessHeap(), 0, size); }
+extern "C" inline void *__interposed_calloc(const size_t nmemb, const size_t size) {
+  return ::HeapAlloc(::GetProcessHeap(), HEAP_ZERO_MEMORY, nmemb * size);
+}
+extern "C" inline void *__interposed_realloc(void *ptr, const size_t size) {
+  if (!ptr) return ::HeapAlloc(::GetProcessHeap(), 0, size);
+  return ::HeapReAlloc(::GetProcessHeap(), 0, ptr, size);
+}
+extern "C" inline void *__interposed_memalign(size_t, const size_t size) { return ::HeapAlloc(::GetProcessHeap(), 0, size); }
+extern "C" inline void __interposed_free(void *ptr) {
+  if (ptr) ::HeapFree(::GetProcessHeap(), 0, ptr);
+}
 
 #endif
 

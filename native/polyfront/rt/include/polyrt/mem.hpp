@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -110,8 +111,24 @@ class SynchronisedMemAllocation {
       const uintptr_t memberRemotePtr = pastEnd ? baseRemotePtr + meta.offsetInBytes : baseRemotePtr;
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
-      std::fprintf(stderr, "[SMA] Warning: encountered foreign pointer %p when writing type @%s at offset %zu\n",
-                   static_cast<void *>(memberLocalPtr), tl.name, memberOffsetInBytes);
+      // XXX First-foreign-pointer warning: polyreflect is inactive, so captured heap pointers
+      // cannot be sized or mirrored to the device.
+      static std::atomic<bool> warnedOnce{false};
+      bool expected = false;
+      if (warnedOnce.compare_exchange_strong(expected, true)) {
+        std::fprintf(
+            stderr,
+            "[SMA] WARNING: polyreflect tracking is INACTIVE - captured heap pointers will not be mirrored to the device.\n"
+            "[SMA]          First foreign pointer %p (type @%s at offset %zu of captures).\n"
+            "[SMA]          You might have built with -fstdpar-mem=direct without USM, or the polyreflect plugin failed to load/link.\n"
+            "[SMA]          To resolve, rebuild/run with -fstdpar-mem=interpose (clang pass-plugin) or -fstdpar-mem=reflect (LLD "
+            "pass-plugin).\n"
+            "[SMA]          Further foreign pointers will be silently skipped this run.\n",
+            static_cast<void *>(memberLocalPtr), tl.name, memberOffsetInBytes);
+      } else if (debug) {
+        std::fprintf(stderr, "[SMA] foreign pointer %p when writing type @%s at offset %zu\n", static_cast<void *>(memberLocalPtr), tl.name,
+                     memberOffsetInBytes);
+      }
     }
   }
 
@@ -194,8 +211,9 @@ class SynchronisedMemAllocation {
       std::fprintf(stderr, "[SMA] readSubObject(p=%p, memberOffsetInBytes=%zu)\n", static_cast<const void *>(p), memberOffsetInBytes);
     if (char *memberRemotePtr = readPtrValue(p + memberOffsetInBytes); !memberRemotePtr) {
       std::memset(p + memberOffsetInBytes, 0, sizeof(uintptr_t));
-    } else if (const auto query = offsetQuery(remoteToLocalPtr, memberRemotePtr, [](auto &x) { return x.sizeInBytes; },
-                                              /*allowPastEnd*/ true)) {
+    } else if (const auto query = offsetQuery(
+                   remoteToLocalPtr, memberRemotePtr, [](auto &x) { return x.sizeInBytes; },
+                   /*allowPastEnd*/ true)) {
       auto [alloc, offset] = *query;
       syncRemoteToLocal(reinterpret_cast<void *>(alloc->ptr), alloc->sizeInBytes);
       // The remote pointer can target an interior position — e.g. the std::list last-node

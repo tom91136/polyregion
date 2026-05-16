@@ -17,6 +17,9 @@
 
 // NOLINTBEGIN(misc-definitions-in-headers)
 
+// XXX skip MSVC; libucrt's malloc/free are strong externs (LNK2005); InterposePass rewrites callers directly.
+#if !defined(_MSC_VER)
+
 extern "C" __ALLOC void *malloc(const size_t size) {
   const auto ptr = __RT_ALTERNATIVE(malloc)(size);
   _rt_record(ptr, size, polyregion::rt_reflect::Type::HeapMalloc);
@@ -52,6 +55,8 @@ extern "C" __FREE void free(void *ptr) {
   __RT_ALTERNATIVE(free)(ptr);
   _rt_release(ptr, polyregion::rt_reflect::Type::HeapFree);
 }
+
+#endif // !_MSC_VER
 
 __ALLOC void *operator new(const size_t size) {
   auto *ptr = __RT_ALTERNATIVE(malloc)(size);

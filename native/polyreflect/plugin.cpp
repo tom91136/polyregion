@@ -1,3 +1,4 @@
+#include "llvm/IR/Comdat.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -35,10 +36,13 @@ public:
   explicit ProtectRTPass(bool verbose) : verbose(verbose) {}
 
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
+    // XXX COFF needs a comdat for LinkOnceODR; ELF/Mach-O don't.
+    const bool isCOFF = M.getTargetTriple().isOSBinFormatCOFF();
     llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
       if (F && Annotation == "polyreflect-rt-odr") {
         if (verbose) llvm::errs() << "[ProtectRTPass] LinkOnceODRLinkage for " << F->getName().str() << "\n";
         F->setLinkage(llvm::GlobalValue::LinkOnceODRLinkage);
+        if (isCOFF && !F->hasComdat()) F->setComdat(M.getOrInsertComdat(F->getName()));
       }
     });
     return llvm::PreservedAnalyses::none();

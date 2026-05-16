@@ -1,12 +1,20 @@
 #include <algorithm>
 #include <cstdarg>
+#include <mutex>
+#include <unordered_set>
 
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyinvoke/device_lock.h"
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/types.h"
 #include "polyrt/rt.h"
+
+// XXX __RT_IMPL defines polyreflect-rt singletons in this TU so SMA's localReflect can resolve
+// captured pointers. On Windows the HashMap allocator routes through HeapAlloc (rt_protected.hpp)
+// to avoid recursing back into polyrt_usm_* via InterposePass.
+#include "reflect-rt/rt.hpp"
 
 constexpr auto PlatformSelectorEnv = "POLYRT_PLATFORM";
 constexpr auto DeviceSelectorEnv = "POLYRT_DEVICE";
@@ -30,11 +38,17 @@ static std::optional<size_t> parseIntNoExcept(const char *str) {
   return value;
 }
 
+// Preserved so DeviceLock can key against the (backend, device) actually selected.
+static std::optional<Backend> selectedBackend;
+
 static void setupBackend(const Backend backend) {
   auto errorOrPlatform = Platform::of(backend);
   if (const auto err = errorOrPlatform ^ get_maybe<std::string>())
     log(DebugLevel::None, "Backend %s failed to initialise: %s", magic_enum::enum_name(backend).data(), err->c_str());
-  else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
+  else {
+    polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
+    selectedBackend = backend;
+  }
 }
 
 namespace {
@@ -129,6 +143,16 @@ void polyregion::polyrt::initialise() {
           strict = true;
         }
         selectDevice(*currentPlatform, requiredFeatures, effectiveHint, strict);
+      }
+      // Test-only: cross-process lock so ctest -j workers do not race on the same device.
+      // Held for process lifetime; the file lock auto-releases on exit.
+      if (currentDevice && selectedBackend) {
+        if (const auto env = std::getenv(polyregion::invoke::DeviceLockEnv); env && env[0] == '1') {
+          static std::optional<polyregion::invoke::DeviceLock> currentDeviceLock;
+          log(DebugLevel::Info, "<%s> Acquiring DeviceLock for (%s, %s)", __func__, magic_enum::enum_name(*selectedBackend).data(),
+              currentDevice->name().c_str());
+          currentDeviceLock.emplace(*selectedBackend, currentDevice->name());
+        }
       }
       if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
       if (currentPlatform) {
@@ -252,47 +276,92 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   return true;
 }
 
-static void *sharedAlloc(const size_t size) {
-  if (const auto p = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) return *p;
-  log(DebugLevel::None, "Device %s does not support shared allocation, aborting...\n", polyregion::polyrt::currentDevice->name().c_str());
-  std::abort();
+// XXX InterposePass routes every free/delete here, but not every pointer was allocated by us
+// (pre-init static ctors, foreign runtimes, untouched TUs). Track our own allocations so
+// foreign pointers fall through instead of being passed to the backend free.
+//
+// XXX Intentionally leaked: the SMA destructor at shutdown re-enters this allocator via delete
+// callbacks; function-local statics would already be destroyed.
+static std::mutex &usmAllocSetMutex() {
+  static auto *m = new std::mutex();
+  return *m;
+}
+static std::unordered_set<void *> &usmAllocSet() {
+  static auto *s = new std::unordered_set<void *>();
+  return *s;
 }
 
-static void sharedFree(void *p) { polyregion::polyrt::currentDevice->freeShared(p); }
+static void *sharedAllocTracked(const size_t size, const polyregion::rt_reflect::Type recordType) {
+  void *p = nullptr;
+  if (polyregion::polyrt::currentDevice) {
+    if (const auto shared = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) p = *shared;
+  }
+  if (!p) p = std::malloc(size);
+  if (p) {
+    std::lock_guard<std::mutex> g(usmAllocSetMutex());
+    usmAllocSet().insert(p);
+    // Recording lets SMA's localReflect size the pointer when walking captured fields;
+    // safe because polyreflect-rt's allocator bypasses InterposePass.
+    polyregion::rt_reflect::_rt_record(p, size, recordType);
+  }
+  return p;
+}
+
+static void sharedFreeTracked(void *p, const polyregion::rt_reflect::Type releaseType) {
+  if (!p) return;
+  bool tracked = false;
+  {
+    std::lock_guard<std::mutex> g(usmAllocSetMutex());
+    tracked = usmAllocSet().erase(p) > 0;
+  }
+  polyregion::rt_reflect::_rt_release(p, releaseType);
+  if (tracked && polyregion::polyrt::currentDevice) {
+    polyregion::polyrt::currentDevice->freeShared(p);
+    return;
+  }
+  if (tracked) {
+    std::free(p);
+    return;
+  }
+  // Untracked: free spliced by InterposePass but the alloc was foreign (pre-init, foreign CRT,
+  // uninstrumented TU). Leak rather than risk freeing on the wrong heap.
+}
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAlloc(size);
+  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMalloc);
   log(DebugLevel::Debug, "%p = polyrt_usm_malloc(%zu)", p, size);
   return p;
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_calloc(const size_t nmemb, const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAlloc(nmemb * size);
+  const auto total = nmemb * size;
+  const auto p = sharedAllocTracked(total, polyregion::rt_reflect::Type::HeapCalloc);
+  if (p) std::memset(p, 0, total);
   log(DebugLevel::Debug, "%p = polyrt_usm_calloc(%zu, %zu)", p, nmemb, size);
   return p;
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_realloc(void *ptr, const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAlloc(size);
+  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapRealloc);
   log(DebugLevel::Debug, "%p = polyrt_usm_realloc(%p, %zu)", p, ptr, size);
-  std::memcpy(p, ptr, size);
-  sharedFree(ptr);
+  if (p && ptr) std::memcpy(p, ptr, size);
+  if (ptr) sharedFreeTracked(ptr, polyregion::rt_reflect::Type::HeapFree);
   return p;
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_memalign(const size_t /*alignment*/, const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAlloc(size);
+  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMemalign);
   log(DebugLevel::Debug, "%p = polyrt_usm_memalign(%zu)", p, size);
   return p;
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_aligned_alloc(size_t /*alignment*/, const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAlloc(size);
+  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapAlignedAlloc);
   log(DebugLevel::Debug, "%p = polyrt_usm_aligned_alloc(%zu)", p, size);
   return p;
 }
@@ -300,12 +369,12 @@ POLYREGION_EXPORT extern "C" void *polyrt_usm_aligned_alloc(size_t /*alignment*/
 POLYREGION_EXPORT extern "C" void polyrt_usm_free(void *ptr) {
   polyregion::polyrt::initialise();
   log(DebugLevel::Debug, "polyrt_usm_free(%p)", ptr);
-  sharedFree(ptr);
+  sharedFreeTracked(ptr, polyregion::rt_reflect::Type::HeapFree);
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_operator_new(const size_t size) {
   polyregion::polyrt::initialise();
-  const auto p = sharedAlloc(size);
+  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapCXXNew);
   log(DebugLevel::Debug, "%p = polyrt_usm_operator_new(%zu)", p, size);
   return p;
 }
@@ -313,11 +382,11 @@ POLYREGION_EXPORT extern "C" void *polyrt_usm_operator_new(const size_t size) {
 POLYREGION_EXPORT extern "C" void polyrt_usm_operator_delete(void *ptr) {
   polyregion::polyrt::initialise();
   log(DebugLevel::Debug, "polyrt_usm_operator_delete(%p)", ptr);
-  sharedFree(ptr);
+  sharedFreeTracked(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_usm_operator_delete_sized(void *ptr, size_t /*size*/) {
   polyregion::polyrt::initialise();
   log(DebugLevel::Debug, "polyrt_usm_operator_delete_sized(%p)", ptr);
-  sharedFree(ptr);
+  sharedFreeTracked(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
 }
