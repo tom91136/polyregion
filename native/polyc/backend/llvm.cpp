@@ -122,6 +122,10 @@ ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
 
 ValPtr CodeGen::findStackVar(const Named &named) {
   if (named.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
+  // Nothing-typed names are absent from stackVarPtrs (FunctionType::get rejects void params).
+  // Return a pointer-typed poison so synthetic refs from the rewriter compile - downstream
+  // GEP/load expect a pointer slot.
+  if (named.tpe.is<Type::Nothing>()) return llvm::PoisonValue::get(llvm::PointerType::getUnqual(C.actual));
   //  check the LUT table for known variables defined by var or brought in scope by parameters
   return stackVarPtrs ^ get_maybe(named.symbol) ^
          fold(
@@ -234,9 +238,13 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
         return llvm::ConstantPointerNull::get(llvm::PointerType::get(C.actual, C.addressSpace(x.space)));
       },
       [&](const Term::Poison &x) -> ValPtr {
-        if (auto tpe = resolveType(x.t); llvm::isa<llvm::PointerType>(tpe)) {
+        // Pointer poison maps to null (analyses treat it as poison-equivalent); other types use
+        // PoisonValue so non-pointer Poison nodes from the rewriter do not abort codegen.
+        auto tpe = resolveType(x.t);
+        if (llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
-        } else throw BackendException("unimplemented");
+        }
+        return llvm::PoisonValue::get(tpe);
       },
       [&](const Term::Select &x) -> ValPtr {
         if (x.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
@@ -401,6 +409,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           return from;
         }
 
+        // Casts to/from a None-kind type (Nothing/Unit0/Exec) are no-ops: void-shaped types carry no value.
+        if (x.from.tpe().kind().is<TypeKind::None>() || x.as.kind().is<TypeKind::None>()) {
+          return from;
+        }
+
         auto fromKind = x.from.tpe().kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
@@ -450,7 +463,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         if (x.receiver) allArgs.push_back(*x.receiver);
         for (auto &a : x.args)
           allArgs.push_back(a);
-        const auto argNoUnit = allArgs ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
+        // Mirror the declaration filter: drop Unit0/Nothing args; both lower to LLVM void at the boundary.
+        const auto argNoUnit = allArgs ^ filter([](auto &arg) {
+                                 return !arg.tpe().template is<Type::Unit0>() //
+                                        && !arg.tpe().template is<Type::Nothing>();
+                               });
         const auto sig = Signature(x.name, /*tpeVars*/ {}, /*receiver*/ {}, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }),
                                    /*moduleCaptures*/ {}, /*termCaptures*/ {}, x.rtn);
         return functions ^ get_maybe(sig) ^
@@ -607,8 +624,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
               B.CreateMemCpy(stackPtr, llvm::MaybeAlign(info.layout.alignment), rhs, llvm::MaybeAlign(info.layout.alignment),
                              info.layout.sizeInBytes);
             } else {
-              if (tpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != tpe)
-                rhs = B.CreateAddrSpaceCast(rhs, tpe);
+              if (tpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != tpe) rhs = B.CreateAddrSpaceCast(rhs, tpe);
               const auto _ = C.store(B, rhs, stackPtr); //
             }
           }
@@ -634,8 +650,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           return BlockKind::Normal;
         }
         const auto slotTpe = resolveType(lhs.tpe);
-        if (slotTpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != slotTpe)
-          rhs = B.CreateAddrSpaceCast(rhs, slotTpe);
+        if (slotTpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != slotTpe) rhs = B.CreateAddrSpaceCast(rhs, slotTpe);
         const auto _ = C.store(B, rhs, dst);
         return BlockKind::Normal;
       },
@@ -662,7 +677,8 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto gepTy = componentIsSizedArray ? resolveType(lhs.tpe) : valTy;
         const auto getPtr = [&]() -> llvm::Value * {
           if (componentIsSizedArray) {
-            return B.CreateInBoundsGEP(gepTy, dest, {llvm::ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)}, qualified(lhs) + "_update_ptr");
+            return B.CreateInBoundsGEP(gepTy, dest, {llvm::ConstantInt::get(C.i32Ty(), 0), mkTermVal(x.idx)},
+                                       qualified(lhs) + "_update_ptr");
           }
           if (spirvStructByMemcpy()) {
             auto *elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(valTy));
@@ -823,8 +839,12 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   for (auto &a : fn.args)
     allArgs.push_back(a);
 
-  // Unit types in arguments are discarded
-  const auto argsNoUnit = allArgs | filter([](auto &arg) { return !arg.named.tpe.template is<Type::Unit0>(); }) | to_vector();
+  // Drop Unit0/Nothing args: both lower to void, which FunctionType::get's isValidArgumentType asserts.
+  const auto argsNoUnit = allArgs | filter([](auto &arg) {
+                            return !arg.named.tpe.template is<Type::Unit0>() //
+                                   && !arg.named.tpe.template is<Type::Nothing>();
+                          }) //
+                          | to_vector();
 
   const bool useSret = shouldUseSret(cg, fn);
 
@@ -833,8 +853,8 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
                       : fn.rtn.is<Type::Struct>()           ? cg.resolveType(fn.rtn, false)
                                                             : cg.resolveType(fn.rtn, true);
 
-  auto argTys = argsNoUnit                                                                                //
-                | map([&](auto &arg) { return cg.resolveType(arg.named.tpe, true, fn.isEntry); })         //
+  auto argTys = argsNoUnit                                                                        //
+                | map([&](auto &arg) { return cg.resolveType(arg.named.tpe, true, fn.isEntry); }) //
                 | to_vector();
 
   if (useSret) argTys.insert(argTys.begin(), llvm::PointerType::get(cg.C.actual, cg.C.AllocaAS));
@@ -963,6 +983,8 @@ ValPtr CodeGen::unaryNumOp(const AnyExpr &expr, const AnyTerm &arg, const AnyTyp
   return unaryExpr(expr, arg, rtn, [&](auto lhs) -> ValPtr {
     if (rtn.kind().is<TypeKind::Integral>()) return integralFn(lhs);
     if (rtn.kind().is<TypeKind::Fractional>()) return fractionalFn(lhs);
+    // None-kind result (Nothing/Unit0/Exec) needs a sized poison; void poison is unrepresentable, so use i8.
+    if (rtn.kind().is<TypeKind::None>()) return llvm::PoisonValue::get(llvm::Type::getInt8Ty(C.actual));
     throw BackendException("unimplemented");
   });
 }
@@ -971,6 +993,7 @@ ValPtr CodeGen::binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm
   return binaryExpr(expr, l, r, rtn, [&](auto lhs, auto rhs) -> ValPtr {
     if (rtn.kind().is<TypeKind::Integral>()) return integralFn(lhs, rhs);
     if (rtn.kind().is<TypeKind::Fractional>()) return fractionalFn(lhs, rhs);
+    if (rtn.kind().is<TypeKind::None>()) return llvm::PoisonValue::get(llvm::Type::getInt8Ty(C.actual));
     throw BackendException("unimplemented");
   });
 }

@@ -49,6 +49,8 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
       GenericAS = 4; // Generic
       break;
   }
+  spirvKernel = options.target == LLVMBackend::Target::SPIRV32_Kernel || //
+                options.target == LLVMBackend::Target::SPIRV64_Kernel;
 }
 
 llvm::Type *TargetedContext::i32Ty() { return llvm::Type::getInt32Ty(actual); }
@@ -118,6 +120,15 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
   const auto ptrAS = [&](const TypeSpace::Any &space) {
     return (kernelEntryArg && functionBoundary) ? addressSpaceForKernelArg(space) : addressSpace(space);
   };
+  // void is fine as a return or discarded arg, but DataLayout::getAlignment asserts on a void
+  // struct member. Use [0 x i8] (size 0, align 1) inside a struct so layout queries succeed;
+  // SPIR-V Kernel lowers that to OpTypeRuntimeArray and rejects it outside shader modules, so
+  // fall back to plain i8 there.
+  auto voidLike = [&]() -> llvm::Type * {
+    if (functionBoundary) return llvm::Type::getVoidTy(actual);
+    if (spirvKernel) return llvm::Type::getInt8Ty(actual);
+    return llvm::ArrayType::get(llvm::Type::getInt8Ty(actual), 0);
+  };
   return tpe.match_total(                                                                     //
       [&](const Type::Float16 &) -> llvm::Type * { return llvm::Type::getHalfTy(actual); },   //
       [&](const Type::Float32 &) -> llvm::Type * { return llvm::Type::getFloatTy(actual); },  //
@@ -133,8 +144,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       [&](const Type::IntS32 &) -> llvm::Type * { return llvm::Type::getInt32Ty(actual); }, //
       [&](const Type::IntS64 &) -> llvm::Type * { return llvm::Type::getInt64Ty(actual); }, //
 
-      [&](const Type::Nothing &) -> llvm::Type * { return llvm::Type::getVoidTy(actual); },                         //
-      [&](const Type::Unit0 &) -> llvm::Type * { return llvm::Type::getVoidTy(actual); },                           //
+      [&](const Type::Nothing &) -> llvm::Type * { return voidLike(); }, [&](const Type::Unit0 &) -> llvm::Type * { return voidLike(); },
       [&](const Type::Bool1 &) -> llvm::Type * { return llvm::Type::getIntNTy(actual, functionBoundary ? 8 : 1); }, //
 
       [&](const Type::Struct &x) -> llvm::Type * {
@@ -149,13 +159,14 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
                                                            return fmt::format(" -> {}", to_string(ty.def));
                                                          })));
                     });
-      },                                                                                                         //
+      },                                                                                                  //
       [&](const Type::Ptr &x) -> llvm::Type * { return llvm::PointerType::get(actual, ptrAS(x.space)); }, //
       [&](const Type::Arr &x) -> llvm::Type * {
-        // At a function boundary, a sized array travels as a pointer to its element type (matching
-        // C array decay). Inside the function body, the LLVM `[N x T]` aggregate is kept so a
-        // [0, idx] GEP can index it.
+        // Sized arrays decay to a pointer at function boundaries (matching C); inside a struct
+        // body keep [N x T] for [0, idx] GEPs. SPIR-V Kernel forbids [0 x T] (see voidLike), so
+        // collapse to i8.
         if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(TypeSpace::Global()));
+        if (spirvKernel && x.length == 0) return llvm::Type::getInt8Ty(actual);
         return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
       }, //
       [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },

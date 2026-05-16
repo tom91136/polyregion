@@ -5,12 +5,6 @@
 using namespace polyregion::backend::details;
 using namespace aspartame;
 
-// Queue a memory fence to ensure correct ordering of memory operations to local memory
-constexpr static uint32_t CLK_LOCAL_MEM_FENCE = 0x01;
-
-// Queue a memory fence to ensure correct ordering of memory operations to global memory
-constexpr static uint32_t CLK_GLOBAL_MEM_FENCE = 0x02;
-
 void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
   fn.addFnAttr(llvm::Attribute::Convergent);
   fn.addFnAttr(llvm::Attribute::NoRecurse);
@@ -103,8 +97,24 @@ const OclBuiltin GET_GROUP_ID{"_Z12get_group_idj", i64, {i32}};
 const OclBuiltin GET_NUM_GROUPS{"_Z14get_num_groupsj", i64, {i32}};
 const OclBuiltin GET_LOCAL_ID{"_Z12get_local_idj", i64, {i32}};
 const OclBuiltin GET_LOCAL_SIZE{"_Z14get_local_sizej", i64, {i32}};
-const OclBuiltin BARRIER{"_Z7barrierj", vd, {i32}};
-const OclBuiltin MEM_FENCE{"_Z9mem_fencej", vd, {i32}};
+// XXX Use the `__spirv_*` form: OpenCL `barrier(flags)` routes through SPIRVBuiltins.cpp::
+// buildBarrierInst which ORs SequentiallyConsistent into the semantics; OpenCL drivers reject
+// that and silently drop the barrier. The __spirv_* path bypasses that and emits the op with
+// our chosen semantics.
+const OclBuiltin CONTROL_BARRIER{"_Z22__spirv_ControlBarrierjjj", vd, {i32, i32, i32}};
+const OclBuiltin MEMORY_BARRIER{"_Z21__spirv_MemoryBarrierjj", vd, {i32, i32}};
+
+// Mirrors SPIRV::MemorySemantics / SPIRV::Scope; the upstream header is private to LLVM,
+// but the constants are part of the SPIR-V ABI.
+namespace SpvMemSem {
+constexpr uint32_t AcquireRelease = 0x008;
+constexpr uint32_t WorkgroupMemory = 0x100;
+constexpr uint32_t CrossWorkgroupMemory = 0x200;
+} // namespace SpvMemSem
+namespace SpvScope {
+constexpr uint32_t Device = 1;
+constexpr uint32_t Workgroup = 2;
+} // namespace SpvScope
 } // namespace
 
 static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requestedRtn, llvm::ArrayRef<ValPtr> args) {
@@ -143,6 +153,13 @@ static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requested
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   auto &ctx = cg.C.actual;
   auto u32 = [&](uint32_t k) { return llvm::ConstantInt::get(i32(ctx), k); };
+  auto barrier = [&](const AnyType &tpe, uint32_t memSem) -> ValPtr {
+    const auto scope = u32(SpvScope::Workgroup);
+    return callOcl(cg, CONTROL_BARRIER, tpe, {scope, scope, u32(memSem | SpvMemSem::AcquireRelease)});
+  };
+  auto fence = [&](const AnyType &tpe, uint32_t memSem) -> ValPtr {
+    return callOcl(cg, MEMORY_BARRIER, tpe, {u32(SpvScope::Workgroup), u32(memSem | SpvMemSem::AcquireRelease)});
+  };
 
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },
@@ -152,16 +169,12 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuGroupSize &v) -> ValPtr { return callOcl(cg, GET_NUM_GROUPS, v.tpe, {cg.mkTermVal(v.dim)}); },
       [&](const Spec::GpuLocalIdx &v) -> ValPtr { return callOcl(cg, GET_LOCAL_ID, v.tpe, {cg.mkTermVal(v.dim)}); },
       [&](const Spec::GpuLocalSize &v) -> ValPtr { return callOcl(cg, GET_LOCAL_SIZE, v.tpe, {cg.mkTermVal(v.dim)}); },
-      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return callOcl(cg, BARRIER, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE)}); },
-      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return callOcl(cg, BARRIER, v.tpe, {u32(CLK_LOCAL_MEM_FENCE)}); },
-      [&](const Spec::GpuBarrierAll &v) -> ValPtr {
-        return callOcl(cg, BARRIER, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE)});
-      },
-      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return callOcl(cg, MEM_FENCE, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE)}); },
-      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return callOcl(cg, MEM_FENCE, v.tpe, {u32(CLK_LOCAL_MEM_FENCE)}); },
-      [&](const Spec::GpuFenceAll &v) -> ValPtr {
-        return callOcl(cg, MEM_FENCE, v.tpe, {u32(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE)});
-      });
+      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return barrier(v.tpe, SpvMemSem::CrossWorkgroupMemory); },
+      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return barrier(v.tpe, SpvMemSem::WorkgroupMemory); },
+      [&](const Spec::GpuBarrierAll &v) -> ValPtr { return barrier(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); },
+      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::CrossWorkgroupMemory); },
+      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory); },
+      [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   return expr.op.match_total( //                                                       //

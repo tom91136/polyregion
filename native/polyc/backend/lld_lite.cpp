@@ -1,5 +1,6 @@
 #include "lld_lite.h"
 
+#include <deque>
 #include <fstream>
 
 #include "lld/Common/CommonLinkerContext.h"
@@ -16,10 +17,11 @@ bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_os
 std::pair<std::optional<std::string>, std::optional<std::string>>
 polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files) {
 
-  std::vector<std::string> inMemoryFiles;
+  // XXX deque for stable c_str() across push_back; LLD holds the pointers below.
+  std::deque<std::string> inMemoryFiles;
 
-  std::vector<const char *> allArgs{""}; // arg[0] is lld program name, not used so empty string
-  allArgs.reserve(args.size());
+  std::vector<const char *> allArgs{""};
+  allArgs.reserve(args.size() + files.size() + 3);
   for (auto &a : args)
     allArgs.push_back(a.c_str());
   for (auto f : files) {
@@ -37,10 +39,18 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, con
   inMemoryFiles.push_back(*output);
 
   allArgs.push_back("-o");
-  allArgs.push_back(output->c_str());
+  allArgs.push_back(inMemoryFiles.back().c_str());
 
-  llvm::SmallString<8> err;
+  llvm::SmallString<1024> err;
   llvm::raw_svector_ostream errSteam(err);
+
+  if (std::getenv("POLYC_DEBUG_LLD")) {
+    std::fprintf(stderr, "[lld_lite] allArgs (%zu):\n", allArgs.size());
+    for (size_t i = 0; i < allArgs.size(); ++i) {
+      std::fprintf(stderr, "  [%zu] = %s\n", i, allArgs[i] ? allArgs[i] : "<null>");
+    }
+    std::fflush(stderr);
+  }
 
   lld::elf::link(allArgs, llvm::outs(), errSteam, false, false);
   lld::CommonLinkerContext::destroy();

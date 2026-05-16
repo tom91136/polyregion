@@ -57,13 +57,14 @@ struct TargetedContext {
   LLVMBackend::Options options;
   llvm::LLVMContext actual;
   AS AllocaAS = 0, GlobalAS = 0, LocalAS = 0, GenericAS = 0;
+  // SPIR-V Kernel mode: gates type-lowering workarounds (no zero-length array types in struct bodies).
+  bool spirvKernel = false;
   explicit TargetedContext(const LLVMBackend::Options &options);
 
   [[nodiscard]] llvm::Type *i32Ty();
   [[nodiscard]] llvm::Type *i64Ty();
   [[nodiscard]] bool isSpirv() const {
-    return options.target == LLVMBackend::Target::SPIRV32_Kernel ||
-           options.target == LLVMBackend::Target::SPIRV64_Kernel ||
+    return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel ||
            options.target == LLVMBackend::Target::SPIRV_GLCompute;
   }
 
