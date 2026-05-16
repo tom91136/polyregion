@@ -254,6 +254,8 @@ $RECYCLE.BIN/
 /build-*
 
 /llvm-*
+!/llvm-patches/
+!/llvm-patches-*/
 /polyregion-*
 /debian-sysroot-image-creator
 

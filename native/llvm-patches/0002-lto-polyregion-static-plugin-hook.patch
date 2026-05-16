@@ -1,0 +1,54 @@
+Subject: [LTO] add static-plugin registration hook for downstream linkers
+
+Adds an opt-in function-pointer hook so a downstream linker can register
+statically-linked pass plugins with the LTO PassBuilder without needing
+dlopen-able .so/.dll files. When unset (default), behaviour is identical
+to upstream.
+
+--- a/llvm/include/llvm/LTO/LTOBackend.h
++++ b/llvm/include/llvm/LTO/LTOBackend.h
+@@ -30,6 +30,7 @@
+ class BitcodeModule;
+ class Error;
+ class Module;
++class PassBuilder;
+ class Target;
+ 
+ namespace lto {
+@@ -79,6 +80,10 @@
+ LLVM_ABI bool initImportList(const Module &M,
+                              const ModuleSummaryIndex &CombinedIndex,
+                              FunctionImporter::ImportMapTy &ImportList);
++
++using StaticPluginRegisterFn = void(*)(llvm::PassBuilder &);
++LLVM_ABI void setStaticPluginRegister(StaticPluginRegisterFn cb);
++LLVM_ABI StaticPluginRegisterFn getStaticPluginRegister();
+ }
+ }
+ 
+--- a/llvm/lib/LTO/LTOBackend.cpp
++++ b/llvm/lib/LTO/LTOBackend.cpp
+@@ -52,6 +52,14 @@
+ 
+ #define DEBUG_TYPE "lto-backend"
+ 
++namespace {
++StaticPluginRegisterFn PolyregionStaticPluginRegister = nullptr;
++}
++namespace llvm::lto {
++void setStaticPluginRegister(StaticPluginRegisterFn cb) { PolyregionStaticPluginRegister = cb; }
++StaticPluginRegisterFn getStaticPluginRegister() { return PolyregionStaticPluginRegister; }
++} // namespace llvm::lto
++
+ enum class LTOBitcodeEmbedding {
+   DoNotEmbed = 0,
+   EmbedOptimized = 1,
+@@ -197,6 +205,8 @@
+       reportFatalUsageError(PassPlugin.takeError());
+     PassPlugin->registerPassBuilderCallbacks(PB);
+   }
++  if (auto cb = getStaticPluginRegister())
++    cb(PB);
+ }
+ 
+ static std::unique_ptr<TargetMachine>

@@ -50,15 +50,32 @@ endif ()
 if (NOT EXISTS ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm/CMakeLists.txt)
     message(STATUS "Extracting LLVM source...")
     file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/${LLVM_TARBALL_NAME} DESTINATION "${LLVM_BUILD_DIR}")
-    if (DEFINED LLVM_PATCH_DIR AND IS_DIRECTORY ${LLVM_PATCH_DIR})
-        file(GLOB LLVM_PATCHES "${LLVM_PATCH_DIR}/*.patch")
+    set(LLVM_PATCHES)
+    foreach (DIR ${LLVM_PATCH_DIRS})
+        if (IS_DIRECTORY ${DIR})
+            file(GLOB _PATCHES_IN_DIR "${DIR}/*.patch")
+            list(APPEND LLVM_PATCHES ${_PATCHES_IN_DIR})
+        endif ()
+    endforeach ()
+    if (LLVM_PATCHES)
         list(SORT LLVM_PATCHES)
+        find_program(POLYREGION_PATCH_CMD patch)
+        find_program(POLYREGION_GIT_CMD git)
         foreach (PATCH ${LLVM_PATCHES})
             message(STATUS "Applying ${PATCH}")
-            execute_process(
-                    COMMAND patch -p1 --forward --batch -i ${PATCH}
-                    WORKING_DIRECTORY ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}
-                    RESULT_VARIABLE PATCH_RC)
+            if (POLYREGION_PATCH_CMD)
+                execute_process(
+                        COMMAND ${POLYREGION_PATCH_CMD} -p1 --forward --batch -i ${PATCH}
+                        WORKING_DIRECTORY ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}
+                        RESULT_VARIABLE PATCH_RC)
+            elseif (POLYREGION_GIT_CMD)
+                execute_process(
+                        COMMAND ${POLYREGION_GIT_CMD} apply --whitespace=nowarn -p1 ${PATCH}
+                        WORKING_DIRECTORY ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}
+                        RESULT_VARIABLE PATCH_RC)
+            else ()
+                message(FATAL_ERROR "Neither `patch` nor `git` found on PATH; cannot apply ${PATCH}")
+            endif ()
             if (NOT PATCH_RC EQUAL 0)
                 message(FATAL_ERROR "Failed to apply ${PATCH} (exit ${PATCH_RC})")
             endif ()
