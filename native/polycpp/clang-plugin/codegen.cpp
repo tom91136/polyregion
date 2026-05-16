@@ -10,6 +10,7 @@
 
 #include "polyregion/types.h"
 
+#include "ast.h"
 #include "clang_utils.h"
 #include "remapper.h"
 

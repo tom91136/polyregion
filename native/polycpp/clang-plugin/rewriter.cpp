@@ -13,13 +13,18 @@
 #include "llvm/Support/Casting.h"
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "ast.h"
 #include "ast_visitors.h"
 #include "clang_utils.h"
 #include "codegen.h"
 
 using namespace polyregion::polystl;
+using namespace polyregion;
+using namespace polyregion::polyast;
+using namespace polyregion::polyast::dsl;
 using namespace aspartame;
 
 namespace {

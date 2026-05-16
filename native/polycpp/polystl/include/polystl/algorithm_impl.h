@@ -33,16 +33,30 @@ namespace polyregion::polystl::details {
 
 using polyrt::DebugLevel;
 
-// Detect a default (rewriter-not-applied) bundle by its sentinel `moduleName` (empty string).
-// In POLYCPP_NO_REWRITE / passthrough builds the polycpp clang plugin doesn't replace the
-// __polyregion_offload__ template body, so it returns the empty sentinel and we should just
-// execute the host loop directly instead of trying to dispatch a non-existent kernel.
+// XXX passthrough builds (POLYCPP_NO_REWRITE) leave moduleName empty; host-fallback in that case.
 inline bool bundleIsRewritten(const polyrt::KernelBundle &bundle) { return bundle.moduleName != nullptr && bundle.moduleName[0] != '\0'; }
+
+// XXX struct-member access emits llvm.ptr.annotation on the loaded value; a local-var annotate
+// would emit llvm.var.annotation on the alloca and detach after mem2reg.
+struct __PolyreflectTrackPtr {
+  [[clang::annotate("polyreflect-track")]] void *p;
+};
+inline void *polyreflectTrackPtr(void *p) { return __PolyreflectTrackPtr{p}.p; }
 
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   polyrt::initialise();
   auto N = std::thread::hardware_concurrency();
   log(DebugLevel::Debug, "<%s, %ld> Dispatch", __func__, global);
+
+  if (!polyrt::currentPlatform) {
+    if (!polyrt::hostFallback()) {
+      polyrt::noCompatibleKernelExit("parallel_for");
+      return;
+    }
+    for (int64_t i = 0; i < global; ++i)
+      f(i);
+    return;
+  }
 
   switch (polyrt::currentPlatform->kind()) {
     case polyregion::runtime::PlatformKind::HostThreaded: {
@@ -56,7 +70,6 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       };
 
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
-      // No rewriter (passthrough build) -> run host loop directly.
       if (!bundleIsRewritten(bundle)) {
         for (int64_t i = 0; i < global; ++i)
           f(i);
@@ -64,7 +77,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchHostThreaded(b.size(), &kernel, bundle.moduleName);
+        details::dispatchHostThreaded(b.size(), polyreflectTrackPtr(&kernel), bundle.moduleName);
         return;
       }
       break;
@@ -94,7 +107,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
         }
       }
 
-      [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
+      void *kernelPtr = polyreflectTrackPtr(&kernel);
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         const auto grid = (global + blocks - 1) / blocks;
@@ -121,6 +134,17 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   auto N = std::thread::hardware_concurrency();
   log(DebugLevel::Debug, "<%s, %d> Dispatch", __func__, global);
 
+  if (!polyrt::currentPlatform) {
+    if (!polyrt::hostFallback()) {
+      polyrt::noCompatibleKernelExit("parallel_reduce");
+      return init;
+    }
+    T acc = init;
+    for (int64_t i = 0; i < global; ++i)
+      acc = reduce(acc, f(i));
+    return acc;
+  }
+
   switch (polyrt::currentPlatform->kind()) {
     case polyregion::runtime::PlatformKind ::HostThreaded: {
       auto [b, e] = concurrency_utils::splitStaticExclusive<int64_t>(0, global, N);
@@ -145,7 +169,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchHostThreaded(groups, &kernel, bundle.moduleName);
+        details::dispatchHostThreaded(groups, polyreflectTrackPtr(&kernel), bundle.moduleName);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);
@@ -189,7 +213,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
           acc = reduce(acc, f(i));
         return acc;
       }
-      [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
+      void *kernelPtr = polyreflectTrackPtr(&kernel);
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         details::dispatchManaged(256, groups, groups * sizeof(T), &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
@@ -218,9 +242,11 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
 
 } // namespace polyregion::polystl::details
 
-namespace std {
+namespace std { // NOLINT(*-dcl58-cpp)
 
-namespace execution { // NOLINT(*-dcl58-cpp)
+// XXX Policy types are always defined here; is_execution_policy is taken from the stdlib when
+// available, polyfilled otherwise.
+namespace execution {
 class sequenced_policy {};
 class parallel_policy {};
 class parallel_unsequenced_policy {};
@@ -232,109 +258,126 @@ class unsequenced_policy {};
 [[maybe_unused]] inline constexpr unsequenced_policy unseq{};
 } // namespace execution
 
-template <typename> struct is_execution_policy : std::false_type {};                                     // NOLINT(*-dcl58-cpp)
-template <> struct is_execution_policy<std::execution::sequenced_policy> : std::true_type {};            // NOLINT(*-dcl58-cpp)
-template <> struct is_execution_policy<std::execution::parallel_policy> : std::true_type {};             // NOLINT(*-dcl58-cpp)
-template <> struct is_execution_policy<std::execution::parallel_unsequenced_policy> : std::true_type {}; // NOLINT(*-dcl58-cpp)
-template <> struct is_execution_policy<std::execution::unsequenced_policy> : std::true_type {};          // NOLINT(*-dcl58-cpp)
-template <typename T> constexpr bool is_execution_policy_v = is_execution_policy<T>::value;              // NOLINT(*-dcl58-cpp)
+#if !(defined(_HAS_CXX17) && _HAS_CXX17) && !defined(__cpp_lib_execution)
+template <typename> struct is_execution_policy : std::false_type {};
+template <> struct is_execution_policy<execution::sequenced_policy> : std::true_type {};
+template <> struct is_execution_policy<execution::parallel_policy> : std::true_type {};
+template <> struct is_execution_policy<execution::parallel_unsequenced_policy> : std::true_type {};
+template <> struct is_execution_policy<execution::unsequenced_policy> : std::true_type {};
+template <typename T> constexpr bool is_execution_policy_v = is_execution_policy<T>::value;
+#endif
 
-template <class ExecutionPolicy, class ForwardIt, class UnaryFunction>
-std::enable_if_t<std::is_execution_policy_v<typename std::decay_t<ExecutionPolicy>>, void> //
-for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {           // NOLINT(*-dcl58-cpp)
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    std::for_each(first, last, f);
-    return;
-  }
+// XXX par_unseq overloads use the concrete policy type so partial ordering routes them here;
+// other policies defer to the stdlib or the polyfill below.
+
+template <class ForwardIt, class UnaryFunction>
+void for_each(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, UnaryFunction f) {
   polyregion::polystl::details::parallel_for(std::distance(first, last), [f, first](auto idx) { f(*(first + idx)); });
 }
 
-template <class ExecutionPolicy, class ForwardIt, class T>                                 //
-std::enable_if_t<std::is_execution_policy_v<typename std::decay_t<ExecutionPolicy>>, void> //
-fill(ExecutionPolicy &&e, ForwardIt first, ForwardIt last, const T &value) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    std::fill(first, last, value);
-    return;
-  }
-  // FIXME we need `value = value` to drop the reference from T&, but this should work without this
+template <class ForwardIt, class T> void fill(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, const T &value) {
+  // XXX `value = value` strips the T& so the capture is by value.
   polyregion::polystl::details::parallel_for(std::distance(first, last), [value = value, first](auto idx) { (*(first + idx)) = value; });
-  // FIXME the following version of the lambda lowers to Ptr[T] := Ptr[T] which is wrong
-  //  std::for_each(first, last, [&](auto &x) { x = value; });
 }
 
-template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2>
-std::enable_if_t<std::is_execution_policy_v<typename std::decay_t<ExecutionPolicy>>, ForwardIt2> //
-copy(ExecutionPolicy &&, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    return std::copy(first, last, d_first);
-  }
+template <class ForwardIt1, class ForwardIt2>
+ForwardIt2 copy(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
   polyregion::polystl::details::parallel_for(std::distance(first, last),
                                              [d_first, first](auto idx) { (*(d_first + idx)) = (*(first + idx)); });
   return d_first;
 }
 
-template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class UnaryOperation>       //
-std::enable_if_t<std::is_execution_policy_v<typename std::decay_t<ExecutionPolicy>>, ForwardIt2> //
-transform(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 d_first, UnaryOperation unary_op) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    return std::transform(first1, last1, d_first, unary_op);
-  }
+template <class ForwardIt1, class ForwardIt2, class UnaryOperation>
+ForwardIt2 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 d_first,
+                     UnaryOperation unary_op) {
   polyregion::polystl::details::parallel_for(std::distance(first1, last1),
                                              [d_first, first1, unary_op](auto idx) { *(d_first + idx) = unary_op(*(first1 + idx)); });
   return d_first;
 }
 
-template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation> //
-std::enable_if_t<std::is_execution_policy_v<std::decay_t<ExecutionPolicy>>, ForwardIt3>                       //
-transform(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first, BinaryOperation binary_op) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    return std::transform(first1, last1, first2, d_first, binary_op);
-  }
+template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation>
+ForwardIt3 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first,
+                     BinaryOperation binary_op) {
   polyregion::polystl::details::parallel_for(std::distance(first1, last1), [d_first, first1, first2, binary_op](auto idx) {
     (*(d_first + idx)) = binary_op(*(first1 + idx), *(first2 + idx));
   });
-
   return d_first;
 }
 
-template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class T>  //
-std::enable_if_t<std::is_execution_policy_v<std::decay_t<ExecutionPolicy>>, T> //
-transform_reduce(ExecutionPolicy &&e, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    return std::transform_reduce(first1, last1, first2, init);
-  }
+template <class ForwardIt1, class ForwardIt2, class T>
+T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
   return polyregion::polystl::details::parallel_reduce(
       std::distance(first1, last1), init, //
       [first1, first2](auto idx) { return *(first1 + idx) * *(first2 + idx); }, [](auto l, auto r) { return l + r; });
 }
 
-template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp,
-          class BinaryTransformOp>                                             //
-std::enable_if_t<std::is_execution_policy_v<std::decay_t<ExecutionPolicy>>, T> //
-transform_reduce(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init, BinaryReductionOp reduce,
-                 BinaryTransformOp transform) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    return std::transform_reduce(first1, last1, first2, init, reduce, transform);
-  }
-  // XXX Wrap `reduce` in a by-value lambda: libstdc++'s `std::plus<>::operator()` perfect-forwards
-  // via `std::forward<T>` and polyc's SPIR-V codegen can't track storage classes through those
-  // references, so Intel IGC produces null pointers and the reduction silently returns init.
+template <class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp, class BinaryTransformOp>
+T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init,
+                   BinaryReductionOp reduce, BinaryTransformOp transform) {
+  // XXX Wrap `reduce` in a by-value lambda; perfect-forwarded references confuse SPIR-V
+  // storage-class tracking and IGC emits null pointers.
   return polyregion::polystl::details::parallel_reduce(
-      std::distance(first1, last1), init, //
-      [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); },
+      std::distance(first1, last1), init, [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); },
       [reduce](auto l, auto r) { return reduce(l, r); });
 }
 
-template <class ExecutionPolicy, class ForwardIt, class T, class BinaryReductionOp,
-          class UnaryTransformOp>                                              //
-std::enable_if_t<std::is_execution_policy_v<std::decay_t<ExecutionPolicy>>, T> //
-transform_reduce(ExecutionPolicy &&, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce, UnaryTransformOp transform) {
-  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
-    return std::transform_reduce(first, last, init, reduce, transform);
-  }
-  // See note above on the by-value `reduce` wrap.
+template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp>
+T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce,
+                   UnaryTransformOp transform) {
   return polyregion::polystl::details::parallel_reduce(std::distance(first, last), init, transform,
                                                        [reduce](auto l, auto r) { return reduce(l, r); });
 }
+
+// Sequential fallbacks for par/seq/unseq when no stdlib <execution> is available.
+#if !(defined(_HAS_CXX17) && _HAS_CXX17) && !defined(__cpp_lib_execution)
+template <class ExecutionPolicy, class ForwardIt, class UnaryFunction>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, void> //
+for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
+  std::for_each(first, last, f);
+}
+
+template <class ExecutionPolicy, class ForwardIt, class T>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, void> //
+fill(ExecutionPolicy &&, ForwardIt first, ForwardIt last, const T &value) {
+  std::fill(first, last, value);
+}
+
+template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, ForwardIt2> //
+copy(ExecutionPolicy &&, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
+  return std::copy(first, last, d_first);
+}
+
+template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class UnaryOperation>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, ForwardIt2> //
+transform(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 d_first, UnaryOperation unary_op) {
+  return std::transform(first1, last1, d_first, unary_op);
+}
+
+template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, ForwardIt3> //
+transform(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first, BinaryOperation binary_op) {
+  return std::transform(first1, last1, first2, d_first, binary_op);
+}
+
+template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class T>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, T> //
+transform_reduce(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
+  return std::transform_reduce(first1, last1, first2, init);
+}
+
+template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp, class BinaryTransformOp>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, T> //
+transform_reduce(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init, BinaryReductionOp reduce,
+                 BinaryTransformOp transform) {
+  return std::transform_reduce(first1, last1, first2, init, reduce, transform);
+}
+
+template <class ExecutionPolicy, class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, T> //
+transform_reduce(ExecutionPolicy &&, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce, UnaryTransformOp transform) {
+  return std::transform_reduce(first, last, init, reduce, transform);
+}
+#endif
 
 } // namespace std

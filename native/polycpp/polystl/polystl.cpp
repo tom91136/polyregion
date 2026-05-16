@@ -6,6 +6,20 @@
 
 #include "reflect-rt/rt_reflect.hpp"
 
+// XXX polystl-static bundles polyinvoke + LLVM Support; consumers link via polycpp at runtime
+// without CMake propagation, so pull in the Windows system imports from this object.
+#if defined(_MSC_VER)
+  #pragma comment(lib, "Version.lib")
+  #pragma comment(lib, "psapi.lib")
+  #pragma comment(lib, "ntdll.lib")
+  #pragma comment(lib, "ws2_32.lib")
+  #pragma comment(lib, "ole32.lib")
+  #pragma comment(lib, "shell32.lib")
+  #pragma comment(lib, "advapi32.lib")
+  #pragma comment(lib, "uuid.lib")
+  #pragma comment(lib, "delayimp.lib")
+#endif
+
 using namespace polyregion;
 using polyrt::DebugLevel;
 

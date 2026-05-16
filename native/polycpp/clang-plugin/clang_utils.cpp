@@ -2,8 +2,13 @@
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
+
+#include "aspartame/all.hpp"
+
+#include "ast.h"
 
 namespace polyregion::polystl {
 

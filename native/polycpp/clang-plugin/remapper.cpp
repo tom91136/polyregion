@@ -18,6 +18,7 @@
 #include "llvm/Support/FormatVariadic.h"
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/llvm_dyn.hpp"
@@ -763,6 +764,9 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         switch (tpe->getKind()) {
           case clang::BuiltinType::Long: return Type::IntS64();
           case clang::BuiltinType::ULong: return Type::IntU64();
+          // MSVC maps `long` to 32-bit; ptrdiff_t/size_t/int64_t come through as LongLong/ULongLong.
+          case clang::BuiltinType::LongLong: return Type::IntS64();
+          case clang::BuiltinType::ULongLong: return Type::IntU64();
           case clang::BuiltinType::Int: return Type::IntS32();
           case clang::BuiltinType::UInt: return Type::IntU32();
           case clang::BuiltinType::Short: return Type::IntS16();
@@ -1232,8 +1236,25 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(dl, dr, tpe_)));
           case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(dl, dr, tpe_)));
           case clang::BO_RemAssign: return Expr::Alias(opAssign(Intr::Rem(dl, dr, tpe_)));
-          case clang::BO_AddAssign: return Expr::Alias(opAssign(Intr::Add(dl, dr, tpe_)));
-          case clang::BO_SubAssign: return Expr::Alias(opAssign(Intr::Sub(dl, dr, tpe_)));
+          case clang::BO_AddAssign:
+            // Pointer +=/-= must rebase the pointer itself; the scalar opAssign path would
+            // write through it.
+            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
+              auto newPtr = r.newVar(Expr::RefTo(termToSel(lhs), rhs, lhsPtr->comp, lhsPtr->space));
+              r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(newPtr)));
+              return Expr::Alias(lhs);
+            } else {
+              return Expr::Alias(opAssign(Intr::Add(dl, dr, tpe_)));
+            }
+          case clang::BO_SubAssign:
+            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
+              auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
+              auto newPtr = r.newVar(Expr::RefTo(termToSel(lhs), negativeIdx, lhsPtr->comp, lhsPtr->space));
+              r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(newPtr)));
+              return Expr::Alias(lhs);
+            } else {
+              return Expr::Alias(opAssign(Intr::Sub(dl, dr, tpe_)));
+            }
           case clang::BO_ShlAssign: return Expr::Alias(opAssign(Intr::BSL(dl, dr, tpe_)));
           case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(dl, dr, tpe_)));
           case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(dl, dr, tpe_)));
@@ -1288,8 +1309,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs() + 1));
         }
         Vector<Term::Any> ivArgs;
+        // fn->args[0] is the implicit `this`; explicit args are offset by 1.
         for (size_t i = 0; i < expr->getNumArgs(); ++i)
-          ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
+          ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
 
         const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;

@@ -45,7 +45,7 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         totalObjects++;
         if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
-          [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
+          void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
           polyregion::polystl::details::dispatchManaged(1, 0, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
           return result;
         }

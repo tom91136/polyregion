@@ -4,4 +4,7 @@
   #define _LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 #endif
 
+// XXX Do not chain to the stdlib <execution>: MSVC pulls in /MD-only PPL/CRT and libstdc++
+// pulls in TBB. Policy types live in algorithm_impl.h; is_execution_policy is reused from
+// the stdlib when present.
 #include "polystl/algorithm_impl.h"

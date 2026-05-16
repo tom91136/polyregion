@@ -7,6 +7,10 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "llvm/Support/Casting.h"
 
+#include "aspartame/all.hpp"
+
+#include "ast.h"
+
 using namespace polyregion::polystl;
 using namespace aspartame;
 
