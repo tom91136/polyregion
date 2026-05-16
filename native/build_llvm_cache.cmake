@@ -68,9 +68,14 @@ endif ()
 set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")
 set(LLVM_BUILD_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
 set(LLVM_LINK_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
-# LLVM_ENABLE_PLUGINS on Windows decorates symbols with dllimport in headers; without a
-# matching shared LLVM the static .obj definitions trip C2491. Tie it to the dylib mode.
-set(LLVM_ENABLE_PLUGINS ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
+if (WIN32)
+    # MSVC cannot use the normal dylib plugin mode, but LLVM supports static Windows tools
+    # loading plugins that name their owning executable with PLUGIN_TOOL.
+    set(LLVM_ENABLE_PLUGINS OFF CACHE BOOL "")
+    set(LLVM_EXPORT_SYMBOLS_FOR_PLUGINS ON CACHE BOOL "")
+else ()
+    set(LLVM_ENABLE_PLUGINS ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
+endif ()
 
 set(LLVM_ENABLE_ZLIB ON CACHE BOOL "")
 set(ZLIB_USE_STATIC_LIBS ON CACHE BOOL "")
@@ -211,4 +216,3 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
 )
 
 set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} flang CACHE STRING "")
-

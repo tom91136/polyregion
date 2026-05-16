@@ -74,6 +74,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Aspartame)
 
 find_package(fmt CONFIG REQUIRED)
+if (WIN32)
+    install(IMPORTED_RUNTIME_ARTIFACTS fmt::fmt RUNTIME DESTINATION bin)
+endif ()
 find_package(Catch2 CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(unofficial-libffi CONFIG REQUIRED)

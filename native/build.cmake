@@ -125,25 +125,6 @@ macro(setup_vcpkg)
     list(APPEND BUILD_OPTIONS -DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET})
 endmacro()
 
-set(LLVM_DIST_INSTALL_TARGETS
-        install-distribution
-
-        module_files
-        tools/flang/tools/f18/install
-        install-flang-cmake-exports
-        install-flang-libraries
-        install-flang-headers
-
-        install-cmake-exports
-        install-clang-cmake-exports
-        install-lld-cmake-exports
-
-        install-llvm-headers
-        install-clang-headers)
-if (POLYREGION_LLVM_DYLIB)
-    list(APPEND LLVM_DIST_INSTALL_TARGETS install-MLIR)
-endif ()
-
 function(check_process_return VALUE NAME)
     if (NOT VALUE EQUAL "0")
         message(FATAL_ERROR "${NAME} failed with code ${VALUE}")
@@ -165,6 +146,8 @@ if (ACTION STREQUAL "LLVM")
     endif ()
     if (LLVM_HOST_ARCH STREQUAL "AMD64")
         set(LLVM_HOST_ARCH x86_64)
+    elseif (LLVM_HOST_ARCH STREQUAL "ARM64")
+        set(LLVM_HOST_ARCH arm64)
     endif ()
     set(LLVM_NATIVE_BUILD OFF)
     if (ARCH STREQUAL LLVM_HOST_ARCH)
@@ -244,15 +227,6 @@ elseif (ACTION STREQUAL "BUILD")
     check_process_return(${SUCCESS} "${TARGET} build")
 elseif (ACTION STREQUAL "DIST")
     setup_vcpkg()
-    message(STATUS "Refreshing LLVM dist into ${LLVM_DIST_DIR}")
-    execute_process(
-            COMMAND ${CMAKE_COMMAND}
-            --build ${LLVM_BUILD_DIR}
-            --target ${LLVM_DIST_INSTALL_TARGETS}
-            -- -k 0
-            COMMAND_ECHO STDERR
-            RESULT_VARIABLE SUCCESS)
-    check_process_return(${SUCCESS} "LLVM dist install")
     message(STATUS "Installing polyregion dist into ${LLVM_DIST_DIR}")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
@@ -284,7 +258,7 @@ elseif (ACTION STREQUAL "CHECK")
     get_filename_component(CMAKE_BIN_DIR "${CMAKE_COMMAND}" DIRECTORY)
     find_program(CTEST_EXE ctest HINTS "${CMAKE_BIN_DIR}" REQUIRED)
     execute_process(
-            COMMAND ${CTEST_EXE} --output-on-failure
+            COMMAND ${CTEST_EXE} -C ${CMAKE_BUILD_TYPE} --output-on-failure
             WORKING_DIRECTORY ${CHECK_BUILD_DIR}
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)

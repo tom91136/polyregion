@@ -42,7 +42,7 @@ function(add_copy_lib_targets target)
             ${commands})
 endfunction()
 if (WIN32)
-    add_copy_lib_targets(polycpp-lib-resource polystl-static polystl)
+    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polystl-static polystl)
 else ()
     add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polyreflect-plugin polystl-static polystl)
 endif ()
@@ -124,7 +124,11 @@ install(TARGETS polystl polystl-static
         ARCHIVE DESTINATION lib/polycpp/lib
         RUNTIME DESTINATION lib/polycpp/lib
         FILE_SET HEADERS DESTINATION lib/polycpp/include)
-if (NOT WIN32)
+if (WIN32)
+    install(TARGETS polycpp-clang-plugin
+            LIBRARY DESTINATION lib/polycpp/lib
+            RUNTIME DESTINATION lib/polycpp/lib)
+else ()
     install(TARGETS polycpp-clang-plugin polyreflect-plugin
             LIBRARY DESTINATION lib/polycpp/lib
             RUNTIME DESTINATION lib/polycpp/lib)
@@ -132,4 +136,3 @@ endif ()
 foreach (HEADER_TARGET polycommon polyinvoke-obj polyrt-obj polyreflect-rt)
     install(TARGETS ${HEADER_TARGET} FILE_SET HEADERS DESTINATION lib/polycpp/include)
 endforeach ()
-
