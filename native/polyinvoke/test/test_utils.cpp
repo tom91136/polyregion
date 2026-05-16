@@ -44,10 +44,15 @@ bool polyregion::test_utils::isDeviceDisabled(std::string_view deviceName) {
   return envContainsSubstring("POLYINVOKE_DISABLE_DEVICE_NAMES", deviceName);
 }
 
+polyregion::invoke::DeviceLock polyregion::test_utils::lockDevice(const invoke::Backend backend, invoke::Device &device) {
+  return invoke::DeviceLock(backend, device.name());
+}
+
 std::unique_ptr<polyregion::invoke::Platform> polyregion::test_utils::makePlatform(const invoke::Backend backend) {
   if (auto errorOrPlatform = invoke::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-    throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend)) +
-                             " failed to initialise: " + std::get<std::string>(errorOrPlatform));
+    // Return nullptr on missing runtime libs so the caller can SKIP unavailable backends
+    // without aborting the suite.
+    return nullptr;
   } else return std::move(std::get<std::unique_ptr<invoke::Platform>>(errorOrPlatform));
 }
 

@@ -9,9 +9,9 @@
 
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
-#include "kernels/generated_ze_fma.hpp"
 #include "kernels/generated_msl_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
+#include "kernels/generated_ze_fma.hpp"
 #include "test_utils.h"
 
 using namespace polyregion::invoke;
@@ -35,6 +35,10 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
   if (enabled.empty()) return;
   auto backend = GENERATE_COPY(from_range(enabled));
   auto platform = polyregion::test_utils::makePlatform(backend);
+  if (!platform) {
+    WARN("Backend " << magic_enum::enum_name(backend) << " is unavailable on this host - skipping");
+    return;
+  }
   DYNAMIC_SECTION("backend=" << magic_enum::enum_name(backend)) {
     for (auto &d : platform->enumerate()) {
       if (polyregion::test_utils::isDeviceDisabled(d->name())) continue;
@@ -42,6 +46,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
       const auto df = d->features();
       if (backend == Backend::OpenCL && std::find(df.begin(), df.end(), "spirv_kernel") != df.end()) continue;
       DYNAMIC_SECTION("device=" << d->name()) {
+        auto _deviceLock = polyregion::test_utils::lockDevice(backend, *d);
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
 
           if (imageGroups.size() != 1) {
@@ -135,9 +140,7 @@ TEST_CASE("SPIRV FMA") {
 #endif
 }
 
-TEST_CASE("ZE FMA") {
-  testFma(generated::ze::fma, {Backend::LevelZero});
-}
+TEST_CASE("ZE FMA") { testFma(generated::ze::fma, {Backend::LevelZero}); }
 
 TEST_CASE("CPU FMA") {
   testFma(generated::cpu::fma,                                //

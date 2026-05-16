@@ -56,6 +56,9 @@ class POLYREGION_EXPORT ClDevice final : public Device {
   detail::MemoryObjects<cl_mem> memoryObjects;
   std::optional<std::vector<std::string>> cachedFeatures; // XXX features() probes via clBuildProgram; cache so we pay once.
 
+  void trackSvm(void *p, size_t size);
+  void untrackSvm(void *p);
+
 public:
   explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm);
   ~ClDevice() override;

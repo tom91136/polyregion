@@ -6,8 +6,9 @@
 
 #include "magic_enum/magic_enum.hpp"
 
-#include "dl_util.h"
 #include "polyregion/env.h"
+
+#include "dl_util.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cl;
@@ -16,40 +17,74 @@ static constexpr const char *PREFIX = "OpenCL";
 
 static const char *clewErrorString(cl_int error) {
   static const char *strings[] = {
-      "CL_SUCCESS",                                       "CL_DEVICE_NOT_FOUND",
-      "CL_DEVICE_NOT_AVAILABLE",                          "CL_COMPILER_NOT_AVAILABLE",
-      "CL_MEM_OBJECT_ALLOCATION_FAILURE",                 "CL_OUT_OF_RESOURCES",
-      "CL_OUT_OF_HOST_MEMORY",                            "CL_PROFILING_INFO_NOT_AVAILABLE",
-      "CL_MEM_COPY_OVERLAP",                              "CL_IMAGE_FORMAT_MISMATCH",
-      "CL_IMAGE_FORMAT_NOT_SUPPORTED",                    "CL_BUILD_PROGRAM_FAILURE",
-      "CL_MAP_FAILURE",                                   "CL_MISALIGNED_SUB_BUFFER_OFFSET",
-      "CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",     "CL_COMPILE_PROGRAM_FAILURE",
-      "CL_LINKER_NOT_AVAILABLE",                          "CL_LINK_PROGRAM_FAILURE",
-      "CL_DEVICE_PARTITION_FAILED",                       "CL_KERNEL_ARG_INFO_NOT_AVAILABLE",
-      "",                                                 "",
-      "",                                                 "",
-      "",                                                 "",
-      "",                                                 "",
-      "",                                                 "",
-      "CL_INVALID_VALUE",                                 "CL_INVALID_DEVICE_TYPE",
-      "CL_INVALID_PLATFORM",                              "CL_INVALID_DEVICE",
-      "CL_INVALID_CONTEXT",                               "CL_INVALID_QUEUE_PROPERTIES",
-      "CL_INVALID_COMMAND_QUEUE",                         "CL_INVALID_HOST_PTR",
-      "CL_INVALID_MEM_OBJECT",                            "CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
-      "CL_INVALID_IMAGE_SIZE",                            "CL_INVALID_SAMPLER",
-      "CL_INVALID_BINARY",                                "CL_INVALID_BUILD_OPTIONS",
-      "CL_INVALID_PROGRAM",                               "CL_INVALID_PROGRAM_EXECUTABLE",
-      "CL_INVALID_KERNEL_NAME",                           "CL_INVALID_KERNEL_DEFINITION",
-      "CL_INVALID_KERNEL",                                "CL_INVALID_ARG_INDEX",
-      "CL_INVALID_ARG_VALUE",                             "CL_INVALID_ARG_SIZE",
-      "CL_INVALID_KERNEL_ARGS",                           "CL_INVALID_WORK_DIMENSION",
-      "CL_INVALID_WORK_GROUP_SIZE",                       "CL_INVALID_WORK_ITEM_SIZE",
-      "CL_INVALID_GLOBAL_OFFSET",                         "CL_INVALID_EVENT_WAIT_LIST",
-      "CL_INVALID_EVENT",                                 "CL_INVALID_OPERATION",
-      "CL_INVALID_GL_OBJECT",                             "CL_INVALID_BUFFER_SIZE",
-      "CL_INVALID_MIP_LEVEL",                             "CL_INVALID_GLOBAL_WORK_SIZE",
-      "CL_INVALID_PROPERTY",                              "CL_INVALID_IMAGE_DESCRIPTOR",
-      "CL_INVALID_COMPILER_OPTIONS",                      "CL_INVALID_LINKER_OPTIONS",
+      "CL_SUCCESS",
+      "CL_DEVICE_NOT_FOUND",
+      "CL_DEVICE_NOT_AVAILABLE",
+      "CL_COMPILER_NOT_AVAILABLE",
+      "CL_MEM_OBJECT_ALLOCATION_FAILURE",
+      "CL_OUT_OF_RESOURCES",
+      "CL_OUT_OF_HOST_MEMORY",
+      "CL_PROFILING_INFO_NOT_AVAILABLE",
+      "CL_MEM_COPY_OVERLAP",
+      "CL_IMAGE_FORMAT_MISMATCH",
+      "CL_IMAGE_FORMAT_NOT_SUPPORTED",
+      "CL_BUILD_PROGRAM_FAILURE",
+      "CL_MAP_FAILURE",
+      "CL_MISALIGNED_SUB_BUFFER_OFFSET",
+      "CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",
+      "CL_COMPILE_PROGRAM_FAILURE",
+      "CL_LINKER_NOT_AVAILABLE",
+      "CL_LINK_PROGRAM_FAILURE",
+      "CL_DEVICE_PARTITION_FAILED",
+      "CL_KERNEL_ARG_INFO_NOT_AVAILABLE",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "CL_INVALID_VALUE",
+      "CL_INVALID_DEVICE_TYPE",
+      "CL_INVALID_PLATFORM",
+      "CL_INVALID_DEVICE",
+      "CL_INVALID_CONTEXT",
+      "CL_INVALID_QUEUE_PROPERTIES",
+      "CL_INVALID_COMMAND_QUEUE",
+      "CL_INVALID_HOST_PTR",
+      "CL_INVALID_MEM_OBJECT",
+      "CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
+      "CL_INVALID_IMAGE_SIZE",
+      "CL_INVALID_SAMPLER",
+      "CL_INVALID_BINARY",
+      "CL_INVALID_BUILD_OPTIONS",
+      "CL_INVALID_PROGRAM",
+      "CL_INVALID_PROGRAM_EXECUTABLE",
+      "CL_INVALID_KERNEL_NAME",
+      "CL_INVALID_KERNEL_DEFINITION",
+      "CL_INVALID_KERNEL",
+      "CL_INVALID_ARG_INDEX",
+      "CL_INVALID_ARG_VALUE",
+      "CL_INVALID_ARG_SIZE",
+      "CL_INVALID_KERNEL_ARGS",
+      "CL_INVALID_WORK_DIMENSION",
+      "CL_INVALID_WORK_GROUP_SIZE",
+      "CL_INVALID_WORK_ITEM_SIZE",
+      "CL_INVALID_GLOBAL_OFFSET",
+      "CL_INVALID_EVENT_WAIT_LIST",
+      "CL_INVALID_EVENT",
+      "CL_INVALID_OPERATION",
+      "CL_INVALID_GL_OBJECT",
+      "CL_INVALID_BUFFER_SIZE",
+      "CL_INVALID_MIP_LEVEL",
+      "CL_INVALID_GLOBAL_WORK_SIZE",
+      "CL_INVALID_PROPERTY",
+      "CL_INVALID_IMAGE_DESCRIPTOR",
+      "CL_INVALID_COMPILER_OPTIONS",
+      "CL_INVALID_LINKER_OPTIONS",
       "CL_INVALID_DEVICE_PARTITION_COUNT",
   };
   static const int num_errors = sizeof(strings) / sizeof(strings[0]);
@@ -116,8 +151,7 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
 #ifdef _WIN32
   void *lib = dl::open_first({"OpenCL.dll"});
 #elif defined(__APPLE__)
-  void *lib = dl::open_first({"/Library/Frameworks/OpenCL.framework/OpenCL",
-                              "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
+  void *lib = dl::open_first({"/Library/Frameworks/OpenCL.framework/OpenCL", "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
 #else
   void *lib = dl::open_first({"libOpenCL.so.1", "libOpenCL.so", "libOpenCL.so.0", "libOpenCL.so.2"});
 #endif
@@ -313,16 +347,27 @@ bool ClDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();
   return store.moduleLoaded(name);
 }
+// Track every SVM alloc (device-only and shared) so it participates in CL_KERNEL_EXEC_INFO_SVM_PTRS
+// indirect-SVM declarations and coarse-grain map/unmap; without tracking, reductions through
+// pointer-in-pointer args silently zero partials on Intel/NVIDIA.
+void ClDevice::trackSvm(void *p, size_t size) {
+  if (!svmTracker) return;
+  std::lock_guard lock(svmTracker->mtx);
+  svmTracker->entries.emplace(p, details::SVMTracker::Entry{size, /*mappedForHost*/ false});
+}
+void ClDevice::untrackSvm(void *p) {
+  if (!svmTracker) return;
+  std::lock_guard lock(svmTracker->mtx);
+  svmTracker->entries.erase(p);
+}
+
 uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
   if (svm) {
     void *p = clSVMAlloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | *svm, size, 0);
     if (!p) POLYINVOKE_FATAL(PREFIX, "clSVMAlloc failed for %zu bytes", size);
-    if (svmTracker) {
-      std::lock_guard lock(svmTracker->mtx);
-      svmTracker->entries.emplace(p, details::SVMTracker::Entry{size, /*mappedForHost*/ false});
-    }
+    trackSvm(p, size);
     return reinterpret_cast<uintptr_t>(p);
   }
   cl_mem_flags flags = {};
@@ -340,10 +385,7 @@ void ClDevice::freeDevice(uintptr_t ptr) {
   context.touch();
 
   if (svm) {
-    if (svmTracker) {
-      std::lock_guard lock(svmTracker->mtx);
-      svmTracker->entries.erase(reinterpret_cast<void *>(ptr));
-    }
+    untrackSvm(reinterpret_cast<void *>(ptr));
     clSVMFree(*context, reinterpret_cast<void *>(ptr));
     return;
   }
@@ -358,20 +400,14 @@ std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
   if (!svm) return std::nullopt;
   void *p = clSVMAlloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | *svm, size, 0);
   if (!p) return std::nullopt;
-  if (svmTracker) {
-    std::lock_guard lock(svmTracker->mtx);
-    svmTracker->entries.emplace(p, details::SVMTracker::Entry{size, /*mappedForHost*/ false});
-  }
+  trackSvm(p, size);
   return p;
 }
 void ClDevice::freeShared(void *ptr) {
   POLYINVOKE_TRACE();
   context.touch();
   if (!svm) POLYINVOKE_FATAL(PREFIX, "Unsupported: %p", ptr);
-  if (svmTracker) {
-    std::lock_guard lock(svmTracker->mtx);
-    svmTracker->entries.erase(ptr);
-  }
+  untrackSvm(ptr);
   clSVMFree(*context, ptr);
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
@@ -390,7 +426,8 @@ ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 // ---
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                             decltype(queryMemObject) queryMemObject, std::optional<cl_bitfield> svm, std::shared_ptr<details::SVMTracker> svmTracker)
+                             decltype(queryMemObject) queryMemObject, std::optional<cl_bitfield> svm,
+                             std::shared_ptr<details::SVMTracker> svmTracker)
     : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
 }
@@ -528,25 +565,41 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   }
   if (svm) {
-    // Indirect SVM allocs (e.g. one captured inside a marshalled lambda struct) must be
-    // declared via CL_KERNEL_EXEC_INFO_SVM_PTRS or the runtime treats them as unused by the
-    // kernel and skips coherency for them.
-    std::vector<void *> svmPtrs;
-    svmPtrs.reserve(types.size() + (svmTracker ? svmTracker->entries.size() : 0));
+    // Indirect SVM allocs must be declared via CL_KERNEL_EXEC_INFO_SVM_PTRS or the driver
+    // skips coherency. Some coarse-grain-only drivers reject the batched call but accept the
+    // same set per-pointer; on CL_INVALID_VALUE fall back per-pointer, then to best-effort
+    // (map/unmap in enqueueWaitBlocking covers coherency anyway).
+    std::vector<void *> allSvmPtrs;
+    allSvmPtrs.reserve(types.size() + (svmTracker ? svmTracker->entries.size() : 0));
     for (cl_uint i = 0; i < types.size() - 1; ++i) {
       if (types[i] != Type::Ptr) continue;
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
       // NVIDIA OpenCL rejects clSetKernelExecInfo on a null entry with CL_INVALID_VALUE.
-      if (ptr) svmPtrs.push_back(reinterpret_cast<void *>(ptr));
+      if (ptr) allSvmPtrs.push_back(reinterpret_cast<void *>(ptr));
     }
     if (svmTracker) {
       std::lock_guard lock(svmTracker->mtx);
       for (auto &[ptr, _] : svmTracker->entries)
-        svmPtrs.push_back(ptr);
+        allSvmPtrs.push_back(ptr);
     }
-    if (!svmPtrs.empty())
-      CHECKED(clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, svmPtrs.size() * sizeof(void *), svmPtrs.data()));
+    auto declare = [&](void *const *ptrs, size_t n) {
+      return n == 0 ? CL_SUCCESS : clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, n * sizeof(void *), ptrs);
+    };
+    cl_int rc = declare(allSvmPtrs.data(), allSvmPtrs.size());
+    if (rc == CL_INVALID_VALUE) {
+      size_t rejected = 0;
+      for (void *ptr : allSvmPtrs) {
+        cl_int rcOne = declare(&ptr, 1);
+        if (rcOne == CL_INVALID_VALUE) ++rejected;
+        else if (rcOne != CL_SUCCESS) CHECKED(rcOne);
+      }
+      if (rejected > 0)
+        std::fprintf(stderr, "[OpenCL] WARN: setKernelExecInfo rejected %zu / %zu SVM pointers (likely indirect-SVM not supported)\n",
+                     rejected, allSvmPtrs.size());
+      rc = CL_SUCCESS;
+    }
+    if (rc != CL_SUCCESS) CHECKED(rc);
   }
 
   POLYINVOKE_TRACE();

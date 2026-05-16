@@ -16,12 +16,15 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FileUtilities.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/args.h"
 #include "fmt/format.h"
 
+#include "polyinvoke/device_lock.h"
 #include "polyregion/io.hpp"
 
 #include "fire.hpp"
@@ -90,22 +93,40 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
   envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", archFor(t, cfg)));
   envs.emplace_back("POLYRT_HOST_FALLBACK=0");
+  envs.emplace_back(fmt::format("{}=1", polyregion::invoke::DeviceLockEnv));
   envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
   if (std::getenv("POLYTEST_DEBUG")) envs.emplace_back("POLYRT_DEBUG=2");
   if (auto p = std::getenv("PATH")) envs.emplace_back(std::string("PATH=") + p);
+#ifdef _WIN32
+  // XXX CreateProcess needs SYSTEMROOT; clang needs TEMP/TMP; link.exe needs LIB/INCLUDE for
+  // CRT and SDK lookup (flang does not auto-populate -libpath). Inherit a vcvars-style env.
+  for (const auto *name : {"SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "WINDIR", "PATHEXT", "COMSPEC", "ProgramFiles",
+                           "ProgramFiles(x86)", "ProgramData", "LOCALAPPDATA", "APPDATA", "LIB", "INCLUDE", "LIBPATH"}) {
+    if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
+  }
+#endif
   return envs;
 }
 
 inline std::string resolveBin(const std::string &name, const DriverConfig &cfg) {
   // XXX Prefer cwd for generated test binaries: a stale copy in binaryDir from a previous build would otherwise shadow the fresh one.
-  auto toAbs = [&] {
-    llvm::SmallString<256> abs(name);
+  auto exists = [](llvm::StringRef p) -> std::optional<std::string> {
+    if (llvm::sys::fs::exists(p)) return std::string(p);
+#ifdef _WIN32
+    auto withExe = std::string(p) + ".exe";
+    if (llvm::sys::fs::exists(withExe)) return withExe;
+#endif
+    return std::nullopt;
+  };
+  auto toAbs = [](llvm::StringRef p) {
+    llvm::SmallString<256> abs(p);
     llvm::sys::fs::make_absolute(abs);
     return std::string(abs);
   };
-  if ((name ^ starts_with(cfg.outputPrefix)) && llvm::sys::fs::exists(name)) return toAbs();
-  if (auto inBin = fmt::format("{}/{}", cfg.binaryDir, name); llvm::sys::fs::exists(inBin)) return inBin;
-  if (llvm::sys::fs::exists(name)) return toAbs();
+  if (name.starts_with(cfg.outputPrefix))
+    if (auto p = exists(name)) return toAbs(*p);
+  if (auto p = exists(fmt::format("{}/{}", cfg.binaryDir, name))) return *p;
+  if (auto p = exists(name)) return toAbs(*p);
   return name;
 }
 
@@ -126,26 +147,25 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   const std::vector<llvm::StringRef> envRefs = envs | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
   const std::vector<llvm::StringRef> argRefs = args | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
 
-  auto out = llvm::sys::fs::TempFile::create(cfg.tempPrefix + "stdout-%%-%%-%%-%%-%%");
-  if (auto e = out.takeError()) return {-1, {}, "Cannot create stdout: " + toString(std::move(e)), command};
-  auto err = llvm::sys::fs::TempFile::create(cfg.tempPrefix + "stderr-%%-%%-%%-%%-%%");
-  if (auto e = err.takeError()) {
-    consumeError(out->discard());
-    return {-1, {}, "Cannot create stderr: " + toString(std::move(e)), command};
-  }
+  // XXX TempFile holds an exclusive Windows handle, blocking ExecuteAndWait's child from
+  // opening it for redirect; use path-only createUniqueFile + FileRemover.
+  auto makeTempPath = [&](std::string_view suffix) -> std::optional<std::string> {
+    llvm::SmallString<256> p;
+    if (llvm::sys::fs::createUniqueFile(cfg.tempPrefix + std::string(suffix) + "-%%-%%-%%-%%-%%", p)) return std::nullopt;
+    return std::string(p);
+  };
+  auto outPath = makeTempPath("stdout");
+  if (!outPath) return {-1, {}, "Cannot create stdout temp", command};
+  auto errPath = makeTempPath("stderr");
+  if (!errPath) return {-1, {}, "Cannot create stderr temp", command};
+  llvm::FileRemover outRemover(*outPath), errRemover(*errPath);
 
-  if (args.empty()) {
-    consumeError(out->discard());
-    consumeError(err->discard());
-    return {-1, {}, "empty command", command};
-  }
+  if (args.empty()) return {-1, {}, "empty command", command};
   auto resolved = resolveBin(args[0], cfg);
-  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, out->TmpName, err->TmpName});
+  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath});
 
-  auto stdoutText = polyregion::read_string(out->TmpName);
-  auto stderrText = polyregion::read_string(err->TmpName);
-  consumeError(out->discard());
-  consumeError(err->discard());
+  auto stdoutText = polyregion::read_string(*outPath);
+  auto stderrText = polyregion::read_string(*errPath);
 
   std::string cmdline = argRefs | drop(1) | prepend(llvm::StringRef(resolved)) | mk_string(" ", [](auto &s) { return s.str(); });
   return {code, std::move(stdoutText), std::move(stderrText), std::move(cmdline)};
@@ -246,8 +266,9 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
             mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
         const auto runsHash =
             std::hash<std::string>{}(tc.runs | mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); }));
-        const auto baseOutput =
-            fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
+        const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
+        const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
+                                            static_cast<std::uint32_t>(runsHash));
         for (const auto mode : modes) {
           const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
           const auto store = mkArgStore(augmented | append(std::pair{std::string("output"), output}) | to_vector());
@@ -341,7 +362,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     finalOutcomes[i] = out;
     std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
     dumpDetails(out, /*includeStdout*/ true);
-    if (cfg.cleanupOnSuccess && out.status == TaskStatus::Pass) llvm::sys::fs::remove(tasks[i].output);
+    if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) llvm::sys::fs::remove(tasks[i].output);
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
 

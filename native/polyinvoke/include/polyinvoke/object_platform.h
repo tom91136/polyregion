@@ -7,6 +7,7 @@
 
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Memory.h"
 
 #include "polyregion/compat.h"
 #include "polyregion/dl.h"

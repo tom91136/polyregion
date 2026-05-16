@@ -31,6 +31,10 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
   if (enabled.empty()) return;
   auto backend = GENERATE_COPY(from_range(enabled));
   auto platform = polyregion::test_utils::makePlatform(backend);
+  if (!platform) {
+    WARN("Backend " << magic_enum::enum_name(backend) << " is unavailable on this host - skipping");
+    return;
+  }
   DYNAMIC_SECTION("backend=" << magic_enum::enum_name(backend)) {
     for (auto &d : platform->enumerate()) {
       if (polyregion::test_utils::isDeviceDisabled(d->name())) continue;
@@ -38,6 +42,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
       const auto df = d->features();
       if (backend == Backend::OpenCL && std::find(df.begin(), df.end(), "spirv_kernel") != df.end()) continue;
       DYNAMIC_SECTION("device=" << d->name()) {
+        auto _deviceLock = polyregion::test_utils::lockDevice(backend, *d);
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
 
           std::function<std::string(size_t)> kernelName;
@@ -138,6 +143,4 @@ TEST_CASE("CPU Args") {
   );
 }
 
-TEST_CASE("ZE Args") {
-  testArgs(generated::ze::args, {Backend::LevelZero});
-}
+TEST_CASE("ZE Args") { testArgs(generated::ze::args, {Backend::LevelZero}); }

@@ -174,15 +174,27 @@ std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
   if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+#ifdef _WIN32
+  // XXX WDDM: cuMemAllocManaged + sync is not sufficient for safe CPU read-back (pages fault
+  // with STATUS_IN_PAGE_ERROR). Use pinned host memory which is permanently mapped on both
+  // sides via UVA.
+  void *ptr = nullptr;
+  CHECKED(cuMemAllocHost(&ptr, size));
+  return ptr;
+#else
   CUdeviceptr ptr = {};
   CHECKED(cuMemAllocManaged(&ptr, size, CU_MEM_ATTACH_GLOBAL));
-
   return reinterpret_cast<void *>(ptr);
+#endif
 }
 void CudaDevice::freeShared(void *ptr) {
   POLYINVOKE_TRACE();
   context.touch();
+#ifdef _WIN32
+  CHECKED(cuMemFreeHost(ptr));
+#else
   CHECKED(cuMemFree(reinterpret_cast<CUdeviceptr>(ptr)));
+#endif
 }
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
@@ -261,6 +273,11 @@ void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const st
 void CudaDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
   CHECKED(cuStreamSynchronize(stream));
+#ifdef _WIN32
+  // XXX WDDM: host read-back of managed memory needs cuCtxSynchronize; stream sync alone
+  // leaves pages un-migrated and faults with STATUS_IN_PAGE_ERROR.
+  CHECKED(cuCtxSynchronize());
+#endif
 }
 
 #undef CHECKED

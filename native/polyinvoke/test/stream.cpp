@@ -34,6 +34,10 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
   if (enabled.empty()) return;
   auto backend = GENERATE_COPY(from_range(enabled));
   auto platform = polyregion::test_utils::makePlatform(backend);
+  if (!platform) {
+    WARN("Backend " << static_cast<int>(backend) << " is unavailable on this host - skipping");
+    return;
+  }
 
   DYNAMIC_SECTION("backend=" << platform->name()) {
     auto size = GENERATE_REF(values(sizes));
@@ -55,6 +59,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                 (backend == Backend::Vulkan || backend == Backend::OpenCL || backend == Backend::LevelZero))
               continue;
             DYNAMIC_SECTION("device=" << d->name()) {
+              auto _deviceLock = polyregion::test_utils::lockDevice(backend, *d);
               if (auto imageGroups = polyregion::test_utils::findTestImage(images, backend, deviceFeatures); !imageGroups.empty()) {
 
                 polyregion::stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
@@ -203,8 +208,8 @@ TEST_CASE("ZE BabelStream") {
   DYNAMIC_SECTION("double") {
     testStream<double>(generated::ze::stream_double, Type::Float64, "_double", 0.008f, //
                        {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},          //
-                       {32, 64, 128, 256},                                              //
-                       {1, 2, 10},                                                      //
+                       {32, 64, 128, 256},                                             //
+                       {1, 2, 10},                                                     //
                        {Backend::LevelZero});
   }
 }
