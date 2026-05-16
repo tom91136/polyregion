@@ -44,15 +44,13 @@ function(merge_static_libs outlib)
 
     # Now the easy part for MSVC and for MAC
     if (MSVC)
-        # lib.exe does the merging of libraries just need to conver the list into string
-        foreach (CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
-            set(flags "")
-            foreach (lib ${libfiles_${CONFIG_TYPE}})
-                set(flags "${flags} ${lib}")
-            endforeach ()
-            string(TOUPPER "STATIC_LIBRARY_FLAGS_${CONFIG_TYPE}" PROPNAME)
-            set_target_properties(${outlib} PROPERTIES ${PROPNAME} "${flags}")
+        # Pass libfiles directly to STATIC_LIBRARY_FLAGS so lib.exe receives them as extra
+        # inputs (the per-config libfiles_${CONFIG_TYPE} variable is never collected).
+        set(flags "")
+        foreach (lib ${libfiles})
+            set(flags "${flags} \"${lib}\"")
         endforeach ()
+        set_target_properties(${outlib} PROPERTIES STATIC_LIBRARY_FLAGS "${flags}")
     elseif (APPLE)
         add_custom_command(TARGET ${outlib} POST_BUILD
                 COMMAND /usr/bin/libtool -static -o "$<TARGET_FILE:${outlib}>" ${libfiles} "$<TARGET_FILE:${outlib}>"

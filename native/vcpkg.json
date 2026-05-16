@@ -1,7 +1,7 @@
 {
   "name": "polyregion-native",
   "version-string": "1.0.0",
-  "builtin-baseline": "dc8d75cfc3281b8e2a4ed8ee4163c891190df932",
+  "builtin-baseline": "1b2b49a767995a1974d42cde5ae5a04f03cf06d3",
   "dependencies": [
     {
       "name": "nlohmann-json"
@@ -53,7 +53,8 @@
     },
     {
       "name": "magic-enum",
-      "version": "0.9.7#1"
+      "version": "0.9.7",
+      "port-version": 1
     },
     {
       "name": "catch2",

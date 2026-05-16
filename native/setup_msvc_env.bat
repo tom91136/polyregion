@@ -9,6 +9,10 @@ if "%GITHUB_ENV%"=="" (
 
 echo Using VC=%VC%
 
+:: XXX Pin vcpkg to the activated VS install so its prebuilts (Catch2.lib) link against
+:: the same MSVC stdlib as our objects.
+set "VCPKG_VISUAL_STUDIO_PATH=%VC%"
+
 if not "%VCPKG_ROOT%"=="" (
   set "VCPKG_ROOT_=%VCPKG_ROOT%"
 )

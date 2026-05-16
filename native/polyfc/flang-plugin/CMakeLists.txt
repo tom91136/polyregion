@@ -1,3 +1,8 @@
+# Fused builds compile the plugin sources directly into polyfc; no loadable module is produced.
+if (POLYREGION_FUSED_DRIVER)
+    return ()
+endif ()
+
 include(AddLLVM)
 
 add_llvm_library(polyfc-flang-plugin

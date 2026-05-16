@@ -12,16 +12,14 @@ target_link_libraries(PolyAST
         nlohmann_json::nlohmann_json)
 
 
-if (NOT WIN32)
-    target_precompile_headers(PolyAST PUBLIC
-            generated/polyast.h
-            generated/polyast_codec.h
-            ast.h
+target_precompile_headers(PolyAST PUBLIC
+        generated/polyast.h
+        generated/polyast_codec.h
+        ast.h
 
-            <optional>
-            <ostream>
-            <unordered_map>
-            <utility>
-            <vector>
-    )
-endif ()
+        <optional>
+        <ostream>
+        <unordered_map>
+        <utility>
+        <vector>
+)

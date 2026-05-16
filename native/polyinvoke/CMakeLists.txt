@@ -30,6 +30,8 @@ endif ()
 if (POLYREGION_LLVM_DYLIB)
     set(LLVM_LIBS LLVM)
 else ()
+    # XXX LLVMMC/LLVMObject transitively reference debug-info symbols (MCDwarfFrameEmitter ->
+    # llvm::dwarf::*); lld-link is stricter on archive order than LLD, so list them explicitly.
     llvm_map_components_to_libnames(LLVM_LIBS
             executionengine
             runtimedyld
@@ -37,6 +39,15 @@ else ()
             core
             mc
             mcparser
+            mcdisassembler
+            debuginfocodeview
+            debuginfodwarf
+            debuginfodwarflowlevel
+            debuginfomsf
+            debuginfobtf
+            debuginfopdb
+            debuginfogsym
+            symbolize
             demangle
             bitstreamreader
             textapi
@@ -46,7 +57,8 @@ else ()
             remarks
             binaryformat
             support
-            targetparser)
+            targetparser
+            profiledata)
 endif ()
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
@@ -69,6 +81,7 @@ set(POLYINVOKE_SRC
         ze_platform.cpp
         object_platform.cpp
         ${POLYINVOKE_WRANGLER_SRCS}
+        device_lock.cpp
         ${RUNTIME_SRC_FILES})
 
 set(POLYINVOKE_LIBS
@@ -95,7 +108,8 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
             TYPE HEADERS
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
             FILES
-            include/polyinvoke/runtime.h)
+            include/polyinvoke/runtime.h
+            include/polyinvoke/device_lock.h)
     target_include_directories(${TARGET} PUBLIC
             thirdparty/
             ${POLYINVOKE_WRANGLER_INCLUDES}
@@ -134,11 +148,5 @@ foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "ZE FMA" "CPU Args" "GPU
     string(REPLACE " " "-" _name "polyinvoke-${_case}")
     add_test(NAME ${_name} COMMAND polyinvoke-tests "${_case}")
     set_tests_properties(${_name} PROPERTIES ENVIRONMENT "${_polyinvoke_test_env}")
-    if (_case MATCHES "^GPU ")
-        set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-cuda")
-    elseif (_case MATCHES "^SPIRV ")
-        set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-spirv")
-    elseif (_case MATCHES "^ZE ")
-        set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK "gpu-ze")
-    endif ()
+    # DeviceLock handles cross-process exclusion per-device; CTest RESOURCE_LOCK is not required.
 endforeach ()

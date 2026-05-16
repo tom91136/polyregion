@@ -33,7 +33,8 @@ if (APPLE)
 endif ()
 add_test(NAME polyreflect-rt-tests COMMAND polyreflect-rt-tests)
 
-if (NOT WIN32)
+# Plugin source is statically linked into polycpp/polyfc under fused builds; no .so needed.
+if (NOT POLYREGION_FUSED_DRIVER)
     target_include_directories(polyreflect-plugin PRIVATE ${LLVM_INCLUDE_DIRS})
     target_compile_definitions(polyreflect-plugin PRIVATE ${LLVM_DEFINITIONS})
     target_compile_options(polyreflect-plugin PRIVATE ${COMPILE_OPTIONS})

@@ -68,13 +68,18 @@ endif ()
 set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")
 set(LLVM_BUILD_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
 set(LLVM_LINK_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
+# XXX Force /MT to match polyregion and vcpkg static-CRT deps; LLVM defaults to /MD and
+# the resulting MD_DynamicRelease markers conflict with /MT consumers.
+set(LLVM_USE_CRT_RELEASE MT CACHE STRING "")
+set(LLVM_USE_CRT_RELWITHDEBINFO MT CACHE STRING "")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "")
+# Plugins are independent of the dylib axis on Unix (host tools get -rdynamic via
+# LLVM_EXPORT_SYMBOLS_FOR_PLUGINS). On Windows the generated .def overflows the PE 65535
+# export limit, so plugin sources are folded into polycpp/polyfc instead (POLYREGION_FUSED_DRIVER).
 if (WIN32)
-    # MSVC cannot use the normal dylib plugin mode, but LLVM supports static Windows tools
-    # loading plugins that name their owning executable with PLUGIN_TOOL.
     set(LLVM_ENABLE_PLUGINS OFF CACHE BOOL "")
-    set(LLVM_EXPORT_SYMBOLS_FOR_PLUGINS ON CACHE BOOL "")
 else ()
-    set(LLVM_ENABLE_PLUGINS ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
+    set(LLVM_ENABLE_PLUGINS ON CACHE BOOL "")
 endif ()
 
 set(LLVM_ENABLE_ZLIB ON CACHE BOOL "")
@@ -133,7 +138,15 @@ elseif (UNIX)
     set(LIBUNWIND_USE_COMPILER_RT ON CACHE BOOL "")
 endif ()
 
-set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
+# The dylib variant must link libLLVM.so against the system shared libstdc++: -static-libstdc++
+# bakes libstdc++ into libLLVM.so and re-exports it through the LLVM_22.1 version script, so
+# a later dlopen of libhsa-runtime64 resolves codecvt/basic_filebuf vtable slots against the
+# wrong copy and SEGVs inside do_unshift. The static variant has no such consumer.
+if (POLYREGION_LLVM_DYLIB)
+    set(LLVM_STATIC_LINK_CXX_STDLIB OFF CACHE BOOL "")
+else ()
+    set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
+endif ()
 set(COMPILER_RT_DEFAULT_TARGET_ONLY ON CACHE BOOL "")
 set(COMPILER_RT_BUILD_LIBFUZZER OFF CACHE BOOL "")
 set(COMPILER_RT_SANITIZERS_TO_BUILD "asan;dfsan;msan;hwasan;tsan;cfi" CACHE STRING "")

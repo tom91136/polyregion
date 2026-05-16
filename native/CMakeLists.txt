@@ -55,6 +55,10 @@ endif ()
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 ProcessorCount(NPROC)
 
+# XXX must precede project(): /MT pairs with LLVM_USE_CRT_RELEASE=MT and the static-CRT triplet.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "")
+cmake_policy(SET CMP0091 NEW)
+
 project(polyregion-native)
 
 FetchContent_Declare(
@@ -75,7 +79,10 @@ FetchContent_MakeAvailable(Aspartame)
 
 find_package(fmt CONFIG REQUIRED)
 if (WIN32)
-    install(IMPORTED_RUNTIME_ARTIFACTS fmt::fmt RUNTIME DESTINATION bin)
+    get_target_property(_fmt_type fmt::fmt TYPE)
+    if (_fmt_type STREQUAL "SHARED_LIBRARY")
+        install(IMPORTED_RUNTIME_ARTIFACTS fmt::fmt RUNTIME DESTINATION bin)
+    endif ()
 endif ()
 find_package(Catch2 CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
@@ -105,8 +112,6 @@ endif ()
 if (MSVC)
     # TODO Enable Asan on Windows if possible
     set(COMMON_DEBUG_OPTIONS -fno-omit-frame-pointer)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:>")
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
@@ -121,6 +126,8 @@ if (MSVC)
             /nologo
 
             /Zc:preprocessor # XXX IMPORTANT: Clang forwards __VA_ARGS__ in macros and need this to work
+            /Zc:__cplusplus  # flang headers gate on __cplusplus >= 201703L
+            /utf-8           # fmt 12.x's unicode support fails to compile without UTF-8 source encoding
             # Disabled warnings.
             -wd4141 # Suppress ''modifier' : used more than once' (because of __forceinline combined with inline)
             -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
@@ -191,6 +198,11 @@ if (MSVC)
             UNICODE
             _UNICODE
     )
+    # NOMINMAX: windows.h min/max macros collide with std::min/max in polyregion/types.h.
+    add_compile_definitions(NOMINMAX)
+    # magic_enum's reflected-enum static_assert misfires under clang-cl; bypass it so
+    # enum_name<> degrades to empty strings instead of failing to compile.
+    add_compile_definitions(MAGIC_ENUM_NO_CHECK_REFLECTED_ENUM=1)
 else ()
 
     set(COMMON_RELEASE_OPTIONS)
@@ -247,6 +259,10 @@ else ()
         # LLD support for macOS is not there yet, flags are for ld64.
         set(STRICT_LINK_OPTIONS) # ld64 defaults to error on undefined on missing symbols, so nothing to do
         set(PLUGIN_LINK_OPTIONS LINKER:-undefined,dynamic_lookup)
+    elseif (MSVC)
+        # link.exe rejects undefined symbols by default.
+        set(STRICT_LINK_OPTIONS)
+        set(PLUGIN_LINK_OPTIONS)
     else ()
         set(STRICT_LINK_OPTIONS
                 LINKER:--no-allow-shlib-undefined
@@ -273,7 +289,7 @@ else ()
                     LINKER:-S # No debug symbols
                     LINKER:-x # No local symbols
             )
-        else ()
+        elseif (NOT MSVC)
             set(COMMON_LINK_OPTIONS
                     ${COMMON_LINK_OPTIONS}
                     -static-libstdc++
@@ -306,16 +322,18 @@ if (UNIX)
         list(APPEND POLYREGION_SYSTEM_LIBS rt)
     endif ()
 else ()
-    set(POLYREGION_SYSTEM_LIBS)
+    set(POLYREGION_SYSTEM_LIBS Psapi)
 endif ()
 
 
-if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
+if ((DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
+    OR (DEFINED POLYREGION_LLVM_DYLIB AND NOT POLYREGION_LLVM_DYLIB))
     set(LLVM_VARIANT static)
 else ()
     set(LLVM_VARIANT dylib)
 endif ()
 set(LLVM_BUILD_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}")
+set(POLYREGION_LLVM_SRC_DIR "${LLVM_BUILD_PREFIX}/llvm-project-${LLVM_SRC_VERSION}.src")
 set(LLVM_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/llvm")
 set(LLD_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/lld")
 set(Clang_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/clang")
@@ -337,6 +355,21 @@ find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 # Defaults to whatever LLVM was built with; override via -DPOLYREGION_LLVM_DYLIB=OFF for static linking.
 option(POLYREGION_LLVM_DYLIB "Link polyregion against libLLVM dylib" ${LLVM_LINK_LLVM_DYLIB})
 message(STATUS "POLYREGION_LLVM_DYLIB = ${POLYREGION_LLVM_DYLIB}")
+
+# XXX forced ON on Windows: LLVM_EXPORT_SYMBOLS_FOR_PLUGINS overflows the PE 65535 export limit.
+if (WIN32)
+    set(_POLYREGION_FUSED_DRIVER_DEFAULT ON)
+else ()
+    set(_POLYREGION_FUSED_DRIVER_DEFAULT OFF)
+endif ()
+option(POLYREGION_FUSED_DRIVER
+        "Fold clang/flang driver and plugin sources into polycpp/polyfc"
+        ${_POLYREGION_FUSED_DRIVER_DEFAULT})
+unset(_POLYREGION_FUSED_DRIVER_DEFAULT)
+if (WIN32 AND NOT POLYREGION_FUSED_DRIVER)
+    message(FATAL_ERROR "POLYREGION_FUSED_DRIVER must be ON on Windows (PE export limit blocks plugin loading)")
+endif ()
+message(STATUS "POLYREGION_FUSED_DRIVER = ${POLYREGION_FUSED_DRIVER}")
 
 find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)
 find_package(Flang REQUIRED PATHS ${Flang_DIR} NO_DEFAULT_PATH)

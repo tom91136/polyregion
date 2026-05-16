@@ -1,4 +1,4 @@
-# XXX Enable CMAKE_SYSTEM_NAME only if cross compiling — flang-rt (LLVM 21.1.4) is not yet a
+# XXX Enable CMAKE_SYSTEM_NAME only if cross compiling - flang-rt (LLVM 21.1.5) is not yet a
 # cross compiler so enabling that will fail. The compiler target is set unconditionally so
 # clang finds the multiarch sysroot paths (usr/lib/x86_64-linux-gnu/Scrt1.o etc.).
 #set(CMAKE_SYSTEM_NAME Linux)
