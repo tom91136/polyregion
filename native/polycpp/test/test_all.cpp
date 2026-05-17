@@ -11,7 +11,10 @@ int main(int argc, const char **argv) {
                      .testFiles = TestFiles,
                      .profileDir = POLYREGION_TEST_PROFILE_DIR,
                      .archVar = "polycpp_arch",
-                     .defaults = {"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic -std=c++17"},
+                     .defaultsVar = "polycpp_defaults",
+                     .defaultsLabelVar = "opt",
+                     .defaultsVariants = {{"O0", "-fno-crash-diagnostics -O0 -g3 -Wall -Wextra -pedantic -std=c++17"},
+                                          {"O3", "-fno-crash-diagnostics -O3 -g3 -Wall -Wextra -pedantic -std=c++17"}},
                      .stdpar = {"polycpp_stdpar",
 #ifdef _WIN32
                                 "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"

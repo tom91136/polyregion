@@ -7,7 +7,10 @@ import polyregion.ast.Traversal.*
 // inline all calls originating from entry
 object FnInline extends ProgramPass {
 
-  // Substitute root names in any Term.Select inside a tree.
+  // XXX Per-renameAll counter so locals from multiple inlinings of the same function don't collide
+  // on the polyc backend's name->slot map
+  private val inlineCounter = new java.util.concurrent.atomic.AtomicLong(0L)
+
   private def substTerms(tree: p.Function, table: Map[p.Named, p.Term]): p.Function =
     tree.modifyAll[p.Term] {
       case p.Term.Select(root, steps, tpe) =>
@@ -23,9 +26,9 @@ object FnInline extends ProgramPass {
       case x => x
     }
 
-  // rename all var and selects to avoid collision
   private def renameAll(f: p.Function): p.Function = {
-    def rename(n: p.Named) = p.Named(s"_inline_${f.mangledName}_${n.symbol}", n.tpe)
+    val id                 = inlineCounter.incrementAndGet()
+    def rename(n: p.Named) = p.Named(s"_inline_${id}_${f.mangledName}_${n.symbol}", n.tpe)
     val captureNames       = f.moduleCaptures.map(_.named).toSet
     val body = f.body
       .modifyAll[p.Term] {

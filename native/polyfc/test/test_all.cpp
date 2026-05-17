@@ -11,7 +11,9 @@ int main(int argc, const char **argv) {
                      .testFiles = TestFiles,
                      .profileDir = POLYREGION_TEST_PROFILE_DIR,
                      .archVar = "polyfc_arch",
-                     .defaults = {"polyfc_defaults", "-O1 -g -cpp"},
+                     .defaultsVar = "polyfc_defaults",
+                     .defaultsLabelVar = "opt",
+                     .defaultsVariants = {{"O0", "-O0 -g -cpp"}, {"O3", "-O3 -g -cpp"}},
                      .stdpar = {"polyfc_stdpar",
 #ifdef _WIN32
                                 // polyreflect-plugin is not built on Windows; force mem=direct + static rt

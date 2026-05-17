@@ -40,9 +40,13 @@ struct DriverConfig {
   std::string binaryDir;
   std::vector<std::string> testFiles;
   std::string profileDir;
-  std::string archVar;                          // matrix variable name, e.g. "polycpp_arch"
-  std::pair<std::string, std::string> defaults; // {name, value} injected as a format variable
-  std::pair<std::string, std::string> stdpar;   // {name, template}; template may reference `{archVar}`
+  std::string archVar;
+  // Each {label, value} variant produces one task; value binds to defaultsVar in templates,
+  // label binds to defaultsLabelVar so the task display can show e.g. "opt=O0".
+  std::string defaultsVar;
+  std::string defaultsLabelVar;
+  std::vector<std::pair<std::string, std::string>> defaultsVariants;
+  std::pair<std::string, std::string> stdpar;
   std::string driverEnvVar;
   std::vector<std::string> passthroughEnvs;
   std::string outputPrefix;
@@ -257,23 +261,26 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
     for (const auto &tc : cases) {
       if (!matches(shortName, tc.name)) continue;
       for (const auto &vars : tc.matrices) {
-        const auto augmented = vars                                                                                     //
-                               | append(std::pair{cfg.defaults.first, cfg.defaults.second})                             //
-                               | append(std::pair{cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(vars))}) //
-                               | append(std::pair{std::string("input"), file})                                          //
-                               | to_vector();
-        const auto unevalStore =
-            mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
-        const auto runsHash =
-            std::hash<std::string>{}(tc.runs | mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); }));
-        const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
-        const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
-                                            static_cast<std::uint32_t>(runsHash));
-        for (const auto mode : modes) {
-          const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
-          const auto store = mkArgStore(augmented | append(std::pair{std::string("output"), output}) | to_vector());
-          auto resolvedRuns = tc.runs | map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; }) | to_vector();
-          tasks.push_back({mode, file, tc.name, vars, output, std::move(resolvedRuns)});
+        for (const auto &[label, value] : cfg.defaultsVariants) {
+          const auto varsWithLabel = vars | append(std::pair{cfg.defaultsLabelVar, label}) | to_vector();
+          const auto augmented = varsWithLabel                                                                                   //
+                                 | append(std::pair{cfg.defaultsVar, value})                                                     //
+                                 | append(std::pair{cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))}) //
+                                 | append(std::pair{std::string("input"), file})                                                 //
+                                 | to_vector();
+          const auto unevalStore =
+              mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
+          const auto runsHash =
+              std::hash<std::string>{}(tc.runs | mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); }));
+          const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
+          const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
+                                              static_cast<std::uint32_t>(runsHash));
+          for (const auto mode : modes) {
+            const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
+            const auto store = mkArgStore(augmented | append(std::pair{std::string("output"), output}) | to_vector());
+            auto resolvedRuns = tc.runs | map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; }) | to_vector();
+            tasks.push_back({mode, file, tc.name, varsWithLabel, output, std::move(resolvedRuns)});
+          }
         }
       }
     }
