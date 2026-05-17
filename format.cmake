@@ -14,10 +14,10 @@ if ("${CMAKE_ARGV3}" STREQUAL "check")
 endif ()
 
 if (NOT POLYREGION_NATIVE_BUILD)
-    file(GLOB _candidates "${REPO_ROOT}/native/cmake-build-*")
+    file(GLOB _candidates "${REPO_ROOT}/native/cmake-build-*" "${REPO_ROOT}/native/build-*")
     set(_newest_mtime 0)
     foreach (c ${_candidates})
-        if (EXISTS "${c}/CMakeCache.txt")
+        if (EXISTS "${c}/CMakeCache.txt" AND EXISTS "${c}/build.ninja" AND EXISTS "${c}/CMakeFiles/rules.ninja")
             file(TIMESTAMP "${c}/CMakeCache.txt" _ts "%s")
             if (_ts GREATER _newest_mtime)
                 set(_newest_mtime ${_ts})
@@ -28,8 +28,8 @@ if (NOT POLYREGION_NATIVE_BUILD)
 endif ()
 if (NOT POLYREGION_NATIVE_BUILD)
     message(FATAL_ERROR
-            "No configured native build dir under native/cmake-build-* — configure one first, "
-            "or pass -DPOLYREGION_NATIVE_BUILD=<path>.")
+            "No configured native build dir under native/{cmake-build,build}-* with usable ninja "
+            "files - configure one first, or pass -DPOLYREGION_NATIVE_BUILD=<path>.")
 endif ()
 
 ### native
