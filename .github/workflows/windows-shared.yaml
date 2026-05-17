@@ -9,13 +9,29 @@ on:
       build_type:
         required: true
         type: string
+      runs_on:
+        required: true
+        type: string
+      llvm_parallel_compile_jobs:
+        required: true
+        type: string
+      llvm_parallel_link_jobs:
+        required: true
+        type: string
+      flang_parallel_compile_jobs:
+        required: true
+        type: string
 defaults:
   run:
     shell: cmd
 
 jobs:
   build:
-    runs-on: ${{ inputs.build_arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
+    runs-on: ${{ inputs.runs_on }}
+    env:
+      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ inputs.llvm_parallel_compile_jobs }}
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ inputs.llvm_parallel_link_jobs }}
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ inputs.flang_parallel_compile_jobs }}
 
     steps:
       - uses: actions/checkout@v5
@@ -63,7 +79,9 @@ jobs:
         id: restore-llvm
         uses: actions/cache/restore@v5
         with:
-          path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}-*
+          path: |
+            ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}-*
+            ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
@@ -79,7 +97,9 @@ jobs:
         uses: actions/cache/save@v5
         id: save-llvm
         with:
-          path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}-*
+          path: |
+            ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}-*
+            ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Configure release build
@@ -121,7 +141,7 @@ jobs:
 
   dist-check:
     needs: build
-    runs-on: ${{ inputs.build_arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - uses: actions/checkout@v5
 

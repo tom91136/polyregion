@@ -13,9 +13,17 @@ jobs:
     with:
       build_arch: amd64
       build_type: Release
+      runs_on: windows-2025
+      llvm_parallel_compile_jobs: "3"
+      llvm_parallel_link_jobs: "1"
+      flang_parallel_compile_jobs: "2"
   ARM64-release:
     uses: ./.github/workflows/windows-shared.yaml
     secrets: inherit
     with:
       build_arch: arm64
       build_type: Release
+      runs_on: windows-11-arm
+      llvm_parallel_compile_jobs: "4"
+      llvm_parallel_link_jobs: "4"
+      flang_parallel_compile_jobs: "2"
