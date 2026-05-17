@@ -19,8 +19,9 @@
   #include <windows.h>
 #else
   #include <fcntl.h>
-  #include <sys/file.h>
   #include <unistd.h>
+
+  #include <sys/file.h>
 #endif
 
 namespace polyregion::invoke {

@@ -3,6 +3,12 @@
 #include <cstddef>
 #include <cstdlib>
 
+// XXX _POSIX_C_SOURCE (set by polyinvoke's compile defs) hides RTLD_NEXT on macOS; expose it via
+// _DARWIN_C_SOURCE before <dlfcn.h>.
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+  #define _DARWIN_C_SOURCE
+#endif
+
 #if defined(__linux__) || defined(__APPLE__)
   #include <dlfcn.h>
 #endif
