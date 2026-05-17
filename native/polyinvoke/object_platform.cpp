@@ -254,8 +254,7 @@ RelocatableDevice::RelocatableDevice() {
 
   // libm::exportAll (called from invoke::init) registers sincosf et al. via sys::DynamicLibrary;
   // the process generator below picks them up.
-  if (auto gen = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(globalPrefix))
-    processJD->addGenerator(std::move(*gen));
+  if (auto gen = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(globalPrefix)) processJD->addGenerator(std::move(*gen));
   else POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create process symbol generator: %s", toString(gen.takeError()).c_str());
 }
 
@@ -519,8 +518,8 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   else {
     address = polyregion_dl_find(handle, symbol.c_str());
     if (!address) {
-      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zd bytes): %s",
-                       symbol.c_str(), moduleName.c_str(), image.size(), polyregion_dl_error());
+      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zd bytes): %s", symbol.c_str(), moduleName.c_str(),
+                       image.size(), polyregion_dl_error());
     }
     symbolTable.emplace_hint(it, symbol, address);
   }

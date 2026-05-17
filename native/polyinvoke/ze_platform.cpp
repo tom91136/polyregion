@@ -92,20 +92,23 @@ std::string queryDeviceName(ze_device_handle_t device) {
 } // namespace
 
 ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
-    : driver(driver), device(device),
-      context(
-          [this]() { return createContext(this->driver); },
-          [](auto ctx) {
-            POLYINVOKE_TRACE();
-            CHECKED(zeContextDestroy(ctx));
-          }),
+    : driver(driver), device(device), context([this]() { return createContext(this->driver); },
+                                              [](auto ctx) {
+                                                POLYINVOKE_TRACE();
+                                                CHECKED(zeContextDestroy(ctx));
+                                              }),
       store(
           PREFIX,
           [this](auto &&image) {
             POLYINVOKE_TRACE();
             context.touch();
-            ze_module_desc_t desc{ZE_STRUCTURE_TYPE_MODULE_DESC, nullptr, ZE_MODULE_FORMAT_IL_SPIRV, image.size(),
-                                  reinterpret_cast<const uint8_t *>(image.data()), nullptr, nullptr};
+            ze_module_desc_t desc{ZE_STRUCTURE_TYPE_MODULE_DESC,
+                                  nullptr,
+                                  ZE_MODULE_FORMAT_IL_SPIRV,
+                                  image.size(),
+                                  reinterpret_cast<const uint8_t *>(image.data()),
+                                  nullptr,
+                                  nullptr};
             ze_module_handle_t module = {};
             ze_module_build_log_handle_t buildLog = {};
             if (const auto r = zeModuleCreate(*context, this->device, &desc, &module, &buildLog); r != ZE_RESULT_SUCCESS) {
@@ -231,9 +234,13 @@ ZeDeviceQueue::ZeDeviceQueue(const std::chrono::duration<int64_t> &timeout, decl
   POLYINVOKE_TRACE();
   // Async immediate command list: appends submit straight to the device without an explicit
   // queue.  Ordinal 0 is always the default compute group.
-  ze_command_queue_desc_t desc{ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC, nullptr,
-                               /*ordinal=*/0, /*index=*/0,
-                               /*flags=*/0, ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS, ZE_COMMAND_QUEUE_PRIORITY_NORMAL};
+  ze_command_queue_desc_t desc{ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC,
+                               nullptr,
+                               /*ordinal=*/0,
+                               /*index=*/0,
+                               /*flags=*/0,
+                               ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS,
+                               ZE_COMMAND_QUEUE_PRIORITY_NORMAL};
   CHECKED(zeCommandListCreateImmediate(context, device, &desc, &cmdList));
 
   // Single-slot host-visible event pool.  Every append uses this event as its signal slot;

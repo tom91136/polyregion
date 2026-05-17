@@ -263,10 +263,10 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
       for (const auto &vars : tc.matrices) {
         for (const auto &[label, value] : cfg.defaultsVariants) {
           const auto varsWithLabel = vars | append(std::pair{cfg.defaultsLabelVar, label}) | to_vector();
-          const auto augmented = varsWithLabel                                                                                   //
-                                 | append(std::pair{cfg.defaultsVar, value})                                                     //
+          const auto augmented = varsWithLabel                                                                                     //
+                                 | append(std::pair{cfg.defaultsVar, value})                                                       //
                                  | append(std::pair{cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))}) //
-                                 | append(std::pair{std::string("input"), file})                                                 //
+                                 | append(std::pair{std::string("input"), file})                                                   //
                                  | to_vector();
           const auto unevalStore =
               mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
@@ -278,7 +278,8 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
           for (const auto mode : modes) {
             const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
             const auto store = mkArgStore(augmented | append(std::pair{std::string("output"), output}) | to_vector());
-            auto resolvedRuns = tc.runs | map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; }) | to_vector();
+            auto resolvedRuns =
+                tc.runs | map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; }) | to_vector();
             tasks.push_back({mode, file, tc.name, varsWithLabel, output, std::move(resolvedRuns)});
           }
         }

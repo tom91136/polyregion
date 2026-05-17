@@ -2,8 +2,8 @@
 
 #include "polyregion/compat.h"
 
-#include "zeew.h"
 #include "runtime.h"
+#include "zeew.h"
 
 namespace polyregion::invoke::ze {
 

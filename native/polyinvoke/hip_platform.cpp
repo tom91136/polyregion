@@ -203,8 +203,8 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
 void HipDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                 const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  CHECKED(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst + dstOffset),
-                             reinterpret_cast<hipDeviceptr_t>(src + srcOffset), size, stream));
+  CHECKED(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst + dstOffset), reinterpret_cast<hipDeviceptr_t>(src + srcOffset), size,
+                             stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {

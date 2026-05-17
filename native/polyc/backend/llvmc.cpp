@@ -200,7 +200,8 @@ static std::string patchSpirvConstantNull(std::string spv) {
       out.push_back(((3u + literalWords) << 16) | OpConstant);
       out.push_back(src[i + 1]);
       out.push_back(src[i + 2]);
-      for (uint32_t w = 0; w < literalWords; ++w) out.push_back(0u);
+      for (uint32_t w = 0; w < literalWords; ++w)
+        out.push_back(0u);
     } else out.insert(out.end(), src + i, src + i + wc);
     i += wc;
   }

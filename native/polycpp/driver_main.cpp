@@ -194,8 +194,8 @@ int main(int argc, const char *argv[]) {
                        // EP-callback-registered passes never fire. Inject the late passes by name
                        // via --lto-newpm-passes so they run regardless of opt level. Comma in
                        // value uses -Xlinker to avoid `-Wl,...,...` arg splitting.
-                       append({fmt::format("-Wl,-mllvm,-polyreflect-verbose={}", debug ? "1" : "0"),
-                               "-Xlinker", "--lto-newpm-passes=polyreflect-stack,polyreflect-mem"});
+                       append({fmt::format("-Wl,-mllvm,-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
+                               "--lto-newpm-passes=polyreflect-stack,polyreflect-mem"});
   #endif
 #else
                        append(Driver::lldPassPluginFlags(polyreflectPlugin, {

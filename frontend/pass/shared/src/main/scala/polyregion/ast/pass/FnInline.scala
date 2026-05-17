@@ -131,12 +131,14 @@ object FnInline extends ProgramPass {
       sig.rtn =:= ivk.rtn
     } match {
       case f :: Nil => f
-      case Nil      =>
+      case Nil =>
         throw new IllegalStateException(
           s"FnInline: no matching overload for ${ivk.repr}; candidates were ${candidates.map(_.repr).mkString("; ")}"
         )
       case xs =>
-        throw new IllegalStateException(s"FnInline: ambiguous overloads for ${ivk.repr}: ${xs.map(_.repr).mkString("; ")}")
+        throw new IllegalStateException(
+          s"FnInline: ambiguous overloads for ${ivk.repr}: ${xs.map(_.repr).mkString("; ")}"
+        )
     }
   }
 
@@ -146,7 +148,7 @@ object FnInline extends ProgramPass {
     expr match {
       case ivk: p.Expr.Invoke =>
         val (resultExpr, inlineStmts, caps) = inlineOne(ivk, resolveOverload(ivk, program))
-        val (rewrittenStmts, nestedCaps) = inlineStmts.foldMap(s => inlineStmt(s, program))
+        val (rewrittenStmts, nestedCaps)    = inlineStmts.foldMap(s => inlineStmt(s, program))
         (resultExpr, rewrittenStmts, caps ++ nestedCaps)
       case _ => (expr, Nil, Nil)
     }
@@ -156,7 +158,7 @@ object FnInline extends ProgramPass {
       val (newE, prepend, caps) = inlineExpr(e, program)
       (prepend :+ p.Stmt.Var(n, Some(newE), mut), caps)
     case p.Stmt.Var(_, None, _) => (List(stmt), Nil)
-    case p.Stmt.Mut(name, e)    =>
+    case p.Stmt.Mut(name, e) =>
       val (newE, prepend, caps) = inlineExpr(e, program)
       (prepend :+ p.Stmt.Mut(name, newE), caps)
     case _: p.Stmt.Update => (List(stmt), Nil)
