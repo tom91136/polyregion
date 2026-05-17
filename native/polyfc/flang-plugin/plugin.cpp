@@ -16,6 +16,10 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned CodePage, unsig
 }
 #endif
 
+// XXX MSVC STL evaluates is_trivially_destructible / _New_alignof on Expr<T> when std::vector
+// destructors instantiate; pull in the full definition before any header that uses it.
+#include "flang/Evaluate/expression.h"
+
 #include "clang/Options/Options.h"
 #include "flang/Frontend/CompilerInstance.h"
 #include "flang/Frontend/CompilerInvocation.h"
