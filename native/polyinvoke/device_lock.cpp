@@ -15,6 +15,11 @@
   #include <fcntl.h>
   #include <unistd.h>
 
+  // XXX _POSIX_C_SOURCE (set by polyinvoke's compile defs) hides BSD flock/LOCK_* on macOS;
+  // re-expose them via _DARWIN_C_SOURCE before <sys/file.h>.
+  #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+    #define _DARWIN_C_SOURCE
+  #endif
   #include <sys/file.h>
 #endif
 
