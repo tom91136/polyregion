@@ -1,3 +1,9 @@
+// _POSIX_C_SOURCE hides BSD flock/LOCK_* on macOS; must define _DARWIN_C_SOURCE
+// before any system header is pulled in transitively.
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+  #define _DARWIN_C_SOURCE
+#endif
+
 #include "polyinvoke/device_lock.h"
 
 #include <algorithm>
@@ -13,14 +19,8 @@
   #include <windows.h>
 #else
   #include <fcntl.h>
-  #include <unistd.h>
-
-  // XXX _POSIX_C_SOURCE (set by polyinvoke's compile defs) hides BSD flock/LOCK_* on macOS;
-  // re-expose them via _DARWIN_C_SOURCE before <sys/file.h>.
-  #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
-    #define _DARWIN_C_SOURCE
-  #endif
   #include <sys/file.h>
+  #include <unistd.h>
 #endif
 
 namespace polyregion::invoke {

@@ -41,13 +41,17 @@ gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;
 gfx1100;gfx1101;gfx1102;gfx1103\
 ")
 
-set(CPU_ARCHS "\
+set(CPU_ARCHS_X86 "\
 x86-64;x86-64-v2;x86-64-v3;x86-64-v4\
 ")
+# Single armv8-a slot for macOS/arm64 covers all current Apple Silicon (M1..M4);
+# findTestImage does subset-match so the M-series-specific extensions add no value.
+set(CPU_ARCHS_ARM "armv8-a")
 
 file(GLOB CL_SRC_FILES ${CMAKE_SOURCE_DIR}/*.cl)
 file(GLOB MSL_SRC_FILES ${CMAKE_SOURCE_DIR}/*.msl)
 file(GLOB C_SRC_FILES ${CMAKE_SOURCE_DIR}/*.c)
+list(FILTER C_SRC_FILES EXCLUDE REGEX ".*polyregion_fltused_shim\\.c$")
 file(GLOB GLSL_SRC_DIRS ${CMAKE_SOURCE_DIR}/glsl_*)
 
 
@@ -118,6 +122,80 @@ endif ()
 
 any_target_enabled(_cpu_any "RelocatableObject" "SharedObject")
 if (_cpu_any)
+    # Gate inner-map entries by host preprocessor macros so a single .hpp works
+    # across the six CI cells (Linux/Windows/macOS x amd64/arm64).
+    macro(configure_multi_platform PLATFORM
+            LIN_X86_LIST LIN_ARM_LIST
+            WIN_X86_LIST WIN_ARM_LIST
+            MAC_X86_LIST MAC_ARM_LIST OUT_LIST)
+        list(JOIN ${LIN_X86_LIST} ",
+        " _lin_x86)
+        list(JOIN ${LIN_ARM_LIST} ",
+        " _lin_arm)
+        list(JOIN ${WIN_X86_LIST} ",
+        " _win_x86)
+        list(JOIN ${WIN_ARM_LIST} ",
+        " _win_arm)
+        list(JOIN ${MAC_X86_LIST} ",
+        " _mac_x86)
+        list(JOIN ${MAC_ARM_LIST} ",
+        " _mac_arm)
+        list(APPEND ${OUT_LIST}
+                "    {\"${PLATFORM}\",
+      {
+#if defined(_WIN32) || defined(_WIN64)
+  #if defined(_M_ARM64) || defined(__aarch64__)
+        ${_win_arm}
+  #else
+        ${_win_x86}
+  #endif
+#elif defined(__APPLE__)
+  #if defined(__aarch64__) || defined(_M_ARM64)
+        ${_mac_arm}
+  #else
+        ${_mac_x86}
+  #endif
+#else
+  #if defined(__aarch64__)
+        ${_lin_arm}
+  #else
+        ${_lin_x86}
+  #endif
+#endif
+      }
+    }")
+    endmacro()
+
+    macro(compile_kernel_blob C_SOURCE PROGRAM_NAME PREFIX TRIPLE CPU_ARCH EXTRA OUTPUT_VAR ENTRIES_VAR)
+        set(CLI clang -target ${TRIPLE} -Os -g0 -std=c11 -march=${CPU_ARCH} ${EXTRA} -xc ${C_SOURCE} -o data.bin)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[${PREFIX}] ${CLI_NS}")
+        execute_process(COMMAND ${CLI} RESULT_VARIABLE _rc)
+        if (NOT _rc EQUAL 0)
+            message(FATAL_ERROR "${PREFIX} compile failed (rc=${_rc}) for ${C_SOURCE} (${CPU_ARCH})")
+        endif ()
+        read_to_hex(data.bin ${OUTPUT_VAR})
+        make_data_block(CONST_DATA_BLOCKS ${ENTRIES_VAR} "${PROGRAM_NAME}_${PREFIX}" "${CPU_ARCH}" "${${OUTPUT_VAR}}")
+    endmacro()
+
+    # Two-source variant: kernel + _fltused shim, plus the no-CRT link flags lld-link wants
+    # when there's no DllMain to root exports.
+    macro(build_windows_dll C_SOURCE PROGRAM_NAME PREFIX TRIPLE CPU_ARCH SHIM EXPORTS ENTRIES_VAR)
+        set(CLI clang -target ${TRIPLE} -Os -g0 -std=c11 -march=${CPU_ARCH}
+                ${C_SOURCE} ${SHIM} -shared -fuse-ld=lld -nostdlib -Xlinker /noentry ${EXPORTS}
+                -o data.bin)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[${PREFIX}] ${CLI_NS}")
+        execute_process(COMMAND ${CLI} RESULT_VARIABLE _rc)
+        if (NOT _rc EQUAL 0)
+            message(FATAL_ERROR "${PREFIX} link failed (rc=${_rc}) for ${C_SOURCE} (${CPU_ARCH})")
+        endif ()
+        read_to_hex(data.bin _HEX)
+        make_data_block(CONST_DATA_BLOCKS ${ENTRIES_VAR} "${PROGRAM_NAME}_${PREFIX}" "${CPU_ARCH}" "${_HEX}")
+    endmacro()
+
+    # Kernel ABI must match the host (SysV / MS-x64 / AAPCS64); clang on Linux
+    # cross-compiles all flavours natively and the runtime picks via #if in the header.
     foreach (C_SOURCE ${C_SRC_FILES})
         message(STATUS "Building ${C_SOURCE}...")
         get_filename_component(PROGRAM_NAME ${C_SOURCE} NAME_WE)
@@ -126,42 +204,79 @@ if (_cpu_any)
 
         target_enabled("RelocatableObject" _reloc)
         if (_reloc)
-            set(RELOCATABLE_OBJ_PROGRAM_ENTRIES "")
-            foreach (CPU_ARCH ${CPU_ARCHS})
-                set(CLI clang
-                        -target x86_64-pc-linux-gnu
-                        -fPIC -Os -g0
-                        -std=c11 -march=${CPU_ARCH}
-                        -xc ${C_SOURCE}
-                        -c
-                        -o data.bin)
-                string(REPLACE ";" " " CLI_NS "${CLI}")
-                message(STATUS "[RelocatableObject] ${CLI_NS}")
-                execute_process(COMMAND ${CLI})
-                read_to_hex(data.bin RELOCATABLE_OBJ_ENTRY_HEX)
-                make_data_block(CONST_DATA_BLOCKS RELOCATABLE_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_relocatable" "${CPU_ARCH}" "${RELOCATABLE_OBJ_ENTRY_HEX}")
+            set(RELOC_LIN_X86_ENTRIES "")
+            set(RELOC_LIN_ARM_ENTRIES "")
+            set(RELOC_WIN_X86_ENTRIES "")
+            set(RELOC_WIN_ARM_ENTRIES "")
+            set(RELOC_MAC_X86_ENTRIES "")
+            set(RELOC_MAC_ARM_ENTRIES "")
+            foreach (CPU_ARCH ${CPU_ARCHS_X86})
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "reloc_lin_x86"
+                        "x86_64-pc-linux-gnu" "${CPU_ARCH}" "-fPIC;-c" _HEX RELOC_LIN_X86_ENTRIES)
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "reloc_w11_x86"
+                        "x86_64-pc-windows-msvc" "${CPU_ARCH}" "-c" _HEX RELOC_WIN_X86_ENTRIES)
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "reloc_mac_x86"
+                        "x86_64-apple-darwin" "${CPU_ARCH}" "-c" _HEX RELOC_MAC_X86_ENTRIES)
             endforeach ()
-            configure_platform("RelocatableObject" RELOCATABLE_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+            foreach (ARM_ARCH ${CPU_ARCHS_ARM})
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "reloc_lin_arm"
+                        "aarch64-pc-linux-gnu" "${ARM_ARCH}" "-fPIC;-c" _HEX RELOC_LIN_ARM_ENTRIES)
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "reloc_w11_arm"
+                        "aarch64-pc-windows-msvc" "${ARM_ARCH}" "-c" _HEX RELOC_WIN_ARM_ENTRIES)
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "reloc_mac_arm"
+                        "arm64-apple-darwin" "${ARM_ARCH}" "-c" _HEX RELOC_MAC_ARM_ENTRIES)
+            endforeach ()
+            configure_multi_platform("RelocatableObject"
+                    RELOC_LIN_X86_ENTRIES RELOC_LIN_ARM_ENTRIES
+                    RELOC_WIN_X86_ENTRIES RELOC_WIN_ARM_ENTRIES
+                    RELOC_MAC_X86_ENTRIES RELOC_MAC_ARM_ENTRIES PROGRAM_ENTRIES)
         endif ()
 
         target_enabled("SharedObject" _shared)
         if (_shared)
-            set(SHARED_OBJ_PROGRAM_ENTRIES "")
-            foreach (CPU_ARCH ${CPU_ARCHS})
-                set(CLI clang
-                        -target x86_64-pc-linux-gnu
-                        -Os -g0
-                        -std=c11 -march=${CPU_ARCH}
-                        -xc ${C_SOURCE}
-                        -shared
-                        -o data.bin)
-                string(REPLACE ";" " " CLI_NS "${CLI}")
-                message(STATUS "[SharedObject] ${CLI_NS}")
-                execute_process(COMMAND ${CLI})
-                read_to_hex(data.bin SHARED_OBJ_ENTRY_HEX)
-                make_data_block(CONST_DATA_BLOCKS SHARED_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_shared" "${CPU_ARCH}" "${SHARED_OBJ_ENTRY_HEX}")
+            set(SHOBJ_LIN_X86_ENTRIES "")
+            set(SHOBJ_LIN_ARM_ENTRIES "")
+            set(SHOBJ_WIN_X86_ENTRIES "")
+            set(SHOBJ_WIN_ARM_ENTRIES "")
+            set(SHOBJ_MAC_X86_ENTRIES "")
+            set(SHOBJ_MAC_ARM_ENTRIES "")
+
+            file(STRINGS ${C_SOURCE} _decls REGEX "^void[ \t]+[A-Za-z_]")
+            set(_exports "")
+            foreach (_decl ${_decls})
+                if (_decl MATCHES "^void[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\\(")
+                    list(APPEND _exports "-Xlinker" "/export:${CMAKE_MATCH_1}")
+                endif ()
             endforeach ()
-            configure_platform("SharedObject" SHARED_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+
+            # _fltused is what MSVC link expects for float-using TUs with no CRT startup.
+            set(_shim "${CMAKE_CURRENT_BINARY_DIR}/polyregion_fltused_shim.c")
+            file(WRITE "${_shim}" "int _fltused = 0;\n")
+
+            foreach (CPU_ARCH ${CPU_ARCHS_X86})
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "shobj_lin_x86"
+                        "x86_64-pc-linux-gnu" "${CPU_ARCH}" "-fPIC;-shared" _HEX SHOBJ_LIN_X86_ENTRIES)
+                build_windows_dll(${C_SOURCE} ${PROGRAM_NAME} "shobj_w11_x86"
+                        "x86_64-pc-windows-msvc" "${CPU_ARCH}" "${_shim}" "${_exports}" SHOBJ_WIN_X86_ENTRIES)
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "shobj_mac_x86"
+                        "x86_64-apple-darwin" "${CPU_ARCH}"
+                        "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _HEX SHOBJ_MAC_X86_ENTRIES)
+            endforeach ()
+            foreach (ARM_ARCH ${CPU_ARCHS_ARM})
+                # system ld.bfd on x86_64 hosts can't link aarch64; route through lld.
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "shobj_lin_arm"
+                        "aarch64-pc-linux-gnu" "${ARM_ARCH}"
+                        "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _HEX SHOBJ_LIN_ARM_ENTRIES)
+                build_windows_dll(${C_SOURCE} ${PROGRAM_NAME} "shobj_w11_arm"
+                        "aarch64-pc-windows-msvc" "${ARM_ARCH}" "${_shim}" "${_exports}" SHOBJ_WIN_ARM_ENTRIES)
+                compile_kernel_blob(${C_SOURCE} ${PROGRAM_NAME} "shobj_mac_arm"
+                        "arm64-apple-darwin" "${ARM_ARCH}"
+                        "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _HEX SHOBJ_MAC_ARM_ENTRIES)
+            endforeach ()
+            configure_multi_platform("SharedObject"
+                    SHOBJ_LIN_X86_ENTRIES SHOBJ_LIN_ARM_ENTRIES
+                    SHOBJ_WIN_X86_ENTRIES SHOBJ_WIN_ARM_ENTRIES
+                    SHOBJ_MAC_X86_ENTRIES SHOBJ_MAC_ARM_ENTRIES PROGRAM_ENTRIES)
         endif ()
 
         list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)

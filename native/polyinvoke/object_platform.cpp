@@ -10,11 +10,15 @@
 #endif
 
 #include "llvm/ADT/StringMap.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include "llvm/Object/COFF.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -170,6 +174,61 @@ static std::string withGlobalPrefix(char prefix, std::string_view name) {
 
 static void *malloc_(size_t size) { return std::malloc(size); }
 
+// llvm::RuntimeDyldCOFFX86_64 zero-extends the 4-byte REL32 addend instead of sign-extending,
+// so RIP-rel instructions with a trailing immediate (vpinsrw imm8, vextractf128, ...) which
+// encode -1..-5 in the patch-site to compensate for the trailing byte(s) overflow the
+// `Result <= INT32_MAX` assert and miscompile in release. Rewrite each such REL32 to the
+// matching IMAGE_REL_AMD64_REL32_N (N=1..5) with a zero patch-site so stock RuntimeDyld
+// computes Delta = 4+N itself. winnt.h defines IMAGE_REL_AMD64_*/IMAGE_FILE_MACHINE_AMD64
+// as macros that collide with llvm::COFF::* enums under MSVC, hence the raw constants.
+static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
+  constexpr uint16_t kRel32 = 0x0004;
+  constexpr uint16_t kFileMachineAMD64 = 0x8664;
+  constexpr size_t kCoffHeaderMin = 20;
+
+  if (buf.size() < kCoffHeaderMin) return;
+  uint16_t machine;
+  std::memcpy(&machine, buf.data(), 2);
+  if (machine != kFileMachineAMD64) return; // not an x86_64 COFF; ELF/Mach-O/import-lib skip the parse
+
+  auto memBuf = llvm::MemoryBufferRef(llvm::StringRef(buf.data(), buf.size()), "<coff>");
+  auto objOrErr = llvm::object::ObjectFile::createObjectFile(memBuf);
+  if (!objOrErr) {
+    llvm::consumeError(objOrErr.takeError());
+    return;
+  }
+  auto *coff = llvm::dyn_cast<llvm::object::COFFObjectFile>(objOrErr->get());
+  if (!coff) return;
+
+  char *const base = buf.data();
+  const size_t size = buf.size();
+
+  for (const auto &secRef : coff->sections()) {
+    const llvm::object::coff_section *cs = coff->getCOFFSection(secRef);
+    if (!cs || cs->NumberOfRelocations == 0 || cs->SizeOfRawData == 0) continue;
+    constexpr size_t kReloc = 10; // sizeof(coff_relocation)
+    size_t i = 0;
+    for (const auto &rel : coff->getRelocations(cs)) {
+      const size_t relOff = static_cast<size_t>(cs->PointerToRelocations) + i * kReloc;
+      ++i;
+      if (rel.Type != kRel32 || rel.VirtualAddress < cs->VirtualAddress) continue;
+      const uint32_t off = rel.VirtualAddress - cs->VirtualAddress;
+      if (off + 4 > cs->SizeOfRawData) continue;
+      const size_t patchOff = static_cast<size_t>(cs->PointerToRawData) + off;
+      if (patchOff + 4 > size || relOff + kReloc > size) continue;
+
+      int32_t addend;
+      std::memcpy(&addend, base + patchOff, 4);
+      if (addend < -5 || addend > -1) continue;
+
+      const uint16_t newType = static_cast<uint16_t>(kRel32 + (-addend));
+      std::memcpy(base + relOff + offsetof(llvm::object::coff_relocation, Type), &newType, 2);
+      const uint32_t zero = 0;
+      std::memcpy(base + patchOff, &zero, 4);
+    }
+  }
+}
+
 RelocatableDevice::RelocatableDevice() {
   POLYINVOKE_TRACE();
   auto epc = llvm::orc::SelfExecutorProcessControl::Create();
@@ -224,8 +283,11 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
     llvm::orc::JITDylib &jd = *jdOrErr;
     jd.addToLinkOrder(*processJD);
 
-    auto buf = llvm::MemoryBuffer::getMemBufferCopy(llvm::StringRef(image), name);
-    if (auto err = ol->add(jd, std::move(buf))) {
+    auto wbuf = llvm::WritableMemoryBuffer::getNewUninitMemBuffer(image.size(), name);
+    if (!wbuf) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot allocate %zu-byte writable buffer for %s", image.size(), name.c_str());
+    std::memcpy(wbuf->getBufferStart(), image.data(), image.size());
+    rewriteCOFFRel32NegativeAddends(wbuf->getBuffer());
+    if (auto err = ol->add(jd, std::unique_ptr<llvm::MemoryBuffer>(std::move(wbuf)))) {
       POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot load module: %s", toString(std::move(err)).c_str());
     }
     objects.emplace_hint(it, name, std::make_unique<details::LoadedCodeObject>(jd));
@@ -456,10 +518,9 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   if (const auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
   else {
     address = polyregion_dl_find(handle, symbol.c_str());
-    auto err = polyregion_dl_error();
-    if (err) {
-      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zd bytes): %s", //
-                       symbol.c_str(), moduleName.c_str(), image.size(), err);
+    if (!address) {
+      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zd bytes): %s",
+                       symbol.c_str(), moduleName.c_str(), image.size(), polyregion_dl_error());
     }
     symbolTable.emplace_hint(it, symbol, address);
   }

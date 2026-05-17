@@ -9,8 +9,10 @@
   #include <Windows.h>
 
 inline const char *polyregion_dl_error_() {
+  const DWORD code = ::GetLastError();
+  if (!code) return nullptr;
   thread_local std::string msg;
-  msg = std::system_category().message(::GetLastError());
+  msg = std::system_category().message(code);
   return msg.c_str();
 }
 

@@ -143,10 +143,15 @@ target_compile_options(polyinvoke-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyinvoke-exec PRIVATE ${LINK_OPTIONS})
 # XXX libstdc++.so must come before libLLVM.so on DT_NEEDED order; libLLVM was built with
 # -static-libstdc++ and re-exports template instantiations that conflict with the dlopen'd
-# vendor libs (codecvt SEGV in AMD's populateOCLDeviceConstants otherwise).
-target_link_options(polyinvoke-tests PRIVATE
-        "SHELL:-Wl,--push-state,--no-as-needed -lstdc++ -lgcc_s -Wl,--pop-state"
-        ${GPU_RUNTIME_LINK_OPTIONS})
+# vendor libs (codecvt SEGV in AMD's populateOCLDeviceConstants otherwise). GNU-ld only;
+# Apple ld64 doesn't grok --push-state/--no-as-needed.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(polyinvoke-tests PRIVATE
+            "SHELL:-Wl,--push-state,--no-as-needed -lstdc++ -lgcc_s -Wl,--pop-state"
+            ${GPU_RUNTIME_LINK_OPTIONS})
+else ()
+    target_link_options(polyinvoke-tests PRIVATE ${GPU_RUNTIME_LINK_OPTIONS})
+endif ()
 
 # XXX `glibc.rtld.optional_static_tls=8192` bumps the static-TLS reserve so libamdhip64.so.6
 # (built with -ftls-model=initial-exec, DT_FLAGS STATIC_TLS) can dlopen.
