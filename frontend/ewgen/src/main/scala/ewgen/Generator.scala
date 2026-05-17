@@ -153,6 +153,12 @@ object Generator {
        |#include <stdbool.h>
        |#endif
        |
+       |// XXX MSVC has no __attribute__/__extension__; stub them so sliced GCC/Clang type tags compile.
+       |#if !defined(__GNUC__) && !defined(__clang__)
+       |  #define __attribute__(x)
+       |  #define __extension__
+       |#endif
+       |
        |#ifdef __cplusplus
        |#define _Bool bool
        |extern "C" {
