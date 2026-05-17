@@ -1,3 +1,10 @@
+// clang-format off
+// XXX Expr<T> must be complete before <vector>/<memory> is included transitively; clang-cl
+// otherwise eagerly instantiates std::vector<Expr<T>>'s dtor type-traits and trips on the
+// forward declaration. Regroup would otherwise sort this after <vector>.
+#include "flang/Evaluate/expression.h"
+// clang-format on
+
 #include <fstream>
 #include <vector>
 
@@ -15,10 +22,6 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned CodePage, unsig
                                                         int *lpUsedDefaultChar);
 }
 #endif
-
-// XXX MSVC STL evaluates is_trivially_destructible / _New_alignof on Expr<T> when std::vector
-// destructors instantiate; pull in the full definition before any header that uses it.
-#include "flang/Evaluate/expression.h"
 
 #include "clang/Options/Options.h"
 #include "flang/Frontend/CompilerInstance.h"
