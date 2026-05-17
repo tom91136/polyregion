@@ -103,5 +103,28 @@ extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo l
                 [&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { addPasses(MPM, earlyPasses); });
             PB.registerFullLinkTimeOptimizationLastEPCallback(
                 [&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { addPasses(MPM, latePasses); });
+            // XXX At -O0, LLD's LTO codegen short-circuits without building any optimisation
+            // pipeline, so EP callbacks never fire. Register passes by name as well so they can
+            // be inserted explicitly via -Wl,--lto-newpm-passes=... at link time.
+            PB.registerPipelineParsingCallback(
+                [](llvm::StringRef Name, llvm::ModulePassManager &MPM, llvm::ArrayRef<llvm::PassBuilder::PipelineElement>) {
+                  if (Name == "polyreflect-protect-rt") {
+                    MPM.addPass(polyregion::polyreflect::ProtectRTPass(verboseOpt));
+                    return true;
+                  }
+                  if (Name == "polyreflect-interpose") {
+                    MPM.addPass(polyregion::polyreflect::InterposePass(verboseOpt));
+                    return true;
+                  }
+                  if (Name == "polyreflect-stack") {
+                    MPM.addPass(polyregion::polyreflect::ReflectStackPass(verboseOpt));
+                    return true;
+                  }
+                  if (Name == "polyreflect-mem") {
+                    MPM.addPass(polyregion::polyreflect::ReflectMemPass(verboseOpt));
+                    return true;
+                  }
+                  return false;
+                });
           }};
 }

@@ -35,6 +35,30 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
          Annotation == "polyreflect-rt-odr"))
       Protected.emplace(F);
   });
+  // XXX Transitive close: any function reachable from a protected one is also protected, else
+  // the alloca walk below instruments stdlib helpers (e.g. std::atomic::load) inlined or called
+  // from _rt_record's body and the inserted _rt_record calls recurse.
+  std::vector<llvm::Function *> WorkList(Protected.begin(), Protected.end());
+  while (!WorkList.empty()) {
+    llvm::Function *F = WorkList.back();
+    WorkList.pop_back();
+    if (F->isDeclaration()) continue;
+    for (llvm::BasicBlock &BB : *F) {
+      for (llvm::Instruction &I : BB) {
+        const auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+        if (!CB || CB->getIntrinsicID() != llvm::Intrinsic::not_intrinsic) continue;
+        if (auto *Callee = CB->getCalledFunction()) {
+          if (!Callee->isDeclaration() && Protected.emplace(Callee).second) WorkList.push_back(Callee);
+        } else if (verbose) {
+          // XXX Indirect call - we can't statically prove the callee is safe. The alloca walk
+          // proceeds anyway; if recursion shows up at runtime, the indirect callee needs an
+          // explicit polyreflect-rt-protect annotation.
+          llvm::errs() << "[ReflectStackPass] Indirect call in protected function " << F->getName()
+                       << "; unable to extend Protected set transitively\n";
+        }
+      }
+    }
+  }
 
   for (llvm::Function &F : M) {
     if (F.isDeclaration()) continue;
@@ -43,47 +67,36 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
       continue;
     }
 
-    llvm::DILocation *zeroDebugLoc{};
-    if (const auto SP = F.getSubprogram()) {
-      zeroDebugLoc = llvm::DILocation::get(C, 0, 0, SP);
+    std::vector<llvm::AllocaInst *> Allocas;
+    for (llvm::Instruction &I : F.getEntryBlock()) {
+      if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(&I)) Allocas.push_back(AI);
     }
+    if (Allocas.empty()) continue;
 
-    if (verbose) llvm::errs() << "[ReflectStackPass] In " << F.getName() << "\n";
+    llvm::DILocation *zeroDebugLoc{};
+    if (const auto SP = F.getSubprogram()) zeroDebugLoc = llvm::DILocation::get(C, 0, 0, SP);
+
+    if (verbose) llvm::errs() << "[ReflectStackPass] In " << F.getName() << " (" << Allocas.size() << " allocas)\n";
+
+    // XXX Anchor record/release on the alloca and on each return, not on llvm.lifetime_*. clang
+    // only emits lifetime intrinsics at -O1+, and an alloca-scoped record is correct (just less
+    // precise) for any opt level - polyreflect only needs the pointer to be tracked while the
+    // kernel can observe it, which the function-scoped window always covers.
+    for (auto *AI : Allocas) {
+      llvm::IRBuilder B(AI->getNextNode());
+      const auto sizeBytes = AI->getAllocationSize(M.getDataLayout()).value_or(llvm::TypeSize::getFixed(0)).getFixedValue();
+      const auto Call = B.CreateCall(RecordFn, {AI, B.getInt64(sizeBytes), B.getInt8(to_integral(rt_reflect::Type::StackAlloc))});
+      if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
+    }
     for (llvm::BasicBlock &BB : F) {
-      std::vector<std::function<void(llvm::IRBuilder<> &)>> Functions;
-      for (llvm::Instruction &I : BB) {
-        if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
-          const auto Called = CB->getCalledFunction();
-          if (!Called) continue;
-          if (CB->getIntrinsicID() == llvm::Intrinsic::lifetime_start) {
-            auto *AI = llvm::dyn_cast<llvm::AllocaInst>(CB->getArgOperand(0));
-            if (!AI) continue;
-            if (verbose) llvm::errs() << "[ReflectStackPass]   Inserted record ` " << *CB << "`\n";
-            Functions.emplace_back([RecordFn, CB, AI, &M, zeroDebugLoc](llvm::IRBuilder<> &B) {
-              B.SetInsertPoint(CB->getNextNode()); // after start
-              auto alloc = B.getInt8(to_integral(rt_reflect::Type::StackAlloc));
-              auto sizeBytes = AI->getAllocationSize(M.getDataLayout()).value_or(llvm::TypeSize::getFixed(0)).getFixedValue();
-              auto size = B.getInt64(sizeBytes);
-              const auto Call = B.CreateCall(RecordFn, {AI, size, alloc});
-              if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
-            });
-          }
-          if (CB->getIntrinsicID() == llvm::Intrinsic::lifetime_end) {
-            auto *AI = llvm::dyn_cast<llvm::AllocaInst>(CB->getArgOperand(0));
-            if (!AI) continue;
-            if (verbose) llvm::errs() << "[ReflectStackPass]   Inserted release ` " << *CB << "`\n";
-            Functions.emplace_back([ReleaseFn, CB, AI, zeroDebugLoc](llvm::IRBuilder<> &B) {
-              B.SetInsertPoint(CB); // before end
-              auto dealloc = B.getInt8(to_integral(rt_reflect::Type::StackFree));
-              const auto Call = B.CreateCall(ReleaseFn, {AI, dealloc});
-              if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
-            });
-          }
+      if (auto *Ret = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator())) {
+        llvm::IRBuilder B(Ret);
+        const auto dealloc = B.getInt8(to_integral(rt_reflect::Type::StackFree));
+        for (auto *AI : Allocas) {
+          const auto Call = B.CreateCall(ReleaseFn, {AI, dealloc});
+          if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
         }
       }
-      llvm::IRBuilder B(&BB);
-      for (auto &f : Functions)
-        f(B);
     }
   }
   return true;

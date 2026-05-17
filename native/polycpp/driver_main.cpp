@@ -163,6 +163,7 @@ int main(int argc, const char *argv[]) {
                        append({fmt::format("-B{}", execParentPath), "-fuse-ld=lld"});
   #ifdef _WIN32
                        // XXX lld-link takes /mllvm:VAL, ld.lld takes -mllvm VAL; -Xlinker forwards either.
+                       // lld-link has no --lto-newpm-passes equivalent, so keep the EP-callback path.
                        append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
                                "/mllvm:-polyreflect-late=ReflectStack+ReflectMem"});
                        // XXX /INCLUDE: pulls polyreflect-rt's new/delete in ahead of vcruntime's.
@@ -189,8 +190,12 @@ int main(int argc, const char *argv[]) {
                          append({"-Xlinker", fmt::format("/INCLUDE:{}", sym)});
                        }
   #else
+                       // XXX At -O0 LLD's LTO codegen builds no optimisation pipeline at all, so
+                       // EP-callback-registered passes never fire. Inject the late passes by name
+                       // via --lto-newpm-passes so they run regardless of opt level. Comma in
+                       // value uses -Xlinker to avoid `-Wl,...,...` arg splitting.
                        append({fmt::format("-Wl,-mllvm,-polyreflect-verbose={}", debug ? "1" : "0"),
-                               "-Wl,-mllvm,-polyreflect-late=ReflectStack+ReflectMem"});
+                               "-Xlinker", "--lto-newpm-passes=polyreflect-stack,polyreflect-mem"});
   #endif
 #else
                        append(Driver::lldPassPluginFlags(polyreflectPlugin, {

@@ -38,10 +38,12 @@ inline bool bundleIsRewritten(const polyrt::KernelBundle &bundle) { return bundl
 
 // XXX struct-member access emits llvm.ptr.annotation on the loaded value; a local-var annotate
 // would emit llvm.var.annotation on the alloca and detach after mem2reg.
+// always_inline so the annotation lands in the caller even at -O0; otherwise the marked
+// pointer is only visible inside this helper and the polyreflect pass can't taint the caller.
 struct __PolyreflectTrackPtr {
   [[clang::annotate("polyreflect-track")]] void *p;
 };
-inline void *polyreflectTrackPtr(void *p) { return __PolyreflectTrackPtr{p}.p; }
+[[gnu::always_inline]] inline void *polyreflectTrackPtr(void *p) { return __PolyreflectTrackPtr{p}.p; }
 
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   polyrt::initialise();
