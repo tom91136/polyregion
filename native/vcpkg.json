@@ -19,12 +19,6 @@
       "name": "libffi"
     },
     {
-      "name": "spirv-tools"
-    },
-    {
-      "name": "spirv-headers"
-    },
-    {
       "name": "vulkan-headers"
     },
     {
