@@ -53,7 +53,7 @@ add_dist_check(flang-plain     flang-new hello.f95)
 add_dist_check(polycpp-plain   polycpp   hello.cpp)
 add_dist_check(polyfc-plain    polyfc    hello.f95)
 if (WIN32)
-    add_dist_check(polycpp-offload polycpp   offload.cpp ${STDPAR_FLAGS})
+    add_dist_check(polycpp-offload polycpp   offload.cpp -std=c++17 ${STDPAR_FLAGS})
     add_dist_check(polyfc-offload  polyfc    offload.f95 ${STDPAR_FLAGS})
 endif ()
 
@@ -62,6 +62,7 @@ function(add_target_compile_check name driver source arch)
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
     add_test(NAME ${name}
             COMMAND ${BIN}/${driver}${EXE_SUFFIX}
+            ${ARGN}
             -fstdpar -fstdpar-arch=${arch} -fstdpar-mem=direct -fstdpar-rt=static
             -c ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${out})
     if (DIST_TEST_ENV)
@@ -89,7 +90,7 @@ endif ()
 
 foreach (TGT IN LISTS POLYCPP_TARGETS)
     string(REPLACE "@" "-" SAFE ${TGT})
-    add_target_compile_check(polycpp-tgt-${SAFE} polycpp offload.cpp ${TGT})
+    add_target_compile_check(polycpp-tgt-${SAFE} polycpp offload.cpp ${TGT} -std=c++17)
 endforeach ()
 foreach (TGT IN LISTS POLYFC_TARGETS)
     string(REPLACE "@" "-" SAFE ${TGT})
