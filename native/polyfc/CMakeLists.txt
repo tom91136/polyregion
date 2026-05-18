@@ -105,6 +105,9 @@ if (POLYREGION_FUSED_DRIVER)
             polycommon polyc-driver polyfront-options PolyAST
             Aspartame::Aspartame fmt::fmt)
     target_precompile_headers(polyfc PRIVATE
+            # XXX expression.h must precede <vector>; MSVC STL eagerly instantiates
+            # ~vector<Expr<SomeType>> via ProcedureRef's ctor in flang/Evaluate/call.h.
+            [["flang/Evaluate/expression.h"]]
             <optional> <ostream> <unordered_map> <unordered_set> <utility> <vector> <cstdio>
             [["flang/Optimizer/Dialect/FIROps.h"]]
             [["flang/Optimizer/Dialect/FIRType.h"]]
