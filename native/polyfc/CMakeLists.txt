@@ -37,15 +37,15 @@ if (POLYREGION_FUSED_DRIVER)
             flang-plugin/mirrors.cpp
             flang-plugin/fexpr.cpp)
     # XXX Mixed C++ standard: polyfc plugin sources (remapper, rewriter, parallel, ...) use
-    # C++20 designated initializers and concepts. The flang driver sources must stay on C++17
-    # because the C++20 stdlib eagerly instantiates is_trivially_destructible on
-    # Fortran::evaluate::Expr before it is complete. Force per-source overrides on the two
-    # flang TUs.
+    # C++20 designated initializers and concepts. Files that pull in flang/Evaluate headers
+    # must stay on C++17 because the C++20 stdlib eagerly instantiates
+    # is_trivially_destructible on Fortran::evaluate::Expr before it is complete.
     set_target_properties(polyfc PROPERTIES CXX_STANDARD 20)
     if (MSVC)
         # XXX match flangFrontend.lib EH/RTTI ABI or linking against flang_rt yields LNK2038.
         set_source_files_properties(
                 flang_driver_wrapper.cpp
+                flang-plugin/plugin.cpp
                 "${POLYFC_FLANG_DRIVER_DIR}/fc1_main.cpp"
                 PROPERTIES SKIP_PRECOMPILE_HEADERS ON
                 COMPILE_FLAGS "/EHs-c- /GR- /std:c++17 /permissive-"
@@ -55,6 +55,7 @@ if (POLYREGION_FUSED_DRIVER)
     else ()
         set_source_files_properties(
                 flang_driver_wrapper.cpp
+                flang-plugin/plugin.cpp
                 "${POLYFC_FLANG_DRIVER_DIR}/fc1_main.cpp"
                 PROPERTIES SKIP_PRECOMPILE_HEADERS ON
                 COMPILE_FLAGS "-std=c++17")
@@ -105,9 +106,6 @@ if (POLYREGION_FUSED_DRIVER)
             polycommon polyc-driver polyfront-options PolyAST
             Aspartame::Aspartame fmt::fmt)
     target_precompile_headers(polyfc PRIVATE
-            # XXX expression.h must precede <vector>; MSVC STL eagerly instantiates
-            # ~vector<Expr<SomeType>> via ProcedureRef's ctor in flang/Evaluate/call.h.
-            [["flang/Evaluate/expression.h"]]
             <optional> <ostream> <unordered_map> <unordered_set> <utility> <vector> <cstdio>
             [["flang/Optimizer/Dialect/FIROps.h"]]
             [["flang/Optimizer/Dialect/FIRType.h"]]
