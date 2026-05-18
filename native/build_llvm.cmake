@@ -135,6 +135,26 @@ if (UNIX AND NOT APPLE)
     endif ()
 endif ()
 
+if (POLYREGION_CROSS_FLANG_NEW AND APPLE)
+    # XXX otherwise cross binaries report the host triple by default.
+    list(APPEND BUILD_OPTIONS
+            -DLLVM_DEFAULT_TARGET_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-apple-darwin
+            -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-apple-darwin
+            -DLLVM_TARGET_ARCH=${CMAKE_SYSTEM_PROCESSOR})
+endif ()
+
+if (POLYREGION_CROSS_FLANG_NEW)
+    set(_RT_ARGS "-DCMAKE_Fortran_COMPILER=${POLYREGION_CROSS_FLANG_NEW}")
+    if (POLYREGION_CROSS_CLANG)
+        list(APPEND _RT_ARGS "-DCMAKE_C_COMPILER=${POLYREGION_CROSS_CLANG}")
+    endif ()
+    if (POLYREGION_CROSS_CLANGXX)
+        list(APPEND _RT_ARGS "-DCMAKE_CXX_COMPILER=${POLYREGION_CROSS_CLANGXX}")
+    endif ()
+    list(APPEND BUILD_OPTIONS "-DRUNTIMES_CMAKE_ARGS=${_RT_ARGS}")
+    list(APPEND BUILD_OPTIONS -DFLANG_BUILD_INTRINSIC_MODULES_CROSS=ON)
+endif ()
+
 execute_process(
         COMMAND ${CMAKE_COMMAND}
         -S ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm
@@ -168,6 +188,17 @@ set(FLANG_BUILD_TARGETS
 # install-MLIR only exists when MLIR is built as a dylib component.
 if (NOT DEFINED ENV{POLYREGION_LLVM_DYLIB} OR NOT "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
     set(MLIR_INSTALL_TARGETS install-MLIR)
+endif ()
+
+if (POLYREGION_CROSS_FLANG_NEW)
+    # XXX openmp's omp_lib.F90 needs iso_c_binding.mod from module_files; force it first.
+    execute_process(
+            COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR} --target module_files
+            WORKING_DIRECTORY ${LLVM_BUILD_DIR}
+            RESULT_VARIABLE SUCCESS)
+    if (NOT SUCCESS EQUAL "0")
+        message(FATAL_ERROR "module_files prebuild failed")
+    endif ()
 endif ()
 
 execute_process(

@@ -180,6 +180,11 @@ if (ACTION STREQUAL "LLVM")
             list(APPEND BUILD_OPTIONS -DCMAKE_C_COMPILER_LAUNCHER=${POLYREGION_CCACHE_PROGRAM})
             list(APPEND BUILD_OPTIONS -DCMAKE_CXX_COMPILER_LAUNCHER=${POLYREGION_CCACHE_PROGRAM})
         endif ()
+    else ()
+        # XXX runtimes' USE_TOOLCHAIN is skipped under CMAKE_CROSSCOMPILING; pin compilers.
+        list(APPEND BUILD_OPTIONS -DPOLYREGION_CROSS_FLANG_NEW=${LLVM_BUILD_DIR}/bin/flang-new)
+        list(APPEND BUILD_OPTIONS -DPOLYREGION_CROSS_CLANG=${LLVM_BUILD_DIR}/bin/clang)
+        list(APPEND BUILD_OPTIONS -DPOLYREGION_CROSS_CLANGXX=${LLVM_BUILD_DIR}/bin/clang++)
     endif ()
     message(STATUS "Starting LLVM build...")
     execute_process(

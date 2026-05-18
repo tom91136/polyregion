@@ -14,7 +14,8 @@ jobs:
       build_sysroot_name: amd64
       build_arch: x86_64
       build_type: Release
-      runs_on: ubuntu-24.04
+      build_runs_on: ubuntu-24.04
+      check_runs_on: ubuntu-24.04
       llvm_parallel_compile_jobs: "4"
       llvm_parallel_link_jobs: "4"
       flang_parallel_compile_jobs: "3"
@@ -25,7 +26,8 @@ jobs:
       build_sysroot_name: arm64
       build_arch: aarch64
       build_type: Release
-      runs_on: ubuntu-24.04-arm
+      build_runs_on: ubuntu-24.04-arm
+      check_runs_on: ubuntu-24.04-arm
       llvm_parallel_compile_jobs: "4"
       llvm_parallel_link_jobs: "4"
       flang_parallel_compile_jobs: "3"

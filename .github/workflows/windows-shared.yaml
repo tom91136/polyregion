@@ -9,7 +9,10 @@ on:
       build_type:
         required: true
         type: string
-      runs_on:
+      build_runs_on:
+        required: true
+        type: string
+      check_runs_on:
         required: true
         type: string
       llvm_parallel_compile_jobs:
@@ -27,7 +30,7 @@ defaults:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.build_runs_on }}
     env:
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ inputs.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ inputs.llvm_parallel_link_jobs }}
@@ -141,7 +144,7 @@ jobs:
 
   dist-check:
     needs: build
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ${{ inputs.check_runs_on }}
     steps:
       - uses: actions/checkout@v5
 

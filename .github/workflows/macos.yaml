@@ -13,7 +13,8 @@ jobs:
     with:
       build_arch: arm64
       build_type: Release
-      runs_on: macos-26
+      build_runs_on: macos-26
+      check_runs_on: macos-26
       llvm_parallel_compile_jobs: "4"
       llvm_parallel_link_jobs: "4"
       flang_parallel_compile_jobs: "2"
@@ -23,7 +24,8 @@ jobs:
     with:
       build_arch: x86_64
       build_type: Release
-      runs_on: macos-26-intel
+      build_runs_on: macos-26
+      check_runs_on: macos-26-intel
       llvm_parallel_compile_jobs: "4"
-      llvm_parallel_link_jobs: "2"
-      flang_parallel_compile_jobs: "1"
+      llvm_parallel_link_jobs: "4"
+      flang_parallel_compile_jobs: "2"

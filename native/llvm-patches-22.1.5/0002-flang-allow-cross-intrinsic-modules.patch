@@ -1,0 +1,22 @@
+Subject: [PATCH] flang: build intrinsic modules under cross when host-runnable
+
+The cross-compiled flang is sometimes host-runnable (e.g. macOS x86_64 binary
+on arm64 via Rosetta), so allow opting in to the module_files build under
+CMAKE_CROSSCOMPILING via FLANG_BUILD_INTRINSIC_MODULES_CROSS.
+---
+ flang/tools/f18/CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/flang/tools/f18/CMakeLists.txt b/flang/tools/f18/CMakeLists.txt
+index aaaaaaaaaaaa1..bbbbbbbbbbbbb 100644
+--- a/flang/tools/f18/CMakeLists.txt
++++ b/flang/tools/f18/CMakeLists.txt
+@@ -53,7 +53,7 @@ set(module_objects "")
+ # If CMAKE_CROSSCOMPILING, then the newly built flang executable was
+ # cross compiled, and thus can't be executed on the build system and thus
+ # can't be used for generating module files.
+-if (NOT CMAKE_CROSSCOMPILING)
++if (NOT CMAKE_CROSSCOMPILING OR FLANG_BUILD_INTRINSIC_MODULES_CROSS)
+   foreach(filename ${MODULES})
+     set(depends "")
+     set(opts "")
