@@ -67,6 +67,9 @@ struct TargetedContext {
     return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel ||
            options.target == LLVMBackend::Target::SPIRV_GLCompute;
   }
+  [[nodiscard]] bool isSpirvKernel() const {
+    return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel;
+  }
 
   [[nodiscard]] AS addressSpace(const TypeSpace::Any &s) const;
   [[nodiscard]] AS addressSpaceForKernelArg(const TypeSpace::Any &s) const;
@@ -112,10 +115,10 @@ struct CodeGen {
   // Out-pointer for sret-transformed bodies; `Stmt::Return` writes through it. Reset per body.
   llvm::Value *currentSretParam = nullptr;
 
-  // XXX SPIR-V: keep struct values in memory and address fields by byte arithmetic. The LLVM
-  // backend's pre-legaliser truncates `load/store %struct` to i32, and IGC mis-routes
-  // `OpInBoundsPtrAccessChain` with an `OpConstantNull` element to field 0.
-  [[nodiscard]] bool spirvStructByMemcpy() const { return C.isSpirv(); }
+  // XXX SPIR-V Kernel only: byte arithmetic + memcpy works around Intel IGC's mis-routing of
+  // `OpInBoundsPtrAccessChain` with `OpConstantNull` element. Logical SPIR-V (GLCompute) runs
+  // SPIRVLegalizePointerCast which can't legalise inttoptr/ptrtoint; force GEP there.
+  [[nodiscard]] bool spirvStructByMemcpy() const { return C.isSpirvKernel(); }
 
   explicit CodeGen(const LLVMBackend::Options &options, const std::string &moduleName);
 

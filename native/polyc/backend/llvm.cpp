@@ -563,13 +563,16 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               return B.CreateGEP(arrLlvmTy, mkTermVal(*lhs), {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_ptr_arr");
             }
             auto ty = arrTpe->comp.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->comp);
-            // Byte arithmetic: Intel OpenCL on Arc treats `OpPtrAccessChain`'s signed -1 Element
-            // as a huge unsigned offset, mis-handling `&end[-1]`. The ptrtoint round-trip emits
-            // OpConvertPtrToU / OpIAdd / OpConvertUToPtr, evaluated with proper wraparound.
             auto *base = mkTermVal(*lhs);
-            auto elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(ty));
-            auto *byteOffset = B.CreateMul(offset, elemSize);
-            return byteOffsetPtr(base, byteOffset, key + "_ref_to_ptr");
+            // XXX Kernel SPIR-V only: Intel Arc OpenCL mis-handles negative OpPtrAccessChain
+            // elements; the ptrtoint round-trip is the workaround. Logical SPIR-V forbids
+            // OpConvertPtrToU/UToPtr; other targets don't need the workaround.
+            if (C.isSpirvKernel()) {
+              auto elemSize = llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(ty));
+              auto *byteOffset = B.CreateMul(offset, elemSize);
+              return byteOffsetPtr(base, byteOffset, key + "_ref_to_ptr");
+            }
+            return B.CreateInBoundsGEP(ty, base, offset, key + "_ref_to_ptr");
           } else if (auto arrTpe = lhs->tpe.template get<Type::Arr>(); arrTpe) {
             auto offset = x.idx ? i64SExt(mkTermVal(*x.idx)) : llvm::ConstantInt::get(C.i64Ty(), 0, true);
             auto arrLlvmTy = resolveType(*arrTpe);

@@ -79,10 +79,8 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND POLYCPP_TARGETS hsa@gfx900)
     list(APPEND POLYFC_TARGETS hsa@gfx900)
 endif ()
-if (NOT POLYREGION_ARCH MATCHES "^(aarch64|arm64|ARM64)$")
-    list(APPEND POLYCPP_TARGETS spirv_glcompute@host)
-    list(APPEND POLYFC_TARGETS spirv_glcompute@host)
-endif ()
+# XXX spirv_glcompute disabled: polyc's pointer-as-stack-slot pattern hits
+# SPIRVLegalizePointerCast's "Unimplemented implicit down-cast from load".
 if (APPLE)
     list(APPEND POLYCPP_TARGETS metal@host)
     list(APPEND POLYFC_TARGETS metal@host)
