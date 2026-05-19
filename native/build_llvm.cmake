@@ -153,6 +153,9 @@ if (POLYREGION_CROSS_FLANG_NEW)
     endif ()
     list(APPEND BUILD_OPTIONS "-DRUNTIMES_CMAKE_ARGS=${_RT_ARGS}")
     list(APPEND BUILD_OPTIONS -DFLANG_BUILD_INTRINSIC_MODULES_CROSS=ON)
+    # XXX flang/tools/f18 module recipes use COMMAND flang (bare), expecting flang on PATH.
+    # Homebrew's llvm ships only flang-new; point PATH at the just-built bin/.
+    set(ENV{PATH} "${LLVM_BUILD_DIR}/bin:$ENV{PATH}")
 endif ()
 
 execute_process(
