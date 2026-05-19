@@ -1,13 +1,36 @@
 #pragma once
 
-#include <vector>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <vector>
 
-static std::string BinaryDir = "@POLYFC_TEST_BINARY_DIR@";
-static std::vector<std::string> TestFiles = { @POLYFC_TEST_INPUT_FILES@ };
+namespace {
+inline std::string envOr(const char *name, const char *fallback) {
+  if (const char *v = std::getenv(name)) return std::string(v);
+  return std::string(fallback);
+}
 
+inline std::vector<std::string> testFilesFromEnv(const char *dirEnv, std::vector<std::string> fallback) {
+  if (const char *d = std::getenv(dirEnv)) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    for (auto &e : std::filesystem::recursive_directory_iterator(d, ec)) {
+      if (!e.is_regular_file()) continue;
+      auto name = e.path().filename().string();
+      auto ext = e.path().extension().string();
+      if (name.rfind("check_", 0) == 0 && (ext == ".cpp" || ext == ".f95")) out.push_back(e.path().string());
+    }
+    if (!out.empty()) return out;
+  }
+  return fallback;
+}
+} // namespace
 
-static std::string FlangDriver = "@POLYFC_FLANG_DRIVER@";
-static std::string PolyDCOLib = "@POLYFC_POLYDCO_LIB@";
-static std::string PolyDCOLDLibraryPath = "@POLYFC_POLYDCO_LIBRARY_PATH@";
-static std::string PolyDCOInclude = "@POLYFC_POLYDCO_INCLUDE@";
+static const std::string BinaryDir = envOr("POLYTEST_BINARY_DIR", "@POLYFC_TEST_BINARY_DIR@");
+static const std::vector<std::string> TestFiles =
+    testFilesFromEnv("POLYTEST_FILES_DIR", { @POLYFC_TEST_INPUT_FILES@ });
+static const std::string FlangDriver = envOr("POLYTEST_FLANG_DRIVER", "@POLYFC_FLANG_DRIVER@");
+static const std::string PolyDCOLib = envOr("POLYTEST_POLYDCO_LIB", "@POLYFC_POLYDCO_LIB@");
+static const std::string PolyDCOLDLibraryPath = envOr("POLYTEST_POLYDCO_LIBRARY_PATH", "@POLYFC_POLYDCO_LIBRARY_PATH@");
+static const std::string PolyDCOInclude = envOr("POLYTEST_POLYDCO_INCLUDE", "@POLYFC_POLYDCO_INCLUDE@");

@@ -9,7 +9,7 @@ int main(int argc, const char **argv) {
                      .driverPath = ClangDriver,
                      .binaryDir = BinaryDir,
                      .testFiles = TestFiles,
-                     .profileDir = POLYREGION_TEST_PROFILE_DIR,
+                     .profileDir = envOr("POLYTEST_PROFILE_DIR", POLYREGION_TEST_PROFILE_DIR),
                      .archVar = "polycpp_arch",
                      .defaultsVar = "polycpp_defaults",
                      .defaultsLabelVar = "opt",
