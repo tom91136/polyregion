@@ -1,5 +1,7 @@
 #include "llvm_spirv_cl.h"
 
+#include <cstring>
+
 #include "aspartame/all.hpp"
 
 using namespace polyregion::backend::details;
@@ -177,31 +179,57 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
-  return expr.op.match_total( //                                                       //
-      [&](const Math::Abs &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Sin &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Cos &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Tan &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Asin &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Acos &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Atan &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Sinh &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Cosh &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Tanh &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Signum &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); }, //
-      [&](const Math::Round &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
-      [&](const Math::Ceil &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Floor &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
-      [&](const Math::Rint &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Sqrt &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Cbrt &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },   //
-      [&](const Math::Exp &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Expm1 &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
-      [&](const Math::Log &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Log1p &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
-      [&](const Math::Log10 &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
-      [&](const Math::Pow &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },    //
-      [&](const Math::Atan2 &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },  //
-      [&](const Math::Hypot &v) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); }   //
+  auto typeCode = [&](const AnyType &t) -> const char * {
+    if (t.is<Type::Float32>()) return "f";
+    if (t.is<Type::Float64>()) return "d";
+    if (t.is<Type::Float16>()) return "Dh";
+    throw polyregion::backend::BackendException("unsupported fp type for OpenCL math builtin");
+  };
+  auto mangle = [&](const char *name, const AnyType &tpe, int arity) {
+    std::string out = "_Z";
+    out += std::to_string(std::strlen(name));
+    out += name;
+    const char *tc = typeCode(tpe);
+    for (int i = 0; i < arity; ++i)
+      out += tc;
+    return out;
+  };
+  auto unary = [&](const char *name, const auto &op) { return cg.extFn1(mangle(name, op.tpe, 1), op.tpe, op.x); };
+  auto binary = [&](const char *name, const auto &op) { return cg.extFn2(mangle(name, op.tpe, 2), op.tpe, op.x, op.y); };
+  return expr.op.match_total( //
+      [&](const Math::Abs &v) -> ValPtr {
+        return cg.unaryNumOp(
+            expr, v.x, v.tpe, //
+            [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); }, [&](auto) { return unary("fabs", v); });
+      },                                                                                 //
+      [&](const Math::Sin &v) -> ValPtr { return unary("sin", v); },                     //
+      [&](const Math::Cos &v) -> ValPtr { return unary("cos", v); },                     //
+      [&](const Math::Tan &v) -> ValPtr { return unary("tan", v); },                     //
+      [&](const Math::Asin &v) -> ValPtr { return unary("asin", v); },                   //
+      [&](const Math::Acos &v) -> ValPtr { return unary("acos", v); },                   //
+      [&](const Math::Atan &v) -> ValPtr { return unary("atan", v); },                   //
+      [&](const Math::Sinh &v) -> ValPtr { return unary("sinh", v); },                   //
+      [&](const Math::Cosh &v) -> ValPtr { return unary("cosh", v); },                   //
+      [&](const Math::Tanh &v) -> ValPtr { return unary("tanh", v); },                   //
+      [&](const Math::Signum &v) -> ValPtr { return cg.mkSignumVal(expr, v.x, v.tpe); }, //
+      [&](const Math::Round &v) -> ValPtr {
+        if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>())
+          return cg.extFn1(mangle("round", v.tpe, 1), v.tpe, v.x);
+        const auto rounded = cg.extFn1(mangle("round", v.x.tpe(), 1), v.x.tpe(), v.x);
+        return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
+      },                                                                  //
+      [&](const Math::Ceil &v) -> ValPtr { return unary("ceil", v); },    //
+      [&](const Math::Floor &v) -> ValPtr { return unary("floor", v); },  //
+      [&](const Math::Rint &v) -> ValPtr { return unary("rint", v); },    //
+      [&](const Math::Sqrt &v) -> ValPtr { return unary("sqrt", v); },    //
+      [&](const Math::Cbrt &v) -> ValPtr { return unary("cbrt", v); },    //
+      [&](const Math::Exp &v) -> ValPtr { return unary("exp", v); },      //
+      [&](const Math::Expm1 &v) -> ValPtr { return unary("expm1", v); },  //
+      [&](const Math::Log &v) -> ValPtr { return unary("log", v); },      //
+      [&](const Math::Log1p &v) -> ValPtr { return unary("log1p", v); },  //
+      [&](const Math::Log10 &v) -> ValPtr { return unary("log10", v); },  //
+      [&](const Math::Pow &v) -> ValPtr { return binary("pow", v); },     //
+      [&](const Math::Atan2 &v) -> ValPtr { return binary("atan2", v); }, //
+      [&](const Math::Hypot &v) -> ValPtr { return binary("hypot", v); }  //
   );
 }

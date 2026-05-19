@@ -153,6 +153,8 @@ struct CodeGen {
   [[nodiscard]] ValPtr binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
                                    const ValPtrFn2 &fractionalFn);
 
+  [[nodiscard]] ValPtr mkSignumVal(const AnyExpr &expr, const AnyTerm &x, const AnyType &tpe);
+
   Pair<Opt<std::string>, std::string> transform(const Program &program);
 };
 

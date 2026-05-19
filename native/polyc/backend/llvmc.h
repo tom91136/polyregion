@@ -33,4 +33,8 @@ POLYREGION_EXPORT Pair<Opt<std::string>, std::string> verifyModule(llvm::Module 
 POLYREGION_EXPORT polyast::CompileResult compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
                                                        llvm::Module &M);
 
+POLYREGION_EXPORT std::string findInDirs(llvm::StringRef name, llvm::ArrayRef<llvm::StringRef> dirs);
+POLYREGION_EXPORT std::string findVendorBitcode(llvm::StringRef name);
+POLYREGION_EXPORT bool linkVendorBitcodeFile(llvm::Module &M, llvm::StringRef path);
+
 } // namespace polyregion::backend::llvmc

@@ -41,26 +41,7 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
       [&](const Math::Sinh &v) -> ValPtr { return cg.extFn1("sinh", v.tpe, v.x); },             //
       [&](const Math::Cosh &v) -> ValPtr { return cg.extFn1("cosh", v.tpe, v.x); },             //
       [&](const Math::Tanh &v) -> ValPtr { return cg.extFn1("tanh", v.tpe, v.x); },             //
-      [&](const Math::Signum &v) -> ValPtr {
-        return cg.unaryNumOp(
-            expr, v.x, v.tpe, //
-            [&](auto x) -> ValPtr {
-              auto msbOffset = x->getType()->getPrimitiveSizeInBits() - 1;
-              return cg.B.CreateOr(cg.B.CreateAShr(x, msbOffset), cg.B.CreateLShr(cg.B.CreateNeg(x), msbOffset));
-            },
-            [&](auto x) -> ValPtr {
-              auto mag = [&](const Term::Any &magnitude) {
-                auto nan = cg.B.CreateFCmpUNO(x, x);
-                auto zero = cg.B.CreateFCmpUNO(x, llvm::ConstantFP::get(x->getType(), 0));
-                return cg.B.CreateSelect(cg.B.CreateLogicalOr(nan, zero), x, cg.intr2(llvm::Intrinsic::copysign, v.tpe, magnitude, v.x));
-              };
-              if (v.tpe.is<Type::Float32>())       //
-                return mag(Term::Float32Const(1)); //
-              else if (v.tpe.is<Type::Float64>())  //
-                return mag(Term::Float64Const(1)); //
-              else throw BackendException("unimplemented");
-            });
-      }, //
+      [&](const Math::Signum &v) -> ValPtr { return cg.mkSignumVal(expr, v.x, v.tpe); },        //
       [&](const Math::Round &v) -> ValPtr {
         // PolyAST's `Round` allows the return type to differ from the input (matching JDK's
         // `math.round(Float): Int` and `math.round(Double): Long`). LLVM's `llvm.round`

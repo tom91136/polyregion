@@ -1000,6 +1000,19 @@ ValPtr CodeGen::binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm
     throw BackendException("unimplemented");
   });
 }
+ValPtr CodeGen::mkSignumVal(const AnyExpr &expr, const AnyTerm &x, const AnyType &tpe) {
+  return unaryNumOp(
+      expr, x, tpe,
+      [&](auto v) -> ValPtr {
+        auto msb = v->getType()->getPrimitiveSizeInBits() - 1;
+        return B.CreateOr(B.CreateAShr(v, msb), B.CreateLShr(B.CreateNeg(v), msb));
+      },
+      [&](auto v) -> ValPtr {
+        auto isNaN = B.CreateFCmpUNO(v, v);
+        auto isZero = B.CreateFCmpOEQ(v, llvm::ConstantFP::get(v->getType(), 0.0));
+        return B.CreateSelect(B.CreateLogicalOr(isNaN, isZero), v, intr2(llvm::Intrinsic::copysign, tpe, dsl::fractional(tpe, 1.0L), x));
+      });
+}
 
 LLVMBackend::LLVMBackend(const Options &options) : options(options) {}
 

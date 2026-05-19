@@ -185,31 +185,50 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
   }
 }
 ValPtr NVPTXTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
-  return expr.op.match_total( //                                                     //
-      [&](const Math::Abs &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Sin &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Cos &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Tan &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Asin &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Acos &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Atan &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Sinh &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Cosh &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Tanh &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Signum &v) -> ValPtr { throw BackendException("unimplemented"); }, //
-      [&](const Math::Round &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Ceil &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Floor &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Rint &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Sqrt &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Cbrt &v) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Math::Exp &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Expm1 &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Log &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Log1p &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Log10 &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Pow &v) -> ValPtr { throw BackendException("unimplemented"); },    //
-      [&](const Math::Atan2 &v) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Math::Hypot &v) -> ValPtr { throw BackendException("unimplemented"); }   //
+  auto nv1 = [&](const char *baseName, const AnyType &rtn, const AnyTerm &arg) -> ValPtr {
+    auto *fpTy = cg.resolveType(rtn);
+    const char *suffix = fpTy->isFloatTy() ? "f" : "";
+    return cg.extFn1(std::string("__nv_") + baseName + suffix, rtn, arg);
+  };
+  auto nv2 = [&](const char *baseName, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) -> ValPtr {
+    auto *fpTy = cg.resolveType(rtn);
+    const char *suffix = fpTy->isFloatTy() ? "f" : "";
+    return cg.extFn2(std::string("__nv_") + baseName + suffix, rtn, lhs, rhs);
+  };
+  return expr.op.match_total( //
+      [&](const Math::Abs &v) -> ValPtr {
+        return cg.unaryNumOp(
+            expr, v.x, v.tpe, //
+            [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); },
+            [&](auto) { return cg.intr1(llvm::Intrinsic::fabs, v.tpe, v.x); });
+      },                                                                                 //
+      [&](const Math::Sin &v) -> ValPtr { return nv1("sin", v.tpe, v.x); },              //
+      [&](const Math::Cos &v) -> ValPtr { return nv1("cos", v.tpe, v.x); },              //
+      [&](const Math::Tan &v) -> ValPtr { return nv1("tan", v.tpe, v.x); },              //
+      [&](const Math::Asin &v) -> ValPtr { return nv1("asin", v.tpe, v.x); },            //
+      [&](const Math::Acos &v) -> ValPtr { return nv1("acos", v.tpe, v.x); },            //
+      [&](const Math::Atan &v) -> ValPtr { return nv1("atan", v.tpe, v.x); },            //
+      [&](const Math::Sinh &v) -> ValPtr { return nv1("sinh", v.tpe, v.x); },            //
+      [&](const Math::Cosh &v) -> ValPtr { return nv1("cosh", v.tpe, v.x); },            //
+      [&](const Math::Tanh &v) -> ValPtr { return nv1("tanh", v.tpe, v.x); },            //
+      [&](const Math::Signum &v) -> ValPtr { return cg.mkSignumVal(expr, v.x, v.tpe); }, //
+      [&](const Math::Round &v) -> ValPtr {
+        if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>()) return nv1("round", v.tpe, v.x);
+        const auto rounded = nv1("round", v.x.tpe(), v.x);
+        return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
+      },                                                                             //
+      [&](const Math::Ceil &v) -> ValPtr { return nv1("ceil", v.tpe, v.x); },        //
+      [&](const Math::Floor &v) -> ValPtr { return nv1("floor", v.tpe, v.x); },      //
+      [&](const Math::Rint &v) -> ValPtr { return nv1("rint", v.tpe, v.x); },        //
+      [&](const Math::Sqrt &v) -> ValPtr { return nv1("sqrt", v.tpe, v.x); },        //
+      [&](const Math::Cbrt &v) -> ValPtr { return nv1("cbrt", v.tpe, v.x); },        //
+      [&](const Math::Exp &v) -> ValPtr { return nv1("exp", v.tpe, v.x); },          //
+      [&](const Math::Expm1 &v) -> ValPtr { return nv1("expm1", v.tpe, v.x); },      //
+      [&](const Math::Log &v) -> ValPtr { return nv1("log", v.tpe, v.x); },          //
+      [&](const Math::Log1p &v) -> ValPtr { return nv1("log1p", v.tpe, v.x); },      //
+      [&](const Math::Log10 &v) -> ValPtr { return nv1("log10", v.tpe, v.x); },      //
+      [&](const Math::Pow &v) -> ValPtr { return nv2("pow", v.tpe, v.x, v.y); },     //
+      [&](const Math::Atan2 &v) -> ValPtr { return nv2("atan2", v.tpe, v.x, v.y); }, //
+      [&](const Math::Hypot &v) -> ValPtr { return nv2("hypot", v.tpe, v.x, v.y); }  //
   );
 }

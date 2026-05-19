@@ -912,3 +912,89 @@ TEST_CASE("while false", "[compiler]") {
                      {FunctionVisibility::Exported()});
   assertCompile(program({}, {fn}));
 }
+
+static Function mkMathKernel(const Type::Any &tpe) {
+  auto outPtr = "out"_(Ptr(tpe));
+  const Term::Select inSel = "in"_(tpe);
+  return function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                  /*isEntry*/ true)({
+      let("rsin") = call(Sin(inSel, tpe)),            //
+      let("rcos") = call(Cos(inSel, tpe)),            //
+      let("rtan") = call(Tan(inSel, tpe)),            //
+      let("rasin") = call(Asin(inSel, tpe)),          //
+      let("racos") = call(Acos(inSel, tpe)),          //
+      let("ratan") = call(Atan(inSel, tpe)),          //
+      let("rsinh") = call(Sinh(inSel, tpe)),          //
+      let("rcosh") = call(Cosh(inSel, tpe)),          //
+      let("rtanh") = call(Tanh(inSel, tpe)),          //
+      let("rsqrt") = call(Sqrt(inSel, tpe)),          //
+      let("rcbrt") = call(Cbrt(inSel, tpe)),          //
+      let("rexp") = call(Exp(inSel, tpe)),            //
+      let("rexpm1") = call(Expm1(inSel, tpe)),        //
+      let("rlog") = call(Log(inSel, tpe)),            //
+      let("rlog1p") = call(Log1p(inSel, tpe)),        //
+      let("rlog10") = call(Log10(inSel, tpe)),        //
+      let("rceil") = call(Ceil(inSel, tpe)),          //
+      let("rfloor") = call(Floor(inSel, tpe)),        //
+      let("rrint") = call(Rint(inSel, tpe)),          //
+      let("rpow") = call(Pow(inSel, inSel, tpe)),     //
+      let("ratan2") = call(Atan2(inSel, inSel, tpe)), //
+      let("rhypot") = call(Hypot(inSel, inSel, tpe)), //
+      let("rsignum") = call(Signum(inSel, tpe)),      //
+      outPtr[0_(SInt)] = "rsin"_(tpe),                //
+      outPtr[1_(SInt)] = "rcos"_(tpe),                //
+      outPtr[2_(SInt)] = "rtan"_(tpe),                //
+      outPtr[3_(SInt)] = "rasin"_(tpe),               //
+      outPtr[4_(SInt)] = "racos"_(tpe),               //
+      outPtr[5_(SInt)] = "ratan"_(tpe),               //
+      outPtr[6_(SInt)] = "rsinh"_(tpe),               //
+      outPtr[7_(SInt)] = "rcosh"_(tpe),               //
+      outPtr[8_(SInt)] = "rtanh"_(tpe),               //
+      outPtr[9_(SInt)] = "rsqrt"_(tpe),               //
+      outPtr[10_(SInt)] = "rcbrt"_(tpe),              //
+      outPtr[11_(SInt)] = "rexp"_(tpe),               //
+      outPtr[12_(SInt)] = "rexpm1"_(tpe),             //
+      outPtr[13_(SInt)] = "rlog"_(tpe),               //
+      outPtr[14_(SInt)] = "rlog1p"_(tpe),             //
+      outPtr[15_(SInt)] = "rlog10"_(tpe),             //
+      outPtr[16_(SInt)] = "rceil"_(tpe),              //
+      outPtr[17_(SInt)] = "rfloor"_(tpe),             //
+      outPtr[18_(SInt)] = "rrint"_(tpe),              //
+      outPtr[19_(SInt)] = "rpow"_(tpe),               //
+      outPtr[20_(SInt)] = "ratan2"_(tpe),             //
+      outPtr[21_(SInt)] = "rhypot"_(tpe),             //
+      outPtr[22_(SInt)] = "rsignum"_(tpe),            //
+      ret()                                           //
+  });
+}
+
+static void assertCompileTarget(const Program &p, compiler::Options opts) {
+  CAPTURE(repr(p));
+  CAPTURE(opts.target);
+  CAPTURE(opts.arch);
+  auto c = compiler::compile(p, opts, OptLevel::O3);
+  CAPTURE(c.messages);
+  CHECK(c.messages == "");
+  CHECK(c.binary.has_value());
+}
+
+TEST_CASE("math ops compile across targets", "[compiler][math]") {
+  compiler::initialise();
+  const auto tpe = GENERATE(values<Type::Any>({Float, Double}));
+  auto p = program({}, {mkMathKernel(tpe)});
+  DYNAMIC_SECTION(tpe) {
+    SECTION("CPU x86_64") { assertCompileTarget(p, {Target::Object_LLVM_x86_64, "native"}); }
+    SECTION("NVPTX64") {
+      const auto cpu = GENERATE(
+          values<std::string>({"sm_35", "sm_50", "sm_60", "sm_70", "sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120"}));
+      DYNAMIC_SECTION(cpu) { assertCompileTarget(p, {Target::Object_LLVM_NVPTX64, cpu}); }
+    }
+    SECTION("AMDGCN") {
+      // CDNA1/2/3 (gfx9xx = wave64)
+      // RDNA2/3/4 (gfx10xx/11xx/12xx = wave32)
+      const auto cpu = GENERATE(values<std::string>({"gfx906", "gfx908", "gfx90a", "gfx942", "gfx1030", "gfx1100", "gfx1200"}));
+      DYNAMIC_SECTION(cpu) { assertCompileTarget(p, {Target::Object_LLVM_AMDGCN, cpu}); }
+    }
+    SECTION("SPIRV64 Kernel") { assertCompileTarget(p, {Target::Object_LLVM_SPIRV64_Kernel, "intel"}); }
+  }
+}
