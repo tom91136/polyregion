@@ -223,8 +223,8 @@ jobs:
         working-directory: ./native
         run: |
           for d in polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist; do
-            [[ -d "$d/bin" ]] && find "$d/bin" -type f -exec chmod +x {} +
-            [[ -d "$d/lib" ]] && find "$d/lib" -type f -name '*.so' -exec chmod +x {} +
+            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
+            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.so' -exec chmod +x {} +; fi
           done
 
       - name: Run unit tests
