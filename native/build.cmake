@@ -248,6 +248,25 @@ elseif (ACTION STREQUAL "DIST")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "polyregion dist install")
+elseif (ACTION STREQUAL "DIST_TEST")
+    setup_vcpkg()
+    set(TEST_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/polyregion-test-${CMAKE_BUILD_TYPE}-${ARCH}-${LLVM_VARIANT}-dist")
+    message(STATUS "Installing polyregion test dist into ${TEST_DIST_DIR}")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND}
+            --build ${BUILD_NAME}
+            --target polyregion-test-dist
+            COMMAND_ECHO STDERR
+            RESULT_VARIABLE SUCCESS)
+    check_process_return(${SUCCESS} "polyregion test dist build")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND}
+            --install ${BUILD_NAME}
+            --component test-dist
+            --prefix ${TEST_DIST_DIR}
+            COMMAND_ECHO STDERR
+            RESULT_VARIABLE SUCCESS)
+    check_process_return(${SUCCESS} "polyregion test dist install")
 elseif (ACTION STREQUAL "CHECK")
     set(CHECK_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build-dist-check-${ARCH}-${LLVM_VARIANT}")
     message(STATUS "Configuring dist check against ${LLVM_DIST_DIR}")

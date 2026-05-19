@@ -26,3 +26,4 @@ if (APPLE)
 endif ()
 
 add_test(NAME polyrt-tests COMMAND polyrt-tests)
+polyregion_test_dist_record(NAME polyrt-tests COMMAND :bin:polyrt-tests)

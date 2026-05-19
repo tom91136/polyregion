@@ -209,9 +209,15 @@ foreach (_test_file IN LISTS TEST_FILE_PATHS)
         add_test(NAME ${_name}
                 COMMAND polycpp-tests --${_mode}-only -c "${_test_short}"
                 WORKING_DIRECTORY "${POLYCPP_TEST_CACHE_DIR}")
+        set(_labels "")
         if (_mode STREQUAL "offload")
             set_tests_properties(${_name} PROPERTIES LABELS "device")
+            set(_labels "device")
         endif ()
+        polyregion_test_dist_record(NAME ${_name}
+                COMMAND :bin:polycpp-tests --${_mode}-only -c "${_test_short}"
+                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polycpp;POLYTEST_PROFILE_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/profiles;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
+                LABELS "${_labels}")
     endforeach ()
 endforeach ()
 

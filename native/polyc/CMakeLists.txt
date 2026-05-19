@@ -107,6 +107,7 @@ target_link_libraries(polyc
 )
 target_link_libraries(polyc-tests PRIVATE polyc polyinvoke-static Catch2::Catch2WithMain Aspartame::Aspartame)
 add_test(NAME polyc-tests COMMAND polyc-tests)
+polyregion_test_dist_record(NAME polyc-tests COMMAND :bin:polyc-tests)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyinvoke-static polytest Aspartame::Aspartame)
 target_compile_definitions(polyc-benchmarks PRIVATE
         POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")

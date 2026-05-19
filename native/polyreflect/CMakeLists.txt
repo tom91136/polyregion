@@ -32,6 +32,7 @@ if (APPLE)
     target_link_options(polyreflect-rt-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()
 add_test(NAME polyreflect-rt-tests COMMAND polyreflect-rt-tests)
+polyregion_test_dist_record(NAME polyreflect-rt-tests COMMAND :bin:polyreflect-rt-tests)
 
 # Plugin source is statically linked into polycpp/polyfc under fused builds; no .so needed.
 if (NOT POLYREGION_FUSED_DRIVER)

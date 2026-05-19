@@ -23,3 +23,4 @@ target_link_libraries(polycommon-tests PRIVATE Catch2::Catch2WithMain Aspartame 
 target_compile_options(polycommon-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polycommon-tests PRIVATE ${LINK_OPTIONS})
 add_test(NAME polycommon-tests COMMAND polycommon-tests)
+polyregion_test_dist_record(NAME polycommon-tests COMMAND :bin:polycommon-tests)

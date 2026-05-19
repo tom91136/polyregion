@@ -162,8 +162,14 @@ foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "ZE FMA" "CPU Args" "GPU
     string(REPLACE " " "-" _name "polyinvoke-${_case}")
     add_test(NAME ${_name} COMMAND polyinvoke-tests "${_case}")
     set_tests_properties(${_name} PROPERTIES ENVIRONMENT "${_polyinvoke_test_env}")
+    set(_labels "")
     if (_case MATCHES "^(GPU|ZE|SPIRV) ")
         set_tests_properties(${_name} PROPERTIES LABELS "device")
+        set(_labels "device")
     endif ()
+    polyregion_test_dist_record(NAME ${_name}
+            COMMAND :bin:polyinvoke-tests "${_case}"
+            ENVIRONMENT "${_polyinvoke_test_env}"
+            LABELS "${_labels}")
     # DeviceLock handles cross-process exclusion per-device; CTest RESOURCE_LOCK is not required.
 endforeach ()
