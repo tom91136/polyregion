@@ -98,6 +98,10 @@ jobs:
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=DIST -P build.cmake
 
+      - name: Build test dist
+        working-directory: ./native
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=DIST_TEST -P build.cmake
+
       - name: Check artefact
         working-directory: ./native
         if: always()
@@ -125,6 +129,13 @@ jobs:
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
           if-no-files-found: error
 
+      - name: Upload test dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyregion-tests-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
+          path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
+          if-no-files-found: error
+
   dist-check:
     needs: build
     runs-on: ${{ inputs.check_runs_on }}
@@ -150,3 +161,50 @@ jobs:
       - name: Run dist-check
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CHECK -P build.cmake
+
+  unit-tests:
+    needs: build
+    runs-on: ${{ inputs.check_runs_on }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: brew install cmake
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
+          path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+
+      - name: Download test dist
+        uses: actions/download-artifact@v4
+        with:
+          name: polyregion-tests-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
+          path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+
+      - name: Restore executable bits
+        working-directory: ./native
+        run: |
+          for d in polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist; do
+            [[ -d "$d/bin" ]] && find "$d/bin" -type f -exec chmod +x {} +
+            [[ -d "$d/lib" ]] && find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +
+          done
+
+      - name: Run unit tests
+        working-directory: ./native
+        run: |
+          DIST=$PWD/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          TESTS=$PWD/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          export DYLD_LIBRARY_PATH=$DIST/lib:${DYLD_LIBRARY_PATH:-}
+          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
+          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
+          ctest --test-dir "$TESTS" -LE device --output-on-failure --output-junit "$TESTS/unit-test-results.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
+          path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/unit-test-results.xml
+          if-no-files-found: warn
