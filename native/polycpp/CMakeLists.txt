@@ -209,6 +209,9 @@ foreach (_test_file IN LISTS TEST_FILE_PATHS)
         add_test(NAME ${_name}
                 COMMAND polycpp-tests --${_mode}-only -c "${_test_short}"
                 WORKING_DIRECTORY "${POLYCPP_TEST_CACHE_DIR}")
+        if (_mode STREQUAL "offload")
+            set_tests_properties(${_name} PROPERTIES LABELS "device")
+        endif ()
     endforeach ()
 endforeach ()
 

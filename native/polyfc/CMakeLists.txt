@@ -188,6 +188,9 @@ foreach (_test_file IN LISTS TEST_FILE_PATHS)
         add_test(NAME ${_name}
                 COMMAND polyfc-tests --${_mode}-only -c "${_test_short}"
                 WORKING_DIRECTORY "${POLYFC_TEST_CACHE_DIR}")
+        if (_mode STREQUAL "offload")
+            set_tests_properties(${_name} PROPERTIES LABELS "device")
+        endif ()
         # XXX LLD on Windows opens archives without FILE_SHARE_READ; serialise concurrent link
         # jobs against polydco-static.lib (~70 MB) to avoid LNK1104.
         if (WIN32)
