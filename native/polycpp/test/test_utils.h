@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "polyrt/rt.h"
+#include "polystl/algorithm_impl.h"
 #include "polystl/polystl.h"
 
 template <typename F> //
