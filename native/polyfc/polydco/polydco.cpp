@@ -1,5 +1,6 @@
 #include "polydco.h"
 
+#include <cinttypes>
 #include <span>
 #include <thread>
 
@@ -194,7 +195,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
+  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch managed, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
   validatePrelude<polydco::FManagedPrelude>(layout, moduleId);
 
@@ -215,7 +216,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
                   : (static_cast<size_t>(tripCount) < blockSize ? static_cast<size_t>(tripCount) : blockSize);
   ManagedPartialReduction mpr(reductions, blockSize);
   const size_t localMemBytes = mpr.allocatePartialsAsync();
-  log(DebugLevel::Debug, "<%s:%s:%zu> localMemBytes=%ld", __func__, moduleId, threadsPerBlock, localMemBytes);
+  log(DebugLevel::Debug, "<%s:%s:%zu> localMemBytes=%zu", __func__, moduleId, threadsPerBlock, localMemBytes);
 
   using namespace invoke;
   const auto buffer = isReduction ? ArgBuffer{{Type::Ptr, &functorDevicePtr},   //
@@ -249,7 +250,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   polyrt::currentQueue->enqueueWaitBlocking();
   dumpAllocations();
-  log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, tripCount);
+  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Done", __func__, moduleId, tripCount);
 }
 
 static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
@@ -258,7 +259,7 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch host, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
+  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch host, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
   validatePrelude<polydco::FHostThreadedPrelude>(layout, moduleId);
 
@@ -290,7 +291,7 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   mpr.allocatePartialsAsync();
   using namespace invoke;
   const ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Void, nullptr}};
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch hostthreaded", __func__, moduleId, tripCount);
+  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch hostthreaded", __func__, moduleId, tripCount);
   polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{groups, 1, 1}}, [&]() { mpr.releaseAndReduce(); });
   polyrt::currentQueue->enqueueWaitBlocking();
   if (polyrt::debugLevel() >= DebugLevel::Debug) {
@@ -307,7 +308,7 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
     }
     std::fflush(stderr);
   }
-  log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, tripCount);
+  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Done", __func__, moduleId, tripCount);
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_is_platformkind(const runtime::PlatformKind kind) {
@@ -324,7 +325,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
                                                                     char *captures) {
   polyrt::initialise();
 
-  log(DebugLevel::Debug, "<%s> Dispatch (%ld to %ld by %ld)", __func__, lowerBoundInclusive, upperBoundInclusive, step);
+  log(DebugLevel::Debug, "<%s> Dispatch (%" PRId64 " to %" PRId64 " by %" PRId64 ")", __func__, lowerBoundInclusive, upperBoundInclusive, step);
 
   if (!bundle || !captures) {
     log(DebugLevel::Debug, "bundle=%p captures=%p, not dispatching", static_cast<const void *>(bundle), static_cast<void *>(captures));

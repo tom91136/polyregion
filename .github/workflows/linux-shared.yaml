@@ -155,14 +155,14 @@ jobs:
           done
 
       - name: Upload dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: polyregion-tests-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
@@ -180,7 +180,7 @@ jobs:
           sudo apt-get install -y cmake
 
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
@@ -208,13 +208,13 @@ jobs:
           sudo apt-get install -y cmake
 
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: polyregion-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
 
       - name: Download test dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: polyregion-tests-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
@@ -239,7 +239,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: unit-test-results-linux-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/unit-test-results.xml

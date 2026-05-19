@@ -142,14 +142,14 @@ jobs:
           )
 
       - name: Upload dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: polyregion-tests-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist/**
@@ -167,7 +167,7 @@ jobs:
           build_arch: ${{ inputs.build_arch }}
 
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist
@@ -190,13 +190,13 @@ jobs:
           build_arch: ${{ inputs.build_arch }}
 
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: polyregion-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist
 
       - name: Download test dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: polyregion-tests-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist
@@ -214,7 +214,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: unit-test-results-windows-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist/unit-test-results.xml

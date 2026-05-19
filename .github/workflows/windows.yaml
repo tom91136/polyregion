@@ -13,8 +13,8 @@ jobs:
     with:
       build_arch: amd64
       build_type: Release
-      build_runs_on: windows-2025
-      check_runs_on: windows-2025
+      build_runs_on: windows-2025-vs2026
+      check_runs_on: windows-2025-vs2026
       llvm_parallel_compile_jobs: "4"
       llvm_parallel_link_jobs: "2"
       flang_parallel_compile_jobs: "2"

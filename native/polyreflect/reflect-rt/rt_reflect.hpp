@@ -158,7 +158,7 @@ class ReflectService {
   HashMap<uintptr_t, PtrRecord> data;
   std::shared_mutex mutex{};
   time_point<steady_clock> start;
-  std::FILE *trace{};
+  [[maybe_unused]] std::FILE *trace{};
 
   __RT_ODR const PtrRecord *queryUnsafe(const uintptr_t ptr, const bool allowSubrange) const {
     const PtrRecord *result = data.find(ptr);
@@ -209,8 +209,7 @@ public:
   __RT_ODR void blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
     // safe_fprintf(stderr, "[PtrReflect] release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
-    static int i = 0;
-    if (const auto it = queryUnsafe(ptr, false)) {
+    if (queryUnsafe(ptr, false)) {
       // const auto [recordPoint, info] = *it;
       // safe_fprintf(trace,
       //              "  {"

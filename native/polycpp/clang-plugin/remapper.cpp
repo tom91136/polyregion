@@ -833,7 +833,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     return Expr::Alias(term);
   };
 
-  auto ref = [&r, termToSel](const Term::Any &term) -> Expr::Any {
+  auto ref = [termToSel](const Term::Any &term) -> Expr::Any {
     if (!term.tpe().is<Type::Ptr>()) {
       return Expr::RefTo(termToSel(term), {}, term.tpe(), TypeSpace::Global());
     }
