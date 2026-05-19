@@ -14,6 +14,7 @@
 #include "llvm/Support/Casting.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Transform/IR/TransformOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -420,6 +421,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
     auto r = newVar(handleValueAsScalar(x.getRhs()));
     witness(x.getResult(), Expr::IntrOp(ap(l, r, handleType(x.getType())).widen()));
   };
+  const auto math1 = [&](auto x, auto ap) -> void {
+    auto v = newVar(handleValueAsScalar(x.getOperand()));
+    witness(x.getResult(), Expr::MathOp(ap(v, handleType(x.getType())).widen()));
+  };
+  const auto math2 = [&](auto x, auto ap) -> void {
+    auto l = newVar(handleValueAsScalar(x.getLhs()));
+    auto r = newVar(handleValueAsScalar(x.getRhs()));
+    witness(x.getResult(), Expr::MathOp(ap(l, r, handleType(x.getType())).widen()));
+  };
   const auto poison = [&](auto x, const std::string &reason) -> void { witness(x, Expr::Alias(Term::Poison(handleType(x.getType())))); };
   const auto poison0 = [&](const std::string &reason) { ; };
   const auto push = [&](const auto &x) { stmts.emplace_back(x); };
@@ -555,6 +565,40 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](const mlir::arith::MaxSIOp x) { intr2r(x, Bind<Intr::Max>()); },    //
       [&](const mlir::arith::MaxUIOp x) { intr2r(x, Bind<Intr::Max>()); },    //
       [&](const mlir::arith::MaximumFOp x) { intr2r(x, Bind<Intr::Max>()); }, //
+
+      [&](const mlir::math::AbsFOp x) { math1(x, Bind<Math::Abs>()); },       //
+      [&](const mlir::math::AbsIOp x) { math1(x, Bind<Math::Abs>()); },       //
+      [&](const mlir::math::SinOp x) { math1(x, Bind<Math::Sin>()); },        //
+      [&](const mlir::math::CosOp x) { math1(x, Bind<Math::Cos>()); },        //
+      [&](const mlir::math::TanOp x) { math1(x, Bind<Math::Tan>()); },        //
+      [&](const mlir::math::AsinOp x) { math1(x, Bind<Math::Asin>()); },      //
+      [&](const mlir::math::AcosOp x) { math1(x, Bind<Math::Acos>()); },      //
+      [&](const mlir::math::AtanOp x) { math1(x, Bind<Math::Atan>()); },      //
+      [&](const mlir::math::SinhOp x) { math1(x, Bind<Math::Sinh>()); },      //
+      [&](const mlir::math::CoshOp x) { math1(x, Bind<Math::Cosh>()); },      //
+      [&](const mlir::math::TanhOp x) { math1(x, Bind<Math::Tanh>()); },      //
+      [&](const mlir::math::SqrtOp x) { math1(x, Bind<Math::Sqrt>()); },      //
+      [&](const mlir::math::CbrtOp x) { math1(x, Bind<Math::Cbrt>()); },      //
+      [&](const mlir::math::CeilOp x) { math1(x, Bind<Math::Ceil>()); },      //
+      [&](const mlir::math::FloorOp x) { math1(x, Bind<Math::Floor>()); },    //
+      [&](const mlir::math::RoundOp x) { math1(x, Bind<Math::Round>()); },    //
+      [&](const mlir::math::RoundEvenOp x) { math1(x, Bind<Math::Rint>()); }, //
+      [&](const mlir::math::ExpOp x) { math1(x, Bind<Math::Exp>()); },        //
+      [&](const mlir::math::ExpM1Op x) { math1(x, Bind<Math::Expm1>()); },    //
+      [&](const mlir::math::LogOp x) { math1(x, Bind<Math::Log>()); },        //
+      [&](const mlir::math::Log10Op x) { math1(x, Bind<Math::Log10>()); },    //
+      [&](const mlir::math::Log1pOp x) { math1(x, Bind<Math::Log1p>()); },    //
+      [&](const mlir::math::PowFOp x) { math2(x, Bind<Math::Pow>()); },       //
+      [&](const mlir::math::Atan2Op x) { math2(x, Bind<Math::Atan2>()); },    //
+      [&](mlir::math::FPowIOp x) {
+        // XXXFlang lowers `real ** integer` to math.fpowi. polyast Math::Pow takes two floats;
+        // promote the integer exponent before dispatching.
+        auto base = newVar(handleValueAsScalar(x.getLhs()));
+        auto expI = newVar(handleValueAsScalar(x.getRhs()));
+        const auto rtn = handleType(x.getType());
+        auto expF = newVar(Expr::Cast(expI.widen(), rtn).widen());
+        witness(x.getResult(), Expr::MathOp(Math::Pow(base.widen(), expF.widen(), rtn).widen()));
+      },
 
       [&](fir::FieldIndexOp f) {
         const auto on = handleType(f.getOnType());
