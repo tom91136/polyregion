@@ -1,4 +1,4 @@
-name: macOS builds
+name: macOS builds (dummy)
 
 on:
   workflow_call:

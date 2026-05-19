@@ -1,4 +1,4 @@
-name: Linux builds
+name: Linux builds (dummy)
 
 on:
   workflow_call:

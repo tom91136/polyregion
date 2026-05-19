@@ -15,9 +15,9 @@ jobs:
       build_type: Release
       build_runs_on: macos-26
       check_runs_on: macos-26
-      llvm_parallel_compile_jobs: "4"
-      llvm_parallel_link_jobs: "4"
-      flang_parallel_compile_jobs: "2"
+      llvm_parallel_compile_jobs: "3"
+      llvm_parallel_link_jobs: "3"
+      flang_parallel_compile_jobs: "1"
   x86_64-release:
     uses: ./.github/workflows/macos-shared.yaml
     secrets: inherit
@@ -26,6 +26,6 @@ jobs:
       build_type: Release
       build_runs_on: macos-26
       check_runs_on: macos-26-intel
-      llvm_parallel_compile_jobs: "4"
-      llvm_parallel_link_jobs: "4"
-      flang_parallel_compile_jobs: "2"
+      llvm_parallel_compile_jobs: "3"
+      llvm_parallel_link_jobs: "3"
+      flang_parallel_compile_jobs: "1"

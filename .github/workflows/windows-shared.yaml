@@ -1,4 +1,4 @@
-name: Windows builds
+name: Windows builds (dummy)
 
 on:
   workflow_call:
