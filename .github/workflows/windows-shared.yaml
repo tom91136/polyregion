@@ -208,6 +208,7 @@ jobs:
           set "DIST=%CD%\polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist"
           set "TESTS=%CD%\polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-static-dist"
           set "PATH=%DIST%\bin;%PATH%"
+          set "POLYREGION_BITCODE_DIR=%DIST%\lib"
           set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
           set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
           ctest --test-dir "%TESTS%" -LE device --output-on-failure --output-junit "%TESTS%\unit-test-results.xml"

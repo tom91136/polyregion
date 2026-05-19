@@ -197,6 +197,7 @@ jobs:
           DIST=$PWD/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
           TESTS=$PWD/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
           export DYLD_LIBRARY_PATH=$DIST/lib:${DYLD_LIBRARY_PATH:-}
+          export POLYREGION_BITCODE_DIR=$DIST/lib
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
           export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
           ctest --test-dir "$TESTS" -LE device --output-on-failure --output-junit "$TESTS/unit-test-results.xml"
