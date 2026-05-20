@@ -638,16 +638,24 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
           }) //
         | to_vector();
 
-    const auto emptyStruct = inherited.empty() && members.empty();
+    const auto declCanonicalType = context.getCanonicalTagType(decl);
+    const auto sizeInBytes = context.getTypeSizeInChars(declCanonicalType).getQuantity();
+    const auto alignmentInBytes = context.getTypeAlignInChars(declCanonicalType).getQuantity();
+    // XXX A class with no own fields and only EBO'd empty bases (e.g. `std::multiplies<T> : binary_function<...>`)
+    // still has C++ sizeof == 1. If we emit it with only `#empty<>` base members, polyc's LLVM DataLayout
+    // sizes it as 0 -- which then misplaces every following field when this type is used as a non-base
+    // member (e.g. as a lambda capture before another non-empty capture). Inject the placeholder byte so
+    // the polyc-side struct picks up the 1-byte size that C++ ABI requires.
+    const auto inheritedAllEmpty = !inherited.empty() && (inherited ^ forall([&](auto &p, auto &) {
+                                     auto s = p.tpe.template get<Type::Struct>();
+                                     return s && repr(s->name) == Empty;
+                                   }));
+    const auto emptyStruct = members.empty() && (inherited.empty() || (inheritedAllEmpty && sizeInBytes == 1));
     *stub = StructDef(                           //
         Sym({name}), std::vector<std::string>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
         std::vector<Type::Struct>{});
-
-    const auto declCanonicalType = context.getCanonicalTagType(decl);
-    const auto sizeInBytes = context.getTypeSizeInChars(declCanonicalType).getQuantity();
-    const auto alignmentInBytes = context.getTypeAlignInChars(declCanonicalType).getQuantity();
     const auto layout = std::make_shared<StructLayout>(                            //
         name,                                                                      //
         sizeInBytes,                                                               //
