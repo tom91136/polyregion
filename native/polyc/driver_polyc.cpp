@@ -91,24 +91,20 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  std::cout << repr(program) << "\n";
                  std::cout << "=================" << std::endl;
 
-                 try {
-                   auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
-                   if (verbose) std::cerr << repr(compilation) << std::endl;
-                   if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
-                   auto resultBytes = compileresult_to_msgpack(compilation);
-                   if (out == "-") {
-                     std::freopen(nullptr, "wb", stdout);
-                     std::fwrite(resultBytes.data(), resultBytes.size(), sizeof(std::byte), stdout);
-                   } else {
-                     std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
-                     outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
-                   }
-                 } catch (const std::exception &e) {
-                   std::cerr << e.what() << std::endl;
+                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
+                 if (verbose) std::cerr << repr(compilation) << std::endl;
+                 if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
+                 auto resultBytes = compileresult_to_msgpack(compilation);
+                 if (out == "-") {
+                   std::freopen(nullptr, "wb", stdout);
+                   std::fwrite(resultBytes.data(), resultBytes.size(), sizeof(std::byte), stdout);
+                 } else {
+                   std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
+                   outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
                  }
-
                } catch (const std::exception &e) {
-                 std::cerr << "Unable to parse packed ast:" << e.what() << std::endl;
+                 std::cerr << "[POLYC] " << e.what() << std::endl;
+                 return EXIT_FAILURE;
                }
                return EXIT_SUCCESS;
              },
