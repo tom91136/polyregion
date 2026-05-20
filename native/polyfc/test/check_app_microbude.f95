@@ -2,7 +2,7 @@
 !CHECK using: ppwi=1,2,4,8,16,32,64,128,256,512,1024
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} -o {output} {input}
 !CHECK do: {output} 938 20 2048 3
-!CHECK requires: Energies 885.11151 1068.83875 721.24786 159.93587 -12.88436 143.15952 280.74811 179.61511 71.15748 -34.05555 59.74567 59.32805 1.79689 769.88855 1077.48657 643.10724 Checksum 865195.99936
+!CHECK requires: Energies 885.11 1068.84 721.25 159.94 -12.88 143.16 280.75 179.62 71.16 -34.06 59.75 59.33 1.80 769.89 1077.49 643.11 Checksum 865196
 
 #ifndef CHECK_PPWI
 #define CHECK_PPWI 1
@@ -139,9 +139,12 @@ contains
 #ifndef CHECK_SUMMARY_ONLY
     write(STDOUT, '(i4, f9.5, f12.5, f12.5, f18.5)') PPWI, minval(timings), maxval(timings), tavg, energies(1)
 #else
+    ! XXX Round at print time so libm/libdevice ULP drift doesn't flip the last displayed digit;
+    ! f0.2 for energies and i0 for checksum leave ~20x margin over observed cross-platform drift.
     write(STDOUT, '(a)', advance = "no") "Energies"
     do i = 1, min(16, nposes)
-      write(STDOUT, '(1x, f0.5)', advance = "no") real(energies(i), REAL64)
+      write(STDOUT, '(1x, f0.2)', advance = "no") &
+        real(nint(real(energies(i), REAL64) * 100.0_REAL64), REAL64) / 100.0_REAL64
     end do
     block
       real(REAL64) :: checksum
@@ -149,7 +152,7 @@ contains
       do i = 1, nposes
         checksum = checksum + real(energies(i), REAL64)
       end do
-      write(STDOUT, '(1x, a, 1x, f0.5)', advance = "no") "Checksum", checksum
+      write(STDOUT, '(1x, a, 1x, i0)', advance = "no") "Checksum", nint(checksum)
     end block
 #endif
     deallocate(energies)

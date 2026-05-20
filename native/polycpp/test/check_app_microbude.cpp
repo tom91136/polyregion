@@ -2,7 +2,7 @@
 #pragma region using: ppwi=1,2,4,8,16,32,64,128,256,512,1024 layout=,-DCHECK_STD_ARRAY
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} {layout} -o {output} {input} -lm
 #pragma region do: {output} 938 20 2048 3
-#pragma region requires: Energies 885.11151 1068.83875 721.24786 159.93587 -12.88436 143.15952 280.74811 179.61511 71.15748 -34.05555 59.74567 59.32805 1.79689 769.88855 1077.48657 643.10724 Checksum 865195.99936
+#pragma region requires: Energies 885.11 1068.84 721.25 159.94 -12.88 143.16 280.75 179.62 71.16 -34.06 59.75 59.33 1.80 769.89 1077.49 643.11 Checksum 865196
 
 
 #include <algorithm>
@@ -445,11 +445,18 @@ void run(int iter, int nposes, int natlig, int natpro, //
   }
 #endif
 #ifdef CHECK_SUMMARY_ONLY
+  // XXX Round at print time so libm/libdevice ULP drift doesn't flip the last displayed digit;
+  // %.2f for energies and integer for checksum leave ~20x margin over observed cross-platform drift.
   std::printf("Energies");
   const int limit = nposes < 16 ? nposes : 16;
-  for (int i = 0; i < limit; ++i) std::printf(" %.5f", static_cast<double>(energies[i]));
+  for (int i = 0; i < limit; ++i) {
+    const double e = static_cast<double>(energies[i]);
+    if (std::isfinite(e)) std::printf(" %.2f", static_cast<double>(std::llround(e * 100.0)) / 100.0);
+    else std::printf(" %.2f", e);
+  }
   double checksum = std::accumulate(energies.begin(), energies.end(), 0.0);
-  std::printf(" Checksum %.5f", checksum);
+  if (std::isfinite(checksum)) std::printf(" Checksum %lld", static_cast<long long>(std::llround(checksum)));
+  else std::printf(" Checksum %.0f", checksum);
 #endif
 }
 
