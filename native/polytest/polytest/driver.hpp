@@ -274,8 +274,9 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                                  | to_vector();
           const auto unevalStore =
               mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
-          const auto runsHash =
-              std::hash<std::string>{}(tc.runs | mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); }));
+          const auto runsCmd = tc.runs | mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); });
+          const auto varsKey = varsWithLabel | mk_string("|", [](auto &k, auto &v) { return k + "=" + v; });
+          const auto runsHash = std::hash<std::string>{}(runsCmd + "\0" + varsKey);
           const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
           const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
                                               static_cast<std::uint32_t>(runsHash));
