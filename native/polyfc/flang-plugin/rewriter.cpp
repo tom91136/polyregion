@@ -127,14 +127,14 @@ class Binder {
     if (const auto refTy = llvm::dyn_cast<fir::ReferenceType>(val.getType())) { // T = fir.ref<E>
       // XXX types mapped here should all be pointers because since they originate from a ref/memref
       if (const auto refElemTy = refTy.getEleTy(); refElemTy.isIntOrIndexOrFloat()) {
-        if (temporary) raise(fmt::format("Unsupported temporary type: {}", fir::mlirTypeToString(refElemTy)));
         const auto llvmPtr = getRefPtr(B, val);
         const auto i64Size = intConst(B, i64Ty(B), refElemTy.isIndex() ? 8 : refElemTy.getIntOrFloatBitWidth() / 8);
+        const std::vector witnesses{CaptureField::Witness{llvmPtr, i64Size}};
         fields.emplace_back(CaptureField{
             .type = refElemTy,
             .fieldPtr = llvmPtr,
-            .dependent = {CaptureField::Witness{llvmPtr, i64Size}},
-            .temporary = {},
+            .dependent = temporary ? std::vector<CaptureField::Witness>{} : witnesses,
+            .temporary = temporary ? witnesses : std::vector<CaptureField::Witness>{},
         });
       } else if (const auto recordTy = dyn_cast<fir::RecordType>(refElemTy)) { //  fir.ref<fir.type<X>>
         if (temporary) raise(fmt::format("Unsupported temporary type: {}", fir::mlirTypeToString(refElemTy)));
@@ -148,14 +148,20 @@ class Binder {
         });
       } else if (auto seqTy = dyn_cast<fir::SequenceType>(refElemTy)) { // fir.ref<fir.array<X>>
         if (temporary) raise(fmt::format("Unsupported temporary type: {}", fir::mlirTypeToString(refElemTy)));
-        if (seqTy.hasDynamicExtents() || seqTy.hasUnknownShape())
-          raise(fmt::format("Array has dynamic extent or unknown shape: {}", fir::mlirTypeToString(refElemTy)));
-        const auto maxExtent = intConst(B, i64Ty(B), seqTy.getConstantArraySize() * (seqTy.getEleTy().getIntOrFloatBitWidth() / 8));
+        if (seqTy.hasUnknownShape())
+          raise(fmt::format("Array has unknown shape: {}", fir::mlirTypeToString(refElemTy)));
+        // XXX Dynamic extents omit the size witness; SMA still mirrors via polyreflect-rt.
+        const bool dynamicExtent = seqTy.hasDynamicExtents();
         const auto llvmPtr = getRefPtr(B, val);
+        std::vector<CaptureField::Witness> witnesses;
+        if (!dynamicExtent) {
+          const auto elemBits = seqTy.getEleTy().getIntOrFloatBitWidth();
+          witnesses.push_back({llvmPtr, intConst(B, i64Ty(B), seqTy.getConstantArraySize() * (elemBits / 8))});
+        }
         fields.emplace_back(CaptureField{
             .type = refElemTy,
             .fieldPtr = llvmPtr,
-            .dependent = {CaptureField::Witness{llvmPtr, maxExtent}},
+            .dependent = witnesses,
             .temporary = {},
         });
       } else if (const auto boxTy = dyn_cast<fir::BoxType>(refElemTy)) { // fir.ref<fir.box<X>>
@@ -175,6 +181,21 @@ class Binder {
         const auto ref = fir::AllocaOp::create(B, uLoc(B), boxTy).getResult();
         fir::StoreOp::create(B, uLoc(B), val, ref);
         bindRef(B, ref, layout, fields, true);
+      } else if (val.getType().isIntOrIndexOrFloat()) {
+        // XXX O3 may inline shape/extent into the kernel body, leaving an unboxed scalar capture;
+        // stack-spill it so the scalar-ref path picks it up.
+        auto ty = val.getType();
+        if (ty.isIndex()) {
+          ty = mlir::IntegerType::get(val.getContext(), 64);
+          val = fir::ConvertOp::create(B, uLoc(B), ty, val).getResult();
+        }
+        const auto ref = fir::AllocaOp::create(B, uLoc(B), ty).getResult();
+        fir::StoreOp::create(B, uLoc(B), val, ref);
+        bindRef(B, ref, layout, fields, true);
+      } else if (auto heapTy = llvm::dyn_cast<fir::HeapType>(val.getType())) {
+        const auto refTy = fir::ReferenceType::get(heapTy.getEleTy());
+        const auto refVal = fir::ConvertOp::create(B, uLoc(B), refTy, val).getResult();
+        bindRef(B, refVal, layout, fields, false);
       } else {
         raise(fmt::format("Binder value is not a ref type: {}", show(val)));
       }
@@ -553,26 +574,125 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       return;
     }
     OpBuilder B(doc);
-    // Hoist the iv allocations (everything before the terminator in the wrapper block) out so
-    // they survive the erase below.
+    const auto loc = doc.getLoc();
     for (auto &op : llvm::make_early_inc_range(wrapperBlock.without_terminator()))
       op.moveBefore(doc);
+    const auto lbV = loopOp.getLowerBound()[0];
+    const auto ubV = loopOp.getUpperBound()[0];
+    const auto stepV = loopOp.getStep()[0];
+    const bool hasReduce = !loopOp.getReduceVars().empty();
+    // XXX `reduce(+ : v)` lowers to a per-iteration scratch[N] (heap so polyreflect-rt tracks
+    // it for SMA mirroring); each thread writes its slot, host sums after. Requires lb == 1
+    // (else we'd need to capture lb into the kernel) and only `+` reduction.
+    if (hasReduce) {
+      if (auto attrs = loopOp.getReduceAttrsAttr()) {
+        for (auto a : attrs.getValue()) {
+          if (auto ra = mlir::dyn_cast<fir::ReduceAttr>(a);
+              !ra || ra.getReduceOperation() != fir::ReduceOperationEnum::Add) {
+            diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                             "[PolyFC] only `+` reduction is supported in `do concurrent ... reduce(...)`"));
+            return;
+          }
+        }
+      }
+      bool lbIsOne = false;
+      if (auto v = mlir::getConstantIntValue(lbV)) lbIsOne = *v == 1;
+      else if (auto cnv = lbV.getDefiningOp<fir::ConvertOp>())
+        if (auto v = mlir::getConstantIntValue(cnv.getValue())) lbIsOne = *v == 1;
+      if (!lbIsOne) {
+        diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                         "[PolyFC] `do concurrent ... reduce(...)` requires lower bound == 1"));
+        return;
+      }
+    }
+    llvm::SmallVector<mlir::Value> reduceVarsSnapshot(loopOp.getReduceVars().begin(), loopOp.getReduceVars().end());
+    llvm::SmallVector<mlir::Value> scratchBoxes;
+    llvm::SmallVector<mlir::Value> scratchHeaps;
+    llvm::SmallVector<mlir::Type> scratchElemTys;
+    mlir::Value numIters, idxZero, idxOne, shapeVal;
+    if (hasReduce) {
+      idxOne = idxConst(B, 1);
+      idxZero = idxConst(B, 0);
+      auto diff = mlir::arith::SubIOp::create(B, loc, ubV, lbV).getResult();
+      auto div = mlir::arith::DivSIOp::create(B, loc, diff, stepV).getResult();
+      numIters = mlir::arith::AddIOp::create(B, loc, div, idxOne).getResult();
+      shapeVal = fir::ShapeOp::create(B, loc, mlir::ValueRange{numIters}).getResult();
+      for (auto rv : reduceVarsSnapshot) {
+        auto refTy = mlir::cast<fir::ReferenceType>(rv.getType());
+        auto elemTy = refTy.getEleTy();
+        auto arrTy = fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, elemTy);
+        auto boxArrTy = fir::BoxType::get(arrTy);
+        auto scratchHeap = fir::AllocMemOp::create(B, loc, arrTy, llvm::StringRef{}, llvm::StringRef{},
+                                                   mlir::ValueRange{}, mlir::ValueRange{numIters})
+                               .getResult();
+        // XXX Convert fir.heap -> fir.ref so the Binder's ref-type path accepts it at O3.
+        auto scratchRef = fir::ConvertOp::create(B, loc, fir::ReferenceType::get(arrTy), scratchHeap).getResult();
+        auto scratchBox = fir::EmboxOp::create(B, loc, boxArrTy, scratchRef, shapeVal).getResult();
+        auto initLoop =
+            fir::DoLoopOp::create(B, loc, idxZero, numIters, idxOne, /*unordered=*/false, /*finalCountValue=*/false);
+        {
+          OpBuilder bi(initLoop.getBody(), initLoop.getBody()->begin());
+          auto idx1Based = mlir::arith::AddIOp::create(bi, loc, initLoop.getInductionVar(), idxConst(bi, 1)).getResult();
+          auto slot = fir::ArrayCoorOp::create(bi, loc, fir::ReferenceType::get(elemTy), scratchBox, shapeVal,
+                                               /*slice=*/mlir::Value{}, mlir::ValueRange{idx1Based},
+                                               /*typeparams=*/mlir::ValueRange{})
+                          .getResult();
+          fir::StoreOp::create(bi, loc, zeroConst(bi, elemTy), slot);
+        }
+        scratchBoxes.push_back(scratchBox);
+        scratchHeaps.push_back(scratchHeap);
+        scratchElemTys.push_back(elemTy);
+      }
+    }
     llvm::SmallVector<mlir::Attribute> reduceAttrs;
     if (auto attrs = loopOp.getReduceAttrsAttr()) reduceAttrs.assign(attrs.begin(), attrs.end());
-    auto unordered = fir::DoLoopOp::create(B, doc.getLoc(),                                                           //
-                                           loopOp.getLowerBound()[0], loopOp.getUpperBound()[0], loopOp.getStep()[0], //
+    auto unordered = fir::DoLoopOp::create(B, loc, lbV, ubV, stepV, //
                                            /*unordered=*/true, /*finalCountValue=*/false,
-                                           /*iterArgs=*/mlir::ValueRange{}, loopOp.getReduceVars(), reduceAttrs);
+                                           /*iterArgs=*/mlir::ValueRange{},
+                                           hasReduce ? mlir::ValueRange{} : mlir::ValueRange(reduceVarsSnapshot),
+                                           hasReduce ? llvm::ArrayRef<mlir::Attribute>{} : llvm::ArrayRef<mlir::Attribute>(reduceAttrs));
     unordered->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
     auto &loopBlock = loopOp.getRegion().front();
     loopBlock.getArgument(0).replaceAllUsesWith(unordered.getInductionVar());
     auto srcReduceArgs = loopBlock.getArguments().drop_front(loopOp.getNumInductionVars() + loopOp.getNumLocalOperands());
-    for (auto [src, ext] : llvm::zip_equal(srcReduceArgs, loopOp.getReduceVars())) {
-      src.replaceAllUsesWith(ext);
+    if (hasReduce) {
+      OpBuilder br(unordered.getBody(), unordered.getBody()->begin());
+      for (auto [idx, src] : llvm::enumerate(srcReduceArgs)) {
+        auto refTy = mlir::cast<fir::ReferenceType>(src.getType());
+        auto slot = fir::ArrayCoorOp::create(br, loc, refTy, scratchBoxes[idx], shapeVal,
+                                             /*slice=*/mlir::Value{}, mlir::ValueRange{unordered.getInductionVar()},
+                                             /*typeparams=*/mlir::ValueRange{})
+                        .getResult();
+        src.replaceAllUsesWith(slot);
+      }
+    } else {
+      for (auto [src, ext] : llvm::zip_equal(srcReduceArgs, reduceVarsSnapshot))
+        src.replaceAllUsesWith(ext);
     }
     auto *destBody = unordered.getBody();
     destBody->getOperations().splice(destBody->getTerminator()->getIterator(), loopBlock.getOperations());
     doc.erase();
+    if (hasReduce) {
+      B.setInsertionPointAfter(unordered);
+      for (auto [extRef, scratchBox, elemTy] : llvm::zip(reduceVarsSnapshot, scratchBoxes, scratchElemTys)) {
+        auto combineLoop =
+            fir::DoLoopOp::create(B, loc, idxZero, numIters, idxOne, /*unordered=*/false, /*finalCountValue=*/false);
+        OpBuilder bc(combineLoop.getBody(), combineLoop.getBody()->begin());
+        auto idx1Based = mlir::arith::AddIOp::create(bc, loc, combineLoop.getInductionVar(), idxConst(bc, 1)).getResult();
+        auto slot = fir::ArrayCoorOp::create(bc, loc, fir::ReferenceType::get(elemTy), scratchBox, shapeVal,
+                                             /*slice=*/mlir::Value{}, mlir::ValueRange{idx1Based},
+                                             /*typeparams=*/mlir::ValueRange{})
+                        .getResult();
+        auto delta = fir::LoadOp::create(bc, loc, slot).getResult();
+        auto cur = fir::LoadOp::create(bc, loc, extRef).getResult();
+        mlir::Value sum = mlir::isa<mlir::FloatType>(elemTy)
+                              ? mlir::arith::AddFOp::create(bc, loc, cur, delta).getResult()
+                              : mlir::arith::AddIOp::create(bc, loc, cur, delta).getResult();
+        fir::StoreOp::create(bc, loc, sum, extRef);
+      }
+      for (auto h : scratchHeaps)
+        fir::FreeMemOp::create(B, loc, h);
+    }
   });
 
   // Mark all unordered fir.do_loop ops (both the ones we just synthesised and any pre-Flang-22
@@ -581,6 +701,14 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     if (!doLoop.getUnordered()) return;
     doLoop->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
   });
+
+  // XXX Sweep dead fir.declare_reduction once after all DCO rewrites; leaving orphan declarators
+  // trips LLVM Translation when the body's SSA refs no longer resolve.
+  llvm::SmallVector<fir::DeclareReductionOp> deadReductions;
+  m.walk([&](fir::DeclareReductionOp op) {
+    if (mlir::SymbolTable::symbolKnownUseEmpty(op, m)) deadReductions.push_back(op);
+  });
+  for (auto op : deadReductions) op.erase();
 }
 
 void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {

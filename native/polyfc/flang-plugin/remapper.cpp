@@ -782,10 +782,14 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
 
         std::vector<Term::Any> actualShape;
         if (seqTy.hasDynamicExtents()) {
+          // XXX Use box dims when boxed; otherwise the explicit shape operand below carries extents.
           const auto boxed = *ref ^ get_maybe<FBoxed>();
-          if (!boxed) return poison(c, fmt::format("array {} has dynamic extent but is not boxed", show(c.getMemref())));
-          for (size_t rank = 0; rank < ranks; ++rank)
-            actualShape.emplace_back(asTerm(selectAny(Expr::Alias(newVar(boxed->dimAt(rank))).widen(), FDimM.extent)));
+          if (boxed) {
+            for (size_t rank = 0; rank < ranks; ++rank)
+              actualShape.emplace_back(asTerm(selectAny(Expr::Alias(newVar(boxed->dimAt(rank))).widen(), FDimM.extent)));
+          } else if (!c.getShape()) {
+            return poison(c, fmt::format("array {} has dynamic extent and no shape operand", show(c.getMemref())));
+          }
         } else {
           for (auto extent : seqTy.getShape())
             actualShape.emplace_back(Term::IntS64Const(extent).widen());
