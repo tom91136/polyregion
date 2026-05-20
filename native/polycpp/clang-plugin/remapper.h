@@ -67,6 +67,7 @@ struct Remapper {
 
     [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
     [[nodiscard]] bool emptyStruct(const StructDef &def);
+    [[nodiscard]] bool isEmpty(const Type::Struct &s);
 
     void push(const Stmt::Any &stmt);
     void push(const Vector<Stmt::Any> &xs);

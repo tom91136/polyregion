@@ -212,6 +212,10 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
   return def.members ^ forall([&](auto &m) { return m == EmptyStructMarker; });
 }
 
+bool Remapper::RemapContext::isEmpty(const Type::Struct &s) {
+  return structs ^ get_maybe(repr(s.name)) ^ exists([&](auto &def) { return emptyStruct(*def); });
+}
+
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
 void Remapper::RemapContext::push(const Vector<Stmt::Any> &xs) { stmts ^= concat_inplace(xs); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
@@ -325,7 +329,8 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
   } else if (rhsPtrTpe && tgtPtrTpe) {
     if (auto tgtStruct = tgtPtrTpe->comp.get<Type::Struct>()) {
       if (auto rhsStruct = rhsPtrTpe->comp.get<Type::Struct>()) {
-        if (rhsSelectTerm) {
+        // XXX empty struct lacks #base_<Name>; EBO places empty bases at offset 0 so the bitcast below is correct.
+        if (rhsSelectTerm && !r.isEmpty(*rhsStruct)) {
           if (Vector<std::shared_ptr<StructDef>> chain;
               walkParents(r, *rhsStruct, [&](auto &p) { return p.name == tgtStruct->name; }, chain)) {
             // Build the augmented Select: existing path + base-of links to the target struct.
@@ -647,9 +652,9 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     // member (e.g. as a lambda capture before another non-empty capture). Inject the placeholder byte so
     // the polyc-side struct picks up the 1-byte size that C++ ABI requires.
     const auto inheritedAllEmpty = !inherited.empty() && (inherited ^ forall([&](auto &p, auto &) {
-                                     auto s = p.tpe.template get<Type::Struct>();
-                                     return s && repr(s->name) == Empty;
-                                   }));
+                                                            auto s = p.tpe.template get<Type::Struct>();
+                                                            return s && repr(s->name) == Empty;
+                                                          }));
     const auto emptyStruct = members.empty() && (inherited.empty() || (inheritedAllEmpty && sizeInBytes == 1));
     *stub = StructDef(                           //
         Sym({name}), std::vector<std::string>{}, //
@@ -951,6 +956,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             const auto srcTpe = sourceExpr.tpe();
             const auto bothStruct = srcTpe.is<Type::Struct>() && targetTpe.is<Type::Struct>();
             if (bothStruct) {
+              // XXX empty struct lacks #base_<Name>; EBO places empty bases at offset 0 so bitcast suffices.
+              if (const auto srcStruct = srcTpe.get<Type::Struct>(); srcStruct && r.isEmpty(*srcStruct))
+                return Expr::Cast(r.newVar(sourceExpr), targetTpe);
               std::optional<Term::Select> seed;
               if (auto a = sourceExpr.template get<Expr::Alias>()) {
                 if (auto s = a->ref.template get<Term::Select>()) seed = *s;
@@ -1305,6 +1313,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
                                          std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
           return instance;
+        } else if (ctorTpe.template is<Type::Arr>()) {
+          // XXX std::array<T,N> lowers to Type::Arr; default/value ctor is a no-op, allocate and let assignments init.
+          auto allocated = r.newVar(ctorTpe);
+          return Expr::Any(Expr::Alias(select(r, {}, allocated).widen()));
         } else {
           raise("CXX ctor resulted in a non-struct type: " + repr(ctorTpe));
         }

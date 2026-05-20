@@ -253,7 +253,9 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
         // as `[N x T]` and mkSelectPtr already returns the array address.
         if (x.tpe.template is<Type::Arr>()) {
           if (x.steps.empty()) {
-            return C.load(B, mkSelectPtr(x), B.getPtrTy(C.GenericAS != 0 ? C.GlobalAS : 0));
+            // XXX Stmt::Var stores a FLAT ptr; load as FLAT to round-trip (Generic on SPIR-V).
+            const auto loadAS = C.GenericAS != 0 ? C.GenericAS : 0;
+            return C.load(B, mkSelectPtr(x), B.getPtrTy(loadAS));
           }
           return mkSelectPtr(x);
         }
@@ -613,10 +615,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         } else {
           const auto tpe = resolveType(x.name.tpe);
           auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
-          // XXX Inline Type::Arr needs an extra ptr slot so refTo/update match mkTermVal's
-          // load-ptr-from-leaf-Arr-slot convention; without it the array bytes get treated as a ptr.
+          // XXX Inline Type::Arr needs a FLAT ptr slot (AllocaAS is 32-bit on AMDGCN so the 64-bit FLAT store overflows).
           if (x.name.tpe.template is<Type::Arr>()) {
-            auto refSlot = C.allocaAS(B, B.getPtrTy(C.AllocaAS), C.AllocaAS, x.name.symbol + "_ref_ptr");
+            auto refSlot = C.allocaAS(B, B.getPtrTy(), C.AllocaAS, x.name.symbol + "_ref_ptr");
             const auto _ = C.store(B, stackPtr, refSlot);
             stackPtr = refSlot;
           }
