@@ -510,9 +510,12 @@ void doRewrite(ModuleOp op) {
         }
       }
 
-      // hoist all the way out
+      // XXX Stop at the innermost loop holding the inductionRef alloca; hoisting past it would
+      // place the store outside the alloca's scope (LLVM Translation: "operand does not dominate").
+      auto *refDef = inductionRef.getDefiningOp();
       Operation *parentLoopOp = loopOp;
       while (const auto parentLoop = llvm::dyn_cast<fir::DoLoopOp>(parentLoopOp->getParentOp())) {
+        if (refDef && parentLoop->isProperAncestor(refDef)) break;
         parentLoopOp = parentLoop;
       }
       R.setInsertionPointAfter(parentLoopOp);
