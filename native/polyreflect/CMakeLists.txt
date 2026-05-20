@@ -13,6 +13,7 @@ target_sources(polyreflect-rt
         reflect-rt/rt_protected.hpp
         reflect-rt/rt_reflect.hpp
 )
+target_link_libraries(polyreflect-rt INTERFACE ${CMAKE_DL_LIBS})
 
 add_llvm_pass_plugin(polyreflect-plugin
         plugin.cpp
