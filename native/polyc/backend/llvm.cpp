@@ -613,6 +613,13 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         } else {
           const auto tpe = resolveType(x.name.tpe);
           auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
+          // XXX Inline Type::Arr needs an extra ptr slot so refTo/update match mkTermVal's
+          // load-ptr-from-leaf-Arr-slot convention; without it the array bytes get treated as a ptr.
+          if (x.name.tpe.template is<Type::Arr>()) {
+            auto refSlot = C.allocaAS(B, B.getPtrTy(C.AllocaAS), C.AllocaAS, x.name.symbol + "_ref_ptr");
+            const auto _ = C.store(B, stackPtr, refSlot);
+            stackPtr = refSlot;
+          }
           // Rebind on same-name redeclaration (adjacent `for (int l = 0; ...)` loops);
           // `emplace` would keep the prior slot and the second loop would see the stale value.
           if (auto it = stackVarPtrs.find(x.name.symbol); it != stackVarPtrs.end() && it->second.first != x.name.tpe) {

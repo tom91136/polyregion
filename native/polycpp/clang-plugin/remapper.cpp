@@ -1562,6 +1562,10 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             } else if (auto arrInit = createInit(var->getType(), name.tpe); arrInit) {
               const bool isMutable = !var->getType().isConstQualified();
               r.push(Stmt::Var(name, *arrInit, isMutable));
+            } else if (name.tpe.get<Type::Arr>()) {
+              // Inline sized array (`T xs[N]`); storage is part of the var, no init needed.
+              const bool isMutable = !var->getType().isConstQualified();
+              r.push(Stmt::Var(name, std::optional<Expr::Any>{}, isMutable));
             } else if (auto structTpe = name.tpe.get<Type::Struct>(); structTpe) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
               defaultInitialiseStruct(r, *structTpe, name);
