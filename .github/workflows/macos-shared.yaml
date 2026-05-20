@@ -37,7 +37,7 @@ jobs:
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ inputs.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ inputs.flang_parallel_compile_jobs }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
@@ -123,14 +123,14 @@ jobs:
           done
 
       - name: Upload dist
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: polyregion-tests-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/**
@@ -140,13 +140,13 @@ jobs:
     needs: build
     runs-on: ${{ inputs.check_runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: brew install --quiet cmake
 
       - name: Download dist
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
@@ -166,19 +166,19 @@ jobs:
     needs: build
     runs-on: ${{ inputs.check_runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: brew install --quiet cmake
 
       - name: Download dist
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
 
       - name: Download test dist
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-tests-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
@@ -204,7 +204,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-results-darwin-${{ inputs.build_arch }}-${{ inputs.build_type }}
           path: ./native/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist/unit-test-results.xml
