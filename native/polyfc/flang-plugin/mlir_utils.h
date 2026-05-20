@@ -28,6 +28,8 @@ LLVM::LLVMPointerType ptrTy(const OpBuilder &B);
 Value nullConst(OpBuilder &B);
 Value intConst(OpBuilder &B, Type ty, int64_t value);
 Value boolConst(OpBuilder &B, bool value);
+Value idxConst(OpBuilder &B, int64_t value);
+Value zeroConst(OpBuilder &B, Type ty);
 Value strConst(OpBuilder &B, ModuleOp &m, const std::string &value, bool nullTerminate = true);
 LLVM::LLVMFuncOp defineFunc(ModuleOp &m, const std::string &name, Type rtnTy, const std::vector<Type> &argTys,
                             LLVM::Linkage linkage = LLVM::Linkage::External,

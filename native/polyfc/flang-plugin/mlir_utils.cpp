@@ -1,5 +1,6 @@
 #include "mlir_utils.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 #include "fmt/format.h"
@@ -25,6 +26,12 @@ mlir::Value polyregion::polyfc::intConst(OpBuilder &B, Type ty, const int64_t va
   return LLVM::ConstantOp::create(B, uLoc(B), ty, B.getIntegerAttr(ty, value));
 }
 mlir::Value polyregion::polyfc::boolConst(OpBuilder &B, const bool value) { return intConst(B, B.getI1Type(), value); }
+mlir::Value polyregion::polyfc::idxConst(OpBuilder &B, const int64_t value) {
+  return arith::ConstantIndexOp::create(B, uLoc(B), value).getResult();
+}
+mlir::Value polyregion::polyfc::zeroConst(OpBuilder &B, Type ty) {
+  return arith::ConstantOp::create(B, uLoc(B), B.getZeroAttr(ty)).getResult();
+}
 mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::string &value, const bool nullTerminate) {
   static size_t id = 0;
   const auto saved = B.saveInsertionPoint();
