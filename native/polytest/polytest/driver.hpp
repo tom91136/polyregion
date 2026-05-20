@@ -131,6 +131,10 @@ inline std::string resolveBin(const std::string &name, const DriverConfig &cfg) 
     if (auto p = exists(name)) return toAbs(*p);
   if (auto p = exists(fmt::format("{}/{}", cfg.binaryDir, name))) return *p;
   if (auto p = exists(name)) return toAbs(*p);
+  // XXX BinaryDir is baked at build time. The CI unit-tests job downloads only the dist
+  // artefact (no build tree), so the BinaryDir path doesn't exist there. Fall back to a
+  // PATH lookup so the dist's bin/ (set in workflow PATH) resolves.
+  if (auto p = llvm::sys::findProgramByName(name)) return *p;
   return name;
 }
 
