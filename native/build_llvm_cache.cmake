@@ -192,6 +192,7 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
         clang-headers
         mlir-headers
         flang-headers
+        lld-headers
 
         # CMake configs (LLVMConfig.cmake + LLVMExports.cmake etc., per project)
         cmake-exports

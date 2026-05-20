@@ -221,6 +221,7 @@ execute_process(
 
         install-llvm-headers
         install-clang-headers
+        install-lld-headers
         install-mlir-headers
 
         ${MLIR_INSTALL_TARGETS}
