@@ -136,17 +136,15 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   llvm::AttributeList Attrs = F.getAttributes();
   llvm::AttrBuilder NewAttrs(Ctx);
 
-  if (!CPU.empty() && !F.hasFnAttribute("target-cpu")) NewAttrs.addAttribute("target-cpu", CPU);
+  // XXX overwrite, not merge: vendor bitcode pins gfx9/sm_<N> attrs that conflict with the
+  // kernel target (e.g. wavefrontsize32 vs 64) and produce illegal-instruction kernels.
+  if (!CPU.empty()) {
+    F.removeFnAttr("target-cpu");
+    NewAttrs.addAttribute("target-cpu", CPU);
+  }
   if (!Features.empty()) {
-    // Append the command line features to any that are already on the function.
-    llvm::StringRef OldFeatures = F.getFnAttribute("target-features").getValueAsString();
-    if (OldFeatures.empty()) NewAttrs.addAttribute("target-features", Features);
-    else {
-      llvm::SmallString<256> Appended(OldFeatures);
-      Appended.push_back(',');
-      Appended.append(Features);
-      NewAttrs.addAttribute("target-features", Appended);
-    }
+    F.removeFnAttr("target-features");
+    NewAttrs.addAttribute("target-features", Features);
   }
 
   llvm::DenormalMode::DenormalModeKind DenormKind = llvm::DenormalMode::DenormalModeKind::IEEE;
@@ -271,6 +269,11 @@ bool llvmc::linkVendorBitcodeFile(llvm::Module &M, llvm::StringRef path) {
   }
   (*mod)->setTargetTriple(M.getTargetTriple());
   (*mod)->setDataLayout(M.getDataLayout());
+  // XXX strip vendor's pinned gfx9/sm_<N> attrs; setFunctionAttributes re-applies the kernel target post-link.
+  for (auto &F : **mod) {
+    F.removeFnAttr("target-cpu");
+    F.removeFnAttr("target-features");
+  }
   llvm::Linker linker(M);
   return !linker.linkInModule(std::move(*mod), llvm::Linker::LinkOnlyNeeded);
 }
@@ -491,7 +494,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       const auto isSpirv = TM.getTargetTriple().isSPIRV();
       // Link vendor bodies before optimise so the inliner can fold them in.
       linkVendorDeviceLibs(*m, TM.getTargetTriple(), TM.getTargetCPU());
-      if (!isSpirv) optimise(TM, *m, optLevel);
+      if (!isSpirv) {
+        for (llvm::Function &F : m->functions())
+          setFunctionAttributes(TM.getTargetCPU(), TM.getTargetFeatureString(), F);
+        optimise(TM, *m, optLevel);
+      }
       verifyKernelSymbols(*m, TM.getTargetTriple());
 
       if (isSpirv) {
