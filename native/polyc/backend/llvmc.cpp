@@ -338,7 +338,11 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
     // SPIR-V allows Itanium-mangled OpenCL and __spirv_* builtins (both `_Z`-prefixed); the
     // translator rewrites those to OpExtInst OpenCL.std / SPIR-V opcodes. NVPTX/AMDGCN have
     // no equivalent escape hatch -- their kernels must be self-contained.
-    return triple.isSPIRV() && name.starts_with("_Z");
+    if (triple.isSPIRV() && name.starts_with("_Z")) return true;
+    // NVPTX dynamic shared memory: postProcessModule emits an `extern addrspace(3) global` whose
+    // storage is supplied by `cuLaunchKernel`'s sharedMemBytes at runtime, so the decl is correct.
+    if (triple.isNVPTX() && name == "polyc_dyn_shared") return true;
+    return false;
   };
   llvm::SmallVector<std::string> missing;
   for (const llvm::Function &F : M)
