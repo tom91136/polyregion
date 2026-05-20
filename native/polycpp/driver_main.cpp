@@ -202,6 +202,8 @@ int main(int argc, const char *argv[]) {
                                                                                 fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"),
                                                                                 "-polyreflect-late=ReflectStack+ReflectMem",
                                                                             }));
+                       // XXX -O0 LLD LTO skips EP callbacks; force the passes by name.
+                       append({"-Xlinker", "--lto-newpm-passes=polyreflect-stack,polyreflect-mem"});
 #endif
                        break;
                    }

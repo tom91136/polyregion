@@ -6,6 +6,13 @@
 
 #include "reflect-rt/rt_reflect.hpp"
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+  #include <mutex>
+  #include <vector>
+
+  #include <link.h>
+#endif
+
 // XXX polystl-static bundles polyinvoke + LLVM Support; consumers link via polycpp at runtime
 // without CMake propagation, so pull in the Windows system imports from this object.
 #if defined(_MSC_VER)
@@ -23,11 +30,52 @@
 using namespace polyregion;
 using polyrt::DebugLevel;
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+// XXX register main exe's RO PT_LOADs with polyreflect lazily; captures into .rodata otherwise
+// hit SMA's foreign-pointer path and mix USM with host VAs on hsa/cuda.
+struct RoSegment {
+  uintptr_t base;
+  size_t size;
+};
+POLYREGION_RT_PROTECT static int collectRoSegment(struct dl_phdr_info *info, size_t, void *data) {
+  if (info->dlpi_name && info->dlpi_name[0] != '\0') return 0;
+  auto &out = *static_cast<std::vector<RoSegment> *>(data);
+  for (int i = 0; i < info->dlpi_phnum; ++i) {
+    const auto &ph = info->dlpi_phdr[i];
+    if (ph.p_type != PT_LOAD) continue;
+    if ((ph.p_flags & PF_W) != 0) continue;
+    if ((ph.p_flags & PF_X) != 0) continue;
+    if (ph.p_memsz == 0) continue;
+    out.push_back({info->dlpi_addr + ph.p_vaddr, ph.p_memsz});
+  }
+  return 0;
+}
+POLYREGION_RT_PROTECT static std::vector<RoSegment> roSegments;
+POLYREGION_RT_PROTECT static std::once_flag roSegmentsOnce;
+POLYREGION_RT_PROTECT static void ensureRoSegmentsRecorded() {
+  std::call_once(roSegmentsOnce, [] {
+    dl_iterate_phdr(collectRoSegment, &roSegments);
+    if (rt_reflect::_rt_record) {
+      for (const auto &s : roSegments)
+        rt_reflect::_rt_record(reinterpret_cast<void *>(s.base), s.size, rt_reflect::Type::StaticRodata);
+    }
+  });
+}
+#endif
+
 POLYREGION_RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{.sizeInBytes = meta.size, .offsetInBytes = meta.offset};
+        return polyrt::PtrQuery{
+            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
       }
+#if !defined(_WIN32) && !defined(__APPLE__)
+      ensureRoSegmentsRecorded();
+      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+        return polyrt::PtrQuery{
+            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
+      }
+#endif
       log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
       return polyrt::PtrQuery{0, 0};
     },

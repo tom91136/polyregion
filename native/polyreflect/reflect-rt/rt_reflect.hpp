@@ -44,6 +44,9 @@ extern "C" enum class Type : uint8_t {
   HeapFree,
   HeapCXXNew,
   HeapCXXDelete,
+
+  // XXX RO static segment (PT_LOAD without W/X) registered at polystl init so SMA can resolve captured .rodata pointers.
+  StaticRodata,
 };
 
 extern "C" struct PtrMeta {
@@ -68,6 +71,7 @@ constexpr const char *to_string(const Type t) {
     case Type::HeapFree: return "HeapFree";
     case Type::HeapCXXNew: return "HeapCXXNew";
     case Type::HeapCXXDelete: return "HeapCXXDelete";
+    case Type::StaticRodata: return "StaticRodata";
   }
   return "Undefined";
 }
@@ -76,9 +80,11 @@ constexpr const char *to_string(const Type t) {
   #if defined(_MSC_VER)
 extern "C" PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
+extern "C" void _rt_record(const void *ptr, size_t size, Type type);
   #else
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __attribute__((weak)) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
+extern "C" __attribute__((weak)) void _rt_record(const void *ptr, size_t size, Type type);
   #endif
 #endif
 

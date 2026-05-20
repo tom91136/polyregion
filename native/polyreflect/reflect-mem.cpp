@@ -536,15 +536,15 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
     }
   });
   std::unordered_set<const llvm::Function *> ignored;
-  if (verbose) {
-    llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
-      if (F &&                                       //
-          (Annotation == "polyreflect-rt-protect" || //
-           Annotation == "polyreflect-rt-odr"))
-        ignored.emplace(F);
-    });
-    llvm::errs() << "[ReflectMemPass] Found " << ignored.size() << " ignored functions values in module " << M.getName() << "\n";
-  }
+  // XXX populate unconditionally: empty `ignored` lets CGTA tag polyreflect-rt's own functions,
+  // and LTO-inlined polyrt_map_* then recurses through SMA and overflows the stack at dispatch.
+  llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
+    if (F &&                                       //
+        (Annotation == "polyreflect-rt-protect" || //
+         Annotation == "polyreflect-rt-odr"))
+      ignored.emplace(F);
+  });
+  if (verbose) llvm::errs() << "[ReflectMemPass] Found " << ignored.size() << " ignored functions values in module " << M.getName() << "\n";
 
   if (verbose) {
     llvm::errs() << "[ReflectMemPass] Found " << values.size() << " annotated values in module " << M.getName() << "\n";

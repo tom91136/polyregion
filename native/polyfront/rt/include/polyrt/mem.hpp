@@ -18,6 +18,8 @@ namespace polyregion::polyrt {
 struct PtrQuery {
   size_t sizeInBytes;
   size_t offsetInBytes;
+  // XXX host page is mprotect'd RO (.rodata); SMA must skip device->host writeback or the copy faults.
+  bool hostReadOnly = false;
 };
 
 template <typename LocalReflect,  //
@@ -69,11 +71,13 @@ class SynchronisedMemAllocation {
     return {};
   }
 
-  uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s) {
-    const uintptr_t remotePtr = remoteAlloc(sizeInBytes);
+  uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s, bool hostReadOnly = false) {
+    // XXX +1 guard so adjacent USM allocs aren't bit-touching; otherwise A's past-end pointer aliases B's base in offsetQuery.
+    const uintptr_t remotePtr = remoteAlloc(sizeInBytes + 1);
     localToRemoteAlloc.emplace(reinterpret_cast<uintptr_t>(local),
                                RemoteAllocation{.layout = s, //
                                                 .localModified = false,
+                                                .hostReadOnly = hostReadOnly,
                                                 .remote = RangedAllocation{.ptr = remotePtr, .sizeInBytes = sizeInBytes}});
     remoteToLocalPtr.emplace(remotePtr, RangedAllocation{.ptr = reinterpret_cast<uintptr_t>(local), .sizeInBytes = sizeInBytes});
     return remotePtr;
@@ -107,7 +111,8 @@ class SynchronisedMemAllocation {
       const bool pastEnd = meta.offsetInBytes == meta.sizeInBytes;
       const char *baseLocalPtr = pastEnd ? memberLocalPtr - meta.offsetInBytes : memberLocalPtr;
       const size_t effectiveSize = pastEnd ? meta.sizeInBytes : meta.sizeInBytes - meta.offsetInBytes;
-      const uintptr_t baseRemotePtr = mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize);
+      const uintptr_t baseRemotePtr =
+          mirrorToRemote(baseLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize, meta.hostReadOnly);
       const uintptr_t memberRemotePtr = pastEnd ? baseRemotePtr + meta.offsetInBytes : baseRemotePtr;
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
@@ -181,7 +186,7 @@ class SynchronisedMemAllocation {
   // is `_List_node<T>` (24+ bytes); sizing the device alloc to the polyc type would put the
   // payload bytes out-of-bounds.
   uintptr_t mirrorToRemote(const char *hostData, const size_t ptrIndirections, const size_t count, const runtime::TypeLayout &l,
-                           const size_t hostAllocSizeInBytes = 0) {
+                           const size_t hostAllocSizeInBytes = 0, const bool hostReadOnly = false) {
     if (debug)
       std::fprintf(stderr, "[SMA] mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s, hostAllocSize=%zu)\n", //
                    static_cast<const void *>(hostData), ptrIndirections, count, l.name, hostAllocSizeInBytes);
@@ -199,7 +204,7 @@ class SynchronisedMemAllocation {
     }
     const size_t typeSizeTotal = l.sizeInBytes * count;
     const size_t allocSize = std::max(typeSizeTotal, hostAllocSizeInBytes);
-    const auto devicePtr = createDeviceAllocation(hostData, allocSize, &l);
+    const auto devicePtr = createDeviceAllocation(hostData, allocSize, &l, hostReadOnly);
     // Trailing bytes outside the polyc type (list node payload, vtable slots, etc.) are copied
     // verbatim; writeStruct then walks the known-typed prefix to mirror pointer fields.
     if (allocSize > typeSizeTotal) remoteWrite(hostData + typeSizeTotal, devicePtr, typeSizeTotal, allocSize - typeSizeTotal);
@@ -249,6 +254,7 @@ public:
   struct RemoteAllocation {
     const runtime::TypeLayout *layout;
     bool localModified;
+    bool hostReadOnly = false;
     RangedAllocation remote;
   };
 
@@ -319,15 +325,18 @@ public:
       const size_t objIdxEnd = std::min(maxObjCount, objIdxBegin + integralCeil(requestedBytes, objSize));
       const size_t totalObjBytes = (objIdxEnd - objIdxBegin) * objSize;
 
-      remoteRead(baseAtObjIdx, alloc->remote.ptr, objIdxBegin * objSize, totalObjBytes);
-      if (tl) {
-        if (!isSet(tl->attrs, runtime::LayoutAttrs::Opaque)) { // short-circuit if the struct is opaque (no further pointers)
+      // XXX skip writeback when host page is RO; cuMemcpyDtoH/hsa fault, and the pointer-rewrite walk would too.
+      if (!alloc->hostReadOnly) {
+        remoteRead(baseAtObjIdx, alloc->remote.ptr, objIdxBegin * objSize, totalObjBytes);
+        if (tl) {
+          if (!isSet(tl->attrs, runtime::LayoutAttrs::Opaque)) {
+            for (size_t i = objIdxBegin; i < objIdxEnd; ++i)
+              readStruct(baseAtObjIdx, i * objSize, tl);
+          }
+        } else {
           for (size_t i = objIdxBegin; i < objIdxEnd; ++i)
-            readStruct(baseAtObjIdx, i * objSize, tl);
+            readSubObject(baseAtObjIdx, i * objSize);
         }
-      } else { // array of pointers
-        for (size_t i = objIdxBegin; i < objIdxEnd; ++i)
-          readSubObject(baseAtObjIdx, i * objSize);
       }
       if (topLevel) syncVisited.clear();
       return alloc->remote.ptr + offsetInBytes;
