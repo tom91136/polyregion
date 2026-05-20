@@ -217,9 +217,11 @@ execute_process(
         install-cmake-exports
         install-clang-cmake-exports
         install-lld-cmake-exports
+        install-mlir-cmake-exports
 
         install-llvm-headers
         install-clang-headers
+        install-mlir-headers
 
         ${MLIR_INSTALL_TARGETS}
         -- -k 0 # keep going even with error

@@ -102,7 +102,6 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: |
-            ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}-*
             ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
@@ -118,7 +117,6 @@ jobs:
         id: save-llvm
         with:
           path: |
-            ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}-*
             ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 

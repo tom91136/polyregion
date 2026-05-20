@@ -180,6 +180,26 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
         # Shared libraries (when dylib mode is on)
         ${LLVM_DISTRIBUTION_SHARED_LIBS}
 
+        # For ${PROJECT}Exports.cmake so find_package(...) works
+        llvm-libraries
+        clang-libraries
+        mlir-libraries
+        flang-libraries
+        lld-libraries
+
+        # Headers
+        llvm-headers
+        clang-headers
+        mlir-headers
+        flang-headers
+
+        # CMake configs (LLVMConfig.cmake + LLVMExports.cmake etc., per project)
+        cmake-exports
+        clang-cmake-exports
+        lld-cmake-exports
+        mlir-cmake-exports
+        flang-cmake-exports
+
         # Linker
         lld
 
