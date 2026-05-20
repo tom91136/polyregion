@@ -194,6 +194,7 @@ jobs:
         run: |
           DIST=$PWD/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
           TESTS=$PWD/polyregion-test-${{ inputs.build_type }}-${{ inputs.build_arch }}-dylib-dist
+          export PATH=$DIST/bin:$PATH
           export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
           export POLYREGION_BITCODE_DIR=$DIST/lib
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
