@@ -8,6 +8,7 @@ int main(int argc, const char **argv) {
                  DriverConfig{
                      .driverPath = ClangDriver,
                      .binaryDir = BinaryDir,
+                     .workDir = WorkDir,
                      .testFiles = TestFiles,
                      .profileDir = envOr("POLYTEST_PROFILE_DIR", POLYREGION_TEST_PROFILE_DIR),
                      .archVar = "polycpp_arch",

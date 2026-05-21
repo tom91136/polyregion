@@ -216,7 +216,7 @@ foreach (_test_file IN LISTS TEST_FILE_PATHS)
         endif ()
         polyregion_test_dist_record(NAME ${_name}
                 COMMAND :bin:polycpp-tests --${_mode}-only -c "${_test_short}"
-                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polycpp;POLYTEST_PROFILE_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/profiles;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
+                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polycpp;POLYTEST_PROFILE_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/profiles;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache;POLYTEST_WORK_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
                 LABELS "${_labels}")
     endforeach ()
 endforeach ()

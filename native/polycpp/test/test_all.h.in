@@ -28,6 +28,7 @@ inline std::vector<std::string> testFilesFromEnv(const char *dirEnv, std::vector
 } // namespace
 
 static const std::string BinaryDir = envOr("POLYTEST_BINARY_DIR", "@POLYCPP_TEST_BINARY_DIR@");
+static const std::string WorkDir = envOr("POLYTEST_WORK_DIR", "@POLYCPP_TEST_CACHE_DIR@");
 static const std::vector<std::string> TestFiles =
     testFilesFromEnv("POLYTEST_FILES_DIR", { @POLYCPP_TEST_INPUT_FILES@ });
 static const std::string ClangDriver = envOr("POLYTEST_CLANG_DRIVER", "@POLYCPP_CLANG_DRIVER@");

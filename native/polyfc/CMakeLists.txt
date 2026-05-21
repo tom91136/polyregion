@@ -197,7 +197,7 @@ foreach (_test_file IN LISTS TEST_FILE_PATHS)
         endif ()
         polyregion_test_dist_record(NAME ${_name}
                 COMMAND :bin:polyfc-tests --${_mode}-only -c "${_test_short}"
-                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polyfc;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
+                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polyfc;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache;POLYTEST_WORK_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
                 LABELS "${_labels}")
         # XXX LLD on Windows opens archives without FILE_SHARE_READ; serialise concurrent link
         # jobs against polydco-static.lib (~70 MB) to avoid LNK1104.

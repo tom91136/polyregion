@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <stdexcept>
@@ -38,6 +39,7 @@ using namespace aspartame;
 struct DriverConfig {
   std::string driverPath;
   std::string binaryDir;
+  std::string workDir;
   std::vector<std::string> testFiles;
   std::string profileDir;
   std::string archVar;
@@ -419,6 +421,17 @@ inline int fired_main( //
 }
 
 inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
+  if (const auto override = std::getenv("POLYTEST_WORK_DIR"); override && *override) {
+    std::error_code ec;
+    std::filesystem::create_directories(override, ec);
+    std::filesystem::current_path(override, ec);
+    if (ec) std::fprintf(stderr, "polytest: failed to chdir to POLYTEST_WORK_DIR='%s': %s\n", override, ec.message().c_str());
+  } else if (!cfg.workDir.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(cfg.workDir, ec);
+    std::filesystem::current_path(cfg.workDir, ec);
+    if (ec) std::fprintf(stderr, "polytest: failed to chdir to workDir='%s': %s\n", cfg.workDir.c_str(), ec.message().c_str());
+  }
   detail::firedCfg = &cfg;
   constexpr const char *descr = "polytest runner: parallel compile, serial run";
   PREPARE_FIRE_(argc, argv, false, fired_main, descr);
