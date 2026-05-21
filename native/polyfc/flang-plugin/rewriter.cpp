@@ -542,11 +542,21 @@ void doRewrite(ModuleOp op) {
       }
       if (!convertOp || !storeOp) return failure();
       auto inductionRef = storeOp.getMemref(); // this is the outer scope induction capture
-      for (auto &op : loopOp.getBody()->getOperations()) {
-        if (auto loadOp = llvm::dyn_cast<fir::LoadOp>(op); loadOp && loadOp.getMemref() == inductionRef) {
-          R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes());
+      // XXX walk the whole body (nested loops/regions too) and follow fir.declare wrappers.
+      // Inlined callees may load the iv-alloca via a chain of declares emitted by hlfir-lowering;
+      // a flat single-level check would leave those reads pointed at the stale alloca and the
+      // per-thread iv value would never reach the inlined body.
+      llvm::SmallVector<fir::LoadOp> loadsToReplace;
+      loopOp.walk([&](fir::LoadOp loadOp) {
+        mlir::Value mem = loadOp.getMemref();
+        while (mem != inductionRef) {
+          if (auto declareOp = mem.getDefiningOp<fir::DeclareOp>()) mem = declareOp.getMemref();
+          else if (auto convOp = mem.getDefiningOp<fir::ConvertOp>()) mem = convOp.getValue();
+          else return;
         }
-      }
+        loadsToReplace.push_back(loadOp);
+      });
+      for (auto loadOp : loadsToReplace) R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes());
 
       // XXX Stop at the innermost loop holding the inductionRef alloca; hoisting past it would
       // place the store outside the alloca's scope (LLVM Translation: "operand does not dominate").
@@ -578,6 +588,38 @@ void doRewrite(ModuleOp op) {
 } // namespace
 
 void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
+  // XXX inline single-block callees inside do_concurrent before the rewrite. Surviving fir.call
+  // becomes a no-op in the kernel since polypass can't lower function calls. MLIR's InlinerPass
+  // needs SCC + symbol visibility that aren't available in-plugin; splice manually. Multi-block
+  // callees fall through and stay un-inlined.
+  {
+    mlir::SymbolTableCollection symTabs;
+    llvm::SmallVector<std::pair<mlir::CallOpInterface, mlir::func::FuncOp>> work;
+    m.walk([&](fir::DoConcurrentOp doc) {
+      doc.walk([&](mlir::CallOpInterface call) {
+        auto callable = mlir::dyn_cast_or_null<mlir::func::FuncOp>(call.resolveCallableInTable(&symTabs));
+        if (callable && !callable.isExternal()) work.emplace_back(call, callable);
+      });
+    });
+    for (auto [call, callee] : work) {
+      auto &calleeBody = callee.getBody();
+      if (calleeBody.empty() || calleeBody.getBlocks().size() != 1) continue;
+      OpBuilder builder(call);
+      mlir::IRMapping mapping;
+      for (auto [arg, blockArg] : llvm::zip(call.getArgOperands(), calleeBody.front().getArguments())) {
+        mlir::Value v = arg;
+        if (v.getType() != blockArg.getType()) v = fir::ConvertOp::create(builder, call.getLoc(), blockArg.getType(), v).getResult();
+        mapping.map(blockArg, v);
+      }
+      auto &block = calleeBody.front();
+      for (auto &op : llvm::make_early_inc_range(block.without_terminator()))
+        builder.clone(op, mapping);
+      if (auto ret = llvm::dyn_cast<mlir::func::ReturnOp>(block.getTerminator()))
+        for (auto [r, v] : llvm::zip(call.getOperation()->getResults(), ret.getOperands()))
+          r.replaceAllUsesWith(mapping.lookupOrDefault(v));
+      call.erase();
+    }
+  }
   m.walk([&](fir::DoConcurrentOp doc) {
     auto &wrapperBlock = doc.getRegion().front();
     auto loopOp = mlir::cast<fir::DoConcurrentLoopOp>(wrapperBlock.getTerminator());

@@ -195,6 +195,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
              [&](mlir::Float16Type) -> Type::Any { return Type::Float16(); }, //
              [&](mlir::Float32Type) -> Type::Any { return Type::Float32(); }, //
              [&](mlir::Float64Type) -> Type::Any { return Type::Float64(); }, //
+             [&](fir::LogicalType) -> Type::Any { return Type::Bool1(); },    //
              [&](fir::ReferenceType t) -> Type::Any {
                // XXX special case for Seq and Box, both are flattened to just !box<T> and not !ref<box<T>> or !ref<ref<T>>
                if (const auto seqTy = llvm::dyn_cast<fir::SequenceType>(t.getEleTy())) return handleSeq(seqTy);
@@ -530,14 +531,19 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           case mlir::arith::CmpFPredicate::OLE: return intr2(x, Bind<Intr::LogicLte>());
           case mlir::arith::CmpFPredicate::ONE: return intr2(x, Bind<Intr::LogicNeq>());
 
-          case mlir::arith::CmpFPredicate::ORD: return poison(x.getResult(), "CmpF ORD Unimplemented");
-          case mlir::arith::CmpFPredicate::UEQ: return poison(x.getResult(), "CmpF UEQ Unimplemented");
-          case mlir::arith::CmpFPredicate::UGT: return poison(x.getResult(), "CmpF UGT Unimplemented");
-          case mlir::arith::CmpFPredicate::UGE: return poison(x.getResult(), "CmpF UGE Unimplemented");
-          case mlir::arith::CmpFPredicate::ULT: return poison(x.getResult(), "CmpF ULT Unimplemented");
-          case mlir::arith::CmpFPredicate::ULE: return poison(x.getResult(), "CmpF ULE Unimplemented");
-          case mlir::arith::CmpFPredicate::UNE: return poison(x.getResult(), "CmpF UNE Unimplemented");
-          case mlir::arith::CmpFPredicate::UNO: return poison(x.getResult(), "CmpF UNO Unimplemented");
+          // XXX no-NaN-handling: treat unordered predicates as their ordered counterparts. Fortran
+          // code typically doesn't carry NaNs through these comparisons; if it does, the result
+          // matches "any predicate is true if either operand is NaN" which polyast can't express.
+          case mlir::arith::CmpFPredicate::UEQ: return intr2(x, Bind<Intr::LogicEq>());
+          case mlir::arith::CmpFPredicate::UGT: return intr2(x, Bind<Intr::LogicGt>());
+          case mlir::arith::CmpFPredicate::UGE: return intr2(x, Bind<Intr::LogicGte>());
+          case mlir::arith::CmpFPredicate::ULT: return intr2(x, Bind<Intr::LogicLt>());
+          case mlir::arith::CmpFPredicate::ULE: return intr2(x, Bind<Intr::LogicLte>());
+          case mlir::arith::CmpFPredicate::UNE: return intr2(x, Bind<Intr::LogicNeq>());
+          case mlir::arith::CmpFPredicate::ORD:
+            return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
+          case mlir::arith::CmpFPredicate::UNO:
+            return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
         }
       }, //
 
@@ -565,6 +571,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](const mlir::arith::MaxSIOp x) { intr2r(x, Bind<Intr::Max>()); },    //
       [&](const mlir::arith::MaxUIOp x) { intr2r(x, Bind<Intr::Max>()); },    //
       [&](const mlir::arith::MaximumFOp x) { intr2r(x, Bind<Intr::Max>()); }, //
+
+      [&](const mlir::arith::AndIOp x) { intr2r(x, Bind<Intr::BAnd>()); }, //
+      [&](const mlir::arith::OrIOp x) { intr2r(x, Bind<Intr::BOr>()); },   //
+      [&](const mlir::arith::XOrIOp x) { intr2r(x, Bind<Intr::BXor>()); }, //
+      [&](mlir::arith::NegFOp x) {
+        auto v = newVar(handleValueAsScalar(x.getOperand()));
+        witness(x.getResult(), Expr::IntrOp(Intr::Neg(v.widen(), handleType(x.getType())).widen()));
+      },
+      [&](fir::NoReassocOp x) { witness(x.getResult(), handleValue(x.getVal())); },
 
       [&](const mlir::math::AbsFOp x) { math1(x, Bind<Math::Abs>()); },       //
       [&](const mlir::math::AbsIOp x) { math1(x, Bind<Math::Abs>()); },       //
@@ -659,10 +674,18 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         };
 
         // TODO  (!fir.ref<!fir.array<?x!fir.char<1>>>, index) -> !fir.ref<!fir.char<1>>
-        if (const auto ref = handleValue(c.getRef()) ^ narrow<Expr::Any, FBoxed>()) {
+        if (const auto ref = handleValue(c.getRef()) ^ narrow<Expr::Any, FBoxed, FVar, FArrayCoord>()) {
           // handle case: (!fir.heap<!fir.type<T{x:f64}>>, !fir.field) -> !fir.ref<f64>
-          *ref ^ foreach_total([&](const Expr::Any &e) { handleBoxed(e); }, [&](const FBoxed &e) { handleBoxed(e.addr()); });
-        } else poison0(fmt::format("CoordinateOf ref value not an Expr|FBoxed, was {}", show(c)));
+          *ref ^ foreach_total([&](const Expr::Any &e) { handleBoxed(e); },                 //
+                               [&](const FBoxed &e) { handleBoxed(e.addr()); },             //
+                               [&](const FVar &v) { handleBoxed(Expr::Alias(v.value)); },   //
+                               [&](const FArrayCoord &a) {
+                                 auto base = newVar(a.array);
+                                 auto off = newVar(a.offset);
+                                 auto elem = newVar(Expr::Index(base, off, a.comp).widen());
+                                 handleBoxed(Expr::Alias(elem));
+                               });
+        } else poison0(fmt::format("CoordinateOf ref value not an Expr|FBoxed|FVar|FArrayCoord, was {}", show(c)));
       },
       [&](fir::DeclareOp d) { witness(d.getResult(), handleValue(d.getMemref())); },
       [&](fir::ConvertOp c) {
@@ -679,8 +702,12 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                          witness(c.getResult(), Expr::Cast(e.value.widen(), as).widen());
                        },
                        [&](const FBoxed &e) {
-                         auto base = newVar(index0(e.addr()));
-                         witness(c.getResult(), Expr::Cast(base, as).widen());
+                         // XXX cast the box's base pointer, not the loaded element. `index0` here
+                         // would emit `*(box.addr+0)` and produce a scalar typed as the ref - which
+                         // then breaks any downstream store/index/array-coor through the cast result.
+                         const auto addr = e.addr();
+                         if (addr.tpe() == as) witness(c.getResult(), addr);
+                         else witness(c.getResult(), Expr::Cast(newVar(addr), as).widen());
                        },
                        [&](const FBoxedNone &e) {
                          poison(c.getResult(),
@@ -866,9 +893,17 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
 
       [&](fir::AllocaOp a) {
         static size_t id;
-        const Named named(fmt::format("alloca_{}", ++id), handleType(a.getInType()));
+        // XXX statically-shaped fir.array allocas need a real stack reservation, not just a pointer
+        // variable. The default `handleType` path collapses `!fir.array<NxT>` to `Ptr(T)` which
+        // leaves the local uninitialised; writes via array-coor then clobber whatever neighbours
+        // the slot. Emit `Type::Arr(T, N)` so the storage actually exists on stack.
+        Type::Any tpe = handleType(a.getInType());
+        if (auto seqTy = llvm::dyn_cast<fir::SequenceType>(a.getInType()); seqTy && !seqTy.hasDynamicExtents() && !seqTy.hasUnknownShape()) {
+          tpe = Type::Arr(handleType(seqTy.getEleTy()), static_cast<int32_t>(seqTy.getConstantArraySize()), TypeSpace::Global()).widen();
+        }
+        const Named named(fmt::format("alloca_{}", ++id), tpe);
         push(Stmt::Var(named, std::optional<Expr::Any>{}, /*isMutable*/ true).widen());
-        if (named.tpe.is<Type::Ptr>()) {
+        if (named.tpe.is<Type::Ptr>() || named.tpe.is<Type::Arr>()) {
           witness(a.getResult(), Expr::Alias(Term::Select(named, {}, named.tpe)));
         } else {
           witness(a.getResult(), FVar{Term::Select(named, {}, named.tpe)});
@@ -898,6 +933,81 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                                }, //
                                [&](const FBoxed &e) { push(update0(e.addr(), newVar(rhs))); });
         } else poison0(fmt::format("StoreOp LHS value not an Expr|FBoxed|FArrayCoord, was {}", show(s.getValue())));
+      },
+      [&](fir::IfOp x) {
+        const auto condE = handleValueAsScalar(x.getCondition());
+        std::vector<Term::Select> resSels;
+        for (auto result : x.getResults()) {
+          const auto resTy = handleType(result.getType());
+          const Named resName(fmt::format("v{}_if{}", reinterpret_cast<uintptr_t>(x.getOperation()), resSels.size()), resTy);
+          push(Stmt::Var(resName, std::optional<Expr::Any>{}, /*isMutable*/ true).widen());
+          const auto sel = Term::Select(resName, {}, resTy);
+          resSels.push_back(sel);
+          witness(result, Expr::Any(Expr::Alias(sel)));
+        }
+        const auto lowerBranch = [&](mlir::Region &region) -> std::vector<Stmt::Any> {
+          if (region.empty()) return {};
+          auto savedStmts = std::move(stmts);
+          stmts.clear();
+          for (auto &innerOp : region.front().without_terminator()) handleOp(&innerOp);
+          if (auto resOp = llvm::dyn_cast<fir::ResultOp>(region.front().getTerminator())) {
+            for (size_t i = 0; i < resSels.size() && i < resOp.getOperands().size(); ++i)
+              push(Stmt::Mut(resSels[i], handleValueAsScalar(resOp.getOperands()[i])).widen());
+          }
+          auto branchStmts = std::move(stmts);
+          stmts = std::move(savedStmts);
+          return branchStmts;
+        };
+        auto thenStmts = lowerBranch(x.getThenRegion());
+        auto elseStmts = lowerBranch(x.getElseRegion());
+        const auto condV = newVar(condE);
+        Term::Any oneT = dsl::integral(condV.tpe, 1);
+        auto eqT = newVar(Expr::IntrOp(Intr::LogicEq(condV.widen(), oneT).widen()).widen());
+        push(Stmt::Cond(eqT, thenStmts, elseStmts).widen());
+      },
+      [&](fir::DummyScopeOp) {
+        // XXX no-op witness: the !fir.dscope token is consumed by fir.declare which ignores it.
+      },
+      [&](fir::ReboxOp x) { witness(x.getResult(), handleValue(x.getBox())); },
+      [&](fir::DoLoopOp x) {
+        const auto ivTy = handleType(x.getInductionVar().getType());
+        const auto lbT = newVar(handleValueAsScalar(x.getLowerBound()));
+        const auto ubT = newVar(handleValueAsScalar(x.getUpperBound()));
+        const auto stepT = newVar(handleValueAsScalar(x.getStep()));
+        // XXX fir.do_loop bounds are inclusive; ForRange's are half-open. Lift via ub + step.
+        const auto ubExclT = newVar(Expr::IntrOp(Intr::Add(ubT.widen(), stepT.widen(), ivTy).widen()).widen());
+
+        const Named ivName(fmt::format("v{}_iv", reinterpret_cast<uintptr_t>(x.getOperation())), ivTy);
+        const auto ivSel = Term::Select(ivName, {}, ivTy);
+        valuesLUT.insert({x.getInductionVar(), Expr::Any(Expr::Alias(ivSel))});
+
+        std::vector<Term::Select> accSels;
+        auto bodyArgs = x.getRegionIterArgs();
+        auto initArgs = x.getInitArgs();
+        for (size_t i = 0; i < bodyArgs.size(); ++i) {
+          const auto accTy = handleType(bodyArgs[i].getType());
+          const auto initE = handleValueAsScalar(initArgs[i]);
+          const Named accName(fmt::format("v{}_acc{}", reinterpret_cast<uintptr_t>(x.getOperation()), i), accTy);
+          push(Stmt::Var(accName, initE, /*isMutable*/ true).widen());
+          const auto accSel = Term::Select(accName, {}, accTy);
+          accSels.push_back(accSel);
+          valuesLUT.insert({bodyArgs[i], Expr::Any(Expr::Alias(accSel))});
+        }
+
+        auto savedStmts = std::move(stmts);
+        stmts.clear();
+        for (auto &innerOp : x.getBody()->without_terminator()) handleOp(&innerOp);
+        if (auto resOp = llvm::dyn_cast<fir::ResultOp>(x.getBody()->getTerminator())) {
+          for (size_t i = 0; i < accSels.size() && i < resOp.getOperands().size(); ++i)
+            push(Stmt::Mut(accSels[i], handleValueAsScalar(resOp.getOperands()[i])).widen());
+        }
+        auto bodyStmts = std::move(stmts);
+        stmts = std::move(savedStmts);
+
+        push(Stmt::ForRange(ivName, lbT.widen(), ubExclT.widen(), stepT.widen(), bodyStmts).widen());
+
+        for (size_t i = 0; i < x.getResults().size() && i < accSels.size(); ++i)
+          witness(x.getResults()[i], Expr::Any(Expr::Alias(accSels[i])));
       },
       [&](const fir::ResultOp r) {
         // (no-op result, formerly emitted Stmt::Comment)
