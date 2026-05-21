@@ -12,6 +12,7 @@
 #include "polyrt/rt.h"
 
 #include "ftypes.h"
+#include "reflect-rt/rt_reflect.hpp"
 
 // XXX Intentionally leaked: the SMA destructor below runs free callbacks at shutdown that
 // route through these maps; file-scope statics would already be gone by then.
@@ -25,6 +26,11 @@ static polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto it = ptrRecords.find(reinterpret_cast<uintptr_t>(ptr)); it != ptrRecords.end()) {
         return polyrt::PtrQuery{.sizeInBytes = it->second, .offsetInBytes = 0};
+      }
+      // XXX fall through to polyreflect-rt for captures we didn't record locally (libc calloc paths).
+      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+        return polyrt::PtrQuery{
+            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
       }
       log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
       return polyrt::PtrQuery{0, 0};
@@ -244,7 +250,6 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   // XXX See polydco_release: keep SVM, drop only host tracking.
   allocations.disassociate(captures, /*releaseRemote*/ false);
-  polyrt::currentQueue->enqueueWaitBlocking();
 
   mpr.releaseAndReduce();
 
@@ -325,7 +330,8 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
                                                                     char *captures) {
   polyrt::initialise();
 
-  log(DebugLevel::Debug, "<%s> Dispatch (%" PRId64 " to %" PRId64 " by %" PRId64 ")", __func__, lowerBoundInclusive, upperBoundInclusive, step);
+  log(DebugLevel::Debug, "<%s> Dispatch (%" PRId64 " to %" PRId64 " by %" PRId64 ")", __func__, lowerBoundInclusive, upperBoundInclusive,
+      step);
 
   if (!bundle || !captures) {
     log(DebugLevel::Debug, "bundle=%p captures=%p, not dispatching", static_cast<const void *>(bundle), static_cast<void *>(captures));

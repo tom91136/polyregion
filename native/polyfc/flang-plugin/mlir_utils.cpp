@@ -48,6 +48,7 @@ mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::s
 mlir::LLVM::LLVMFuncOp polyregion::polyfc::defineFunc(ModuleOp &m, const std::string &name, const Type rtnTy,
                                                       const std::vector<Type> &argTys, LLVM::Linkage linkage,
                                                       const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f) {
+  if (auto existing = m.lookupSymbol<LLVM::LLVMFuncOp>(name)) return existing;
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
   auto func = LLVM::LLVMFuncOp::create(B, uLoc(B), name, LLVM::LLVMFunctionType::get(rtnTy, argTys), linkage);

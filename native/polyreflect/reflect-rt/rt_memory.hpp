@@ -6,8 +6,17 @@
 #include "rt_protected.hpp"
 #include "rt_reflect.hpp"
 
-#define __ALLOC __RT_ODR __RT_ANNOTATE("polyreflect-rt-alloc") __RT_NOINLINE
-#define __FREE __RT_ODR __RT_ANNOTATE("polyreflect-rt-free")
+// XXX default visibility so the wrappers actually export from libpolystl/libpolydco shared libs;
+// otherwise -fvisibility=hidden (set at native/CMakeLists.txt level) makes them DSO-local and
+// callers in the main exe can't see them, falling through to libc and bypassing tracking.
+#if defined(__GNUC__) || defined(__clang__)
+  #define __EXPORT_DEFAULT __attribute__((visibility("default")))
+#else
+  #define __EXPORT_DEFAULT
+#endif
+
+#define __ALLOC __RT_ODR __RT_ANNOTATE("polyreflect-rt-alloc") __RT_NOINLINE __EXPORT_DEFAULT
+#define __FREE __RT_ODR __RT_ANNOTATE("polyreflect-rt-free") __EXPORT_DEFAULT
 
 #if __cpp_exceptions == 199711
   #define __THROW_OF_ABORT(e) throw e

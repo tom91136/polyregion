@@ -18,7 +18,7 @@ foreach (TARGET polydco polydco-static)
             polydco.h
     )
 
-    target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polycommon)
+    target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polycommon polyreflect-rt)
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
     if (APPLE)
