@@ -215,6 +215,10 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Dynamic: {
                        append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polystl"));
+#if defined(__APPLE__)
+                       // XXX clang stamps @rpath/libc++.1.dylib on macOS; bundle's libc++ sits in the dist's main lib/.
+                       append({fmt::format("-Wl,-rpath,{}", joinPath(execParentPath, "..", "lib"))});
+#endif
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(

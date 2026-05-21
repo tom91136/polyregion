@@ -154,6 +154,11 @@ int main(int argc, const char *argv[]) {
                        // libhsa-runtime64 segfaults inside std::codecvt during dispatch.
                        auto flags = Driver::dynamicOriginLinkFlags(polyfcLibPath, "polydco");
                        remaining.insert(remaining.begin() + 1, flags.begin(), flags.end());
+#if defined(__APPLE__)
+                       // XXX clang aliases -lstdc++ to libc++ on macOS and stamps @rpath/libc++.1.dylib;
+                       // bundle's libc++ sits in the dist's main lib/, not under polyfc/lib/.
+                       append({fmt::format("-Wl,-rpath,{}", joinPath(execParentPath, "..", "lib"))});
+#endif
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(
