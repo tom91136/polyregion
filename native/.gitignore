@@ -257,6 +257,7 @@ $RECYCLE.BIN/
 !/llvm-patches/
 !/llvm-patches-*/
 /polyregion-*
+/thirdparty/device_libs/
 /debian-sysroot-image-creator
 
 venv

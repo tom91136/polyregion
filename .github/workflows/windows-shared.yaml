@@ -103,6 +103,29 @@ jobs:
             ./native/polyregion-${{ inputs.build_type }}-${{ inputs.build_arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
+      - name: Restore device libs cache
+        if: ${{ !env.ACT }}
+        id: restore-device-libs
+        uses: actions/cache/restore@v5
+        with:
+          path: ./native/thirdparty/device_libs
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+      - name: Build device libs
+        id: build-device-libs
+        if: steps.restore-device-libs.outputs.cache-hit != 'true'
+        working-directory: ./native
+        run: |
+          call setup_msvc_env.bat ${{ inputs.build_arch }}
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=DEVICE_LIBS -P build.cmake
+
+      - name: Save device libs cache
+        if: steps.build-device-libs.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: ./native/thirdparty/device_libs
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
       - name: Configure release build
         working-directory: ./native
         run: |

@@ -197,6 +197,44 @@ if (ACTION STREQUAL "LLVM")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "LLVM build")
+elseif (ACTION STREQUAL "DEVICE_LIBS")
+    include(ProjectConfig.cmake)
+    set(DEVICE_LIBS_MARKER "${POLYREGION_DEVICE_LIBS_DIR}/.staged")
+    set(DEVICE_LIBS_TAG "cuda=${POLYREGION_CUDA_LIBDEVICE_VERSIONS};rocm=${POLYREGION_ROCM_TAG}")
+    set(_existing_tag "")
+    if (EXISTS "${DEVICE_LIBS_MARKER}")
+        file(READ "${DEVICE_LIBS_MARKER}" _existing_tag)
+    endif ()
+    if (_existing_tag STREQUAL "${DEVICE_LIBS_TAG}")
+        message(STATUS "Device libs up to date at ${POLYREGION_DEVICE_LIBS_DIR}")
+    else ()
+        if (EXISTS "${POLYREGION_DEVICE_LIBS_DIR}")
+            file(REMOVE_RECURSE "${POLYREGION_DEVICE_LIBS_DIR}")
+        endif ()
+        file(MAKE_DIRECTORY "${POLYREGION_DEVICE_LIBS_DIR}")
+        message(STATUS "Staging device libs into ${POLYREGION_DEVICE_LIBS_DIR}")
+        foreach (_ver IN LISTS POLYREGION_CUDA_LIBDEVICE_VERSIONS)
+            execute_process(
+                    COMMAND ${CMAKE_COMMAND}
+                    -DOUT_DIR=${POLYREGION_DEVICE_LIBS_DIR}
+                    -DCUDA_VERSION=${_ver}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/prepare_cuda_dist.cmake
+                    COMMAND_ECHO STDERR
+                    RESULT_VARIABLE SUCCESS)
+            check_process_return(${SUCCESS} "libdevice prep for CUDA ${_ver}")
+        endforeach ()
+        execute_process(
+                COMMAND ${CMAKE_COMMAND}
+                -DOUT_DIR=${POLYREGION_DEVICE_LIBS_DIR}
+                -DROCM_TAG=${POLYREGION_ROCM_TAG}
+                -DPOLYREGION_LLVM_BIN_HINT=${LLVM_DIST_DIR}/bin
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/prepare_amdgpu_dist.cmake
+                COMMAND_ECHO STDERR
+                RESULT_VARIABLE SUCCESS)
+        check_process_return(${SUCCESS} "AMDGPU device-libs prep")
+        file(WRITE "${DEVICE_LIBS_MARKER}" "${DEVICE_LIBS_TAG}")
+        message(STATUS "Device libs staged at ${POLYREGION_DEVICE_LIBS_DIR}")
+    endif ()
 elseif (ACTION STREQUAL "CONFIGURE")
     setup_vcpkg()
     if (APPLE)

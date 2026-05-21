@@ -132,48 +132,16 @@ set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
 # without an install step; dist install ships it under lib/ next to the binaries.
 target_compile_definitions(polyc PRIVATE POLYPASS_JS_DEV_PATH="${CMAKE_CURRENT_SOURCE_DIR}/polypass.js")
 
-set(POLYREGION_CUDA_LIBDEVICE_VERSIONS "11.8.0;12.9.2;13.2.0" CACHE STRING
-    "CUDA versions to stage libdevice.10.cuda<M>-<m>.bc from. polyc picks the newest applicable to the target sm_*.")
-set(POLYREGION_CUDA_LIBDEVICE_MIN_ARCH  "35;50;75" CACHE STRING
-    "sm_NN floor per libdevice version (parallel to POLYREGION_CUDA_LIBDEVICE_VERSIONS). NVIDIA's drop schedule is irregular so this stays an explicit policy list.")
-set(POLYREGION_ROCM_TAG     "rocm-7.2.3" CACHE STRING "ROCm/llvm-project tag for device-libs prep")
-set(POLYREGION_BITCODE_DIR  "${CMAKE_CURRENT_BINARY_DIR}/vendor-bitcode")
-option(POLYREGION_PREPARE_VENDOR_BITCODE "Run vendor bitcode prep at configure time" ON)
-
-if(POLYREGION_PREPARE_VENDOR_BITCODE)
-  foreach(_ver IN LISTS POLYREGION_CUDA_LIBDEVICE_VERSIONS)
-    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _ "${_ver}")
-    set(_marker "${POLYREGION_BITCODE_DIR}/libdevice.10.cuda${CMAKE_MATCH_1}-${CMAKE_MATCH_2}.bc")
-    if(NOT EXISTS "${_marker}")
-      execute_process(
-        COMMAND "${CMAKE_COMMAND}"
-          "-DOUT_DIR=${POLYREGION_BITCODE_DIR}"
-          "-DCUDA_VERSION=${_ver}"
-          -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/prepare_cuda_dist.cmake"
-        RESULT_VARIABLE _rc)
-      if(NOT _rc EQUAL 0)
-        message(FATAL_ERROR "libdevice prep for CUDA ${_ver} failed (${_rc})")
-      endif()
-    endif()
-  endforeach()
-  if(NOT EXISTS "${POLYREGION_BITCODE_DIR}/ocml.bc" OR NOT EXISTS "${POLYREGION_BITCODE_DIR}/oclc_abi_version_500.bc")
-    execute_process(
-      COMMAND "${CMAKE_COMMAND}"
-        "-DOUT_DIR=${POLYREGION_BITCODE_DIR}"
-        "-DROCM_TAG=${POLYREGION_ROCM_TAG}"
-        "-DPOLYREGION_LLVM_BIN_HINT=${LLVM_DIST_DIR}/bin"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/prepare_amdgpu_dist.cmake"
-      RESULT_VARIABLE _rc)
-    if(NOT _rc EQUAL 0)
-      message(FATAL_ERROR "device-libs prep failed (${_rc})")
-    endif()
-  endif()
-endif()
+if (NOT EXISTS "${POLYREGION_DEVICE_LIBS_DIR}/.staged")
+  message(FATAL_ERROR
+          "Device libs are not staged at ${POLYREGION_DEVICE_LIBS_DIR}.\n"
+          "Run: cmake -DACTION=DEVICE_LIBS -P build.cmake")
+endif ()
 
 target_compile_definitions(polyc PRIVATE
-  POLYREGION_BITCODE_DEV_DIR="${POLYREGION_BITCODE_DIR}")
+  POLYREGION_BITCODE_DEV_DIR="${POLYREGION_DEVICE_LIBS_DIR}")
 target_compile_definitions(polyc-tests PRIVATE
-  POLYREGION_BITCODE_DEV_DIR="${POLYREGION_BITCODE_DIR}")
+  POLYREGION_BITCODE_DEV_DIR="${POLYREGION_DEVICE_LIBS_DIR}")
 
 list(LENGTH POLYREGION_CUDA_LIBDEVICE_VERSIONS _n_libdev)
 list(LENGTH POLYREGION_CUDA_LIBDEVICE_MIN_ARCH _n_min_arch)
@@ -197,5 +165,5 @@ target_include_directories(polyc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
 
 install(TARGETS polyc-bin RUNTIME DESTINATION bin)
 install(FILES polypass.js DESTINATION lib OPTIONAL)
-install(DIRECTORY "${POLYREGION_BITCODE_DIR}/" DESTINATION lib
+install(DIRECTORY "${POLYREGION_DEVICE_LIBS_DIR}/" DESTINATION lib
         FILES_MATCHING PATTERN "*.bc" PATTERN "*.LICENSE")
