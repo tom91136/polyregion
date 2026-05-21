@@ -1,7 +1,6 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Path.h"
@@ -22,34 +21,6 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 using namespace aspartame;
 using namespace polyregion::polyfront;
 
-[[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */ }
-
-static std::string joinPath(llvm::StringRef a, llvm::StringRef b, llvm::StringRef c = {}, llvm::StringRef d = {}) {
-  llvm::SmallString<256> p(a);
-  // Skip empty components: llvm::sys::path::append unconditionally inserts a separator before
-  // each non-null Twine, which would yield a trailing `/` for unused trailing args.
-  if (!b.empty()) llvm::sys::path::append(p, b);
-  if (!c.empty()) llvm::sys::path::append(p, c);
-  if (!d.empty()) llvm::sys::path::append(p, d);
-  return p.str().str();
-}
-
-static std::string executableName(llvm::StringRef name) {
-#if defined(_WIN32)
-  return name.str() + ".exe";
-#else
-  return name.str();
-#endif
-}
-
-static std::string staticLibraryName(llvm::StringRef name) {
-#if defined(_WIN32)
-  return name.str() + ".lib";
-#else
-  return "lib" + name.str() + ".a";
-#endif
-}
-
 int main(int argc, const char *argv[]) {
 #ifdef POLYREGION_FUSED_DRIVER
   // XXX clang_main requires InitLLVM for target/PassBuilder registration; use throwaway argv
@@ -63,7 +34,7 @@ int main(int argc, const char *argv[]) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-  std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
+  std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrAnchor);
   std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
   std::string clangPath;
@@ -72,12 +43,8 @@ int main(int argc, const char *argv[]) {
   // XXX fused build has no external driver; --driver/POLYCPP_DRIVER are accepted but ignored.
   (void)args.popValue("--driver");
 #else
-  if (auto driverArg = args.popValue("--driver")) clangPath = *driverArg;         // Explicit driver takes precedence
-  else if (auto driverEnv = std::getenv("POLYCPP_DRIVER")) clangPath = driverEnv; // Then try environment vars
-  else if (auto clangBin = joinPath(execParentPath, executableName("clang++"));
-           llvm::sys::fs::exists(clangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
-    clangPath = clangBin;
-  } else {
+  clangPath = resolveExternalDriver(args, "POLYCPP_DRIVER", "clang++", execParentPath);
+  if (clangPath.empty()) {
     std::cerr << fmt::format(
                      "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`",
                      execPath)
@@ -101,8 +68,7 @@ int main(int argc, const char *argv[]) {
                  remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator));
                  remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_LIB", {}, llvm::sys::EnvPathSeparator));
 
-                 std::string polycppResourcePath = joinPath(execParentPath, "lib", "polycpp");
-                 if (!llvm::sys::fs::exists(polycppResourcePath)) polycppResourcePath = joinPath(execParentPath, "..", "lib", "polycpp");
+                 const auto polycppResourcePath = resolveResourcePath(execParentPath, "polycpp");
                  const auto polycppIncludePath = joinPath(polycppResourcePath, "include");
                  const auto polycppLibPath = joinPath(polycppResourcePath, "lib");
                  const auto polyreflectPlugin = joinPath(polycppLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
@@ -215,10 +181,7 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Dynamic: {
                        append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polystl"));
-#if defined(__APPLE__)
-                       // XXX clang stamps @rpath/libc++.1.dylib on macOS; bundle's libc++ sits in the dist's main lib/.
-                       append({fmt::format("-Wl,-rpath,{}", joinPath(execParentPath, "..", "lib"))});
-#endif
+                       append(appleDistLibcxxRpath(execParentPath));
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(

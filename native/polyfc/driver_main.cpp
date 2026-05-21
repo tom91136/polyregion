@@ -1,7 +1,6 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
@@ -21,39 +20,13 @@ int flang_main(int argc, const char **argv);
 using namespace aspartame;
 using namespace polyregion::polyfront;
 
-[[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */ }
-
-static std::string joinPath(llvm::StringRef a, llvm::StringRef b, llvm::StringRef c = {}, llvm::StringRef d = {}) {
-  llvm::SmallString<256> p(a);
-  if (!b.empty()) llvm::sys::path::append(p, b);
-  if (!c.empty()) llvm::sys::path::append(p, c);
-  if (!d.empty()) llvm::sys::path::append(p, d);
-  return p.str().str();
-}
-
-static std::string executableName(llvm::StringRef name) {
-#if defined(_WIN32)
-  return name.str() + ".exe";
-#else
-  return name.str();
-#endif
-}
-
-static std::string staticLibraryName(llvm::StringRef name) {
-#if defined(_WIN32)
-  return name.str() + ".lib";
-#else
-  return "lib" + name.str() + ".a";
-#endif
-}
-
 int main(int argc, const char *argv[]) {
   CliArgs args(std::vector(argv, argv + argc));
   if (args.has("--polyc", 1)) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-  const std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
+  const std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrAnchor);
   const std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
 
   std::string flangPath;
@@ -61,13 +34,10 @@ int main(int argc, const char *argv[]) {
   // XXX fused build has no external driver; --driver/POLYFC_DRIVER are accepted but ignored.
   (void)args.popValue("--driver");
 #else
-  if (const auto driverArg = args.popValue("--driver")) flangPath = *driverArg;
-  else if (const auto driverEnv = std::getenv("POLYFC_DRIVER")) flangPath = driverEnv;
-  else if (auto flangBin = joinPath(execParentPath, executableName("flang-new")); llvm::sys::fs::exists(flangBin)) {
-    flangPath = flangBin;
-  } else {
+  flangPath = resolveExternalDriver(args, "POLYFC_DRIVER", "flang-new", execParentPath);
+  if (flangPath.empty()) {
     std::cerr << fmt::format(
-                     "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`",
+                     "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_flang-new>`",
                      execPath)
               << std::endl;
     return EXIT_FAILURE;
@@ -93,9 +63,7 @@ int main(int argc, const char *argv[]) {
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
-                 std::string polyfcResourcePath = joinPath(execParentPath, "lib", "polyfc");
-                 if (!llvm::sys::fs::exists(polyfcResourcePath)) polyfcResourcePath = joinPath(execParentPath, "..", "lib", "polyfc");
-                 const auto polyfcLibPath = joinPath(polyfcResourcePath, "lib");
+                 const auto polyfcLibPath = joinPath(resolveResourcePath(execParentPath, "polyfc"), "lib");
                  const auto polyreflectPlugin = joinPath(polyfcLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
                  const auto polyfcFlangPlugin = joinPath(polyfcLibPath, fmt::format("polyfc-flang-plugin.{}", dynamicLibSuffix()));
 
@@ -154,11 +122,7 @@ int main(int argc, const char *argv[]) {
                        // libhsa-runtime64 segfaults inside std::codecvt during dispatch.
                        auto flags = Driver::dynamicOriginLinkFlags(polyfcLibPath, "polydco");
                        remaining.insert(remaining.begin() + 1, flags.begin(), flags.end());
-#if defined(__APPLE__)
-                       // XXX clang aliases -lstdc++ to libc++ on macOS and stamps @rpath/libc++.1.dylib;
-                       // bundle's libc++ sits in the dist's main lib/, not under polyfc/lib/.
-                       append({fmt::format("-Wl,-rpath,{}", joinPath(execParentPath, "..", "lib"))});
-#endif
+                       append(appleDistLibcxxRpath(execParentPath));
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(

@@ -4,6 +4,11 @@
 #include <optional>
 #include <vector>
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+
 #include "aspartame/all.hpp"
 
 #include "options.hpp"
@@ -11,6 +16,52 @@
 namespace polyregion::polyfront {
 
 using namespace aspartame;
+
+template <typename... S> inline std::string joinPath(llvm::StringRef x, const S &...xs) {
+  llvm::SmallString<256> p(x);
+  auto appendOne = [&](llvm::StringRef s) {
+    // XXX skip empties: llvm::sys::path::append unconditionally inserts a separator before each non-null Twine.
+    if (!s.empty()) llvm::sys::path::append(p, s);
+  };
+  (appendOne(xs), ...);
+  return p.str().str();
+}
+
+inline std::string executableName(llvm::StringRef name) {
+#if defined(_WIN32)
+  return name.str() + ".exe";
+#else
+  return name.str();
+#endif
+}
+
+inline std::string staticLibraryName(llvm::StringRef name) {
+#if defined(_WIN32)
+  return name.str() + ".lib";
+#else
+  return "lib" + name.str() + ".a";
+#endif
+}
+
+[[maybe_unused]] inline void addrAnchor() { /* anchor for llvm::sys::fs::getMainExecutable */ }
+
+// Resolves ${execParent}/lib/<name>, falling back to ${execParent}/../lib/<name>.
+inline std::string resolveResourcePath(const std::string &execParentPath, const std::string &resourceName) {
+  auto p = joinPath(execParentPath, "lib", resourceName);
+  if (!llvm::sys::fs::exists(p)) p = joinPath(execParentPath, "..", "lib", resourceName);
+  return p;
+}
+
+// XXX clang aliases -lstdc++ to libc++ on macOS and stamps @rpath/libc++.1.dylib; the
+// bundled libc++ sits in the dist's main lib/, not under polyfc/lib or polycpp/lib.
+inline std::vector<std::string> appleDistLibcxxRpath(const std::string &execParentPath) {
+#if defined(__APPLE__)
+  return {fmt::format("-Wl,-rpath,{}", joinPath(execParentPath, "..", "lib"))};
+#else
+  (void)execParentPath;
+  return {};
+#endif
+}
 
 struct CliArgs {
 
@@ -70,6 +121,16 @@ struct CliArgs {
     return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() | to_vector();
   }
 };
+
+// Locates the external driver in priority order: `--driver <path>`, ${envVar},
+// then ${execParent}/<coLocatedName>(.exe). Returns "" if none found.
+inline std::string resolveExternalDriver(CliArgs &args, const char *envVar, const std::string &coLocatedName,
+                                         const std::string &execParentPath) {
+  if (auto driverArg = args.popValue("--driver")) return *driverArg;
+  if (auto driverEnv = std::getenv(envVar)) return driverEnv;
+  if (auto coLocated = joinPath(execParentPath, executableName(coLocatedName)); llvm::sys::fs::exists(coLocated)) return coLocated;
+  return {};
+}
 
 struct Driver {
 
