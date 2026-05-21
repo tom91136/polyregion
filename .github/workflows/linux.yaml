@@ -17,7 +17,7 @@ jobs:
       build_runs_on: ubuntu-24.04
       check_runs_on: ubuntu-24.04
       llvm_parallel_compile_jobs: "4"
-      llvm_parallel_link_jobs: "1"
+      llvm_parallel_link_jobs: "2"
       flang_parallel_compile_jobs: "3"
   aarch64-release:
     uses: ./.github/workflows/linux-shared.yaml
