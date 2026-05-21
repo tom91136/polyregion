@@ -310,9 +310,11 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
 
   const auto bindCpuArch = [&](const Triple::ArchType &archTpe) {
     const Triple defaultTriple = llvmc::defaultHostTriple();
-    if (arch.empty() && defaultTriple.getArch() != archTpe) // when detecting host arch, the host triple's arch must match
-      throw BackendException("Requested arch detection with " + Triple::getArchTypeName(archTpe).str() +
-                             " but the host arch is different (" + Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
+    const bool wantHost = arch.empty() || arch == "native";
+    if (wantHost && defaultTriple.getArch() != archTpe)
+      throw BackendException("Requested host CPU detection (`" + (arch.empty() ? std::string{"<empty>"} : arch) + "`) with " +
+                             Triple::getArchTypeName(archTpe).str() + " but the host arch is different (" +
+                             Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
 
     Triple triple = defaultTriple;
     triple.setArch(archTpe);
@@ -320,7 +322,7 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
         .triple = triple,
         .layout = {},
         .target = llvmc::targetFromTriple(triple),
-        .cpu = arch.empty() || arch == "native" ? llvmc::hostCpuInfo() : llvmc::CpuInfo{.uArch = arch, .features = {}},
+        .cpu = wantHost ? llvmc::hostCpuInfo() : llvmc::CpuInfo{.uArch = arch, .features = {}},
     };
   };
 

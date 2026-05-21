@@ -112,7 +112,7 @@ Expr::Any generateConstValue(const Tpe::Any &t) {
 
 template <typename P> static void assertCompile(const P &p) {
   CAPTURE(repr(p));
-  auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_x86_64, "native"}, OptLevel::O3);
+  auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
   CAPTURE(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
@@ -983,7 +983,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
   const auto tpe = GENERATE(values<Type::Any>({Float, Double}));
   auto p = program({}, {mkMathKernel(tpe)});
   DYNAMIC_SECTION(tpe) {
-    SECTION("CPU x86_64") { assertCompileTarget(p, {Target::Object_LLVM_x86_64, "native"}); }
+    SECTION("CPU x86_64") { assertCompileTarget(p, {Target::Object_LLVM_x86_64, "skylake"}); }
     SECTION("NVPTX64") {
       const auto cpu = GENERATE(
           values<std::string>({"sm_35", "sm_50", "sm_60", "sm_70", "sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120"}));
