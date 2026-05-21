@@ -98,11 +98,12 @@ struct Driver {
   }
 
   static std::vector<std::string> lldPassPluginFlags(const std::string &pluginPath, const std::vector<std::string> &args = {}) {
+    // XXX ld64.lld accepts -mllvm only as Separate; comma form works on both ELF and MachO.
     return std::vector{
-               fmt::format("-Wl,--load-pass-plugin={}", pluginPath),
-               fmt::format("-Wl,-mllvm=-load={}", pluginPath),
+               fmt::format("-Wl,--load-pass-plugin,{}", pluginPath),
+               fmt::format("-Wl,-mllvm,-load={}", pluginPath),
            } //
-           ^ concat(args ^ map([](auto &arg) { return fmt::format("-Wl,-mllvm={}", arg); }));
+           ^ concat(args ^ map([](auto &arg) { return fmt::format("-Wl,-mllvm,{}", arg); }));
   }
 };
 

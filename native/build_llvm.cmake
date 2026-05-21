@@ -204,6 +204,22 @@ if (POLYREGION_CROSS_FLANG_NEW)
     endif ()
 endif ()
 
+# XXX install-flang-headers has no build deps; pre-build distribution so tablegen .inc files exist before install
+execute_process(
+        COMMAND
+        ${CMAKE_COMMAND} -E env ASAN_OPTIONS=detect_leaks=0 --
+        ${CMAKE_COMMAND}
+        --build ${LLVM_BUILD_DIR}
+        --target
+        distribution
+        module_files
+        -- -k 0
+        WORKING_DIRECTORY ${LLVM_BUILD_DIR}
+        RESULT_VARIABLE SUCCESS)
+if (NOT SUCCESS EQUAL "0")
+    message(FATAL_ERROR "LLVM distribution build did not succeed")
+endif ()
+
 execute_process(
         COMMAND
         ${CMAKE_COMMAND} -E env ASAN_OPTIONS=detect_leaks=0 --
@@ -229,9 +245,12 @@ execute_process(
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)
 if (NOT SUCCESS EQUAL "0")
-    message(FATAL_ERROR "LLVM build did not succeed")
-else ()
-    message(STATUS "LLVM build complete!")
+    message(FATAL_ERROR "LLVM install did not succeed")
 endif ()
 
+# XXX flang-headers install matches only *.inc from the build tree; copy the generated config.h ourselves.
+file(COPY "${LLVM_BUILD_DIR}/tools/flang/include/flang/Config/config.h"
+        DESTINATION "${LLVM_DIST_DIR}/include/flang/Config")
+
+message(STATUS "LLVM build complete!")
 
