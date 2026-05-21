@@ -60,9 +60,18 @@ endif ()
 
 
 if (POLYREGION_FUSED_DRIVER)
-    set(POLYCPP_CLANG_DRIVER_DIR "${POLYREGION_LLVM_SRC_DIR}/clang/tools/driver")
-    if (NOT EXISTS "${POLYCPP_CLANG_DRIVER_DIR}/driver.cpp")
-        message(FATAL_ERROR "clang driver sources not found at ${POLYCPP_CLANG_DRIVER_DIR}; LLVM source tree required for POLYREGION_FUSED_DRIVER builds")
+    # Prefer the unpacked LLVM tree; fall back to the dist's staged copy (cache-hit CI builds
+    # restore only the dist, the source tree is gone). build_llvm.cmake mirrors the files.
+    set(POLYCPP_CLANG_DRIVER_DIR "")
+    foreach (_root "${POLYREGION_LLVM_SRC_DIR}/clang/tools/driver"
+                   "${LLVM_DIST_DIR}/share/polyregion-fused-driver/clang-tools-driver")
+        if (EXISTS "${_root}/driver.cpp")
+            set(POLYCPP_CLANG_DRIVER_DIR "${_root}")
+            break ()
+        endif ()
+    endforeach ()
+    if (NOT POLYCPP_CLANG_DRIVER_DIR)
+        message(FATAL_ERROR "clang driver sources not found in src tree or dist staging; LLVM source tree or staged dist required for POLYREGION_FUSED_DRIVER builds")
     endif ()
     add_executable(polycpp
             driver_main.cpp

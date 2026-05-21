@@ -252,5 +252,16 @@ endif ()
 file(COPY "${LLVM_BUILD_DIR}/tools/flang/include/flang/Config/config.h"
         DESTINATION "${LLVM_DIST_DIR}/include/flang/Config")
 
+# XXX POLYREGION_FUSED_DRIVER compiles a handful of LLVM driver .cpp files directly into
+# polycpp/polyfc. CI caches only the dist, so on cache hit the unpacked LLVM source is gone
+# and the fused-driver build can't find these. Stage the exact files we need.
+set(FUSED_DRIVER_STAGE "${LLVM_DIST_DIR}/share/polyregion-fused-driver")
+foreach (F driver.cpp cc1_main.cpp cc1as_main.cpp cc1gen_reproducer_main.cpp)
+    file(COPY "${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/clang/tools/driver/${F}"
+            DESTINATION "${FUSED_DRIVER_STAGE}/clang-tools-driver")
+endforeach ()
+file(COPY "${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/flang/tools/flang-driver/fc1_main.cpp"
+        DESTINATION "${FUSED_DRIVER_STAGE}/flang-tools-flang-driver")
+
 message(STATUS "LLVM build complete!")
 
