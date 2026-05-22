@@ -195,12 +195,10 @@ public:
                   getpid()
   #endif
     );
-    // trace = std::fopen(name, "w");
     __RT_ALTERNATIVE(free)(name);
-
-    // safe_fprintf(trace, "[\n");
     safe_fprintf(stderr, "[PtrReflect] started\n");
-    interpose = true;
+    // XXX `interpose` is armed by the _rt_get caller AFTER the static local fully constructs;
+    // arming here lets a tracked alloc re-enter _rt_get mid-init and trip recursive_init_error.
   }
 
   __RT_ODR void blockingRecord(const PtrInfo &info, const time_point<steady_clock> now = steady_clock::now()) {
@@ -270,7 +268,11 @@ __RT_ODR inline ReflectService *_rt_get() {
   static ReflectService s(serviceInit);
   return &s;
 }
-inline auto _ = _rt_get();
+inline auto _ = [] {
+  auto *svc = _rt_get();
+  serviceInit.store(true);
+  return svc;
+}();
 
 // XXX TLS re-entry flag: a throw inside a service call mallocs an exception, which would
 // re-enter _rt_record on the same mutex; same for internal HashMap rehash/emplace.
