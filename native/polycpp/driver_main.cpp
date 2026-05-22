@@ -4,6 +4,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 
 #ifdef POLYREGION_FUSED_DRIVER
@@ -15,6 +16,7 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 #include "fmt/core.h"
 
 #include "polyfront/options_frontend.hpp"
+#include "polyregion/env.h"
 
 #include "driver_polyc.h"
 
@@ -33,6 +35,11 @@ int main(int argc, const char *argv[]) {
   if (args.has("--polyc", 1)) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
+
+#if defined(_WIN32)
+  // XXX per-process mspdbsrv endpoint; see polyfc/driver_main.cpp.
+  polyregion::env::put("_MSPDBSRV_ENDPOINT_", fmt::format("polycpp-{}", llvm::sys::Process::getProcessId()).c_str(), true);
+#endif
 
   std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrAnchor);
   std::string execParentPath = llvm::sys::path::parent_path(execPath).str();

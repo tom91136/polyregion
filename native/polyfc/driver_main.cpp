@@ -3,7 +3,10 @@
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 
 #ifdef POLYREGION_FUSED_DRIVER
 int flang_main(int argc, const char **argv);
@@ -25,6 +28,20 @@ int main(int argc, const char *argv[]) {
   if (args.has("--polyc", 1)) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
+
+#if defined(_WIN32)
+  // XXX per-process mspdbsrv endpoint; shared default deadlocks if a sibling link crashes
+  // mid-PDB-write (LNK1318/LNK1201/STATUS_ACCESS_VIOLATION).
+  polyregion::env::put("_MSPDBSRV_ENDPOINT_", fmt::format("polyfc-{}", llvm::sys::Process::getProcessId()).c_str(), true);
+
+  // XXX derive arch / triple from LLVM's host triple; *TypeName drops the MSVC version suffix.
+  const llvm::Triple hostTriple(llvm::sys::getDefaultTargetTriple());
+  const auto windowsClangRtLib = fmt::format("clang_rt.builtins-{}.lib", hostTriple.getArchName().str());
+  const auto windowsFlangRtSentinel =
+      fmt::format("lib/{}-{}-{}-{}/flang_rt.runtime.static.lib", llvm::Triple::getArchTypeName(hostTriple.getArch()).str(),
+                  llvm::Triple::getVendorTypeName(hostTriple.getVendor()).str(), llvm::Triple::getOSTypeName(hostTriple.getOS()).str(),
+                  llvm::Triple::getEnvironmentTypeName(hostTriple.getEnvironment()).str());
+#endif
 
   const std::string execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrAnchor);
   const std::string execParentPath = llvm::sys::path::parent_path(execPath).str();
@@ -107,7 +124,7 @@ int main(int argc, const char *argv[]) {
                        // the resource dir since MSVC libucrt lacks it.
                        for (const auto &resRoot :
                             {joinPath(execParentPath, "..", "lib", "clang/22"), std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")}) {
-                         const auto builtins = joinPath(resRoot, "lib", "windows", "clang_rt.builtins-x86_64.lib");
+                         const auto builtins = joinPath(resRoot, "lib", "windows", windowsClangRtLib);
                          if (llvm::sys::fs::exists(builtins)) {
                            append({"-Xlinker", builtins});
                            break;
@@ -142,8 +159,7 @@ int main(int argc, const char *argv[]) {
                  polyregion::env::put(k, v.c_str(), true);
 #ifdef POLYREGION_FUSED_DRIVER
                // Probe install-relative paths first so the binary works both installed and
-               // from the build tree. XXX flang_rt sentinel hard-codes the MSVC triple;
-               // non-Windows fused builds skip this path until parameterised.
+               // from the build tree.
                auto firstWith = [](llvm::StringRef sentinel, std::initializer_list<std::string> roots) -> std::string {
                  for (const auto &root : roots)
                    if (llvm::sys::fs::exists(joinPath(root, sentinel))) return root;
@@ -154,13 +170,15 @@ int main(int argc, const char *argv[]) {
                    !modDir.empty()) {
                  remaining.push_back("-fintrinsic-modules-path=" + modDir);
                }
-               if (auto resDir =
-                       firstWith("lib/x86_64-pc-windows-msvc/flang_rt.runtime.static.lib",
-                                 {joinPath(execParentPath, "..", "lib", "clang/22"), std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")});
+  #if defined(_WIN32)
+               // XXX Windows-only: only the MSVC dist ships per-triple flang_rt.
+               if (auto resDir = firstWith(windowsFlangRtSentinel, {joinPath(execParentPath, "..", "lib", "clang/22"),
+                                                                    std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")});
                    !resDir.empty()) {
                  remaining.push_back("-resource-dir");
                  remaining.push_back(resDir);
                }
+  #endif
                remaining[0] = execPath;
                std::vector<const char *> rawArgs;
                rawArgs.reserve(remaining.size());

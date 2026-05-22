@@ -103,7 +103,17 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
   if (std::getenv("POLYTEST_DEBUG")) envs.emplace_back("POLYRT_DEBUG=2");
   if (auto p = std::getenv("PATH")) envs.emplace_back(std::string("PATH=") + p);
-#ifdef _WIN32
+#if defined(__APPLE__)
+  // XXX forward DYLD_*; compiled test binaries can't find dist libs otherwise (SIGTRAP).
+  for (const auto *name : {"DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "TMPDIR", "HOME"}) {
+    if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
+  }
+#elif defined(__linux__)
+  // XXX forward LD_LIBRARY_PATH for dist-relative .so when rpath misses.
+  for (const auto *name : {"LD_LIBRARY_PATH", "LD_PRELOAD", "TMPDIR", "HOME"}) {
+    if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
+  }
+#elif defined(_WIN32)
   // XXX CreateProcess needs SYSTEMROOT; clang needs TEMP/TMP; link.exe needs LIB/INCLUDE for
   // CRT and SDK lookup (flang does not auto-populate -libpath). Inherit a vcvars-style env.
   for (const auto *name : {"SYSTEMROOT", "SYSTEMDRIVE", "TEMP", "TMP", "USERPROFILE", "WINDIR", "PATHEXT", "COMSPEC", "ProgramFiles",
@@ -351,7 +361,8 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
       std::lock_guard lk(logMtx);
       std::fprintf(stderr, "[compile %zu/%zu] %s %s (%.2fs)\n", done, tasks.size(), statusTag(o.status), tasks[i].display().c_str(),
                    o.secs);
-      dumpDetails(o, /*includeStdout*/ false);
+      // XXX include stdout on fail; MSVC link emits LNK1120 etc. to stdout, not stderr.
+      dumpDetails(o, /*includeStdout*/ true);
       // XXX Drop captures on Pass to bound peak RSS over a 1500-task batch; only failures need to keep them for the summary.
       if (o.status == TaskStatus::Pass && !opts.verbose) std::string{}.swap(o.stdoutCapture), std::string{}.swap(o.stderrCapture);
     }

@@ -202,6 +202,9 @@ if (MSVC)
     )
     # NOMINMAX: windows.h min/max macros collide with std::min/max in polyregion/types.h.
     add_compile_definitions(NOMINMAX)
+    # XXX disable MSVC STL SIMD intrinsics (__std_max_element_*u etc.); refs break across
+    # libcpmt.lib versions and LNK2019 fires when build/link runners drift.
+    add_compile_definitions(_USE_STD_VECTOR_ALGORITHMS=0)
     # magic_enum's reflected-enum static_assert misfires under clang-cl; bypass it so
     # enum_name<> degrades to empty strings instead of failing to compile.
     add_compile_definitions(MAGIC_ENUM_NO_CHECK_REFLECTED_ENUM=1)
