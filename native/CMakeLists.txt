@@ -266,11 +266,17 @@ else ()
         set(STRICT_LINK_OPTIONS)
         set(PLUGIN_LINK_OPTIONS)
     else ()
-        set(STRICT_LINK_OPTIONS
-                LINKER:--no-allow-shlib-undefined
-                LINKER:--no-undefined-version
-                LINKER:--no-undefined
-        )
+        # XXX With POLYREGION_ASAN, ASan symbols are resolved at runtime via LD_PRELOAD'd
+        # libclang_rt.asan.so, so --no-undefined would reject them at link time.
+        if (POLYREGION_ASAN)
+            set(STRICT_LINK_OPTIONS LINKER:--no-undefined-version)
+        else ()
+            set(STRICT_LINK_OPTIONS
+                    LINKER:--no-allow-shlib-undefined
+                    LINKER:--no-undefined-version
+                    LINKER:--no-undefined
+            )
+        endif ()
         set(PLUGIN_LINK_OPTIONS)
         if (USE_LINKER STREQUAL "lld") # For lld, we setup LTO, ICF, and threading
             set(COMMON_LINK_OPTIONS
@@ -400,6 +406,10 @@ set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${STRICT_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
+        # XXX -shared-libsan + -fsanitize=address pair: forces the dynamic ASan runtime so the
+        # JNI .so loads cleanly via the LD_PRELOAD'd libclang_rt.asan.so at JVM start.
+        "$<$<BOOL:${POLYREGION_ASAN}>:-fsanitize=address>"
+        "$<$<BOOL:${POLYREGION_ASAN}>:-shared-libsan>"
         CACHE INTERNAL ""
 )
 
