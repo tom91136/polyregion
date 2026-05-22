@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
@@ -122,8 +123,9 @@ int main(int argc, const char *argv[]) {
                                "-Xlinker", "delayimp.lib"});
                        // flang_rt uses __udivti3 (128-bit div); pull clang_rt.builtins from
                        // the resource dir since MSVC libucrt lacks it.
-                       for (const auto &resRoot :
-                            {joinPath(execParentPath, "..", "lib", "clang/22"), std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")}) {
+                       const auto clangResourceDirRel = fmt::format("clang/{}", LLVM_VERSION_MAJOR);
+                       for (const auto &resRoot : {joinPath(execParentPath, "..", "lib", clangResourceDirRel),
+                                                   joinPath(POLYFC_FUSED_DIST_DIR, "lib", clangResourceDirRel)}) {
                          const auto builtins = joinPath(resRoot, "lib", "windows", windowsClangRtLib);
                          if (llvm::sys::fs::exists(builtins)) {
                            append({"-Xlinker", builtins});
@@ -172,8 +174,9 @@ int main(int argc, const char *argv[]) {
                }
   #if defined(_WIN32)
                // XXX Windows-only: only the MSVC dist ships per-triple flang_rt.
-               if (auto resDir = firstWith(windowsFlangRtSentinel, {joinPath(execParentPath, "..", "lib", "clang/22"),
-                                                                    std::string(POLYFC_FUSED_DIST_DIR "/lib/clang/22")});
+               const auto flangResourceDirRel = fmt::format("clang/{}", LLVM_VERSION_MAJOR);
+               if (auto resDir = firstWith(windowsFlangRtSentinel, {joinPath(execParentPath, "..", "lib", flangResourceDirRel),
+                                                                    joinPath(POLYFC_FUSED_DIST_DIR, "lib", flangResourceDirRel)});
                    !resDir.empty()) {
                  remaining.push_back("-resource-dir");
                  remaining.push_back(resDir);

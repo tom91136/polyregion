@@ -7,9 +7,15 @@ set(CMAKE_C_COMPILER_TARGET x86_64-linux-gnu)
 set(CMAKE_CXX_COMPILER_TARGET x86_64-linux-gnu)
 set(CMAKE_ASM_COMPILER_TARGET x86_64-linux-gnu)
 
-set(CMAKE_C_COMPILER /home/tom/polyregion/native/polyregion-Release-x86_64-dylib-dist/bin/clang)
-set(CMAKE_ASM_COMPILER /home/tom/polyregion/native/polyregion-Release-x86_64-dylib-dist/bin/clang)
-set(CMAKE_CXX_COMPILER /home/tom/polyregion/native/polyregion-Release-x86_64-dylib-dist/bin/clang++)
+# XXX Use the project's bundled clang dist so the asan runtime matches what we shipped.
+# Run `cmake -P build.cmake -DACTION=DIST` first to populate the dist dir.
+set(_POLYREGION_BUILT_CLANG_DIR "${CMAKE_CURRENT_LIST_DIR}/../polyregion-Release-x86_64-dylib-dist/bin")
+if (NOT EXISTS "${_POLYREGION_BUILT_CLANG_DIR}/clang")
+    message(FATAL_ERROR "asan toolchain expects a built polyregion clang at ${_POLYREGION_BUILT_CLANG_DIR}; build the dylib dist first")
+endif ()
+set(CMAKE_C_COMPILER "${_POLYREGION_BUILT_CLANG_DIR}/clang")
+set(CMAKE_ASM_COMPILER "${_POLYREGION_BUILT_CLANG_DIR}/clang")
+set(CMAKE_CXX_COMPILER "${_POLYREGION_BUILT_CLANG_DIR}/clang++")
 
 find_program(CCACHE_PROGRAM ccache)
 if (CCACHE_PROGRAM)

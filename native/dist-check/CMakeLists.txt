@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(polyregion-dist-check NONE)
 
+include(${CMAKE_CURRENT_LIST_DIR}/../ProjectConfig.cmake)
+
 if (NOT POLYREGION_DIST)
     message(FATAL_ERROR "POLYREGION_DIST not set; pass -DPOLYREGION_DIST=/path/to/dist")
 endif ()
@@ -71,13 +73,13 @@ function(add_target_compile_check name driver source arch)
 endfunction()
 
 set(POLYCPP_TARGETS c11@host)
-set(POLYFC_TARGETS cuda@sm_70 spirv64_kernel@host c11@host)
+set(POLYFC_TARGETS cuda@${POLYREGION_DIST_CHECK_CUDA_ARCH} spirv64_kernel@host c11@host)
 if (NOT APPLE)
-    list(APPEND POLYCPP_TARGETS cuda@sm_70 spirv64_kernel@host)
+    list(APPEND POLYCPP_TARGETS cuda@${POLYREGION_DIST_CHECK_CUDA_ARCH} spirv64_kernel@host)
 endif ()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND POLYCPP_TARGETS hsa@gfx900)
-    list(APPEND POLYFC_TARGETS hsa@gfx900)
+    list(APPEND POLYCPP_TARGETS hsa@${POLYREGION_DIST_CHECK_ROCM_ARCH})
+    list(APPEND POLYFC_TARGETS hsa@${POLYREGION_DIST_CHECK_ROCM_ARCH})
 endif ()
 # XXX spirv_glcompute disabled: polyc's pointer-as-stack-slot pattern hits
 # SPIRVLegalizePointerCast's "Unimplemented implicit down-cast from load".

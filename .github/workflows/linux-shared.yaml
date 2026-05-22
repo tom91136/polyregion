@@ -32,6 +32,10 @@ defaults:
   run:
     shell: bash
 
+env:
+  # XXX Debian release the sysroot is built against; bump together with make_sysroot.py.
+  DEBIAN_SYSROOT_DIST: bullseye
+
 jobs:
   build:
     runs-on: ${{ inputs.build_runs_on }}
@@ -72,7 +76,7 @@ jobs:
         id: restore-sysroot
         uses: actions/cache/restore@v5
         with:
-          path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
+          path: ./native/debian-sysroot-image-creator/out/sysroot-build/${{ env.DEBIAN_SYSROOT_DIST }}/debian_${{ env.DEBIAN_SYSROOT_DIST }}_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
           key: sysroot-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
 
       - name: Build sysroot
@@ -86,14 +90,14 @@ jobs:
         uses: actions/cache/save@v5
         id: save-sysroot
         with:
-          path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
+          path: ./native/debian-sysroot-image-creator/out/sysroot-build/${{ env.DEBIAN_SYSROOT_DIST }}/debian_${{ env.DEBIAN_SYSROOT_DIST }}_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
           key: sysroot-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
 
       - name: Prepare sysroot
         working-directory: ./native/debian-sysroot-image-creator
         run: |
           mkdir -p "sysroot_${{ inputs.build_sysroot_name }}"
-          tar xf out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_sysroot_name }}
+          tar xf out/sysroot-build/${{ env.DEBIAN_SYSROOT_DIST }}/debian_${{ env.DEBIAN_SYSROOT_DIST }}_${{ inputs.build_sysroot_name }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_sysroot_name }}
           echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.build_sysroot_name }}" >> $GITHUB_ENV
 
       - name: Restore LLVM cache

@@ -1,14 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
 
 if(NOT DEFINED CUDA_VERSION)
-  set(CUDA_VERSION "12.6.3")
-endif()
-if(NOT DEFINED CUDA_ARCH)
-  set(CUDA_ARCH "linux-x86_64")
+  message(FATAL_ERROR "CUDA_VERSION not set; pass -DCUDA_VERSION=<x.y.z>")
 endif()
 if(NOT DEFINED OUT_DIR)
-  set(OUT_DIR "${CMAKE_CURRENT_LIST_DIR}/dist")
+  message(FATAL_ERROR "OUT_DIR not set; pass -DOUT_DIR=/path/to/staging")
 endif()
+
+# XXX libdevice.10.bc is target-independent, use linux-x86_66 for simplicity
+set(CUDA_ARCH "linux-x86_64")
 
 # CUDA 13 split libdevice out of cuda_nvcc into a new libnvvm redist component.
 string(REGEX MATCH "^([0-9]+)" cuda_major "${CUDA_VERSION}")
