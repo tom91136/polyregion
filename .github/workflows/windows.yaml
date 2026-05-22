@@ -31,11 +31,14 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+        uses: sbt/setup-sbt@v1.1.18
 
       - name: Regenerate Scala-derived sources
         working-directory: ./frontend
         run: sbt -no-colors 'codegen/genCodegen; passJS/exportPassBundle'
+
+      - name: Format generated C++
+        run: clang-format -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
 
       - name: Fail if regenerated sources drift
         run: git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/polypass.js
@@ -306,7 +309,7 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+        uses: sbt/setup-sbt@v1.1.18
 
       - name: Download dist
         uses: actions/download-artifact@v8
