@@ -13,19 +13,9 @@ object DeadArgElimination extends ProgramPass {
   private def cleanModuleCaptures(f: p.Function): p.Function =
     f.copy(moduleCaptures = f.moduleCaptures.filter(arg => referencedRoots(f).contains(arg.named)))
 
-  private def cleanEntryFully(f: p.Function): p.Function = {
-    val refs = referencedRoots(f)
-    f.copy(
-      receiver = f.receiver.filter(arg => refs.contains(arg.named)),
-      moduleCaptures = f.moduleCaptures.filter(arg => refs.contains(arg.named)),
-      termCaptures = f.termCaptures.filter(arg => refs.contains(arg.named))
-    )
-  }
-
+  // XXX The entry's params are the kernel ABI seen by the JVM macro, which packs fnValues
+  // before this pass runs. Dropping captures here desyncs host marshalling from the kernel.
   override def apply(program: p.Program, log: Log): p.Program =
-    program.copy(
-      entry = cleanEntryFully(program.entry),
-      functions = program.functions.map(cleanModuleCaptures)
-    )
+    program.copy(functions = program.functions.map(cleanModuleCaptures))
 
 }

@@ -376,6 +376,10 @@ object Pickler {
               // Opaque struct member (e.g. scala.Option) — kernel doesn't access this field;
               // skip (the inline layout has no slot for it anyway).
               '{ () }
+            case (_, p.Type.Ptr(_, _)) =>
+              // Opaque Ptr field on a captured singleton (e.g. `scala.Array$.emptyByteArray`);
+              // not a MutableSeq prism target and unused after intrinsification.
+              '{ () }
             case (_, _) =>
               writePrim('buffer, memberOffset, m.tpe, m.select(rootAfterPrism.asTerm).asExpr)
           }
@@ -476,21 +480,19 @@ object Pickler {
             val memberOffset = Expr(m.offsetInBytes.toInt)
             ((root, m.tpe): @scala.unchecked) match {
               case (_, p.Type.Ptr(comp, _)) =>
+                // Restore arrays only when root is a MutableSeq prism (parameterised type with
+                // a write witness); other Ptr fields (e.g. opaque singleton members) skip.
                 (
                   mapping.write,
                   root.asTerm.tpe.widenTermRefByName match {
-                    case q.AppliedType(_, x :: Nil) => x.asType
-                    case t =>
-                      q.report.errorAndAbort(
-                        s"Unexpected type while matching on arrays ${t.show}, the correct shape is F[t]"
-                      )
+                    case q.AppliedType(_, x :: Nil) => Some(x.asType)
+                    case _                          => None
                   }
                 ) match {
-                  case (Some((_, write)), '[t]) =>
+                  case (Some((_, write)), Some('[t])) =>
                     val seq = write(root.asTerm).asExprOf[MutableSeq[t]]
                     readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
-                  case (_, _) =>
-                    q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
+                  case _ => '{ () }
                 }
 
               case (_, p.Type.Struct(name, _)) if lut.contains(name) =>

@@ -71,12 +71,12 @@ object FnInline extends ProgramPass {
       case x                                        => x
     }))
 
-    // ivk.args is the flattened (args ::: moduleCaptures ::: termCaptures) per D10.
+    // ivk.args is the flattened (moduleCaptures ::: termCaptures ::: args) per Compiler.patchIvk.
     val targetNames =
       renamed.receiver.map(_.named).toList ++
-        renamed.args.map(_.named) ++
         renamed.moduleCaptures.map(_.named) ++
-        renamed.termCaptures.map(_.named)
+        renamed.termCaptures.map(_.named) ++
+        renamed.args.map(_.named)
     val replacements = ivk.receiver.toList ++ ivk.args
     val substTable   = targetNames.zip(replacements).toMap
     val substituted  = substTerms(renamed, substTable)
@@ -119,15 +119,18 @@ object FnInline extends ProgramPass {
   }
 
   private def resolveOverload(ivk: p.Expr.Invoke, program: p.Program): p.Function = {
-    val candidates = program.functions.distinct.filter(f => f.name == ivk.name && f.args.size == ivk.args.size)
+    def flatParams(f: p.Function): List[p.Type] =
+      f.moduleCaptures.map(_.named.tpe) ++ f.termCaptures.map(_.named.tpe) ++ f.args.map(_.named.tpe)
+    val candidates = program.functions.distinct.filter(f => f.name == ivk.name && flatParams(f).size == ivk.args.size)
     candidates.filter { f =>
       val varToTpeLut = f.tpeVars.zip(ivk.tpeArgs).toMap
       val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
         case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
         case x                 => x
       })
+      val flatSigParams = sig.moduleCaptures ++ sig.termCaptures ++ sig.args
       sig.receiver.size == ivk.receiver.size &&
-      sig.args.zip(ivk.args.map(_.tpe)).forall(_ =:= _) &&
+      flatSigParams.zip(ivk.args.map(_.tpe)).forall(_ =:= _) &&
       sig.rtn =:= ivk.rtn
     } match {
       case f :: Nil => f
