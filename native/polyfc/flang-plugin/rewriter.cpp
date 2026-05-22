@@ -186,16 +186,22 @@ class Binder {
         fir::StoreOp::create(B, uLoc(B), val, ref);
         bindRef(B, ref, layout, fields, true);
       } else if (val.getType().isIntOrIndexOrFloat()) {
-        // XXX O3 may inline shape/extent into the kernel body, leaving an unboxed scalar capture;
-        // stack-spill it so the scalar-ref path picks it up.
+        // XXX O3 may inline shape/extent into the kernel body, leaving an unboxed scalar capture.
+        // The polyast captures these as inline scalars (handleType returns IntS32/Float32/... not
+        // Ptr), so store the value directly into the struct field; spilling to stack and binding
+        // as a ref would leave the struct field shaped as a pointer while the kernel reads it as
+        // an inline scalar - sizes and offsets mismatch and the kernel reads garbage at -O>0.
         auto ty = val.getType();
         if (ty.isIndex()) {
           ty = mlir::IntegerType::get(val.getContext(), 64);
           val = fir::ConvertOp::create(B, uLoc(B), ty, val).getResult();
         }
-        const auto ref = fir::AllocaOp::create(B, uLoc(B), ty).getResult();
-        fir::StoreOp::create(B, uLoc(B), val, ref);
-        bindRef(B, ref, layout, fields, true);
+        fields.emplace_back(CaptureField{
+            .type = ty,
+            .fieldPtr = val,
+            .dependent = {},
+            .temporary = {},
+        });
       } else if (auto heapTy = llvm::dyn_cast<fir::HeapType>(val.getType())) {
         const auto refTy = fir::ReferenceType::get(heapTy.getEleTy());
         const auto refVal = fir::ConvertOp::create(B, uLoc(B), refTy, val).getResult();
@@ -232,6 +238,8 @@ public:
   Value createCapture(OpBuilder &B, ModuleOp &M) const {
     const auto annotationConst = strConst(B, M, "polyreflect-track");
     captureFields | for_each([&](auto &f) {
+      // XXX skip non-pointer fields (inline scalar captures): VarAnnotation requires a ptr operand.
+      if (!llvm::isa<LLVM::LLVMPointerType>(f.fieldPtr.getType())) return;
       LLVM::VarAnnotation::create(B, uLoc(B), f.fieldPtr, annotationConst, nullConst(B), intConst(B, i32Ty(B), 0), nullConst(B));
     });
     return captureMirror.local(B, {captureFields                                                   //

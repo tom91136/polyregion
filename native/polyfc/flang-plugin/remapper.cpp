@@ -350,6 +350,10 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
         || llvm::isa<fir::ShapeShiftOp>(defOp)    //
         || llvm::isa<fir::SliceOp>(defOp)         //
         || llvm::isa<fir::BoxDimsOp>(defOp)       //
+        || llvm::isa<fir::AddrOfOp>(defOp)        // XXX rematerialise globals at the use site so MLIR-hoisted
+                                                  // `fir.address_of` (often LICM'd above the do_concurrent at -O>0)
+                                                  // does not surface as a per-global capture; the kernel module
+                                                  // already has the global symbol available.
     ) {
       handleOp(defOp);
       if (const auto it = valuesLUT.find(val); it != valuesLUT.end()) return it->second;
@@ -918,8 +922,16 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                                  auto base = newVar(e.array);
                                  auto off = newVar(e.offset);
                                  witness(l.getResult(), Expr::Index(base, off, e.comp).widen());
-                               },                                                    //
-                               [&](const FBoxed &e) { witness(l.getResult(), e); }); //
+                               }, //
+                               [&](const FBoxed &e) {
+                                 // XXX scalar-shaped result: materialise the loaded value via the
+                                 // box's heap addr so downstream converts/arith see the scalar, not
+                                 // the FBoxed wrapper. Box-typed results preserve the wrapper for
+                                 // subsequent box_addr / rebox / fir.embox use sites.
+                                 if (l.getResult().getType().isIntOrIndexOrFloat())
+                                   witness(l.getResult(), index0(e.addr()));
+                                 else witness(l.getResult(), e);
+                               }); //
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
       },
       [&](fir::StoreOp s) {

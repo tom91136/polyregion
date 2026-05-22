@@ -131,7 +131,7 @@ void llvmc::initialise() {
 
 /// Set function attributes of function \p F based on CPU, Features, and command
 /// line flags.
-static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features, llvm::Function &F) {
+static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features, llvm::Function &F, bool useUnsafeMath) {
   auto &Ctx = F.getContext();
   llvm::AttributeList Attrs = F.getAttributes();
   llvm::AttrBuilder NewAttrs(Ctx);
@@ -151,9 +151,14 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   NewAttrs.addAttribute("denormal-fp-math", llvm::DenormalMode(DenormKind, DenormKind).str());
   NewAttrs.addAttribute("denormal-fp-math-f32", llvm::DenormalMode(DenormKind, DenormKind).str());
 
-  NewAttrs.addAttribute("unsafe-fp-math", "true");
-  NewAttrs.addAttribute("no-infs-fp-math", "true");
-  NewAttrs.addAttribute("no-signed-zeros-fp-math", "true");
+  // XXX gate these on Ofast - they invite the optimiser to reorder/drop FP ops, which at -O>0 on
+  // NVPTX/AMDGCN can miscompile precision-sensitive math (e.g. inlined libdevice sin/cos argument
+  // reduction) into bad indices and OOB device writes. Match the TargetOptions branches below.
+  if (useUnsafeMath) {
+    NewAttrs.addAttribute("unsafe-fp-math", "true");
+    NewAttrs.addAttribute("no-infs-fp-math", "true");
+    NewAttrs.addAttribute("no-signed-zeros-fp-math", "true");
+  }
   //  NewAttrs.addAttribute("amdgpu-early-inline-all", "true");
   //  NewAttrs.addAttribute("amdgpu-function-calls", "true");
 
@@ -438,7 +443,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
 
   const auto isSpirvTriple = info.triple.isSPIRV();
   for (llvm::Function &F : M.functions())
-    setFunctionAttributes(isSpirvTriple ? "" : info.cpu.uArch, isSpirvTriple ? "" : info.cpu.features, F);
+    setFunctionAttributes(isSpirvTriple ? "" : info.cpu.uArch, isSpirvTriple ? "" : info.cpu.features, F, useUnsafeMath);
 
   llvm::OptimizationLevel optLevel;
   switch (opt) {
@@ -475,7 +480,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     M.setTargetTriple(TM.getTargetTriple());
   };
 
-  auto mkLLVMTargetMachineArtefact = [optLevel, genOpt](TargetMachine &TM,                               //
+  auto mkLLVMTargetMachineArtefact = [optLevel, genOpt, useUnsafeMath](TargetMachine &TM,                //
                                                         const std::optional<llvm::CodeGenFileType> &tpe, //
                                                         const llvm::Module &m0,                          //
                                                         std::vector<polyast::CompileEvent> &events, const bool emplaceEvent) {
@@ -496,7 +501,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       linkVendorDeviceLibs(*m, TM.getTargetTriple(), TM.getTargetCPU());
       if (!isSpirv) {
         for (llvm::Function &F : m->functions())
-          setFunctionAttributes(TM.getTargetCPU(), TM.getTargetFeatureString(), F);
+          setFunctionAttributes(TM.getTargetCPU(), TM.getTargetFeatureString(), F, useUnsafeMath);
         optimise(TM, *m, optLevel);
       }
       verifyKernelSymbols(*m, TM.getTargetTriple());
