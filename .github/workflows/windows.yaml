@@ -30,6 +30,9 @@ jobs:
           java-version: '21'
           cache: sbt
 
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
       - name: Regenerate Scala-derived sources
         working-directory: ./frontend
         run: sbt -no-colors 'codegen/genCodegen; passJS/exportPassBundle'
@@ -301,6 +304,9 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
 
       - name: Download dist
         uses: actions/download-artifact@v8
