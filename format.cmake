@@ -36,7 +36,7 @@ endif ()
 
 message(STATUS "Native: ${NATIVE_TARGET} via ${POLYREGION_NATIVE_BUILD}")
 execute_process(
-        COMMAND ${CMAKE_COMMAND} --build ${POLYREGION_NATIVE_BUILD} --target ${NATIVE_TARGET}
+        COMMAND ${CMAKE_COMMAND} --build ${POLYREGION_NATIVE_BUILD} --target ${NATIVE_TARGET} --parallel
         RESULT_VARIABLE native_rc)
 
 ### scala

@@ -521,16 +521,33 @@ file(GLOB POLYREGION_LLVM_DIST_BIN "${CMAKE_SOURCE_DIR}/llvm-*-dist/bin")
 find_program(POLYREGION_CLANG_FORMAT NAMES clang-format HINTS ${POLYREGION_LLVM_DIST_BIN})
 
 if (POLYREGION_CLANG_FORMAT)
-    add_custom_target(format
-            COMMAND ${POLYREGION_CLANG_FORMAT} --style=file -i ${POLYREGION_FORMAT_SOURCES}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            VERBATIM
-            COMMENT "clang-format -i (${POLYREGION_CLANG_FORMAT})")
-    add_custom_target(format-check
-            COMMAND ${POLYREGION_CLANG_FORMAT} --style=file --dry-run --Werror ${POLYREGION_FORMAT_SOURCES}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            VERBATIM
-            COMMENT "clang-format --dry-run (${POLYREGION_CLANG_FORMAT})")
+    # XXX Per-file stamps so ninja (or any parallel generator) can dispatch clang-format
+    # invocations concurrently. A single multi-file `clang-format` call would run serially.
+    set(_format_stamps)
+    set(_format_check_stamps)
+    foreach (src IN LISTS POLYREGION_FORMAT_SOURCES)
+        file(RELATIVE_PATH _rel ${CMAKE_SOURCE_DIR} ${src})
+        set(_stamp_in       ${CMAKE_BINARY_DIR}/format-stamps/${_rel}.stamp)
+        set(_stamp_check    ${CMAKE_BINARY_DIR}/format-check-stamps/${_rel}.stamp)
+        get_filename_component(_stamp_in_dir    ${_stamp_in}    DIRECTORY)
+        get_filename_component(_stamp_check_dir ${_stamp_check} DIRECTORY)
+        add_custom_command(OUTPUT ${_stamp_in}
+                DEPENDS ${src}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${_stamp_in_dir}
+                COMMAND ${POLYREGION_CLANG_FORMAT} --style=file -i ${src}
+                COMMAND ${CMAKE_COMMAND} -E touch ${_stamp_in}
+                VERBATIM)
+        add_custom_command(OUTPUT ${_stamp_check}
+                DEPENDS ${src}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${_stamp_check_dir}
+                COMMAND ${POLYREGION_CLANG_FORMAT} --style=file --dry-run --Werror ${src}
+                COMMAND ${CMAKE_COMMAND} -E touch ${_stamp_check}
+                VERBATIM)
+        list(APPEND _format_stamps       ${_stamp_in})
+        list(APPEND _format_check_stamps ${_stamp_check})
+    endforeach ()
+    add_custom_target(format       DEPENDS ${_format_stamps})
+    add_custom_target(format-check DEPENDS ${_format_check_stamps})
 else ()
     set(_no_cf_msg "clang-format not found; build the bundled LLVM (cmake -P build_llvm.cmake) or install one on PATH")
     add_custom_target(format
