@@ -15,8 +15,8 @@ defaults:
     shell: bash
 
 env:
-  # XXX Debian release the sysroot is built against; bump together with make_sysroot.py.
-  DEBIAN_SYSROOT_DIST: bullseye
+  # AL8 = glibc 2.28, gcc-toolset-12 libstdc++
+  SYSROOT_VARIANT: al8
 
 jobs:
   codegen-check:
@@ -34,15 +34,17 @@ jobs:
       - name: Setup sbt
         uses: sbt/setup-sbt@v1.1.18
 
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Regenerate Scala-derived sources
-        working-directory: ./frontend
-        run: sbt -no-colors 'codegen/genCodegen; passJS/exportPassBundle'
+        run: just _codegen-sbt
 
       - name: Format generated C++
-        run: clang-format -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
+        run: just _codegen-format
 
       - name: Fail if regenerated sources drift
-        run: git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/polypass.js
+        run: just _codegen-diff
 
   build:
     strategy:
@@ -50,13 +52,11 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            sysroot_name: amd64
             runs_on: ubuntu-24.04
             llvm_parallel_compile_jobs: "4"
             llvm_parallel_link_jobs: "1"
             flang_parallel_compile_jobs: "3"
           - arch: aarch64
-            sysroot_name: arm64
             runs_on: ubuntu-24.04-arm
             llvm_parallel_compile_jobs: "4"
             llvm_parallel_link_jobs: "4"
@@ -69,12 +69,24 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Max parallelism under act
+        if: ${{ env.ACT }}
+        run: |
+          echo "POLYREGION_LLVM_PARALLEL_COMPILE_JOBS=" >> "$GITHUB_ENV"
+          echo "POLYREGION_LLVM_PARALLEL_LINK_JOBS=" >> "$GITHUB_ENV"
+          echo "POLYREGION_FLANG_PARALLEL_COMPILE_JOBS=" >> "$GITHUB_ENV"
+
       - name: Install dependencies
-        # llvm-tblgen is in llvm; gfortran is needed at LLVM-runtimes configure time so
-        # flang-rt's enable_language(Fortran) succeeds.
+        # clang-tools provides clang-scan-deps (cmake >= 3.28 uses it for C++20 module deps).
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang lld llvm gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests default-jdk
+          sudo apt-get install -y cmake ninja-build clang clang-tools lld llvm gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - name: Dotenv
         id: dotenv
@@ -99,28 +111,36 @@ jobs:
         id: restore-sysroot
         uses: actions/cache/restore@v5
         with:
-          path: ./native/debian-sysroot-image-creator/out/sysroot-build/${{ env.DEBIAN_SYSROOT_DIST }}/debian_${{ env.DEBIAN_SYSROOT_DIST }}_${{ matrix.sysroot_name }}_sysroot.tar.xz
-          key: sysroot-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.py') }}
+          path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot_al8.sh') }}
+
+      - name: Detect existing sysroot tarball (act fast-path)
+        if: ${{ env.ACT }}
+        id: act-sysroot-probe
+        run: |
+          [ -f native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz ] && echo "found=true" >> "$GITHUB_OUTPUT" || true
 
       - name: Build sysroot
         id: build-sysroot
-        if: steps.restore-sysroot.outputs.cache-hit != 'true'
+        if: steps.restore-sysroot.outputs.cache-hit != 'true' && steps.act-sysroot-probe.outputs.found != 'true'
         working-directory: ./native
-        run: ./make_sysroot.py build ${{ matrix.sysroot_name }}
+        run: ./make_sysroot_al8.sh ${{ matrix.arch }}
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
         uses: actions/cache/save@v5
         with:
-          path: ./native/debian-sysroot-image-creator/out/sysroot-build/${{ env.DEBIAN_SYSROOT_DIST }}/debian_${{ env.DEBIAN_SYSROOT_DIST }}_${{ matrix.sysroot_name }}_sysroot.tar.xz
-          key: sysroot-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.py') }}
+          path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot_al8.sh') }}
 
       - name: Prepare sysroot
-        working-directory: ./native/debian-sysroot-image-creator
+        working-directory: ./native
         run: |
-          mkdir -p "sysroot_${{ matrix.sysroot_name }}"
-          tar xf out/sysroot-build/${{ env.DEBIAN_SYSROOT_DIST }}/debian_${{ env.DEBIAN_SYSROOT_DIST }}_${{ matrix.sysroot_name }}_sysroot.tar.xz  -C ./sysroot_${{ matrix.sysroot_name }}
-          echo "SYSROOT_PATH=$PWD/sysroot_${{ matrix.sysroot_name }}" >> $GITHUB_ENV
+          STAGE=out/sysroot-build/${{ env.SYSROOT_VARIANT }}/extracted-${{ matrix.arch }}
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          tar xf out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz -C "$STAGE"
+          echo "SYSROOT_PATH=$PWD/$STAGE" >> "$GITHUB_ENV"
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
@@ -129,13 +149,22 @@ jobs:
         with:
           path: |
             ./native/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
+
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
+      - name: Detect existing LLVM/device-libs (act fast-path)
+        if: ${{ env.ACT }}
+        id: act-cache-probe
+        run: |
+          [ -x native/polyregion-Release-${{ matrix.arch }}-dylib-dist/bin/clang++ ] && echo "llvm=true" >> "$GITHUB_OUTPUT" || true
+          [ -d native/thirdparty/device_libs ] && [ -n "$(ls -A native/thirdparty/device_libs 2>/dev/null)" ] && echo "device-libs=true" >> "$GITHUB_OUTPUT" || true
 
       - name: Build LLVM
         id: build-llvm
-        if: steps.restore-llvm.outputs.cache-hit != 'true'
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=LLVM -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        if: steps.restore-llvm.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.llvm != 'true'
+        run: just llvm
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -143,7 +172,7 @@ jobs:
         with:
           path: |
             ./native/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
@@ -151,32 +180,28 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
 
       - name: Build device libs
         id: build-device-libs
-        if: steps.restore-device-libs.outputs.cache-hit != 'true'
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=DEVICE_LIBS -P build.cmake
+        if: steps.restore-device-libs.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.device-libs != 'true'
+        run: just device-libs
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
 
       - name: Configure release build
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=CONFIGURE -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: just configure
 
       - name: Build dist
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=DIST -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: just dist
 
       - name: Build test dist
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=DIST_TEST -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: just test-dist
 
       - name: Check artefact
         working-directory: ./native
@@ -199,14 +224,16 @@ jobs:
           done
 
       - name: Upload dist
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
@@ -217,22 +244,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
+        distro:
+          # gcc-c++/g++ for the host C++ stdlib headers; libquadmath for flang-new runtime.
+          # AlmaLinux ships curl-minimal; asking for full curl conflicts.
+          - { image: 'almalinux:8',  pkg: 'dnf install -y git cmake findutils tar gzip gcc-c++ libquadmath' }
+          - { image: 'almalinux:9',  pkg: 'dnf install -y git cmake findutils tar gzip gcc-c++ libquadmath' }
+          - { image: 'almalinux:10', pkg: 'dnf install -y git cmake findutils tar gzip gcc-c++ libquadmath' }
+          - { image: 'ubuntu:22.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ libquadmath0' }
+          - { image: 'ubuntu:24.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ libquadmath0' }
         include:
           - arch: x86_64
             runs_on: ubuntu-24.04
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
+    container: ${{ matrix.distro.image }}
     steps:
+      - name: Install container dependencies
+        run: ${{ matrix.distro.pkg }}
+
       - uses: actions/checkout@v6
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
+      - name: Setup just
+        # XXX direct install as alma/ubuntu containers has no nodejs, so extractions/setup-just (node20) fails
+        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
       - name: Download dist
-        uses: actions/download-artifact@v8
+        # XXX Under act the workspace is bind-mounted; the dist is already at this path.
+        if: ${{ !env.ACT }}
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -245,8 +287,7 @@ jobs:
           find "$DIST/lib" -type f -name '*.so' -exec chmod +x {} +
 
       - name: Run dist-check
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=CHECK -P build.cmake
+        run: just dist-check
 
   native-tests:
     needs: build
@@ -268,13 +309,15 @@ jobs:
           sudo apt-get install -y cmake
 
       - name: Download dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
@@ -301,7 +344,8 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: native-test-results-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
@@ -331,8 +375,12 @@ jobs:
       - name: Setup sbt
         uses: sbt/setup-sbt@v1.1.18
 
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Download dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -349,12 +397,16 @@ jobs:
           done
 
       - name: Run munit suite
-        working-directory: ./frontend
-        run: sbt -no-colors 'compiler-testsuite-scala/test'
+        # LD_LIBRARY_PATH so the JNI dlopen resolves libLLVM/libMLIR/libclang-cpp from the dist
+        # regardless of which Loader.java probe path wins (cmake-build-*/, build-*-dylib/, etc.).
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/native/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+        run: just scala-tests
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: scala-test-results-linux-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/

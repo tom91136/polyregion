@@ -33,15 +33,17 @@ jobs:
       - name: Setup sbt
         uses: sbt/setup-sbt@v1.1.18
 
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Regenerate Scala-derived sources
-        working-directory: ./frontend
-        run: sbt -no-colors 'codegen/genCodegen; passJS/exportPassBundle'
+        run: just _codegen-sbt
 
       - name: Format generated C++
-        run: clang-format -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
+        run: just _codegen-format
 
       - name: Fail if regenerated sources drift
-        run: git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/polypass.js
+        run: just _codegen-diff
 
   build:
     strategy:
@@ -96,6 +98,14 @@ jobs:
         with:
           vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
 
+      - name: Setup MSVC env
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Check environment
         shell: pwsh
         run: |
@@ -116,10 +126,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true'
-        working-directory: ./native
-        run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
-          cmake -DCMAKE_BUILD_TYPE=Release -DLLVM_USE_HOST_TOOLS=OFF -DARCH=${{ matrix.arch }} -DACTION=LLVM -P build.cmake
+        run: just llvm -DLLVM_USE_HOST_TOOLS=OFF
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -140,10 +147,7 @@ jobs:
       - name: Build device libs
         id: build-device-libs
         if: steps.restore-device-libs.outputs.cache-hit != 'true'
-        working-directory: ./native
-        run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
-          cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=DEVICE_LIBS -P build.cmake
+        run: just device-libs
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
@@ -153,29 +157,18 @@ jobs:
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Configure release build
-        working-directory: ./native
-        run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
-          cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=CONFIGURE -P build.cmake
+        run: just configure
 
       - name: Build dist
-        working-directory: ./native
-        run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
-          cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=DIST -P build.cmake
+        run: just dist
 
       - name: Build test dist
-        working-directory: ./native
-        run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
-          cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=DIST_TEST -P build.cmake
+        run: just test-dist
 
       - name: Check artefact
         if: always()
         working-directory: ./native
-        # XXX dumpbin needs an MSVC env to find link.exe
         run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
           set "DIST=polyregion-Release-${{ matrix.arch }}-static-dist"
           dir "%DIST%\bin"
           dir "%DIST%\lib"
@@ -189,14 +182,16 @@ jobs:
           )
 
       - name: Upload dist
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
@@ -221,17 +216,23 @@ jobs:
         with:
           build_arch: ${{ matrix.arch }}
 
+      - name: Setup MSVC env
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Download dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist
 
       - name: Run dist-check
-        working-directory: ./native
-        run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
-          cmake -DCMAKE_BUILD_TYPE=Release -DARCH=${{ matrix.arch }} -DACTION=CHECK -P build.cmake
+        run: just dist-check
 
   native-tests:
     needs: build
@@ -253,13 +254,20 @@ jobs:
           build_arch: ${{ matrix.arch }}
 
       - name: Download dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist
 
+      - name: Setup MSVC env
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
       - name: Download test dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-test-Release-${{ matrix.arch }}-static-dist
@@ -267,7 +275,6 @@ jobs:
       - name: Run native tests
         working-directory: ./native
         run: |
-          call setup_msvc_env.bat ${{ matrix.arch }}
           set "DIST=%CD%\polyregion-Release-${{ matrix.arch }}-static-dist"
           set "TESTS=%CD%\polyregion-test-Release-${{ matrix.arch }}-static-dist"
           set "PATH=%DIST%\bin;%PATH%"
@@ -278,7 +285,8 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: native-test-results-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
@@ -311,8 +319,12 @@ jobs:
       - name: Setup sbt
         uses: sbt/setup-sbt@v1.1.18
 
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Download dist
-        uses: actions/download-artifact@v8
+        # v4: nektos/act#6022
+        uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist
@@ -328,12 +340,12 @@ jobs:
           done
 
       - name: Run munit suite
-        working-directory: ./frontend
-        run: sbt -no-colors 'compiler-testsuite-scala/test'
+        run: just scala-tests
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
         with:
           name: scala-test-results-windows-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/

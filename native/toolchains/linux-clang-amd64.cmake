@@ -23,6 +23,13 @@ set(CMAKE_CXX_FLAGS_INIT "-march=westmere -mtune=skylake -fPIC")
 set(CMAKE_ASM_FLAGS_INIT "-march=westmere -mtune=skylake -fPIC")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/sysroot_gcc_dir.cmake")
+if (POLYREGION_SYSROOT_GCC_INSTALL_DIR)
+    string(APPEND CMAKE_C_FLAGS_INIT   " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+    string(APPEND CMAKE_CXX_FLAGS_INIT " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+    string(APPEND CMAKE_ASM_FLAGS_INIT " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+endif ()
+
 set(CMAKE_SHARED_LINKER_FLAGS -fuse-ld=lld)
 set(CMAKE_MODULE_LINKER_FLAGS -fuse-ld=lld)
 set(CMAKE_EXE_LINKER_FLAGS -fuse-ld=lld)

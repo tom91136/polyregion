@@ -1,16 +1,20 @@
 # Native build
 
-All build steps go through `cmake -P build.cmake -DACTION=<action>`.
+Top-level task runner is `just` (see `../justfile` at the repo root); each recipe is a thin
+wrapper around `cmake -P build.cmake -DACTION=<action>`. Run `just` from the repo root to list
+recipes. The underlying cmake form still works if you prefer it.
 
 ## Actions
 
-| Action      | What it does                                                                                                                                                                                                         |
-|-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `LLVM`      | Configure + build + install LLVM/Clang/LLD/Flang/MLIR into `llvm-${BUILD_TYPE}-${ARCH}-${VARIANT}/`. Slow (hours, first time).                                                                                       |
-| `CONFIGURE` | Configure polyregion build into `build-${platform}-${ARCH}-${VARIANT}/`.                                                                                                                                             |
-| `BUILD`     | Build a target. Requires `-DTARGET=<name>` (use `all` for everything).                                                                                                                                               |
-| `DIST`      | Install polyregion into `polyregion-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`. Builds install deps as needed.                                                                                                          |
-| `CHECK`     | Run the dist sanity check (compiles hello/offload programs through `clang`/`flang-new`/`polycpp`/`polyfc`, verifies output binaries don't depend on shipped DSOs, compile-only checks for cuda/hsa/spirv/metal/c11). |
+| Action        | `just` recipe   | What it does                                                                                                                                                                                                         |
+|---------------|-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `LLVM`        | `just llvm`         | Configure + build + install LLVM/Clang/LLD/Flang/MLIR into `llvm-${BUILD_TYPE}-${ARCH}-${VARIANT}/`. Slow (hours, first time).                                                                                       |
+| `DEVICE_LIBS` | `just device-libs`  | Build AMDGPU/NVPTX device libs (offload bitcode).                                                                                                                                                                    |
+| `CONFIGURE`   | `just configure`    | Configure polyregion build into `build-${platform}-${ARCH}-${VARIANT}/`.                                                                                                                                             |
+| `BUILD`       | `just build [tgt]`  | Build a target. `-DTARGET=<name>` selects (default `all`).                                                                                                                                                           |
+| `DIST`        | `just dist`         | Install polyregion into `polyregion-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`. Builds install deps as needed.                                                                                                          |
+| `DIST_TEST`   | `just test-dist`    | Bundle the test binaries + sources into `polyregion-test-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`.                                                                                                                    |
+| `CHECK`       | `just dist-check`   | Run the dist sanity check (compiles hello/offload programs through `clang`/`flang-new`/`polycpp`/`polyfc`, verifies output binaries don't depend on shipped DSOs, compile-only checks for cuda/hsa/spirv/metal/c11). |
 
 ## Common options
 
@@ -33,37 +37,65 @@ If `ccache` is on `PATH` it is used automatically (set by the toolchain files).
 
 ## Examples
 
-Full dylib release dist + smoke check:
+Full dylib release dist + smoke check (from the repo root):
 
 ```sh
-cd native
-cmake -DACTION=LLVM      -DCMAKE_BUILD_TYPE=Release -P build.cmake     # one-time
-cmake -DACTION=CONFIGURE -DCMAKE_BUILD_TYPE=Release -P build.cmake
-cmake -DACTION=DIST      -DCMAKE_BUILD_TYPE=Release -P build.cmake
-cmake -DACTION=CHECK     -DCMAKE_BUILD_TYPE=Release -P build.cmake
+just llvm        # one-time, slow
+just configure
+just dist
+just dist-check
 ```
 
-Static dist (everything statically linked, no shipped LLVM dylibs):
+Static dist (no shipped LLVM dylibs):
 
 ```sh
-POLYREGION_LLVM_DYLIB=OFF cmake -DACTION=LLVM      -DCMAKE_BUILD_TYPE=Release -P build.cmake
-POLYREGION_LLVM_DYLIB=OFF cmake -DACTION=CONFIGURE -DCMAKE_BUILD_TYPE=Release -P build.cmake
-POLYREGION_LLVM_DYLIB=OFF cmake -DACTION=DIST      -DCMAKE_BUILD_TYPE=Release -P build.cmake
-POLYREGION_LLVM_DYLIB=OFF cmake -DACTION=CHECK     -DCMAKE_BUILD_TYPE=Release -P build.cmake
+just --set dylib OFF llvm
+just --set dylib OFF configure
+just --set dylib OFF dist
+just --set dylib OFF dist-check
 ```
 
 Iterate on a single target without re-installing:
 
 ```sh
-cmake -DACTION=BUILD -DTARGET=polycpp -DCMAKE_BUILD_TYPE=Release -P build.cmake
+just build polycpp
 ```
+
+Cross-arch (sysroot is auto-passed when `native/sysroot-${ARCH}` exists):
+
+```sh
+just sysroot ARCH=aarch64    # one-time, downloads + extracts Debian sysroot
+just llvm    ARCH=aarch64
+```
+
+`just env` prints the resolved settings (`arch`, `build_type`, `dylib`, `sysroot_path`).
 
 ## CI release artefacts
 
-Each platform workflow (`linux-shared.yaml`, `macos-shared.yaml`, `windows-shared.yaml`) runs
-`LLVM` (cached), `CONFIGURE`, per-target `BUILD`, then `DIST` → `Package dist` → `Upload dist` →
-`CHECK`. The packaged dist is uploaded as a GitHub Actions artefact named
-`polyregion-${platform}-${arch}-${build_type}` (90-day retention, not a release).
+Each platform workflow (`linux.yaml`, `macos.yaml`, `windows.yaml`) runs `codegen-check`, then
+matrix-driven `build` (`LLVM` + `DEVICE_LIBS` + `CONFIGURE` + `BUILD` + `DIST` + `DIST_TEST`),
+then in parallel `dist-check`, `native-tests`, and (linux only) `scala-tests`. The packaged
+dist is uploaded as a GitHub Actions artefact named `polyregion-${platform}-${arch}-${build_type}`
+(90-day retention, not a release).
+
+### Running CI locally with `act`
+
+[`act`](https://github.com/nektos/act) executes the workflow on a local podman/docker runner.
+`.actrc` at the repo root configures it: x86_64-only matrix, host network (needed because
+rootless podman's default bridge has no IPv6 egress), workspace bind-mount so artefacts
+survive between runs, and `/tmp/act-ccache` for compiler cache.
+
+```sh
+act -W .github/workflows/linux.yaml -j codegen-check   # fast: sbt codegen + diff
+act -W .github/workflows/linux.yaml -j build           # full LLVM build (~30 min cold)
+act -W .github/workflows/linux.yaml -j dist-check      # uses the artefact from `build`
+```
+
+Notes:
+- Requires `act >= 0.2.86` for upload-artifact@v7 protocol compatibility.
+- macOS and Windows workflows aren't tested locally (`act` doesn't have parity for those runners).
+- First run is slow (sysroot ~40s, LLVM ~30min); subsequent runs reuse the build dir on disk
+  thanks to `--bind`.
 
 ## Testing
 
@@ -141,9 +173,12 @@ task. Tee long runs and grep the log; do not re-run for follow-up questions.
 ### To skip a flaky backend
 
 ```bash
-POLYINVOKE_DISABLE_BACKENDS=ZE polyfc-tests          # drop Intel Level Zero
-POLYINVOKE_DISABLE_BACKENDS=HIP polycpp-tests        # drop ROCm/HIP
+POLYINVOKE_DISABLE_BACKENDS=LevelZero polyfc-tests   # drop Intel Level Zero
+POLYINVOKE_DISABLE_BACKENDS=HIP        polycpp-tests # drop ROCm/HIP
 ```
+
+Token must match the `magic_enum::enum_name` of `polyregion::invoke::Backend` (e.g.
+`LevelZero`, `HIP`, `CUDA`, `HSA`, `OpenCL`, `Vulkan`, `Metal`).
 
 Drops the listed backend from the arch matrix without editing the host
 profile.

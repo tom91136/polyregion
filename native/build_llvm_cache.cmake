@@ -23,6 +23,18 @@ if (UNIX)
 
     set(CMAKE_C_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
     set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
+
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/sysroot_gcc_dir.cmake)
+    if (POLYREGION_SYSROOT_GCC_INSTALL_DIR)
+        set(_extra " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+        string(APPEND CMAKE_C_FLAGS_RELEASE   "${_extra}")
+        string(APPEND CMAKE_CXX_FLAGS_RELEASE "${_extra}")
+        string(APPEND CMAKE_C_FLAGS_DEBUG     "${_extra}")
+        string(APPEND CMAKE_CXX_FLAGS_DEBUG   "${_extra}")
+        set(CMAKE_C_FLAGS   "${_extra}" CACHE STRING "")
+        set(CMAKE_CXX_FLAGS "${_extra}" CACHE STRING "")
+        set(CMAKE_ASM_FLAGS "${_extra}" CACHE STRING "")
+    endif ()
 endif ()
 
 set(LLVM_TARGETS_TO_BUILD

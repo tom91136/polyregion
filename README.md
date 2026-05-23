@@ -9,25 +9,32 @@ Supported frontends are:
 ## Build & debug
 
 The native side (compilers, runtime, plugins) lives under `native/` and is built with CMake + vcpkg. The Scala frontend lives under `frontend/` and is built with sbt.
-LLVM is bundled and built once into `native/llvm-${BUILD_TYPE}-${ARCH}/` via the helper CMake script:
+Top-level orchestration is via [`just`](https://github.com/casey/just); `just` from the repo root lists every recipe.
+
+### Quick start (fresh clone)
+
+Only `JAVA_HOME` needs to be set externally; `just vcpkg` clones vcpkg into the repo and `VCPKG_ROOT` is auto-discovered there.
 
 ```sh
-cmake -DCMAKE_BUILD_TYPE=Release -DARCH=x86_64 -DACTION=LLVM -DCMAKE_SYSROOT=$PWD/sysroot-x86_64 -P build.cmake
+export JAVA_HOME=/path/to/jdk21    # any JDK 21+ install root
+
+just vcpkg               # clones vcpkg at the pinned commit
+just sysroot             # AL8 sysroot for portable binaries (optional step, podman or docker required)
+                         # skip if you want host-native; no sysroot is detected as "no sysroot"
+just llvm                # bundled LLVM/Clang/LLD/Flang/MLIR
+just dist                # polyregion dist (bin/ + lib/)
+just dist-check          # smoke test
 ```
 
-vcpkg dependencies are resolved by the toolchain file on first configure.
+`just env` prints the resolved settings (`arch`, `build_type`, `dylib`, `sysroot_path`, `vcpkg_root`, `java_home`).
 
 ### Native - incremental
 
 ```sh
-# Configure 
-cmake -S native -B native/cmake-build-release-clang \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-    -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+just configure              # one-time CMake configure of native/
 
-# Build a single component
-cmake --build native/cmake-build-release-clang --target polycpp -j
+just build polycpp          # build a single component
+just build all              # everything
 
 # Useful targets:
 #   polyc       — AST → LLVM IR backend (subprocess invoked by frontends)
@@ -36,6 +43,8 @@ cmake --build native/cmake-build-release-clang --target polycpp -j
 #   polystl     — runtime library linked into user binaries
 #   polyc-test  — polyc unit tests
 ```
+
+For IDE-driven CMake configurations or anything fancier, see `native/README.md` for the raw cmake invocation.
 
 The `polycpp` and `polyfc` targets transitively rebuild everything they depend on (clang plugin, polystl, polyreflect plugin, polyc, etc.).
 
@@ -95,18 +104,16 @@ Prerequisites: the native JNI shared library must be built first — the test ru
 # 1. Build the native JNI bindings the test runner depends on.
 cmake --build native/cmake-build-release-clang --target polyc-JNI -j
 
-# 2. Run the full suite (~13–17 min).
+# 2. Run the full suite (~20 min).
+just scala-tests
+
+#  sbt for specific runs:
 cd frontend
-sbt 'compiler-testsuite-scala/test'
-
-# Or one suite while iterating:
 sbt 'compiler-testsuite-scala/testOnly polyregion.GivenSuite'
-
-# Or one test by glob:
 sbt 'compiler-testsuite-scala/testOnly polyregion.ControlFlowSuite -- *while-le-inc*'
 ```
 
-If you change anything in `compiler/` (macros) or `prism/StdLib.scala`, force a clean macro re-expansion — sbt's incremental compiler doesn't always notice that downstream test classes' macro outputs are stale:
+If you change anything in `compiler/` (macros) or `prism/StdLib.scala`, force a clean macro re-expansion as sbt's incremental compiler doesn't always track macro changes correctly:
 
 ```sh
 rm -rf compiler-testsuite-scala/target/scala-3.7.4 compiler/target/scala-3.7.4/classes

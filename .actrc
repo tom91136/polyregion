@@ -1,0 +1,15 @@
+-P ubuntu-24.04=catthehacker/ubuntu:act-24.04
+
+# keeps build artefacts on disk across runs
+--bind
+
+--artifact-server-path /tmp/act-artifacts
+
+--matrix arch:x86_64
+
+# XXX rootless podman has no IPv6 egress for some reason
+--container-options --network=host
+--env RES_OPTIONS=no-aaaa
+
+--container-options --volume=/tmp/act-ccache:/tmp/act-ccache
+--env CCACHE_DIR=/tmp/act-ccache
