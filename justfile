@@ -173,7 +173,7 @@ _native action extra='':
     set -euo pipefail
     SYSROOT_FLAG=()
     [ -d "{{ sysroot_path }}" ] && SYSROOT_FLAG=(-DCMAKE_SYSROOT="{{ sysroot_path }}")
-    cd native && cmake -DCMAKE_BUILD_TYPE={{ build_type }} -DARCH={{ arch }} -DACTION={{ action }} "${SYSROOT_FLAG[@]}" {{ extra }} -P build.cmake
+    cd native && cmake -DCMAKE_BUILD_TYPE={{ build_type }} -DARCH={{ arch }} -DACTION={{ action }} ${SYSROOT_FLAG[@]+"${SYSROOT_FLAG[@]}"} {{ extra }} -P build.cmake
 
 # === Aggregate ===
 

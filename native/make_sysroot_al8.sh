@@ -27,7 +27,7 @@ for arch in "${archs[@]}"; do
   echo "==> building al8 sysroot for $arch"
   image="polyregion-sysroot-al8:$arch"
 
-  "$OCI" build --pull=always --arch="$arch" -t "$image" -f - <<'EOF'
+  "$OCI" build --pull --arch="$arch" -t "$image" -f - <<'EOF'
 ARG SYSBASE=quay.io/almalinuxorg/almalinux:8
 FROM ${SYSBASE} AS staging
 
