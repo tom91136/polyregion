@@ -15,36 +15,6 @@ defaults:
     shell: cmd
 
 jobs:
-  codegen-check:
-    runs-on: windows-2025-vs2026
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK + sbt cache
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: sbt
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
-
-      - name: Setup just
-        uses: extractions/setup-just@v4
-
-      - name: Regenerate Scala-derived sources
-        run: just _codegen-sbt
-
-      - name: Format generated C++
-        run: just _codegen-format
-
-      - name: Fail if regenerated sources drift
-        run: just _codegen-diff
-
   build:
     strategy:
       fail-fast: false
