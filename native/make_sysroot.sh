@@ -39,10 +39,11 @@ for arch in "${archs[@]}"; do
   echo "==> building al8 sysroot for $arch (host=$host_arch, oci=$OCI)"
   image="polyregion-sysroot-al8:$arch"
 
+  # docker requires an explicit context arg (`.`); podman accepts `-f -` alone but tolerates the dot.
   "$OCI" build --pull ${oci_flags[@]+"${oci_flags[@]}"} \
       --build-arg "RHEL_TRIPLE=$rhel_triple" \
       --build-arg "GNU_TRIPLE=$gnu_triple" \
-      -t "$image" -f - <<'EOF'
+      -t "$image" -f - . <<'EOF'
 ARG SYSBASE=quay.io/almalinuxorg/almalinux:8
 FROM ${SYSBASE} AS staging
 ARG RHEL_TRIPLE
