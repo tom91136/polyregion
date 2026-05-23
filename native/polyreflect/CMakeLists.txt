@@ -1,8 +1,7 @@
 include(AddLLVM)
 
-add_library(polyreflect-rt INTERFACE)
+add_library(polyreflect-rt SHARED reflect-rt/rt_impl.cpp)
 target_sources(polyreflect-rt
-        PRIVATE
         PUBLIC FILE_SET HEADERS
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
@@ -13,7 +12,10 @@ target_sources(polyreflect-rt
         reflect-rt/rt_protected.hpp
         reflect-rt/rt_reflect.hpp
 )
-target_link_libraries(polyreflect-rt INTERFACE ${CMAKE_DL_LIBS})
+target_include_directories(polyreflect-rt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(polyreflect-rt PRIVATE ${COMPILE_OPTIONS})
+target_link_options(polyreflect-rt PRIVATE ${LINK_OPTIONS})
+target_link_libraries(polyreflect-rt PUBLIC ${CMAKE_DL_LIBS})
 
 add_llvm_pass_plugin(polyreflect-plugin
         plugin.cpp

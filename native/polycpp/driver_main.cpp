@@ -183,11 +183,15 @@ int main(int argc, const char *argv[]) {
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), joinPath(polycppLibPath, staticLibraryName("polystl-static")));
+                       // XXX link libpolyreflect-rt so the per-TU malloc/free interposers resolve to
+                       // its single `_rt_record` / `_rt_release` instance.
+                       append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polyreflect-rt"));
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
                      case StdParOptions::LinkKind::Dynamic: {
                        append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polystl"));
+                       append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polyreflect-rt"));
                        append(appleDistLibcxxRpath(execParentPath));
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr

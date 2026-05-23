@@ -54,7 +54,7 @@ if (POLYREGION_FUSED_DRIVER)
     add_custom_target(polycpp-polyld-resource
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polyld-link>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LLD_NAME}")
 else ()
-    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polyreflect-plugin polystl-static polystl)
+    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polyreflect-plugin polyreflect-rt polystl-static polystl)
 endif ()
 # =======================================================================================
 
@@ -249,7 +249,7 @@ if (APPLE)
 endif ()
 
 install(TARGETS polycpp RUNTIME DESTINATION bin)
-install(TARGETS polystl polystl-static
+install(TARGETS polystl polystl-static polyreflect-rt
         LIBRARY DESTINATION lib/polycpp/lib
         ARCHIVE DESTINATION lib/polycpp/lib
         RUNTIME DESTINATION lib/polycpp/lib
@@ -259,6 +259,6 @@ if (NOT POLYREGION_FUSED_DRIVER)
             LIBRARY DESTINATION lib/polycpp/lib
             RUNTIME DESTINATION lib/polycpp/lib)
 endif ()
-foreach (HEADER_TARGET polycommon polyinvoke-obj polyrt-obj polyreflect-rt)
+foreach (HEADER_TARGET polycommon polyinvoke-obj polyrt-obj)
     install(TARGETS ${HEADER_TARGET} FILE_SET HEADERS DESTINATION lib/polycpp/include)
 endforeach ()

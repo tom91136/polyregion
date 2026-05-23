@@ -13,9 +13,9 @@ function(add_copy_lib_targets target)
             ${commands})
 endfunction()
 if (POLYREGION_FUSED_DRIVER)
-    add_copy_lib_targets(polyfc-lib-resource polydco-static polydco)
+    add_copy_lib_targets(polyfc-lib-resource polyreflect-rt polydco-static polydco)
 else ()
-    add_copy_lib_targets(polyfc-lib-resource polyfc-flang-plugin polyreflect-plugin polydco-static polydco)
+    add_copy_lib_targets(polyfc-lib-resource polyfc-flang-plugin polyreflect-plugin polyreflect-rt polydco-static polydco)
 endif ()
 
 
@@ -240,7 +240,7 @@ install(TARGETS polyfc RUNTIME DESTINATION bin)
 if (WIN32)
     install(FILES "$<TARGET_FILE_DIR:polyfc>/polyfc.exe" DESTINATION bin)
 endif ()
-install(TARGETS polydco polydco-static
+install(TARGETS polydco polydco-static polyreflect-rt
         LIBRARY DESTINATION lib/polyfc/lib
         ARCHIVE DESTINATION lib/polyfc/lib
         RUNTIME DESTINATION lib/polyfc/lib

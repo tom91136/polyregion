@@ -81,10 +81,12 @@ constexpr const char *to_string(const Type t) {
 extern "C" PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" void _rt_record(const void *ptr, size_t size, Type type);
+extern "C" void _rt_release(void *ptr, Type type);
   #else
-extern "C" __attribute__((weak)) PtrMeta _rt_reflect_p(const void *ptr);
-extern "C" __attribute__((weak)) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
-extern "C" __attribute__((weak)) void _rt_record(const void *ptr, size_t size, Type type);
+extern "C" PtrMeta _rt_reflect_p(const void *ptr);
+extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
+extern "C" void _rt_record(const void *ptr, size_t size, Type type);
+extern "C" void _rt_release(void *ptr, Type type);
   #endif
 #endif
 
@@ -160,11 +162,10 @@ struct PtrRecord {
 
 class ReflectService {
 
-  std::atomic_bool &interpose;
   HashMap<uintptr_t, PtrRecord> data;
   std::shared_mutex mutex{};
+  std::FILE *trace{};
   time_point<steady_clock> start;
-  [[maybe_unused]] std::FILE *trace{};
 
   __RT_ODR const PtrRecord *queryUnsafe(const uintptr_t ptr, const bool allowSubrange) const {
     const PtrRecord *result = data.find(ptr);
@@ -185,20 +186,12 @@ class ReflectService {
   }
 
 public:
-  __RT_ODR explicit ReflectService(std::atomic_bool &interpose)
-      : interpose(interpose), data([](auto x) { return x; }), start(steady_clock::now()) {
-    char *name{};
-    safe_snprintf(&name, "trace_%d.json",
-  #ifdef _WIN32
-                  GetCurrentProcessId()
-  #else
-                  getpid()
-  #endif
-    );
-    __RT_ALTERNATIVE(free)(name);
+  __RT_ODR ReflectService() : data([](auto x) { return x; }), start(steady_clock::now()) {
+    if (const char *path = std::getenv("POLYREFLECT_TRACE")) {
+      trace = std::fopen(path, "w");
+      if (trace) safe_fprintf(trace, "[\n");
+    }
     safe_fprintf(stderr, "[PtrReflect] started\n");
-    // XXX `interpose` is armed by the _rt_get caller AFTER the static local fully constructs;
-    // arming here lets a tracked alloc re-enter _rt_get mid-init and trip recursive_init_error.
   }
 
   __RT_ODR void blockingRecord(const PtrInfo &info, const time_point<steady_clock> now = steady_clock::now()) {
@@ -212,28 +205,31 @@ public:
 
   __RT_ODR void blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
-    // safe_fprintf(stderr, "[PtrReflect] release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
-    if (queryUnsafe(ptr, false)) {
-      // const auto [recordPoint, info] = *it;
-      // safe_fprintf(trace,
-      //              "  {"
-      //              "\"name\": \"0x%lx (%ld)\","
-      //              "\"cat\": \"%s\", "
-      //              "\"ph\": \"X\", "
-      //              "\"ts\": %" PRId64 " , "
-      //              "\"dur\": %" PRId64 ", \"pid\": %d, \"tid\": %d},\n",
-      //              info.base, info.size, to_string(info.type),                                     //
-      //              duration_cast<microseconds>(recordPoint.time_since_epoch()).count(),            //
-      //              duration_cast<microseconds>(now - recordPoint).count(), to_integral(info.type), //
-      //              0);
-      // i++;
-      // if (i % 100 == 0) std::fflush(trace);
+    if (const auto *rec = queryUnsafe(ptr, false)) {
+      if (trace)
+        safe_fprintf(trace,
+                     "  {\"name\":\"0x%lx (%ld)\",\"cat\":\"%s\",\"ph\":\"X\","
+                     "\"ts\":%" PRId64 ",\"dur\":%" PRId64 ",\"pid\":0,\"tid\":0},\n",
+                     rec->info.base, rec->info.size, to_string(rec->info.type),
+                     duration_cast<microseconds>(rec->point.time_since_epoch()).count(),
+                     duration_cast<microseconds>(now - rec->point).count());
       data.erase(ptr);
       return;
     }
     safe_fprintf(stderr, "[PtrReflect] failed to release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
-    // raise(SIGTRAP);
-    // fail();
+  }
+
+  __RT_ODR void finishTrace() {
+    std::unique_lock lock(mutex);
+    if (!trace) return;
+    const auto now = steady_clock::now();
+    // Final event has no trailing comma; closes the JSON array.
+    safe_fprintf(trace,
+                 "  {\"name\":\"runtime\",\"cat\":\"global\",\"ph\":\"X\","
+                 "\"ts\":%" PRId64 ",\"dur\":%" PRId64 ",\"pid\":0,\"tid\":0}\n]\n",
+                 duration_cast<microseconds>(start.time_since_epoch()).count(), duration_cast<microseconds>(now - start).count());
+    std::fclose(trace);
+    trace = nullptr;
   }
 
   __RT_ODR PtrMeta blockingQuery(const uintptr_t ptrValue) {
@@ -244,33 +240,24 @@ public:
 
   __RT_ODR PtrMeta blockingQuery(const void *ptr) { return blockingQuery(reinterpret_cast<uintptr_t>(ptr)); }
 
-  __RT_ODR ~ReflectService() {
-    interpose = false;
-    // const auto now = steady_clock::now();
-    // safe_fprintf(trace,
-    //              "  {"
-    //              "\"name\": \"runtime\","
-    //              "\"cat\": \"global\", "
-    //              "\"ph\": \"X\", "
-    //              "\"ts\": %" PRId64 ", "
-    //              "\"dur\": %" PRId64 ", \"pid\": 0, \"tid\": %d}\n",            //
-    //              duration_cast<microseconds>(start.time_since_epoch()).count(), //
-    //              duration_cast<microseconds>(now - start).count(),              //
-    //              0);
-    // safe_fprintf(trace, "]");
-    // std::fclose(trace);
-    safe_fprintf(stderr, "[PtrReflect] terminated\n");
-  }
+  __RT_ODR ~ReflectService() = default;
 };
 
+// XXX Service is leaked: driver-internal teardowns (CUDA/HSA) call into interposed free() during
+// process exit, which would race the HashMap destructor and SIGSEGV. OS reclaims at exit.
 inline std::atomic_bool serviceInit{false};
 __RT_ODR inline ReflectService *_rt_get() {
-  static ReflectService s(serviceInit);
-  return &s;
+  static ReflectService *const instance = new ReflectService();
+  return instance;
 }
 inline auto _ = [] {
   auto *svc = _rt_get();
   serviceInit.store(true);
+  std::atexit([] {
+    serviceInit.store(false, std::memory_order_relaxed);
+    _rt_get()->finishTrace();
+    safe_fprintf(stderr, "[PtrReflect] terminated\n");
+  });
   return svc;
 }();
 

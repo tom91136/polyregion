@@ -86,5 +86,16 @@ extern "C" __attribute__((weak)) void *__interceptor_realloc(void *ptr, size_t s
 extern "C" __attribute__((weak)) void *__interceptor_memalign(size_t alignment, size_t size);
 extern "C" __attribute__((weak)) void __interceptor_free(void *ptr);
 
-  #define __RT_ALTERNATIVE(func) (__interceptor_##func ? __interceptor_##func : __interposed_##func)
+  // XXX Inside libpolyreflect-rt the ReflectService ctor allocates during dlopen, before
+  // dlsym(RTLD_NEXT,...) can resolve; route to plain libc to avoid a PC=0 crash. The .so
+  // doesn't override malloc/free itself so this stays safe.
+  #ifdef __RT_IMPL
+    #include <cstdlib>
+    #if defined(__linux__)
+      #include <malloc.h>
+    #endif
+    #define __RT_ALTERNATIVE(func) ::func
+  #else
+    #define __RT_ALTERNATIVE(func) (__interceptor_##func ? __interceptor_##func : __interposed_##func)
+  #endif
 #endif
