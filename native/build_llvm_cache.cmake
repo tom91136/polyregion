@@ -35,6 +35,14 @@ if (UNIX)
         set(CMAKE_CXX_FLAGS "${_extra}" CACHE STRING "")
         set(CMAKE_ASM_FLAGS "${_extra}" CACHE STRING "")
     endif ()
+
+    # shm_open is in librt on glibc <2.34 (AL8 = 2.28); thin-LTO drops the implicit
+    # dependency LLVM's OrcJIT introduces, leaving libLLVM.so unlinked against -lrt.
+    # No-op on glibc 2.34+ where librt is an empty compat shim.
+    if (NOT APPLE)
+        string(APPEND CMAKE_SHARED_LINKER_FLAGS_INIT " -lrt")
+        string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT    " -lrt")
+    endif ()
 endif ()
 
 set(LLVM_TARGETS_TO_BUILD

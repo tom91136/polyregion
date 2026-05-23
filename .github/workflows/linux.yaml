@@ -63,6 +63,7 @@ jobs:
             flang_parallel_compile_jobs: "3"
     runs-on: ${{ matrix.runs_on }}
     env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
@@ -258,6 +259,8 @@ jobs:
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
     container: ${{ matrix.distro.image }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - name: Install container dependencies
         run: ${{ matrix.distro.pkg }}
@@ -298,6 +301,8 @@ jobs:
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 
@@ -360,6 +365,8 @@ jobs:
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 

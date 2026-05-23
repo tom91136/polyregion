@@ -28,6 +28,7 @@ jobs:
             flang_parallel_compile_jobs: "1"
     runs-on: ${{ matrix.runs_on }}
     env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
@@ -160,6 +161,8 @@ jobs:
           - arch: x86_64
             runs_on: macos-26-intel
     runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 
@@ -197,6 +200,8 @@ jobs:
           - arch: x86_64
             runs_on: macos-26-intel
     runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 
@@ -257,6 +262,8 @@ jobs:
           - arch: x86_64
             runs_on: macos-26-intel
     runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 
