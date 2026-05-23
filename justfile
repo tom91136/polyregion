@@ -5,7 +5,7 @@ set shell := ["bash", "-cu"]
 set windows-shell := ["bash", "-cu"]
 
 native_build := env_var_or_default('POLYREGION_NATIVE_BUILD', '')
-arch         := env_var_or_default('ARCH', `uname -m`)
+arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', `uname -m`))
 build_type   := env_var_or_default('BUILD_TYPE', 'Release')
 
 # `just --set dylib OFF llvm` builds a static dist (no libLLVM.so / libMLIR.so / libclang-cpp.so).
