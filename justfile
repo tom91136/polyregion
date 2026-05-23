@@ -140,7 +140,7 @@ sysroot:
     #!/usr/bin/env bash
     set -euo pipefail
     cd native
-    ./make_sysroot_al8.sh {{ arch }}
+    ./make_sysroot.sh {{ arch }}
     rm -rf "sysroot-{{ arch }}"
     mkdir -p "sysroot-{{ arch }}"
     tar xf "out/sysroot-build/al8/sysroot-al8-{{ arch }}.tar.xz" -C "sysroot-{{ arch }}"

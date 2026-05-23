@@ -112,7 +112,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot_al8.sh') }}
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.sh') }}
 
       - name: Detect existing sysroot tarball (act fast-path)
         if: ${{ env.ACT }}
@@ -124,14 +124,14 @@ jobs:
         id: build-sysroot
         if: steps.restore-sysroot.outputs.cache-hit != 'true' && steps.act-sysroot-probe.outputs.found != 'true'
         working-directory: ./native
-        run: ./make_sysroot_al8.sh ${{ matrix.arch }}
+        run: ./make_sysroot.sh ${{ matrix.arch }}
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot_al8.sh') }}
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.sh') }}
 
       - name: Prepare sysroot
         working-directory: ./native
@@ -149,7 +149,7 @@ jobs:
         with:
           path: |
             ./native/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Setup just
         uses: extractions/setup-just@v4
@@ -172,7 +172,7 @@ jobs:
         with:
           path: |
             ./native/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
@@ -180,7 +180,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -192,7 +192,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot_al8.sh') }}
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Configure release build
         run: just configure
