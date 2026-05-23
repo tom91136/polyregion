@@ -182,10 +182,14 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
 
   if (args.empty()) return {-1, {}, "empty command", command};
   auto resolved = resolveBin(args[0], cfg);
-  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath});
+  std::string execErr;
+  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath}, 0, 0, &execErr);
 
   auto stdoutText = polyregion::read_string(*outPath);
   auto stderrText = polyregion::read_string(*errPath);
+
+  // XXX -2 is LLVM's signal-killed sentinel; surface WTERMSIG via the ErrMsg out-param.
+  if (code == -2 && !execErr.empty()) stderrText += "\n[polytest] signal: " + execErr + "\n";
 
   std::string cmdline = argRefs | drop(1) | prepend(llvm::StringRef(resolved)) | mk_string(" ", [](auto &s) { return s.str(); });
   return {code, std::move(stdoutText), std::move(stderrText), std::move(cmdline)};
