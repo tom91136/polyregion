@@ -36,6 +36,11 @@ for arch in "${archs[@]}"; do
     esac
   fi
 
+  case "$arch" in
+    x86_64)  extra_pkgs=libquadmath ;;
+    aarch64) extra_pkgs= ;;
+  esac
+
   echo "==> building al8 sysroot for $arch (host=$host_arch, oci=$OCI)"
   image="polyregion-sysroot-al8:$arch"
 
@@ -43,11 +48,13 @@ for arch in "${archs[@]}"; do
   "$OCI" build --pull ${oci_flags[@]+"${oci_flags[@]}"} \
       --build-arg "RHEL_TRIPLE=$rhel_triple" \
       --build-arg "GNU_TRIPLE=$gnu_triple" \
+      --build-arg "EXTRA_PKGS=$extra_pkgs" \
       -t "$image" -f - . <<'EOF'
 ARG SYSBASE=quay.io/almalinuxorg/almalinux:8
 FROM ${SYSBASE} AS staging
 ARG RHEL_TRIPLE
 ARG GNU_TRIPLE
+ARG EXTRA_PKGS
 
 RUN dnf install -y dnf-plugins-core && dnf config-manager --set-enabled powertools
 
@@ -57,11 +64,12 @@ RUN mkdir -p /mnt/sys-root \
         glibc glibc-devel glibc-headers glibc-static \
         libgcc libstdc++ libstdc++-devel libstdc++-static \
         libatomic libatomic-static \
-        libgfortran libquadmath \
+        libgfortran \
         kernel-headers \
         gcc gcc-c++ \
         gcc-toolset-12-gcc gcc-toolset-12-gcc-c++ \
         gcc-toolset-12-libstdc++-devel gcc-toolset-12-libatomic-devel \
+        ${EXTRA_PKGS} \
  && dnf --installroot /mnt/sys-root clean all
 
 RUN rm -rf \

@@ -246,11 +246,9 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
         distro:
-          # gcc-c++/g++ for the host C++ stdlib headers; libquadmath for flang-new runtime.
-          # AlmaLinux ships curl-minimal; asking for full curl conflicts.
-          - { image: 'almalinux:8',  pkg: 'dnf install -y git cmake findutils tar gzip gcc-c++ libquadmath' }
-          - { image: 'almalinux:9',  pkg: 'dnf install -y git cmake findutils tar gzip gcc-c++ libquadmath' }
-          - { image: 'almalinux:10', pkg: 'dnf install -y git cmake findutils tar gzip gcc-c++ libquadmath' }
+          - { image: 'almalinux:8',  pkg: 'dnf install -y --skip-unavailable git cmake findutils tar gzip gcc-c++ libquadmath' }
+          - { image: 'almalinux:9',  pkg: 'dnf install -y --skip-unavailable git cmake findutils tar gzip gcc-c++ libquadmath' }
+          - { image: 'almalinux:10', pkg: 'dnf install -y --skip-unavailable git cmake findutils tar gzip gcc-c++ libquadmath' }
           - { image: 'ubuntu:22.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ libquadmath0' }
           - { image: 'ubuntu:24.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ libquadmath0' }
         include:
