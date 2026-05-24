@@ -1,8 +1,8 @@
 !CHECK case: microbude
-!CHECK using: ppwi=1,2,256,512
+!CHECK using: ppwi=1,2,64,128
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} -o {output} {input}
-!CHECK do: {output} 938 20 2048 3
-!CHECK requires: Energies 885.11 1068.84 721.25 159.94 -12.88 143.16 280.75 179.62 71.16 -34.06 59.75 59.33 1.80 769.89 1077.49 643.11 Checksum 865196
+!CHECK do: {output} 938 20 128 3
+!CHECK requires: Energies 885.11 1068.84 721.25 159.94 -12.88 143.16 280.75 179.62 71.16 -34.06 59.75 59.33 1.80 769.89 1077.49 643.11 Checksum 53268
 
 #ifndef CHECK_PPWI
 #define CHECK_PPWI 1
