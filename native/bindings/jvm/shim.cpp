@@ -1,3 +1,5 @@
+#include <cstdlib>
+
 #include "polyregion/dl.h"
 
 #include "generated/mirror.h"
@@ -13,7 +15,7 @@ static std::vector<jobject> files;
 static JavaVM *CurrentVM = {};
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
-  fprintf(stdout, "Shim JNI_OnLoad\n");
+  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stdout, "Shim JNI_OnLoad\n");
   files.clear(); // In case OnUnload didn't finish normally
   CurrentVM = vm;
 
@@ -23,12 +25,16 @@ static JavaVM *CurrentVM = {};
 }
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
-  fprintf(stdout, "Shim JNI_OnUnload\n");
+  const bool debug = [] {
+    const char *d = std::getenv("POLYREGION_DEBUG");
+    return d && *d;
+  }();
+  if (debug) fprintf(stdout, "Shim JNI_OnUnload\n");
   JNIEnv *env = getEnv(vm);
   Natives::unregisterMethods(env);
 
   if (!files.empty()) {
-    fprintf(stdout, "Registered files: %ld\n", files.size());
+    if (debug) fprintf(stdout, "Registered files: %ld\n", files.size());
     auto File = polyregion::generated::File::of(env);
     for (auto &f : files) {
       File.wrap(env, f).delete_(env);

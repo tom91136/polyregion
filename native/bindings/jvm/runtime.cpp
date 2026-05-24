@@ -1,5 +1,6 @@
 #include "polyinvoke/runtime.h"
 
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -25,7 +26,7 @@ static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeExcep
 static JavaVM *CurrentVM;
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
-  fprintf(stderr, "OnLoad runtime\n");
+  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "OnLoad runtime\n");
   CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
@@ -36,7 +37,7 @@ static JavaVM *CurrentVM;
 }
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
-  fprintf(stderr, "OnUnload runtime\n");
+  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "OnUnload runtime\n");
   JNIEnv *env = getEnv(vm);
   gen::Platform::drop(env);
   gen::Property::drop(env);
@@ -219,7 +220,7 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
     }
     if (!cbRef) throwGeneric(attachedEnv, EX, "Unable to retrieve reference to the callback passed to enqueueInvokeAsync");
     else {
-      fprintf(stderr, "JNI thread attached\n");
+      if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "JNI thread attached\n");
       gen::Runnable::of(attachedEnv).wrap(attachedEnv, cbRef).run(attachedEnv);
       if (attachedEnv->ExceptionCheck()) attachedEnv->ExceptionClear();
       attachedEnv->DeleteGlobalRef(cbRef);

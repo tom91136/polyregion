@@ -1,5 +1,6 @@
 #include "compiler.h"
 
+#include <cstdlib>
 #include <string>
 
 #include "magic_enum/magic_enum.hpp"
@@ -36,7 +37,7 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_Metal1_0) == Compiler::Target_Source_C_Metal1_0);
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
-  fprintf(stderr, "JVM enter\n");
+  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "JVM enter\n");
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
   cp::initialise();
@@ -45,7 +46,7 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source
 }
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
-  fprintf(stderr, "JVM exit\n");
+  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "JVM exit\n");
   JNIEnv *env = getEnv(vm);
   gen::Layout::drop(env);
   gen::Compilation::drop(env);

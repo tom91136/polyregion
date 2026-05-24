@@ -11,6 +11,10 @@ import polyregion.prism.StdLib.MutableSeq
 
 object Pickler {
 
+  // Macro-time dump gate; matches `compiletime.DEBUG` semantics (POLYREGION_DEBUG=1).
+  private val DEBUG                                   = sys.env.contains("POLYREGION_DEBUG")
+  private inline def debug(inline s: => String): Unit = if (DEBUG) println(s)
+
   def liftTpe(using q: Quotes)(t: p.Type) = t match {
     case p.Type.Bool1   => Type.of[Boolean]
     case p.Type.IntU16  => Type.of[Char]
@@ -297,9 +301,10 @@ object Pickler {
         '{
           val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
           val arrPtr    = $pointerOfBuffer(arrBuffer)
-          println(
-            s"[bind]: write array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
-          )
+          if (sys.env.contains("POLYREGION_DEBUG"))
+            println(
+              s"[bind]: write array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
+            )
           var i = 0
           while (i < $expr.length_) {
             ${
@@ -342,7 +347,8 @@ object Pickler {
     ) = '{
       val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
       val ptr    = $pointerOfBuffer(buffer)
-      println(s"[bind]: object  ${$root}(prism=${$rootAfterPrism}) => $buffer(0x${ptr.toHexString})")
+      if (sys.env.contains("POLYREGION_DEBUG"))
+        println(s"[bind]: object  ${$root}(prism=${$rootAfterPrism}) => $buffer(0x${ptr.toHexString})")
       ${
         Varargs(mapping.members.map { m =>
           val memberOffset = Expr(m.offsetInBytes.toInt)
@@ -392,7 +398,8 @@ object Pickler {
         array
       }
 
-      println(s"??? target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
+      if (sys.env.contains("POLYREGION_DEBUG"))
+        println(s"??? target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
       $ptrMap += ($root -> ptr)
       ptr
     }
@@ -450,9 +457,10 @@ object Pickler {
             }
             i += 1
           }
-          println(
-            s"[bind]: read array  [${arrayLen} * ${${ Expr(comp.repr) }}]  ${$seq} => $arrBuffer(0x${arrPtr.toHexString})"
-          )
+          if (sys.env.contains("POLYREGION_DEBUG"))
+            println(
+              s"[bind]: read array  [${arrayLen} * ${${ Expr(comp.repr) }}]  ${$seq} => $arrBuffer(0x${arrPtr.toHexString})"
+            )
         }
     }
 
@@ -464,7 +472,8 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ) = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      println(s"[bind]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
+      if (sys.env.contains("POLYREGION_DEBUG"))
+        println(s"[bind]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
 
       def toByteArray(buffer: ByteBuffer): Array[Byte] = {
         val array = new Array[Byte](buffer.remaining())
@@ -472,7 +481,8 @@ object Pickler {
         array
       }
 
-      println(s">>> target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
+      if (sys.env.contains("POLYREGION_DEBUG"))
+        println(s">>> target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
 
       ${
         Varargs(
@@ -531,13 +541,14 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ): Expr[t] = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      println(
-        s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }} <- $buffer(0x${$ptr.toHexString})"
-      )
+      if (sys.env.contains("POLYREGION_DEBUG"))
+        println(
+          s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }} <- $buffer(0x${$ptr.toHexString})"
+        )
       ${
 
         // See if we have a ctor:
-        println(">> t= " + q.TypeRepr.of[t].widenTermRefByName.show)
+        debug(">> t= " + q.TypeRepr.of[t].widenTermRefByName.show)
         // For empty-member structs we use `Any` as the param type (see methodParamRepr); their
         // typeSymbol is Any, which has no usable primary ctor. Treat that as the no-ctor case
         // and just return null (the kernel doesn't read these back into a Scala value).
@@ -575,7 +586,7 @@ object Pickler {
               val typeDefs = ps.collect { case q.TypeParamClause(xs) => xs }.flatten
               val valDefs  = ps.collect { case q.TermParamClause(xs) => xs }.flatten
 
-              println(q.TypeRepr.of[t].widenTermRefByName)
+              debug(q.TypeRepr.of[t].widenTermRefByName.toString)
 
               val args = q.TypeRepr.of[t].widenTermRefByName match {
                 case q.AppliedType(_, xs) => xs
@@ -690,8 +701,8 @@ object Pickler {
                             // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
                             // and then extract the return type that way. The instantiated tree will never spliced anywhere so it safe to do so.
 
-                            println(s"sss = ${rootExpr.asTerm.tpe.widenTermRefByName.show}")
-                            println(s"sss = ${write(rootExpr.asTerm).tpe.widenTermRefByName.show}")
+                            debug(s"sss = ${rootExpr.asTerm.tpe.widenTermRefByName.show}")
+                            debug(s"sss = ${write(rootExpr.asTerm).tpe.widenTermRefByName.show}")
                             write(rootExpr.asTerm).tpe.widenTermRefByName.asType match {
                               case '[t] =>
                                 '{

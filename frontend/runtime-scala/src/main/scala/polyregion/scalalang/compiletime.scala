@@ -18,6 +18,11 @@ import scala.util.Try
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
 
+  // Set POLYREGION_DEBUG=1 to surface the per-offload IR / captures / events dump that the
+  // main macro path would otherwise print to scalac's stdout (hundreds of MB under the test suite).
+  private val DEBUG                                   = sys.env.contains("POLYREGION_DEBUG")
+  private inline def debug(inline s: => String): Unit = if (DEBUG) println(s)
+
   inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
   def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
     import q.reflect.*
@@ -212,9 +217,9 @@ object compiletime {
         )
       )
 
-      _ = println(log.render(1).mkString("\n"))
-      _ = println(prog.entry.repr)
-      _ = println(prog.functions.map(_.repr).mkString("\n"))
+      _ = debug(log.render(1).mkString("\n"))
+      _ = debug(prog.entry.repr)
+      _ = debug(prog.functions.map(_.repr).mkString("\n"))
 
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.polyASTVersioned(prog)))
       compiler = ct.Compiler.create()
@@ -228,12 +233,12 @@ object compiletime {
     } yield {
 
       compilations.foreach { (config, c) =>
-        println(s"Config=${config}")
-        println(s"Program=${c.program.length}")
-        println(s"Messages=\n  ${c.messages}")
-        println(s"Features=\n  ${c.features.toList}")
-        println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-        println(s"Captures=\n${capturesWithStructDefs}")
+        debug(s"Config=${config}")
+        debug(s"Program=${c.program.length}")
+        debug(s"Messages=\n  ${c.messages}")
+        debug(s"Features=\n  ${c.features.toList}")
+        debug(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+        debug(s"Captures=\n${capturesWithStructDefs}")
       }
 
       given Quotes = q.underlying
@@ -251,7 +256,7 @@ object compiletime {
       val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
       val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
 
-      println(s"Prog defs: ${prog.defs}")
+      debug(s"Prog defs: ${prog.defs}")
 
       val code = '{
 
@@ -352,9 +357,11 @@ object compiletime {
                         )
                       }
 
-                      println("Dispatch tid=" + Thread.currentThread.getId)
-                      println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
-                      println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
+                      if (sys.env.contains("POLYREGION_DEBUG")) {
+                        println("Dispatch tid=" + Thread.currentThread.getId)
+                        println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
+                        println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
+                      }
                       // Dispatch.
                       $queue.enqueueInvokeAsync(
                         $moduleName,
@@ -363,7 +370,8 @@ object compiletime {
                         fnValues.array,
                         rt.Policy($dim),
                         { () =>
-                          println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
+                          if (sys.env.contains("POLYREGION_DEBUG"))
+                            println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
 
                           val objMap = scala.collection.mutable.Map[Long, Any]()
 
@@ -380,7 +388,7 @@ object compiletime {
                               )
                               // })
                             }
-                            println("Restore complete")
+                            if (sys.env.contains("POLYREGION_DEBUG")) println("Restore complete")
                             cb_(Right(()))
                           } catch {
                             case e: Throwable =>
@@ -413,7 +421,7 @@ object compiletime {
         }
       }
       given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
-      println("Code=" + code.asTerm.show)
+      debug("Code=" + code.asTerm.show)
       compiler.close()
       code
     }
@@ -447,9 +455,7 @@ object compiletime {
     given Quotes = q.underlying
     val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((offset, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
-        println(
-          s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})"
-        )
+        debug(s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
@@ -468,7 +474,7 @@ object compiletime {
           case (p.Type.Struct(_, _), Some(sdef)) =>
             (ref.asExpr: @scala.unchecked) match {
               case '{ $r: t } =>
-                println(s"$r = " + r.asTerm.symbol.flags.show)
+                debug(s"$r = " + r.asTerm.symbol.flags.show)
                 val rtn = write(sdef.name, r)
                 Pickler.writePrim(target, Expr(byteOffset), p.Type.IntS64, rtn)
             }
@@ -497,9 +503,7 @@ object compiletime {
     given Quotes = q.underlying
     val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((offset, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
-        println(
-          s"[Bind] <-  [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})"
-        )
+        debug(s"[Bind] <-  [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
@@ -515,10 +519,10 @@ object compiletime {
           case (p.Type.Struct(_, _), Some(sdef)) =>
             (ref.asExpr: @scala.unchecked) match {
               case '{ $r: t } =>
-                println(s"$r = " + r.asTerm.symbol.flags.show)
+                debug(s"$r = " + r.asTerm.symbol.flags.show)
                 val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
                 '{
-                  println(s"Restore ${$r}")
+                  if (sys.env.contains("POLYREGION_DEBUG")) println(s"Restore ${$r}")
                   ${
                     if (mutable) {
                       q.Assign(r.asTerm, read(sdef.name, r, ptr).asTerm).asExprOf[Unit]
@@ -532,7 +536,7 @@ object compiletime {
             (ref.asExpr: @scala.unchecked) match {
               case '{ $r: u } =>
                 '{
-                  println(s"[Bind] skipping primitive ${$r}")
+                  if (sys.env.contains("POLYREGION_DEBUG")) println(s"[Bind] skipping primitive ${$r}")
                 }
             }
           case (t, _) =>
