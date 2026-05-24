@@ -40,8 +40,9 @@ if (UNIX)
     # dependency LLVM's OrcJIT introduces, leaving libLLVM.so unlinked against -lrt.
     # No-op on glibc 2.34+ where librt is an empty compat shim.
     if (NOT APPLE)
-        string(APPEND CMAKE_SHARED_LINKER_FLAGS_INIT " -lrt")
-        string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT    " -lrt")
+        set(CMAKE_SHARED_LINKER_FLAGS "-lrt" CACHE STRING "")
+        set(CMAKE_EXE_LINKER_FLAGS    "-lrt" CACHE STRING "")
+        set(CMAKE_MODULE_LINKER_FLAGS "-lrt" CACHE STRING "")
     endif ()
 endif ()
 
