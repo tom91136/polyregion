@@ -50,6 +50,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
+        bundle: [dso, js]
         include:
           - arch: x86_64
             runs_on: ubuntu-24.04
@@ -62,11 +64,13 @@ jobs:
             llvm_parallel_link_jobs: "4"
             flang_parallel_compile_jobs: "3"
     runs-on: ${{ matrix.runs_on }}
+    continue-on-error: ${{ matrix.bundle == 'js' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
+      POLYC_PASS_BUNDLE: ${{ matrix.bundle }}
     steps:
       - uses: actions/checkout@v6
 
@@ -88,6 +92,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1.1.18
 
       - name: Dotenv
         id: dotenv
@@ -195,18 +203,35 @@ jobs:
           path: ./native/thirdparty/device_libs
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
+      - name: Build pass bundle (${{ matrix.bundle }})
+        run: just pass-${{ matrix.bundle }}
+
       - name: Configure release build
         run: just configure
 
+      # dso = the bundle we ship; runs the full dist build + uploads downstream.
+      # js  = parallel coverage; build polyc + run native tests, no dist.
       - name: Build dist
+        if: matrix.bundle == 'dso'
         run: just dist
 
       - name: Build test dist
+        if: matrix.bundle == 'dso'
         run: just test-dist
 
+      - name: Build polyc + tests (js bundle)
+        if: matrix.bundle == 'js'
+        run: |
+          just build polyc
+          just build polyc-tests
+
+      - name: Run native tests (js bundle)
+        if: matrix.bundle == 'js'
+        run: just native-tests
+
       - name: Check artefact
+        if: always() && matrix.bundle == 'dso'
         working-directory: ./native
-        if: always()
         run: |
           DIST=polyregion-Release-${{ matrix.arch }}-dylib-dist
           ls -lah "$DIST/bin" "$DIST/lib"
@@ -225,6 +250,7 @@ jobs:
           done
 
       - name: Upload dist
+        if: matrix.bundle == 'dso'
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v4
         with:
@@ -233,6 +259,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload test dist
+        if: matrix.bundle == 'dso'
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v4
         with:
