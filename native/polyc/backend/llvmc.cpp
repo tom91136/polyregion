@@ -480,10 +480,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     M.setTargetTriple(TM.getTargetTriple());
   };
 
-  auto mkLLVMTargetMachineArtefact = [optLevel, genOpt, useUnsafeMath](TargetMachine &TM,                //
-                                                        const std::optional<llvm::CodeGenFileType> &tpe, //
-                                                        const llvm::Module &m0,                          //
-                                                        std::vector<polyast::CompileEvent> &events, const bool emplaceEvent) {
+  auto mkLLVMTargetMachineArtefact = [optLevel, genOpt, useUnsafeMath](TargetMachine &TM,                               //
+                                                                       const std::optional<llvm::CodeGenFileType> &tpe, //
+                                                                       const llvm::Module &m0,                          //
+                                                                       std::vector<polyast::CompileEvent> &events,
+                                                                       const bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
     auto iselPassStart = compiler::nowMono();
     llvm::SmallVector<char, 0> objBuffer;

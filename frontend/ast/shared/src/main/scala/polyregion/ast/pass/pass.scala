@@ -208,43 +208,37 @@ object PassDef {
 }
 
 object PassPipelineParser {
-  // Format: `name1, name2(k=v; k=v), name3`. The spec is built programmatically by `PassRegistry`
-  // / `polyc`, so argument values don't contain commas, semicolons, or nested parens.
-  def parse(input: String): Either[String, p.PassPipeline] = {
-    val trimmed = input.trim
-    if (trimmed.isEmpty) Left("empty pass pipeline")
-    else
-      trimmed
-        .split(',')
-        .toList
-        .zipWithIndex
-        .foldRight(Right(Nil): Either[String, List[p.PassSpec]]) { case ((step, idx), acc) =>
-          parseStep(step.trim).left.map(e => s"step ${idx + 1}: $e").flatMap(s => acc.map(s :: _))
-        }
-        .map(p.PassPipeline.apply)
-  }
-
-  private def parseStep(step: String): Either[String, p.PassSpec] = step match {
+  def parseStep(step: String): Either[String, p.PassSpec] = step match {
     case "" => Left("empty step")
     case s"$name($body)" =>
-      validateName(name.trim).flatMap { n =>
-        val args = body.trim
-        if (args.isEmpty) Right(p.PassSpec(n, Nil))
-        else
-          args
-            .split(';')
-            .toList
-            .foldRight(Right(Nil): Either[String, List[p.PassArg]])((raw, acc) =>
-              parseArg(raw.trim).flatMap(a => acc.map(a :: _))
-            )
-            .map(p.PassSpec(n, _))
-      }
-    case n => validateName(n).map(p.PassSpec(_, Nil))
+      if (body.contains('(') || body.contains(')')) Left(s"nested parentheses in args: '$step'")
+      else
+        validateName(name.trim).flatMap { n =>
+          val args = body.trim
+          if (args.isEmpty) Right(p.PassSpec(n, Nil))
+          else
+            args
+              .split(';')
+              .toList
+              .foldRight(Right(Nil): Either[String, List[p.PassArg]])((raw, acc) =>
+                parseArg(raw.trim).flatMap(a => acc.map(a :: _))
+              )
+              .map(p.PassSpec(n, _))
+        }
+    case n if n.contains('(') || n.contains(')') => Left(s"unbalanced parentheses: '$n'")
+    case n                                       => validateName(n).map(p.PassSpec(_, Nil))
   }
 
+  private val ReservedArgChars = Set(',', ';', '(', ')')
+
   private def parseArg(arg: String): Either[String, p.PassArg] = arg match {
-    case s"$key=$value" => validateName(key.trim).map(k => p.PassArg(k, value.trim))
-    case _              => Left(s"expected key=value argument, got '$arg'")
+    case s"$key=$value" =>
+      val v = value.trim
+      v.find(ReservedArgChars.contains) match {
+        case Some(c) => Left(s"reserved character '$c' in arg value '$v'")
+        case None    => validateName(key.trim).map(k => p.PassArg(k, v))
+      }
+    case _ => Left(s"expected key=value argument, got '$arg'")
   }
 
   private def validateName(name: String): Either[String, String] =

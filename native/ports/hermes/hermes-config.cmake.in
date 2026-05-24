@@ -1,0 +1,55 @@
+include(CMakeFindDependencyMacro)
+
+set(_hermes_root "${CMAKE_CURRENT_LIST_DIR}/../..")
+get_filename_component(_hermes_root "${_hermes_root}" ABSOLUTE)
+set(HERMES_INCLUDE_DIR "${_hermes_root}/include")
+
+# Hermes's archive set varies per platform (e.g. hermesADT,
+# hermesPlatformIntl are host-specific). Declare only those present.
+function(_hermes_maybe_import name)
+    if (TARGET ${name})
+        return()
+    endif ()
+    set(_rel "${_hermes_root}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${name}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    if (NOT EXISTS "${_rel}")
+        return()
+    endif ()
+    add_library(${name} STATIC IMPORTED)
+    set_target_properties(${name} PROPERTIES
+        IMPORTED_LOCATION             "${_rel}"
+        IMPORTED_LOCATION_DEBUG       "${_hermes_root}/debug/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${name}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+        INTERFACE_INCLUDE_DIRECTORIES "${HERMES_INCLUDE_DIR}")
+endfunction()
+
+set(_hermes_all
+    hermesvm_a hermesOptimizer hermesFrontend hermescompiler hermesPublic
+    hermesSema hermesRegex hermesBackend hermesHBCBackend hermesPlatformUnicode
+    hermesSupport hermesSourceMap hermesParser hermesAST hermesInst
+    hermesADT hermesFrontEndDefs hermesPlatformIntl
+    LLVHSupport LLVHDemangle
+    dtoa boost_context
+    jsi compileJS)
+foreach (_lib IN LISTS _hermes_all)
+    _hermes_maybe_import(${_lib})
+endforeach ()
+
+# Wire hermesvm_a's transitive deps; missing ones drop silently.
+set(_hermesvm_deps "")
+foreach (_dep IN ITEMS
+        hermesOptimizer hermesFrontend hermescompiler hermesSema hermesRegex
+        hermesBackend hermesHBCBackend hermesPlatformUnicode hermesSupport
+        hermesSourceMap hermesParser hermesAST hermesInst hermesADT
+        hermesFrontEndDefs hermesPublic hermesPlatformIntl
+        LLVHSupport LLVHDemangle dtoa boost_context)
+    if (TARGET ${_dep})
+        list(APPEND _hermesvm_deps ${_dep})
+    endif ()
+endforeach ()
+if (TARGET hermesvm_a)
+    set_target_properties(hermesvm_a PROPERTIES INTERFACE_LINK_LIBRARIES "${_hermesvm_deps}")
+endif ()
+if (TARGET compileJS)
+    set_target_properties(compileJS PROPERTIES INTERFACE_LINK_LIBRARIES "hermesvm_a")
+endif ()
+
+set(hermes_FOUND TRUE)

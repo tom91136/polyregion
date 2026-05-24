@@ -564,7 +564,8 @@ void doRewrite(ModuleOp op) {
         }
         loadsToReplace.push_back(loadOp);
       });
-      for (auto loadOp : loadsToReplace) R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes());
+      for (auto loadOp : loadsToReplace)
+        R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes());
 
       // XXX Stop at the innermost loop holding the inductionRef alloca; hoisting past it would
       // place the store outside the alloca's scope (LLVM Translation: "operand does not dominate").

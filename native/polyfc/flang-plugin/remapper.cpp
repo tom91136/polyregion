@@ -544,10 +544,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           case mlir::arith::CmpFPredicate::ULT: return intr2(x, Bind<Intr::LogicLt>());
           case mlir::arith::CmpFPredicate::ULE: return intr2(x, Bind<Intr::LogicLte>());
           case mlir::arith::CmpFPredicate::UNE: return intr2(x, Bind<Intr::LogicNeq>());
-          case mlir::arith::CmpFPredicate::ORD:
-            return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
-          case mlir::arith::CmpFPredicate::UNO:
-            return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
+          case mlir::arith::CmpFPredicate::ORD: return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), true))));
+          case mlir::arith::CmpFPredicate::UNO: return witness(x.getResult(), Expr::Any(Expr::Alias(dsl::integral(Type::Bool1(), false))));
         }
       }, //
 
@@ -680,9 +678,9 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         // TODO  (!fir.ref<!fir.array<?x!fir.char<1>>>, index) -> !fir.ref<!fir.char<1>>
         if (const auto ref = handleValue(c.getRef()) ^ narrow<Expr::Any, FBoxed, FVar, FArrayCoord>()) {
           // handle case: (!fir.heap<!fir.type<T{x:f64}>>, !fir.field) -> !fir.ref<f64>
-          *ref ^ foreach_total([&](const Expr::Any &e) { handleBoxed(e); },                 //
-                               [&](const FBoxed &e) { handleBoxed(e.addr()); },             //
-                               [&](const FVar &v) { handleBoxed(Expr::Alias(v.value)); },   //
+          *ref ^ foreach_total([&](const Expr::Any &e) { handleBoxed(e); },               //
+                               [&](const FBoxed &e) { handleBoxed(e.addr()); },           //
+                               [&](const FVar &v) { handleBoxed(Expr::Alias(v.value)); }, //
                                [&](const FArrayCoord &a) {
                                  auto base = newVar(a.array);
                                  auto off = newVar(a.offset);
@@ -902,7 +900,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         // leaves the local uninitialised; writes via array-coor then clobber whatever neighbours
         // the slot. Emit `Type::Arr(T, N)` so the storage actually exists on stack.
         Type::Any tpe = handleType(a.getInType());
-        if (auto seqTy = llvm::dyn_cast<fir::SequenceType>(a.getInType()); seqTy && !seqTy.hasDynamicExtents() && !seqTy.hasUnknownShape()) {
+        if (auto seqTy = llvm::dyn_cast<fir::SequenceType>(a.getInType());
+            seqTy && !seqTy.hasDynamicExtents() && !seqTy.hasUnknownShape()) {
           tpe = Type::Arr(handleType(seqTy.getEleTy()), static_cast<int32_t>(seqTy.getConstantArraySize()), TypeSpace::Global()).widen();
         }
         const Named named(fmt::format("alloca_{}", ++id), tpe);
@@ -928,8 +927,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                                  // box's heap addr so downstream converts/arith see the scalar, not
                                  // the FBoxed wrapper. Box-typed results preserve the wrapper for
                                  // subsequent box_addr / rebox / fir.embox use sites.
-                                 if (l.getResult().getType().isIntOrIndexOrFloat())
-                                   witness(l.getResult(), index0(e.addr()));
+                                 if (l.getResult().getType().isIntOrIndexOrFloat()) witness(l.getResult(), index0(e.addr()));
                                  else witness(l.getResult(), e);
                                }); //
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
@@ -961,7 +959,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           if (region.empty()) return {};
           auto savedStmts = std::move(stmts);
           stmts.clear();
-          for (auto &innerOp : region.front().without_terminator()) handleOp(&innerOp);
+          for (auto &innerOp : region.front().without_terminator())
+            handleOp(&innerOp);
           if (auto resOp = llvm::dyn_cast<fir::ResultOp>(region.front().getTerminator())) {
             for (size_t i = 0; i < resSels.size() && i < resOp.getOperands().size(); ++i)
               push(Stmt::Mut(resSels[i], handleValueAsScalar(resOp.getOperands()[i])).widen());
@@ -1008,7 +1007,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
 
         auto savedStmts = std::move(stmts);
         stmts.clear();
-        for (auto &innerOp : x.getBody()->without_terminator()) handleOp(&innerOp);
+        for (auto &innerOp : x.getBody()->without_terminator())
+          handleOp(&innerOp);
         if (auto resOp = llvm::dyn_cast<fir::ResultOp>(x.getBody()->getTerminator())) {
           for (size_t i = 0; i < accSels.size() && i < resOp.getOperands().size(); ++i)
             push(Stmt::Mut(accSels[i], handleValueAsScalar(resOp.getOperands()[i])).widen());

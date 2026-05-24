@@ -70,20 +70,30 @@ _format native_target sbt_task_a sbt_task_b:
 
 # === Codegen ===
 
-# Regenerate Scala-derived C++/JNI sources and polypass.js, then clang-format the output.
+# Regenerate Scala-derived C++/JNI sources, then clang-format the output.
 codegen:       _codegen-sbt _codegen-format
 
 # codegen + git diff against committed state, fails if regenerated sources drift.
 codegen-check: codegen _codegen-diff
 
 _codegen-sbt:
-    cd frontend && sbt -no-colors 'codegen/genCodegen; passJS/exportPassBundle'
+    cd frontend && sbt -no-colors 'codegen/genCodegen'
 
 _codegen-format:
     clang-format -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
 
 _codegen-diff:
-    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/polypass.js
+    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/generated native/polyc/include/polyregion/polypass.h
+
+# === Pass bundles ===
+
+# Build the Scala.js pass bundle (closure-compiled) and stage at native/polyc/polypass.js.
+pass-js:
+    cd frontend && sbt -no-colors 'passJS/exportPassBundle'
+
+# Build the Scala Native pass DSO and stage at native/polyc/libpolypass.{so,dylib,dll}.
+pass-native:
+    cd frontend && sbt -no-colors 'passNative/exportPassDso'
 
 # === Lint ===
 

@@ -15,7 +15,7 @@
 #include <vector>
 
 #ifndef CHECK_NUM_TYPE
-#define CHECK_NUM_TYPE double
+  #define CHECK_NUM_TYPE double
 #endif
 
 namespace {
@@ -27,7 +27,8 @@ constexpr double startScalar = 0.4;
 template <typename T> bool failed(const std::vector<T> &xs, double epsi, T gold, const char *name) {
   if (xs.empty()) return false;
   double err = 0.0;
-  for (auto v : xs) err += std::fabs(static_cast<double>(v - gold));
+  for (auto v : xs)
+    err += std::fabs(static_cast<double>(v - gold));
   if ((err / static_cast<double>(xs.size())) > epsi) {
     std::fprintf(stderr, "Validation failed on %s, average error = %f", name, err);
     return true;
@@ -54,7 +55,8 @@ template <typename T> bool run(int size, int times) {
   const T scalar = static_cast<T>(startScalar);
   T sum = static_cast<T>(0);
   std::vector<double> timings[5];
-  for (auto &t : timings) t.reserve(times);
+  for (auto &t : timings)
+    t.reserve(times);
 
   for (int k = 0; k < times; ++k) {
     auto t = clock::now();
@@ -70,8 +72,7 @@ template <typename T> bool run(int size, int times) {
     timings[2].push_back(seconds_since(t));
 
     t = clock::now();
-    std::transform(std::execution::par_unseq, b.begin(), b.end(), c.begin(), a.begin(),
-                   [scalar](T x, T y) { return x + scalar * y; });
+    std::transform(std::execution::par_unseq, b.begin(), b.end(), c.begin(), a.begin(), [scalar](T x, T y) { return x + scalar * y; });
     timings[3].push_back(seconds_since(t));
 
     t = clock::now();

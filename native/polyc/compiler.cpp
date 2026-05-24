@@ -1,8 +1,10 @@
 #include "compiler.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <mutex>
+#include <unordered_map>
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
@@ -21,12 +23,10 @@
 #include "backend/c_source.h"
 #include "backend/llvm.h"
 #include "backend/llvmc.h"
+#include "dso_runner.h"
+#include "js_runner.h"
 #include "polyast_codec.h"
-#include "qjs_runner.h"
-
-#ifndef POLYPASS_JS_DEV_PATH
-  #define POLYPASS_JS_DEV_PATH ""
-#endif
+#include "polypass_locate.h"
 
 using namespace polyregion;
 using namespace aspartame;
@@ -138,44 +138,49 @@ std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &byte
 }
 
 namespace {
-[[maybe_unused]] void polypassJsAnchor() {}
 
-// Resolution order: $POLYPASS_JS env, <exe-dir>/polypass.js, <exe-dir>/../lib/polypass.js,
-// then the build-time POLYPASS_JS_DEV_PATH baked in by CMake. Returns "" if unfound.
-std::string findPolypassJs() {
-  namespace fs = llvm::sys::fs;
-  namespace path = llvm::sys::path;
-  if (auto env = std::getenv("POLYPASS_JS"); env && *env && fs::exists(env)) return env;
-  const auto exe = fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&polypassJsAnchor));
-  if (!exe.empty()) {
-    const auto dir = path::parent_path(exe);
-    for (const llvm::StringRef rel : {"polypass.js", "../lib/polypass.js"}) {
-      llvm::SmallString<256> candidate(dir);
-      path::append(candidate, rel);
-      if (!fs::exists(candidate)) continue;
-      llvm::SmallString<256> resolved;
-      if (fs::real_path(candidate, resolved)) return candidate.str().str();
-      return resolved.str().str();
-    }
-  }
-  if (constexpr std::string_view dev = POLYPASS_JS_DEV_PATH; !dev.empty() && fs::exists(dev)) return std::string(dev);
-  return {};
-}
-} // namespace
+struct PluginRegistry {
+  std::vector<std::unique_ptr<polypass::PassRunner>> plugins;
+  std::unordered_map<std::string, size_t> ownerByPass;
+};
 
-static polypass::JsPassRunner &sharedJsRunner() {
-  static polypass::JsPassRunner runner;
+PluginRegistry &sharedPlugins() {
+  static PluginRegistry reg;
   static std::once_flag loaded;
   std::call_once(loaded, [] {
-    const auto path = findPolypassJs();
-    if (path.empty()) throw std::logic_error("polyc: polypass.js not found (set $POLYPASS_JS or install the dist)");
-    if (auto err = runner.loadModule(read_string(path), path); !err.empty())
-      throw std::logic_error("polyc: failed to load polypass.js: " + err);
+    std::string err;
+    auto refs = polypass::resolvePlugins(err);
+    if (!err.empty()) throw std::logic_error(fmt::format("polyc: {}", err));
+    for (auto &ref : refs) {
+      std::unique_ptr<polypass::PassRunner> runner =
+          ref.kind == polypass::PluginKind::Js ? std::unique_ptr<polypass::PassRunner>(std::make_unique<polypass::JsPassRunner>(ref.path))
+                                               : std::unique_ptr<polypass::PassRunner>(std::make_unique<polypass::DsoPassRunner>(ref.path));
+      if (auto rerr = runner->load(); !rerr.empty())
+        throw std::logic_error(fmt::format("polyc: failed to load PolyPass plugin {}: {}", ref.path, rerr));
+      const size_t idx = reg.plugins.size();
+      for (const auto &name : runner->passNames()) {
+        if (auto it = reg.ownerByPass.find(name); it != reg.ownerByPass.end()) {
+          fmt::print(stderr, "polyc: pass '{}' from {} overrides earlier definition from {}\n", name, runner->tag(),
+                     reg.plugins[it->second]->tag());
+          it->second = idx;
+        } else {
+          reg.ownerByPass.emplace(name, idx);
+        }
+      }
+      reg.plugins.push_back(std::move(runner));
+    }
   });
-  return runner;
+  return reg;
 }
 
-static polyast::PassRunResult runJsPipeline(const polyast::Program &p, std::string_view spec) {
+std::string bareName(const std::string &step) {
+  const auto paren = step.find('(');
+  return paren == std::string::npos ? step : trim(step.substr(0, paren));
+}
+
+} // namespace
+
+static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view spec) {
   const auto rootEpoch = compiler::nowMs();
   const auto rootStart = compiler::nowMono();
   auto timed = [](auto &&name, auto &&data, auto &&f) {
@@ -185,21 +190,55 @@ static polyast::PassRunResult runJsPipeline(const polyast::Program &p, std::stri
     return std::pair{std::move(out), polyast::CompileEvent(epoch, compiler::elapsedNs(start), name, data, {})};
   };
 
-  auto [in, serialiseEvent] = timed("polyast_msgpack_serialise_cpp", "", [&] { return polyast::program_to_msgpack(p); });
-  serialiseEvent.data = fmt::format("bytes={}", in.size());
+  auto [bytes, serialiseEvent] = timed("polyast_msgpack_serialise_cpp", "", [&] { return polyast::program_to_msgpack(p); });
+  serialiseEvent.data = fmt::format("bytes={}", bytes.size());
 
-  std::string err;
-  auto [out, jsEvent] = timed("polypass_js", "", [&] { return sharedJsRunner().runPipeline(spec, in, err); });
-  if (!err.empty()) throw std::logic_error(fmt::format("polypass {}: {}", spec, err));
-  jsEvent.data = fmt::format("bytes={}", out.size());
+  auto &reg = sharedPlugins();
 
-  auto [result, deserialiseEvent] = timed("polyast_msgpack_deserialise_cpp", fmt::format("bytes={}", out.size()),
-                                          [&] { return polyast::passrunresult_from_msgpack(out.data(), out.data() + out.size()); });
+  auto ownerOf = [&](const std::string &step) {
+    const auto bare = bareName(step);
+    const auto it = reg.ownerByPass.find(bare);
+    if (it == reg.ownerByPass.end()) throw std::logic_error(fmt::format("PolyPass: unknown pass '{}' in spec '{}'", bare, spec));
+    return it->second;
+  };
 
-  jsEvent.items = std::move(result.event.items);
-  std::vector<polyast::CompileEvent> items{std::move(serialiseEvent), std::move(jsEvent), std::move(deserialiseEvent)};
-  result.event = polyast::CompileEvent(rootEpoch, compiler::elapsedNs(rootStart), "polypass", std::string(spec), std::move(items));
-  return result;
+  const auto stepsWithOwner = (std::string(spec) ^ split(";"))                                  //
+                              | map([](auto &s) { return trim(s); })                            //
+                              | filter([](auto &s) { return !s.empty(); })                      //
+                              | map([&](auto &step) { return std::pair{ownerOf(step), step}; }) //
+                              | to_vector();
+
+  std::vector<std::pair<size_t, std::vector<std::string>>> groups;
+  for (const auto &[owner, step] : stepsWithOwner) {
+    if (groups.empty() || groups.back().first != owner) groups.emplace_back(owner, std::vector<std::string>{});
+    groups.back().second.emplace_back(step);
+  }
+  if (groups.empty()) throw std::logic_error(fmt::format("PolyPass: empty pipeline spec '{}'", spec));
+
+  std::vector<polyast::CompileEvent> items;
+  items.push_back(std::move(serialiseEvent));
+
+  polyast::Program currentProgram = p;
+  for (auto &[idx, stepStrings] : groups) {
+    auto &runner = *reg.plugins[idx];
+    std::string err;
+    const std::string runnerTag(runner.tag());
+    auto [out, runEvent] = timed(runnerTag, "", [&] { return runner.runPasses(stepStrings, bytes, err); });
+    if (!err.empty()) throw std::logic_error(fmt::format("PolyPass {} ({}): {}", spec, runnerTag, err));
+    runEvent.data = fmt::format("bytes={}", out.size());
+
+    auto [result, decodeEvent] = timed("polyast_msgpack_deserialise_cpp", fmt::format("bytes={}", out.size()),
+                                       [&] { return polyast::passrunresult_from_msgpack(out.data(), out.data() + out.size()); });
+
+    runEvent.items = std::move(result.event.items);
+    items.push_back(std::move(runEvent));
+    items.push_back(std::move(decodeEvent));
+    currentProgram = std::move(result.program);
+    bytes = std::move(out);
+  }
+
+  return polyast::PassRunResult(std::move(currentProgram), polyast::CompileEvent(rootEpoch, compiler::elapsedNs(rootStart), "PolyPass",
+                                                                                 std::string(spec), std::move(items)));
 }
 
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
@@ -229,7 +268,9 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   std::vector<polyast::CompileEvent> preEvents;
   auto effective = program;
   {
-    auto passRun = runJsPipeline(effective, "FullOpt");
+    const std::string_view spec =
+        options.pipelineSpec.empty() ? std::string_view{DefaultPipelineSpec} : std::string_view{options.pipelineSpec};
+    auto passRun = runPipelineChain(effective, spec);
     effective = std::move(passRun.program);
     preEvents.emplace_back(std::move(passRun.event));
   }

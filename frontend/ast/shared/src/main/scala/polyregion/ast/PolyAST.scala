@@ -370,7 +370,65 @@ object PolyAST {
       messages: String
   ) derives MsgPack.Codec
 
-  // ==========
+  object PolyPassAbi {
+
+    inline val Version    = 1
+    inline val Prefix     = "polypass_"
+    inline val EnvPlugins = "POLYPASS_PLUGINS"
+
+    object Status {
+      inline val Ok            = 0
+      inline val AllocFailed   = 1
+      inline val PipelineError = 2
+      // Detected by polyc, never returned by plugins.
+      inline val UnknownPass = 3
+      inline val AbiMismatch = 4
+    }
+    def docs(d: String): Nothing = ???
+
+    object AbiVersion {
+      def apply(): Int = docs("ABI version the plugin was built against; polyc refuses mismatched plugins.")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object PassCount {
+      def apply(): Long                   = docs("Number of passes this plugin contributes.")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object PassName {
+      def apply(i: Long): String =
+        docs("Bare identifier of the i-th pass (e.g. \"FullOpt\"). Process-lifetime; NULL if i out of range.")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object PassDescr {
+      def apply(i: Long): String =
+        docs("Optional human-readable description of the i-th pass; may return NULL or \"\".")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object RunPasses {
+      def apply(steps: List[String], in: Array[Byte]): Array[Byte] = docs(
+        "Run the NULL-terminated `steps` list against `in` (msgpack Program); steps share in-process state. On Ok, *out is a malloc'd PassRunResult; caller frees via " +
+          Free.Name + "."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object LastError {
+      def apply(): String = docs(
+        "NUL-terminated diagnostic for the most recent non-Ok status. Valid until the next " + RunPasses.Name +
+          " call; NULL when no error is set."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object Free {
+      def apply(ptr: Any): Unit           = docs("Release a buffer returned by " + RunPasses.Name + ".")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+  }
 
   extension (s: Sym) {
     def repr: String = s.fqn.mkString(".")

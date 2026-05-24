@@ -7,12 +7,30 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
 lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
-lazy val passBundleDest   = settingKey[File]("Destination of the JS pass bundle in the native tree.")
+lazy val passJsDest  = settingKey[File]("Destination of the JS PolyPass source in the native tree.")
+lazy val passDsoDest = settingKey[File]("Destination of the SN PolyPass DSO in the native tree.")
+
 lazy val exportPassBundle = taskKey[File]("Build pass.js (fullLinkJS) and copy it into the native tree.")
+lazy val exportPassDso    = taskKey[File]("Build the SN pass DSO (nativeLink) and copy it into the native tree.")
 lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)generate native C++/JNI sources.")
 lazy val genEw            = taskKey[Unit]("Run ewgen.Main to (re)generate the polyinvoke wrangler sources.")
 
-// /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
+def findBdwgcPrefix: File = {
+  val nativeDir = (file(".") / ".." / "native").getAbsoluteFile
+  Option(nativeDir.listFiles())
+    .map(_.toSeq)
+    .getOrElse(Nil)
+    .filter(_.isDirectory)
+    .flatMap(b => Option((b / "vcpkg_installed").listFiles()).map(_.toSeq).getOrElse(Nil))
+    .filter(d => d.isDirectory && !d.getName.startsWith("vcpkg"))
+    .find(d => (d / "include" / "gc.h").exists || (d / "include" / "gc" / "gc.h").exists)
+    .getOrElse(
+      sys.error(
+        "bdw-gc not found in any native/*/vcpkg_installed/<triplet>/. " +
+          "Configure the native build first: cmake -S native -B native/build-<config>."
+      )
+    )
+}
 
 lazy val scala3Version = "3.8.3"
 lazy val catsVersion   = "2.12.0"
@@ -80,7 +98,7 @@ lazy val `runtime-scala` = project
   )
   .dependsOn(`binding-jvm`, compiler % Compile, codegen % Compile)
 
-lazy val ast = crossProject(JVMPlatform, JSPlatform)
+lazy val ast = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .in(file("ast"))
   .settings(
     commonSettings,
@@ -132,7 +150,7 @@ lazy val codegen = project
   )
   .dependsOn(ast.jvm, `binding-jvm`)
 
-lazy val pass = crossProject(JVMPlatform, JSPlatform)
+lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .in(file("pass"))
   .settings(
     commonSettings,
@@ -147,16 +165,171 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform)
   .jsSettings(
     scalaJSUseMainModuleInitializer := false,
     scalaJSLinkerConfig ~= { _.withModuleKind(SJSModuleKind.CommonJSModule) },
-    passBundleDest := nativeDir / "polyc" / "polypass.js",
+    // XXX Scala.js's fullOptJS is dropping gcc, see https://www.scala-js.org/news/2026/04/04/announcing-scalajs-1.21.0
+    Compile / fullLinkJS / scalaJSLinkerConfig ~= (_.withClosureCompiler(false)),
+    passJsDest := nativeDir / "polyc" / "polypass.js",
     exportPassBundle := {
-      // fastLinkJS does IR-level DCE (tree-shaking) without Closure's name mangling, leaving the
-      // bundle readable for debugging from C++/QuickJS. fullLinkJS would minify everything.
+      import com.google.javascript.jscomp.{
+        BasicErrorManager,
+        CheckLevel,
+        CommandLineRunner,
+        CompilationLevel,
+        CompilerOptions,
+        DiagnosticGroups,
+        JSError,
+        WarningLevel,
+        Compiler => ClosureCompiler,
+        SourceFile => ClosureSourceFile
+      }
+
       val _      = (Compile / fastLinkJS).value
       val srcDir = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
       val src    = srcDir / "main.js"
-      val dst    = passBundleDest.value
+      val dst    = passJsDest.value
+      val log    = streams.value.log
+
+      // XXX Scala.js encodes `_` in JVM names as U+FF3F to avoid collisions with its own `_` usage;
+      // Closure's parser then NPEs on the escape (`Cannot read field "features"`).
+      val raw = IO.read(src).replace("\\uff3f", "_FF3F_")
+
+      val defaultExterns = CommandLineRunner.getDefaultExterns()
+      val inputs         = java.util.Collections.singletonList(ClosureSourceFile.fromCode(src.getName, raw))
+
+      def quietErrorManager(onReport: (CheckLevel, JSError) => Unit) =
+        new BasicErrorManager() {
+          override def report(level: CheckLevel, error: JSError): Unit  = onReport(level, error)
+          override def println(level: CheckLevel, error: JSError): Unit = ()
+          override def printSummary(): Unit                             = ()
+        }
+
+      // XXX `exports.X = ...` are Scala.js @JSExportTopLevel surfaces
+      val exportNames =
+        """(?m)^exports\.([A-Za-z_$][\w$]*)\s*=""".r.findAllMatchIn(raw).map(_.group(1)).toSet
+      val undeclared = scala.collection.mutable.Set.empty[String]
+      val undefRe    = """variable (\S+) is undeclared""".r
+      locally {
+        val pre = new ClosureCompiler(System.err)
+        pre.setErrorManager(quietErrorManager { (_, error) =>
+          if (error.getType.key == "JSC_UNDEFINED_VARIABLE")
+            undefRe.findFirstMatchIn(error.getDescription).foreach(m => undeclared += m.group(1))
+        })
+        val preOpts = new CompilerOptions
+        preOpts.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT_NEXT)
+        preOpts.setChecksOnly(true)
+        preOpts.setWarningLevel(DiagnosticGroups.UNDEFINED_VARIABLES, CheckLevel.WARNING)
+        pre.compile(defaultExterns, inputs, preOpts)
+      }
+      // XXX `exports` is the CJS module slot we always seed; everything else is a host-supplied global.
+      val hostGlobals = (undeclared.toSet - "exports").toSeq.sorted
+      val externsBody =
+        (Seq("/** @externs */", "var exports = {};") ++
+          exportNames.toSeq.sorted.map(n => s"exports.$n = function() {};") ++
+          hostGlobals.map(n => s"var $n;")).mkString("\n")
+
+      val opts = new CompilerOptions
+      CompilationLevel.ADVANCED_OPTIMIZATIONS.setOptionsForCompilationLevel(opts)
+      WarningLevel.QUIET.setOptionsForWarningLevel(opts)
+      opts.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT_NEXT)
+      opts.setLanguageOut(CompilerOptions.LanguageMode.ECMASCRIPT_2015)
+
+      val gcc = new ClosureCompiler(System.err)
+      gcc.setErrorManager(quietErrorManager { (level, error) =>
+        if (level == CheckLevel.ERROR) log.error(error.toString)
+      })
+      val externs = new java.util.ArrayList[ClosureSourceFile]
+      externs.addAll(defaultExterns)
+      externs.add(ClosureSourceFile.fromCode("polyregion-externs.js", externsBody))
+      val result = gcc.compile(externs, inputs, opts)
+      if (!result.success || result.errors.size > 0)
+        sys.error(s"Closure ADVANCED failed (${result.errors.size} errors)")
+      IO.write(dst, gcc.toSource)
+      log.info(
+        s"pass bundle: $dst (${dst.length() / 1024} KB; ${exportNames.size} exports, ${hostGlobals.size} host bindings)"
+      )
+      dst
+    }
+  )
+  .nativeSettings(
+    nativeConfig := {
+      val cfg      = nativeConfig.value
+      val gcPrefix = findBdwgcPrefix
+      val isMac    = scala.util.Properties.isMac
+      val isWin    = scala.util.Properties.isWin
+
+      // XXX macOS uses ld64.lld, no ICF so releaseFull, others have ICF so releaseFast for max folding
+      val mode =
+        if (isMac) scala.scalanative.build.Mode.releaseFull
+        else scala.scalanative.build.Mode.releaseFast
+
+      val gcLpath = "-L" + (gcPrefix / "lib").getAbsolutePath
+      val linkOpts: Seq[String] = if (isWin) {
+        // Windows hides non-exported symbols via @exported / __declspec(dllexport).
+        Seq(gcLpath, "-Wl,/opt:icf,/opt:ref", "-Wl,/debug:none")
+      } else {
+        val exportsList = {
+          val f = nativeDir / "polyc" / "generated" / "polypass-exports.txt"
+          if (!f.exists)
+            sys.error(s"PolyPass exports list missing: $f - run `sbt genCodegen` to regenerate")
+          IO.readLines(f).map(_.trim).filter(_.nonEmpty)
+        }
+        val exportsDir = (Compile / target).value / "polypass-exports"
+        IO.createDirectory(exportsDir)
+        if (isMac) {
+          val f = exportsDir / "polypass-exports.txt"
+          IO.write(f, exportsList.map("_" + _).mkString("", "\n", "\n"))
+          Seq(
+            gcLpath,
+            "-Wl,-exported_symbols_list," + f.getAbsolutePath,
+            "-Wl,-dead_strip",
+            "-Wl,-dead_strip_dylibs",
+            "-Wl,-x",
+            "-Wl,-no_function_starts"
+          )
+        } else {
+          val f = exportsDir / "polypass-exports.ver"
+          IO.write(f, "{\n  global:\n    polypass_*;\n  local:\n    *;\n};\n")
+          // --undefined roots survive SN's --start-lib/--end-lib lazy archives.
+          val keepRoots = exportsList.map("-Wl,--undefined=" + _)
+          val stripFlag =
+            if (Option(System.getenv("POLYREGION_POLYPASS_NO_STRIP")).exists(_.trim.nonEmpty)) Nil
+            else Seq("-Wl,-s")
+          Seq(
+            gcLpath,
+            "-fuse-ld=lld",
+            "-Wl,--icf=all",
+            "-static-libstdc++",
+            "-static-libgcc",
+            "-Wl,--version-script=" + f.getAbsolutePath
+          ) ++ keepRoots ++
+            Seq("-Wl,--gc-sections") ++ stripFlag
+        }
+      }
+
+      val sysrootFlag = Option(System.getenv("CMAKE_SYSROOT"))
+        .map(_.trim)
+        .filter(_.nonEmpty)
+        .map(s => Seq(s"--sysroot=$s"))
+        .getOrElse(Nil)
+
+      cfg
+        .withMode(mode)
+        .withLTO(scala.scalanative.build.LTO.full)
+        .withGC(scala.scalanative.build.GC.boehm)
+        .withBuildTarget(scala.scalanative.build.BuildTarget.libraryDynamic)
+        .withCompileOptions(sysrootFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath))
+        // XXX macOS ld64 picks the first match so we must prepend
+        .withLinkingOptions(sysrootFlag ++ linkOpts ++ cfg.linkingOptions)
+    },
+    passDsoDest := nativeDir / "polyc" / (
+      if (scala.util.Properties.isWin) "libpolypass.dll"
+      else if (scala.util.Properties.isMac) "libpolypass.dylib"
+      else "libpolypass.so"
+    ),
+    exportPassDso := {
+      val src = (Compile / nativeLink).value
+      val dst = passDsoDest.value
       IO.copyFile(src, dst)
-      streams.value.log.info(s"pass bundle: $src -> $dst (${dst.length() / 1024} KB)")
+      streams.value.log.info(s"pass DSO: $dst (${dst.length() / 1024} KB)")
       dst
     }
   )
@@ -268,10 +441,12 @@ lazy val root = project
     `binding-jvm`,
     ast.jvm,
     ast.js,
+    ast.native,
     codegen,
     ewgen,
     pass.jvm,
     pass.js,
+    pass.native,
     `runtime-scala`,
     `runtime-java`,
     compiler,

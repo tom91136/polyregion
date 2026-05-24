@@ -1,3 +1,9 @@
+if (POLYC_JS_ENGINE STREQUAL "hermes")
+    set(POLYC_JS_RUNNER_SRC hermes_runner.cpp)
+else ()
+    set(POLYC_JS_RUNNER_SRC qjs_runner.cpp)
+endif ()
+
 set(LIB_SOURCES
         backend/backend.cpp
         backend/llvm_amdgpu.cpp
@@ -10,14 +16,17 @@ set(LIB_SOURCES
         backend/c_source.cpp
         backend/lld_lite.cpp
         backend/memoryfs.cpp
-        qjs_runner.cpp
+        ${POLYC_JS_RUNNER_SRC}
+        dso_runner.cpp
+        polypass_locate.cpp
+        js_cache.cpp
         compiler.cpp
 )
 
 add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_polyc.cpp)
 
-add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp test/qjs_runner.cpp test/vendor_bitcode.cpp)
+add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp test/js_runner.cpp test/vendor_bitcode.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin driver_main.cpp)
 
@@ -29,7 +38,8 @@ target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR})
 target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
-        . ../include)
+        . ../include
+        include)
 
 if (NOT WIN32)
     target_precompile_headers(polyc-tests PRIVATE
@@ -93,6 +103,20 @@ message(STATUS "[compiler] Adding LLD libs = ${LLD_LIBS} ")
 #target_include_directories(polyc PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} ${LLVM_TARGETS_BINARY_HEADERS})
 
 
+if (POLYC_JS_ENGINE STREQUAL "hermes")
+    # hermesvm_a = all-in-one VM archive;
+    # compileJS = source-to-HBC entry point
+    # jsi = public C++ API
+    # winmm = sampling profiler deps for windows
+    set(POLYC_JS_LIBS compileJS hermesvm_a jsi)
+    if (MSVC)
+        list(APPEND POLYC_JS_LIBS winmm)
+    endif ()
+else ()
+    set(POLYC_JS_LIBS qjs)
+endif ()
+list(APPEND POLYC_JS_LIBS ${CMAKE_DL_LIBS})
+
 target_link_libraries(polyc
         PUBLIC
         PolyAST
@@ -100,7 +124,7 @@ target_link_libraries(polyc
         Aspartame::Aspartame
         magic_enum::magic_enum
         fmt::fmt
-        qjs
+        ${POLYC_JS_LIBS}
         ${POLYREGION_SYSTEM_LIBS}
         ${LLVM_LIBS}
         ${LLD_LIBS}
@@ -120,17 +144,43 @@ target_compile_options(polyc-driver PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(polyc-tests PRIVATE ${LINK_OPTIONS})
-target_link_options(polyc-benchmarks PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-tests PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
+target_link_options(polyc-benchmarks PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
 target_link_options(polyc-driver PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS})
-target_link_options(polyc PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
+target_link_options(polyc PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
+if (WIN32)
+    set_target_properties(polyc-bin PROPERTIES ARCHIVE_OUTPUT_NAME polyc-bin)
+endif ()
 
-# XXX dev-path lets polyc resolve polypass.js out of the source tree when run from a build dir
-# without an install step; dist install ships it under lib/ next to the binaries.
-target_compile_definitions(polyc PRIVATE POLYPASS_JS_DEV_PATH="${CMAKE_CURRENT_SOURCE_DIR}/polypass.js")
+# dev-path: lets polyc resolve the bundle/DSO out of the source tree without
+# an install step. Dist install ships them under lib/ alongside the binaries.
+# Built by sbt (just pass-native | just pass-js) into native/polyc/.
+if (WIN32)
+    set(_polypass_dso_name "libpolypass.dll")
+elseif (APPLE)
+    set(_polypass_dso_name "libpolypass.dylib")
+else ()
+    set(_polypass_dso_name "libpolypass.so")
+endif ()
+
+if (POLYC_PASS_BUNDLE STREQUAL "dso")
+    set(_polypass_artefact "${CMAKE_CURRENT_SOURCE_DIR}/${_polypass_dso_name}")
+    set(_polypass_dev_macro POLYPASS_DSO_DEV_PATH)
+    set(_polypass_build_hint "just pass-native")
+else ()
+    set(_polypass_artefact "${CMAKE_CURRENT_SOURCE_DIR}/polypass.js")
+    set(_polypass_dev_macro POLYPASS_JS_DEV_PATH)
+    set(_polypass_build_hint "just pass-js")
+endif ()
+if (NOT EXISTS "${_polypass_artefact}")
+    message(FATAL_ERROR
+            "POLYC_PASS_BUNDLE=${POLYC_PASS_BUNDLE} but ${_polypass_artefact} is missing.\n"
+            "Run: ${_polypass_build_hint}")
+endif ()
+target_compile_definitions(polyc PRIVATE ${_polypass_dev_macro}="${_polypass_artefact}")
 
 if (NOT EXISTS "${POLYREGION_DEVICE_LIBS_DIR}/.staged")
   message(FATAL_ERROR
@@ -164,6 +214,9 @@ configure_file(
 target_include_directories(polyc PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 install(TARGETS polyc-bin RUNTIME DESTINATION bin)
-install(FILES polypass.js DESTINATION lib OPTIONAL)
+install(FILES "${_polypass_artefact}" DESTINATION lib)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/polyregion"
+        DESTINATION include
+        FILES_MATCHING PATTERN "polypass.h")
 install(DIRECTORY "${POLYREGION_DEVICE_LIBS_DIR}/" DESTINATION lib
         FILES_MATCHING PATTERN "*.bc" PATTERN "*.LICENSE")

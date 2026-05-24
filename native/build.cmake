@@ -92,6 +92,12 @@ if (CMAKE_SYSROOT)
     list(APPEND BUILD_OPTIONS -DCMAKE_SYSROOT=${CMAKE_SYSROOT})
 endif ()
 
+foreach (_var POLYC_JS_ENGINE POLYC_PASS_BUNDLE)
+    if (DEFINED ENV{${_var}} AND NOT EXISTS "${BUILD_NAME}/CMakeCache.txt")
+        list(APPEND BUILD_OPTIONS -D${_var}=$ENV{${_var}})
+    endif ()
+endforeach ()
+
 macro(setup_vcpkg)
     if (DEFINED ENV{VCPKG_ROOT})
         set(VCPKG_ROOT $ENV{VCPKG_ROOT})

@@ -1,0 +1,18 @@
+{
+  "name": "hermes",
+  "version-date": "2026-05-05",
+  "description": "Hermes JavaScript engine. Static-only build wired with JSI + CompileJS for embedding via the JSI API.",
+  "homepage": "https://hermesengine.dev",
+  "license": "MIT",
+  "supports": "!uwp & !mingw",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ]
+}

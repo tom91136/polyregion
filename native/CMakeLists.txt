@@ -28,6 +28,7 @@ include(ProjectConfig.cmake)
 include(cmake/mergestaticlibs.cmake)
 include(cmake/deadstriparchive.cmake)
 include(cmake/testdist.cmake)
+include(cmake/polytest_discover.cmake)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
@@ -61,6 +62,25 @@ ProcessorCount(NPROC)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "")
 cmake_policy(SET CMP0091 NEW)
 
+# XXX JS engine selection must precede project() so the vcpkg toolchain reads VCPKG_MANIFEST_FEATURES
+# at the right time and only installs the engine we actually use
+set(POLYC_JS_ENGINE "hermes" CACHE STRING "JS engine for polyc: qjs or hermes")
+set_property(CACHE POLYC_JS_ENGINE PROPERTY STRINGS qjs hermes)
+string(TOLOWER "${POLYC_JS_ENGINE}" POLYC_JS_ENGINE)
+if (NOT POLYC_JS_ENGINE STREQUAL "qjs" AND NOT POLYC_JS_ENGINE STREQUAL "hermes")
+    message(FATAL_ERROR "POLYC_JS_ENGINE must be 'qjs' or 'hermes', got `${POLYC_JS_ENGINE}`")
+endif ()
+list(APPEND VCPKG_MANIFEST_FEATURES "${POLYC_JS_ENGINE}")
+message(STATUS "POLYC_JS_ENGINE = ${POLYC_JS_ENGINE} (vcpkg features: ${VCPKG_MANIFEST_FEATURES})")
+
+set(POLYC_PASS_BUNDLE "dso" CACHE STRING "Built-in pass bundle: dso or js")
+set_property(CACHE POLYC_PASS_BUNDLE PROPERTY STRINGS dso js)
+string(TOLOWER "${POLYC_PASS_BUNDLE}" POLYC_PASS_BUNDLE)
+if (NOT POLYC_PASS_BUNDLE STREQUAL "dso" AND NOT POLYC_PASS_BUNDLE STREQUAL "js")
+    message(FATAL_ERROR "POLYC_PASS_BUNDLE must be 'dso' or 'js', got `${POLYC_PASS_BUNDLE}`")
+endif ()
+message(STATUS "POLYC_PASS_BUNDLE = ${POLYC_PASS_BUNDLE}")
+
 project(polyregion-native)
 
 FetchContent_Declare(
@@ -92,8 +112,30 @@ find_package(unofficial-libffi CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(qjs CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
+
+if (POLYC_JS_ENGINE STREQUAL "qjs")
+    find_package(qjs CONFIG REQUIRED)
+endif ()
+
+if (POLYC_JS_ENGINE STREQUAL "hermes")
+    # XXX clang-cl leaves __GNUC__ undefined and drops -fexceptions: llvh trips  -Wundef on bare
+    # `#if __GNUC__`; jsi.cpp throws need /EHsc to link
+    if (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+              AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+        add_compile_options(
+                $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-undef>
+                $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+    endif ()
+
+    # XXX llvh duplicates Signals.cpp's HandleAbort etc. against LLVMSupport, POSIX hides
+    # via -fvisibility=hidden + --exclude-libs; MSVC needs /FORCE:MULTIPLE.
+    if (MSVC)
+        set(POLYC_LINK_HERMES_OPTS LINKER:/FORCE:MULTIPLE LINKER:/IGNORE:4006 CACHE INTERNAL "")
+    endif ()
+
+    find_package(hermes CONFIG REQUIRED)
+endif ()
 
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")

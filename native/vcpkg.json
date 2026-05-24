@@ -25,12 +25,30 @@
       "name": "vulkan-memory-allocator"
     },
     {
-      "name": "quickjs-ng"
+      "name": "bdwgc"
     },
     {
       "name": "zlib"
     }
   ],
+  "features": {
+    "hermes": {
+      "description": "",
+      "dependencies": [
+        {
+          "name": "hermes"
+        }
+      ]
+    },
+    "qjs": {
+      "description": "",
+      "dependencies": [
+        {
+          "name": "quickjs-ng"
+        }
+      ]
+    }
+  },
   "overrides": [
     {
       "name": "nlohmann-json",
@@ -69,6 +87,10 @@
     {
       "name": "quickjs-ng",
       "version": "0.14.0"
+    },
+    {
+      "name": "bdwgc",
+      "version": "8.2.12"
     },
     {
       "name": "zlib",

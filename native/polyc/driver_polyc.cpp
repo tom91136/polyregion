@@ -12,6 +12,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/io.hpp"
+#include "polyregion/polypass.h"
 
 #include "ast.h"
 #include "compiler.h"
@@ -35,16 +36,19 @@ template <typename T = std::byte> std::vector<T> readFromStdIn() {
   return input;
 }
 
-static std::string targetDescription =                                      //
-    "PolyAST to object code compiler.\nSupported targets:" +                //
-    (compiletime::TargetSpec::registry()                                    //
-     ^ mk_string("\n\t", "\n\t", "", [](const compiletime::TargetSpec &s) { //
-         std::string names(s.canonical);                                    //
-         for (const auto &a : s.aliases)
-           names += std::string("|") + std::string(a);                                     //
-         return names + ": \t" + std::string(magic_enum::enum_name(s.codegen)) + " via " + //
-                std::string(magic_enum::enum_name(s.runtime));                             //
-       }));
+static std::string targetDescription = [] {
+  std::string targets =
+      compiletime::TargetSpec::registry() ^ mk_string("\n\t", "\n\t", "", [](const compiletime::TargetSpec &s) {
+        std::string names(s.canonical);
+        for (const auto &a : s.aliases)
+          names += std::string("|") + std::string(a);
+        return names + ": \t" + std::string(magic_enum::enum_name(s.codegen)) + " via " + std::string(magic_enum::enum_name(s.runtime));
+      });
+  std::string env = std::string("\n\nEnvironment:\n  ") + POLYPASS_ENV_PLUGINS +
+                    " - PATH-separated list of PolyPass plugin paths (libpolypass.so / polypass.js). "
+                    "Overrides the bundled default plugin.";
+  return "PolyAST to object code compiler.\nSupported targets:" + targets + env;
+}();
 
 int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-value-param)
                fire::arg({0, "Input source, in either JSON or MessagePack format. Format is auto detected based on ASCII ranges."}),
@@ -56,6 +60,11 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                fire::arg({"-a", "--arch", "Target architecture (e.g sm_35, gfx906, skylake)"}, "native"),
                int rawOpt = //
                fire::arg({"-O", "--opt", "Optimisation level, from 0 (no optimisation) to 4 (unsafe optimisations)"}, 3),
+               std::string passes = //
+               fire::arg({"-p", "--passes",
+                          "PolyPass pipeline spec: `;`-separated `Name(k=v,k=v)` steps. "
+                          "Empty selects the default."},
+                         ""),
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
@@ -91,7 +100,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  std::cout << repr(program) << "\n";
                  std::cout << "=================" << std::endl;
 
-                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
+                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes}, opt);
                  if (verbose) std::cerr << repr(compilation) << std::endl;
                  if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
                  auto resultBytes = compileresult_to_msgpack(compilation);

@@ -1,0 +1,14 @@
+CMake 4.x renamed the ASM_ARMASM language to ASM_MARMASM. Hermes ships a
+vendored boost 1.86 that still uses the old name.
+diff --git a/external/boost/boost_1_86_0/libs/context/CMakeLists.txt b/external/boost/boost_1_86_0/libs/context/CMakeLists.txt
+--- a/external/boost/boost_1_86_0/libs/context/CMakeLists.txt
++++ b/external/boost/boost_1_86_0/libs/context/CMakeLists.txt
+@@ -156,7 +156,7 @@
+       enable_language(ASM)
+     endif()
+   elseif(BOOST_CONTEXT_ASSEMBLER STREQUAL armasm)
+-    enable_language(ASM_ARMASM)
++    enable_language(ASM_MARMASM)
+   else()
+     enable_language(ASM_MASM)
+   endif()

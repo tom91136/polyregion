@@ -1,0 +1,7 @@
+polypass_abi_version
+polypass_pass_count
+polypass_pass_name
+polypass_pass_descr
+polypass_run_passes
+polypass_last_error
+polypass_free

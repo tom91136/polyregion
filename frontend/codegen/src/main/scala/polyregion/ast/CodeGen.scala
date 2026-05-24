@@ -202,8 +202,22 @@ private[polyregion] object CodeGen {
 
   def polyASTVersioned[A](x: A) = MsgPack.Versioned(polyASTHash, x)
 
+  private def writePolyPassAbiSources(): Unit = {
+    val headerTarget  = Paths.get("../native/polyc/include/polyregion/polypass.h").toAbsolutePath.normalize
+    val symbolsTarget = Paths.get("../native/polyc/generated/polypass_symbols.h").toAbsolutePath.normalize
+    val exportsTarget = Paths.get("../native/polyc/generated/polypass-exports.txt").toAbsolutePath.normalize
+    println(s"Writing PolyPass ABI to $headerTarget and ${symbolsTarget.getParent}")
+    Files.createDirectories(headerTarget.getParent)
+    Files.createDirectories(symbolsTarget.getParent)
+    overwrite(headerTarget)(CAbiCodeGen.polyPassHeader)
+    overwrite(symbolsTarget)(CAbiCodeGen.polyPassSymbolsHeader)
+    overwrite(exportsTarget)(CAbiCodeGen.polyPassExportsList)
+    println("Done")
+  }
+
   def main(args: Array[String]): Unit = {
     writePolyASTSources()
+    writePolyPassAbiSources()
     generateJniBindings()
   }
 

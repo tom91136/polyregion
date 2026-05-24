@@ -1,5 +1,8 @@
 {
   "overlay-triplets": [
     "./toolchains"
+  ],
+  "overlay-ports": [
+    "./ports"
   ]
 }

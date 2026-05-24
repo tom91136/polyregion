@@ -1,0 +1,15 @@
+Hermes's add_definitions(/MP) propagates to ASM_MARMASM, which armasm64.exe
+rejects ("error A2029: unknown command-line argument /MP"). Scope the flag
+to C/CXX so ARM Windows builds (boost_context's .asm sources) succeed.
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -616,7 +616,7 @@ if(MSVC)
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -wd4530")
+   # Parallelize build
+   if (HERMES_MSVC_MP)
+-    add_definitions( /MP )
++    add_compile_options( $<$<COMPILE_LANGUAGE:C,CXX>:/MP> )
+   endif()
+   # MSVC does not have strict aliasing so there is no need to support it.
+   # Similar to GCC/Clang above, disable strict signed integer overflow.
