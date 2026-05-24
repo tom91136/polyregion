@@ -203,32 +203,18 @@ target_link_libraries(polycpp-tests PRIVATE
 
 
 target_compile_options(polycpp PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polycpp PRIVATE ${LINK_OPTIONS})
+target_link_options(polycpp PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
 
 target_compile_options(polycpp-tests PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polycpp-tests PRIVATE ${LINK_OPTIONS})
+target_link_options(polycpp-tests PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
 
 # XXX one ctest entry per test file x {offload, passthrough}.
 # Cross-process device serialisation lives in DeviceLock (polyinvoke/include/polyinvoke/device_lock.h).
-foreach (_test_file IN LISTS TEST_FILE_PATHS)
-    get_filename_component(_test_name "${_test_file}" NAME_WE)
-    string(REGEX REPLACE "^check_" "" _test_short "${_test_name}")
-    foreach (_mode IN ITEMS offload passthrough)
-        set(_name "polycpp-${_test_short}-${_mode}")
-        add_test(NAME ${_name}
-                COMMAND polycpp-tests --${_mode}-only -c "${_test_short}"
-                WORKING_DIRECTORY "${POLYCPP_TEST_CACHE_DIR}")
-        set(_labels "")
-        if (_mode STREQUAL "offload")
-            set_tests_properties(${_name} PROPERTIES LABELS "device")
-            set(_labels "device")
-        endif ()
-        polyregion_test_dist_record(NAME ${_name}
-                COMMAND :bin:polycpp-tests --${_mode}-only -c "${_test_short}"
-                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polycpp;POLYTEST_PROFILE_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/profiles;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache;POLYTEST_WORK_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
-                LABELS "${_labels}")
-    endforeach ()
-endforeach ()
+polytest_discover_tests(polycpp-tests
+        NAME_PREFIX polycpp
+        WORKING_DIRECTORY "${POLYCPP_TEST_CACHE_DIR}"
+        DIST_BIN polycpp-tests
+        TEST_FILES ${TEST_FILE_PATHS})
 
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${POLYCPP_TEST_CACHE_DIR}")
 add_custom_target(clean-polycpp-tests

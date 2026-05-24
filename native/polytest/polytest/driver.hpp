@@ -72,6 +72,19 @@ struct Task {
     return fmt::format("[{}] {}/{} {}", modeName(mode), extractTestName(testFile), caseName,
                        variables | mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; }));
   }
+
+  // XXX ctest-name-safe stable ID; lower-case alnum + `_` + `-` only.
+  std::string id() const {
+    auto safe = [](std::string_view s) {
+      std::string out;
+      out.reserve(s.size());
+      for (char c : s)
+        out += (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') ? c : '_';
+      return out;
+    };
+    auto vars = variables | mk_string("", [&](auto &k, auto &v) { return "-" + safe(k) + "_" + safe(v); });
+    return fmt::format("{}-{}-{}{}", modeName(mode), safe(extractTestName(testFile)), safe(caseName), vars);
+  }
 };
 
 enum class TaskStatus : std::uint8_t { Pass = 0, Fail = 1, Skip = 2 };
@@ -102,6 +115,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   envs.emplace_back(fmt::format("{}=1", polyregion::invoke::DeviceLockEnv));
   envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
   if (std::getenv("POLYTEST_DEBUG")) envs.emplace_back("POLYRT_DEBUG=2");
+  for (const auto *name : {"POLYCPP_LINK_THREADS", "POLYFC_LINK_THREADS"})
+    if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
   if (auto p = std::getenv("PATH")) envs.emplace_back(std::string("PATH=") + p);
 #if defined(__APPLE__)
   // XXX forward DYLD_*; compiled test binaries can't find dist libs otherwise (SIGTRAP).
@@ -312,11 +327,13 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
 
 struct RunnerOptions {
   std::vector<std::string> caseFilters;
+  std::string runTask;
   int compileJobs = -1;
   bool verbose = false;
   bool offload = true;
   bool passthrough = true;
   bool list = false;
+  bool listIds = false;
 };
 
 inline const char *statusTag(TaskStatus s) {
@@ -329,9 +346,24 @@ inline const char *statusTag(TaskStatus s) {
 }
 
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
-  const auto tasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
+  auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
+  if (!opts.runTask.empty()) {
+    const auto it = std::find_if(allTasks.begin(), allTasks.end(), [&](auto &t) { return t.id() == opts.runTask; });
+    if (it == allTasks.end()) {
+      std::fprintf(stderr, "polytest: no task with id '%s'\n", opts.runTask.c_str());
+      return 1;
+    }
+    Task only = std::move(*it);
+    allTasks.clear();
+    allTasks.push_back(std::move(only));
+  }
+  const auto &tasks = allTasks;
   if (tasks.empty()) {
     std::fprintf(stderr, "polytest: no tasks discovered (filters=%zu)\n", opts.caseFilters.size());
+    return 0;
+  }
+  if (opts.listIds) {
+    tasks | for_each([](auto &t) { std::fprintf(stdout, "%s\n", t.id().c_str()); });
     return 0;
   }
   if (opts.list) {
@@ -425,13 +457,17 @@ inline const DriverConfig *firedCfg = nullptr;
 
 inline int fired_main( //
     fire::optional<std::string> caseFilter = fire::arg({"-c", "--case", "Filter by file shortname or case name"}),
+    fire::optional<std::string> runTask = fire::arg({"--run-task", "Run exactly one task by id (see --list-ids)"}),
     int jobs = fire::arg({"-j", "--jobs", "Compile parallelism (default: hardware_concurrency)"}, -1),
     bool verbose = fire::arg({"-v", "--verbose", "Dump stdout/stderr for every task"}),
     bool offloadOnly = fire::arg({"--offload-only", "Skip passthrough mode"}),
     bool passthroughOnly = fire::arg({"--passthrough-only", "Skip offload mode"}),
-    bool list = fire::arg({"-l", "--list", "Enumerate tasks and exit without running"})) {
-  RunnerOptions opts{.compileJobs = jobs, .verbose = verbose, .offload = !passthroughOnly, .passthrough = !offloadOnly, .list = list};
+    bool list = fire::arg({"-l", "--list", "Enumerate tasks (human-readable) and exit"}),
+    bool listIds = fire::arg({"--list-ids", "Enumerate task ids (one per line) and exit"})) {
+  RunnerOptions opts{
+      .compileJobs = jobs, .verbose = verbose, .offload = !passthroughOnly, .passthrough = !offloadOnly, .list = list, .listIds = listIds};
   if (caseFilter) opts.caseFilters.push_back(caseFilter.value());
+  if (runTask) opts.runTask = runTask.value();
   return runTasks(*detail::firedCfg, opts);
 }
 

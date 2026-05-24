@@ -191,30 +191,11 @@ target_compile_options(polyfc-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyfc-tests PRIVATE ${LINK_OPTIONS})
 
 # XXX one ctest entry per test file x {offload, passthrough}.
-foreach (_test_file IN LISTS TEST_FILE_PATHS)
-    get_filename_component(_test_name "${_test_file}" NAME_WE)
-    string(REGEX REPLACE "^check_" "" _test_short "${_test_name}")
-    foreach (_mode IN ITEMS offload passthrough)
-        set(_name "polyfc-${_test_short}-${_mode}")
-        add_test(NAME ${_name}
-                COMMAND polyfc-tests --${_mode}-only -c "${_test_short}"
-                WORKING_DIRECTORY "${POLYFC_TEST_CACHE_DIR}")
-        set(_labels "")
-        if (_mode STREQUAL "offload")
-            set_tests_properties(${_name} PROPERTIES LABELS "device")
-            set(_labels "device")
-        endif ()
-        polyregion_test_dist_record(NAME ${_name}
-                COMMAND :bin:polyfc-tests --${_mode}-only -c "${_test_short}"
-                ENVIRONMENT "POLYTEST_FILES_DIR=\${CMAKE_CURRENT_LIST_DIR}/test/polyfc;POLYTEST_BINARY_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache;POLYTEST_WORK_DIR=\${CMAKE_CURRENT_LIST_DIR}/test-cache"
-                LABELS "${_labels}")
-        # XXX LLD on Windows opens archives without FILE_SHARE_READ; serialise concurrent link
-        # jobs against polydco-static.lib (~70 MB) to avoid LNK1104.
-        if (WIN32)
-            set_tests_properties(${_name} PROPERTIES RESOURCE_LOCK polyfc_polydco_static_lib)
-        endif ()
-    endforeach ()
-endforeach ()
+polytest_discover_tests(polyfc-tests
+        NAME_PREFIX polyfc
+        WORKING_DIRECTORY "${POLYFC_TEST_CACHE_DIR}"
+        DIST_BIN polyfc-tests
+        TEST_FILES ${TEST_FILE_PATHS})
 # Wipe the whole cache on `clean` so stale test binaries cannot survive a rebuild.
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${POLYFC_TEST_CACHE_DIR}")
 # Targeted clean for the test-cache dir without disturbing the rest of the build.

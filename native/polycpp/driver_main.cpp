@@ -205,6 +205,7 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
+                   if (const char *t = std::getenv("POLYCPP_LINK_THREADS"); t && *t) append({fmt::format("-Wl,--threads={}", t)});
                  }
                }
 
