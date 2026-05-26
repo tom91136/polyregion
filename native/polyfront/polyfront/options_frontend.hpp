@@ -144,10 +144,14 @@ struct Driver {
   }
 
   static std::vector<std::string> dynamicOriginLinkFlags(const std::string &libsPath, const std::string &libName) {
+#ifdef _WIN32
+    return {fmt::format("{}/{}.lib", libsPath, libName)};
+#else
     return {fmt::format("-L{}", libsPath),          //
             fmt::format("-l{}", libName),           //
             fmt::format("-Wl,-rpath,{}", libsPath), //
             "-Wl,-rpath,$ORIGIN"};
+#endif
   }
 
   static std::vector<std::string> clangPassPluginFlags(const std::string &pluginPath, const std::vector<std::string> &args = {}) {

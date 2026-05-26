@@ -115,6 +115,9 @@ int main(int argc, const char *argv[]) {
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), joinPath(polyfcLibPath, staticLibraryName("polydco-static")));
+                       // polydco-static references _rt_record / _rt_release / _rt_reflect_p; link the
+                       // shared polyreflect-rt so MSVC's dllimport thunks resolve.
+                       append(Driver::dynamicOriginLinkFlags(polyfcLibPath, "polyreflect-rt"));
 #if defined(_WIN32)
                        // flang Fortran sources cannot use #pragma comment(lib); inject the
                        // Windows system imports that polydco-static depends on directly.

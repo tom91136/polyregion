@@ -78,10 +78,10 @@ constexpr const char *to_string(const Type t) {
 
 #ifndef __RT_IMPL
   #if defined(_MSC_VER)
-extern "C" PtrMeta _rt_reflect_p(const void *ptr);
-extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
-extern "C" void _rt_record(const void *ptr, size_t size, Type type);
-extern "C" void _rt_release(void *ptr, Type type);
+extern "C" __declspec(dllimport) PtrMeta _rt_reflect_p(const void *ptr);
+extern "C" __declspec(dllimport) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
+extern "C" __declspec(dllimport) void _rt_record(const void *ptr, size_t size, Type type);
+extern "C" __declspec(dllimport) void _rt_release(void *ptr, Type type);
   #else
 extern "C" PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
@@ -93,7 +93,7 @@ extern "C" void _rt_release(void *ptr, Type type);
 #ifdef __RT_IMPL
 
   #if defined(_MSC_VER)
-    #define __RT_EXPORTED __RT_NOINLINE
+    #define __RT_EXPORTED __RT_NOINLINE __declspec(dllexport)
     #define __RT_PRINTF_FORMAT(fmt_index, first_arg)
   #else
     #define __RT_EXPORTED __RT_NOINLINE __attribute__((visibility("default")))
