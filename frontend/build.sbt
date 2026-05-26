@@ -4,6 +4,12 @@ import org.scalajs.linker.interface.{ESVersion, ModuleKind => SJSModuleKind, Out
 
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
+Global / concurrentRestrictions := Seq(
+  Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime.availableProcessors),
+  Tags.limit(Tags.Network, java.lang.Runtime.getRuntime.availableProcessors),
+  Tags.limitAll(java.lang.Runtime.getRuntime.availableProcessors * 2)
+)
+
 lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
 lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
@@ -311,14 +317,38 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
         .map(s => Seq(s"--sysroot=$s"))
         .getOrElse(Nil)
 
-      cfg
+      val polyregionArch = Option(System.getenv("POLYREGION_ARCH")).map(_.trim).filter(_.nonEmpty)
+      val hostArch       = System.getProperty("os.arch")
+      def norm(a: String) = a.toLowerCase match {
+        case "amd64" | "x86_64"  => "x86_64"
+        case "arm64" | "aarch64" => "arm64"
+        case other               => other
+      }
+      val targetTriple: Option[String] = polyregionArch
+        .filter(a => norm(a) != norm(hostArch))
+        .flatMap { a =>
+          val n = norm(a)
+          if (isMac) Some(s"$n-apple-darwin")
+          else if (isWin) Some(if (n == "x86_64") "x86_64-pc-windows-msvc" else "aarch64-pc-windows-msvc")
+          else Some(if (n == "x86_64") "x86_64-unknown-linux-gnu" else "aarch64-unknown-linux-gnu")
+        }
+      val crossFlag = targetTriple.map(t => Seq("-target", t)).getOrElse(Nil)
+
+      val withTriple = targetTriple.fold(cfg)(cfg.withTargetTriple(_))
+
+      val nproc = java.lang.Runtime.getRuntime.availableProcessors
+      val thinLtoFlag = if (!isMac && !isWin) Seq(s"-Wl,--threads=$nproc", "-Wl,--lto-O2") else Nil
+
+      withTriple
         .withMode(mode)
-        .withLTO(scala.scalanative.build.LTO.full)
+        .withLTO(scala.scalanative.build.LTO.thin)
         .withGC(scala.scalanative.build.GC.boehm)
+        .withMultithreading(false)
+        .withCheckFeatures(false)
         .withBuildTarget(scala.scalanative.build.BuildTarget.libraryDynamic)
-        .withCompileOptions(sysrootFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath))
+        .withCompileOptions(sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath))
         // XXX macOS ld64 picks the first match so we must prepend
-        .withLinkingOptions(sysrootFlag ++ linkOpts ++ cfg.linkingOptions)
+        .withLinkingOptions(sysrootFlag ++ crossFlag ++ thinLtoFlag ++ linkOpts ++ cfg.linkingOptions)
     },
     passDsoDest := nativeDir / "polyc" / (
       if (scala.util.Properties.isWin) "libpolypass.dll"
