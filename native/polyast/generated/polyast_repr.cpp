@@ -107,7 +107,7 @@ std::string repr(const Type::Any &t) {
       return "Bool1"s;
     }
     if (auto _x = t.get<Type::Struct>()) {
-      return fmt::format("{}<{}>", repr(_x->name), (_x->args | map([&](const Type::Any &__1) { return repr(__1); }) | mk_string(","s)));
+      return fmt::format("{}<{}>", repr(_x->name), (_x->args | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)));
     }
     if (auto _x = t.get<Type::Ptr>()) {
       return fmt::format("{}*{}", repr(_x->comp), repr(_x->space));
@@ -120,7 +120,7 @@ std::string repr(const Type::Any &t) {
     }
     if (auto _x = t.get<Type::Exec>()) {
       return fmt::format("<{}>({}) => {}", (_x->tpeVars | mk_string(","s)),
-                         (_x->args | map([&](const Type::Any &__2) { return repr(__2); }) | mk_string(","s)), repr(_x->rtn));
+                         (_x->args | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)), repr(_x->rtn));
     }
 
     throw std::logic_error(fmt::format("Unhandled match case for t (of type Type::Any) at {}:{})", __FILE__, __LINE__));
@@ -178,7 +178,7 @@ std::string repr(const Term::Any &t) {
     }
     if (auto _x = t.get<Term::Select>()) {
       return fmt::format("{}: {}{}", _x->root.symbol, repr(_x->root.tpe),
-                         (_x->steps | map([&](const PathStep::Any &__3) { return repr(__3); }) | mk_string(""s)));
+                         (_x->steps | map([&](const PathStep::Any &_v7_0) { return repr(_v7_0); }) | mk_string(""s)));
     }
 
     throw std::logic_error(fmt::format("Unhandled match case for t (of type Term::Any) at {}:{})", __FILE__, __LINE__));
@@ -405,7 +405,7 @@ std::string repr(const Expr::Any &e) {
     }
     if (auto _x = e.get<Expr::RefTo>()) {
       return fmt::format("({}).refTo[{}, {}]({})", repr(_x->lhs), repr(_x->comp), repr(_x->space),
-                         _x->idx ^ map([&](const Term::Any &__4) { return repr(__4); }) ^ get_or_else(""s));
+                         _x->idx ^ map([&](const Term::Any &_v7_0) { return repr(_v7_0); }) ^ get_or_else(""s));
     }
     if (auto _x = e.get<Expr::Alloc>()) {
       return fmt::format("alloc[{}, {}]({})", repr(_x->comp), repr(_x->space), repr(_x->size));
@@ -413,8 +413,8 @@ std::string repr(const Expr::Any &e) {
     if (auto _x = e.get<Expr::Invoke>()) {
       return fmt::format("{}{}<{}>({}): {}",
                          _x->receiver ^ map([&](const Term::Any &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s),
-                         repr(_x->name), (_x->tpeArgs | map([&](const Type::Any &__5) { return repr(__5); }) | mk_string(","s)),
-                         (_x->args | map([&](const Term::Any &__6) { return repr(__6); }) | mk_string(", "s)), repr(_x->rtn));
+                         repr(_x->name), (_x->tpeArgs | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)),
+                         (_x->args | map([&](const Term::Any &_v7_0) { return repr(_v7_0); }) | mk_string(", "s)), repr(_x->rtn));
     }
 
     throw std::logic_error(fmt::format("Unhandled match case for e (of type Expr::Any) at {}:{})", __FILE__, __LINE__));
@@ -425,7 +425,7 @@ std::string repr(const Stmt::Any &stmt) {
   return [&] {
     if (auto _x = stmt.get<Stmt::Var>()) {
       return fmt::format("{} {}: {} = {}", (_x->isMutable ? "var"s : "val"s), _x->name.symbol, repr(_x->name.tpe),
-                         _x->expr ^ map([&](const Expr::Any &__7) { return repr(__7); }) ^ get_or_else("_"s));
+                         _x->expr ^ map([&](const Expr::Any &_v7_0) { return repr(_v7_0); }) ^ get_or_else("_"s));
     }
     if (auto _x = stmt.get<Stmt::Mut>()) {
       return fmt::format("{} = {}", repr(_x->name), repr(_x->expr));
@@ -435,12 +435,12 @@ std::string repr(const Stmt::Any &stmt) {
     }
     if (auto _x = stmt.get<Stmt::While>()) {
       return fmt::format("while({}){}\n{}\n{}", repr(_x->cond), "{"s,
-                         (_x->body | map([&](const Stmt::Any &__8) { return repr(__8); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+                         (_x->body | map([&](const Stmt::Any &_v8_0) { return repr(_v8_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
     }
     if (auto _x = stmt.get<Stmt::ForRange>()) {
       return fmt::format("for({}: {} = {}; < {}; += {}){}\n{}\n{}", _x->induction.symbol, repr(_x->induction.tpe), repr(_x->lbIncl),
                          repr(_x->ubExcl), repr(_x->step), "{"s,
-                         (_x->body | map([&](const Stmt::Any &__9) { return repr(__9); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+                         (_x->body | map([&](const Stmt::Any &_v8_0) { return repr(_v8_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
     }
     if (stmt.is<Stmt::Break>()) {
       return "break;"s;
@@ -454,11 +454,12 @@ std::string repr(const Stmt::Any &stmt) {
     if (auto _x = stmt.get<Stmt::Cond>()) {
       return fmt::format(
           "if({}) {}\n{}\n{}{}", repr(_x->cond), "{"s,
-          (_x->trueBr | map([&](const Stmt::Any &__10) { return repr(__10); }) | mk_string("\n"s)) ^ indent(2), "}"s,
+          (_x->trueBr | map([&](const Stmt::Any &_v8_0) { return repr(_v8_0); }) | mk_string("\n"s)) ^ indent(2), "}"s,
           (_x->falseBr.empty()
                ? ""s
                : fmt::format(" else {}\n{}\n{}", "{"s,
-                             (_x->falseBr | map([&](const Stmt::Any &__11) { return repr(__11); }) | mk_string("\n"s)) ^ indent(2), "}"s)));
+                             (_x->falseBr | map([&](const Stmt::Any &_v10_0) { return repr(_v10_0); }) | mk_string("\n"s)) ^ indent(2),
+                             "}"s)));
     }
     if (auto _x = stmt.get<Stmt::Annotated>()) {
       return fmt::format("{}{}{}", repr(_x->inner),
@@ -504,9 +505,9 @@ std::string repr(const FunctionFpMode::Any &m) {
 std::string repr(const Signature &f) {
   return fmt::format("def {}{}<{}>({}): {} /* mod={} term={} */",
                      f.receiver ^ map([&](const Type::Any &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s), repr(f.name),
-                     (f.tpeVars | mk_string(","s)), (f.args | map([&](const Type::Any &__12) { return repr(__12); }) | mk_string(", "s)),
-                     repr(f.rtn), (f.moduleCaptures | map([&](const Type::Any &__13) { return repr(__13); }) | mk_string(","s)),
-                     (f.termCaptures | map([&](const Type::Any &__14) { return repr(__14); }) | mk_string(","s)));
+                     (f.tpeVars | mk_string(","s)), (f.args | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)),
+                     repr(f.rtn), (f.moduleCaptures | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
+                     (f.termCaptures | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(","s)));
 }
 
 std::string repr(const Function &f) {
@@ -516,20 +517,20 @@ std::string repr(const Function &f) {
       (f.tpeVars | mk_string(","s)),
       (f.args | map([&](const Arg &a) { return fmt::format("{}: {}", a.named.symbol, repr(a.named.tpe)); }) | mk_string(", "s)),
       repr(f.rtn), repr(f.visibility), repr(f.fpMode), f.isEntry,
-      (f.moduleCaptures | map([&](const Arg &__15) { return repr(__15); }) | mk_string(","s)),
-      (f.termCaptures | map([&](const Arg &__16) { return repr(__16); }) | mk_string(","s)), "{"s,
-      (f.body | map([&](const Stmt::Any &__17) { return repr(__17); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+      (f.moduleCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
+      (f.termCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)), "{"s,
+      (f.body | map([&](const Stmt::Any &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 }
 
 std::string repr(const StructDef &s) {
   return fmt::format("class {}<{}>({}) <: {}", repr(s.name), (s.tpeVars | mk_string(","s)),
                      (s.members | map([&](const Named &m) { return fmt::format("{}: {}", m.symbol, repr(m.tpe)); }) | mk_string(", "s)),
-                     (s.parents | map([&](const Type::Struct &__18) { return repr(__18); }) | mk_string(", "s)));
+                     (s.parents | map([&](const Type::Struct &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)));
 }
 
 std::string repr(const Program &s) {
-  return fmt::format("{}\n{}\n{}", (s.defs | map([&](const StructDef &__19) { return repr(__19); }) | mk_string("\n"s)), repr(s.entry),
-                     (s.functions | map([&](const Function &__20) { return repr(__20); }) | mk_string("\n"s)));
+  return fmt::format("{}\n{}\n{}", (s.defs | map([&](const StructDef &_v5_0) { return repr(_v5_0); }) | mk_string("\n"s)), repr(s.entry),
+                     (s.functions | map([&](const Function &_v5_0) { return repr(_v5_0); }) | mk_string("\n"s)));
 }
 
 std::string repr(const StructLayout &l) {

@@ -166,8 +166,13 @@ private[polyregion] object compiletime {
       case If(cond, trueBr, falseBr) =>
         s"(${remap(cond, scope, depth + 1)} ? ${remap(trueBr, scope, depth + 1)} : ${remap(falseBr, scope, depth + 1)})"
       case f @ DefDef("$anonfun", _, _, Some(rhs)) =>
-        val args = f.termParamss.flatMap(_.params).map(p => remap(p, scope, depth + 1, fnDef = true)).mkString(", ")
-        s"[&]($args){ return ${remap(rhs, scope, depth + 1)}; }"
+        val params = f.termParamss.flatMap(_.params).collect { case v: ValDef => v }
+        val (args, lambdaScope) = params.zipWithIndex.foldLeft((List.empty[String], scope)) {
+          case ((acc, sc), (ValDef(name, tpe, _), i)) =>
+            val newName = if name.startsWith("_$") then s"_v${depth}_$i" else name
+            (acc :+ s"${retype(tpe.tpe, const = true)} $newName", sc + (name -> newName))
+        }
+        s"[&](${args.mkString(", ")}){ return ${remap(rhs, lambdaScope, depth + 1)}; }"
       case Match(term, cases) =>
         val names       = List("_x", "_y", "_z")
         val nameAtDepth = names((names.size - 1) % depth)
