@@ -15,12 +15,37 @@ defaults:
     shell: cmd
 
 jobs:
+  pass-js:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1.1.18
+
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
+      - name: Build pass bundle (js)
+        run: just pass-js
+
+      - name: Verify bundle staged
+        shell: bash
+        run: |
+          test -s native/polyc/polypass.js
+          echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
   build:
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
-        bundle: [dso]
         include:
           - arch: amd64
             runs_on: windows-2025-vs2026
@@ -33,13 +58,15 @@ jobs:
             llvm_parallel_link_jobs: "4"
             flang_parallel_compile_jobs: "2"
     runs-on: ${{ matrix.runs_on }}
-    continue-on-error: ${{ matrix.bundle == 'js' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
-      POLYC_PASS_BUNDLE: ${{ matrix.bundle }}
+      POLYC_PASS_BUNDLE: dso
+      # Hermes port doesn't compile cleanly with MSVC cl.exe (__builtin_expect missing).
+      # quickjs-ng is portable C, builds on MSVC. Switch JS engine on Windows.
+      POLYC_JS_ENGINE: qjs
     steps:
       - uses: actions/checkout@v6
 
@@ -57,13 +84,18 @@ jobs:
           }
           echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
 
-      - name: Setup JDK (${{ matrix.arch }})
-        uses: ./.github/actions/setup-jdk
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
         with:
-          build_arch: ${{ matrix.arch }}
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
 
       - name: Setup sbt
         uses: sbt/setup-sbt@v1.1.18
+
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v6
 
       - name: Dotenv
         id: dotenv
@@ -119,7 +151,9 @@ jobs:
         id: restore-device-libs
         uses: actions/cache/restore@v5
         with:
-          path: ./native/thirdparty/device_libs
+          path: |
+            ./native/thirdparty/device_libs
+            !./native/thirdparty/device_libs/.staging
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build device libs
@@ -131,35 +165,28 @@ jobs:
         if: steps.build-device-libs.outcome == 'success'
         uses: actions/cache/save@v5
         with:
-          path: ./native/thirdparty/device_libs
+          path: |
+            ./native/thirdparty/device_libs
+            !./native/thirdparty/device_libs/.staging
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
-      - name: Build pass bundle (${{ matrix.bundle }})
-        run: just pass-${{ matrix.bundle }}
+      - name: Install vcpkg dependencies
+        run: just vcpkg-deps
+
+      - name: Build pass bundle (dso)
+        run: just pass-native
 
       - name: Configure release build
         run: just configure
 
       - name: Build dist
-        if: matrix.bundle == 'dso'
         run: just dist
 
       - name: Build test dist
-        if: matrix.bundle == 'dso'
         run: just test-dist
 
-      - name: Build polyc + tests (js bundle)
-        if: matrix.bundle == 'js'
-        run: |
-          just build polyc
-          just build polyc-tests
-
-      - name: Run native tests (js bundle)
-        if: matrix.bundle == 'js'
-        run: just native-tests
-
       - name: Check artefact
-        if: always() && matrix.bundle == 'dso'
+        if: always()
         working-directory: ./native
         run: |
           set "DIST=polyregion-Release-${{ matrix.arch }}-static-dist"
@@ -175,7 +202,6 @@ jobs:
           )
 
       - name: Upload dist
-        if: matrix.bundle == 'dso'
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v4
         with:
@@ -184,7 +210,6 @@ jobs:
           if-no-files-found: error
 
       - name: Upload test dist
-        if: matrix.bundle == 'dso'
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v4
         with:
@@ -208,10 +233,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup JDK (${{ matrix.arch }})
-        uses: ./.github/actions/setup-jdk
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
         with:
-          build_arch: ${{ matrix.arch }}
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
 
       - name: Setup MSVC env
         uses: ilammy/msvc-dev-cmd@v1
@@ -247,10 +274,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup JDK (${{ matrix.arch }})
-        uses: ./.github/actions/setup-jdk
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
         with:
-          build_arch: ${{ matrix.arch }}
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
 
       - name: Download dist
         # v4: nektos/act#6022
@@ -278,9 +307,10 @@ jobs:
           set "TESTS=%CD%\polyregion-test-Release-${{ matrix.arch }}-static-dist"
           set "PATH=%DIST%\bin;%PATH%"
           set "POLYREGION_BITCODE_DIR=%DIST%\lib"
+          set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
           set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
           set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
-          ctest --test-dir "%TESTS%" -LE device --output-on-failure --output-junit "%TESTS%\native-test-results.xml"
+          ctest --test-dir "%TESTS%" -LE device --timeout 300 --output-on-failure --output-junit "%TESTS%\native-test-results.xml"
 
       - name: Upload test results
         if: always()
@@ -341,6 +371,8 @@ jobs:
           done
 
       - name: Run munit suite
+        env:
+          PATH: ${{ github.workspace }}\native\polyregion-Release-${{ matrix.arch }}-static-dist\bin;${{ env.PATH }}
         run: just scala-tests
 
       - name: Upload test results

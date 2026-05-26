@@ -36,13 +36,14 @@ if (UNIX)
         set(CMAKE_ASM_FLAGS "${_extra}" CACHE STRING "")
     endif ()
 
-    # shm_open is in librt on glibc <2.34 (AL8 = 2.28); thin-LTO drops the implicit
-    # dependency LLVM's OrcJIT introduces, leaving libLLVM.so unlinked against -lrt.
-    # No-op on glibc 2.34+ where librt is an empty compat shim.
+    # XXX shm_open is in librt on glibc <2.34; thin-LTO drops the implicit dependency LLVM's OrcJIT introduces,
+    # leaving libLLVM.so unlinked against -lrt. --as-needed: librt is only retained when its symbols are referenced;
+    # cmake try-compile (which doesn't use rt) skips it cleanly so its pthread@GLIBC_PRIVATE back-refs don't trip the link.
     if (NOT APPLE)
-        set(CMAKE_SHARED_LINKER_FLAGS "-lrt" CACHE STRING "")
-        set(CMAKE_EXE_LINKER_FLAGS    "-lrt" CACHE STRING "")
-        set(CMAKE_MODULE_LINKER_FLAGS "-lrt" CACHE STRING "")
+        set(_polyregion_rt "-Wl,--push-state,--as-needed,-lrt,--pop-state")
+        set(CMAKE_SHARED_LINKER_FLAGS "${_polyregion_rt}" CACHE STRING "")
+        set(CMAKE_EXE_LINKER_FLAGS    "${_polyregion_rt}" CACHE STRING "")
+        set(CMAKE_MODULE_LINKER_FLAGS "${_polyregion_rt}" CACHE STRING "")
     endif ()
 endif ()
 

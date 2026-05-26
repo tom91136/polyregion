@@ -13,9 +13,15 @@ dylib := env_var_or_default('POLYREGION_LLVM_DYLIB', 'ON')
 export POLYREGION_LLVM_DYLIB := dylib
 
 # Auto-export VCPKG_ROOT to ./vcpkg (populated by `just vcpkg`) if the env doesn't set it.
-export VCPKG_ROOT := env_var_or_default('VCPKG_ROOT', justfile_directory() / "vcpkg")
+export VCPKG_ROOT := env_var_or_default('RUNVCPKG_VCPKG_ROOT', env_var_or_default('VCPKG_ROOT', justfile_directory() / "vcpkg"))
 
-actionlint_version := '1.7.7'
+# Shared vcpkg install root so `just vcpkg-deps` and `just configure` agree on a location.
+export VCPKG_INSTALLED_DIR := env_var_or_default('VCPKG_INSTALLED_DIR', justfile_directory() / "native" / ".vcpkg" / "vcpkg_installed")
+
+actionlint_version  := '1.7.7'
+clang_format_version := '20.1.0'
+# See https://github.com/muttleyxd/clang-tools-static-binaries/releases
+clang_format_release := 'master-796e77c'
 
 # CI sets SYSROOT_PATH; locally defaults to native/sysroot-{arch}.
 sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "native" / "sysroot-" + arch)
@@ -80,7 +86,7 @@ _codegen-sbt:
     cd frontend && sbt -no-colors 'codegen/genCodegen'
 
 _codegen-format:
-    clang-format -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
+    "$(just _clang-format)" -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
 
 _codegen-diff:
     git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/generated native/polyc/include/polyregion/polypass.h
@@ -92,7 +98,11 @@ pass-js:
     cd frontend && sbt -no-colors 'passJS/exportPassBundle'
 
 # Build the Scala Native pass DSO and stage at native/polyc/libpolypass.{so,dylib,dll}.
+# Export CMAKE_SYSROOT so sbt's nativeConfig propagates --sysroot to clang
 pass-native:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
     cd frontend && sbt -no-colors 'passNative/exportPassDso'
 
 # === Lint ===
@@ -121,6 +131,29 @@ _actionlint:
     fi
     echo "$BIN"
 
+_clang-format:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DIR=".cache/clang-format-{{ clang_format_version }}"
+    BIN="$DIR/clang-format"
+    [[ "{{ os() }}" == "windows" ]] && BIN="$BIN.exe"
+    if [ ! -x "$BIN" ]; then
+        mkdir -p "$DIR"
+        case "{{ os() }}-{{ arch() }}" in
+            linux-x86_64|linux-amd64)      asset=clang-format-20_linux-amd64 ;;
+            linux-aarch64|linux-arm64)     asset=clang-format-20_linux-arm64 ;;
+            macos-aarch64|macos-arm64)     asset=clang-format-20_macosx-arm64 ;;
+            macos-x86_64|macos-amd64)      asset=clang-format-20_macosx-amd64 ;;
+            windows-x86_64|windows-amd64)  asset=clang-format-20_windows-amd64.exe ;;
+            *) echo "unsupported {{ os() }}-{{ arch() }}" >&2; exit 1 ;;
+        esac
+        url="https://github.com/muttleyxd/clang-tools-static-binaries/releases/download/{{ clang_format_release }}/${asset}"
+        echo "Fetching clang-format {{ clang_format_version }} from $url" >&2
+        curl -fsSL "$url" -o "$BIN"
+        chmod +x "$BIN"
+    fi
+    echo "$BIN"
+
 # === Test ===
 
 # Run the full scalalang munit suite.
@@ -144,6 +177,32 @@ vcpkg:
     COMMIT=$(awk -F= '/^VCPKG_COMMIT=/{print $2}' native/.env)
     [ -n "$COMMIT" ] && git -C vcpkg fetch --depth=1 origin "$COMMIT" && git -C vcpkg checkout "$COMMIT"
     echo "vcpkg ready at $PWD/vcpkg"
+
+# Install vcpkg manifest deps to $VCPKG_INSTALLED_DIR for the current host/arch.
+vcpkg-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ os() }}-{{ arch }}" in
+        linux-x86_64|linux-amd64)       TRIPLET=linux-clang-amd64 ;;
+        linux-aarch64|linux-arm64)      TRIPLET=linux-clang-aarch64 ;;
+        macos-x86_64|macos-amd64)       TRIPLET=darwin-clang-amd64 ;;
+        macos-aarch64|macos-arm64)      TRIPLET=darwin-clang-arm64 ;;
+        windows-x86_64|windows-amd64)   TRIPLET=x64-windows-static ;;
+        windows-aarch64|windows-arm64)  TRIPLET=arm64-windows-static ;;
+        *) echo "unsupported {{ os() }}-{{ arch }}" >&2; exit 1 ;;
+    esac
+    VCPKG_BIN="$VCPKG_ROOT/vcpkg"
+    [[ "{{ os() }}" == "windows" ]] && VCPKG_BIN="$VCPKG_BIN.exe"
+    JS_ENGINE="${POLYC_JS_ENGINE:-hermes}"
+    # Match polyregion's sysroot pin so vcpkg ports compile against the same glibc/libstdc++.
+    if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
+    echo "Installing vcpkg deps (triplet=$TRIPLET, feature=$JS_ENGINE, sysroot=${CMAKE_SYSROOT:-none}) -> $VCPKG_INSTALLED_DIR" >&2
+    mkdir -p "$VCPKG_INSTALLED_DIR"
+    "$VCPKG_BIN" install \
+        --x-manifest-root=native \
+        --x-install-root="$VCPKG_INSTALLED_DIR" \
+        --x-feature="$JS_ENGINE" \
+        --triplet="$TRIPLET"
 
 # Build the AL8 sysroot (podman/docker required) and extract to native/sysroot-{arch}
 sysroot:
@@ -197,4 +256,7 @@ _native-build:
     #!/usr/bin/env bash
     set -uo pipefail
     if [ -n "{{ native_build }}" ]; then echo "{{ native_build }}"; exit 0; fi
-    ls -td native/cmake-build-*/CMakeCache.txt native/build-*/CMakeCache.txt 2>/dev/null | head -1 | xargs -r dirname
+    shopt -s nullglob
+    candidates=(native/cmake-build-*/CMakeCache.txt native/build-*/CMakeCache.txt)
+    [ ${#candidates[@]} -eq 0 ] && exit 0
+    ls -td "${candidates[@]}" 2>/dev/null | head -1 | xargs -r dirname
