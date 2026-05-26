@@ -103,7 +103,7 @@ struct Fixture {
               fprintf(stderr, "                               Remote free(%p)\n", reinterpret_cast<void *>(remotePtr));
               std::free(reinterpret_cast<void *>(remotePtr));
             },
-            true) {}
+            false) {}
 
   template <typename T> T *mallocLocal(size_t count = 1) {
     auto p = std::malloc(sizeof(T) * count);
