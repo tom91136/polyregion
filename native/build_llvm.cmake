@@ -83,10 +83,6 @@ if (NOT EXISTS ${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/llvm/CMakeLists.txt)
     endif ()
 endif ()
 
-if (UNIX AND NOT APPLE)
-    list(APPEND BUILD_OPTIONS -DLLVM_ENABLE_LTO=Thin)
-endif ()
-
 if (UNIX AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND BUILD_OPTIONS "-DLLVM_USE_SANITIZER=Address\\;Undefined")
     list(APPEND BUILD_OPTIONS "-DBUILD_SHARED_LIBS=ON")
