@@ -1,7 +1,5 @@
 #include "ast.h"
 
-#include <iostream>
-
 #include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 

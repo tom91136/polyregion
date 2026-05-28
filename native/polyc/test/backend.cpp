@@ -1,6 +1,5 @@
-#include <iostream>
-
 #include "catch2/catch_all.hpp"
+#include "fmt/format.h"
 
 #include "ast.h"
 #include "compiler.h"
@@ -23,7 +22,7 @@ static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any r
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
-  std::cout << c << std::endl;
+  fmt::print("{}\n", repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 }
@@ -48,17 +47,17 @@ TEST_CASE("run", "[backend]") {
   Program p(fn, {}, {}, PassPhase::Initial());
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O3);
-  INFO(c);
+  INFO(repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 
   c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx803"}, OptLevel::O3);
-  INFO(c);
+  INFO(repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 
   c = polyregion::compiler::compile(p, {Target::Object_LLVM_NVPTX64, "sm_35"}, OptLevel::O3);
-  INFO(c);
+  INFO(repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 }

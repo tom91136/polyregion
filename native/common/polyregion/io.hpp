@@ -1,8 +1,8 @@
 #pragma once
 
 #include <fstream>
+#include <iterator>
 #include <limits>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,9 +25,7 @@ template <typename T> std::vector<T> read_struct(const std::string &path) {
 
 static inline std::string read_string(const std::string &path) {
   std::ifstream t(path);
-  std::stringstream buffer;
-  buffer << t.rdbuf();
-  return buffer.str();
+  return {std::istreambuf_iterator<char>(t), std::istreambuf_iterator<char>()};
 }
 
 } // namespace polyregion

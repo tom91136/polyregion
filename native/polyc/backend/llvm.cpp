@@ -1,6 +1,5 @@
 #include "llvm.h"
 
-#include <iostream>
 #include <unordered_set>
 
 #include "llvm/IR/Intrinsics.h"
@@ -11,6 +10,7 @@
 
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "ast.h"
@@ -420,7 +420,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
-              throw BackendException("Semantic error: conversion from ref type (" + to_string(fromTpe) + ") is not allowed");
+              throw BackendException("Semantic error: conversion from ref type (" + llvm_tostring(fromTpe) + ") is not allowed");
             },
             [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
@@ -428,7 +428,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
-              throw BackendException("Semantic error: conversion to ref type (" + to_string(fromTpe) + ") is not allowed");
+              throw BackendException("Semantic error: conversion to ref type (" + llvm_tostring(fromTpe) + ") is not allowed");
             },
             [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
@@ -963,7 +963,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (verifyModule(M, &errOut)) {
-    std::cerr << "Verification failed:\n" << errOut.str() << "\nIR=\n" << irOut.str() << std::endl;
+    fmt::print(stderr, "Verification failed:\n{}\nIR=\n{}\n", errOut.str(), irOut.str());
     return {errOut.str(), irOut.str()};
   } else {
     return {{}, irOut.str()};

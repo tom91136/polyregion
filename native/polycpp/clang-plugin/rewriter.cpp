@@ -1,6 +1,5 @@
 #include "rewriter.h"
 
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -387,7 +386,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
               // the rest. Disambiguate with the lambda's CXXRecordDecl ID.
               moduleId += fmt::format("@{:x}", c.functorDecl->getParent()->getID());
 
-              std::cout << moduleId << std::endl;
+              fmt::print("{}\n", moduleId);
 
               const auto bundle = compileRegion(
                   opts, C, D, moduleId, *c.functorDecl,

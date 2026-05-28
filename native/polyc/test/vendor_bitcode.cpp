@@ -1,10 +1,13 @@
-#include <filesystem>
 #include <fstream>
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "catch2/catch_all.hpp"
@@ -15,11 +18,20 @@ using namespace polyregion::backend;
 
 namespace {
 
-std::filesystem::path scratchDir(const std::string &suffix) {
-  auto root = std::filesystem::temp_directory_path() / ("polyc-vendor-bitcode-" + suffix);
-  std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root);
-  return root;
+std::string scratchDir(const std::string &suffix) {
+  llvm::SmallString<256> root;
+  llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, root);
+  const auto pid = std::to_string(llvm::sys::Process::getProcessId());
+  llvm::sys::path::append(root, "polyc-vendor-bitcode-" + pid + "-" + suffix);
+  llvm::sys::fs::remove_directories(root);
+  if (auto ec = llvm::sys::fs::create_directories(root)) FAIL("scratchDir create_directories failed: " << ec.message());
+  return root.str().str();
+}
+
+std::string joined(const std::string &dir, llvm::StringRef name) {
+  llvm::SmallString<256> p(dir);
+  llvm::sys::path::append(p, name);
+  return p.str().str();
 }
 
 } // namespace
@@ -27,28 +39,25 @@ std::filesystem::path scratchDir(const std::string &suffix) {
 TEST_CASE("findInDirs picks the first match", "[vendor-bitcode]") {
   auto a = scratchDir("first-match-a");
   auto b = scratchDir("first-match-b");
-  std::ofstream(b / "libdevice.10.bc") << "stub";
-  const std::string aStr = a.string(), bStr = b.string();
-  CHECK(llvmc::findInDirs("libdevice.10.bc", {aStr, bStr}) == (b / "libdevice.10.bc").string());
+  std::ofstream(joined(b, "libdevice.10.bc")) << "stub";
+  CHECK(llvmc::findInDirs("libdevice.10.bc", {a, b}) == joined(b, "libdevice.10.bc"));
 }
 
 TEST_CASE("findInDirs returns empty when no dir contains the file", "[vendor-bitcode]") {
   auto a = scratchDir("no-match");
-  const std::string aStr = a.string();
-  CHECK(llvmc::findInDirs("missing.bc", {aStr}).empty());
+  CHECK(llvmc::findInDirs("missing.bc", {a}).empty());
 }
 
 TEST_CASE("findInDirs skips empty dir entries", "[vendor-bitcode]") {
   auto a = scratchDir("skip-empty");
-  std::ofstream(a / "libdevice.10.bc") << "stub";
+  std::ofstream(joined(a, "libdevice.10.bc")) << "stub";
   const llvm::StringRef empty;
-  const std::string aStr = a.string();
-  CHECK(llvmc::findInDirs("libdevice.10.bc", {empty, aStr}) == (a / "libdevice.10.bc").string());
+  CHECK(llvmc::findInDirs("libdevice.10.bc", {empty, a}) == joined(a, "libdevice.10.bc"));
 }
 
 TEST_CASE("linkVendorBitcodeFile merges definitions into target module", "[vendor-bitcode]") {
   auto dir = scratchDir("link");
-  const auto donorPath = (dir / "donor.bc").string();
+  const auto donorPath = joined(dir, "donor.bc");
 
   {
     llvm::LLVMContext ctx;

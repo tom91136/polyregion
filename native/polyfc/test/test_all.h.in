@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdlib>
-#include <filesystem>
 #include <string>
 #include <vector>
+
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 
 namespace {
 inline std::string envOr(const char *name, const char *fallback) {
@@ -15,17 +17,19 @@ inline std::vector<std::string> testFilesFromEnv(const char *dirEnv, std::vector
   if (const char *d = std::getenv(dirEnv)) {
     std::vector<std::string> out;
     std::error_code ec;
-    for (auto &e : std::filesystem::recursive_directory_iterator(d, ec)) {
-      if (!e.is_regular_file()) continue;
-      auto name = e.path().filename().string();
-      auto ext = e.path().extension().string();
-      if (name.rfind("check_", 0) == 0 && (ext == ".cpp" || ext == ".f95")) out.push_back(e.path().string());
+    for (llvm::sys::fs::recursive_directory_iterator it(d, ec, /*follow_symlinks*/ false), end; it != end && !ec;
+         it.increment(ec)) {
+      if (!llvm::sys::fs::is_regular_file(it->path())) continue;
+      const auto name = llvm::sys::path::filename(it->path());
+      const auto ext = llvm::sys::path::extension(it->path());
+      if (name.starts_with("check_") && (ext == ".cpp" || ext == ".f95")) out.emplace_back(it->path());
     }
     if (!out.empty()) return out;
   }
   return fallback;
 }
 } // namespace
+
 
 static const std::string BinaryDir = envOr("POLYTEST_BINARY_DIR", "@POLYFC_TEST_BINARY_DIR@");
 static const std::string WorkDir = envOr("POLYTEST_WORK_DIR", "@POLYFC_TEST_CACHE_DIR@");
@@ -35,3 +39,4 @@ static const std::string FlangDriver = envOr("POLYTEST_FLANG_DRIVER", "@POLYFC_F
 static const std::string PolyDCOLib = envOr("POLYTEST_POLYDCO_LIB", "@POLYFC_POLYDCO_LIB@");
 static const std::string PolyDCOLDLibraryPath = envOr("POLYTEST_POLYDCO_LIBRARY_PATH", "@POLYFC_POLYDCO_LIBRARY_PATH@");
 static const std::string PolyDCOInclude = envOr("POLYTEST_POLYDCO_INCLUDE", "@POLYFC_POLYDCO_INCLUDE@");
+

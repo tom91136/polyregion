@@ -87,23 +87,16 @@ struct Fixture {
             }, //
             [&](size_t size) {
               auto p = std::malloc(size);
-              fprintf(stderr, "                               Remote %p = malloc(%ld)\n", p, size);
               remoteAllocations.emplace(reinterpret_cast<uintptr_t>(p), size);
               return reinterpret_cast<uintptr_t>(p);
             }, //
             [](void *dst, uintptr_t src, size_t srcOffset, size_t size) {
-              fprintf(stderr, "Local %p <|[%4ld]- Remote [%p + %4ld]\n", dst, size, reinterpret_cast<void *>(src), srcOffset);
               return std::memcpy(dst, reinterpret_cast<char *>(src) + srcOffset, size);
             }, //
             [](const void *src, uintptr_t dst, size_t dstOffset, size_t size) {
-              fprintf(stderr, "Local %p -[%4ld]|> Remote [%p + %4ld]\n", src, size, reinterpret_cast<void *>(dst), dstOffset);
               return std::memcpy(reinterpret_cast<char *>(dst) + dstOffset, src, size);
             }, //
-            [](uintptr_t remotePtr) {
-              fprintf(stderr, "                               Remote free(%p)\n", reinterpret_cast<void *>(remotePtr));
-              std::free(reinterpret_cast<void *>(remotePtr));
-            },
-            false) {}
+            [](uintptr_t remotePtr) { std::free(reinterpret_cast<void *>(remotePtr)); }, false) {}
 
   template <typename T> T *mallocLocal(size_t count = 1) {
     auto p = std::malloc(sizeof(T) * count);

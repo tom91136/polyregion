@@ -1,7 +1,6 @@
 #include "driver_polyc.h"
 
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -9,6 +8,7 @@
 #include "aspartame/string.hpp"
 #include "aspartame/unordered_map.hpp"
 #include "aspartame/vector.hpp"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/io.hpp"
@@ -79,7 +79,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  case 2: opt = compiletime::OptLevel::O2; break;
                  case 3: opt = compiletime::OptLevel::O3; break;
                  case 4: opt = compiletime::OptLevel::Ofast; break;
-                 default: std::cerr << "Unknown optimisation level: " << std::to_string(rawOpt) << std::endl; return EXIT_FAILURE;
+                 default: fmt::print(stderr, "Unknown optimisation level: {}\n", rawOpt); return EXIT_FAILURE;
                }
 
                auto bytes = maybePath ? polyregion::read_struct<uint8_t>(maybePath.value()) : readFromStdIn<uint8_t>();
@@ -95,14 +95,11 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  }();
 
                  compiler::initialise();
-                 std::cout << "[POLYC] Compiling program:\n";
-                 std::cout << "=================" << std::endl;
-                 std::cout << repr(program) << "\n";
-                 std::cout << "=================" << std::endl;
+                 fmt::print(stderr, "[POLYC] Compiling program:\n=================\n{}\n=================\n", repr(program));
 
                  auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes}, opt);
-                 if (verbose) std::cerr << repr(compilation) << std::endl;
-                 if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
+                 if (verbose) fmt::print(stderr, "{}\n", repr(compilation));
+                 if (!compilation.messages.empty()) fmt::print(stderr, "{}\n", compilation.messages);
                  auto resultBytes = compileresult_to_msgpack(compilation);
                  if (out == "-") {
                    std::freopen(nullptr, "wb", stdout);
@@ -112,13 +109,13 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                    outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
                  }
                } catch (const std::exception &e) {
-                 std::cerr << "[POLYC] " << e.what() << std::endl;
+                 fmt::print(stderr, "[POLYC] {}\n", e.what());
                  return EXIT_FAILURE;
                }
                return EXIT_SUCCESS;
              },
              [&]() {
-               std::cerr << "Unknown target: " << rawTarget << std::endl;
+               fmt::print(stderr, "Unknown target: {}\n", rawTarget);
                return EXIT_FAILURE;
              });
 }

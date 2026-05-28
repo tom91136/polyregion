@@ -2,10 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
-#include <iostream>
 #include <numeric>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/runtime.h"
@@ -71,22 +70,26 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
 
   auto bandwidth = [&](auto &&f) { return *f(sizesMB) / *std::min_element(f(elapsed)->begin(), f(elapsed)->end()); };
 
-  std::cerr                                 //
-      << std::fixed << std::setprecision(3) //
-      << "===BabelStream (" << title << ")===\n"
-      << "Running kernels " << times << " times\n"
-      << "Precision: " << magic_enum::enum_name(tpe) << "\n"
-      << "Array size: " << sizesMB.copy / 2 << " MB (=" << sizesMB.copy / 2 / 1000 << " GB)\n"
-      << "Total size: " << sizesMB.triad << " MB (=" << sizesMB.triad / 1000 << " GB)\n";
+  fmt::print(stderr,
+             "===BabelStream ({})===\n"
+             "Running kernels {} times\n"
+             "Precision: {}\n"
+             "Array size: {:.3f} MB (={:.3f} GB)\n"
+             "Total size: {:.3f} MB (={:.3f} GB)\n",
+             title, times, magic_enum::enum_name(tpe), sizesMB.copy / 2, sizesMB.copy / 2 / 1000, sizesMB.triad, sizesMB.triad / 1000);
   for (auto &ln : extraLines)
-    std::cerr << ln << "\n";
+    fmt::print(stderr, "{}\n", ln);
 
-  std::cerr << "Function MBytes/sec\n"
-            << "Copy     " << bandwidth([](auto &x) { return &x.copy; }) << "\n"
-            << "Mul      " << bandwidth([](auto &x) { return &x.mul; }) << "\n"
-            << "Add      " << bandwidth([](auto &x) { return &x.add; }) << "\n"
-            << "Triad    " << bandwidth([](auto &x) { return &x.triad; }) << "\n"
-            << "Dot      " << bandwidth([](auto &x) { return &x.dot; }) << "\n";
+  fmt::print(stderr,
+             "Function MBytes/sec\n"
+             "Copy     {:.3f}\n"
+             "Mul      {:.3f}\n"
+             "Add      {:.3f}\n"
+             "Triad    {:.3f}\n"
+             "Dot      {:.3f}\n",
+             bandwidth([](auto &x) { return &x.copy; }), bandwidth([](auto &x) { return &x.mul; }),
+             bandwidth([](auto &x) { return &x.add; }), bandwidth([](auto &x) { return &x.triad; }),
+             bandwidth([](auto &x) { return &x.dot; }));
 }
 
 template <typename T>
@@ -227,7 +230,7 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   if (auto checkAlloc = d.mallocShared(1, Access::RW); checkAlloc) {
     d.freeShared(*checkAlloc);
   } else {
-    std::cerr << "shared allocation unsupported for device: " + d.name() << ", skipping..." << std::endl;
+    fmt::print(stderr, "shared allocation unsupported for device: {}, skipping...\n", d.name());
     return;
   }
   bool threaded = kind == PlatformKind::HostThreaded;

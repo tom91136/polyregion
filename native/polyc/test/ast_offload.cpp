@@ -1,4 +1,3 @@
-#include <iostream>
 
 #include "catch2/catch_all.hpp"
 
@@ -23,7 +22,7 @@ using namespace polyast::dsl;
 template <typename P> static void assertCompile(const P &p) {
   CAPTURE(repr(p));
   auto c = compiler::compile(p, compiler::Options{Target::Object_LLVM_AMDGCN, "gfx1036"}, OptLevel::O3);
-  CAPTURE(c);
+  CAPTURE(repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
   for (auto e : c.events) {
@@ -31,7 +30,7 @@ template <typename P> static void assertCompile(const P &p) {
     REQUIRE_THAT(e.data, !ContainsSubstring("unreachable"));
   }
   FAIL("debug");
-  INFO(c);
+  INFO(repr(c));
 }
 
 // TEST_CASE("array update struct elem member", "[compiler]") {

@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <iostream>
 
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/FileSystem.h"
@@ -54,10 +53,8 @@ int main(int argc, const char *argv[]) {
 #else
   flangPath = resolveExternalDriver(args, "POLYFC_DRIVER", "flang-new", execParentPath);
   if (flangPath.empty()) {
-    std::cerr << fmt::format(
-                     "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_flang-new>`",
-                     execPath)
-              << std::endl;
+    fmt::print(stderr, "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_flang-new>`\n",
+               execPath);
     return EXIT_FAILURE;
   }
 #endif
@@ -65,8 +62,7 @@ int main(int argc, const char *argv[]) {
   return StdParOptions::parse(args) ^
          fold_total(
              [&](const std::vector<std::string> &errors) {
-               std::cerr << fmt::format("[PolyFC] Unable to parse PolyFC specific arguments:\n{}", (errors ^ mk_string("\n") ^ indent(2)))
-                         << std::endl;
+               fmt::print(stderr, "[PolyFC] Unable to parse PolyFC specific arguments:\n{}\n", (errors ^ mk_string("\n") ^ indent(2)));
                return EXIT_FAILURE;
              },
              [&](const std::optional<StdParOptions> &opts) {
@@ -146,12 +142,10 @@ int main(int argc, const char *argv[]) {
                        remaining.insert(remaining.begin() + 1, flags.begin(), flags.end());
                        append(appleDistLibcxxRpath(execParentPath));
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
-                         std::cerr
-                             << fmt::format(
+                         fmt::print(stderr,
                                     "[PolyFC] Dynamic linking of PolyDCO runtime requested, if you would like to relocate your binary, "
-                                    "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
-                                    joinPath(polyfcLibPath, fmt::format("libpolydco.{}", dynamicLibSuffix())))
-                             << std::endl;
+                                    "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)\n",
+                                    joinPath(polyfcLibPath, fmt::format("libpolydco.{}", dynamicLibSuffix())));
                        }
                        break;
                      }

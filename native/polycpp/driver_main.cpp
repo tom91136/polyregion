@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <iostream>
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
@@ -52,10 +51,8 @@ int main(int argc, const char *argv[]) {
 #else
   clangPath = resolveExternalDriver(args, "POLYCPP_DRIVER", "clang++", execParentPath);
   if (clangPath.empty()) {
-    std::cerr << fmt::format(
-                     "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`",
-                     execPath)
-              << std::endl;
+    fmt::print(stderr, "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`\n",
+               execPath);
     return EXIT_FAILURE;
   }
 #endif
@@ -63,8 +60,7 @@ int main(int argc, const char *argv[]) {
   return StdParOptions::parse(args) ^
          fold_total(
              [&](const std::vector<std::string> &errors) {
-               std::cerr << fmt::format("[PolyCpp] Unable to parse PolyCpp specific arguments:\n{}", (errors ^ mk_string("\n") ^ indent(2)))
-                         << std::endl;
+               fmt::print(stderr, "[PolyCpp] Unable to parse PolyCpp specific arguments:\n{}\n", (errors ^ mk_string("\n") ^ indent(2)));
                return EXIT_FAILURE;
              },
              [&](const std::optional<StdParOptions> &opts) {
@@ -194,12 +190,10 @@ int main(int argc, const char *argv[]) {
                        append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polyreflect-rt"));
                        append(appleDistLibcxxRpath(execParentPath));
                        if (opts->verbose == StdParOptions::VerboseLevel::Info) {
-                         std::cerr
-                             << fmt::format(
+                         fmt::print(stderr,
                                     "[PolyCpp] Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "
-                                    "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
-                                    joinPath(polycppLibPath, fmt::format("libpolystl.{}", dynamicLibSuffix())))
-                             << std::endl;
+                                    "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)\n",
+                                    joinPath(polycppLibPath, fmt::format("libpolystl.{}", dynamicLibSuffix())));
                        }
                        break;
                      }
@@ -224,7 +218,7 @@ int main(int argc, const char *argv[]) {
                return clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext);
 #else
                remaining[0] = "clang++";
-               std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
+               fmt::print(">>> {}\n", remaining ^ mk_string(" "));
                return llvm::sys::ExecuteAndWait(clangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
 #endif
              });

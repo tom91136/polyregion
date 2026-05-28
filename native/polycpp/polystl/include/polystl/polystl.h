@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cassert>
-#include <iostream>
 
 #include "polyinvoke/runtime.h"
 

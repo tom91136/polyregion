@@ -113,7 +113,7 @@ Expr::Any generateConstValue(const Tpe::Any &t) {
 template <typename P> static void assertCompile(const P &p) {
   CAPTURE(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
-  CAPTURE(c);
+  CAPTURE(repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
   for (auto e : c.events) {
@@ -164,7 +164,7 @@ TEST_CASE("spirv64 minimal", "[compiler]") {
 TEST_CASE("recursive struct", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
-  DYNAMIC_SECTION(tpe) {
+  DYNAMIC_SECTION(repr(tpe)) {
     Type::Struct fooTpe(Sym({"foo"}), {});
     Named x("x", tpe);
     Named next("next", Ptr(fooTpe));
@@ -265,7 +265,7 @@ TEST_CASE("code after if", "[compiler]") {
 TEST_CASE("return ptr to struct", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
-  DYNAMIC_SECTION(tpe) {
+  DYNAMIC_SECTION(repr(tpe)) {
 
     Named x("x", tpe);
     StructDef def(Sym({"foo"}), {}, {x}, {});
@@ -281,7 +281,7 @@ TEST_CASE("return ptr to struct", "[compiler]") {
 TEST_CASE("return struct", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
-  DYNAMIC_SECTION(tpe) {
+  DYNAMIC_SECTION(repr(tpe)) {
 
     Named x("x", tpe);
     StructDef def(Sym({"foo"}), {}, {x}, {});
@@ -355,8 +355,8 @@ TEST_CASE("return struct and take ref", "[compiler]") {
 TEST_CASE("fn call arg0", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypes));
-  DYNAMIC_SECTION(tpe) {
-    CAPTURE(tpe);
+  DYNAMIC_SECTION(repr(tpe)) {
+    CAPTURE(repr(tpe));
     auto callee = function("bar", {}, tpe)({
         ret(generateConstValue(tpe)) //
     });
@@ -370,8 +370,8 @@ TEST_CASE("fn call arg0", "[compiler]") {
 TEST_CASE("fn call arg1", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypes));
-  DYNAMIC_SECTION(tpe) {
-    CAPTURE(tpe);
+  DYNAMIC_SECTION(repr(tpe)) {
+    CAPTURE(repr(tpe));
     auto callee = function("bar", {"a"_(tpe)()}, tpe)({
         ret("a"_(tpe)) //
     });
@@ -386,9 +386,9 @@ TEST_CASE("fn call arg2", "[compiler]") {
   compiler::initialise();
   auto tpe0 = GENERATE(from_range(PrimitiveTypes));
   auto tpe1 = GENERATE(from_range(PrimitiveTypes));
-  DYNAMIC_SECTION(tpe0 << "," << tpe1) {
-    CAPTURE(tpe0);
-    CAPTURE(tpe1);
+  DYNAMIC_SECTION(repr(tpe0) << "," << repr(tpe1)) {
+    CAPTURE(repr(tpe0));
+    CAPTURE(repr(tpe1));
     auto callee = function("bar", {"a"_(tpe0)(), "b"_(tpe1)()}, tpe0)({
         ret("a"_(tpe0)) //
     });
@@ -404,10 +404,10 @@ TEST_CASE("fn call arg3", "[compiler]") {
   auto tpe0 = GENERATE(from_range(PrimitiveTypes));
   auto tpe1 = GENERATE(from_range(PrimitiveTypes));
   auto tpe2 = GENERATE(from_range(PrimitiveTypes));
-  DYNAMIC_SECTION(tpe0 << "," << tpe1 << "," << tpe2) {
-    CAPTURE(tpe0);
-    CAPTURE(tpe1);
-    CAPTURE(tpe2);
+  DYNAMIC_SECTION(repr(tpe0) << "," << repr(tpe1) << "," << repr(tpe2)) {
+    CAPTURE(repr(tpe0));
+    CAPTURE(repr(tpe1));
+    CAPTURE(repr(tpe2));
     auto callee = function("bar", {"a"_(tpe0)(), "b"_(tpe1)(), "c"_(tpe2)()}, tpe0)({
         ret("a"_(tpe0)) //
     });
@@ -421,8 +421,8 @@ TEST_CASE("fn call arg3", "[compiler]") {
 TEST_CASE("constant return", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypes));
-  DYNAMIC_SECTION(tpe) {
-    CAPTURE(tpe);
+  DYNAMIC_SECTION(repr(tpe)) {
+    CAPTURE(repr(tpe));
     assertCompile(program(function("foo", {}, tpe)({
         ret(generateConstValue(tpe)) //
     })));
@@ -432,8 +432,8 @@ TEST_CASE("constant return", "[compiler]") {
 TEST_CASE("alias prim", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypes));
-  DYNAMIC_SECTION(tpe << "(local)") {
-    CAPTURE(tpe);
+  DYNAMIC_SECTION(repr(tpe) << "(local)") {
+    CAPTURE(repr(tpe));
     assertCompile(program(function("foo", {}, tpe)({
         let("v1") = generateConstValue(tpe), //
         let("v2") = "v1"_(tpe),              //
@@ -442,8 +442,8 @@ TEST_CASE("alias prim", "[compiler]") {
         ret("v4"_(tpe))                      //
     })));
   }
-  DYNAMIC_SECTION(tpe << "(arg)") {
-    CAPTURE(tpe);
+  DYNAMIC_SECTION(repr(tpe) << "(arg)") {
+    CAPTURE(repr(tpe));
     assertCompile(program(function("foo", {"in"_(tpe)()}, tpe)({
         let("v1") = "in"_(tpe), //
         let("v2") = "v1"_(tpe), //
@@ -459,8 +459,8 @@ TEST_CASE("index sized prim array", "[compiler]") {
   const auto tpe = SInt; // GENERATE(from_range(PrimitiveTypes));
 
   auto idx = 3; // GENERATE(0, 1, 3, 7, 10);
-  //  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
-  //    CAPTURE(tpe, idx);
+  //  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (local)") {
+  //    CAPTURE(repr(tpe), idx);
   //    assertCompile(program(function("foo", {}, tpe)({
   //        let("xs") = Alloc(tpe, 42_(SInt)),
   //        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
@@ -468,8 +468,8 @@ TEST_CASE("index sized prim array", "[compiler]") {
   //        ret("x"_(tpe))                                     //
   //    })));
   //  }
-  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
-    CAPTURE(tpe, idx);
+  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (args)") {
+    CAPTURE(repr(tpe), idx);
     assertCompile(program(function("foo", {"xs"_(Arr(tpe, 10))()}, tpe)({
         let("x") = "xs"_(Arr(tpe, 10))[integral(SInt, idx)], //
         ret("x"_(tpe))                                       //
@@ -482,8 +482,8 @@ TEST_CASE("mut sized prim array", "[compiler]") {
   const auto tpe = SInt; // GENERATE(from_range(PrimitiveTypes));
 
   auto idx = 3; // GENERATE(0, 1, 3, 7, 10);
-  //  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
-  //    CAPTURE(tpe, idx);
+  //  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (local)") {
+  //    CAPTURE(repr(tpe), idx);
   //    assertCompile(program(function("foo", {}, tpe)({
   //        let("xs") = Alloc(tpe, 42_(SInt)),
   //        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
@@ -491,8 +491,8 @@ TEST_CASE("mut sized prim array", "[compiler]") {
   //        ret("x"_(tpe))                                     //
   //    })));
   //  }
-  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
-    CAPTURE(tpe, idx);
+  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (args)") {
+    CAPTURE(repr(tpe), idx);
     assertCompile(program(function("foo", {"xs"_(Arr(tpe, 10))()}, Arr(tpe, 10))({
         "xs"_(Arr(tpe, 10))[integral(SInt, idx)] = integral(SInt, 42), //
         ret("xs"_(Arr(tpe, 10)))                                       //
@@ -505,8 +505,8 @@ TEST_CASE("mut ptr to sized prim array", "[compiler]") {
   const auto tpe = SInt; // GENERATE(from_range(PrimitiveTypes));
 
   auto idx = 3; // GENERATE(0, 1, 3, 7, 10);
-  //  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
-  //    CAPTURE(tpe, idx);
+  //  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (local)") {
+  //    CAPTURE(repr(tpe), idx);
   //    assertCompile(program(function("foo", {}, tpe)({
   //        let("xs") = Alloc(tpe, 42_(SInt)),
   //        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
@@ -514,8 +514,8 @@ TEST_CASE("mut ptr to sized prim array", "[compiler]") {
   //        ret("x"_(tpe))                                     //
   //    })));
   //  }
-  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
-    CAPTURE(tpe, idx);
+  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (args)") {
+    CAPTURE(repr(tpe), idx);
     assertCompile(program(function("foo", {"xs"_(Ptr(Arr(tpe, 10)))()}, tpe)({
         let("deref") = "xs"_(Ptr(Arr(tpe, 10)))[integral(SInt, 2)], "deref"_(Arr(tpe, 10))[integral(SInt, idx)] = integral(SInt, 42), //
         ret("deref"_(Arr(tpe, 10))[integral(SInt, idx)])                                                                              //
@@ -527,16 +527,16 @@ TEST_CASE("index prim array", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypes));
   const auto idx = GENERATE(0, 1, 3, 7, 10);
-  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
-    CAPTURE(tpe, idx);
+  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (local)") {
+    CAPTURE(repr(tpe), idx);
     assertCompile(program(function("foo", {}, tpe)({
         let("xs") = Alloc(tpe, 42_(SInt), Global), "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
         let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                          //
         ret("x"_(tpe))                                                                                            //
     })));
   }
-  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
-    CAPTURE(tpe, idx);
+  DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (args)") {
+    CAPTURE(repr(tpe), idx);
     assertCompile(program(function("foo", {"xs"_(Ptr(tpe))()}, tpe)({
         let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)], //
         ret("x"_(tpe))                                   //
@@ -549,16 +549,16 @@ TEST_CASE("update prim array", "[compiler]") {
   const auto tpe = GENERATE(from_range(PrimitiveTypes));
   const auto idx = GENERATE(0, 1, 3, 7, 10);
   const auto val = generateConstTerm(tpe);
-  DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (local)") {
-    CAPTURE(tpe, idx, val);
+  DYNAMIC_SECTION("(xs[" << idx << "]:" << repr(tpe) << ") = " << repr(val) << " (local)") {
+    CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {}, tpe)({
         let("xs") = Alloc(tpe, 42_(SInt), Global),  //
         "xs"_(Ptr(tpe))[integral(SInt, idx)] = val, //
         ret("xs"_(Ptr(tpe))[integral(SInt, idx)])   //
     })));
   }
-  DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (args)") {
-    CAPTURE(tpe, idx, val);
+  DYNAMIC_SECTION("(xs[" << idx << "]:" << repr(tpe) << ") = " << repr(val) << " (args)") {
+    CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {"xs"_(Ptr(tpe))()}, tpe)({
         "xs"_(Ptr(tpe))[integral(SInt, idx)] = val, //
         ret("xs"_(Ptr(tpe))[integral(SInt, idx)])   //
@@ -571,8 +571,8 @@ TEST_CASE("update prim array by ref", "[compiler]") {
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   const auto idx = GENERATE(std::optional<int>{}, 0, 1, 3, 7, 10);
   const auto val = generateConstValue(tpe);
-  DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (local)") {
-    CAPTURE(tpe, idx, val);
+  DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << repr(tpe) << ") = " << repr(val) << " (local)") {
+    CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {}, tpe)({
         let("xs") = Alloc(tpe, 42_(SInt), Global),                                 //
         "xs"_(Ptr(tpe))[integral(SInt, idx.value_or(0))] = generateConstTerm(tpe), //
@@ -580,8 +580,8 @@ TEST_CASE("update prim array by ref", "[compiler]") {
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
     })));
   }
-  DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (args)") {
-    CAPTURE(tpe, idx, val);
+  DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << repr(tpe) << ") = " << repr(val) << " (args)") {
+    CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {"xs"_(Ptr(tpe))()}, tpe)({
         let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
@@ -593,16 +593,16 @@ TEST_CASE("update prim value by ref", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   const auto val = generateConstValue(tpe);
-  DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (local)") {
-    CAPTURE(tpe, val);
+  DYNAMIC_SECTION("(&x:" << repr(tpe) << ") = " << repr(val) << " (local)") {
+    CAPTURE(repr(tpe), repr(val));
     assertCompile(program(function("foo", {}, tpe)({
         let("x") = val,                               //
         let("y") = RefTo("x"_(tpe), {}, tpe, Global), //
         ret("y"_(Ptr(tpe))[integral(SInt, 0)])        //
     })));
   }
-  DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (args)") {
-    CAPTURE(tpe, val);
+  DYNAMIC_SECTION("(&x:" << repr(tpe) << ") = " << repr(val) << " (args)") {
+    CAPTURE(repr(tpe), repr(val));
     assertCompile(program(function("foo", {"x"_(tpe)()}, tpe)({
         let("y") = RefTo("x"_(tpe), {}, tpe, Global), //
         ret("y"_(Ptr(tpe))[integral(SInt, 0)])        //
@@ -982,7 +982,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
   compiler::initialise();
   const auto tpe = GENERATE(values<Type::Any>({Float, Double}));
   auto p = program({}, {mkMathKernel(tpe)});
-  DYNAMIC_SECTION(tpe) {
+  DYNAMIC_SECTION(repr(tpe)) {
     SECTION("CPU x86_64") { assertCompileTarget(p, {Target::Object_LLVM_x86_64, "skylake"}); }
     SECTION("NVPTX64") {
       const auto cpu = GENERATE(

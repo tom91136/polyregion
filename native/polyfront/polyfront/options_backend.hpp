@@ -3,8 +3,11 @@
 #include <cstdlib>
 #include <vector>
 
+#include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 
 #include "aspartame/all.hpp"
@@ -98,26 +101,40 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
                                                                         const std::string &arch) {
   auto data = polyast::hashed_program_to_msgpack(p);
 
-  llvm::SmallString<64> inputPath;
-  auto inputCreateEC = llvm::sys::fs::createTemporaryFile("", "", inputPath);
-  if (inputCreateEC) return "Failed to create temp input file: " + inputCreateEC.message();
+  auto tempModel = [](llvm::StringRef leaf) {
+    llvm::SmallString<128> path;
+    llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, path);
+    llvm::sys::path::append(path, leaf);
+    return path;
+  };
 
-  llvm::SmallString<64> outputPath;
-  auto outputCreateEC = llvm::sys::fs::createTemporaryFile("", "", outputPath);
-  if (outputCreateEC) return "Failed to create temp output file: " + outputCreateEC.message();
+  auto inputFileExp = llvm::sys::fs::TempFile::create(tempModel("polyfront-in-%%%%%%.msgpack"));
+  if (!inputFileExp) return "Failed to create temp input file: " + llvm::toString(inputFileExp.takeError());
+  auto inputFile = std::move(*inputFileExp);
 
-  std::error_code streamEC;
-  llvm::raw_fd_ostream file(inputPath, streamEC, llvm::sys::fs::OF_None);
-  if (streamEC) return "Failed to open file: " + streamEC.message();
+  auto outputFileExp = llvm::sys::fs::TempFile::create(tempModel("polyfront-out-%%%%%%.msgpack"));
+  if (!outputFileExp) {
+    llvm::consumeError(inputFile.discard());
+    return "Failed to create temp output file: " + llvm::toString(outputFileExp.takeError());
+  }
+  auto outputFile = std::move(*outputFileExp);
 
-  file.write(reinterpret_cast<const char *>(data.data()), data.size());
-  file.flush();
+  auto cleanup = llvm::make_scope_exit([&] {
+    llvm::consumeError(inputFile.discard());
+    llvm::consumeError(outputFile.discard());
+  });
+
+  {
+    llvm::raw_fd_ostream file(inputFile.FD, /*shouldClose=*/false);
+    file.write(reinterpret_cast<const char *>(data.data()), data.size());
+    file.flush();
+  }
 
   const auto canonical = polyregion::compiletime::TargetSpec::findByCodegen(target);
   if (!canonical) return std::string("Unknown codegen target ordinal: ") + std::to_string(static_cast<int>(target));
   std::vector<llvm::StringRef> args{
       //
-      "", "--polyc", inputPath.str(), "--out", outputPath.str(), "--target", std::string_view(canonical->canonical), "--arch", arch};
+      "", "--polyc", inputFile.TmpName, "--out", outputFile.TmpName, "--target", std::string_view(canonical->canonical), "--arch", arch};
 
   if (opts.verbose) {
     (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
@@ -126,7 +143,7 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   if (int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
     return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
 
-  auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
+  auto BufferOrErr = llvm::MemoryBuffer::getFile(outputFile.TmpName);
 
   if (auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
   // The polycpp clang plugin is built with -fno-exceptions, so a throw from `from_msgpack(empty)`

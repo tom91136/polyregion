@@ -6,7 +6,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <stdexcept>
@@ -472,17 +471,16 @@ inline int fired_main( //
 }
 
 inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
-  if (const auto override = std::getenv("POLYTEST_WORK_DIR"); override && *override) {
-    std::error_code ec;
-    std::filesystem::create_directories(override, ec);
-    std::filesystem::current_path(override, ec);
-    if (ec) std::fprintf(stderr, "polytest: failed to chdir to POLYTEST_WORK_DIR='%s': %s\n", override, ec.message().c_str());
-  } else if (!cfg.workDir.empty()) {
-    std::error_code ec;
-    std::filesystem::create_directories(cfg.workDir, ec);
-    std::filesystem::current_path(cfg.workDir, ec);
-    if (ec) std::fprintf(stderr, "polytest: failed to chdir to workDir='%s': %s\n", cfg.workDir.c_str(), ec.message().c_str());
-  }
+  auto chdirTo = [](const char *what, llvm::StringRef dir) {
+    if (auto ec = llvm::sys::fs::create_directories(dir); ec) {
+      std::fprintf(stderr, "polytest: failed to create %s='%s': %s\n", what, dir.str().c_str(), ec.message().c_str());
+      return;
+    }
+    if (auto ec = llvm::sys::fs::set_current_path(dir); ec)
+      std::fprintf(stderr, "polytest: failed to chdir to %s='%s': %s\n", what, dir.str().c_str(), ec.message().c_str());
+  };
+  if (const auto override = std::getenv("POLYTEST_WORK_DIR"); override && *override) chdirTo("POLYTEST_WORK_DIR", override);
+  else if (!cfg.workDir.empty()) chdirTo("workDir", cfg.workDir);
   detail::firedCfg = &cfg;
   constexpr const char *descr = "polytest runner: parallel compile, serial run";
   PREPARE_FIRE_(argc, argv, false, fired_main, descr);
