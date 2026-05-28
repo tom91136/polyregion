@@ -22,6 +22,8 @@ using Bytes = Vector<char>;
 
 const static auto show_repr = [](auto &x) { return repr(x); };
 
+template <typename T> auto to_string(const T &x) -> decltype(repr(x)) { return repr(x); }
+
 std::string qualified(const Term::Select &);
 
 Term::Select selectNamed(const Named &name);
@@ -72,10 +74,7 @@ Tpe::Ptr Ptr(const Tpe::Any &t, std::optional<int32_t>, const TypeSpace::Any &s)
 Tpe::Arr Arr(const Tpe::Any &t, int32_t length, const TypeSpace::Any &s = TypeSpace::Global());
 Tpe::Struct Struct(std::string name, Vector<Type::Any> args);
 
-// Backwards-compat shim for the legacy While(prelude, cond, body) shape. The new Stmt::While takes
-// (cond, body) only; we inline the prelude into the start of body so the cond term gets re-bound
-// each iteration. Best-effort - callers should migrate to the 2-arg form for clarity.
-Stmt::While whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body);
+std::vector<Stmt::Any> whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body);
 
 struct AssignmentBuilder {
   std::string name;

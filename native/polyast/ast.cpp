@@ -1,9 +1,9 @@
 #include "ast.h"
 
-#include <iomanip>
 #include <string>
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 
 using namespace std::string_literals;
 using namespace polyregion::polyast;
@@ -12,26 +12,28 @@ using std::string;
 
 using namespace aspartame;
 
-static void renderCompileEvent(std::ostringstream &os, const CompileEvent &e, size_t depth) {
+static void renderCompileEvent(std::string &out, const CompileEvent &e, size_t depth) {
   const std::string prefix(4 + depth * 2, ' ');
-  os << prefix << "[" << e.epochMillis << ", +" << static_cast<double>(e.elapsedNanos) / 1e6 << "ms] " << e.name;
+  fmt::format_to(std::back_inserter(out), "{}[{}, +{}ms] {}", prefix, e.epochMillis, static_cast<double>(e.elapsedNanos) / 1e6, e.name);
   if (e.data.empty()) {
-    os << '\n';
+    out += '\n';
   } else if (e.data.find('\n') == std::string::npos) {
-    os << ": " << e.data << '\n';
+    fmt::format_to(std::back_inserter(out), ": {}\n", e.data);
   } else {
-    os << ":\n";
-    std::stringstream ss(e.data);
-    string l;
+    out += ":\n";
     size_t ln = 0;
-    while (std::getline(ss, l, '\n')) {
-      ln++;
-      os << prefix << std::setw(3) << ln << "│" << l << '\n';
+    for (size_t start = 0; start < e.data.size();) {
+      const size_t nl = e.data.find('\n', start);
+      const auto line = e.data.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+      ++ln;
+      fmt::format_to(std::back_inserter(out), "{}{:>3}│{}\n", prefix, ln, line);
+      if (nl == std::string::npos) break;
+      start = nl + 1;
     }
-    os << prefix << "   ╰───\n";
+    fmt::format_to(std::back_inserter(out), "{}   ╰───\n", prefix);
   }
   for (auto &child : e.items)
-    renderCompileEvent(os, child, depth + 1);
+    renderCompileEvent(out, child, depth + 1);
 }
 
 string polyast::qualified(const Term::Select &select) {
@@ -64,24 +66,22 @@ Type::Struct polyast::typeOf(const StructDef &def) {
 }
 
 string polyast::repr(const CompileResult &compilation) {
-  std::ostringstream os;
-  os << "Compilation {"                                                                                            //
-     << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //
-     << "\n  messages: " << (compilation.messages.empty() ? "(none)" : "`" + compilation.messages + "`")           //
-     << "\n  features: " << (compilation.features.empty() ? "(none)" : compilation.features ^ mk_string(","));
-  if (compilation.layouts.empty()) {
-    os << "\n  layouts: (none)";
-  } else {
-    os << "\n  layouts:\n" << (compilation.layouts ^ mk_string("\n", [](auto &l) { return repr(l) ^ indent(4); }));
-  }
-  os << "\n  events:";
-  if (compilation.events.empty()) os << " (none)";
-  else os << '\n';
+  std::string out;
+  auto sink = std::back_inserter(out);
+  fmt::format_to(sink, "Compilation {{\n  binary: {}\n  messages: {}\n  features: {}",
+                 compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)",
+                 compilation.messages.empty() ? "(none)" : "`" + compilation.messages + "`",
+                 compilation.features.empty() ? "(none)" : compilation.features ^ mk_string(","));
+  if (compilation.layouts.empty()) out += "\n  layouts: (none)";
+  else fmt::format_to(sink, "\n  layouts:\n{}", compilation.layouts ^ mk_string("\n", [](auto &l) { return repr(l) ^ indent(4); }));
+  out += "\n  events:";
+  if (compilation.events.empty()) out += " (none)";
+  else out += '\n';
 
   for (auto &e : compilation.events)
-    renderCompileEvent(os, e, 0);
-  os << "}";
-  return os.str();
+    renderCompileEvent(out, e, 0);
+  out += "}";
+  return out;
 }
 
 Opt<Type::Any> polyast::extractComponent(const Type::Any &t) {
@@ -154,11 +154,16 @@ bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::St
 Type::Ptr dsl::Ptr(const Type::Any &t, const TypeSpace::Any &s) { return Type::Ptr(t, s); }
 Type::Ptr dsl::Ptr(const Type::Any &t, std::optional<int32_t>, const TypeSpace::Any &s) { return Type::Ptr(t, s); }
 
-Stmt::While dsl::whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body) {
-  // Inline the prelude inside the body so the cond term gets re-bound each iteration.
-  std::vector<Stmt::Any> loopBody = prelude;
-  loopBody.insert(loopBody.end(), body.begin(), body.end());
-  return Stmt::While(cond, loopBody);
+std::vector<Stmt::Any> dsl::whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body) {
+  std::vector<Stmt::Any> result = prelude;
+  std::vector<Stmt::Any> loopBody = body;
+  for (const auto &s : prelude) {
+    if (auto v = s.get<Stmt::Var>(); v && v->expr) {
+      loopBody.push_back(Stmt::Mut(Term::Select(v->name, {}, v->name.tpe), *v->expr));
+    } else loopBody.push_back(s);
+  }
+  result.push_back(Stmt::While(cond, loopBody));
+  return result;
 }
 Type::Arr dsl::Arr(const Type::Any &t, int32_t length, const TypeSpace::Any &s) { return Type::Arr(t, length, s); }
 Type::Struct dsl::Struct(std::string name, Vector<Type::Any> args) { return Type::Struct(Sym({std::move(name)}), std::move(args)); }
