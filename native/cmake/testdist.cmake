@@ -2,7 +2,7 @@
 # standalone CTestTestfile.cmake. COMMAND tokens prefixed with `:bin:<name>` resolve to the
 # test-dist's bin/<name> at ctest invocation time via ${CMAKE_CURRENT_LIST_DIR}.
 function(polyregion_test_dist_record)
-    cmake_parse_arguments(ARG "" "NAME;WORKING_DIRECTORY;LABELS" "COMMAND;ENVIRONMENT" ${ARGN})
+    cmake_parse_arguments(ARG "" "NAME;WORKING_DIRECTORY;LABELS" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION" ${ARGN})
     if (NOT ARG_NAME OR NOT ARG_COMMAND)
         message(FATAL_ERROR "polyregion_test_dist_record requires NAME and COMMAND")
     endif ()
@@ -21,6 +21,9 @@ function(polyregion_test_dist_record)
     endif ()
     if (ARG_ENVIRONMENT)
         string(APPEND _props " ENVIRONMENT \"${ARG_ENVIRONMENT}\"")
+    endif ()
+    if (ARG_ENVIRONMENT_MODIFICATION)
+        string(APPEND _props " ENVIRONMENT_MODIFICATION \"${ARG_ENVIRONMENT_MODIFICATION}\"")
     endif ()
     if (ARG_LABELS)
         string(APPEND _props " LABELS \"${ARG_LABELS}\"")

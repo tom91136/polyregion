@@ -1,6 +1,7 @@
-# polytest_discover_tests(<target> NAME_PREFIX <p> WORKING_DIRECTORY <d> [LABELS <l>] [DIST_BIN <name>])
+# polytest_discover_tests(<target> NAME_PREFIX <p> [WORKING_DIRECTORY <d>] [LABELS <l>]
+#                         [DIST_BIN <name>] [ENVIRONMENT_MODIFICATION <pairs>] [TEST_FILES <files>])
 function(polytest_discover_tests target)
-    cmake_parse_arguments(ARG "" "NAME_PREFIX;WORKING_DIRECTORY;LABELS;DIST_BIN" "TEST_FILES" ${ARGN})
+    cmake_parse_arguments(ARG "" "NAME_PREFIX;WORKING_DIRECTORY;LABELS;DIST_BIN;ENVIRONMENT_MODIFICATION" "TEST_FILES" ${ARGN})
     if (NOT ARG_NAME_PREFIX)
         message(FATAL_ERROR "polytest_discover_tests: NAME_PREFIX required")
     endif ()
@@ -14,6 +15,9 @@ function(polytest_discover_tests target)
     endif ()
     if (ARG_LABELS)
         list(APPEND _props "-DLABELS=${ARG_LABELS}")
+    endif ()
+    if (ARG_ENVIRONMENT_MODIFICATION)
+        list(APPEND _props "-DENVIRONMENT_MODIFICATION=${ARG_ENVIRONMENT_MODIFICATION}")
     endif ()
     add_custom_command(
             OUTPUT "${_ids_file}" "${_tests_file}"

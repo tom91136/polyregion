@@ -42,10 +42,10 @@ inline std::optional<std::string> hostname() {
 #endif
 }
 
-// `<backend>@<uarch>` test targets, in order: $POLYREGION_TEST_TARGETS (verbatim, colon-split),
+// `<backend>@<uarch>` test targets, in order: $<envKey> (verbatim, colon-split),
 // $POLYREGION_TEST_PROFILE.env, <hostname>.env, default.env, {}. Profile files concatenate every
-// `POLYREGION_TEST_TARGETS=...` line; `#` and blank lines are skipped.
-inline std::vector<std::string> loadTestTargets(const std::string &profileDir) {
+// `<envKey>=...` line; `#` and blank lines are skipped.
+inline std::vector<std::string> loadTestTargets(const std::string &profileDir, const char *envKey = "POLYREGION_TEST_TARGETS") {
   auto split = [](const std::string &s, std::vector<std::string> &out) {
     for (size_t i = 0, j = 0; i <= s.size(); ++i)
       if (i == s.size() || s[i] == ':') {
@@ -53,7 +53,7 @@ inline std::vector<std::string> loadTestTargets(const std::string &profileDir) {
         j = i + 1;
       }
   };
-  if (auto v = std::getenv("POLYREGION_TEST_TARGETS")) {
+  if (auto v = std::getenv(envKey)) {
     std::vector<std::string> xs;
     split(v, xs);
     return xs;
@@ -74,7 +74,7 @@ inline std::vector<std::string> loadTestTargets(const std::string &profileDir) {
       if (eq == std::string::npos) continue;
       auto keyEnd = eq;
       if (keyEnd > s && line[keyEnd - 1] == '+') --keyEnd;
-      if (line.compare(s, keyEnd - s, "POLYREGION_TEST_TARGETS") != 0) continue;
+      if (line.compare(s, keyEnd - s, envKey, std::strlen(envKey)) != 0) continue;
       any = true;
       auto valStart = eq + 1;
       if (valStart < line.size() && line[valStart] == ':') ++valStart;
@@ -115,9 +115,9 @@ inline std::optional<ResolvedTarget> resolveTestTarget(std::string_view token) {
   return std::nullopt;
 }
 
-inline std::vector<ResolvedTarget> resolveTestTargets(const std::string &profileDir) {
+inline std::vector<ResolvedTarget> resolveTestTargets(const std::string &profileDir, const char *envKey = "POLYREGION_TEST_TARGETS") {
   std::vector<ResolvedTarget> out;
-  for (const auto &t : loadTestTargets(profileDir))
+  for (const auto &t : loadTestTargets(profileDir, envKey))
     if (auto r = resolveTestTarget(t)) out.emplace_back(*r);
   return out;
 }

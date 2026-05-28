@@ -6,8 +6,9 @@ target_sources(polytest
         FILES
         polytest/profile.hpp
         polytest/lit.hpp
-        polytest/driver.hpp)
+        polytest/driver.hpp
+        polytest/test_case.hpp
+        polytest/test_runner.hpp)
 target_link_libraries(polytest INTERFACE Aspartame polycommon LLVMSupport fmt::fmt Catch2::Catch2)
-# driver.hpp consumes polyinvoke::DeviceLockEnv from a header; headers only, no link required.
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../polyinvoke/include)
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
