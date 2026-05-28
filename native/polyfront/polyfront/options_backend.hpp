@@ -124,11 +124,16 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
     llvm::consumeError(outputFile.discard());
   });
 
+  // Close both FDs before ExecuteAndWait: Windows default file-sharing blocks the child from
+  // opening files the parent still has open. POSIX doesn't care, but the close is harmless there.
   {
-    llvm::raw_fd_ostream file(inputFile.FD, /*shouldClose=*/false);
+    llvm::raw_fd_ostream file(inputFile.FD, /*shouldClose=*/true);
     file.write(reinterpret_cast<const char *>(data.data()), data.size());
     file.flush();
   }
+  inputFile.FD = -1;
+  { llvm::raw_fd_ostream out(outputFile.FD, /*shouldClose=*/true); }
+  outputFile.FD = -1;
 
   const auto canonical = polyregion::compiletime::TargetSpec::findByCodegen(target);
   if (!canonical) return std::string("Unknown codegen target ordinal: ") + std::to_string(static_cast<int>(target));
