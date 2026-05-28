@@ -57,13 +57,13 @@ llvm::Type *TargetedContext::i32Ty() { return llvm::Type::getInt32Ty(actual); }
 llvm::Type *TargetedContext::i64Ty() { return llvm::Type::getInt64Ty(actual); }
 
 TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const {
-  // SPIR-V routes internal pointers through Generic so Function-storage allocas can flow
-  // through pointer slots without `addrspacecast Function -> CrossWorkgroup` (which the spec
-  // forbids); Generic accepts both via `OpPtrCastToGeneric`.
-  const auto defaultAS = GenericAS != 0 ? GenericAS : GlobalAS;
+  // XXX Globals stay in CrossWorkgroup: routing through Generic loses kernel writes on Intel
+  // NEO's coarse-grain SVM cache. Private uses Generic so Function allocas can flow through
+  // pointer slots (CrossWorkgroup -> Function addrspacecast is illegal; OpPtrCastToGeneric is not).
+  const auto privateAS = GenericAS != 0 ? GenericAS : GlobalAS;
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
-      [&](const TypeSpace::Global &) { return defaultAS; }, [&](const TypeSpace::Private &) { return defaultAS; });
+      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return privateAS; });
 }
 
 TargetedContext::AS TargetedContext::addressSpaceForKernelArg(const TypeSpace::Any &s) const {
@@ -332,8 +332,11 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     case Target::ARM: return bindCpuArch(Triple::ArchType::arm);
     case Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
     case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
-    case Target::SPIRV32_Kernel: return bindSpirv("spirv32-unknown-unknown");
-    case Target::SPIRV64_Kernel: return bindSpirv("spirv64-unknown-unknown");
+    // XXX Pin to SPIR-V 1.2: OpenCL 1.2 conformant ICDs (Intel NEO included) only accept 1.0 via
+    // clCreateProgramWithIL; 1.2 is what OpenCL 2.1+ environments accept. Without a version
+    // suffix LLVM defaults to 1.4 and the program won't load on most current OpenCL drivers.
+    case Target::SPIRV32_Kernel: return bindSpirv("spirv32v1.2-unknown-unknown");
+    case Target::SPIRV64_Kernel: return bindSpirv("spirv64v1.2-unknown-unknown");
     case Target::SPIRV_GLCompute: return bindSpirv("spirv-unknown-vulkan1.3-compute");
     default: throw BackendException(fmt::format("Unexpected target {}", magic_enum::enum_name(target)));
   }

@@ -1,6 +1,5 @@
 #include "llvmc.h"
 
-#include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -581,6 +580,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
 
   switch (info.triple.getOS()) {
     case llvm::Triple::AMDHSA: {
+      // XXX Pin COv4 to match libclc (built with -mcode-object-version=none): COv5+ relocates the
+      // hidden kernarg slots, so libclc's get_global_id() reads the wrong one and is off-by-1.
+      if (!M.getModuleFlag("amdhsa_code_object_version")) M.addModuleFlag(llvm::Module::Error, "amdhsa_code_object_version", 400);
       auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
       bindLLVMTargetMachineDataLayout(*llvmTM, M);
       // We need to link the object file for AMDGPU at this stage to get a working ELF binary.
