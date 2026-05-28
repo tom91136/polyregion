@@ -338,8 +338,8 @@ jobs:
 
       - name: Run munit suite
         env:
-          DYLD_FALLBACK_LIBRARY_PATH: ${{ github.workspace }}/native/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
-          POLYPASS_PLUGINS: ${{ github.workspace }}/native/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib/libpolypass.dylib
+          DYLD_FALLBACK_LIBRARY_PATH: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+          POLYPASS_PLUGINS: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib/libpolypass.dylib
         run: just test-scala
 
       - name: Upload test results

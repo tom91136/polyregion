@@ -372,7 +372,8 @@ jobs:
 
       - name: Run munit suite
         env:
-          PATH: ${{ github.workspace }}\native\polyregion-Release-${{ matrix.arch }}-static-dist\bin;${{ env.PATH }}
+          PATH: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\bin;${{ env.PATH }}
+          POLYPASS_PLUGINS: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib\libpolypass.dll
         run: just test-scala
 
       - name: Upload test results
