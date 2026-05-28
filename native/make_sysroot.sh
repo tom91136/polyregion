@@ -89,6 +89,8 @@ RUN cd /mnt/sys-root/usr/lib64 \
 RUN ln -sfn "${RHEL_TRIPLE}" "/mnt/sys-root/usr/lib/gcc/${GNU_TRIPLE}" \
  && ln -sfn "${RHEL_TRIPLE}" "/mnt/sys-root/usr/include/c++/8/${GNU_TRIPLE}"
 
+RUN chmod -R u+rwX /mnt/sys-root
+
 FROM scratch
 COPY --from=staging /mnt/sys-root/ /
 # Dummy CMD so `docker create` will accept the image (we never run it, only export the fs).

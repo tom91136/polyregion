@@ -9,24 +9,25 @@ Supported frontends are:
 ## Build & debug
 
 The native side (compilers, runtime, plugins) lives under `native/` and is built with CMake + vcpkg. The Scala frontend lives under `frontend/` and is built with sbt.
-Top-level orchestration is via [`just`](https://github.com/casey/just); `just` from the repo root lists every recipe.
+Top-level orchestration is via [`just`](https://github.com/casey/just); `just` from the repo root lists every recipe and points git at the tracked `.githooks/` directory on first run (manual: `just install-git-hooks`).
 
 ### Quick start (fresh clone)
 
-Only `JAVA_HOME` needs to be set externally; `just vcpkg` clones vcpkg into the repo and `VCPKG_ROOT` is auto-discovered there.
+Only `JAVA_HOME` needs to be set externally; `just vcpkg` clones + bootstraps vcpkg into the repo and `VCPKG_ROOT` is auto-discovered there.
 
 ```sh
 export JAVA_HOME=/path/to/jdk21    # any JDK 21+ install root
 
-just vcpkg               # clones vcpkg at the pinned commit
-just sysroot             # AL8 sysroot for portable binaries (optional step, podman or docker required)
-                         # skip if you want host-native; no sysroot is detected as "no sysroot"
-just llvm                # bundled LLVM/Clang/LLD/Flang/MLIR
+just vcpkg               # clone + bootstrap vcpkg at the pinned commit
+just sysroot             # AL8 sysroot for portable binaries (optional; podman or docker required)
+                         # skip for host-native; absence is detected as "no sysroot"
+just llvm                # bundled LLVM/Clang/LLD/Flang/MLIR (matches sysroot if present)
+just vcpkg-deps          # manifest deps (Catch2, fmt, hermes, libffi, ...) into native/.vcpkg
 just dist                # polyregion dist (bin/ + lib/)
-just dist-check          # smoke test
+just check-dist          # smoke test
 ```
 
-`just env` prints the resolved settings (`arch`, `build_type`, `dylib`, `sysroot_path`, `vcpkg_root`, `java_home`).
+`just env` prints the resolved settings (`arch`, `build_type`, `dylib`, `sysroot_path`, `vcpkg_root`, `vcpkg_commit`, `java_home`).
 
 ### Native - incremental
 
@@ -53,8 +54,8 @@ The `polycpp` and `polyfc` targets transitively rebuild everything they depend o
 `polycpp` is a clang wrapper. It forwards to a real clang via `POLYCPP_DRIVER` and adds the polycpp clang plugin, polyreflect plugin, and runtime link.
 
 ```sh
-export POLYCPP_DRIVER=$PWD/native/llvm-Release-x86_64-dist/bin/clang++
-POLYCPP=$PWD/native/cmake-build-release-clang/polycpp/polycpp
+export POLYCPP_DRIVER=$PWD/native/out/polyregion-Release-x86_64-dylib-dist/bin/clang++
+POLYCPP=$PWD/native/out/build-linux-x86_64-dylib/polycpp/polycpp
 
 # -fstdpar enables the polyreflect+polystl wiring; -fstdpar-arch picks the GPU target.
 $POLYCPP -O1 -fstdpar -fstdpar-arch=cuda@sm_89 -fstdpar-mem=reflect -fstdpar-rt=dynamic \
@@ -105,7 +106,7 @@ Prerequisites: the native JNI shared library must be built first — the test ru
 cmake --build native/cmake-build-release-clang --target polyc-JNI -j
 
 # 2. Run the full suite (~20 min).
-just scala-tests
+just test-scala
 
 #  sbt for specific runs:
 cd frontend

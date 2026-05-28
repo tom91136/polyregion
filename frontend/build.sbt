@@ -336,7 +336,7 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 
       val withTriple = targetTriple.fold(cfg)(cfg.withTargetTriple(_))
 
-      val nproc = java.lang.Runtime.getRuntime.availableProcessors
+      val nproc       = java.lang.Runtime.getRuntime.availableProcessors
       val thinLtoFlag = if (!isMac && !isWin) Seq(s"-Wl,--threads=$nproc", "-Wl,--lto-O2") else Nil
 
       withTriple
@@ -346,7 +346,9 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
         .withMultithreading(false)
         .withCheckFeatures(false)
         .withBuildTarget(scala.scalanative.build.BuildTarget.libraryDynamic)
-        .withCompileOptions(sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath))
+        .withCompileOptions(
+          sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath)
+        )
         // XXX macOS ld64 picks the first match so we must prepend
         .withLinkingOptions(sysrootFlag ++ crossFlag ++ thinLtoFlag ++ linkOpts ++ cfg.linkingOptions)
     },

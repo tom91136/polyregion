@@ -14,7 +14,7 @@ recipes. The underlying cmake form still works if you prefer it.
 | `BUILD`       | `just build [tgt]`  | Build a target. `-DTARGET=<name>` selects (default `all`).                                                                                                                                                           |
 | `DIST`        | `just dist`         | Install polyregion into `polyregion-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`. Builds install deps as needed.                                                                                                          |
 | `DIST_TEST`   | `just test-dist`    | Bundle the test binaries + sources into `polyregion-test-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`.                                                                                                                    |
-| `CHECK`       | `just dist-check`   | Run the dist sanity check (compiles hello/offload programs through `clang`/`flang-new`/`polycpp`/`polyfc`, verifies output binaries don't depend on shipped DSOs, compile-only checks for cuda/hsa/spirv/metal/c11). |
+| `CHECK`       | `just check-dist`   | Run the dist sanity check (compiles hello/offload programs through `clang`/`flang-new`/`polycpp`/`polyfc`, verifies output binaries don't depend on shipped DSOs, compile-only checks for cuda/hsa/spirv/metal/c11). |
 
 ## Common options
 
@@ -43,7 +43,7 @@ Full dylib release dist + smoke check (from the repo root):
 just llvm        # one-time, slow
 just configure
 just dist
-just dist-check
+just check-dist
 ```
 
 Static dist (no shipped LLVM dylibs):
@@ -52,7 +52,7 @@ Static dist (no shipped LLVM dylibs):
 just --set dylib OFF llvm
 just --set dylib OFF configure
 just --set dylib OFF dist
-just --set dylib OFF dist-check
+just --set dylib OFF check-dist
 ```
 
 Iterate on a single target without re-installing:
@@ -72,9 +72,9 @@ just llvm    ARCH=aarch64
 
 ## CI release artefacts
 
-Each platform workflow (`linux.yaml`, `macos.yaml`, `windows.yaml`) runs `codegen-check`, then
+Each platform workflow (`linux.yaml`, `macos.yaml`, `windows.yaml`) runs `check-codegen`, then
 matrix-driven `build` (`LLVM` + `DEVICE_LIBS` + `CONFIGURE` + `BUILD` + `DIST` + `DIST_TEST`),
-then in parallel `dist-check`, `native-tests`, and (linux only) `scala-tests`. The packaged
+then in parallel `check-dist`, `test-native`, and (linux only) `test-scala`. The packaged
 dist is uploaded as a GitHub Actions artefact named `polyregion-${platform}-${arch}-${build_type}`
 (90-day retention, not a release).
 
@@ -86,9 +86,9 @@ rootless podman's default bridge has no IPv6 egress), workspace bind-mount so ar
 survive between runs, and `/tmp/act-ccache` for compiler cache.
 
 ```sh
-act -W .github/workflows/linux.yaml -j codegen-check   # fast: sbt codegen + diff
+act -W .github/workflows/linux.yaml -j check-codegen   # fast: sbt codegen + diff
 act -W .github/workflows/linux.yaml -j build           # full LLVM build (~30 min cold)
-act -W .github/workflows/linux.yaml -j dist-check      # uses the artefact from `build`
+act -W .github/workflows/linux.yaml -j check-dist      # uses the artefact from `build`
 ```
 
 Notes:

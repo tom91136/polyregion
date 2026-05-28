@@ -1,8 +1,6 @@
-# polyregion task runner. `just` lists recipes; `just <recipe>` runs one.
-
-# Recipes use bash array/brace expansion. Windows-shell expects Git Bash on PATH.
 set shell := ["bash", "-cu"]
 set windows-shell := ["bash", "-cu"]
+set dotenv-path := "native/.env"
 
 native_build := env_var_or_default('POLYREGION_NATIVE_BUILD', '')
 arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', `uname -m`))
@@ -24,22 +22,36 @@ clang_format_version := '20.1.0'
 clang_format_release := 'master-796e77c'
 
 # CI sets SYSROOT_PATH; locally defaults to native/sysroot-{arch}.
-sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "native" / "sysroot-" + arch)
+sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "native" / "out" / "sysroot" / arch)
 
 # === Default ===
 
 # List all recipes.
-default:
+default: install-git-hooks
     @just --list
+
+# Point git at .githooks/ for this clone (idempotent; runs on first `just`).
+install-git-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+    current=$(git config --local --default '' core.hooksPath)
+    [ "$current" = ".githooks" ] && exit 0
+    git config --local core.hooksPath .githooks
+    echo "git hooks: pointed at .githooks/"
 
 # Print the resolved build settings.
 env:
-    @printf '%-12s = %s\n' arch         '{{ arch }}'
-    @printf '%-12s = %s\n' build_type   '{{ build_type }}'
-    @printf '%-12s = %s\n' dylib        '{{ dylib }}'
-    @printf '%-12s = %s\n' sysroot_path '{{ sysroot_path }}'
-    @printf '%-12s = %s\n' vcpkg_root   "${VCPKG_ROOT}"
-    @printf '%-12s = %s\n' java_home    "${JAVA_HOME:-(unset)}"
+    #!/usr/bin/env bash
+    set -uo pipefail
+    note() { [ -d "$1" ] || printf ' (missing)'; }
+    printf '%-12s = %s\n' arch         '{{ arch }}'
+    printf '%-12s = %s\n' build_type   '{{ build_type }}'
+    printf '%-12s = %s\n' dylib        '{{ dylib }}'
+    printf '%-12s = %s%s\n' sysroot_path '{{ sysroot_path }}' "$(note '{{ sysroot_path }}')"
+    printf '%-12s = %s%s\n' vcpkg_root   "${VCPKG_ROOT:-(unset)}" "$(note "${VCPKG_ROOT:-/}")"
+    printf '%-12s = %s\n' vcpkg_commit "${VCPKG_COMMIT:-(unset)}"
+    printf '%-12s = %s\n' java_home    "${JAVA_HOME:-(unset)}"
 
 # === Format ===
 
@@ -47,7 +59,7 @@ env:
 format:       (_format "format"       "scalafmtAll"      "scalafmtSbt")
 
 # clang-format + scalafmt, dry-run, in parallel; non-zero exit on diff.
-format-check: (_format "format-check" "scalafmtCheckAll" "scalafmtSbtCheck")
+check-format: check-header (_format "format-check" "scalafmtCheckAll" "scalafmtSbtCheck")
 
 _format native_target sbt_task_a sbt_task_b:
     #!/usr/bin/env bash
@@ -80,7 +92,15 @@ _format native_target sbt_task_a sbt_task_b:
 codegen:       _codegen-sbt _codegen-format
 
 # codegen + git diff against committed state, fails if regenerated sources drift.
-codegen-check: codegen _codegen-diff
+check-codegen: check-header codegen _codegen-diff
+
+# Regen test/kernels/generated_*.hpp; needs `just llvm` plus spirv-link and glslangValidator on PATH.
+codegen-kernels:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BUILD=$(just _native-build)
+    [ -z "$BUILD" ] && { echo "no configured native build dir; run 'just configure' first" >&2; exit 1; }
+    cmake --build "$BUILD" --target polyinvoke-regen-kernels
 
 _codegen-sbt:
     cd frontend && sbt -no-colors 'codegen/genCodegen'
@@ -108,10 +128,19 @@ pass-native:
 # === Lint ===
 
 # Validate .github/workflows/*.yaml against actionlint; auto-fetches the binary on first run.
-lint-ci:
+check-ci:
     #!/usr/bin/env bash
     set -euo pipefail
     "$(just _actionlint)" -color .github/workflows/*.yaml
+
+# Forbid <filesystem|regex|codecvt|iostream|sstream|ostream|iomanip> in tracked C/C++ sources.
+# Prefer LLVM sys::fs / sys::path and fmt::print.
+check-header:
+    #!/usr/bin/env bash
+    set -u
+    pat='^[[:space:]]*#[[:space:]]*include[[:space:]]*<(filesystem|regex|codecvt|iostream|sstream|ostream|iomanip)>'
+    hits=$(git ls-files -z -- '*.cpp' '*.cc' '*.h' '*.hpp' '*.h.in' '*.hpp.in' | xargs -0 grep -nE "$pat" 2>/dev/null)
+    [ -z "$hits" ] || { echo "banned headers (use fmt/LLVM alternatives):"; echo "$hits"; exit 1; }
 
 _actionlint:
     #!/usr/bin/env bash
@@ -157,25 +186,33 @@ _clang-format:
 # === Test ===
 
 # Run the full scalalang munit suite.
-scala-tests *args='':
+test-scala *args='':
     cd frontend && sbt -no-colors 'compiler-testsuite-scala/test' {{ args }}
 
 # Run the native ctest suite, excluding the `device` label (GPU dispatch), extra ctest flags via *args.
-native-tests *args='':
+test-native *args='':
     #!/usr/bin/env bash
     set -euo pipefail
     BUILD=$(just _native-build)
-    ctest --test-dir "$BUILD" -LE device {{ args }}
+    ctest --test-dir "$BUILD" {{ args }}
 
 # === Build wrappers ===
 
 # Clone vcpkg into ./vcpkg at the commit pinned in native/.env. Idempotent.
-vcpkg:
+# Also syncs vcpkg.json's `builtin-baseline` to match VCPKG_COMMIT, because vcpkg rejects
+# manifests that use `overrides` without a baseline. .env is the single source of truth;
+# this rewrite is a no-op when they already agree.
+vcpkg: _vcpkg-sync-baseline
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -d vcpkg/.git ]; then git clone https://github.com/microsoft/vcpkg.git; fi
-    COMMIT=$(awk -F= '/^VCPKG_COMMIT=/{print $2}' native/.env)
-    [ -n "$COMMIT" ] && git -C vcpkg fetch --depth=1 origin "$COMMIT" && git -C vcpkg checkout "$COMMIT"
+    git -C vcpkg fetch --depth=1 origin "$VCPKG_COMMIT"
+    git -C vcpkg checkout "$VCPKG_COMMIT"
+    BOOTSTRAP=bootstrap-vcpkg.sh
+    [[ "{{ os() }}" == "windows" ]] && BOOTSTRAP=bootstrap-vcpkg.bat
+    if [ ! -x vcpkg/vcpkg ] && [ ! -x vcpkg/vcpkg.exe ]; then
+        (cd vcpkg && "./$BOOTSTRAP" -disableMetrics)
+    fi
     echo "vcpkg ready at $PWD/vcpkg"
 
 # Install vcpkg manifest deps to $VCPKG_INSTALLED_DIR for the current host/arch.
@@ -191,8 +228,19 @@ vcpkg-deps:
         windows-aarch64|windows-arm64)  TRIPLET=arm64-windows-static ;;
         *) echo "unsupported {{ os() }}-{{ arch }}" >&2; exit 1 ;;
     esac
+    if [ -z "${VCPKG_ROOT:-}" ]; then
+        echo "VCPKG_ROOT not set; run \`just vcpkg\` first or export VCPKG_ROOT" >&2; exit 1
+    fi
     VCPKG_BIN="$VCPKG_ROOT/vcpkg"
-    [[ "{{ os() }}" == "windows" ]] && VCPKG_BIN="$VCPKG_BIN.exe"
+    BOOTSTRAP="bootstrap-vcpkg.sh"
+    [[ "{{ os() }}" == "windows" ]] && { VCPKG_BIN="$VCPKG_BIN.exe"; BOOTSTRAP="bootstrap-vcpkg.bat"; }
+    if [ ! -x "$VCPKG_BIN" ]; then
+        if [ -x "$VCPKG_ROOT/$BOOTSTRAP" ]; then
+            (cd "$VCPKG_ROOT" && "./$BOOTSTRAP" -disableMetrics)
+        else
+            echo "vcpkg checkout incomplete at $VCPKG_ROOT (no $BOOTSTRAP); run \`just vcpkg\`" >&2; exit 1
+        fi
+    fi
     JS_ENGINE="${POLYC_JS_ENGINE:-hermes}"
     # Match polyregion's sysroot pin so vcpkg ports compile against the same glibc/libstdc++.
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
@@ -204,16 +252,27 @@ vcpkg-deps:
         --x-feature="$JS_ENGINE" \
         --triplet="$TRIPLET"
 
+# Rewrite native/vcpkg.json's `builtin-baseline` from $VCPKG_COMMIT. Cheap; safe to depend on.
+_vcpkg-sync-baseline:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BASELINE=$(jq -r '."builtin-baseline" // empty' native/vcpkg.json)
+    if [ "$VCPKG_COMMIT" != "$BASELINE" ]; then
+        echo "vcpkg.json builtin-baseline: $BASELINE -> $VCPKG_COMMIT (from native/.env)"
+        jq --indent 2 --arg c "$VCPKG_COMMIT" '."builtin-baseline" = $c' native/vcpkg.json > native/vcpkg.json.tmp
+        mv native/vcpkg.json.tmp native/vcpkg.json
+    fi
+
 # Build the AL8 sysroot (podman/docker required) and extract to native/sysroot-{arch}
 sysroot:
     #!/usr/bin/env bash
     set -euo pipefail
     cd native
     ./make_sysroot.sh {{ arch }}
-    rm -rf "sysroot-{{ arch }}"
-    mkdir -p "sysroot-{{ arch }}"
-    tar xf "out/sysroot-build/al8/sysroot-al8-{{ arch }}.tar.xz" -C "sysroot-{{ arch }}"
-    echo "sysroot ready at native/sysroot-{{ arch }}"
+    rm -rf "out/sysroot/{{ arch }}"
+    mkdir -p "out/sysroot/{{ arch }}"
+    tar xf "out/sysroot-build/al8/sysroot-al8-{{ arch }}.tar.xz" -C "out/sysroot/{{ arch }}"
+    echo "sysroot ready at native/out/sysroot/{{ arch }}"
 
 # Build the bundled LLVM/Clang/LLD/Flang/MLIR dist; cached on rerun.
 llvm        extra='': (_native "LLVM"        extra)
@@ -231,10 +290,22 @@ dist        extra='': (_native "DIST"        extra)
 test-dist   extra='': (_native "DIST_TEST"   extra)
 
 # Smoke-check a built dist: compile hello/offload programs through clang/flang/polycpp/polyfc.
-dist-check  extra='': (_native "CHECK"       extra)
+check-dist  extra='': (_native "CHECK"       extra)
 
-# Incremental build of a single ninja target (default: all); pass extra cmake flags via second arg.
-build target='all' extra='': (_native "BUILD" ("-DTARGET=" + target + " " + extra))
+# Incremental build of all ninja targets.
+build-all     extra='': (_native "BUILD" ("-DTARGET=all "        + extra))
+
+# Incremental build of the polyc driver.
+build-polyc   extra='': (_native "BUILD" ("-DTARGET=polyc "      + extra))
+
+# Incremental build of the polycpp driver.
+build-polycpp extra='': (_native "BUILD" ("-DTARGET=polycpp "    + extra))
+
+# Incremental build of the polyfc driver.
+build-polyfc  extra='': (_native "BUILD" ("-DTARGET=polyfc "     + extra))
+
+# Incremental build of an arbitrary ninja target (escape hatch for non-default names).
+build target  extra='': (_native "BUILD" ("-DTARGET=" + target + " " + extra))
 
 # Run `cmake -DACTION=<action> -P native/build.cmake`. Auto-passes -DCMAKE_SYSROOT if it exists.
 _native action extra='':
@@ -244,19 +315,77 @@ _native action extra='':
     [ -d "{{ sysroot_path }}" ] && SYSROOT_FLAG=(-DCMAKE_SYSROOT="{{ sysroot_path }}")
     cd native && cmake -DCMAKE_BUILD_TYPE={{ build_type }} -DARCH={{ arch }} -DACTION={{ action }} ${SYSROOT_FLAG[@]+"${SYSROOT_FLAG[@]}"} {{ extra }} -P build.cmake
 
+# === Clean ===
+
+# Remove the LLVM build trees (preserves llvm-patches* sources).
+clean-llvm:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    paths=(native/out/llvm-Release-* native/out/llvm-Debug-* native/out/llvm-RelWithDebInfo-*)
+    [ ${#paths[@]} -eq 0 ] && { echo "clean-llvm: nothing to remove"; exit 0; }
+    echo "clean-llvm: ${paths[*]}"
+    rm -rf "${paths[@]}"
+
+# Remove the staged polyregion dist + test dist + dist-check build.
+clean-dist:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    paths=(native/out/polyregion-*-dist native/out/build-dist-check-*)
+    [ ${#paths[@]} -eq 0 ] && { echo "clean-dist: nothing to remove"; exit 0; }
+    echo "clean-dist: ${paths[*]}"
+    rm -rf "${paths[@]}"
+
+# Remove extracted sysroots + tarballs + intermediate build state.
+clean-sysroot:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    paths=(native/out/sysroot native/out/sysroot-build)
+    [ ${#paths[@]} -eq 0 ] && { echo "clean-sysroot: nothing to remove"; exit 0; }
+    echo "clean-sysroot: ${paths[*]}"
+    rm -rf "${paths[@]}"
+
+# Remove the repo-local vcpkg clone from `just vcpkg`; leaves $VCPKG_ROOT alone if it points elsewhere.
+clean-vcpkg:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ -d vcpkg/.git ]; then
+        echo "clean-vcpkg: ./vcpkg"
+        rm -rf vcpkg
+    else
+        echo "clean-vcpkg: nothing to remove"
+    fi
+
+# Remove polyregion CMake build trees + cached vcpkg install (forces a fresh configure).
+clean-build:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    shopt -s nullglob
+    paths=(native/out/build-* native/cmake-build-* native/.vcpkg)
+    [ ${#paths[@]} -eq 0 ] && { echo "clean-build: nothing to remove"; exit 0; }
+    echo "clean-build: ${paths[*]}"
+    rm -rf "${paths[@]}"
+
+# Run all clean recipes in parallel.
+[parallel]
+clean-all: clean-llvm clean-dist clean-sysroot clean-vcpkg clean-build
+
 # === Aggregate ===
 
 # Local mirror of the CI checks.
-ci: codegen-check format-check lint-ci
+ci: check-codegen check-format check-ci
 
 # === Internal ===
 
-# Locate the newest cmake-build-*/build-* dir under native/. Honours $POLYREGION_NATIVE_BUILD.
+# Locate the newest configured build dir. Honours $POLYREGION_NATIVE_BUILD.
+# Searches `native/out/build-*` (just-driven builds) and `native/cmake-build-*` (IDE-driven).
 _native-build:
     #!/usr/bin/env bash
     set -uo pipefail
-    if [ -n "{{ native_build }}" ]; then echo "{{ native_build }}"; exit 0; fi
     shopt -s nullglob
-    candidates=(native/cmake-build-*/CMakeCache.txt native/build-*/CMakeCache.txt)
-    [ ${#candidates[@]} -eq 0 ] && exit 0
-    ls -td "${candidates[@]}" 2>/dev/null | head -1 | xargs -r dirname
+    if [ -n "{{ native_build }}" ]; then echo "{{ native_build }}"; exit 0; fi
+    caches=(native/out/build-*/CMakeCache.txt native/cmake-build-*/CMakeCache.txt)
+    [ ${#caches[@]} -eq 0 ] && exit 0
+    ls -td "${caches[@]}" | head -1 | xargs -r dirname

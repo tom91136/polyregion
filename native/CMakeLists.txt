@@ -392,9 +392,9 @@ if ((DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQU
 else ()
     set(LLVM_VARIANT dylib)
 endif ()
-set(LLVM_BUILD_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}")
+set(LLVM_BUILD_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/out/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}")
 set(POLYREGION_LLVM_SRC_DIR "${LLVM_BUILD_PREFIX}/llvm-project-${LLVM_SRC_VERSION}.src")
-set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist")
+set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist")
 set(LLVM_DIR "${LLVM_DIST_DIR}/lib/cmake/llvm")
 set(LLD_DIR "${LLVM_DIST_DIR}/lib/cmake/lld")
 set(Clang_DIR "${LLVM_DIST_DIR}/lib/cmake/clang")
@@ -557,11 +557,10 @@ file(GLOB_RECURSE POLYREGION_FORMAT_SOURCES
         "${CMAKE_SOURCE_DIR}/*.h"
         "${CMAKE_SOURCE_DIR}/*.hpp")
 list(FILTER POLYREGION_FORMAT_SOURCES EXCLUDE REGEX
-        "/(_deps|llvm-[^/]+|polyregion-[^/]+-dist|vcpkg_installed|build-[^/]+|cmake-build-[^/]+|CMakeFiles)/|/polyinvoke/thirdparty/|/(debian-sysroot-image-creator|sysroot-[^/]+)/")
+        "/(_deps|vcpkg_installed|cmake-build-[^/]+|CMakeFiles|out)/|/polyinvoke/thirdparty/")
 
 # Prefer the bundled LLVM dist's clang-format so output is reproducible across hosts.
-file(GLOB POLYREGION_LLVM_DIST_BIN "${CMAKE_SOURCE_DIR}/llvm-*-dist/bin")
-find_program(POLYREGION_CLANG_FORMAT NAMES clang-format HINTS ${POLYREGION_LLVM_DIST_BIN})
+find_program(POLYREGION_CLANG_FORMAT NAMES clang-format HINTS ${LLVM_DIST_DIR}/bin)
 
 if (POLYREGION_CLANG_FORMAT)
     # XXX Per-file stamps so ninja (or any parallel generator) can dispatch clang-format

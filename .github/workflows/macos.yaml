@@ -93,7 +93,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: |
-            ./native/polyregion-Release-${{ matrix.arch }}-*-dist
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Setup just
@@ -109,7 +109,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: |
-            ./native/polyregion-Release-${{ matrix.arch }}-*-dist
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Restore device libs cache
@@ -155,7 +155,7 @@ jobs:
         if: always()
         working-directory: ./native
         run: |
-          DIST=polyregion-Release-${{ matrix.arch }}-dylib-dist
+          DIST=out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           ls -lah "$DIST/bin" "$DIST/lib"
           inspect () {
             local f="$1"
@@ -176,7 +176,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
@@ -184,10 +184,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
-  dist-check:
+  check-dist:
     needs: build
     strategy:
       fail-fast: false
@@ -214,19 +214,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Restore executable bits
         working-directory: ./native
         run: |
-          DIST=polyregion-Release-${{ matrix.arch }}-dylib-dist
+          DIST=out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           find "$DIST/bin" -type f -exec chmod +x {} +
           find "$DIST/lib" -type f -name '*.dylib' -exec chmod +x {} +
 
-      - name: Run dist-check
-        run: just dist-check
+      - name: Run check-dist
+        run: just check-dist
 
-  native-tests:
+  test-native:
     needs: build
     strategy:
       fail-fast: false
@@ -250,19 +250,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
         # v4: nektos/act#6022
         uses: actions/download-artifact@v4
         with:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Restore executable bits
         working-directory: ./native
         run: |
-          for d in polyregion-Release-${{ matrix.arch }}-dylib-dist polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
+          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
             if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
             if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +; fi
           done
@@ -270,8 +270,8 @@ jobs:
       - name: Run native tests
         working-directory: ./native
         run: |
-          DIST=$PWD/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          TESTS=$PWD/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
           export PATH=$DIST/bin:$PATH
           export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
           export POLYREGION_BITCODE_DIR=$DIST/lib
@@ -286,10 +286,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-test-results-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
           if-no-files-found: warn
 
-  scala-tests:
+  test-scala:
     needs: build
     strategy:
       fail-fast: false
@@ -323,13 +323,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Stage JNI libs at Loader-searched path
         # XXX Loader.java probes ../native/cmake-build-release-clang/bindings/jvm/ etc. from sbt's
         # frontend/ cwd; the CI dist puts the JNI .dylibs under lib/. Bridge via copy.
         run: |
-          DIST=./native/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          DIST=./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           mkdir -p native/cmake-build-release-clang/bindings/jvm
           for f in libpolyc-JNI.dylib libpolyc-JNIshim.dylib libpolyinvoke-JNI.dylib; do
             chmod +x "$DIST/lib/$f" || true
@@ -340,7 +340,7 @@ jobs:
         env:
           DYLD_FALLBACK_LIBRARY_PATH: ${{ github.workspace }}/native/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
           POLYPASS_PLUGINS: ${{ github.workspace }}/native/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib/libpolypass.dylib
-        run: just scala-tests
+        run: just test-scala
 
       - name: Upload test results
         if: always()

@@ -60,10 +60,6 @@
       "version": "12.1.0"
     },
     {
-      "name": "spdlog",
-      "version": "1.16.0"
-    },
-    {
       "name": "magic-enum",
       "version": "0.9.7",
       "port-version": 1

@@ -258,11 +258,11 @@ $RECYCLE.BIN/
 !/llvm-patches-*/
 /polyregion-*
 /thirdparty/device_libs/
-/debian-sysroot-image-creator
 
 venv
 
 !.env
+.vcpkg/
 
 
 sysroot-*.tar.gz

@@ -130,7 +130,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: |
-            ./native/polyregion-Release-${{ matrix.arch }}-*-dist
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
@@ -143,7 +143,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: |
-            ./native/polyregion-Release-${{ matrix.arch }}-*-dist
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Restore device libs cache
@@ -189,7 +189,7 @@ jobs:
         if: always()
         working-directory: ./native
         run: |
-          set "DIST=polyregion-Release-${{ matrix.arch }}-static-dist"
+          set "DIST=out/polyregion-Release-${{ matrix.arch }}-static-dist"
           dir "%DIST%\bin"
           dir "%DIST%\lib"
           for %%B in (polyc.exe polycpp.exe polyfc.exe clang++.exe flang-new.exe) do (
@@ -206,7 +206,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist/**
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist/**
           if-no-files-found: error
 
       - name: Upload test dist
@@ -214,10 +214,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
           if-no-files-found: error
 
-  dist-check:
+  check-dist:
     needs: build
     strategy:
       fail-fast: false
@@ -253,12 +253,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
-      - name: Run dist-check
-        run: just dist-check
+      - name: Run check-dist
+        run: just check-dist
 
-  native-tests:
+  test-native:
     needs: build
     strategy:
       fail-fast: false
@@ -286,7 +286,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
       - name: Setup MSVC env
         uses: ilammy/msvc-dev-cmd@v1
@@ -298,13 +298,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-test-Release-${{ matrix.arch }}-static-dist
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
 
       - name: Run native tests
         working-directory: ./native
         run: |
-          set "DIST=%CD%\polyregion-Release-${{ matrix.arch }}-static-dist"
-          set "TESTS=%CD%\polyregion-test-Release-${{ matrix.arch }}-static-dist"
+          set "DIST=%CD%\out\polyregion-Release-${{ matrix.arch }}-static-dist"
+          set "TESTS=%CD%\out\polyregion-test-Release-${{ matrix.arch }}-static-dist"
           set "PATH=%DIST%\bin;%PATH%"
           set "POLYREGION_BITCODE_DIR=%DIST%\lib"
           set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
@@ -318,10 +318,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-test-results-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
           if-no-files-found: warn
 
-  scala-tests:
+  test-scala:
     needs: build
     strategy:
       fail-fast: false
@@ -358,13 +358,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
-          path: ./native/polyregion-Release-${{ matrix.arch }}-static-dist
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
       - name: Stage JNI libs at Loader-searched path
         # XXX Loader.java probes ../native/cmake-build-release-clang/bindings/jvm/ etc. from sbt's
         # frontend/ cwd; the CI dist puts the JNI .dlls under lib/. Bridge via copy.
         run: |
-          DIST=./native/polyregion-Release-${{ matrix.arch }}-static-dist
+          DIST=./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
           mkdir -p native/cmake-build-release-clang/bindings/jvm
           for f in polyc-JNI.dll polyc-JNIshim.dll polyinvoke-JNI.dll; do
             cp "$DIST/lib/$f" native/cmake-build-release-clang/bindings/jvm/
@@ -373,7 +373,7 @@ jobs:
       - name: Run munit suite
         env:
           PATH: ${{ github.workspace }}\native\polyregion-Release-${{ matrix.arch }}-static-dist\bin;${{ env.PATH }}
-        run: just scala-tests
+        run: just test-scala
 
       - name: Upload test results
         if: always()
