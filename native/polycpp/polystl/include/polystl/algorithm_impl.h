@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -185,8 +184,11 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       auto groupPartial = polyrt::currentDevice->mallocSharedTyped<T>(groups, polyrt::Access::RW);
 
       if (!groupPartial) {
-        log(DebugLevel::Debug, "<%s, %d> No USM support", __func__, global);
-        std::abort();
+        log(DebugLevel::Debug, "<%s, %d> No USM support; host fallback", __func__, global);
+        T acc = init;
+        for (int64_t i = 0; i < global; ++i)
+          acc = reduce(acc, f(i));
+        return acc;
       }
 
       auto kernel = [groupPartial = *groupPartial, init, f, reduce, global]([[clang::annotate("__polyregion_local")]] T *localPartialSum) {

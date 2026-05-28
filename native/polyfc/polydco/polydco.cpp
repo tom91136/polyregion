@@ -45,11 +45,13 @@ static polyrt::SynchronisedMemAllocation allocations(
     [](void *dst, const uintptr_t src, const size_t srcOffset, const size_t size) {
       log(DebugLevel::Debug, "Local %p <|[%4ld]- Remote [%p + %4ld]", dst, size, reinterpret_cast<void *>(src), srcOffset);
       polyrt::currentQueue->enqueueDeviceToHostAsync(src, srcOffset, dst, size, {});
+      polyrt::currentQueue->enqueueWaitBlocking();
     },
     /*remoteWrite*/
     [](const void *src, const uintptr_t dst, const size_t dstOffset, const size_t size) {
       log(DebugLevel::Debug, "Local %p -[%4ld]|> Remote [%p + %4ld]", src, size, reinterpret_cast<void *>(dst), dstOffset);
       polyrt::currentQueue->enqueueHostToDeviceAsync(src, dst, dstOffset, size, {});
+      polyrt::currentQueue->enqueueWaitBlocking();
     },
     /*remoteRelease*/
     [](const uintptr_t remotePtr) {
@@ -166,6 +168,7 @@ struct ManagedPartialReduction {
       const auto devicePtr = polyrt::currentDevice->mallocDevice(size, polyrt::Access::RW);
       allocations[i] = Allocation{.ptr = devicePtr, .size = size};
       polyrt::currentQueue->enqueueHostToDeviceAsync(&devicePtr, devicePartials, sizeof(void *) * i, sizeof(void *), {});
+      polyrt::currentQueue->enqueueWaitBlocking();
       localMemBytes += size;
     }
     return localMemBytes;

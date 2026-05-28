@@ -1,6 +1,5 @@
 #include "remapper.h"
 
-#include <iostream>
 #include <utility>
 
 #include "clang/AST/ASTContext.h"
@@ -157,12 +156,12 @@ const static std::string Empty = "#empty";
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const Named &root) {
   if (auto def = r.structs ^ get_maybe(repr(tpe.name))) {
-    // Skip empty structs entirely. Their members are just the synthesised `#empty_struct_storage`
-    // placeholder; they exist as a type only and have no representation in the host C++ ABI when
-    // used as a base (we drop empty bases from `inherited`). Trying to initialise them via
-    // `select(r, {root}, member)` would walk the parent chain looking for a `#base_<Name>` field
-    // that no longer exists on the derived struct.
-    if (r.emptyStruct(**def)) return;
+    // XXX zero-init the synthesised placeholder byte, otherwise it's poison @ O3+LTO as it propagates through empty-struct copies into
+    // adjacent stack slots
+    if (r.emptyStruct(**def)) {
+      r.push(Stmt::Mut(select(r, {root}, EmptyStructMarker), defaultValue(EmptyStructMarker.tpe)));
+      return;
+    }
     for (auto &named : (*def)->members) {
       if (named.tpe.template is<Type::Struct>()) continue;
       if (const auto arr = named.tpe.template get<Type::Arr>()) {
@@ -563,7 +562,19 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                   r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
                 } else raise("receiver is not a struct type!");
               } else raise("receiver is not a instance ptr type!");
-            } else handleStmt(decl->getBody(), r);
+            } else {
+              // XXX a defaulted copy/move assign on an empty struct has an empty body (no members), leaving the placeholder byte poison, so
+              // copy explicitly
+              if (auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl);
+                  method && method->isDefaulted() && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator()) && //
+                  parent && r.emptyStruct(*parent) && args.size() == 1) {
+                auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
+                auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
+                auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
+                r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
+              }
+              handleStmt(decl->getBody(), r);
+            }
             break;
           default:
             // TODO handle the following, see https://reviews.llvm.org/D123345 and clang/Basic/Builtins.def

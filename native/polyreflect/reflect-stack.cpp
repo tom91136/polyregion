@@ -85,6 +85,7 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
     for (auto *AI : Allocas) {
       llvm::IRBuilder B(AI->getNextNode());
       const auto sizeBytes = AI->getAllocationSize(M.getDataLayout()).value_or(llvm::TypeSize::getFixed(0)).getFixedValue();
+      if (sizeBytes == 1) B.CreateMemSet(AI, B.getInt8(0), B.getInt64(1), AI->getAlign());
       const auto Call = B.CreateCall(RecordFn, {AI, B.getInt64(sizeBytes), B.getInt8(to_integral(rt_reflect::Type::StackAlloc))});
       if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
     }

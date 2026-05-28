@@ -85,15 +85,18 @@ POLYREGION_RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
       log(DebugLevel::Debug, "                               Remote 0x%jx = malloc(%ld)", p, size);
       return p;
     },
+
     /*remoteRead*/
     [](void *dst, const uintptr_t src, const size_t srcOffset, const size_t size) {
       log(DebugLevel::Debug, "Local %p <|[%4ld]- Remote [%p + %4ld]", dst, size, reinterpret_cast<void *>(src), srcOffset);
       polyrt::currentQueue->enqueueDeviceToHostAsync(src, srcOffset, dst, size, {});
+      polyrt::currentQueue->enqueueWaitBlocking();
     },
     /*remoteWrite*/
     [](const void *src, const uintptr_t dst, const size_t dstOffset, const size_t size) {
       log(DebugLevel::Debug, "Local %p -[%4ld]|> Remote [%p + %4ld]", src, size, reinterpret_cast<void *>(dst), dstOffset);
       polyrt::currentQueue->enqueueHostToDeviceAsync(src, dst, dstOffset, size, {});
+      polyrt::currentQueue->enqueueWaitBlocking();
     },
     /*remoteRelease*/
     [](const uintptr_t remotePtr) {
