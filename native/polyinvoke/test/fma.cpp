@@ -1,25 +1,32 @@
-#include "aspartame/all.hpp"
-#include "catch2/catch_test_macros.hpp"
-#include "catch2/generators/catch_generators_range.hpp"
-#include "catch2/matchers/catch_matchers_floating_point.hpp"
+#include <limits>
+#include <vector>
+
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyinvoke/device_lock.h"
 #include "polyregion/concurrency_utils.hpp"
-#include "polyregion/io.hpp"
 
-#include "kernels/generated_cpu_fma.hpp"
-#include "kernels/generated_gpu_fma.hpp"
-#include "kernels/generated_msl_fma.hpp"
-#include "kernels/generated_spirv_glsl_fma.hpp"
-#include "kernels/generated_ze_fma.hpp"
+#include "kernels/generated_cpu_reloc_fma.hpp"
+#include "kernels/generated_cpu_shared_fma.hpp"
+#include "kernels/generated_cuda_fma.hpp"
+#include "kernels/generated_hsa_fma.hpp"
+#include "kernels/generated_metal_fma.hpp"
+#include "kernels/generated_opencl_source_fma.hpp"
+#include "kernels/generated_opencl_spirv_fma.hpp"
+#include "kernels/generated_vulkan_fma.hpp"
 #include "test_utils.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::test_utils;
 using namespace polyregion::concurrency_utils;
-using namespace aspartame;
+using polyregion::polytest::cases::approxEqual;
+using polyregion::polytest::cases::Context;
+using polyregion::polytest::cases::Task;
 
-const static std::vector xs{0.f,
+namespace {
+
+const std::vector<float> xs{0.f,
                             -0.f,
                             1.f,
                             42.f,
@@ -28,122 +35,63 @@ const static std::vector xs{0.f,
                             std::numeric_limits<float>::max(),     //
                             std::numeric_limits<float>::min()};
 
-template <typename I> void testFma(I images, std::initializer_list<Backend> backends) {
-  std::vector<Backend> enabled;
-  for (auto b : backends)
-    if (!polyregion::test_utils::isBackendDisabled(b)) enabled.push_back(b);
-  if (enabled.empty()) return;
-  auto backend = GENERATE_COPY(from_range(enabled));
-  auto platform = polyregion::test_utils::makePlatform(backend);
-  if (!platform) {
-    WARN("Backend " << magic_enum::enum_name(backend) << " is unavailable on this host - skipping");
-    return;
+void runFma(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+  if (imageGroup.size() != 1) {
+    POLYTEST_FAIL(ctx, "expected exactly 1 image group, got {} for device `{}` (backend={})", //
+                  imageGroup.size(), device.name(), magic_enum::enum_name(backend));
   }
-  DYNAMIC_SECTION("backend=" << magic_enum::enum_name(backend)) {
-    for (auto &d : platform->enumerate()) {
-      if (polyregion::test_utils::isDeviceDisabled(d->name())) continue;
-      // XXX skip OpenCL SPIR-V-format duplicate; polyinvoke ships only source kernels.
-      const auto df = d->features();
-      if (backend == Backend::OpenCL && std::find(df.begin(), df.end(), "spirv_kernel") != df.end()) continue;
-      DYNAMIC_SECTION("device=" << d->name()) {
-        auto _deviceLock = polyregion::test_utils::lockDevice(backend, *d);
-        if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
+  std::string module_, function_;
+  if (device.singleEntryPerModule()) {
+    module_ = "fma";
+    function_ = "main";
+  } else {
+    module_ = "module";
+    function_ = "_fma";
+  }
+  device.loadModule(module_, imageGroup[0].second);
 
-          if (imageGroups.size() != 1) {
-            FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend="
-                                         << magic_enum::enum_name(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
-          }
+  auto q = device.createQueue(std::chrono::seconds(10));
+  auto out_d = device.template mallocDeviceTyped<float>(1, Access::RW);
 
-          std::string module_;
-          std::string function_;
-          if (d->singleEntryPerModule()) {
-            module_ = "fma";
-            function_ = "main";
-          } else {
-            module_ = "module";
-            function_ = "_fma";
-          }
-          d->loadModule(module_, imageGroups[0].second);
-
-          auto a = GENERATE(from_range(xs));
-          auto b = GENERATE(from_range(xs));
-          auto c = GENERATE(from_range(xs));
-          DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
-            auto q = d->createQueue(std::chrono::seconds(10));
-            auto out_d = d->template mallocDeviceTyped<float>(1, Access::RW);
-            //
-            ArgBuffer buffer;
-            if (d->sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
-
-            buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
-
-            waitAll([&](auto &h) {
-              q->enqueueInvokeAsync( //
-                  module_, function_,
-                  buffer, //
-                  {}, h);
-            });
-            float out = {};
-            waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
-            auto expected = a * b + c;
-            INFO("fma actual=" << out << " expected=" << expected);
-
-            if (c == 0 && //
-                ((a == std::numeric_limits<float>::min() && b == std::numeric_limits<float>::epsilon()) ||
-                 (b == std::numeric_limits<float>::min() && a == std::numeric_limits<float>::epsilon()))) {
-              CHECK_THAT(out, Catch::Matchers::WithinRel(0.f) || Catch::Matchers::WithinRel(expected));
-            } else {
-              CHECK_THAT(out, Catch::Matchers::WithinRel(expected));
-            }
-
-            d->freeDevice(out_d);
-          }
-        } else {
-          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << magic_enum::enum_name(backend)
-                                                         << ", features=" << (d->features() | mk_string(",")) << ")");
-        }
+  for (auto a : xs)
+    for (auto b : xs)
+      for (auto c : xs) {
+        ArgBuffer buffer;
+        if (device.sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
+        buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
+        waitAll([&](auto &h) { q->enqueueInvokeAsync(module_, function_, buffer, {}, h); });
+        float out = {};
+        waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
+        const auto expected = a * b + c;
+        // Subnormal-underflow corner: min*eps + 0 may flush to 0 on some HW; accept either.
+        const bool acceptable = (c == 0.f && ((a == std::numeric_limits<float>::min() && b == std::numeric_limits<float>::epsilon()) ||
+                                              (b == std::numeric_limits<float>::min() && a == std::numeric_limits<float>::epsilon())))
+                                    ? (approxEqual(out, expected) || approxEqual(out, 0.f))
+                                    : approxEqual(out, expected);
+        POLYTEST_CHECK_S(ctx, acceptable, "a={} b={} c={} actual={} expected={}", a, b, c, out, expected);
       }
-    }
-  }
+  device.freeDevice(out_d);
 }
 
-TEST_CASE("GPU FMA") {
-#ifndef NDEBUG
-  WARN("Make sure ASAN is disabled otherwise most GPU backends will fail with memory related errors");
-#endif
-  polyregion::test_utils::ImageGroups images{};
-  images.insert(generated::gpu::fma.begin(), generated::gpu::fma.end());
-#ifdef RUNTIME_ENABLE_METAL
-  images.insert(generated::msl::fma.begin(), generated::msl::fma.end());
-#endif
-  testFma(images, //
-          {
+std::vector<Task> discoverAll() {
+  return discoverMatrix({
 #ifndef __APPLE__
-              Backend::CUDA,
-              Backend::HIP,
-              Backend::HSA,
+      {"fma-cuda", generated::cuda::fma, {Backend::CUDA}, &runFma},
+      {"fma-hsa", generated::hsa::fma, {Backend::HSA}, &runFma},
+      {"fma-hip", generated::hsa::fma, {Backend::HIP}, &runFma},
+      {"fma-opencl-source", generated::opencl_source::fma, {Backend::OpenCL}, &runFma, skipHasSpirv},
+      {"fma-opencl-spirv", generated::opencl_spirv::fma, {Backend::OpenCL}, &runFma, skipNoSpirv},
+      {"fma-vulkan", generated::vulkan::fma, {Backend::Vulkan}, &runFma},
+      {"fma-levelzero", generated::opencl_spirv::fma, {Backend::LevelZero}, &runFma},
 #endif
-              Backend::OpenCL,
 #ifdef RUNTIME_ENABLE_METAL
-              Backend::Metal,
+      {"fma-metal", generated::metal::fma, {Backend::Metal}, &runFma},
 #endif
-          });
+      {"fma-cpu-reloc", generated::cpu_reloc::fma, {Backend::RelocatableObject}, &runFma},
+      {"fma-cpu-shared", generated::cpu_shared::fma, {Backend::SharedObject}, &runFma},
+  });
 }
 
-TEST_CASE("SPIRV FMA") {
-#ifdef __APPLE__
-  WARN("Vulkan not natively supported on macOS");
-#else
-  testFma(generated::spirv::glsl_fma, //
-          {Backend::Vulkan}           //
-  );
-#endif
-}
+} // namespace
 
-TEST_CASE("ZE FMA") { testFma(generated::ze::fma, {Backend::LevelZero}); }
-
-TEST_CASE("CPU FMA") {
-  testFma(generated::cpu::fma,                                //
-          {Backend::RelocatableObject, Backend::SharedObject} //
-  );
-}
+POLYTEST_DISCOVER(discoverAll)

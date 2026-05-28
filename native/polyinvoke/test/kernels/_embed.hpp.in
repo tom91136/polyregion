@@ -10,7 +10,7 @@ namespace generated::@VARIANT@ {
 
 @CONST_DATA_BLOCKS@
 
-const static std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> @PROGRAM_NAME@ = {
+const static std::unordered_map<std::string, std::vector<uint8_t>> @PROGRAM_NAME@ = {
 @PROGRAM_ENTRIES@
   };
 }

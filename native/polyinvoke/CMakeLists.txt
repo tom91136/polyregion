@@ -131,11 +131,13 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
 endforeach ()
 
-add_executable(polyinvoke-tests test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
+add_subdirectory(test/kernels)
+add_executable(polyinvoke-tests test/main.cpp test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
+target_compile_definitions(polyinvoke-tests PRIVATE POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 add_executable(polyinvoke-exec driver.cpp)
 
-target_link_libraries(polyinvoke-exec PRIVATE polyinvoke-static Aspartame)
-target_link_libraries(polyinvoke-tests PRIVATE polyinvoke-static Catch2::Catch2WithMain Aspartame)
+target_link_libraries(polyinvoke-exec PRIVATE polyinvoke-static Aspartame fmt::fmt)
+target_link_libraries(polyinvoke-tests PRIVATE polyinvoke-static polytest Aspartame fmt::fmt)
 
 target_compile_options(polyinvoke-exec PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyinvoke-tests PRIVATE ${COMPILE_OPTIONS})
@@ -153,23 +155,7 @@ else ()
     target_link_options(polyinvoke-tests PRIVATE ${GPU_RUNTIME_LINK_OPTIONS})
 endif ()
 
-# XXX `glibc.rtld.optional_static_tls=8192` bumps the static-TLS reserve so libamdhip64.so.6
-# (built with -ftls-model=initial-exec, DT_FLAGS STATIC_TLS) can dlopen.
-# XXX `POLYINVOKE_DISABLE_BACKENDS=HIP` because hipModuleLaunchKernel doesn't fill OpenCL-style
-# hidden args (hidden_block_count_x etc.) for kernels emitted by clang's nvptx-ocl pipeline.
-set(_polyinvoke_test_env "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=8192;POLYINVOKE_DISABLE_BACKENDS=HIP")
-foreach (_case IN ITEMS "SPIRV FMA" "CPU FMA" "GPU FMA" "ZE FMA" "CPU Args" "GPU Args" "SPIRV Args" "ZE Args" "CPU BabelStream" "GPU BabelStream" "SPIRV BabelStream" "ZE BabelStream")
-    string(REPLACE " " "-" _name "polyinvoke-${_case}")
-    add_test(NAME ${_name} COMMAND polyinvoke-tests "${_case}")
-    set_tests_properties(${_name} PROPERTIES ENVIRONMENT "${_polyinvoke_test_env}")
-    set(_labels "")
-    if (_case MATCHES "^(GPU|ZE|SPIRV) ")
-        set_tests_properties(${_name} PROPERTIES LABELS "device")
-        set(_labels "device")
-    endif ()
-    polyregion_test_dist_record(NAME ${_name}
-            COMMAND :bin:polyinvoke-tests "${_case}"
-            ENVIRONMENT "${_polyinvoke_test_env}"
-            LABELS "${_labels}")
-    # DeviceLock handles cross-process exclusion per-device; CTest RESOURCE_LOCK is not required.
-endforeach ()
+include(${CMAKE_SOURCE_DIR}/cmake/polytest_discover.cmake)
+polytest_discover_tests(polyinvoke-tests
+        NAME_PREFIX polyinvoke
+        DIST_BIN polyinvoke-tests)
