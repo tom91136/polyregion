@@ -8,7 +8,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <ostream>
 #include <queue>
 #include <shared_mutex>
 #include <stdexcept>
@@ -280,7 +279,6 @@ struct POLYREGION_EXPORT Dim3 {
     if (z < 1) POLYINVOKE_FATAL("Runtime", "Dim3.z must be > 0, got %zu", z);
   }
   constexpr Dim3() : Dim3(1, 1, 1) {}
-  friend std::ostream &operator<<(std::ostream &os, const Dim3 &dim3);
 };
 
 struct POLYREGION_EXPORT Policy {
@@ -342,6 +340,7 @@ struct POLYREGION_EXPORT Device {
   virtual POLYREGION_EXPORT ~Device() = default;
   [[nodiscard]] virtual POLYREGION_EXPORT int64_t id() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::string name() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT PhysicalDevice physicalDevice() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT ModuleFormat moduleFormat() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool singleEntryPerModule() = 0;
@@ -385,5 +384,6 @@ public:
   [[nodiscard]] POLYREGION_EXPORT virtual PlatformKind kind() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
   [[nodiscard]] POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> of(const Backend &b);
+  [[nodiscard]] POLYREGION_EXPORT static std::unique_ptr<Platform> maybe(const Backend &b);
 };
 } // namespace polyregion::invoke

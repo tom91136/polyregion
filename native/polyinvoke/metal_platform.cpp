@@ -108,6 +108,10 @@ std::string MetalDevice::name() {
   POLYINVOKE_TRACE();
   return device->name()->utf8String();
 }
+PhysicalDevice MetalDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  return PhysicalDevice::registryId(device->registryID());
+}
 bool MetalDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;

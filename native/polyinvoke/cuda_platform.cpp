@@ -128,6 +128,14 @@ std::string CudaDevice::name() {
   POLYINVOKE_TRACE();
   return deviceName;
 }
+PhysicalDevice CudaDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  int domain = 0, bus = 0, slot = 0;
+  CHECKED(cuDeviceGetAttribute(&domain, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, device));
+  CHECKED(cuDeviceGetAttribute(&bus, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, device));
+  CHECKED(cuDeviceGetAttribute(&slot, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, device));
+  return PhysicalDevice::pci(static_cast<uint32_t>(domain), static_cast<uint8_t>(bus), static_cast<uint8_t>(slot), 0);
+}
 bool CudaDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;

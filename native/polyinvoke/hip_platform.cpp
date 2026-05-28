@@ -2,6 +2,7 @@
 
 #include "magic_enum/magic_enum.hpp"
 
+#include "amd_util.h"
 #include "dl_util.h"
 
 using namespace polyregion::invoke;
@@ -110,6 +111,14 @@ std::string HipDevice::name() {
   POLYINVOKE_TRACE();
   return deviceName;
 }
+PhysicalDevice HipDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  // XXX hipDeviceProp_t has no PCI function field; AMD GPUs are always function 0.
+  return PhysicalDevice::pci(static_cast<uint32_t>(prop.pciDomainID), static_cast<uint8_t>(prop.pciBusID),
+                             static_cast<uint8_t>(prop.pciDeviceID), 0);
+}
 bool HipDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
@@ -130,10 +139,21 @@ std::vector<std::string> HipDevice::features() {
   // See https://docs.amd.com/bundle/ROCm_Release_Notes_v5.0/page/Breaking_Changes.html
   hipDeviceProp_t prop;
   CHECKED(hipGetDeviceProperties(&prop, device));
-  return {"hip", "amd", "gfx" + std::to_string(prop.gcnArch)};
+  std::vector<std::string> out{"hip", "amd", "gfx" + std::to_string(prop.gcnArch)};
+  if (prop.arch.hasDoubles) out.emplace_back("fp64");
+  if (prop.arch.hasGlobalInt64Atomics) out.emplace_back("int64");
+  // XXX No prop field for fp16; gfx9 (Vega) >= have fp16, older parts emulate via fp32
+  if (prop.gcnArch >= 900) out.emplace_back("fp16");
+  return out;
 }
 void HipDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
+  // XXX libclc/device-libs are pinned to COv4; COv5+ relocates the hidden kernargs so get_global_id() is off-by-1.
+  if (auto cov = amd::amdgcn_code_object_version(image); cov && *cov > 4)
+    POLYINVOKE_FATAL(PREFIX,
+                     "module `%s` is amdgcn code object v%d but device-libs are COv4; "
+                     "recompile with -mcode-object-version=4",
+                     name.c_str(), *cov);
   store.loadModule(name, image);
 }
 bool HipDevice::moduleLoaded(const std::string &name) {
@@ -215,6 +235,9 @@ void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, si
 void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   CHECKED(hipMemcpyDtoHAsync(dst, reinterpret_cast<hipDeviceptr_t>(src + srcOffset), size, stream));
+  // XXX hipStreamAddCallback can fire before a pageable async copy is host-visible; sync so a caller
+  // waiting on the callback doesn't read stale data.
+  CHECKED(hipStreamSynchronize(stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,

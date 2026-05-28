@@ -21,6 +21,7 @@ using ReadLock = std::shared_lock<std::shared_mutex>;
 class POLYREGION_EXPORT ObjectDevice : public Device {
 public:
   POLYREGION_EXPORT int64_t id() override;
+  POLYREGION_EXPORT PhysicalDevice physicalDevice() override;
   POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT std::vector<std::string> features() override;

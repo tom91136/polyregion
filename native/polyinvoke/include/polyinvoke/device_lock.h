@@ -8,12 +8,14 @@
 
 namespace polyregion::invoke {
 
-// When "1", polyrt acquires a cross-process lock on each unique device
+// When "1", polyrt acquires a cross-process lock on each unique physical device
 inline constexpr const char *DeviceLockEnv = "POLYINVOKE_TEST_LOCK";
 
+// Cross-process exclusive lock keyed on the physical device, so backends sharing one GPU serialise.
+// A no-op for host/CPU devices (PhysicalDevice::host()).
 class POLYREGION_EXPORT DeviceLock {
 public:
-  DeviceLock(Backend backend, std::string_view deviceName);
+  explicit DeviceLock(const PhysicalDevice &device);
   ~DeviceLock();
 
   DeviceLock(DeviceLock &&) noexcept;

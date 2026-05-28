@@ -1,6 +1,6 @@
 #include "polyinvoke/runtime.h"
 
-#include <iostream>
+#include <cstdio>
 #include <mutex>
 #include <utility>
 
@@ -58,6 +58,15 @@ void invoke::init() { libm::exportAll(); }
 
 std::variant<std::string, std::unique_ptr<invoke::Platform>> invoke::Platform::of(const Backend &b) {
   using namespace polyregion::invoke;
+  if (const char *raw = std::getenv("POLYINVOKE_DISABLE_BACKENDS"); raw && *raw) {
+    const auto needle = magic_enum::enum_name(b);
+    std::string_view s(raw);
+    for (size_t i = 0, j = 0; i <= s.size(); ++i)
+      if (i == s.size() || s[i] == ',') {
+        if (i > j && s.substr(j, i - j) == needle) return std::string("disabled by POLYINVOKE_DISABLE_BACKENDS");
+        j = i + 1;
+      }
+  }
   switch (b) {
     case Backend::CUDA: return cuda::CudaPlatform::create();
     case Backend::HIP: return hip::HipPlatform::create();
@@ -68,13 +77,24 @@ std::variant<std::string, std::unique_ptr<invoke::Platform>> invoke::Platform::o
 #ifdef RUNTIME_ENABLE_METAL
       return metal::MetalPlatform::create();
 #else
-      POLYINVOKE_FATAL("Runtime", "%s backend not available", magic_enum::enum_name(b).data());
+      return std::string("backend not available (built without RUNTIME_ENABLE_METAL)");
 #endif
     case Backend::LevelZero: return ze::ZePlatform::create();
     case Backend::SharedObject: return object::SharedPlatform::create();
     case Backend::RelocatableObject: return object::RelocatablePlatform::create();
   }
-  return "Backend " + std::string(magic_enum::enum_name(b)) + " not available";
+  return std::string("unknown backend");
+}
+
+std::unique_ptr<invoke::Platform> invoke::Platform::maybe(const Backend &b) {
+  auto r = Platform::of(b);
+  if (std::holds_alternative<std::string>(r)) {
+    const auto &reason = std::get<std::string>(r);
+    std::fprintf(stderr, "polyinvoke: backend %s failed to initialise: %.*s\n", magic_enum::enum_name(b).data(),
+                 static_cast<int>(reason.size()), reason.data());
+    return nullptr;
+  }
+  return std::move(std::get<std::unique_ptr<Platform>>(r));
 }
 
 invoke::detail::CountingLatch::Token::Token(CountingLatch &latch) : latch(latch) { POLYINVOKE_TRACE(); }
@@ -101,7 +121,8 @@ bool invoke::detail::CountingLatch::waitAll() {
 invoke::detail::CountingLatch::~CountingLatch() {
   POLYINVOKE_TRACE();
   if (!waitAll()) {
-    std::cerr << "Timed out with " + std::to_string(pending) + " pending latches" << std::endl;
+    std::fprintf(stderr, "Timed out with %ld pending latches\n", pending.load());
+    std::fflush(stderr);
   }
 }
 
@@ -136,9 +157,3 @@ std::vector<void *> invoke::detail::argDataAsPointers(const std::vector<Type> &t
   }
   return argsPtrStore;
 }
-
-namespace polyregion::invoke {
-std::ostream &operator<<(std::ostream &os, const Dim3 &dim3) {
-  return os << "Dim3{x: " << dim3.x << " y: " << dim3.y << " z: " << dim3.z << "}";
-}
-} // namespace polyregion::invoke

@@ -38,7 +38,7 @@ static std::optional<size_t> parseIntNoExcept(const char *str) {
   return value;
 }
 
-// Preserved so DeviceLock can key against the (backend, device) actually selected.
+// Preserved for diagnostics; the DeviceLock keys on the device's PhysicalDevice, not the backend.
 static std::optional<Backend> selectedBackend;
 
 static void setupBackend(const Backend backend) {
@@ -149,12 +149,21 @@ void polyregion::polyrt::initialise() {
       if (currentDevice && selectedBackend) {
         if (const auto env = std::getenv(polyregion::invoke::DeviceLockEnv); env && env[0] == '1') {
           static std::optional<polyregion::invoke::DeviceLock> currentDeviceLock;
+          const auto physical = currentDevice->physicalDevice();
+          // No-op for host/CPU devices; GPU backends sharing one physical device serialise.
           log(DebugLevel::Info, "<%s> Acquiring DeviceLock for (%s, %s)", __func__, magic_enum::enum_name(*selectedBackend).data(),
-              currentDevice->name().c_str());
-          currentDeviceLock.emplace(*selectedBackend, currentDevice->name());
+              physical.str().c_str());
+          currentDeviceLock.emplace(physical);
         }
       }
       if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
+      // XXX HIP/CUDA/HSA runtimes don't survive explicit teardown during __cxa_finalize. their globals are being destroyed concurrently and
+      // the destroy-stream call SIGSEGVs. Just leak it as program is terminating anyway.
+      std::atexit([] {
+        (void)currentQueue.release();
+        (void)currentDevice.release();
+        (void)currentPlatform.release();
+      });
       if (currentPlatform) {
         log(DebugLevel::Info, "- Platform: %s [%s] Device: %s [%s]",
             currentPlatform->name().c_str(),                          //

@@ -1,7 +1,6 @@
 #include "polyinvoke/cl_platform.h"
 
 #include <cstring>
-#include <iostream>
 #include <thread>
 
 #include "magic_enum/magic_enum.hpp"
@@ -135,6 +134,7 @@ bool deviceSupportsIL(cl_device_id device) {
 // Returns the buffer memflags to OR into clSVMAlloc when SVM is usable (0 = coarse-grain,
 // CL_MEM_SVM_FINE_GRAIN_BUFFER otherwise); nullopt means fall back to cl_mem buffers.
 std::optional<cl_bitfield> resolveSVM(cl_device_id device) {
+  if (const char *off = std::getenv("POLYINVOKE_DISABLE_SVM"); off && *off && *off != '0') return std::nullopt;
   cl_bitfield caps = 0;
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return std::nullopt;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return std::nullopt;
@@ -234,8 +234,9 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
             POLYINVOKE_TRACE();
             CHECKED(clReleaseContext(c));
           }),
-      deviceName(queryDeviceInfo(device, CL_DEVICE_NAME)), format(format), ilCreateFn(ilCreateFn), svm(svm),
-      svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
+      // XXX kernel-format suffix disambiguates source vs SPIRV_Kernel instances over the same cl_device_id.
+      deviceName(queryDeviceInfo(device, CL_DEVICE_NAME) + (format == ModuleFormat::SPIRV_Kernel ? " [SPIR-V]" : " [source]")),
+      format(format), ilCreateFn(ilCreateFn), svm(svm), svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
       store(
           PREFIX,
           [this](auto &&image) {
@@ -282,6 +283,21 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
 int64_t ClDevice::id() {
   POLYINVOKE_TRACE();
   return reinterpret_cast<int64_t>(*device);
+}
+PhysicalDevice ClDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  // XXX clew doesn't have cl_khr_pci_bus_info/cl_khr_device_uuid tokens; use their published values.
+  // we do PCI first then UUID fallback
+  constexpr cl_device_info PCI_BUS_INFO_KHR = 0x410F, UUID_KHR = 0x106A;
+  struct PciBusInfoKHR {
+    cl_uint domain, bus, device, function;
+  } pci{};
+  if (clGetDeviceInfo(*device, PCI_BUS_INFO_KHR, sizeof(pci), &pci, nullptr) == CL_SUCCESS)
+    return PhysicalDevice::pci(pci.domain, static_cast<uint8_t>(pci.bus), static_cast<uint8_t>(pci.device),
+                               static_cast<uint8_t>(pci.function));
+  std::array<uint8_t, 16> uuid{};
+  if (clGetDeviceInfo(*device, UUID_KHR, uuid.size(), uuid.data(), nullptr) == CL_SUCCESS) return PhysicalDevice::uuid(uuid);
+  return PhysicalDevice::synthetic(Backend::OpenCL, id());
 }
 std::string ClDevice::name() {
   POLYINVOKE_TRACE();
@@ -397,7 +413,7 @@ void ClDevice::freeDevice(uintptr_t ptr) {
 std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (!svm) return std::nullopt;
+  if (!svm || *svm == 0) return std::nullopt;
   void *p = clSVMAlloc(*context, /*CL_MEM_READ_WRITE*/ 1 << 0 | *svm, size, 0);
   if (!p) return std::nullopt;
   trackSvm(p, size);
@@ -513,9 +529,17 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   cl_event event = {};
   if (!dst) POLYINVOKE_FATAL(PREFIX, "Destination pointer is NULL, source=%lu", src);
   if (svm) {
-    unmapAllSvmForDevice();
-    auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
-    CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
+    auto *srcP = reinterpret_cast<char *>(src) + srcOffset;
+    if (*svm == 0 && clEnqueueSVMMap && clEnqueueSVMUnmap) {
+      // XXX Intel NEO clEnqueueSVMMemcpy reads stale data on coarse-grain SVM after a kernel write;
+      // Map/Unmap forces the cache flush.
+      CHECKED(clEnqueueSVMMap(queue, CL_TRUE, /*CL_MAP_READ*/ 0x1, srcP, size, 0, nullptr, nullptr));
+      std::memcpy(dst, srcP, size);
+      CHECKED(clEnqueueSVMUnmap(queue, srcP, 0, nullptr, nullptr));
+    } else {
+      unmapAllSvmForDevice();
+      CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
+    }
   } else {
     CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, srcOffset, size, dst, 0, nullptr, &event));
   }

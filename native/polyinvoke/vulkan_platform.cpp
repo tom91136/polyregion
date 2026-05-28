@@ -1,6 +1,7 @@
 #include "polyinvoke/vulkan_platform.h"
 
-#include <iostream>
+#include <algorithm>
+#include <cstring>
 #include <utility>
 
 #include "magic_enum/magic_enum.hpp"
@@ -238,6 +239,24 @@ int64_t VulkanDevice::id() {
 std::string VulkanDevice::name() {
   POLYINVOKE_TRACE();
   return device.getProperties().deviceName;
+}
+PhysicalDevice VulkanDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  const auto exts = device.enumerateDeviceExtensionProperties();
+  const bool hasPci = std::any_of(exts.begin(), exts.end(), [](const vk::ExtensionProperties &e) {
+    return std::strcmp(e.extensionName, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME) == 0;
+  });
+  if (hasPci) {
+    const auto chain = device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDevicePCIBusInfoPropertiesEXT>();
+    const auto &pci = chain.template get<vk::PhysicalDevicePCIBusInfoPropertiesEXT>();
+    return PhysicalDevice::pci(pci.pciDomain, static_cast<uint8_t>(pci.pciBus), static_cast<uint8_t>(pci.pciDevice),
+                               static_cast<uint8_t>(pci.pciFunction));
+  }
+  const auto chain = device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceIDProperties>();
+  const auto &devUuid = chain.template get<vk::PhysicalDeviceIDProperties>().deviceUUID;
+  std::array<uint8_t, 16> uuid{};
+  std::memcpy(uuid.data(), devUuid.data(), uuid.size());
+  return PhysicalDevice::uuid(uuid);
 }
 bool VulkanDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();

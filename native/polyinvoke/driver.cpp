@@ -1,11 +1,11 @@
 #include <chrono>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/cl_platform.h"
@@ -232,26 +232,21 @@ void run() {
 
   std::vector<std::unique_ptr<Platform>> rts;
 
-  for (auto backend : {Backend::RelocatableObject}) {
-    if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      std::cerr << "Backend " << magic_enum::enum_name(backend) << " failed to initialise: " << std::get<std::string>(errorOrPlatform)
-                << "\n";
-    } else rts.emplace_back(std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform)));
-  }
+  for (auto backend : {Backend::RelocatableObject})
+    if (auto platform = Platform::maybe(backend)) rts.emplace_back(std::move(platform));
 
   static std::vector<int32_t> xs;
 
   for (auto &rt : rts) {
-    std::cout << "RT=" << rt->name() << std::endl;
+    fmt::print("RT={}\n", rt->name());
     auto devices = rt->enumerate();
-    std::cout << "Found " << devices.size() << " devices" << std::endl;
+    fmt::print("Found {} devices\n", devices.size());
 
     for (auto &d : devices) {
 
       auto features = d->features() | mk_string(",", [](auto &&s) { return s; });
 
-      std::cout << "[Device " << d->id() << "]"
-                << "name: `" << d->name() << "`; features: " << features << std::endl;
+      fmt::print("[Device {}]name: `{}`; features: {}\n", d->id(), d->name(), features);
 
       xs.resize(4);
       std::fill(xs.begin(), xs.end(), 7);
@@ -278,7 +273,7 @@ void run() {
         }
         auto size = sizeof(decltype(xs)::value_type) * xs.size();
         auto ptr = d->mallocDevice(size, Access::RW);
-        q1->enqueueHostToDeviceAsync(xs.data(), ptr, 0, size, [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
+        q1->enqueueHostToDeviceAsync(xs.data(), ptr, 0, size, [&]() { fmt::print("[{}]  H->D ok\n", i); });
 
         int32_t x = 4;
 
@@ -288,22 +283,21 @@ void run() {
             {Type::Void, nullptr},
         });
 
-        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { std::cout << "[" << i << "]  K 1 ok" << std::endl; });
+        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { fmt::print("[{}]  K 1 ok\n", i); });
 
         x = 5;
 
-        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
-        q1->enqueueDeviceToHostAsync(ptr, 0, xs.data(), size,
-                                     [&]() { std::cout << "[" << i << "]  D->H ok, r= " << (xs | mk_string(",")) << std::endl; });
+        q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { fmt::print("[{}]  K 2 ok\n", i); });
+        q1->enqueueDeviceToHostAsync(ptr, 0, xs.data(), size, [&]() { fmt::print("[{}]  D->H ok, r= {}\n", i, xs | mk_string(",")); });
         d->freeDevice(ptr);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       }
 
-      std::cout << d->id() << " = Done" << std::endl;
+      fmt::print("{} = Done\n", d->id());
     }
   }
 
-  std::cout << "Done" << std::endl;
+  fmt::print("Done\n");
 }
 
 int main(int argc, char *argv[]) {

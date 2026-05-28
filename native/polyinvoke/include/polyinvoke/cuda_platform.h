@@ -34,6 +34,7 @@ public:
   explicit CudaDevice(int ordinal);
   POLYREGION_EXPORT int64_t id() override;
   POLYREGION_EXPORT std::string name() override;
+  POLYREGION_EXPORT PhysicalDevice physicalDevice() override;
   POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;

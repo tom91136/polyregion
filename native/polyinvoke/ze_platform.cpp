@@ -28,6 +28,12 @@ std::variant<std::string, std::unique_ptr<Platform>> ZePlatform::create() {
   void *lib = dl::open_first({"libze_loader.so.1", "libze_loader.so"});
 #endif
   if (!lib) return "Level Zero: failed to open libze_loader dynamic library, no Level Zero driver present?";
+  // XXX sysman exposes zesDevicePciGetProperties for physicalDevice()'s PCI BDF; must precede zeInit.
+#ifdef _WIN32
+  _putenv_s("ZES_ENABLE_SYSMAN", "1");
+#else
+  setenv("ZES_ENABLE_SYSMAN", "1", /*overwrite=*/0);
+#endif
   zeew_ze_resolve(dl::lookup, lib);
   if (const auto result = zeInit(0); result != ZE_RESULT_SUCCESS) {
     return "Level Zero: zeInit failed with code " + std::to_string(result);
@@ -151,6 +157,24 @@ int64_t ZeDevice::id() {
   POLYINVOKE_TRACE();
   return reinterpret_cast<intptr_t>(device);
 }
+PhysicalDevice ZeDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  if (zesDevicePciGetProperties) {
+    zes_pci_properties_t pci{};
+    pci.stype = ZES_STRUCTURE_TYPE_PCI_PROPERTIES;
+    if (zesDevicePciGetProperties(device, &pci) == ZE_RESULT_SUCCESS)
+      return PhysicalDevice::pci(pci.address.domain, static_cast<uint8_t>(pci.address.bus), static_cast<uint8_t>(pci.address.device),
+                                 static_cast<uint8_t>(pci.address.function));
+  }
+  ze_device_properties_t props{};
+  props.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  if (zeDeviceGetProperties(device, &props) == ZE_RESULT_SUCCESS) {
+    std::array<uint8_t, 16> uuid{};
+    std::memcpy(uuid.data(), props.uuid.id, uuid.size());
+    return PhysicalDevice::uuid(uuid);
+  }
+  return PhysicalDevice::synthetic(Backend::LevelZero, id());
+}
 std::string ZeDevice::name() {
   POLYINVOKE_TRACE();
   return deviceName;
@@ -248,8 +272,10 @@ ZeDeviceQueue::ZeDeviceQueue(const std::chrono::duration<int64_t> &timeout, decl
   // zeCommandListHostSynchronize).
   ze_event_pool_desc_t poolDesc{ZE_STRUCTURE_TYPE_EVENT_POOL_DESC, nullptr, ZE_EVENT_POOL_FLAG_HOST_VISIBLE, /*count=*/1};
   CHECKED(zeEventPoolCreate(context, &poolDesc, /*numDevices=*/1, &device, &eventPool));
+  // XXX signal scope must flush to host, else a completing op signals before its writes are
+  // host-visible and zeEventHostSynchronize returns stale data (off-by-one under load).
   ze_event_desc_t eventDesc{ZE_STRUCTURE_TYPE_EVENT_DESC, nullptr, /*index=*/0,
-                            /*signal=*/0, ZE_EVENT_SCOPE_FLAG_HOST};
+                            /*signal=*/ZE_EVENT_SCOPE_FLAG_HOST, ZE_EVENT_SCOPE_FLAG_HOST};
   CHECKED(zeEventCreate(eventPool, &eventDesc, &event));
 }
 ZeDeviceQueue::~ZeDeviceQueue() {

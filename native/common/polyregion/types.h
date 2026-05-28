@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -31,6 +32,60 @@ enum class POLYREGION_EXPORT Backend : uint8_t {
   SharedObject,
   RelocatableObject,
   LevelZero,
+};
+
+struct POLYREGION_EXPORT PhysicalDevice {
+  enum class Scheme : uint8_t { Host = 0, Pci, Uuid, RegistryId, Synthetic };
+  Scheme scheme = Scheme::Host;
+  std::array<uint8_t, 16> value{};
+
+  [[nodiscard]] bool needsLock() const { return scheme != Scheme::Host; }
+  bool operator==(const PhysicalDevice &o) const { return scheme == o.scheme && value == o.value; }
+  bool operator!=(const PhysicalDevice &o) const { return !(*this == o); }
+
+  [[nodiscard]] std::string str() const {
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string uuid;
+    for (const auto b : value) {
+      uuid += hex[b >> 4];
+      uuid += hex[b & 0xF];
+    }
+    switch (scheme) {
+      case Scheme::Host: return "host-" + uuid;
+      case Scheme::Pci: return "pci-" + uuid;
+      case Scheme::Uuid: return "uuid-" + uuid;
+      case Scheme::RegistryId: return "reg-" + uuid;
+      case Scheme::Synthetic: return "syn-" + uuid;
+    }
+    return "unknown-" + uuid;
+  }
+
+  static PhysicalDevice host() { return {Scheme::Host, {}}; }
+  static PhysicalDevice pci(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
+    PhysicalDevice p{Scheme::Pci, {}};
+    p.value[0] = static_cast<uint8_t>(domain >> 24);
+    p.value[1] = static_cast<uint8_t>(domain >> 16);
+    p.value[2] = static_cast<uint8_t>(domain >> 8);
+    p.value[3] = static_cast<uint8_t>(domain);
+    p.value[4] = bus;
+    p.value[5] = device;
+    p.value[6] = function;
+    return p;
+  }
+  static PhysicalDevice uuid(const std::array<uint8_t, 16> &u) { return {Scheme::Uuid, u}; }
+  static PhysicalDevice registryId(uint64_t id) {
+    PhysicalDevice p{Scheme::RegistryId, {}};
+    for (int i = 0; i < 8; ++i)
+      p.value[i] = static_cast<uint8_t>(id >> (i * 8));
+    return p;
+  }
+  static PhysicalDevice synthetic(Backend backend, int64_t ordinal) {
+    PhysicalDevice p{Scheme::Synthetic, {}};
+    p.value[0] = static_cast<uint8_t>(backend);
+    for (int i = 0; i < 8; ++i)
+      p.value[8 + i] = static_cast<uint8_t>(ordinal >> (i * 8));
+    return p;
+  }
 };
 
 } // namespace polyregion::invoke
@@ -85,6 +140,7 @@ struct POLYREGION_EXPORT TargetSpec {
       {"spirv64_kernel",  {"spirv", "spirv64",
                            "spirv_kernel", "opencl_spirv"}, T::Object_LLVM_SPIRV64_Kernel,   B::OpenCL,            false, {"spirv_kernel"}},
       {"spirv32_kernel",  {"spirv32"},                      T::Object_LLVM_SPIRV32_Kernel,   B::OpenCL,            false, {"spirv_kernel"}},
+      {"level_zero",      {"ze", "levelzero"},              T::Object_LLVM_SPIRV64_Kernel,   B::LevelZero,         false, {}},
       {"spirv_glcompute", {"vulkan", "vulkan_spirv"},       T::Object_LLVM_SPIRV_GLCompute,  B::Vulkan,            false, {"spirv_glcompute"}},
       {"opencl1_1",       {"opencl"},                       T::Source_C_OpenCL1_1,           B::OpenCL,            false, {"source"}},
       {"metal1_0",        {"metal"},                        T::Source_C_Metal1_0,            B::Metal,             true,  {}},

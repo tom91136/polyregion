@@ -9,6 +9,7 @@
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
 
+#include "amd_util.h"
 #include "dl_util.h"
 
 using namespace polyregion::invoke;
@@ -280,6 +281,17 @@ std::string HsaDevice::name() {
   POLYINVOKE_TRACE();
   return deviceName;
 }
+PhysicalDevice HsaDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  // XXX BDFID packs bus[15:8]/device[7:3]/function[2:0]; domain is separate. Matches HIP's PCI BDF
+  // XXX Fall back rather than collapse distinct agents onto pci(0,0,0,0) if the query is unsupported
+  uint32_t bdfid = 0, domain = 0;
+  if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &bdfid) != HSA_STATUS_SUCCESS)
+    return PhysicalDevice::synthetic(Backend::HSA, id());
+  hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &domain);
+  return PhysicalDevice::pci(domain, static_cast<uint8_t>((bdfid >> 8) & 0xFF), static_cast<uint8_t>((bdfid >> 3) & 0x1F),
+                             static_cast<uint8_t>(bdfid & 0x7));
+}
 bool HsaDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
@@ -295,10 +307,36 @@ std::vector<Property> HsaDevice::properties() {
 std::vector<std::string> HsaDevice::features() {
   POLYINVOKE_TRACE();
   auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
-  return {"hsa", "amd", gfxArch, "fp64", "fp16", "int64"};
+  std::vector<std::string> out{"hsa", "amd", gfxArch};
+  // XXX HSA exposes no direct hasDoubles/hasInt64Atomics query (unlike HIP's hipDeviceProp_t.arch).
+  // In practice, gfx >= 7xx supports fp64 and global int64 atomics
+  int gfx = 0;
+  for (char c : gfxArch)
+    if (c >= '0' && c <= '9') gfx = gfx * 10 + (c - '0');
+  if (gfx >= 700) {
+    out.emplace_back("fp64");
+    out.emplace_back("int64");
+  }
+  // XXX except for f16, and fall back to gfx9
+  hsa_isa_t isa{};
+  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa) == HSA_STATUS_SUCCESS) {
+    bool fastF16 = false;
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_FAST_F16_OPERATION, &fastF16) == HSA_STATUS_SUCCESS && fastF16) {
+      out.emplace_back("fp16");
+      return out;
+    }
+  }
+  if (gfx >= 900) out.emplace_back("fp16");
+  return out;
 }
 void HsaDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
+  // XXX libclc/device-libs are pinned to COv4; COv5+ relocates the hidden kernargs so get_global_id() is off-by-1.
+  if (auto cov = amd::amdgcn_code_object_version(image); cov && *cov > 4)
+    POLYINVOKE_FATAL(PREFIX,
+                     "module `%s` is amdgcn code object v%d but device-libs are COv4; "
+                     "recompile with -mcode-object-version=4",
+                     name.c_str(), *cov);
   store.loadModule(name, image);
 }
 bool HsaDevice::moduleLoaded(const std::string &name) {

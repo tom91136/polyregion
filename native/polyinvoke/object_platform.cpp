@@ -67,6 +67,10 @@ int64_t ObjectDevice::id() {
   POLYINVOKE_TRACE();
   return 0;
 }
+PhysicalDevice ObjectDevice::physicalDevice() {
+  POLYINVOKE_TRACE();
+  return PhysicalDevice::host();
+}
 bool ObjectDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return true;
