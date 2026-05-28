@@ -81,7 +81,7 @@ jobs:
             runs_on: ubuntu-24.04
             llvm_parallel_compile_jobs: "4"
             llvm_parallel_link_jobs: "4"
-            flang_parallel_compile_jobs: "3"
+            flang_parallel_compile_jobs: "2"
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
             llvm_parallel_compile_jobs: "4"
