@@ -19,8 +19,7 @@ inline constexpr auto PassName = "polypass_pass_name";
 // Optional human-readable description of the i-th pass; may return NULL or "".
 inline constexpr auto PassDescr = "polypass_pass_descr";
 
-// Run the NULL-terminated `steps` list against `in` (msgpack Program); steps share in-process state. On Ok, *out is a malloc'd
-// PassRunResult; caller frees via polypass_free.
+// Run the NULL-terminated `steps` list against `in` (msgpack Program); steps share in-process state. On Ok, *out is a malloc'd PassRunResult; caller frees via polypass_free.
 inline constexpr auto RunPasses = "polypass_run_passes";
 
 // NUL-terminated diagnostic for the most recent non-Ok status. Valid until the next polypass_run_passes call; NULL when no error is set.
