@@ -48,7 +48,7 @@ private[polyregion] object CppStructGen {
   object StructSource {
 
     val RequiredIncludes =
-      List("memory", "variant", "iterator", "sstream", "optional", "algorithm", "functional", "set", "vector")
+      List("memory", "variant", "iterator", "optional", "algorithm", "functional", "set", "vector")
     def emitHeader(namespace: String, xs: List[StructSource]) = {
 
       def nsStart(n: String) = if (n.isEmpty) "" else s"namespace $n { "
@@ -146,13 +146,6 @@ private[polyregion] object CppStructGen {
             |A arg1_(Ret (F::*)(A, Rest...) const);
             |template <typename F> struct arg1 { using type = decltype(arg1_(&F::operator())); };
             |template <typename T> using arg1_t = typename arg1<T>::type;
-            |
-            |template <typename T> //
-            |std::string to_string(const T& x) {
-            |  std::ostringstream ss;
-            |  ss << x;
-            |  return ss.str();
-            |}
             |
             |""".stripMargin
 
@@ -256,42 +249,6 @@ private[polyregion] object CppStructGen {
         tpe.namespace.sym("", "::", "::") + name
 
       val hasMoreSumTypes = variants.exists(_.tpe.kind == CppType.Kind.Base)
-
-      val (streamSig, streamImpl) = tpe.kind match {
-        case CppType.Kind.Base => (Nil, Nil)
-        case _ =>
-          (
-            s"POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &);" :: Nil,
-            tpe.namespace match {
-              case Nil =>
-                s"std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &x) { return x.dump(os); }" :: Nil
-              case xs =>
-                s"namespace ${xs.mkString("::")} { std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &x) { return x.dump(os); } }" :: Nil
-            }
-          )
-      }
-
-      val (dumpSig, dumpImpl) = tpe.kind match {
-        case CppType.Kind.Base if hasMoreSumTypes => (Nil, Nil)
-        case CppType.Kind.Base =>
-          (
-            s"[[nodiscard]] POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const = 0;" :: Nil,
-            Nil
-          )
-        case _ =>
-          val stmts =
-            s"std::ostream &${clsName(qualified = true)}::dump(std::ostream &os) const {" ::
-              s"  os << \"${tpe.name}(\";" ::
-              members.map((n, tpe) => tpe.streamOp("os", s"$n").map("  " + _)).intercalate("  os << ',';" :: Nil) :::
-              "  os << ')';" ::
-              "  return os;" ::
-              "}" :: Nil
-          val sig =
-            s"[[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const${
-                if (tpe.kind == CppType.Kind.Variant) " override" else ""
-              };" :: Nil
-          (sig, stmts)
-      }
 
       def capitalCase(s: String): String = if (s.isEmpty) s else s.head.toUpper + s.tail
 
@@ -488,8 +445,6 @@ private[polyregion] object CppStructGen {
              |    std::swap(_v, other._v);
              |    return *this;
              |  }
-             |  POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const; 
-             |  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
              |  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
              |  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
              |${if (!pureEnum) "" else "[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;"}
@@ -519,13 +474,6 @@ private[polyregion] object CppStructGen {
         s"uint32_t ${tpe.ref(true)}::id() const { return _v->id(); }" ::
           s"size_t ${tpe.ref(true)}::hash_code() const { return _v->hash_code(); }" ::
           members.map((name, t) => s"${t.ref(true)} ${tpe.ref(true)}::${name}() const { return _v->${name}; }") :::
-          s"std::ostream &${tpe.ref(true)}::dump(std::ostream &os) const { return _v->dump(os); }" ::
-          (tpe.namespace match {
-            case Nil =>
-              s"std::ostream &operator<<(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); }"
-            case xs =>
-              s"namespace ${tpe.namespace.mkString("::")} { std::ostream &operator<<(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); } }"
-          }) ::
           s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v); }" ::
           s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v); }" ::
           (if (!pureEnum) Nil
@@ -712,17 +660,14 @@ private[polyregion] object CppStructGen {
         stmts = memberStmts //
           ::: idSig         //
           ::: hashCodeSig   //
-          ::: dumpSig       //
           ::: memberSigs
           ::: traverseSigs
           ::: equalitySig
           ::: visibility
-          ::: ctorStmt :: conversionSig ::: widenSig ::: streamSig,
+          ::: ctorStmt :: conversionSig ::: widenSig,
         implStmts = ctorStmtImpl
           :: idImpl
           ::: hashCodeImpl
-          ::: streamImpl
-          ::: dumpImpl
           ::: memberImpls
           ::: traverseImpls
           ::: equalityImpl

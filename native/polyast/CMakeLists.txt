@@ -18,7 +18,6 @@ target_precompile_headers(PolyAST PUBLIC
         ast.h
 
         <optional>
-        <ostream>
         <unordered_map>
         <utility>
         <vector>

@@ -24,6 +24,24 @@ private[polyregion] object CodeGen {
     String.format("%032x", new BigInteger(1, md5.digest()));
   }
 
+  private def adtFingerprint(nodes: List[StructNode]): String = {
+    def tpeRepr(t: CppType): String = {
+      val args = t.ctors match {
+        case Nil => ""
+        case xs  => xs.map(tpeRepr).mkString("<", ",", ">")
+      }
+      s"${t.namespace.mkString("::")}::${t.name}/${t.kind}$args"
+    }
+    def go(n: StructNode): String = {
+      val name    = (n.tpe.namespace :+ n.tpe.name).mkString("::")
+      val parent  = n.parentTpe.fold("")((p, _) => tpeRepr(p))
+      val members = n.members.map((mn, mt) => s"$mn:${tpeRepr(mt)}").mkString(",")
+      val vars    = n.variants.map(go).mkString(";")
+      s"$name/${n.tpe.kind}<$parent>[$members]{$vars}"
+    }
+    nodes.map(go).mkString("\n")
+  }
+
   private def overwrite(path: Path)(content: String) = Files.write(
     path,
     content.getBytes(StandardCharsets.UTF_8),
@@ -174,7 +192,7 @@ private[polyregion] object CodeGen {
                        |}
                        |""".stripMargin
 
-    val adtHash = md5(adtHeader + adtImpl)
+    val adtHash = md5(adtFingerprint(structs))
 
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
     val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, adtHash, jsonCodecSources)
