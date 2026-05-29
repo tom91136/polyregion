@@ -42,183 +42,45 @@ jobs:
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
 
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runs_on: windows-2025-vs2026
-            llvm_parallel_compile_jobs: "4"
-            llvm_parallel_link_jobs: "2"
-            flang_parallel_compile_jobs: "2"
-          - arch: arm64
-            runs_on: windows-11-arm
-            llvm_parallel_compile_jobs: "4"
-            llvm_parallel_link_jobs: "4"
-            flang_parallel_compile_jobs: "2"
-    runs-on: ${{ matrix.runs_on }}
+  # Per-arch build jobs so downstream can proceed for the arch that built even if the other is red.
+  build-amd64:
+    runs-on: windows-2025-vs2026
     env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
-      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
-      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
+      POLYREGION_ARCH: amd64
+      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "4"
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "2"
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "2"
       POLYC_PASS_BUNDLE: dso
       # Hermes port doesn't compile cleanly with MSVC cl.exe (__builtin_expect missing).
       # quickjs-ng is portable C, builds on MSVC. Switch JS engine on Windows.
       POLYC_JS_ENGINE: qjs
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install LLVM
-        # Without clang-cl the LLVM runtimes (compiler-rt builtins) fails because
-        # cl.exe cannot parse GCC __attribute__ syntax used in e.g. aarch64/fp_mode.c. The
-        # github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
-        # windows-11-arm runner may not, so install explicitly via winget.
-        shell: pwsh
-        env:
-          LLVM_HOST_VERSION: "21.1.6"
-        run: |
-          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
-            winget install --id LLVM.LLVM --version $env:LLVM_HOST_VERSION --silent --disable-interactivity --accept-source-agreements --accept-package-agreements
-          }
-          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
-
-      - name: Setup JDK + sbt cache
-        uses: actions/setup-java@v5
+      - uses: ./.github/actions/build-windows
         with:
-          distribution: temurin
-          java-version: '21'
-          cache: sbt
+          arch: amd64
+          act: ${{ env.ACT }}
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
-
-      - name: Setup Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v6
-
-      - name: Dotenv
-        id: dotenv
-        uses: falti/dotenv-action@v1.2
+  build-arm64:
+    runs-on: windows-11-arm
+    env:
+      POLYREGION_ARCH: arm64
+      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "4"
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "4"
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "2"
+      POLYC_PASS_BUNDLE: dso
+      POLYC_JS_ENGINE: qjs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/build-windows
         with:
-          path: ./native/.env
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
-
-      - name: Setup MSVC env
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
-
-      - name: Setup just
-        uses: extractions/setup-just@v4
-
-      - name: Check environment
-        shell: pwsh
-        run: |
-          Write-Output $env:JAVA_HOME
-          & "$env:JAVA_HOME\bin\java.exe" -version
-          Write-Output $env:PROCESSOR_ARCHITECTURE
-          Write-Output $env:VCPKG_ROOT
-
-      - name: Restore LLVM cache
-        if: ${{ !env.ACT }}
-        id: restore-llvm
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
-
-      - name: Build LLVM
-        id: build-llvm
-        if: steps.restore-llvm.outputs.cache-hit != 'true'
-        run: just llvm -DLLVM_USE_HOST_TOOLS=OFF
-
-      - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
-
-      - name: Restore device libs cache
-        if: ${{ !env.ACT }}
-        id: restore-device-libs
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            ./native/thirdparty/device_libs
-            !./native/thirdparty/device_libs/.staging
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
-
-      - name: Build device libs
-        id: build-device-libs
-        if: steps.restore-device-libs.outputs.cache-hit != 'true'
-        run: just device-libs
-
-      - name: Save device libs cache
-        if: steps.build-device-libs.outcome == 'success'
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ./native/thirdparty/device_libs
-            !./native/thirdparty/device_libs/.staging
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
-
-      - name: Install vcpkg dependencies
-        run: just vcpkg-deps
-
-      - name: Build pass bundle (dso)
-        run: just pass-native
-
-      - name: Configure release build
-        run: just configure
-
-      - name: Build dist
-        run: just dist
-
-      - name: Build test dist
-        run: just test-dist
-
-      - name: Check artefact
-        if: always()
-        working-directory: ./native
-        run: |
-          set "DIST=out/polyregion-Release-${{ matrix.arch }}-static-dist"
-          dir "%DIST%\bin"
-          dir "%DIST%\lib"
-          for %%B in (polyc.exe polycpp.exe polyfc.exe clang++.exe flang-new.exe) do (
-            echo ---- %%B ----
-            if exist "%DIST%\bin\%%B" (dumpbin /dependents "%DIST%\bin\%%B") else echo MISSING: %DIST%\bin\%%B
-          )
-          for %%L in (polyc-JNI.dll polyc-JNIshim.dll polyinvoke-JNI.dll) do (
-            echo ---- %%L ----
-            if exist "%DIST%\lib\%%L" (dumpbin /dependents "%DIST%\lib\%%L") else echo MISSING: %DIST%\lib\%%L
-          )
-
-      - name: Upload dist
-        # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
-        with:
-          name: polyregion-windows-${{ matrix.arch }}-Release
-          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist/**
-          if-no-files-found: error
-
-      - name: Upload test dist
-        # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
-        with:
-          name: polyregion-tests-windows-${{ matrix.arch }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
-          if-no-files-found: error
+          arch: arm64
+          act: ${{ env.ACT }}
 
   check-dist:
-    needs: build
+    needs: [build-amd64, build-arm64]
+    # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -258,8 +120,16 @@ jobs:
       - name: Run check-dist
         run: just check-dist
 
+      - name: Annotate dist-check results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/build-dist-check-${{ matrix.arch }}-static/dist-check-results.xml
+          label: dist-check
+
   test-native:
-    needs: build
+    needs: [build-amd64, build-arm64]
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -312,6 +182,13 @@ jobs:
           set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
           ctest --test-dir "%TESTS%" -LE device --timeout 300 --output-on-failure --output-junit "%TESTS%\native-test-results.xml"
 
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
+          label: ctest
+
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
@@ -322,7 +199,8 @@ jobs:
           if-no-files-found: warn
 
   test-scala:
-    needs: build
+    needs: [build-amd64, build-arm64]
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -360,21 +238,19 @@ jobs:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
-      - name: Stage JNI libs at Loader-searched path
-        # XXX Loader.java probes ../native/cmake-build-release-clang/bindings/jvm/ etc. from sbt's
-        # frontend/ cwd; the CI dist puts the JNI .dlls under lib/. Bridge via copy.
-        run: |
-          DIST=./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
-          mkdir -p native/cmake-build-release-clang/bindings/jvm
-          for f in polyc-JNI.dll polyc-JNIshim.dll polyinvoke-JNI.dll; do
-            cp "$DIST/lib/$f" native/cmake-build-release-clang/bindings/jvm/
-          done
-
       - name: Run munit suite
         env:
+          POLYREGION_NATIVE_LIB_DIR: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib
           PATH: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\bin;${{ env.PATH }}
           POLYPASS_PLUGINS: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib\libpolypass.dll
         run: just test-scala
+
+      - name: Annotate scala results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: frontend/compiler-testsuite-scala/target/test-reports
+          label: scala
 
       - name: Upload test results
         if: always()

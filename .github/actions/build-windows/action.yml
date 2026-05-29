@@ -1,0 +1,169 @@
+name: Build polyregion (Windows)
+description: Build and stage the polyregion Windows static dist + test dist for one arch.
+
+inputs:
+  arch:
+    description: Target arch (amd64 or arm64).
+    required: true
+  act:
+    description: Set from the workflow env.ACT so the action can skip cache steps under local act.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install LLVM
+      # Without clang-cl the LLVM runtimes (compiler-rt builtins) fails because
+      # cl.exe cannot parse GCC __attribute__ syntax used in e.g. aarch64/fp_mode.c. The
+      # github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
+      # windows-11-arm runner may not, so install explicitly via winget.
+      shell: pwsh
+      env:
+        LLVM_HOST_VERSION: "21.1.6"
+      run: |
+        if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+          winget install --id LLVM.LLVM --version $env:LLVM_HOST_VERSION --silent --disable-interactivity --accept-source-agreements --accept-package-agreements
+        }
+        echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
+
+    - name: Setup JDK + sbt cache
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '21'
+        cache: sbt
+
+    - name: Setup sbt
+      uses: sbt/setup-sbt@v1.1.18
+
+    - name: Setup Ninja
+      uses: seanmiddleditch/gha-setup-ninja@v6
+
+    - name: Dotenv
+      id: dotenv
+      uses: falti/dotenv-action@v1.2
+      with:
+        path: ./native/.env
+
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+    - name: Setup MSVC env
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ${{ inputs.arch }}
+
+    - name: Setup just
+      uses: extractions/setup-just@v4
+
+    - name: Check environment
+      shell: pwsh
+      run: |
+        Write-Output $env:JAVA_HOME
+        & "$env:JAVA_HOME\bin\java.exe" -version
+        Write-Output $env:PROCESSOR_ARCHITECTURE
+        Write-Output $env:VCPKG_ROOT
+
+    - name: Restore LLVM cache
+      if: ${{ inputs.act != 'true' }}
+      id: restore-llvm
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ./native/out/polyregion-Release-${{ inputs.arch }}-*-dist
+        key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+    - name: Build LLVM
+      id: build-llvm
+      if: steps.restore-llvm.outputs.cache-hit != 'true'
+      shell: cmd
+      run: just llvm -DLLVM_USE_HOST_TOOLS=OFF
+
+    - name: Save LLVM cache
+      if: steps.build-llvm.outcome == 'success'
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          ./native/out/polyregion-Release-${{ inputs.arch }}-*-dist
+        key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+    - name: Restore device libs cache
+      if: ${{ inputs.act != 'true' }}
+      id: restore-device-libs
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ./native/thirdparty/device_libs
+          !./native/thirdparty/device_libs/.staging
+        key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ inputs.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+    - name: Build device libs
+      id: build-device-libs
+      if: steps.restore-device-libs.outputs.cache-hit != 'true'
+      shell: cmd
+      run: just device-libs
+
+    - name: Save device libs cache
+      if: steps.build-device-libs.outcome == 'success'
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          ./native/thirdparty/device_libs
+          !./native/thirdparty/device_libs/.staging
+        key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ inputs.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+    - name: Install vcpkg dependencies
+      shell: cmd
+      run: just vcpkg-deps
+
+    - name: Build pass bundle (dso)
+      shell: cmd
+      run: just pass-native
+
+    - name: Configure release build
+      shell: cmd
+      run: just configure
+
+    - name: Build dist
+      shell: cmd
+      run: just dist
+
+    - name: Build test dist
+      shell: cmd
+      run: just test-dist
+
+    - name: Check artefact
+      if: always()
+      working-directory: ./native
+      shell: cmd
+      run: |
+        set "DIST=out/polyregion-Release-${{ inputs.arch }}-static-dist"
+        dir "%DIST%\bin"
+        dir "%DIST%\lib"
+        for %%B in (polyc.exe polycpp.exe polyfc.exe clang++.exe flang-new.exe) do (
+          echo ---- %%B ----
+          if exist "%DIST%\bin\%%B" (dumpbin /dependents "%DIST%\bin\%%B") else echo MISSING: %DIST%\bin\%%B
+        )
+        for %%L in (polyc-JNI.dll polyc-JNIshim.dll polyinvoke-JNI.dll) do (
+          echo ---- %%L ----
+          if exist "%DIST%\lib\%%L" (dumpbin /dependents "%DIST%\lib\%%L") else echo MISSING: %DIST%\lib\%%L
+        )
+
+    - name: Upload dist
+      # v4: nektos/act#6022
+      uses: actions/upload-artifact@v4
+      with:
+        name: polyregion-windows-${{ inputs.arch }}-Release
+        path: ./native/out/polyregion-Release-${{ inputs.arch }}-static-dist/**
+        if-no-files-found: error
+
+    - name: Upload test dist
+      # v4: nektos/act#6022
+      uses: actions/upload-artifact@v4
+      with:
+        name: polyregion-tests-windows-${{ inputs.arch }}-Release
+        path: ./native/out/polyregion-test-Release-${{ inputs.arch }}-static-dist/**
+        if-no-files-found: error

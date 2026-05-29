@@ -1,0 +1,69 @@
+name: Annotate JUnit test results
+description: Emit GitHub Actions annotations and a step summary from JUnit XML (file or directory).
+
+inputs:
+  junit:
+    description: Path to a JUnit XML file or a directory of *.xml reports.
+    required: true
+  label:
+    description: Short label for the annotations and summary (e.g. ctest, scala).
+    required: false
+    default: tests
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        py=$(command -v python3 || command -v python) || { echo "::warning::no python to parse ${{ inputs.label }} results"; exit 0; }
+        "$py" - "${{ inputs.junit }}" "${{ inputs.label }}" <<'PY'
+        import os, sys, glob, xml.etree.ElementTree as ET
+        path, label = sys.argv[1], sys.argv[2]
+        if os.path.isdir(path):
+            files = sorted(glob.glob(os.path.join(path, "**", "*.xml"), recursive=True))
+        elif os.path.exists(path):
+            files = [path]
+        else:
+            files = []
+        if not files:
+            print(f"::warning::{label}: no JUnit XML at {path}")
+            sys.exit(0)
+        passed = failed = skipped = 0
+        failures = []
+        for f in files:
+            try:
+                root = ET.parse(f).getroot()
+            except ET.ParseError as e:
+                print(f"::warning::{label}: cannot parse {f}: {e}")
+                continue
+            for c in root.iter("testcase"):
+                status = (c.get("status") or "").lower()
+                is_fail = c.find("failure") is not None or c.find("error") is not None or status in ("fail", "failed")
+                is_skip = c.find("skipped") is not None or status in ("notrun", "disabled", "skipped")
+                name = c.get("name") or "?"
+                cls = c.get("classname")
+                full = f"{cls}.{name}" if cls and cls != name else name
+                if is_fail:
+                    failed += 1
+                    failures.append(full)
+                elif is_skip:
+                    skipped += 1
+                else:
+                    passed += 1
+        total = passed + failed + skipped
+        # GitHub only renders ~10 workflow-command annotations per step; cap them and
+        # keep the full failure list in the (1 MiB) step summary instead.
+        cap = 10
+        for name in failures[:cap]:
+            print(f"::error title={label} failed::{name}")
+        ran = passed + failed
+        rate = f"{100.0 * passed / ran:.1f}% pass" if ran else "no tests ran"
+        tally = f"{rate} ({passed}/{ran}), {failed} failed, {skipped} skipped"
+        print(f"::{'error' if failed else 'notice'}::{label}: {tally}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as fh:
+                fh.write(f"### {label}: {tally}\n\n")
+                for name in failures:
+                    fh.write(f"- FAIL `{name}`\n")
+        PY
