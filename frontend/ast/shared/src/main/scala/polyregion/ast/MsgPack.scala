@@ -559,17 +559,43 @@ object MsgPack {
       def decodeFields(r: Reader, fieldCount: Int): Any
     }
 
-    private inline def sumCase[A]: SumCase = summonFrom { case p: Mirror.ProductOf[A] =>
-      val fieldCount = constValue[Tuple.Size[p.MirroredElemTypes]]
+    private def mkSumCase[A](m: Mirror.ProductOf[A], codecs: Array[Codec[?]]): SumCase =
       new SumCase {
-        def arity: Int = fieldCount
-        def encodeFields(w: Writer, x: Any): Unit =
-          writeFields[p.MirroredElemTypes](w, x.asInstanceOf[Product], 0)
+        def arity: Int = codecs.length
+        def encodeFields(w: Writer, x: Any): Unit = {
+          val p = x.asInstanceOf[Product]
+          var i = 0
+          while (i < codecs.length) {
+            codecs(i).asInstanceOf[Codec[Any]].encode(w, p.productElement(i))
+            i += 1
+          }
+        }
         def decodeFields(r: Reader, n: Int): Any = {
-          if (n != fieldCount) throw new MsgPackException(s"Expected sum case with $fieldCount field(s), got $n")
-          p.fromProduct(readFields[p.MirroredElemTypes](r))
+          if (n != codecs.length)
+            throw new MsgPackException(s"Expected sum case with ${codecs.length} field(s), got $n")
+          val arr = new Array[Any](codecs.length)
+          var i   = 0
+          while (i < codecs.length) {
+            arr(i) = codecs(i).decode(r)
+            i += 1
+          }
+          m.fromProduct(Tuple.fromArray(arr))
         }
       }
+
+    private inline def summonCodecs[T <: Tuple]: Array[Codec[?]] = inline erasedValue[T] match {
+      case _: EmptyTuple => Array.empty
+      case _: (t *: ts) =>
+        val head = summonOrDerive[t]
+        val tail = summonCodecs[ts]
+        val out  = new Array[Codec[?]](tail.length + 1)
+        out(0) = head
+        Array.copy(tail, 0, out, 1, tail.length)
+        out
+    }
+
+    private inline def sumCase[A]: SumCase = summonFrom { case p: Mirror.ProductOf[A] =>
+      mkSumCase[A](p, summonCodecs[p.MirroredElemTypes])
     }
 
     private inline def summonCases[T <: Tuple]: Array[SumCase] = inline erasedValue[T] match {

@@ -106,109 +106,157 @@ object Traversal {
     case _: (t *: ts)  => summonInline[Traversal[t, B]] :: summonAll[ts, B]
   }
 
-  private def sum[A, B](
-      s: Mirror.SumOf[A],
-      tss: => Array[Traversal[?, B]],
-      aSubB: Boolean
-  ) =
+  private def singleton[A, B](aSubB: Boolean): Traversal[A, B] =
     new Traversal[A, B] {
       extension (a: A) {
         def collectAll: List[B] =
-          tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectAll(a)
+          if (aSubB) a.asInstanceOf[B] :: Nil else Nil
         def collectWhere[C](f: PartialFunction[B, C]): List[C] =
-          tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectWhere(a)(f)
+          if (aSubB) f.lift(a.asInstanceOf[B]).toList else Nil
         def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
-          tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectFirst_(a)(f)
-        def modifyAll(f: B => B): A = {
-          val a1 = tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyAllInternal(a)(f)
-          if (aSubB) f(a1.asInstanceOf[B]).asInstanceOf[A] else a1
-        }
-        def modifyAllInternal(f: B => B): A =
-          tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyAllInternal(a)(f)
-        def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
-          val (a1, cs) = tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyCollectInternal(a)(f)
+          if (aSubB) f.lift(a.asInstanceOf[B]) else None
+        def modifyAll(f: B => B): A =
           if (aSubB) {
-            val (b0, c0) = f(a1.asInstanceOf[B])
-            (b0.asInstanceOf[A], c0 :: cs)
-          } else (a1, cs)
-        }
-        def modifyCollectInternal[C](f: B => (B, C)): (A, List[C]) =
-          tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyCollectInternal(a)(f)
+            val fb = f(a.asInstanceOf[B])
+            if (a.getClass.isInstance(fb)) fb.asInstanceOf[A] else a
+          } else a
+        def modifyAllInternal(f: B => B): A = a
+        def modifyCollect[C](f: B => (B, C)): (A, List[C]) =
+          if (aSubB) {
+            val (b0, c0) = f(a.asInstanceOf[B])
+            if (a.getClass.isInstance(b0)) (b0.asInstanceOf[A], c0 :: Nil) else (a, c0 :: Nil)
+          } else (a, Nil)
+        def modifyCollectInternal[C](f: B => (B, C)): (A, List[C]) = (a, Nil)
       }
     }
+
+  private def product[A, B](
+      m: Mirror.ProductOf[A],
+      tssThunk: => Array[Traversal[?, B]],
+      aSubB: Boolean
+  ): Traversal[A, B] = new Traversal[A, B] {
+    private lazy val tss = tssThunk
+    extension (a: A) {
+      def collectAll: List[B] = {
+        val prod = a.asInstanceOf[Product]
+        val arr  = tss
+        val n    = arr.length
+        val out  = scala.collection.mutable.ListBuffer.empty[B]
+        var i    = 0
+        while (i < n) {
+          out ++= arr(i).asInstanceOf[Traversal[Any, B]].collectAll(prod.productElement(i))
+          i += 1
+        }
+        if (aSubB) a.asInstanceOf[B] :: out.toList else out.toList
+      }
+      def collectWhere[C](f: PartialFunction[B, C]): List[C] = {
+        val prod = a.asInstanceOf[Product]
+        val arr  = tss
+        val n    = arr.length
+        val out  = scala.collection.mutable.ListBuffer.empty[C]
+        var i    = 0
+        while (i < n) {
+          out ++= arr(i).asInstanceOf[Traversal[Any, B]].collectWhere(prod.productElement(i))(f)
+          i += 1
+        }
+        if (aSubB) f.lift(a.asInstanceOf[B]).toList ::: out.toList else out.toList
+      }
+      def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = {
+        val prod = a.asInstanceOf[Product]
+        val arr  = tss
+        val n    = arr.length
+        def loop(i: Int): Option[C] =
+          if (i >= n) None
+          else
+            arr(i)
+              .asInstanceOf[Traversal[Any, B]]
+              .collectFirst_(prod.productElement(i))(f)
+              .orElse(loop(i + 1))
+        if (aSubB) f.lift(a.asInstanceOf[B]).orElse(loop(0)) else loop(0)
+      }
+      def modifyAll(f: B => B): A = {
+        val a0 = modifyAllInternal(f)
+        if (aSubB) {
+          val fb = f(a0.asInstanceOf[B])
+          if (a0.getClass.isInstance(fb)) fb.asInstanceOf[A] else a0
+        } else a0
+      }
+      def modifyAllInternal(f: B => B): A = {
+        val prod = a.asInstanceOf[Product]
+        val arr  = tss
+        val n    = arr.length
+        val out  = new Array[Any](n)
+        var i    = 0
+        while (i < n) {
+          out(i) = arr(i).asInstanceOf[Traversal[Any, B]].modifyAll(prod.productElement(i))(f)
+          i += 1
+        }
+        m.fromProduct(Tuple.fromArray(out))
+      }
+      def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
+        val (a0, cs) = modifyCollectInternal(f)
+        if (aSubB) {
+          val (b0, c0) = f(a0.asInstanceOf[B])
+          if (a0.getClass.isInstance(b0)) (b0.asInstanceOf[A], c0 :: cs) else (a0, c0 :: cs)
+        } else (a0, cs)
+      }
+      def modifyCollectInternal[C](f: B => (B, C)): (A, List[C]) = {
+        val prod = a.asInstanceOf[Product]
+        val arr  = tss
+        val n    = arr.length
+        val out  = new Array[Any](n)
+        val cs   = scala.collection.mutable.ListBuffer.empty[C]
+        var i    = 0
+        while (i < n) {
+          val (nx, cx) = arr(i).asInstanceOf[Traversal[Any, B]].modifyCollect(prod.productElement(i))(f)
+          out(i) = nx
+          cs ++= cx
+          i += 1
+        }
+        (m.fromProduct(Tuple.fromArray(out)), cs.toList)
+      }
+    }
+  }
+
+  private def sum[A, B](
+      s: Mirror.SumOf[A],
+      tssThunk: => Array[Traversal[?, B]],
+      aSubB: Boolean
+  ): Traversal[A, B] = new Traversal[A, B] {
+    private lazy val tss = tssThunk
+    extension (a: A) {
+      def collectAll: List[B] =
+        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectAll(a)
+      def collectWhere[C](f: PartialFunction[B, C]): List[C] =
+        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectWhere(a)(f)
+      def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
+        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectFirst_(a)(f)
+      def modifyAll(f: B => B): A = {
+        val a1 = tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyAllInternal(a)(f)
+        if (aSubB) f(a1.asInstanceOf[B]).asInstanceOf[A] else a1
+      }
+      def modifyAllInternal(f: B => B): A =
+        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyAllInternal(a)(f)
+      def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
+        val (a1, cs) = tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyCollectInternal(a)(f)
+        if (aSubB) {
+          val (b0, c0) = f(a1.asInstanceOf[B])
+          (b0.asInstanceOf[A], c0 :: cs)
+        } else (a1, cs)
+      }
+      def modifyCollectInternal[C](f: B => (B, C)): (A, List[C]) =
+        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].modifyCollectInternal(a)(f)
+    }
+  }
 
   inline given derived[A, B](using inline m: Mirror.Of[A]): Traversal[A, B] =
     inline m match {
       case _: Mirror.Singleton =>
-        new Traversal[A, B] {
-          extension (a: A) {
-            def collectAll: List[B] =
-              inline if (isB[A, B]) a.asInstanceOf[B] :: Nil else Nil
-            def collectWhere[C](f: PartialFunction[B, C]): List[C] =
-              inline if (isB[A, B]) f.lift(a.asInstanceOf[B]).toList else Nil
-            def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
-              inline if (isB[A, B]) f.lift(a.asInstanceOf[B]) else None
-            def modifyAll(f: B => B): A =
-              inline if (isB[A, B]) {
-                val fb = f(a.asInstanceOf[B])
-                if (a.getClass.isInstance(fb)) fb.asInstanceOf[A] else a
-              } else a
-            def modifyAllInternal(f: B => B): A = a
-            def modifyCollect[C](f: B => (B, C)): (A, List[C]) =
-              inline if (isB[A, B]) {
-                val (b0, c0) = f(a.asInstanceOf[B])
-                if (a.getClass.isInstance(b0)) (b0.asInstanceOf[A], c0 :: Nil) else (a, c0 :: Nil)
-              } else (a, Nil)
-            def modifyCollectInternal[C](f: B => (B, C)): (A, List[C]) = (a, Nil)
-          }
-        }
+        singleton[A, B](isB[A, B])
       case p: Mirror.ProductOf[A] =>
-        new Traversal[A, B] {
-          extension (a: A) {
-            def collectAll: List[B] = {
-              val prod = a.asInstanceOf[Product]
-              val bss  = collectAllFields[p.MirroredElemTypes, B](prod, 0)
-              inline if (isB[A, B]) a.asInstanceOf[B] :: bss else bss
-            }
-            def collectWhere[C](f: PartialFunction[B, C]): List[C] = {
-              val prod = a.asInstanceOf[Product]
-              val css  = collectWhereFields[p.MirroredElemTypes, B, C](prod, 0, f)
-              inline if (isB[A, B]) f.lift(a.asInstanceOf[B]).toList ::: css else css
-            }
-            def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = {
-              val prod = a.asInstanceOf[Product]
-              inline if (isB[A, B])
-                f.lift(a.asInstanceOf[B]).orElse(collectFirstFields[p.MirroredElemTypes, B, C](prod, 0, f))
-              else
-                collectFirstFields[p.MirroredElemTypes, B, C](prod, 0, f)
-            }
-            def modifyAll(f: B => B): A = {
-              val a0 = modifyAllInternal(f)
-              inline if (isB[A, B]) {
-                val fb = f(a0.asInstanceOf[B])
-                if (a0.getClass.isInstance(fb)) fb.asInstanceOf[A] else a0
-              } else a0
-            }
-            def modifyAllInternal(f: B => B): A = {
-              val prod = a.asInstanceOf[Product]
-              val tup  = modifyAllFields[p.MirroredElemTypes, B](prod, 0, f)
-              constructProduct[A](tup)(using p)
-            }
-            def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
-              val (a0, cs) = modifyCollectInternal(f)
-              inline if (isB[A, B]) {
-                val (b0, c0) = f(a0.asInstanceOf[B])
-                if (a0.getClass.isInstance(b0)) (b0.asInstanceOf[A], c0 :: cs) else (a0, c0 :: cs)
-              } else (a0, cs)
-            }
-            def modifyCollectInternal[C](f: B => (B, C)): (A, List[C]) = {
-              val prod      = a.asInstanceOf[Product]
-              val (tup, cs) = modifyCollectFields[p.MirroredElemTypes, B, C](prod, 0, f)
-              (constructProduct[A](tup)(using p), cs)
-            }
-          }
-        }
-      case s: Mirror.SumOf[A] => sum[A, B](s, summonAll[s.MirroredElemTypes, B].toArray, isB[A, B])
+        product[A, B](p, summonAll[p.MirroredElemTypes, B].toArray, isB[A, B])
+      case s: Mirror.SumOf[A] =>
+        sum[A, B](s, summonAll[s.MirroredElemTypes, B].toArray, isB[A, B])
     }
 
   private val nullTraversal: Traversal[Any, Any] = new Traversal[Any, Any] {

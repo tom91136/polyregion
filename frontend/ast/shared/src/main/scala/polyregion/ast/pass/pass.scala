@@ -43,14 +43,39 @@ trait PassArgCodec[A] {
 }
 
 object PassArgCodec {
-  inline def derived[A <: Product](using m: Mirror.ProductOf[A]): PassArgCodec[A] = new PassArgCodec[A] {
-    private val fieldNames = labels[m.MirroredElemLabels]
-    private val fieldSet   = fieldNames.toSet
 
+  inline def derived[A <: Product](using m: Mirror.ProductOf[A]): PassArgCodec[A] =
+    mkCodec[A](m, labels[m.MirroredElemLabels], summonArgValues[m.MirroredElemTypes])
+
+  private def mkCodec[A](
+      m: Mirror.ProductOf[A],
+      fieldNames: List[String],
+      argValues: Array[PassArgValue[?]]
+  ): PassArgCodec[A] = new PassArgCodec[A] {
+    private val fieldNamesArr = fieldNames.toArray
+    private val fieldSet      = fieldNames.toSet
     def parse(args: PassArgs, default: A): Either[String, A] =
-      args
-        .expectKnown(fieldSet)
-        .flatMap(_ => fields[m.MirroredElemTypes](fieldNames, default, args, 0).map(m.fromProduct))
+      args.expectKnown(fieldSet).flatMap { _ =>
+        val defProd     = default.asInstanceOf[Product]
+        val n           = argValues.length
+        val arr         = new Array[Any](n)
+        var i           = 0
+        var err: String = null
+        while (i < n && err == null) {
+          val key = fieldNamesArr(i)
+          val head: Either[String, Any] = args.values.get(key) match {
+            case Some(value) => argValues(i).asInstanceOf[PassArgValue[Any]].parse(key, value)
+            case None        => Right(defProd.productElement(i))
+          }
+          head match {
+            case Right(v) => arr(i) = v
+            case Left(e)  => err = e
+          }
+          i += 1
+        }
+        if (err == null) Right(m.fromProduct(Tuple.fromArray(arr)))
+        else Left(err)
+      }
   }
 
   private inline def labels[T <: Tuple]: List[String] =
@@ -59,21 +84,16 @@ object PassArgCodec {
       case _: (h *: t)   => constValue[h].asInstanceOf[String] :: labels[t]
     }
 
-  private inline def fields[T <: Tuple](
-      names: List[String],
-      default: Product,
-      args: PassArgs,
-      index: Int
-  ): Either[String, Tuple] =
+  private inline def summonArgValues[T <: Tuple]: Array[PassArgValue[?]] =
     inline erasedValue[T] match {
-      case _: EmptyTuple => Right(EmptyTuple)
+      case _: EmptyTuple => Array.empty
       case _: (h *: t) =>
-        val key = names.head
-        val head = args.values.get(key) match {
-          case Some(value) => summonInline[PassArgValue[h]].parse(key, value)
-          case None        => Right(default.productElement(index).asInstanceOf[h])
-        }
-        head.flatMap(hv => fields[t](names.tail, default, args, index + 1).map(hv *: _))
+        val head = summonInline[PassArgValue[h]]
+        val tail = summonArgValues[t]
+        val out  = new Array[PassArgValue[?]](tail.length + 1)
+        out(0) = head
+        Array.copy(tail, 0, out, 1, tail.length)
+        out
     }
 }
 
