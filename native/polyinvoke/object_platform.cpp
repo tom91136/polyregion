@@ -50,13 +50,21 @@ static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vec
   };
   if (types.size() != args.size()) POLYINVOKE_FATAL(prefix, "types size (%zu) != args size (%zu)", types.size(), args.size());
 
-  std::vector<ffi_type *> ffiTypes(args.size());
-  for (size_t i = 0; i < args.size(); i++)
-    ffiTypes[i] = toFFITpe(types[i]);
+  // XXX kernel strips Unit0/Nothing params; ffi_type_void as a param misaligns Win x64.
+  std::vector<ffi_type *> ffiParamTypes;
+  std::vector<void *> ffiParamArgs;
+  ffiParamTypes.reserve(args.size());
+  ffiParamArgs.reserve(args.size());
+  for (size_t i = 0; i + 1 < types.size(); ++i) {
+    if (types[i] == Type::Void) continue;
+    ffiParamTypes.push_back(toFFITpe(types[i]));
+    ffiParamArgs.push_back(args[i]);
+  }
+  ffi_type *returnFfiTpe = toFFITpe(types.back());
   ffi_cif cif{};
-  ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, args.size() - 1, ffiTypes.back(), ffiTypes.data());
+  ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, static_cast<unsigned>(ffiParamTypes.size()), returnFfiTpe, ffiParamTypes.data());
   switch (status) {
-    case FFI_OK: ffi_call(&cif, FFI_FN(symbolAddress), args.back(), args.data()); break;
+    case FFI_OK: ffi_call(&cif, FFI_FN(symbolAddress), args.back(), ffiParamArgs.data()); break;
     case FFI_BAD_TYPEDEF: POLYINVOKE_FATAL(prefix, "ffi_prep_cif: FFI_BAD_TYPEDEF (%d)", status);
     case FFI_BAD_ABI: POLYINVOKE_FATAL(prefix, "ffi_prep_cif: FFI_BAD_ABI (%d)", status);
     default: POLYINVOKE_FATAL(prefix, "ffi_prep_cif: unknown error (%d)", status);
