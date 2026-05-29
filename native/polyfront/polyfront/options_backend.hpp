@@ -101,45 +101,35 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
                                                                         const std::string &arch) {
   auto data = polyast::hashed_program_to_msgpack(p);
 
-  auto tempModel = [](llvm::StringRef leaf) {
-    llvm::SmallString<128> path;
-    llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, path);
-    llvm::sys::path::append(path, leaf);
-    return path;
-  };
-
-  auto inputFileExp = llvm::sys::fs::TempFile::create(tempModel("polyfront-in-%%%%%%.msgpack"));
-  if (!inputFileExp) return "Failed to create temp input file: " + llvm::toString(inputFileExp.takeError());
-  auto inputFile = std::move(*inputFileExp);
-
-  auto outputFileExp = llvm::sys::fs::TempFile::create(tempModel("polyfront-out-%%%%%%.msgpack"));
-  if (!outputFileExp) {
-    llvm::consumeError(inputFile.discard());
-    return "Failed to create temp output file: " + llvm::toString(outputFileExp.takeError());
+  // Use createTemporaryFile (returns path, closes its FD) rather than fs::TempFile (keeps the FD
+  // open + on Windows opens with FILE_FLAG_DELETE_ON_CLOSE). A held parent FD blocks the child
+  // from opening via Windows file sharing; closing it deletes the file outright. Either way the
+  // child's read_struct throws "Cannot open ..." into SEH 0xE06D7363.
+  llvm::SmallString<128> inputPath, outputPath;
+  if (auto ec = llvm::sys::fs::createTemporaryFile("polyfront-in", "msgpack", inputPath))
+    return "Failed to create temp input file: " + ec.message();
+  if (auto ec = llvm::sys::fs::createTemporaryFile("polyfront-out", "msgpack", outputPath)) {
+    llvm::sys::fs::remove(inputPath);
+    return "Failed to create temp output file: " + ec.message();
   }
-  auto outputFile = std::move(*outputFileExp);
-
-  auto cleanup = llvm::make_scope_exit([&] {
-    llvm::consumeError(inputFile.discard());
-    llvm::consumeError(outputFile.discard());
+  auto cleanup = llvm::scope_exit([&] {
+    llvm::sys::fs::remove(inputPath);
+    llvm::sys::fs::remove(outputPath);
   });
 
-  // Close both FDs before ExecuteAndWait: Windows default file-sharing blocks the child from
-  // opening files the parent still has open. POSIX doesn't care, but the close is harmless there.
   {
-    llvm::raw_fd_ostream file(inputFile.FD, /*shouldClose=*/true);
+    std::error_code ec;
+    llvm::raw_fd_ostream file(inputPath, ec, llvm::sys::fs::OF_None);
+    if (ec) return "Failed to open temp input file for writing: " + ec.message();
     file.write(reinterpret_cast<const char *>(data.data()), data.size());
     file.flush();
   }
-  inputFile.FD = -1;
-  { llvm::raw_fd_ostream out(outputFile.FD, /*shouldClose=*/true); }
-  outputFile.FD = -1;
 
   const auto canonical = polyregion::compiletime::TargetSpec::findByCodegen(target);
   if (!canonical) return std::string("Unknown codegen target ordinal: ") + std::to_string(static_cast<int>(target));
   std::vector<llvm::StringRef> args{
       //
-      "", "--polyc", inputFile.TmpName, "--out", outputFile.TmpName, "--target", std::string_view(canonical->canonical), "--arch", arch};
+      "", "--polyc", inputPath.str(), "--out", outputPath.str(), "--target", std::string_view(canonical->canonical), "--arch", arch};
 
   if (opts.verbose) {
     (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
@@ -148,7 +138,7 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   if (int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
     return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
 
-  auto BufferOrErr = llvm::MemoryBuffer::getFile(outputFile.TmpName);
+  auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
   if (auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
   // The polycpp clang plugin is built with -fno-exceptions, so a throw from `from_msgpack(empty)`
