@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -110,22 +109,12 @@ public final class Loader {
 
     String platform = resolvePlatform();
 
-    // TODO remove for prod
-    List<Path> paths =
-        new ArrayList<>(
-            Arrays.asList(
-                //      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
-                Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
-                Paths.get("../native/build-" + platform + "-dylib/bindings/jvm/"),
-                Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
-                Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/"),
-                Paths.get("../../native/build-" + platform + "-dylib/bindings/jvm/"),
-                Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
-                Paths.get("../../native/build-" + platform + "/bindings/jvm/")));
-
-    // TODO remove for prod; use debug first for compiler
-    if (filename.contains("compiler")) {
-      paths.add(0, Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"));
+    List<Path> paths = new ArrayList<>();
+    String envDirs = System.getenv("POLYREGION_NATIVE_LIB_DIR");
+    if (envDirs != null && !envDirs.isEmpty()) {
+      for (String entry : envDirs.split(java.io.File.pathSeparator)) {
+        if (!entry.isEmpty()) paths.add(Paths.get(entry));
+      }
     }
 
     String[] resourcePaths = {

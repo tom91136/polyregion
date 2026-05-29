@@ -187,6 +187,12 @@ _clang-format:
 
 # Run the full scalalang munit suite.
 test-scala *args='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    BUILD=$(just _native-build)
+    if [ -z "${POLYREGION_NATIVE_LIB_DIR:-}" ] && [ -n "$BUILD" ]; then
+        export POLYREGION_NATIVE_LIB_DIR="$PWD/$BUILD/bindings/jvm"
+    fi
     cd frontend && sbt -no-colors 'compiler-testsuite-scala/test' {{ args }}
 
 # Run the native ctest suite, excluding the `device` label (GPU dispatch), extra ctest flags via *args.
