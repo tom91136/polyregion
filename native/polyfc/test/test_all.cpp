@@ -20,6 +20,9 @@ int main(int argc, const char **argv) {
                                 // polyreflect-plugin is not built on Windows; force mem=direct + static rt
                                 // to exercise the static-fold compile path.
                                 "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fstdpar-mem=direct -fstdpar-rt=static"
+#elif defined(__APPLE__)
+                                // no -lstdc++: flang's libc++ has no rpath; libpolydco covers it.
+                                "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -fstdpar-rt=dynamic"
 #else
                                 "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -lstdc++ -fstdpar-rt=dynamic"
 #endif
