@@ -275,6 +275,16 @@ Expr::Any Remapper::floatConstOfType(const Type::Any &tpe, const double value) {
 Remapper::Remapper(clang::ASTContext &context) : context(context) {}
 
 static Type::Ptr ptrTo(const Type::Any &tpe) { return Type::Ptr(tpe, TypeSpace::Global()); }
+
+static constexpr bool isTrapBuiltin(unsigned id) {
+  switch (id) {
+    case clang::Builtin::BI__builtin_unreachable:
+    case clang::Builtin::BI__builtin_trap:
+    case clang::Builtin::BI__builtin_verbose_trap:
+    case clang::Builtin::BI__builtin_debugtrap: return true;
+    default: return false;
+  }
+}
 std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
   // Locals/parms get a per-decl ID suffix so shadowed names in the same function (e.g. nested
   // `for (int l = ...)` loops in miniBUDE's fasten_main) stay distinct in polyc's flat per-function
@@ -576,15 +586,19 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
               handleStmt(decl->getBody(), r);
             }
             break;
+          case clang::Builtin::BI__builtin_expect:
+          case clang::Builtin::BI__builtin_expect_with_probability:
+            if (args.empty()) r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
+            else r.push(Stmt::Return(Expr::Alias(select(r, {}, args[0].named))));
+            break;
           default:
-            // TODO handle the following, see https://reviews.llvm.org/D123345 and clang/Basic/Builtins.def
-            //  addressof
-            //  __addressof
-            //  as_const
-            //  forward
-            //  forward_like
-            //  move
-            //  move_if_noexcept
+            if (isTrapBuiltin(decl->getBuiltinID())) {
+              r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+            } else if (decl->getBuiltinID() != 0) {
+              // TODO handle: addressof, __addressof, as_const, forward, forward_like, move, move_if_noexcept
+              //   see https://reviews.llvm.org/D123345 and clang/Basic/Builtins.def
+              r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
+            }
             break;
         }
       },
@@ -1023,6 +1037,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             auto z = r.newVar(integralConstOfType(srcTpe, 0));
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), z));
           }
+          case clang::CK_ToVoid: return Expr::Alias(Term::Unit0Const());
           default: return sourceExpr;
         }
       },
@@ -1237,6 +1252,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
               auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
               return Expr::RefTo(termToSel(lhs), negativeIdx, lhsPtr->comp, TypeSpace::Global());
+            } else if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && rhs.tpe().is<Type::Ptr>()) {
+              const auto i64 = Type::IntS64();
+              auto lhsInt = r.newVar(Expr::Cast(lhs, i64));
+              auto rhsInt = r.newVar(Expr::Cast(rhs, i64));
+              auto byteDiff = r.newVar(Expr::IntrOp(Intr::Sub(lhsInt, rhsInt, i64)));
+              // void*/incomplete pointees report size 0; clang treats as 1.
+              const auto elemBytes = context.getTypeSizeInChars(expr->getLHS()->getType()->getPointeeType()).getQuantity();
+              auto elemSz = r.newVar(integralConstOfType(i64, elemBytes ? elemBytes : 1));
+              auto elemDiff = r.newVar(Expr::IntrOp(Intr::Div(byteDiff, elemSz, i64)));
+              return Expr::Cast(elemDiff, tpe_);
             } else {
               return Expr::IntrOp(Intr::Sub(dl, dr, tpe_));
             }
@@ -1469,7 +1494,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                           return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                         });
         } else {
-          auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
+          if (isTrapBuiltin(target->getBuiltinID())) return Expr::Any(Expr::Alias(Term::Unit0Const()));
+          auto [name, fn] = handleCall(target, r);
           if (fn->args.size() != expr->getNumArgs())
             raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
           Vector<Term::Any> ivArgs;
@@ -1603,8 +1629,6 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             } else {
               raise(std::string("unhandled var rhs: "));
             }
-          } else {
-            r.push(Stmt::Return(Expr::Alias(Term::Poison(Type::Unit0()))));
           }
         }
       },
