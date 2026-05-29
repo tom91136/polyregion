@@ -1,4 +1,6 @@
 #include <cstdlib>
+#include <mutex>
+#include <unordered_map>
 
 #include "polyregion/dl.h"
 
@@ -13,6 +15,9 @@ static constexpr const char *EX = "polyregion/jvm/PolyregionLoaderException";
 static std::vector<jobject> files;
 
 static JavaVM *CurrentVM = {};
+
+static std::mutex dlMutex;
+static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stdout, "Shim JNI_OnLoad\n");
@@ -59,8 +64,15 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
     throwGeneric(env, EX, "Cannot load library `" + str + "` :" + resolveDlError());
     return {};
   } else {
-    if (void *f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
-      reinterpret_cast<jint (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
+    bool firstLoad;
+    {
+      std::lock_guard lock(dlMutex);
+      firstLoad = dlRefcount[dylib]++ == 0;
+    }
+    if (firstLoad) {
+      if (void *f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
+        reinterpret_cast<jint (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
+      }
     }
     return reinterpret_cast<jlong>(dylib);
   }
@@ -68,8 +80,21 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
 
 void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
   auto typedHandle = reinterpret_cast<polyregion_dl_handle>(handle);
-  if (void *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
-    reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
+  bool lastRelease;
+  {
+    std::lock_guard lock(dlMutex);
+    auto it = dlRefcount.find(typedHandle);
+    if (it == dlRefcount.end() || --it->second == 0) {
+      lastRelease = true;
+      if (it != dlRefcount.end()) dlRefcount.erase(it);
+    } else {
+      lastRelease = false;
+    }
+  }
+  if (lastRelease) {
+    if (void *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
+      reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
+    }
   }
   if (auto code = polyregion_dl_close(typedHandle); code != 0) {
     throwGeneric(env, EX, "Cannot unload module:" + resolveDlError());
