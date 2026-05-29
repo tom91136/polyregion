@@ -221,9 +221,7 @@ jobs:
         id: restore-device-libs
         uses: actions/cache/restore@v5
         with:
-          path: |
-            ./native/thirdparty/device_libs
-            !./native/thirdparty/device_libs/.staging
+          path: ./native/thirdparty/device_libs
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Build device libs
@@ -235,9 +233,7 @@ jobs:
         if: steps.build-device-libs.outcome == 'success'
         uses: actions/cache/save@v5
         with:
-          path: |
-            ./native/thirdparty/device_libs
-            !./native/thirdparty/device_libs/.staging
+          path: ./native/thirdparty/device_libs
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Install vcpkg dependencies
