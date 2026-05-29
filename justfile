@@ -61,14 +61,20 @@ format:       (_format "format"       "scalafmtAll"      "scalafmtSbt")
 # clang-format + scalafmt, dry-run, in parallel; non-zero exit on diff.
 check-format: check-header (_format "format-check" "scalafmtCheckAll" "scalafmtSbtCheck")
 
-_format native_target sbt_task_a sbt_task_b:
+_format mode sbt_task_a sbt_task_b:
     #!/usr/bin/env bash
     # XXX no `-e`; we collect both native + sbt rc's after `wait` and report jointly.
     set -uo pipefail
-    BUILD=$(just _native-build)
-    [ -z "$BUILD" ] && { echo "no configured native build dir" >&2; exit 1; }
-    echo "Native:  {{ native_target }} via $BUILD"
-    cmake --build "$BUILD" --target {{ native_target }} --parallel &
+    CF="$(just _clang-format)"
+    case "{{ mode }}" in
+        format)       cf_args=(--style=file -i) ;;
+        format-check) cf_args=(--style=file --dry-run --Werror) ;;
+        *) echo "unknown format mode: {{ mode }}" >&2; exit 2 ;;
+    esac
+    echo "Native:  clang-format {{ mode }} via $CF"
+    git ls-files -z -- '*.cpp' '*.cc' '*.h' '*.hpp' \
+        | grep -zvE '^native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)' \
+        | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
     if command -v sbt >/dev/null 2>&1; then
         echo "Scala:   sbt {{ sbt_task_a }} {{ sbt_task_b }}"
@@ -82,7 +88,7 @@ _format native_target sbt_task_a sbt_task_b:
     rc_s=0
     [ -n "$pid_s" ] && { wait $pid_s; rc_s=$?; }
     if [ "$rc_n" -ne 0 ] || [ "$rc_s" -ne 0 ]; then
-        echo "{{ native_target }} failed (native=$rc_n sbt=$rc_s)" >&2
+        echo "{{ mode }} failed (native=$rc_n sbt=$rc_s)" >&2
         exit 1
     fi
 
