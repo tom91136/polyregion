@@ -53,7 +53,7 @@ object Pickler {
     case p.Type.IntS16  => '{ $source.getShort($byteOffset) }
     case p.Type.IntS32  => '{ $source.getInt($byteOffset) }
     case p.Type.IntS64  => '{ $source.getLong($byteOffset) }
-    case p.Type.Unit0   => '{ $source.get($byteOffset); () }
+    case p.Type.Unit0   => '{ () }
     case x =>
       throw new RuntimeException(s"Cannot get ${x.repr} from buffer, it is not a primitive type")
 
@@ -69,7 +69,7 @@ object Pickler {
     case p.Type.IntS16  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
     case p.Type.IntS32  => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
     case p.Type.IntS64  => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
-    case p.Type.Unit0   => '{ $target.put($byteOffset, 0.toByte) }
+    case p.Type.Unit0   => '{ () }
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
