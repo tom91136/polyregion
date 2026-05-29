@@ -18,7 +18,7 @@ inline const char *polyregion_dl_error_() {
 
   #define polyregion_dl_open(path) LoadLibraryA(path)
   #define polyregion_dl_error() polyregion_dl_error_()
-  #define polyregion_dl_close(lib) FreeLibrary(lib)
+  #define polyregion_dl_close(lib) (FreeLibrary(lib) ? 0 : 1)
   #define polyregion_dl_find(lib, symbol) GetProcAddress(lib, symbol)
   #define polyregion_dl_handle HMODULE
 #else
