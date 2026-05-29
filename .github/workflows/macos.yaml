@@ -37,39 +37,158 @@ jobs:
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
 
-  # Per-arch build jobs so downstream can proceed for the arch that built even if the other is red.
-  build-arm64:
-    runs-on: macos-26
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-26
+            llvm_parallel_compile_jobs: "3"
+            llvm_parallel_link_jobs: "3"
+            flang_parallel_compile_jobs: "1"
+          - arch: x86_64
+            runs_on: macos-26
+            llvm_parallel_compile_jobs: "3"
+            llvm_parallel_link_jobs: "3"
+            flang_parallel_compile_jobs: "1"
+    runs-on: ${{ matrix.runs_on }}
     env:
-      POLYREGION_ARCH: arm64
-      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "3"
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "3"
-      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "1"
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
       POLYC_PASS_BUNDLE: dso
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/build-macos
-        with:
-          arch: arm64
-          act: ${{ env.ACT }}
 
-  build-x86_64:
-    runs-on: macos-26
-    env:
-      POLYREGION_ARCH: x86_64
-      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "3"
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "3"
-      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "1"
-      POLYC_PASS_BUNDLE: dso
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/build-macos
+      - name: Install dependencies
+        # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
+        run: |
+          brew install --quiet llvm lld cmake ninja zlib gcc sbt
+          echo "JAVA_HOME=$(/usr/libexec/java_home)" >> $GITHUB_ENV
+          echo "$(brew --prefix llvm)/bin"          >> $GITHUB_PATH
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
         with:
-          arch: x86_64
-          act: ${{ env.ACT }}
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - name: Check environment
+        run: |
+          clang --version
+          llvm-tblgen --version
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "VCPKG_ROOT=$VCPKG_ROOT"
+
+      - name: Restore LLVM cache
+        if: ${{ !env.ACT }}
+        id: restore-llvm
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
+      - name: Build LLVM
+        id: build-llvm
+        if: steps.restore-llvm.outputs.cache-hit != 'true'
+        run: just llvm
+
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+      - name: Restore device libs cache
+        if: ${{ !env.ACT }}
+        id: restore-device-libs
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ./native/thirdparty/device_libs
+            !./native/thirdparty/device_libs/.staging
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+      - name: Build device libs
+        id: build-device-libs
+        if: steps.restore-device-libs.outputs.cache-hit != 'true'
+        run: just device-libs
+
+      - name: Save device libs cache
+        if: steps.build-device-libs.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ./native/thirdparty/device_libs
+            !./native/thirdparty/device_libs/.staging
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+
+      - name: Install vcpkg dependencies
+        run: just vcpkg-deps
+
+      - name: Build pass bundle (dso)
+        run: just pass-native
+
+      - name: Configure release build
+        run: just configure
+
+      - name: Build dist
+        run: just dist
+
+      - name: Build test dist
+        run: just test-dist
+
+      - name: Check artefact
+        if: always()
+        working-directory: ./native
+        run: |
+          DIST=out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          ls -lah "$DIST/bin" "$DIST/lib"
+          inspect () {
+            local f="$1"
+            if [[ ! -f "$f" ]]; then echo "MISSING: $f"; return; fi
+            file "$f"
+            otool -L "$f"
+            echo "----"
+          }
+          for b in polyc polycpp polyfc clang++ flang-new; do
+            inspect "$DIST/bin/$b"
+          done
+          for l in "$DIST"/lib/libpolyc-JNI.dylib "$DIST"/lib/libpolyc-JNIshim.dylib "$DIST"/lib/libpolyinvoke-JNI.dylib; do
+            inspect "$l"
+          done
+
+      - name: Upload dist
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
+
+      - name: Upload test dist
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyregion-tests-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
 
   check-dist:
-    needs: [build-arm64, build-x86_64]
+    needs: build
     # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
     if: ${{ !cancelled() }}
     strategy:
@@ -117,7 +236,7 @@ jobs:
           label: dist-check
 
   test-native:
-    needs: [build-arm64, build-x86_64]
+    needs: build
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -188,7 +307,7 @@ jobs:
           if-no-files-found: warn
 
   test-scala:
-    needs: [build-arm64, build-x86_64]
+    needs: build
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false

@@ -14,6 +14,10 @@ defaults:
   run:
     shell: bash
 
+env:
+  # AL8 = glibc 2.28, gcc-toolset-12 libstdc++
+  SYSROOT_VARIANT: al8
+
 jobs:
   check-codegen:
     runs-on: ubuntu-24.04
@@ -68,39 +72,227 @@ jobs:
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
 
-  # Per-arch build jobs so downstream can proceed for the arch that built even if the other is red.
-  build-x86_64:
-    runs-on: ubuntu-24.04
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+            llvm_parallel_compile_jobs: "4"
+            llvm_parallel_link_jobs: "4"
+            flang_parallel_compile_jobs: "2"
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+            llvm_parallel_compile_jobs: "4"
+            llvm_parallel_link_jobs: "4"
+            flang_parallel_compile_jobs: "3"
+    runs-on: ${{ matrix.runs_on }}
     env:
-      POLYREGION_ARCH: x86_64
-      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "4"
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "4"
-      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "2"
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
       POLYC_PASS_BUNDLE: dso
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/build-linux
+      - name: Free up disk space
+        if: ${{ !env.ACT }}
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
         with:
-          arch: x86_64
-          act: ${{ env.ACT }}
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-dotnet: 'true'
 
-  build-aarch64:
-    runs-on: ubuntu-24.04-arm
-    env:
-      POLYREGION_ARCH: aarch64
-      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "4"
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "4"
-      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "3"
-      POLYC_PASS_BUNDLE: dso
-    steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/build-linux
+
+      - name: Max parallelism under act
+        if: ${{ env.ACT }}
+        run: |
+          echo "POLYREGION_LLVM_PARALLEL_COMPILE_JOBS=" >> "$GITHUB_ENV"
+          echo "POLYREGION_LLVM_PARALLEL_LINK_JOBS=" >> "$GITHUB_ENV"
+          echo "POLYREGION_FLANG_PARALLEL_COMPILE_JOBS=" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        # clang-tools provides clang-scan-deps (cmake >= 3.28 uses it for C++20 module deps).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
         with:
-          arch: aarch64
-          act: ${{ env.ACT }}
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1.1.18
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - name: Check environment
+        run: |
+          clang --version
+          llvm-tblgen --version
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "VCPKG_ROOT=$VCPKG_ROOT"
+
+      - name: Restore sysroot cache
+        if: ${{ !env.ACT }}
+        id: restore-sysroot
+        uses: actions/cache/restore@v5
+        with:
+          path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.sh') }}
+
+      - name: Detect existing sysroot tarball (act fast-path)
+        if: ${{ env.ACT }}
+        id: act-sysroot-probe
+        run: |
+          [ -f native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz ] && echo "found=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Build sysroot
+        id: build-sysroot
+        if: steps.restore-sysroot.outputs.cache-hit != 'true' && steps.act-sysroot-probe.outputs.found != 'true'
+        working-directory: ./native
+        run: ./make_sysroot.sh ${{ matrix.arch }}
+
+      - name: Save sysroot cache
+        if: steps.build-sysroot.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.sh') }}
+
+      - name: Prepare sysroot
+        working-directory: ./native
+        run: |
+          STAGE=out/sysroot-build/${{ env.SYSROOT_VARIANT }}/extracted-${{ matrix.arch }}
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          tar xf out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz -C "$STAGE"
+          echo "SYSROOT_PATH=$PWD/$STAGE" >> "$GITHUB_ENV"
+
+      - name: Restore LLVM cache
+        if: ${{ !env.ACT }}
+        id: restore-llvm
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
+      - name: Detect existing LLVM/device-libs (act fast-path)
+        if: ${{ env.ACT }}
+        id: act-cache-probe
+        run: |
+          [ -x native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/bin/clang++ ] && echo "llvm=true" >> "$GITHUB_OUTPUT" || true
+          [ -d native/thirdparty/device_libs ] && [ -n "$(ls -A native/thirdparty/device_libs 2>/dev/null)" ] && echo "device-libs=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Build LLVM
+        id: build-llvm
+        if: steps.restore-llvm.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.llvm != 'true'
+        run: just llvm
+
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+
+      - name: Restore device libs cache
+        if: ${{ !env.ACT }}
+        id: restore-device-libs
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ./native/thirdparty/device_libs
+            !./native/thirdparty/device_libs/.staging
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+
+      - name: Build device libs
+        id: build-device-libs
+        if: steps.restore-device-libs.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.device-libs != 'true'
+        run: just device-libs
+
+      - name: Save device libs cache
+        if: steps.build-device-libs.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ./native/thirdparty/device_libs
+            !./native/thirdparty/device_libs/.staging
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+
+      - name: Install vcpkg dependencies
+        run: just vcpkg-deps
+
+      - name: Build pass bundle (dso)
+        run: just pass-native
+
+      - name: Configure release build
+        run: just configure
+
+      - name: Build dist
+        run: just dist
+
+      - name: Build test dist
+        run: just test-dist
+
+      - name: Check artefact
+        if: always()
+        working-directory: ./native
+        run: |
+          DIST=out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          ls -lah "$DIST/bin" "$DIST/lib"
+          inspect () {
+            local f="$1"
+            if [[ ! -f "$f" ]]; then echo "MISSING: $f"; return; fi
+            file "$f"
+            objdump -p "$f" | grep -E '^\s+NEEDED' || true
+            echo "----"
+          }
+          for b in polyc polycpp polyfc clang++ flang-new; do
+            inspect "$DIST/bin/$b"
+          done
+          for l in "$DIST"/lib/libpolyc-JNI.so "$DIST"/lib/libpolyc-JNIshim.so "$DIST"/lib/libpolyinvoke-JNI.so; do
+            inspect "$l"
+          done
+
+      - name: Upload dist
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
+
+      - name: Upload test dist
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
 
   check-dist:
-    needs: [build-x86_64, build-aarch64]
+    needs: build
     # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
     if: ${{ !cancelled() }}
     strategy:
@@ -159,7 +351,7 @@ jobs:
           label: dist-check
 
   test-native:
-    needs: [build-x86_64, build-aarch64]
+    needs: build
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -232,7 +424,7 @@ jobs:
           if-no-files-found: warn
 
   test-scala:
-    needs: [build-x86_64, build-aarch64]
+    needs: build
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
