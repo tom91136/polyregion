@@ -416,6 +416,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           return from;
         }
 
+        // Disallowed on Logical SPIR-V; permitted elsewhere.
+        if (x.from.tpe().is<Type::Ptr>() && x.as.kind().is<TypeKind::Integral>()) {
+          return B.CreatePtrToInt(from, toTpe);
+        }
+
         auto fromKind = x.from.tpe().kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },

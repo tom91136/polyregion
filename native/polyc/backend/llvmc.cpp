@@ -456,14 +456,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   using TargetMachine = llvm::TargetMachine;
 
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
-    // XXX We need a code model that supports far relocations for RuntimeDyld (objects can land anywhere
-    // in the address space). Large places functions into `.ltext` (a large-code section), which
-    // RuntimeDyld's SectionMemoryManager doesn't currently recognise as a code section -- the
-    // function loads but the page is left non-executable, so calling it segfaults at the entry.
-    // Medium keeps functions in `.text` while still allowing large data references.
-    //
+    // XXX RuntimeDyld objects can land anywhere in the address space:
+    // - x86_64: Large emits `.ltext` which SectionMemoryManager leaves non-executable, so use Medium.
+    // - AArch64: Small's BL (+-128MB) can't reach cross-module libm; Large emits movz/movk + blr.
     const auto isSpirv = info.triple.isSPIRV();
-    const auto codeModel = info.triple.getArch() == llvm::Triple::aarch64 ? llvm::CodeModel::Small : llvm::CodeModel::Medium;
+    const auto codeModel = info.triple.getArch() == llvm::Triple::aarch64 ? llvm::CodeModel::Large : llvm::CodeModel::Medium;
     auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
         info.triple,                                                         //
         isSpirv ? "" : info.cpu.uArch,                                       //

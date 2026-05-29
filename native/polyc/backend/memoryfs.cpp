@@ -33,6 +33,13 @@ std::optional<std::string> open(const std::string &name) {
   if (h == INVALID_HANDLE_VALUE) return {};
   CloseHandle(h);
   return scoped;
+#elif defined(__APPLE__)
+  // XXX macOS shm_open is not path-addressable; /dev/shm is Linux-only. Use mkstemp.
+  auto tmp = std::string("/tmp/") + scoped + "-XXXXXX";
+  int tmpFd = mkstemp(tmp.data());
+  if (tmpFd < 0) return {};
+  ::close(tmpFd);
+  return tmp;
 #else
   auto ns = "/" + scoped;
   int shmFd = shm_open(ns.data(), O_RDWR | O_CREAT | O_EXCL, S_IRWXU);

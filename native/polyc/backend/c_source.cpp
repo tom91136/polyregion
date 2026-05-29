@@ -208,6 +208,13 @@ static std::string normalise(const std::string &s) {
 static std::string normalise(const Sym &s) { return normalise(repr(s)); }
 
 std::string backend::CSource::mkTpe(const Type::Any &tpe) {
+  // metal: address space required on every pointer, struct fields included.
+  auto mslPtrPrefix = [&](const TypeSpace::Any &space) {
+    return space.match_total([&](TypeSpace::Global) { return "device"; },     //
+                             [&](TypeSpace::Local) { return "threadgroup"; }, //
+                             [&](TypeSpace::Private) { return "thread"; }     //
+    );
+  };
   switch (dialect) {
     case Dialect::C11:
     case Dialect::MSL1_0:
@@ -229,8 +236,12 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Unit0 &) { return "void"s; },          //
                              [&](const Type::Bool1 &) { return "bool"s; },          //
 
-                             [&](const Type::Struct &x) { return normalise(x.name); },                           //
-                             [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.comp)); },              //
+                             [&](const Type::Struct &x) { return normalise(x.name); }, //
+                             [&](const Type::Ptr &x) {
+                               if (dialect == Dialect::MSL1_0)
+                                 return fmt::format("{} {}*", mslPtrPrefix(x.space), mkTpe(x.comp));
+                               return fmt::format("{}*", mkTpe(x.comp));
+                             }, //
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
                              [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); });
@@ -296,6 +307,11 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           [&](const Term::Poison &x) { return fmt::format("(NULL /*{}*/)", repr(x.tpe)); },       //
                           [&](const Term::Select &x) {
                             std::string acc = normalise(x.root.symbol);
+                            // AST has no Deref step before a Field on a Ptr root.
+                            if (!x.steps.empty() && x.steps[0].template is<PathStep::Field>() &&
+                                x.root.tpe.template is<Type::Ptr>()) {
+                              acc = "(*" + acc + ")";
+                            }
                             for (auto &step : x.steps) {
                               step.match_total(
                                   [&](const PathStep::Field &f) {
@@ -486,9 +502,9 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
             // query:              $T &$name           [[ $type ]]
             if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
               decl = arr->space.match_total(
-                  [&](TypeSpace::Global) { return fmt::format("device {} {} [[buffer({})]]", tpe, name, idx); },          //
-                  [&](TypeSpace::Local) { return fmt::format("threadgroup {} {} [[threadgroup({})]]", tpe, name, idx); }, //
-                  [&](TypeSpace::Private) { return fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx); }         //
+                  [&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },          //
+                  [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); },      //
+                  [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }         //
               );
             } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
 
@@ -595,11 +611,10 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     }
   }
 
-  // Forward declare all fns
-  fragments.emplace_back(program.functions | mk_string("\n", [&](auto &fn) { return fmt::format("{};", mkFnProto(fn)); }));
+  const auto allFns = std::vector<Function>{program.entry} ^ concat(program.functions);
+  fragments.emplace_back(allFns | mk_string("\n", [&](auto &fn) { return fmt::format("{};", mkFnProto(fn)); }));
   fragments.emplace_back("\n");
-
-  for (auto &f : program.functions)
+  for (auto &f : allFns)
     fragments.emplace_back(mkFn(f));
 
   auto code = fragments | mk_string("\n");
