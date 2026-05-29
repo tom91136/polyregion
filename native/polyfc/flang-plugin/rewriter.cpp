@@ -296,16 +296,11 @@ public:
         CharStar(M),                                                                        //
         KernelObject(M), KernelBundle(M), AggregateMember(M), TypeLayout(M), FReduction(M), //
         primitiveTypeLayouts(std::vector<polyast::Type::Any>{
-                                 polyast::Type::Float16(),
-                                 polyast::Type::Float32(),
+                                 polyast::Type::Float16(), polyast::Type::Float32(),
                                  polyast::Type::Float64(), //
-                                 polyast::Type::IntU8(),
-                                 polyast::Type::IntU16(),
-                                 polyast::Type::IntU32(),
+                                 polyast::Type::IntU8(), polyast::Type::IntU16(), polyast::Type::IntU32(),
                                  polyast::Type::IntU64(), //
-                                 polyast::Type::IntS8(),
-                                 polyast::Type::IntS16(),
-                                 polyast::Type::IntS32(),
+                                 polyast::Type::IntS8(), polyast::Type::IntS16(), polyast::Type::IntS32(),
                                  polyast::Type::IntS64(), //
                                  polyast::Type::Unit0(),
                                  polyast::Type::Bool1(), //

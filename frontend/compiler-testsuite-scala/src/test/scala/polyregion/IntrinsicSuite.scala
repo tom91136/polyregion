@@ -39,10 +39,10 @@ class IntrinsicSuite extends BaseSuite {
     testExpr[Double](math.floor(a)) // D
     testExpr[Double](math.rint(a))  // D
 
-    testExpr[Double](math.sqrt(a))  // D
-    testExpr[Double](math.cbrt(a))  // D
-    testExpr[Double](math.exp(a))   // D
-    testExpr[Double](math.expm1(a)) // D
+    testExpr[Double](math.sqrt(a))                   // D
+    testExpr[Double](math.cbrt(a))                   // D
+    testExpr[Double](math.exp(a))                    // D
+    testExpr[Double](math.expm1(a))                  // D
     testExprUlps[Double](math.log(a), maxUlps = 1)   // D
     testExpr[Double](math.log1p(a))                  // D
     testExprUlps[Double](math.log10(a), maxUlps = 1) // D
