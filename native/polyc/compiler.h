@@ -26,7 +26,7 @@ inline constexpr auto DefaultPipelineSpec = "FullOpt";
 struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT compiletime::Target target;
   POLYREGION_EXPORT std::string arch;
-  POLYREGION_EXPORT std::string pipelineSpec; // pipeline spec ("Name(k=v,k=v); Name; ...")
+  POLYREGION_EXPORT std::string pipelineSpec = {}; // pipeline spec ("Name(k=v,k=v); Name; ...")
 };
 
 POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);

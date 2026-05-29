@@ -222,9 +222,10 @@ function(_cpu_dll_one VARIANT C_SOURCE PROGRAM BUCKET ARCH TRIPLE EXPORTS_FROM O
     add_custom_command(
             OUTPUT ${_bin}
             COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/${VARIANT}
+            # XXX /Brepro's timestamp and the driver's implicit -debug PDB GUID are both non-deterministic here.
             COMMAND ${KERNELGEN_CLANG} -target ${TRIPLE} -Os -g0 -std=c11 -march=${ARCH} ${REPRO_FLAGS}
                     ${C_SOURCE} ${_shim} -shared -fuse-ld=lld -nostdlib
-                    -Xlinker /noentry -Xlinker /Brepro ${_exports}
+                    -Xlinker /noentry -Xlinker /timestamp:0 -Xlinker /DEBUG:NONE ${_exports}
                     -o ${_bin}
             DEPENDS ${C_SOURCE} ${_shim}
             COMMENT "[${VARIANT}/${BUCKET}/${ARCH}] ${C_SOURCE}"

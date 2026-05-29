@@ -325,8 +325,8 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
 }
 
 struct RunnerOptions {
-  std::vector<std::string> caseFilters;
-  std::string runTask;
+  std::vector<std::string> caseFilters = {};
+  std::string runTask = {};
   int compileJobs = -1;
   bool verbose = false;
   bool offload = true;

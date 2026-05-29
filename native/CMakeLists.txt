@@ -269,6 +269,8 @@ else ()
             -Wno-unused-variable
             "$<$<CXX_COMPILER_ID:Clang>:-Wthread-safety>"
             "$<$<CXX_COMPILER_ID:Clang>:-Werror=return-type>"
+            # libstdc++ __find_if's `#pragma GCC unroll 4` is a forced transform clang can't honour.
+            "$<$<CXX_COMPILER_ID:Clang>:-Wno-pass-failed>"
     )
 endif ()
 

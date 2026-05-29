@@ -55,10 +55,8 @@ POLYREGION_RT_PROTECT static std::once_flag roSegmentsOnce;
 POLYREGION_RT_PROTECT static void ensureRoSegmentsRecorded() {
   std::call_once(roSegmentsOnce, [] {
     dl_iterate_phdr(collectRoSegment, &roSegments);
-    if (rt_reflect::_rt_record) {
-      for (const auto &s : roSegments)
-        rt_reflect::_rt_record(reinterpret_cast<void *>(s.base), s.size, rt_reflect::Type::StaticRodata);
-    }
+    for (const auto &s : roSegments)
+      rt_reflect::_rt_record(reinterpret_cast<void *>(s.base), s.size, rt_reflect::Type::StaticRodata);
   });
 }
 #endif
