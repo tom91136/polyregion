@@ -44,8 +44,16 @@ extern "C" inline void *__interposed_calloc(const size_t nmemb, const size_t siz
 }
 
 extern "C" inline void *__interposed_memalign(const size_t alignment, const size_t size) {
+  #if defined(__APPLE__)
+  // macOS libc has no memalign.
+  static __DEF_DLSYM(posix_memalign, int, void **, size_t, size_t);
+  void *ptr = nullptr;
+  if (_posix_memalign && _posix_memalign(&ptr, alignment < sizeof(void *) ? sizeof(void *) : alignment, size) == 0) return ptr;
+  return nullptr;
+  #else
   static __DEF_DLSYM(memalign, void *, size_t, size_t);
   return _memalign(alignment, size);
+  #endif
 }
 
 extern "C" inline void *__interposed_realloc(void *ptr, const size_t size) {
@@ -77,7 +85,9 @@ extern "C" inline void __interposed_free(void *ptr) {
 
 #endif
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__APPLE__)
+// MSVC: libucrt strong externs collide with __interceptor_ weak fallbacks. Darwin: weak
+// undefined refs don't survive ld64.lld LTO. Both bypass to the dlsym interposer.
   #define __RT_ALTERNATIVE(func) __interposed_##func
 #else
 extern "C" __attribute__((weak)) void *__interceptor_malloc(size_t size);

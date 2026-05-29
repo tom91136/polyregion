@@ -69,7 +69,8 @@ MetalPlatform::~MetalPlatform() {
 // ---
 
 MetalDevice::MetalDevice(decltype(device) device_)
-    : pool(NS::AutoreleasePool::alloc()->init()), device(device_),
+    : pool(NS::AutoreleasePool::alloc()->init()), device(device_), unified(device_->hasUnifiedMemory()),
+      memoryObjects(device_->hasUnifiedMemory()),
       store(
           PREFIX,
           [this](auto &&image) {
@@ -114,7 +115,7 @@ PhysicalDevice MetalDevice::physicalDevice() {
 }
 bool MetalDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
-  return false;
+  return unified;
 }
 bool MetalDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
@@ -143,7 +144,7 @@ bool MetalDevice::moduleLoaded(const std::string &name) {
 }
 uintptr_t MetalDevice::mallocDevice(size_t size, Access access) {
   POLYINVOKE_TRACE();
-  return memoryObjects.malloc(device->newBuffer(size, MTL::ResourceStorageModeShared));
+  return memoryObjects.insert(device->newBuffer(size, MTL::ResourceStorageModeShared));
 }
 void MetalDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
@@ -154,19 +155,23 @@ void MetalDevice::freeDevice(uintptr_t ptr) {
 }
 std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
-  return std::nullopt;
+  if (!unified) return std::nullopt;
+  return reinterpret_cast<void *>(mallocDevice(size, access));
 }
 void MetalDevice::freeShared(void *ptr) {
   POLYINVOKE_TRACE();
-  POLYINVOKE_FATAL(PREFIX, "Unsupported operation on %p", ptr);
+  if (!unified) POLYINVOKE_FATAL(PREFIX, "Unsupported operation on %p", ptr);
+  freeDevice(reinterpret_cast<uintptr_t>(ptr));
 }
 std::unique_ptr<DeviceQueue> MetalDevice::createQueue(const std::chrono::duration<int64_t> &) {
   POLYINVOKE_TRACE();
-  return std::make_unique<MetalDeviceQueue>(store, NOT_NIL(device->newCommandQueue(), "command queue"), [this](auto &&ptr) {
-    if (auto mem = memoryObjects.query(ptr); mem) {
-      return *mem;
-    } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
-  });
+  return std::make_unique<MetalDeviceQueue>(
+      store, NOT_NIL(device->newCommandQueue(), "command queue"),
+      [this](uintptr_t ptr) {
+        if (auto mem = memoryObjects.query(ptr); mem) return *mem;
+        POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
+      },
+      [this]() { return memoryObjects.snapshot(); }, unified);
 }
 MetalDevice::~MetalDevice() {
   POLYINVOKE_TRACE();
@@ -176,8 +181,10 @@ MetalDevice::~MetalDevice() {
 
 // ---
 
-MetalDeviceQueue::MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject)
-    : pool(NS::AutoreleasePool::alloc()->init()), store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
+MetalDeviceQueue::MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject,
+                                   decltype(snapshotAllocations) snapshotAllocations, bool unified)
+    : pool(NS::AutoreleasePool::alloc()->init()), store(store), queue(queue), queryMemObject(std::move(queryMemObject)),
+      snapshotAllocations(std::move(snapshotAllocations)), unified(unified) {
   POLYINVOKE_TRACE();
 }
 MetalDeviceQueue::~MetalDeviceQueue() {
@@ -224,7 +231,7 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
         static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
         uintptr_t ptr = {};
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
-        encoder->setBuffer(queryMemObject(ptr), 0, i);
+        encoder->setBuffer(ptr ? queryMemObject(ptr) : nullptr, 0, i);
       } break;
       case Type::Scratch: {
         encoder->setThreadgroupMemoryLength(sharedMem, i);
@@ -237,6 +244,11 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
     }
   }
 
+  if (unified) {
+    for (auto *b : snapshotAllocations())
+      encoder->useResource(b, MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+  }
+
   encoder->dispatchThreadgroups(MTL::Size::Make(policy.global.x, policy.global.y, policy.global.z),
                                 MTL::Size::Make(local.x, local.y, local.z));
   encoder->endEncoding();
@@ -246,11 +258,16 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
   buffer->commit();
   POLYINVOKE_TRACE();
   buffer->waitUntilCompleted();
+  if (buffer->status() == MTL::CommandBufferStatusError) {
+    auto err = buffer->error();
+    POLYINVOKE_FATAL(PREFIX, "Kernel `%s` (%s) failed: %s", moduleName.c_str(), symbol.c_str(),
+                     err && err->localizedDescription() ? err->localizedDescription()->utf8String() : "<unknown>");
+  }
 }
 
 void MetalDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
-  queue->commandBuffer()->waitUntilCompleted();
+  // waitUntilCompleted on a fresh uncommitted buffer would block forever; enqueues here are sync.
 }
 
 #undef NOT_NIL_ERROR

@@ -25,12 +25,46 @@ namespace {
 using MetalModuleStore = detail::ModuleStore<MTL::Library *, MTL::ComputePipelineState *>;
 }
 
+class MetalMemoryObjects {
+  mutable std::shared_mutex mutex;
+  std::unordered_map<uintptr_t, MTL::Buffer *> map;
+  std::atomic<uintptr_t> counter{1}; // 0 reserved as sentinel
+  bool unified;
+
+public:
+  explicit MetalMemoryObjects(bool unified) : unified(unified) {}
+  uintptr_t insert(MTL::Buffer *buf) {
+    auto ptr = unified ? reinterpret_cast<uintptr_t>(buf->contents()) : counter++;
+    std::unique_lock g(mutex);
+    map[ptr] = buf;
+    return ptr;
+  }
+  std::optional<MTL::Buffer *> query(uintptr_t p) const {
+    std::shared_lock g(mutex);
+    auto it = map.find(p);
+    return it == map.end() ? std::nullopt : std::optional<MTL::Buffer *>{it->second};
+  }
+  void erase(uintptr_t p) {
+    std::unique_lock g(mutex);
+    map.erase(p);
+  }
+  std::vector<MTL::Buffer *> snapshot() const {
+    std::shared_lock g(mutex);
+    std::vector<MTL::Buffer *> v;
+    v.reserve(map.size());
+    for (auto &[_, b] : map)
+      v.push_back(b);
+    return v;
+  }
+};
+
 class POLYREGION_EXPORT MetalDevice final : public Device {
 
   NS::AutoreleasePool *pool;
   MTL::Device *device;
+  bool unified;
   MetalModuleStore store;
-  detail::MemoryObjects<MTL::Buffer *> memoryObjects;
+  MetalMemoryObjects memoryObjects;
 
 public:
   explicit MetalDevice(decltype(device) device);
@@ -58,9 +92,12 @@ class POLYREGION_EXPORT MetalDeviceQueue final : public DeviceQueue {
   MetalModuleStore &store;
   MTL::CommandQueue *queue;
   std::function<MTL::Buffer *(uintptr_t)> queryMemObject;
+  std::function<std::vector<MTL::Buffer *>()> snapshotAllocations;
+  bool unified;
 
 public:
-  POLYREGION_EXPORT MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject);
+  POLYREGION_EXPORT MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject,
+                                     decltype(snapshotAllocations) snapshotAllocations, bool unified);
   POLYREGION_EXPORT ~MetalDeviceQueue() override;
   POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                     const MaybeCallback &cb) override;
