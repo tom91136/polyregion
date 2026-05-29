@@ -679,12 +679,12 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           throw BackendException("Semantic error: array comp type (" + to_string(*compTpe) + ") and rhs term (" + to_string(x.value.tpe()) +
                                  ") mismatch (" + repr(x) + ")");
         }
+        // XXX Unit0 store: no-op. Host storage may be a JVM Object[]; a byte write clobbers the first ref.
+        if (x.value.tpe().template is<Type::Unit0>()) return BlockKind::Normal;
         const bool componentIsSizedArray = lhs.tpe.template is<Type::Arr>();
         const auto dest = mkTermVal(lhs);
         // Arr GEP indexes the array type itself with [0, idx]; Ptr GEP indexes the comp type with [idx].
-        const auto valTy = x.value.tpe().template is<Type::Bool1>() || x.value.tpe().template is<Type::Unit0>()
-                               ? llvm::Type::getInt8Ty(C.actual)
-                               : resolveType(x.value.tpe());
+        const auto valTy = x.value.tpe().template is<Type::Bool1>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(x.value.tpe());
         const auto gepTy = componentIsSizedArray ? resolveType(lhs.tpe) : valTy;
         const auto getPtr = [&]() -> llvm::Value * {
           if (componentIsSizedArray) {
@@ -699,7 +699,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           return B.CreateInBoundsGEP(gepTy, dest, {mkTermVal(x.idx)}, qualified(lhs) + "_update_ptr");
         };
         const auto ptr = getPtr();
-        if (x.value.tpe().template is<Type::Bool1>() || x.value.tpe().template is<Type::Unit0>()) {
+        if (x.value.tpe().template is<Type::Bool1>()) {
           const auto _ = C.store(B, B.CreateIntCast(mkTermVal(x.value), valTy, true), ptr);
         } else {
           const auto _ = C.store(B, mkTermVal(x.value), ptr);
