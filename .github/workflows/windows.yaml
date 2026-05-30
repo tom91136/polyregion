@@ -166,8 +166,25 @@ jobs:
           path: ./native/thirdparty/device_libs
           key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
+      - name: Restore vcpkg cache
+        if: ${{ !env.ACT }}
+        id: restore-vcpkg
+        uses: actions/cache/restore@v5
+        with:
+          path: ./native/.vcpkg/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+
       - name: Install vcpkg dependencies
+        id: build-vcpkg
+        if: steps.restore-vcpkg.outputs.cache-hit != 'true'
         run: just vcpkg-deps
+
+      - name: Save vcpkg cache
+        if: steps.build-vcpkg.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: ./native/.vcpkg/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
 
       - name: Build pass bundle (dso)
         run: just pass-native
