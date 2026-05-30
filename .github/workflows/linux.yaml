@@ -304,6 +304,16 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
+      - name: Stage just
+        run: install -D "$(command -v just)" just-dist/just
+
+      - name: Upload just
+        uses: actions/upload-artifact@v4
+        with:
+          name: just-linux-${{ matrix.arch }}
+          path: just-dist/just
+          if-no-files-found: error
+
   check-dist:
     needs: build
     # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
@@ -333,9 +343,18 @@ jobs:
 
       - uses: actions/checkout@v6
 
+      - name: Download just
+        # XXX extractions/setup-just (node20) fails in node-less containers; download the host-built musl binary instead.
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v4
+        with:
+          name: just-linux-${{ matrix.arch }}
+          path: just-bin
+
       - name: Setup just
-        # XXX direct install as alma/ubuntu containers has no nodejs, so extractions/setup-just (node20) fails
-        run: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+        run: |
+          if [ -f just-bin/just ]; then install -m755 just-bin/just /usr/local/bin/just
+          else curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin; fi
 
       - name: Download dist
         # XXX Under act the workspace is bind-mounted; the dist is already at this path.
