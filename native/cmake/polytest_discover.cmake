@@ -51,10 +51,10 @@ function(polytest_discover_tests target)
         install(FILES "${_ids_file}" DESTINATION test-meta RENAME "${ARG_DIST_BIN}.ids" OPTIONAL)
     endif ()
     if (_dist_outputs)
-        install(FILES "${_dist_tests_file}" DESTINATION . RENAME "${target}-dist-tests.cmake"
+        install(FILES "${_dist_tests_file}" DESTINATION "${target}" RENAME CTestTestfile.cmake
                 COMPONENT test-dist EXCLUDE_FROM_ALL OPTIONAL)
         set_property(GLOBAL APPEND_STRING PROPERTY POLYREGION_TEST_DIST_ENTRIES
-                "include(\"\${CMAKE_CURRENT_LIST_DIR}/${target}-dist-tests.cmake\" OPTIONAL)\n")
+                "subdirs(\"${target}\")\n")
         set_property(GLOBAL APPEND PROPERTY POLYREGION_TEST_DISCOVER_TARGETS "${target}-discover")
     endif ()
 endfunction()
