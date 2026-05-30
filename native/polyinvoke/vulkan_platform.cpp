@@ -69,7 +69,13 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
 
   return {ctx, info};
 }
-std::variant<std::string, std::unique_ptr<Platform>> VulkanPlatform::create() { return std::unique_ptr<Platform>(new VulkanPlatform()); }
+std::variant<std::string, std::unique_ptr<Platform>> VulkanPlatform::create() {
+  try {
+    return std::unique_ptr<Platform>(new VulkanPlatform());
+  } catch (const std::exception &e) {
+    return std::string("Vulkan: ") + e.what();
+  }
+}
 VulkanPlatform::VulkanPlatform() : context(), instance(createInstance(extensions, layers, context)) { POLYINVOKE_TRACE(); }
 std::string VulkanPlatform::name() {
   POLYINVOKE_TRACE();
