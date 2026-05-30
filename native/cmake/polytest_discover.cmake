@@ -20,12 +20,15 @@ function(polytest_discover_tests target)
         list(APPEND _props "-DENVIRONMENT_MODIFICATION=${ARG_ENVIRONMENT_MODIFICATION}")
     endif ()
     set(_dist_outputs "")
-    if (ARG_DIST_BIN AND NOT ARG_TEST_FILES)
+    if (ARG_DIST_BIN)
         set(_dist_tests_file "${_stamp_dir}/${target}-dist-tests.cmake")
         list(APPEND _props
                 "-DDIST_TESTS_FILE=${_dist_tests_file}"
                 "-DDIST_BIN=${ARG_DIST_BIN}"
                 "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}")
+        if (ARG_TEST_FILES)
+            list(APPEND _props "-DDIST_FILES_SUBDIR=test/${ARG_NAME_PREFIX}")
+        endif ()
         set(_dist_outputs "${_dist_tests_file}")
     endif ()
     add_custom_command(
