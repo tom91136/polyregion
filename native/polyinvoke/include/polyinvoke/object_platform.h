@@ -5,7 +5,10 @@
 #include <shared_mutex>
 #include <thread>
 
+#include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/Layer.h"
+#include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 
 #include "polyregion/compat.h"
@@ -120,7 +123,8 @@ public:
 
 class POLYREGION_EXPORT RelocatableDevice final : public ObjectDevice {
   std::unique_ptr<llvm::orc::ExecutionSession> es;
-  std::unique_ptr<llvm::orc::RTDyldObjectLinkingLayer> ol;
+  std::unique_ptr<llvm::orc::ObjectLayer> ol;
+  std::unique_ptr<llvm::jitlink::JITLinkMemoryManager> jitMemMgr;
   llvm::orc::JITDylib *processJD = nullptr; // borrowed; owned by es
   char globalPrefix = '\0';
   details::ObjectModules objects = {};

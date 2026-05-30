@@ -11,8 +11,10 @@
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/BinaryFormat/COFF.h"
+#include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
+#include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Object/COFF.h"
@@ -246,15 +248,29 @@ RelocatableDevice::RelocatableDevice() {
   auto epc = llvm::orc::SelfExecutorProcessControl::Create();
   if (!epc) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create executor process control: %s", toString(epc.takeError()).c_str());
   es = std::make_unique<llvm::orc::ExecutionSession>(std::move(*epc));
-  ol = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(
-      *es, [](const llvm::MemoryBuffer &) { return std::make_unique<llvm::SectionMemoryManager>(); });
 
-  globalPrefix = llvm::Triple(llvm::sys::getDefaultTargetTriple()).isOSBinFormatMachO() ? '_' : '\0';
+  const llvm::Triple hostTriple(llvm::sys::getDefaultTargetTriple());
+  globalPrefix = hostTriple.isOSBinFormatMachO() ? '_' : '\0';
 
-  // XXX object files we load have their own visibility/weak flags; promote ours so duplicates
-  // across modules don't fail materialisation.
-  ol->setOverrideObjectFlagsWithResponsibilityFlags(true);
-  ol->setAutoClaimResponsibilityForObjectSymbols(true);
+  // XXX RTDyld SIGBUSes on x86_64 macOS after many libm-calling kernels; JITLink covers Mach-O
+  // but lacks COFF/ARM64 + ELF backends on some hosts, so keep RTDyld elsewhere.
+  if (hostTriple.isOSBinFormatMachO()) {
+    auto mm = llvm::jitlink::InProcessMemoryManager::Create();
+    if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
+    jitMemMgr = std::move(*mm);
+    auto layer = std::make_unique<llvm::orc::ObjectLinkingLayer>(*es, *jitMemMgr);
+    // XXX object files we load have their own visibility/weak flags; promote ours so duplicates
+    // across modules don't fail materialisation.
+    layer->setOverrideObjectFlagsWithResponsibilityFlags(true);
+    layer->setAutoClaimResponsibilityForObjectSymbols(true);
+    ol = std::move(layer);
+  } else {
+    auto layer = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(
+        *es, [](const llvm::MemoryBuffer &) { return std::make_unique<llvm::SectionMemoryManager>(); });
+    layer->setOverrideObjectFlagsWithResponsibilityFlags(true);
+    layer->setAutoClaimResponsibilityForObjectSymbols(true);
+    ol = std::move(layer);
+  }
 
   processJD = &es->createBareJITDylib("<process>");
 
