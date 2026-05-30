@@ -19,8 +19,17 @@ function(polytest_discover_tests target)
     if (ARG_ENVIRONMENT_MODIFICATION)
         list(APPEND _props "-DENVIRONMENT_MODIFICATION=${ARG_ENVIRONMENT_MODIFICATION}")
     endif ()
+    set(_dist_outputs "")
+    if (ARG_DIST_BIN AND NOT ARG_TEST_FILES)
+        set(_dist_tests_file "${_stamp_dir}/${target}-dist-tests.cmake")
+        list(APPEND _props
+                "-DDIST_TESTS_FILE=${_dist_tests_file}"
+                "-DDIST_BIN=${ARG_DIST_BIN}"
+                "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}")
+        set(_dist_outputs "${_dist_tests_file}")
+    endif ()
     add_custom_command(
-            OUTPUT "${_ids_file}" "${_tests_file}"
+            OUTPUT "${_ids_file}" "${_tests_file}" ${_dist_outputs}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_stamp_dir}"
             COMMAND $<TARGET_FILE:${target}> --list-ids > "${_ids_file}"
             COMMAND ${CMAKE_COMMAND}
@@ -34,11 +43,18 @@ function(polytest_discover_tests target)
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
             COMMENT "Discovering ${target} tasks"
             VERBATIM)
-    add_custom_target(${target}-discover ALL DEPENDS "${_ids_file}" "${_tests_file}")
+    add_custom_target(${target}-discover ALL DEPENDS "${_ids_file}" "${_tests_file}" ${_dist_outputs})
 
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_tests_file}")
 
     if (ARG_DIST_BIN)
         install(FILES "${_ids_file}" DESTINATION test-meta RENAME "${ARG_DIST_BIN}.ids" OPTIONAL)
+    endif ()
+    if (_dist_outputs)
+        install(FILES "${_dist_tests_file}" DESTINATION . RENAME "${target}-dist-tests.cmake"
+                COMPONENT test-dist EXCLUDE_FROM_ALL OPTIONAL)
+        set_property(GLOBAL APPEND_STRING PROPERTY POLYREGION_TEST_DIST_ENTRIES
+                "include(\"\${CMAKE_CURRENT_LIST_DIR}/${target}-dist-tests.cmake\" OPTIONAL)\n")
+        set_property(GLOBAL APPEND PROPERTY POLYREGION_TEST_DISCOVER_TARGETS "${target}-discover")
     endif ()
 endfunction()

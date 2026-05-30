@@ -546,4 +546,5 @@ install(DIRECTORY polyfc/test/ DESTINATION test/polyfc COMPONENT test-dist EXCLU
 install(DIRECTORY test-profiles/ DESTINATION test/profiles COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(FILES "${CMAKE_BINARY_DIR}/test-dist-CTestTestfile.cmake"
         DESTINATION . RENAME CTestTestfile.cmake COMPONENT test-dist EXCLUDE_FROM_ALL)
-add_custom_target(polyregion-test-dist DEPENDS ${POLYREGION_TEST_BINARIES})
+get_property(_polyregion_test_discover_targets GLOBAL PROPERTY POLYREGION_TEST_DISCOVER_TARGETS)
+add_custom_target(polyregion-test-dist DEPENDS ${POLYREGION_TEST_BINARIES} ${_polyregion_test_discover_targets})
