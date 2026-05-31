@@ -425,7 +425,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
-              throw BackendException("Semantic error: conversion from ref type (" + llvm_tostring(fromTpe) + ") is not allowed");
+              throw BackendException::semantic("conversion from ref type (" + llvm_tostring(fromTpe) + ") is not allowed");
             },
             [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
@@ -433,7 +433,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
-              throw BackendException("Semantic error: conversion to ref type (" + llvm_tostring(fromTpe) + ") is not allowed");
+              throw BackendException::semantic("conversion to ref type (" + llvm_tostring(fromTpe) + ") is not allowed");
             },
             [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
@@ -557,9 +557,9 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             if (spirvStructByMemcpy() && arrTpe->comp.template is<Type::Struct>()) return ptr;
             return C.load(B, ptr, resolveType(arrTpe->comp));
           } else {
-            throw BackendException("Semantic error: array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
+            throw BackendException::semantic("array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
           }
-        } else throw BackendException("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
+        } else throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select");
       },
       [&](const Expr::RefTo &x) -> ValPtr {
         if (auto lhs = x.lhs.template get<Term::Select>()) {
@@ -586,13 +586,13 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             return B.CreateInBoundsGEP(arrLlvmTy, mkTermVal(*lhs), {llvm::ConstantInt::get(C.i32Ty(), 0), offset},
                                        key + "_ref_to_" + llvm_tostring(arrLlvmTy));
           } else {
-            if (x.idx) throw BackendException("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
+            if (x.idx) throw BackendException::semantic("Cannot take reference of scalar with index in " + to_string(x));
             if (lhs->tpe.is<Type::Unit0>())
-              throw BackendException("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
+              throw BackendException::semantic("Cannot take reference of an select with unit type in " + to_string(x));
             return mkSelectPtr(*lhs);
           }
         } else
-          throw BackendException("Semantic error: LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
+          throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
       },
       [&](const Expr::Alloc &x) -> ValPtr { //
         const auto componentTpe = B.getPtrTy(0);
@@ -610,7 +610,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
         if (x.expr && x.expr->tpe() != x.name.tpe) {
-          throw BackendException("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
+          throw BackendException::semantic("name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
                                  " mismatch (" + repr(x) + ")");
         }
 
@@ -653,7 +653,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         // [T : val]        =>> t   :=   rhs:T
         const auto &lhs = x.name;
         if (x.expr.tpe() != lhs.tpe) {
-          throw BackendException("Semantic error: name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs.tpe) +
+          throw BackendException::semantic("name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs.tpe) +
                                  ") mismatch (" + repr(x) + ")");
         }
         if (lhs.tpe.is<Type::Unit0>()) return BlockKind::Normal;
@@ -678,10 +678,10 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           return {};
         }();
         if (!compTpe) {
-          throw BackendException("Semantic error: array update not called on array type (" + to_string(lhs.tpe) + ")(" + repr(x) + ")");
+          throw BackendException::semantic("array update not called on array type (" + to_string(lhs.tpe) + ")(" + repr(x) + ")");
         }
         if (*compTpe != x.value.tpe()) {
-          throw BackendException("Semantic error: array comp type (" + to_string(*compTpe) + ") and rhs term (" + to_string(x.value.tpe()) +
+          throw BackendException::semantic("array comp type (" + to_string(*compTpe) + ") and rhs term (" + to_string(x.value.tpe()) +
                                  ") mismatch (" + repr(x) + ")");
         }
         // XXX Unit0 store: no-op. Host storage may be a JVM Object[]; a byte write clobbers the first ref.
@@ -977,7 +977,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
 
 ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
   if (l.tpe() != rtn) {
-    throw BackendException("Semantic error: lhs type " + to_string(l.tpe()) + " of unary numeric operation in " + to_string(expr) +
+    throw BackendException::semantic("lhs type " + to_string(l.tpe()) + " of unary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
   return fn(mkTermVal(l));
@@ -985,11 +985,11 @@ ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &
 ValPtr CodeGen::binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn,
                            const ValPtrFn2 &fn) { //
   if (l.tpe() != rtn) {
-    throw BackendException("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
+    throw BackendException::semantic("lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
   if (r.tpe() != rtn) {
-    throw BackendException("Semantic error: rhs type " + to_string(r.tpe()) + " of binary numeric operation in " + to_string(expr) +
+    throw BackendException::semantic("rhs type " + to_string(r.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
   return fn(mkTermVal(l), mkTermVal(r));

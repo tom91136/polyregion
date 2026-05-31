@@ -33,20 +33,8 @@ add_custom_target(polycpp-header-resource ${header_commands})
 
 
 # =========================== Generate header resource target ===========================
-function(add_copy_lib_targets target)
-    foreach (target ${ARGN})
-        list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${target}>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
-        get_target_property(_target_type ${target} TYPE)
-        if (WIN32 AND _target_type STREQUAL "SHARED_LIBRARY")
-            list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_LINKER_FILE:${target}>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
-        endif ()
-    endforeach ()
-    add_custom_target(${target}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            ${commands})
-endfunction()
 if (POLYREGION_FUSED_DRIVER)
-    add_copy_lib_targets(polycpp-lib-resource polyreflect-rt polystl-static polystl)
+    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR} polystl-static polystl)
     # Fused mem=reflect uses polyld-link (polyreflect statically linked); install as the
     # platform's lld name (lld-link.exe on Windows, ld.lld on POSIX) next to polycpp so
     # `-fuse-ld=lld` resolves to it (clang's LTO check rejects anything not named lld).
@@ -58,7 +46,7 @@ if (POLYREGION_FUSED_DRIVER)
     add_custom_target(polycpp-polyld-resource
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polyld-link>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LLD_NAME}")
 else ()
-    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polyreflect-plugin polyreflect-rt polystl-static polystl)
+    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR} polycpp-clang-plugin polyreflect-plugin polyreflect-rt polystl-static polystl)
 endif ()
 # =======================================================================================
 
