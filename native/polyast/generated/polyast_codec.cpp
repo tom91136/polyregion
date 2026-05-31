@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <utility>
 
+constexpr auto AdtHash = "bcf018849116fae9ed343e8ea2173aa1";
+
 namespace {
 
 constexpr int32_t MsgpackInternedMagic = 0x4d504349; // "MPCI"
@@ -2559,13 +2561,13 @@ json compileresult_to_json(const CompileResult &x_) {
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if (hash_ != "bcf018849116fae9ed343e8ea2173aa1") {
-    throw std::runtime_error("Expecting ADT hash to be bcf018849116fae9ed343e8ea2173aa1, but was " + hash_);
+  if (hash_ != AdtHash) {
+    throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
   }
   return data_;
 }
 
-json hashed_to_json(const json &x_) { return json::array({"bcf018849116fae9ed343e8ea2173aa1", x_}); }
+json hashed_to_json(const json &x_) { return json::array({AdtHash, x_}); }
 
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
@@ -7937,7 +7939,7 @@ Program program_from_msgpack(const std::vector<uint8_t> &xs_) { return program_f
 std::vector<uint8_t> hashed_program_to_msgpack(const Program &x_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string("bcf018849116fae9ed343e8ea2173aa1"));
+    w_.writeString(std::string(AdtHash));
     program_to_msgpack(w_, x_);
   });
 }
@@ -7947,8 +7949,7 @@ Program hashed_program_from_msgpack(const uint8_t *begin_, const uint8_t *end_) 
     auto n_ = r_.readArrayHeader();
     if (n_ != 2) throw std::runtime_error("Expected versioned Program array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != "bcf018849116fae9ed343e8ea2173aa1")
-      throw std::runtime_error("Expecting ADT hash to be bcf018849116fae9ed343e8ea2173aa1, but was " + hash_);
+    if (hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
     return program_from_msgpack(r_);
   });
 }
@@ -7972,7 +7973,7 @@ std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t> &xs_) 
 std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string("bcf018849116fae9ed343e8ea2173aa1"));
+    w_.writeString(std::string(AdtHash));
     structdefs_value_to_msgpack(w_, xs_);
   });
 }
@@ -7982,8 +7983,7 @@ std::vector<StructDef> hashed_structdefs_from_msgpack(const uint8_t *begin_, con
     auto n_ = r_.readArrayHeader();
     if (n_ != 2) throw std::runtime_error("Expected versioned StructDef list array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != "bcf018849116fae9ed343e8ea2173aa1")
-      throw std::runtime_error("Expecting ADT hash to be bcf018849116fae9ed343e8ea2173aa1, but was " + hash_);
+    if (hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
     return structdefs_value_from_msgpack(r_);
   });
 }

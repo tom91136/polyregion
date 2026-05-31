@@ -286,8 +286,6 @@ struct POLYREGION_EXPORT Policy {
   POLYREGION_EXPORT std::optional<std::pair<Dim3, size_t>> local{};
 };
 
-enum class Access : uint8_t { RW = 1, RO, WO };
-
 template <> constexpr std::optional<Access> POLYREGION_EXPORT from_underlying<Access>(std::underlying_type_t<Access> v) {
   switch (auto x = static_cast<Access>(v)) {
     case Access::RW:

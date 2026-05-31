@@ -1,14 +1,15 @@
+// AUTO-GENERATED from PolyAST.Enums via polyregion.ast.CodeGen. DO NOT EDIT.
 package polyregion.jvm.compiler;
 
 import polyregion.jvm.ByteEnum;
 
 @SuppressWarnings("unused")
 public enum Opt implements ByteEnum {
-  O0(Compiler.Opt_O0),
-  O1(Compiler.Opt_O1),
-  O2(Compiler.Opt_O2),
-  O3(Compiler.Opt_O3),
-  Ofast(Compiler.Opt_Ofast);
+  O0((byte) 10),
+  O1((byte) 11),
+  O2((byte) 12),
+  O3((byte) 13),
+  Ofast((byte) 14);
 
   public static final Opt[] VALUES = values();
 

@@ -5,6 +5,8 @@
 
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/env_keys.h"
+
 #include "backend/llvmc.h"
 #include "generated/compiler.h"
 #include "generated/mirror.h"
@@ -18,26 +20,8 @@ namespace ct = ::compiletime;
 namespace gen = ::generated;
 using namespace gen::registry;
 
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_HOST) == Compiler::Target_Object_LLVM_HOST);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_x86_64) == Compiler::Target_Object_LLVM_x86_64);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_AArch64) == Compiler::Target_Object_LLVM_AArch64);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_ARM) == Compiler::Target_Object_LLVM_ARM);
-
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_NVPTX64) == Compiler::Target_Object_LLVM_NVPTX64);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_AMDGCN) == Compiler::Target_Object_LLVM_AMDGCN);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32_Kernel) ==
-              Compiler::Target_Object_LLVM_SPIRV32_Kernel);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64_Kernel) ==
-              Compiler::Target_Object_LLVM_SPIRV64_Kernel);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV_GLCompute) ==
-              Compiler::Target_Object_LLVM_SPIRV_GLCompute);
-
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_Metal1_0) == Compiler::Target_Source_C_Metal1_0);
-
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
-  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "JVM enter\n");
+  if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "JVM enter\n");
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
   cp::initialise();
@@ -46,7 +30,7 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source
 }
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
-  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stderr, "JVM exit\n");
+  if (const char *d = std::getenv(env::PolyregionDebug); d && *d) fprintf(stderr, "JVM exit\n");
   JNIEnv *env = getEnv(vm);
   gen::Layout::drop(env);
   gen::Compilation::drop(env);
@@ -96,7 +80,7 @@ jbyte Compiler::hostTarget0(JNIEnv *, jclass) {
     case llvm::Triple::x86_64: return static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_x86_64);
     case llvm::Triple::aarch64: return static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_AArch64);
     case llvm::Triple::arm: return static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_ARM);
-    default: return Compiler::Target_UNSUPPORTED;
+    default: return 0; // no matching Target; Java's hostTarget() maps the unmatched ordinal to empty
   }
 }
 

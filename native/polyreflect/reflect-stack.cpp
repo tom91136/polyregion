@@ -9,6 +9,7 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/llvm_ir.hpp"
 
 #include "reflect-rt/rt_reflect.hpp"
@@ -30,8 +31,8 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
 
   std::unordered_set<llvm::Function *> Protected;
   llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
-    if (F &&                                       //
-        (Annotation == "polyreflect-rt-protect" || //
+    if (F &&                                                //
+        (Annotation == POLYREFLECT_RT_PROTECT_ANNOTATION || //
          Annotation == "polyreflect-rt-odr"))
       Protected.emplace(F);
   });

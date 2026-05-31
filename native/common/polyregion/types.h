@@ -12,27 +12,18 @@
 #include <utility>
 #include <vector>
 
+#include "polyregion/conventions.h"
+#include "polyregion/enums.h"
+
 #include "export.h"
 
 #ifdef __clang__
-  #define POLYREGION_RT_PROTECT [[clang::annotate("polyreflect-rt-protect")]]
+  #define POLYREGION_RT_PROTECT [[clang::annotate(POLYREFLECT_RT_PROTECT_ANNOTATION)]]
 #else
   #define POLYREGION_RT_PROTECT
 #endif
 
 namespace polyregion::invoke {
-
-enum class POLYREGION_EXPORT Backend : uint8_t {
-  CUDA,
-  HIP,
-  HSA,
-  OpenCL,
-  Vulkan,
-  Metal,
-  SharedObject,
-  RelocatableObject,
-  LevelZero,
-};
 
 struct POLYREGION_EXPORT PhysicalDevice {
   enum class Scheme : uint8_t { Host = 0, Pci, Uuid, RegistryId, Synthetic };
@@ -91,31 +82,6 @@ struct POLYREGION_EXPORT PhysicalDevice {
 } // namespace polyregion::invoke
 
 namespace polyregion::compiletime {
-
-enum class POLYREGION_EXPORT Target : uint8_t {
-  Object_LLVM_HOST = 10,
-  Object_LLVM_x86_64,
-  Object_LLVM_AArch64,
-  Object_LLVM_ARM,
-
-  Object_LLVM_NVPTX64 = 20,
-  Object_LLVM_AMDGCN,
-  Object_LLVM_SPIRV32_Kernel,
-  Object_LLVM_SPIRV64_Kernel,
-  Object_LLVM_SPIRV_GLCompute,
-
-  Source_C_C11 = 30,
-  Source_C_OpenCL1_1,
-  Source_C_Metal1_0,
-};
-
-enum class POLYREGION_EXPORT OptLevel : uint8_t {
-  O0 = 10,
-  O1,
-  O2,
-  O3,
-  Ofast,
-};
 
 struct POLYREGION_EXPORT TargetSpec {
   std::string_view canonical;
@@ -196,28 +162,6 @@ POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::pa
 
 namespace polyregion::runtime {
 
-enum class POLYREGION_EXPORT Type : uint8_t {
-  Void = 1,
-  Bool1,
-
-  IntU8,
-  IntU16,
-  IntU32,
-  IntU64,
-
-  IntS8,
-  IntS16,
-  IntS32,
-  IntS64,
-
-  Float16,
-  Float32,
-  Float64,
-
-  Ptr,
-  Scratch,
-};
-
 POLYREGION_RT_PROTECT static constexpr size_t byteOfType(Type t) {
   switch (t) {
     case Type::Void: return 0;
@@ -245,8 +189,6 @@ using TypedPointer = std::pair<Type, void *>;
 
 namespace polyregion::runtime {
 
-enum class POLYREGION_EXPORT PlatformKind : uint8_t { HostThreaded = 1, Managed };
-
 POLYREGION_RT_PROTECT static constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
   if (name == "host" || name == "hostthreaded") return PlatformKind::HostThreaded;
   if (name == "managed") return PlatformKind::Managed;
@@ -271,7 +213,6 @@ POLYREGION_RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(
   }
 }
 
-enum class POLYREGION_EXPORT ModuleFormat : uint8_t { Source = 1, Object, DSO, PTX, HSACO, SPIRV_Kernel, SPIRV_GLCompute };
 POLYREGION_RT_PROTECT static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
   if (name == "src" || name == "source") return ModuleFormat::Source;
   if (name == "obj" || name == "object") return ModuleFormat::Object;

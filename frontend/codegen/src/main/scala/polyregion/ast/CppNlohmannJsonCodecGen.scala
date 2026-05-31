@@ -359,6 +359,8 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |#include <unordered_map>
           |#include <utility>
           |
+          |constexpr auto AdtHash = "$hash";
+          |
           |namespace {
           |
           |constexpr int32_t MsgpackInternedMagic = 0x4d504349; // "MPCI"
@@ -750,7 +752,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |std::vector<uint8_t> hashed_program_to_msgpack(const Program& x_) {
           |  return encodeInterned([&](MsgpackWriter& w_) {
           |    w_.writeArrayHeader(2);
-          |    w_.writeString(std::string("$hash"));
+          |    w_.writeString(std::string(AdtHash));
           |    program_to_msgpack(w_, x_);
           |  });
           |}
@@ -760,7 +762,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |    auto n_ = r_.readArrayHeader();
           |    if(n_ != 2) throw std::runtime_error("Expected versioned Program array of size 2");
           |    auto hash_ = r_.readString();
-          |    if(hash_ != "$hash") throw std::runtime_error("Expecting ADT hash to be $hash, but was " + hash_);
+          |    if(hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
           |    return program_from_msgpack(r_);
           |  });
           |}
@@ -784,7 +786,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef>& xs_) {
           |  return encodeInterned([&](MsgpackWriter& w_) {
           |    w_.writeArrayHeader(2);
-          |    w_.writeString(std::string("$hash"));
+          |    w_.writeString(std::string(AdtHash));
           |    structdefs_value_to_msgpack(w_, xs_);
           |  });
           |}
@@ -794,7 +796,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |    auto n_ = r_.readArrayHeader();
           |    if(n_ != 2) throw std::runtime_error("Expected versioned StructDef list array of size 2");
           |    auto hash_ = r_.readString();
-          |    if(hash_ != "$hash") throw std::runtime_error("Expecting ADT hash to be $hash, but was " + hash_);
+          |    if(hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
           |    return structdefs_value_from_msgpack(r_);
           |  });
           |}
@@ -839,14 +841,14 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |json hashed_from_json(const json& j_) {
           |  auto hash_ = j_.at(0).get<std::string>();
           |  auto data_ = j_.at(1);
-          |  if(hash_ != "$hash") {
-          |   throw std::runtime_error("Expecting ADT hash to be ${hash}, but was " + hash_);
+          |  if(hash_ != AdtHash) {
+          |   throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
           |  }
           |  return data_;
           |}
           |
           |json hashed_to_json(const json& x_) {
-          |  return json::array({"$hash", x_});
+          |  return json::array({AdtHash, x_});
           |}
           |
           |$msgpackForwardDecls

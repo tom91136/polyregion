@@ -45,6 +45,7 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/interval.hpp"
 #include "polyregion/llvm_dyn.hpp"
 #include "polyregion/llvm_ir.hpp"
@@ -521,7 +522,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   std::vector<llvm::Function *> roots;
   std::vector<llvm::Value *> values;
   llvm_shared::findValuesWithStringAnnotations(M, [&](llvm::Function &F, llvm::Value *V, llvm::StringRef Annotation) {
-    if (!Annotation.starts_with("polyreflect-track")) return;
+    if (!Annotation.starts_with(POLYREFLECT_TRACK_ANNOTATION)) return;
     const auto U = llvm::getUnderlyingObject(V, 0);
     if (auto GV = llvm::dyn_cast<llvm::GlobalVariable>(U)) {
       if (verbose) llvm::errs() << "[ReflectMemPass] Found annotated (GV) in " << F.getName() << ": `" << *GV << "`\n";

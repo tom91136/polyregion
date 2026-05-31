@@ -927,7 +927,7 @@ private[polyregion] object CppStructGen {
           if (xt.kind == CppType.Kind.Base) s"$x.${y}()"
           else s"$x.$y"
         case compiletime.Value.TermSelect(x, xs) =>
-          throw new RuntimeException(s"multiple path ${x :: xs} is not supported")
+          throw RuntimeException(s"multiple path ${x :: xs} is not supported")
         case compiletime.Value.CtorAp(tpe, args) =>
           if (!tpe.initialiser) tpe.ref(qualified = true) + s"(${args.map(write(_)).mkString(",")})"
           else s"{${args.map(write(_)).mkString(",")}}"

@@ -3,23 +3,12 @@
 
 #include <jni.h>
 namespace polyregion::generated::registry::Platforms {
-static constexpr jbyte ACCESS_RO = 2;
-static constexpr jbyte ACCESS_RW = 1;
-static constexpr jbyte ACCESS_WO = 3;
-static constexpr jbyte TYPE_BOOL = 2;
-static constexpr jbyte TYPE_BYTE = 7;
-static constexpr jbyte TYPE_CHAR = 4;
-static constexpr jbyte TYPE_DOUBLE = 13;
-static constexpr jbyte TYPE_FLOAT = 12;
-static constexpr jbyte TYPE_INT = 9;
-static constexpr jbyte TYPE_LONG = 10;
-static constexpr jbyte TYPE_PTR = 14;
-static constexpr jbyte TYPE_SHORT = 8;
-static constexpr jbyte TYPE_VOID = 1;
+
 [[maybe_unused]] jobject CUDA0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject Dynamic0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject HIP0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject HSA0(JNIEnv *env, jclass);
+[[maybe_unused]] jobject LevelZero0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject Metal0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject OpenCL0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject Relocatable0(JNIEnv *env, jclass);
@@ -43,11 +32,12 @@ static void unregisterMethods(JNIEnv *env) {
 static void registerMethods(JNIEnv *env) {
   if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Platforms")));
-  const static JNINativeMethod methods[12] = {
+  const static JNINativeMethod methods[13] = {
       {(char *)"CUDA0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&CUDA0},
       {(char *)"Dynamic0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Dynamic0},
       {(char *)"HIP0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&HIP0},
       {(char *)"HSA0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&HSA0},
+      {(char *)"LevelZero0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&LevelZero0},
       {(char *)"Metal0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Metal0},
       {(char *)"OpenCL0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&OpenCL0},
       {(char *)"Relocatable0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Relocatable0},
@@ -56,7 +46,7 @@ static void registerMethods(JNIEnv *env) {
       {(char *)"directBufferFromPointer0", (char *)"(JJ)Ljava/nio/ByteBuffer;", (void *)&directBufferFromPointer0},
       {(char *)"pointerOfDirectBuffer0", (char *)"(Ljava/nio/Buffer;)J", (void *)&pointerOfDirectBuffer0},
       {(char *)"pointerOfDirectBuffers0", (char *)"([Ljava/nio/Buffer;)[J", (void *)&pointerOfDirectBuffers0}};
-  if (env->RegisterNatives(clazz, methods, 12) != 0) {
+  if (env->RegisterNatives(clazz, methods, 13) != 0) {
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
   }
 }

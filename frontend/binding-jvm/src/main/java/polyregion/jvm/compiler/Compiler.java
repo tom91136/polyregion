@@ -10,32 +10,6 @@ import polyregion.jvm.NativeLibrary;
 @SuppressWarnings("unused")
 public final class Compiler implements AutoCloseable {
 
-  static final byte //
-      Opt_O0 = 10,
-      Opt_O1 = 11,
-      Opt_O2 = 12,
-      Opt_O3 = 13,
-      Opt_Ofast = 14;
-
-  static final byte //
-      Target_UNSUPPORTED = 1;
-
-  static final byte //
-      Target_Object_LLVM_HOST = 10,
-      Target_Object_LLVM_x86_64 = 11,
-      Target_Object_LLVM_AArch64 = 12,
-      Target_Object_LLVM_ARM = 13;
-  static final byte //
-      Target_Object_LLVM_NVPTX64 = 20,
-      Target_Object_LLVM_AMDGCN = 21,
-      Target_Object_LLVM_SPIRV32_Kernel = 22,
-      Target_Object_LLVM_SPIRV64_Kernel = 23,
-      Target_Object_LLVM_SPIRV_GLCompute = 24;
-  static final byte //
-      Target_Source_C_C11 = 30,
-      Target_Source_C_OpenCL1_1 = 31,
-      Target_Source_C_Metal1_0 = 32;
-
   private static native String hostTriplet0();
 
   private static native byte hostTarget0();
@@ -70,9 +44,8 @@ public final class Compiler implements AutoCloseable {
 
   public Optional<Target> hostTarget() {
     if (cachedTarget == 0) cachedTarget = hostTarget0();
-    if (cachedTarget == Target_UNSUPPORTED) return Optional.empty();
     for (Target t : Target.VALUES) if (t.value == cachedTarget) return Optional.of(t);
-    throw new AssertionError("Target enum not implemented in Java:" + cachedTarget);
+    return Optional.empty();
   }
 
   public String hostTriplet() {

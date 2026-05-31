@@ -21,7 +21,7 @@ private[polyregion] object CodeGen {
   private def md5(s: String): String = {
     val md5 = MessageDigest.getInstance("MD5");
     md5.update(StandardCharsets.UTF_8.encode(s));
-    String.format("%032x", new BigInteger(1, md5.digest()));
+    String.format("%032x", BigInteger(1, md5.digest()));
   }
 
   private def adtFingerprint(nodes: List[StructNode]): String = {
@@ -220,6 +220,28 @@ private[polyregion] object CodeGen {
 
   def polyASTVersioned[A](x: A) = MsgPack.Versioned(polyASTHash, x)
 
+  private def writeConventions(): Unit = {
+    val target = Paths.get("../native/common/generated/polyregion/conventions.h").toAbsolutePath.normalize
+    println(s"Writing conventions to $target")
+    Files.createDirectories(target.getParent)
+    overwrite(target)(ConventionsCodeGen.conventionsHeader)
+    println("Done")
+  }
+
+  private def writeEnums(): Unit = {
+    val header   = Paths.get("../native/common/generated/polyregion/enums.h").toAbsolutePath.normalize
+    val javaBase = Paths.get("binding-jvm/src/main/java/polyregion/jvm").toAbsolutePath.normalize
+    println(s"Writing enums to $header and Java mirrors under $javaBase")
+    Files.createDirectories(header.getParent)
+    overwrite(header)(EnumCodeGen.cppHeader)
+    EnumCodeGen.javaMirrors.foreach { (rel, src) =>
+      val target = javaBase.resolve(rel)
+      Files.createDirectories(target.getParent)
+      overwrite(target)(src)
+    }
+    println("Done")
+  }
+
   private def writePolyPassAbiSources(): Unit = {
     val headerTarget  = Paths.get("../native/polyc/include/polyregion/polypass.h").toAbsolutePath.normalize
     val symbolsTarget = Paths.get("../native/polyc/generated/polypass_symbols.h").toAbsolutePath.normalize
@@ -236,6 +258,8 @@ private[polyregion] object CodeGen {
   def main(args: Array[String]): Unit = {
     writePolyASTSources()
     writePolyPassAbiSources()
+    writeConventions()
+    writeEnums()
     generateJniBindings()
   }
 

@@ -1,19 +1,20 @@
+// AUTO-GENERATED from PolyAST.Enums via polyregion.ast.CodeGen. DO NOT EDIT.
 package polyregion.jvm.runtime;
 
 import polyregion.jvm.ByteEnum;
 
 @SuppressWarnings("unused")
 public enum Type implements ByteEnum {
-  BOOL(Platforms.TYPE_BOOL, Byte.BYTES),
-  BYTE(Platforms.TYPE_BYTE, Byte.BYTES),
-  CHAR(Platforms.TYPE_CHAR, Character.BYTES),
-  SHORT(Platforms.TYPE_SHORT, Short.BYTES),
-  INT(Platforms.TYPE_INT, Integer.BYTES),
-  LONG(Platforms.TYPE_LONG, Long.BYTES),
-  FLOAT(Platforms.TYPE_FLOAT, Float.BYTES),
-  DOUBLE(Platforms.TYPE_DOUBLE, Double.BYTES),
-  PTR(Platforms.TYPE_PTR, Long.BYTES),
-  VOID(Platforms.TYPE_VOID, 0);
+  VOID((byte) 1, 0),
+  BOOL((byte) 2, Byte.BYTES),
+  CHAR((byte) 4, Character.BYTES),
+  BYTE((byte) 7, Byte.BYTES),
+  SHORT((byte) 8, Short.BYTES),
+  INT((byte) 9, Integer.BYTES),
+  LONG((byte) 10, Long.BYTES),
+  FLOAT((byte) 12, Float.BYTES),
+  DOUBLE((byte) 13, Double.BYTES),
+  PTR((byte) 14, Long.BYTES);
 
   public static final Type[] VALUES = values();
 

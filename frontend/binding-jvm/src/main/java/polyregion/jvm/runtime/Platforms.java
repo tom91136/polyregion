@@ -10,23 +10,6 @@ import polyregion.jvm.NativeLibrary;
 
 public final class Platforms implements AutoCloseable {
 
-  // These ordinals must match the native enum `polyregion::runtime::Type` in common/polyregion/types.h.
-  static final byte //
-      TYPE_VOID = 1,
-      TYPE_BOOL = 2,
-      TYPE_BYTE = 7,    // signed Java byte -> native IntS8
-      TYPE_CHAR = 4,    // unsigned Java char -> native IntU16
-      TYPE_SHORT = 8,   // signed Java short -> native IntS16
-      TYPE_INT = 9,     // signed Java int -> native IntS32
-      TYPE_LONG = 10,   // signed Java long -> native IntS64
-      TYPE_FLOAT = 12,  // native Float32
-      TYPE_DOUBLE = 13, // native Float64
-      TYPE_PTR = 14;
-  static final byte //
-      ACCESS_RW = 1,
-      ACCESS_RO = 2,
-      ACCESS_WO = 3;
-
   static native Platform CUDA0();
 
   static native Platform HIP0();
@@ -38,6 +21,8 @@ public final class Platforms implements AutoCloseable {
   static native Platform Vulkan0();
 
   static native Platform OpenCL0();
+
+  static native Platform LevelZero0();
 
   static native Platform Relocatable0();
 
@@ -86,6 +71,10 @@ public final class Platforms implements AutoCloseable {
 
   public Platform OpenCL() {
     return OpenCL0();
+  }
+
+  public Platform LevelZero() {
+    return LevelZero0();
   }
 
   public Platform Relocatable() {

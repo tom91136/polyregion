@@ -430,6 +430,126 @@ object PolyAST {
     }
   }
 
+  object Conventions {
+    inline val EntryName    = "_main"
+    inline val ThisReceiver = "#this"
+    object Macros {
+      inline val PolyreflectTrackAnnotation     = "polyreflect-track"
+      inline val PolyreflectRtProtectAnnotation = "polyreflect-rt-protect"
+    }
+  }
+
+  object Enums {
+    case class JavaMirror(pkg: String, name: String)
+    trait Variant {
+      def value: Int
+      def namespace: String
+      def cppExport: Boolean
+      def javaMirror: Option[JavaMirror] = None
+      def java: Option[String]           = None
+      def javaSize: Option[String]       = None
+      final def name: String             = toString
+      final def cppName: String          = getClass.getSuperclass.getSimpleName
+    }
+
+    enum Backend(val value: Int) extends Variant {
+      def namespace = "invoke"
+      def cppExport = true
+      case CUDA              extends Backend(0)
+      case HIP               extends Backend(1)
+      case HSA               extends Backend(2)
+      case OpenCL            extends Backend(3)
+      case Vulkan            extends Backend(4)
+      case Metal             extends Backend(5)
+      case SharedObject      extends Backend(6)
+      case RelocatableObject extends Backend(7)
+      case LevelZero         extends Backend(8)
+    }
+
+    enum Access(val value: Int, override val java: Option[String]) extends Variant {
+      def namespace           = "invoke"
+      def cppExport           = false
+      override def javaMirror = Some(JavaMirror("runtime", "Access"))
+      case RW extends Access(1, Some("RW"))
+      case RO extends Access(2, Some("RO"))
+      case WO extends Access(3, Some("WO"))
+    }
+
+    enum Target(val value: Int, override val java: Option[String]) extends Variant {
+      def namespace           = "compiletime"
+      def cppExport           = true
+      override def javaMirror = Some(JavaMirror("compiler", "Target"))
+      case Object_LLVM_HOST            extends Target(10, Some("LLVM_HOST"))
+      case Object_LLVM_x86_64          extends Target(11, Some("LLVM_X86_64"))
+      case Object_LLVM_AArch64         extends Target(12, Some("LLVM_AARCH64"))
+      case Object_LLVM_ARM             extends Target(13, Some("LLVM_ARM"))
+      case Object_LLVM_NVPTX64         extends Target(20, Some("LLVM_NVPTX64"))
+      case Object_LLVM_AMDGCN          extends Target(21, Some("LLVM_AMDGCN"))
+      case Object_LLVM_SPIRV32_Kernel  extends Target(22, Some("LLVM_SPIRV32_KERNEL"))
+      case Object_LLVM_SPIRV64_Kernel  extends Target(23, Some("LLVM_SPIRV64_KERNEL"))
+      case Object_LLVM_SPIRV_GLCompute extends Target(24, Some("LLVM_SPIRV_GLCOMPUTE"))
+      case Source_C_C11                extends Target(30, Some("C_C11"))
+      case Source_C_OpenCL1_1          extends Target(31, Some("C_OpenCL1_1"))
+      case Source_C_Metal1_0           extends Target(32, Some("C_Metal1_0"))
+    }
+
+    enum OptLevel(val value: Int, override val java: Option[String]) extends Variant {
+      def namespace           = "compiletime"
+      def cppExport           = true
+      override def javaMirror = Some(JavaMirror("compiler", "Opt"))
+      case O0    extends OptLevel(10, Some("O0"))
+      case O1    extends OptLevel(11, Some("O1"))
+      case O2    extends OptLevel(12, Some("O2"))
+      case O3    extends OptLevel(13, Some("O3"))
+      case Ofast extends OptLevel(14, Some("Ofast"))
+    }
+
+    enum Type(val value: Int, override val java: Option[String] = None, override val javaSize: Option[String] = None)
+        extends Variant {
+      def namespace           = "runtime"
+      def cppExport           = true
+      override def javaMirror = Some(JavaMirror("runtime", "Type"))
+      case Void    extends Type(1, Some("VOID"), Some("0"))
+      case Bool1   extends Type(2, Some("BOOL"), Some("Byte.BYTES"))
+      case IntU8   extends Type(3)
+      case IntU16  extends Type(4, Some("CHAR"), Some("Character.BYTES"))
+      case IntU32  extends Type(5)
+      case IntU64  extends Type(6)
+      case IntS8   extends Type(7, Some("BYTE"), Some("Byte.BYTES"))
+      case IntS16  extends Type(8, Some("SHORT"), Some("Short.BYTES"))
+      case IntS32  extends Type(9, Some("INT"), Some("Integer.BYTES"))
+      case IntS64  extends Type(10, Some("LONG"), Some("Long.BYTES"))
+      case Float16 extends Type(11)
+      case Float32 extends Type(12, Some("FLOAT"), Some("Float.BYTES"))
+      case Float64 extends Type(13, Some("DOUBLE"), Some("Double.BYTES"))
+      case Ptr     extends Type(14, Some("PTR"), Some("Long.BYTES"))
+      case Scratch extends Type(15)
+    }
+
+    enum PlatformKind(val value: Int) extends Variant {
+      def namespace = "runtime"
+      def cppExport = true
+      case HostThreaded extends PlatformKind(1)
+      case Managed      extends PlatformKind(2)
+    }
+
+    enum ModuleFormat(val value: Int) extends Variant {
+      def namespace = "runtime"
+      def cppExport = true
+      case Source          extends ModuleFormat(1)
+      case Object          extends ModuleFormat(2)
+      case DSO             extends ModuleFormat(3)
+      case PTX             extends ModuleFormat(4)
+      case HSACO           extends ModuleFormat(5)
+      case SPIRV_Kernel    extends ModuleFormat(6)
+      case SPIRV_GLCompute extends ModuleFormat(7)
+    }
+
+    val All: List[Variant] =
+      Backend.values.toList ++ Access.values.toList ++ Target.values.toList ++ OptLevel.values.toList ++
+        Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList
+  }
+
   extension (s: Sym) {
     def repr: String = s.fqn.mkString(".")
   }
