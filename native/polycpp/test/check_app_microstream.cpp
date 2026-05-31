@@ -1,6 +1,6 @@
 #pragma region case: microstream
 #pragma region using: num_type=double,float
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_NUM_TYPE={num_type} -o {output} {input} -lm
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_NUM_TYPE={num_type} -o {output} {input} {libm}
 #pragma region do: {output} 1024 10
 
 #include <algorithm>

@@ -114,9 +114,22 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   envs.emplace_back(fmt::format("{}=1", polyregion::invoke::DeviceLockEnv));
   envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
   if (std::getenv("POLYTEST_DEBUG")) envs.emplace_back("POLYRT_DEBUG=2");
-  for (const auto *name : {"POLYCPP_LINK_THREADS", "POLYFC_LINK_THREADS"})
+  // XXX child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish.
+  for (const auto *name : {"POLYCPP_LINK_THREADS", "POLYFC_LINK_THREADS", //
+                           "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
-  if (auto p = std::getenv("PATH")) envs.emplace_back(std::string("PATH=") + p);
+  {
+    std::string pathVal = std::getenv("PATH") ? std::getenv("PATH") : "";
+#if defined(_WIN32)
+    // XXX no rpath on Windows: prepend <binaryDir>/lib/<stem>/lib so test exes find staged DLLs.
+    std::string bd = cfg.binaryDir;
+    while (!bd.empty() && (bd.back() == '/' || bd.back() == '\\')) bd.pop_back();
+    const auto slash = bd.find_last_of("/\\");
+    const std::string stem = (slash == std::string::npos) ? bd : bd.substr(slash + 1);
+    if (!bd.empty() && !stem.empty()) pathVal = bd + "\\lib\\" + stem + "\\lib;" + pathVal;
+#endif
+    if (!pathVal.empty()) envs.emplace_back("PATH=" + pathVal);
+  }
 #if defined(__APPLE__)
   // XXX forward DYLD_*; compiled test binaries can't find dist libs otherwise (SIGTRAP).
   for (const auto *name : {"DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "TMPDIR", "HOME"}) {
@@ -197,7 +210,13 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   if (args.empty()) return {-1, {}, "empty command", command};
   auto resolved = resolveBin(args[0], cfg);
   std::string execErr;
-  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath}, 0, 0, &execErr);
+  unsigned secondsToWait = 0;
+  if (const char *t = std::getenv("POLYTEST_TIMEOUT")) {
+    char *end = nullptr;
+    const unsigned long v = std::strtoul(t, &end, 10);
+    if (end != t && *end == '\0') secondsToWait = static_cast<unsigned>(v);
+  }
+  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath}, secondsToWait, 0, &execErr);
 
   auto stdoutText = polyregion::read_string(*outPath);
   auto stderrText = polyregion::read_string(*errPath);
@@ -282,6 +301,12 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
   const auto matches = [&](const std::string &shortName, const std::string &caseName) {
     return caseFilters.empty() || (caseFilters | exists([&](auto &f) { return f == shortName || f == caseName; }));
   };
+  const std::string libmFlag =
+#if defined(_WIN32)
+      "";
+#else
+      "-lm";
+#endif
   std::vector<Mode> modes;
   if (offload) modes.emplace_back(Mode::Offload);
   if (passthrough) modes.emplace_back(Mode::Passthrough);
@@ -301,6 +326,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                                  | append(std::pair{cfg.defaultsVar, value})                                                       //
                                  | append(std::pair{cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))}) //
                                  | append(std::pair{std::string("input"), file})                                                   //
+                                 | append(std::pair{std::string("libm"), libmFlag})                                                //
                                  | to_vector();
           const auto unevalStore =
               mkArgStore(augmented | append(std::pair{std::string("output"), std::string("<unevaluated>")}) | to_vector());
