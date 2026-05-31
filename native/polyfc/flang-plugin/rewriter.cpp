@@ -32,12 +32,14 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/options_backend.hpp"
+#include "polyregion/conventions.h"
 #include "polyregion/types.h"
 
 #include "codegen.h"
 #include "ftypes.h"
 #include "mirrors.h"
 #include "mlir_utils.h"
+#include "polydco_abi.h"
 #include "remapper.h"
 #include "utils.h"
 
@@ -236,7 +238,7 @@ public:
   Type structType() const { return captureMirror.ty; }
 
   Value createCapture(OpBuilder &B, ModuleOp &M) const {
-    const auto annotationConst = strConst(B, M, "polyreflect-track");
+    const auto annotationConst = strConst(B, M, POLYREFLECT_TRACK_ANNOTATION);
     captureFields | for_each([&](auto &f) {
       // XXX skip non-pointer fields (inline scalar captures): VarAnnotation requires a ptr operand.
       if (!llvm::isa<LLVM::LLVMPointerType>(f.fieldPtr.getType())) return;
@@ -989,8 +991,8 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       // next iteration's mirrorToRemote would cache-hit the stale entry.
       const auto llvmPtrTy = mlir::LLVM::LLVMPointerType::get(B.getContext());
       const auto voidTy = mlir::LLVM::LLVMVoidType::get(B.getContext());
-      auto releaseFn = m.lookupSymbol<mlir::LLVM::LLVMFuncOp>("polydco_release");
-      if (!releaseFn) releaseFn = defineFunc(m, "polydco_release", voidTy, {llvmPtrTy});
+      auto releaseFn = m.lookupSymbol<mlir::LLVM::LLVMFuncOp>(polydco::abi::Release);
+      if (!releaseFn) releaseFn = defineFunc(m, polydco::abi::Release, voidTy, {llvmPtrTy});
       for (auto h : scratchHeaps) {
         auto i64Addr = fir::ConvertOp::create(B, loc, B.getI64Type(), h).getResult();
         auto llvmPtr = mlir::LLVM::IntToPtrOp::create(B, loc, llvmPtrTy, i64Addr).getResult();

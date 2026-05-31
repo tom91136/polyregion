@@ -16,6 +16,8 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 
 #include "polyfront/options_frontend.hpp"
 #include "polyregion/env.h"
+#include "polyregion/env_keys.h"
+#include "polyregion/msvc_abi_names.h"
 
 #include "driver_polyc.h"
 
@@ -49,7 +51,7 @@ int main(int argc, const char *argv[]) {
   // XXX fused build has no external driver; --driver/POLYCPP_DRIVER are accepted but ignored.
   (void)args.popValue("--driver");
 #else
-  clangPath = resolveExternalDriver(args, "POLYCPP_DRIVER", "clang++", execParentPath);
+  clangPath = resolveExternalDriver(args, polyregion::env::PolycppDriver, "clang++", execParentPath);
   if (clangPath.empty()) {
     fmt::print(stderr, "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`\n",
                execPath);
@@ -68,8 +70,8 @@ int main(int argc, const char *argv[]) {
                auto append = [&](const std::vector<std::string> &xs) { remaining ^= concat_inplace(xs); };
 
                if (opts) {
-                 remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator));
-                 remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_LIB", {}, llvm::sys::EnvPathSeparator));
+                 remaining ^= concat_inplace(mkDelimitedEnvPaths(polyregion::env::PolystlInclude, "-isystem", llvm::sys::EnvPathSeparator));
+                 remaining ^= concat_inplace(mkDelimitedEnvPaths(polyregion::env::PolystlLib, {}, llvm::sys::EnvPathSeparator));
 
                  const auto polycppResourcePath = resolveResourcePath(execParentPath, "polycpp");
                  const auto polycppIncludePath = joinPath(polycppResourcePath, "include");
@@ -80,7 +82,7 @@ int main(int argc, const char *argv[]) {
                  append({"-include", "polystl/polystl.h"});
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
-                 const bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
+                 const bool noRewrite = std::getenv(polyregion::env::PolycppNoRewrite) != nullptr;
 #ifndef POLYREGION_FUSED_DRIVER
                  // XXX non-fused: plugin only loaded when rewriting; fused needs it for polyreflect callbacks.
                  if (!noRewrite) append({"-Xclang", "-load", "-Xclang", polycppClangPlugin});
@@ -136,26 +138,26 @@ int main(int argc, const char *argv[]) {
                        append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
                                "/mllvm:-polyreflect-late=ReflectStack+ReflectMem"});
                        // XXX /INCLUDE: pulls polyreflect-rt's new/delete in ahead of vcruntime's.
-                       for (auto sym : {"??2@YAPEAX_K@Z",
-                                        "??2@YAPEAX_KW4align_val_t@std@@@Z",
-                                        "??2@YAPEAX_KAEBUnothrow_t@std@@@Z",
-                                        "??2@YAPEAX_KW4align_val_t@std@@AEBUnothrow_t@1@@Z",
-                                        "??_U@YAPEAX_K@Z",
-                                        "??_U@YAPEAX_KW4align_val_t@std@@@Z",
-                                        "??_U@YAPEAX_KAEBUnothrow_t@std@@@Z",
-                                        "??_U@YAPEAX_KW4align_val_t@std@@AEBUnothrow_t@1@@Z",
-                                        "??3@YAXPEAX@Z",
-                                        "??_V@YAXPEAX@Z",
-                                        "??3@YAXPEAXW4align_val_t@std@@@Z",
-                                        "??_V@YAXPEAXW4align_val_t@std@@@Z",
-                                        "??3@YAXPEAX_K@Z",
-                                        "??_V@YAXPEAX_K@Z",
-                                        "??3@YAXPEAX_KW4align_val_t@std@@@Z",
-                                        "??_V@YAXPEAX_KW4align_val_t@std@@@Z",
-                                        "??3@YAXPEAXAEBUnothrow_t@std@@@Z",
-                                        "??_V@YAXPEAXAEBUnothrow_t@std@@@Z",
-                                        "??3@YAXPEAXW4align_val_t@std@@AEBUnothrow_t@1@@Z",
-                                        "??_V@YAXPEAXW4align_val_t@std@@AEBUnothrow_t@1@@Z"}) {
+                       for (auto sym : {msvc_abi::OperatorNew,
+                                        msvc_abi::OperatorNewAligned,
+                                        msvc_abi::OperatorNewNothrow,
+                                        msvc_abi::OperatorNewAlignedNothrow,
+                                        msvc_abi::OperatorNewArray,
+                                        msvc_abi::OperatorNewArrayAligned,
+                                        msvc_abi::OperatorNewArrayNothrow,
+                                        msvc_abi::OperatorNewArrayAlignedNothrow,
+                                        msvc_abi::OperatorDelete,
+                                        msvc_abi::OperatorDeleteArray,
+                                        msvc_abi::OperatorDeleteAligned,
+                                        msvc_abi::OperatorDeleteArrayAligned,
+                                        msvc_abi::OperatorDeleteSized,
+                                        msvc_abi::OperatorDeleteArraySized,
+                                        msvc_abi::OperatorDeleteSizedAligned,
+                                        msvc_abi::OperatorDeleteArraySizedAligned,
+                                        msvc_abi::OperatorDeleteNothrow,
+                                        msvc_abi::OperatorDeleteArrayNothrow,
+                                        msvc_abi::OperatorDeleteAlignedNothrow,
+                                        msvc_abi::OperatorDeleteArrayAlignedNothrow}) {
                          append({"-Xlinker", fmt::format("/INCLUDE:{}", sym)});
                        }
   #else
@@ -199,7 +201,8 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
-                   if (const char *t = std::getenv("POLYCPP_LINK_THREADS"); t && *t) append({fmt::format("-Wl,--threads={}", t)});
+                   if (const char *t = std::getenv(polyregion::env::PolycppLinkThreads); t && *t)
+                     append({fmt::format("-Wl,--threads={}", t)});
                  }
                }
 

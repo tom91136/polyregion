@@ -24,7 +24,7 @@ function(add_copy_header_set_targets target commands_var)
 #    add_custom_target(${name} ${commands})
 endfunction()
 
-foreach (header_target polycommon polystl polyinvoke-obj polyrt-obj polyreflect-rt)
+foreach (header_target polycommon polycommon-generated polystl polyinvoke-obj polyrt-obj polyreflect-rt)
     add_copy_header_set_targets(${header_target} header_commands)
 endforeach ()
 add_custom_target(polycpp-header-resource ${header_commands})
@@ -160,8 +160,7 @@ target_include_directories(polycpp-tests PRIVATE
         ${LLVM_INCLUDE_DIRS}
         ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(polycpp-tests PRIVATE
-        POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
+polyregion_test_profile_dir(polycpp-tests)
 
 # === test_all.h.in variables ===
 get_filename_component(POLYCPP_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)
@@ -206,11 +205,8 @@ target_link_libraries(polycpp-tests PRIVATE
 )
 
 
-target_compile_options(polycpp PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polycpp PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
-
-target_compile_options(polycpp-tests PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polycpp-tests PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polycpp EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polycpp-tests EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 
 # XXX one ctest entry per test file x {offload, passthrough}.
 # Cross-process device serialisation lives in DeviceLock (polyinvoke/include/polyinvoke/device_lock.h).
@@ -249,6 +245,6 @@ if (NOT POLYREGION_FUSED_DRIVER)
             LIBRARY DESTINATION lib/polycpp/lib
             RUNTIME DESTINATION lib/polycpp/lib)
 endif ()
-foreach (HEADER_TARGET polycommon polyinvoke-obj polyrt-obj)
+foreach (HEADER_TARGET polycommon polycommon-generated polyinvoke-obj polyrt-obj)
     install(TARGETS ${HEADER_TARGET} FILE_SET HEADERS DESTINATION lib/polycpp/include)
 endforeach ()

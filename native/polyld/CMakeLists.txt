@@ -32,7 +32,6 @@ target_link_libraries(polyld-link PRIVATE
         ${POLYLD_LLVM_LIBS}
         polycommon Aspartame::Aspartame fmt::fmt)
 
-target_compile_options(polyld-link PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyld-link PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(polyld-link)
 
 install(TARGETS polyld-link RUNTIME DESTINATION bin)

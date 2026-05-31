@@ -26,7 +26,7 @@ set(LIB_SOURCES
 add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_polyc.cpp)
 
-add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp test/js_runner.cpp test/vendor_bitcode.cpp)
+add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/js_runner.cpp test/vendor_bitcode.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin driver_main.cpp)
 
@@ -50,7 +50,6 @@ if (NOT WIN32)
             backend/llvm.h
             backend/llvmc.h
             backend/memoryfs.h
-            backend/suppress_fd.h
 
             <optional>
             <ostream>
@@ -129,26 +128,19 @@ target_link_libraries(polyc
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )
-target_link_libraries(polyc-tests PRIVATE polyc polyinvoke-static Catch2::Catch2WithMain Aspartame::Aspartame)
+target_link_libraries(polyc-tests PRIVATE polyc Catch2::Catch2WithMain Aspartame::Aspartame)
 add_test(NAME polyc-tests COMMAND polyc-tests)
 polyregion_test_dist_record(NAME polyc-tests COMMAND :bin:polyc-tests)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyinvoke-static polytest Aspartame::Aspartame)
-target_compile_definitions(polyc-benchmarks PRIVATE
-        POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
-target_link_libraries(polyc-driver PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
+polyregion_test_profile_dir(polyc-benchmarks)
+target_link_libraries(polyc-driver PRIVATE polyc Aspartame::Aspartame)
 target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)
 
-target_compile_options(polyc-tests PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyc-benchmarks PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyc-driver PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})
-
-target_link_options(polyc-tests PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
-target_link_options(polyc-benchmarks PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
-target_link_options(polyc-driver PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
-target_link_options(polyc PRIVATE ${LINK_OPTIONS} ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polyc-tests EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polyc-benchmarks EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polyc-driver)
+polyregion_apply_common_options(polyc-bin EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polyc EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
 if (WIN32)
@@ -193,19 +185,14 @@ target_compile_definitions(polyc PRIVATE
 target_compile_definitions(polyc-tests PRIVATE
   POLYREGION_BITCODE_DEV_DIR="${POLYREGION_DEVICE_LIBS_DIR}")
 
-list(LENGTH POLYREGION_CUDA_LIBDEVICE_VERSIONS _n_libdev)
-list(LENGTH POLYREGION_CUDA_LIBDEVICE_MIN_ARCH _n_min_arch)
-if(NOT _n_libdev EQUAL _n_min_arch)
-  message(FATAL_ERROR "POLYREGION_CUDA_LIBDEVICE_VERSIONS (${_n_libdev}) and POLYREGION_CUDA_LIBDEVICE_MIN_ARCH (${_n_min_arch}) must be parallel lists")
-endif()
 set(POLYREGION_LIBDEVICE_ENTRIES "")
+list(LENGTH POLYREGION_CUDA_LIBDEVICE _n_libdev)
 math(EXPR _last_libdev "${_n_libdev} - 1")
 foreach(_i RANGE ${_last_libdev} 0 -1)
-  list(GET POLYREGION_CUDA_LIBDEVICE_VERSIONS ${_i} _ver)
-  list(GET POLYREGION_CUDA_LIBDEVICE_MIN_ARCH ${_i} _arch)
-  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _ "${_ver}")
+  list(GET POLYREGION_CUDA_LIBDEVICE ${_i} _entry)
+  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.[0-9]+:([0-9]+)$" _ "${_entry}")
   string(APPEND POLYREGION_LIBDEVICE_ENTRIES
-    "    {\"libdevice.10.cuda${CMAKE_MATCH_1}-${CMAKE_MATCH_2}.bc\", ${_arch}u},\n")
+    "    {\"libdevice.10.cuda${CMAKE_MATCH_1}-${CMAKE_MATCH_2}.bc\", ${CMAKE_MATCH_3}u},\n")
 endforeach()
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/backend/vendor_libdevice.inc.in"

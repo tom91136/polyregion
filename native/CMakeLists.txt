@@ -29,6 +29,7 @@ include(cmake/mergestaticlibs.cmake)
 include(cmake/deadstriparchive.cmake)
 include(cmake/testdist.cmake)
 include(cmake/polytest_discover.cmake)
+include(cmake/polyregion_targets.cmake)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)

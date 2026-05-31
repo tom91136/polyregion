@@ -43,13 +43,9 @@ target_link_libraries(polyinvoke-JNI PRIVATE polyinvoke-static Aspartame::Aspart
 
 
 
-target_compile_options(polyc-JNIshim PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyc-JNI PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyinvoke-JNI PRIVATE ${COMPILE_OPTIONS})
-
-target_link_options(polyc-JNIshim PRIVATE ${LINK_OPTIONS})
-target_link_options(polyc-JNI PRIVATE ${LINK_OPTIONS})
-target_link_options(polyinvoke-JNI PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(polyc-JNIshim)
+polyregion_apply_common_options(polyc-JNI)
+polyregion_apply_common_options(polyinvoke-JNI)
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

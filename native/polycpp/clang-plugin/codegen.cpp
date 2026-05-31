@@ -6,6 +6,7 @@
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/types.h"
 
 #include "ast.h"
@@ -37,7 +38,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentDef);
   stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
 
-  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name, {}), TypeSpace::Global())), {});
+  auto recv = Arg(Named(conventions::ThisReceiver, Type::Ptr(Type::Struct(parentDef->name, {}), TypeSpace::Global())), {});
 
   // The kernel ABI prepends a thread-id Int64 to Entry functions and the offload lambdas take
   // an int64 tid as their first parameter -- the runtime fills the same slot for both. Drop
@@ -76,8 +77,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
               | append(recv) //
               | to_vector();
 
-  auto f0 = std::make_shared<Function>(Sym({"_main"}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
-                                       std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  auto f0 =
+      std::make_shared<Function>(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
+                                 std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
 
   auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
                          r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial());

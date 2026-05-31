@@ -5,8 +5,8 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/runtime.h"
+#include "polyinvoke/stream.hpp"
 #include "polyregion/concurrency_utils.hpp"
-#include "polyregion/stream.hpp"
 
 #include "ast.h"
 #include "compiler.h"

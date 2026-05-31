@@ -119,7 +119,7 @@ if (POLYREGION_FUSED_DRIVER)
             polycommon polyc-driver polyfront-options PolyAST
             Aspartame::Aspartame fmt::fmt)
     target_precompile_headers(polyfc PRIVATE
-            <optional> <ostream> <unordered_map> <unordered_set> <utility> <vector> <cstdio>
+            <optional> <unordered_map> <unordered_set> <utility> <vector> <cstdio> <cstdlib>
             [["flang/Optimizer/Dialect/FIROps.h"]]
             [["flang/Optimizer/Dialect/FIRType.h"]]
             [["mlir/Dialect/LLVMIR/LLVMDialect.h"]]
@@ -149,8 +149,7 @@ target_include_directories(polyfc-tests PRIVATE
         ${LLVM_INCLUDE_DIRS}
         ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(polyfc-tests PRIVATE
-        POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
+polyregion_test_profile_dir(polyfc-tests)
 
 # === test_all.h.in variables ===
 get_filename_component(POLYFC_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)
@@ -188,11 +187,9 @@ target_link_libraries(polyfc PRIVATE
 target_link_libraries(polyfc-tests PRIVATE polytest)
 
 
-target_compile_options(polyfc PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyfc PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(polyfc)
 
-target_compile_options(polyfc-tests PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyfc-tests PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(polyfc-tests)
 
 # XXX one ctest entry per test file x {offload, passthrough}.
 polytest_discover_tests(polyfc-tests

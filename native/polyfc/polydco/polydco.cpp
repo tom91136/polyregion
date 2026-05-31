@@ -7,6 +7,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/concurrency_utils.hpp"
+#include "polyregion/conventions.h"
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
@@ -239,9 +240,9 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=0x%jx", __func__, moduleId, threadsPerBlock,
       static_cast<void *>(captures), mpr.devicePartials);
-  polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer,          //
-                                           Policy{                             //
-                                                  Dim3{threadsPerBlock, 1, 1}, //
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, //
+                                           Policy{                                   //
+                                                  Dim3{threadsPerBlock, 1, 1},       //
                                                   blocks > 0 ? std::optional{std::pair{Dim3{blocks, 1, 1}, localMemBytes}} : std::nullopt},
                                            {});
 
@@ -300,7 +301,8 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   using namespace invoke;
   const ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Void, nullptr}};
   log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch hostthreaded", __func__, moduleId, tripCount);
-  polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{groups, 1, 1}}, [&]() { mpr.releaseAndReduce(); });
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{Dim3{groups, 1, 1}},
+                                           [&]() { mpr.releaseAndReduce(); });
   polyrt::currentQueue->enqueueWaitBlocking();
   if (polyrt::debugLevel() >= DebugLevel::Debug) {
     for (size_t i = 0; i < layout->memberCount; ++i) {
@@ -390,7 +392,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
     log(DebugLevel::None,
         "Dispatch failed for %s: no compatible backend after trying %zu kernel objects, host fallback disabled - exiting 77 (skip)",
         bundle->moduleName, attempts);
-    polyrt::noCompatibleKernelExit("polydco_dispatch");
+    polyrt::noCompatibleKernelExit(polydco::abi::Dispatch);
   }
 
   return false;

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "polyregion/concurrency_utils.hpp"
+#include "polyregion/conventions.h"
 #include "polyrt/rt.h"
 
 #include "polystl.h"
@@ -40,7 +41,7 @@ inline bool bundleIsRewritten(const polyrt::KernelBundle &bundle) { return bundl
 // always_inline so the annotation lands in the caller even at -O0; otherwise the marked
 // pointer is only visible inside this helper and the polyreflect pass can't taint the caller.
 struct __PolyreflectTrackPtr {
-  [[clang::annotate("polyreflect-track")]] void *p;
+  [[clang::annotate(POLYREFLECT_TRACK_ANNOTATION)]] void *p;
 };
 [[gnu::always_inline]] inline void *polyreflectTrackPtr(void *p) { return __PolyreflectTrackPtr{p}.p; }
 

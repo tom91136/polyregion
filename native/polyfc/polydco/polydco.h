@@ -6,6 +6,7 @@
 #include "polyregion/types.h"
 
 #include "ftypes.h"
+#include "polydco_abi.h"
 
 extern "C" {
 

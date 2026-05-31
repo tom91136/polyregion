@@ -13,8 +13,7 @@ target_sources(polyreflect-rt
         reflect-rt/rt_reflect.hpp
 )
 target_include_directories(polyreflect-rt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_options(polyreflect-rt PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyreflect-rt PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(polyreflect-rt)
 target_link_libraries(polyreflect-rt PUBLIC ${CMAKE_DL_LIBS})
 
 add_llvm_pass_plugin(polyreflect-plugin
@@ -29,8 +28,7 @@ add_llvm_pass_plugin(polyreflect-plugin
 
 add_executable(polyreflect-rt-tests test/map.cpp)
 target_link_libraries(polyreflect-rt-tests PRIVATE Catch2::Catch2WithMain polyreflect-rt)
-target_compile_options(polyreflect-rt-tests PRIVATE ${COMPILE_OPTIONS})
-target_link_options(polyreflect-rt-tests PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(polyreflect-rt-tests)
 if (APPLE)
     target_link_options(polyreflect-rt-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()

@@ -7,6 +7,8 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/msvc_abi_names.h"
+
 using namespace aspartame;
 using namespace polyregion;
 
@@ -53,12 +55,12 @@ bool runSplice(llvm::Module &M, const bool verbose) {
       //      {"__libc_realloc", "polyrt_usm_realloc"}
       //
       // MSVC x64 C++ ABI new/delete. See https://learn.microsoft.com/cpp/build/reference/decorated-names
-      {"??2@YAPEAX_K@Z", "polyrt_usm_operator_new"},            // operator new(size_t)
-      {"??_U@YAPEAX_K@Z", "polyrt_usm_operator_new"},           // operator new[](size_t)
-      {"??3@YAXPEAX@Z", "polyrt_usm_operator_delete"},          // operator delete(void*)
-      {"??_V@YAXPEAX@Z", "polyrt_usm_operator_delete"},         // operator delete[](void*)
-      {"??3@YAXPEAX_K@Z", "polyrt_usm_operator_delete_sized"},  // operator delete(void*, size_t)
-      {"??_V@YAXPEAX_K@Z", "polyrt_usm_operator_delete_sized"}, // operator delete[](void*, size_t)
+      {msvc_abi::OperatorNew, "polyrt_usm_operator_new"},                       // operator new(size_t)
+      {msvc_abi::OperatorNewArray, "polyrt_usm_operator_new"},                  // operator new[](size_t)
+      {msvc_abi::OperatorDelete, "polyrt_usm_operator_delete"},                 // operator delete(void*)
+      {msvc_abi::OperatorDeleteArray, "polyrt_usm_operator_delete"},            // operator delete[](void*)
+      {msvc_abi::OperatorDeleteSized, "polyrt_usm_operator_delete_sized"},      // operator delete(void*, size_t)
+      {msvc_abi::OperatorDeleteArraySized, "polyrt_usm_operator_delete_sized"}, // operator delete[](void*, size_t)
   };
   llvm::SmallDenseMap<llvm::StringRef, llvm::StringRef> AllocReplacements(std::cbegin(ReplaceMap), std::cend(ReplaceMap));
   bool modified = false;

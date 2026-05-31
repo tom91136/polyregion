@@ -118,7 +118,8 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
             FILES
             include/polyinvoke/runtime.h
-            include/polyinvoke/device_lock.h)
+            include/polyinvoke/device_lock.h
+            include/polyinvoke/stream.hpp)
     target_include_directories(${TARGET} PUBLIC
             thirdparty/
             ${POLYINVOKE_WRANGLER_INCLUDES}
@@ -133,7 +134,7 @@ endforeach ()
 
 add_subdirectory(test/kernels)
 add_executable(polyinvoke-tests test/main.cpp test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
-target_compile_definitions(polyinvoke-tests PRIVATE POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
+polyregion_test_profile_dir(polyinvoke-tests)
 add_executable(polyinvoke-exec driver.cpp)
 
 target_link_libraries(polyinvoke-exec PRIVATE polyinvoke-static Aspartame fmt::fmt)

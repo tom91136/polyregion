@@ -238,10 +238,9 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
                              [&](const Type::Struct &x) { return normalise(x.name); }, //
                              [&](const Type::Ptr &x) {
-                               if (dialect == Dialect::MSL1_0)
-                                 return fmt::format("{} {}*", mslPtrPrefix(x.space), mkTpe(x.comp));
+                               if (dialect == Dialect::MSL1_0) return fmt::format("{} {}*", mslPtrPrefix(x.space), mkTpe(x.comp));
                                return fmt::format("{}*", mkTpe(x.comp));
-                             }, //
+                             },                                                                                  //
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
                              [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); });
@@ -308,8 +307,7 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           [&](const Term::Select &x) {
                             std::string acc = normalise(x.root.symbol);
                             // AST has no Deref step before a Field on a Ptr root.
-                            if (!x.steps.empty() && x.steps[0].template is<PathStep::Field>() &&
-                                x.root.tpe.template is<Type::Ptr>()) {
+                            if (!x.steps.empty() && x.steps[0].template is<PathStep::Field>() && x.root.tpe.template is<Type::Ptr>()) {
                               acc = "(*" + acc + ")";
                             }
                             for (auto &step : x.steps) {
@@ -501,10 +499,9 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
             // Local:  threadgroup $T &$name [[ threadgroup($i) ]]
             // query:              $T &$name           [[ $type ]]
             if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
-              decl = arr->space.match_total(
-                  [&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },          //
-                  [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); },      //
-                  [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }         //
+              decl = arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },     //
+                                            [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
+                                            [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }    //
               );
             } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
 

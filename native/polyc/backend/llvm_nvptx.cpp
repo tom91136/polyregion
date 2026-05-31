@@ -111,8 +111,8 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     if (sharedGlobal) return sharedGlobal;
     auto *arrTy = llvm::ArrayType::get(llvm::Type::getInt8Ty(ctx), 0);
     sharedGlobal = new llvm::GlobalVariable(M, arrTy, /*isConstant*/ false, llvm::GlobalValue::ExternalLinkage,
-                                            /*Initializer*/ nullptr, "polyc_dyn_shared", /*InsertBefore*/ nullptr,
-                                            llvm::GlobalValue::NotThreadLocal, /*addressSpace*/ 3);
+                                            /*Initializer*/ nullptr, PolycDynSharedGlobal, /*InsertBefore*/ nullptr,
+                                            llvm::GlobalValue::NotThreadLocal, AddrSpace::Workgroup);
     sharedGlobal->setAlignment(llvm::Align(16));
     return sharedGlobal;
   };

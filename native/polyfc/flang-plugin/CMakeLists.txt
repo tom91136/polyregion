@@ -46,11 +46,11 @@ target_link_libraries(polyfc-flang-plugin
 target_precompile_headers(polyfc-flang-plugin PRIVATE
 
         <optional>
-        <ostream>
         <unordered_map>
         <utility>
         <vector>
         <cstdio>
+        <cstdlib>
 
         [["aspartame/all.hpp"]]
 

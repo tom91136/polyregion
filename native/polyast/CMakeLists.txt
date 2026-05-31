@@ -1,8 +1,7 @@
 
 add_library(PolyAST generated/polyast.cpp generated/polyast_codec.cpp generated/polyast_repr.cpp ast.cpp )
 target_include_directories(PolyAST PUBLIC . generated)
-target_compile_options(PolyAST PRIVATE ${COMPILE_OPTIONS})
-target_link_options(PolyAST PRIVATE ${LINK_OPTIONS})
+polyregion_apply_common_options(PolyAST)
 target_link_libraries(PolyAST
         PRIVATE
         Aspartame::Aspartame

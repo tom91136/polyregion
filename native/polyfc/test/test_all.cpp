@@ -1,5 +1,7 @@
 #include "test_all.h"
 
+#include "polyregion/env_keys.h"
+
 #include "polytest/driver.hpp"
 
 int main(int argc, const char **argv) {
@@ -10,7 +12,7 @@ int main(int argc, const char **argv) {
                      .binaryDir = BinaryDir,
                      .workDir = WorkDir,
                      .testFiles = TestFiles,
-                     .profileDir = envOr("POLYTEST_PROFILE_DIR", POLYREGION_TEST_PROFILE_DIR),
+                     .profileDir = envOr(polyregion::env::PolytestProfileDir, POLYREGION_TEST_PROFILE_DIR),
                      .archVar = "polyfc_arch",
                      .defaultsVar = "polyfc_defaults",
                      .defaultsLabelVar = "opt",
@@ -28,7 +30,7 @@ int main(int argc, const char **argv) {
 #endif
                      },
                      .driverEnvVar = "POLYFC_DRIVER",
-                     .passthroughEnvs = {"POLYFC_NO_REWRITE=1", "POLYDCO_NO_OFFLOAD=1"},
+                     .passthroughEnvs = {std::string(polyregion::env::PolyfcNoRewrite) + "=1"},
                      .outputPrefix = "polyfc_test_",
                      .tempPrefix = "polyfc_",
                      .directive = "!CHECK",

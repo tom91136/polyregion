@@ -4,8 +4,10 @@
 
 #include "ast.h"
 #include "ftypes.h"
+#include "polydco_abi.h"
 
 using namespace polyregion::polyfc;
+namespace abi = polyregion::polydco::abi;
 
 CharStarMirror::CharStarMirror(ModuleOp &M) : AggregateMirror(M), ptr(M) {}
 const char *CharStarMirror::typeName() const { return "CharStar"; }
@@ -78,11 +80,10 @@ Value PolyDCOMirror::convertIfNeeded(OpBuilder &B, Value value, Type required) {
 }
 PolyDCOMirror::PolyDCOMirror(ModuleOp &m)
     : TLB(m), ptrTy(LLVM::LLVMPointerType::get(TLB.getContext())), voidTy(LLVM::LLVMVoidType::get(TLB.getContext())), //
-      recordFn(defineFunc(m, "polydco_record", voidTy, {ptrTy, TLB.getI64Type()})),
-      releaseFn(defineFunc(m, "polydco_release", voidTy, {ptrTy})),
-      debugLayoutFn(defineFunc(m, "polydco_debug_typelayout", voidTy, {ptrTy})),
-      isPlatformKindFn(defineFunc(m, "polydco_is_platformkind", TLB.getI1Type(), {TLB.getI8Type()})),
-      dispatchFn(defineFunc(m, "polydco_dispatch", TLB.getI1Type(),
+      recordFn(defineFunc(m, abi::Record, voidTy, {ptrTy, TLB.getI64Type()})), releaseFn(defineFunc(m, abi::Release, voidTy, {ptrTy})),
+      debugLayoutFn(defineFunc(m, abi::DebugTypeLayout, voidTy, {ptrTy})),
+      isPlatformKindFn(defineFunc(m, abi::IsPlatformKind, TLB.getI1Type(), {TLB.getI8Type()})),
+      dispatchFn(defineFunc(m, abi::Dispatch, TLB.getI1Type(),
                             {/* lowerBound     */ TLB.getI64Type(),
                              /* upperBound     */ TLB.getI64Type(),
                              /* step           */ TLB.getI64Type(),

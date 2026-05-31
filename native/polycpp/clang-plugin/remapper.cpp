@@ -20,6 +20,7 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/llvm_dyn.hpp"
 
 #include "ast.h"
@@ -30,7 +31,7 @@ using namespace polyregion::polystl;
 using namespace aspartame;
 
 const static auto EmptyStructMarker = Named("#empty_struct_storage", Type::IntU8());
-const static std::string This = "#this";
+const static std::string This = polyregion::conventions::ThisReceiver;
 const static std::string Empty = "#empty";
 
 [[nodiscard]] static Expr::Any defaultValue(const Type::Any &tpe) {

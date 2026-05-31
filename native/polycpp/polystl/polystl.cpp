@@ -1,5 +1,6 @@
 #include "polystl/polystl.h"
 
+#include "polyregion/conventions.h"
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
@@ -158,7 +159,7 @@ POLYREGION_EXPORT void polystl::details::dispatchHostThreaded(const size_t globa
   using namespace invoke;
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch hostthread", __func__, moduleId, global);
   ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
-  polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{global, 1, 1}}, {});
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{Dim3{global, 1, 1}}, {});
   polyrt::currentQueue->enqueueWaitBlocking();
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
 }
@@ -174,9 +175,9 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
   dumpAllocationTable();
   const auto buffer = localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorDevicePtr}, {Type::Void, {}}}
                                         : ArgBuffer{{Type::Ptr, &functorDevicePtr}, {Type::Void, {}}};
-  polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, //
-                                           Policy{                    //
-                                                  Dim3{global, 1, 1}, //
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, //
+                                           Policy{                                   //
+                                                  Dim3{global, 1, 1},                //
                                                   local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},
                                            {});
   log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);

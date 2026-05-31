@@ -25,6 +25,7 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/llvm_dyn.hpp"
 
 #include "ast.h"
@@ -1054,7 +1055,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   using namespace dsl;
   using namespace parallel_ops;
 
-  const static std::string fnName = "_main";
+  const static std::string fnName = conventions::EntryName;
 
   const static Named UpperBound("#upperBound", Long);
   const static Named LowerBound("#lowerBound", Long);
