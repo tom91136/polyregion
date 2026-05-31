@@ -243,6 +243,7 @@ object Processor {
 }
 
 class Processor extends AbstractProcessor {
+  import polyregion.ast.Env.debug
 
   private val symbolTable = mutable.Map[String, TypeElement]()
   private val methodTable = mutable.Map[String, MethodTree]()
@@ -258,7 +259,7 @@ class Processor extends AbstractProcessor {
     super.init(processingEnv)
     processingEnv.getMessager.printMessage(Diagnostic.Kind.NOTE, "Entered processor")
 
-    System.out.println(getClass.getClassLoader)
+    debug(getClass.getClassLoader)
 
     val allPkgs = Seq(
       "com.sun.tools.javac.code",
@@ -299,7 +300,7 @@ class Processor extends AbstractProcessor {
 
       tasks.addTaskListener(new TaskListener {
         override def started(e: TaskEvent): Unit = {
-          println(s"[STARTED]  =>  ${e} ${visited}")
+          debug(s"[STARTED]  =>  ${e} ${visited}")
           (e.getKind, e.getCompilationUnit, e.getSourceFile) match {
 
             case (TaskEvent.Kind.GENERATE, cu, file) if cu != null && !visited.contains(file) =>
@@ -325,7 +326,7 @@ class Processor extends AbstractProcessor {
                 case Right(value) => value
               }
 
-              println(
+              debug(
                 s">>>> Closures for ${e.getTypeElement}\n" + xs
                   .map { case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString}" }
                   .mkString("\n")
@@ -337,7 +338,7 @@ class Processor extends AbstractProcessor {
                 val pkg  = s"polyregion.$$gen$$"
                 val name = s"${cls.replace('.', '$')}$$${x.getName}"
                 val fqcn = s"$pkg.$name"
-                println(s"Write ${fqcn}")
+                debug(s"Write ${fqcn}")
                 if (!generated.contains(fqcn)) {
                   val gen =
                     processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class", null)
@@ -364,7 +365,7 @@ class Processor extends AbstractProcessor {
                   os.close()
                   generated += fqcn
                 } else {
-                  println(s"OVERWRITE ${fqcn}")
+                  debug(s"OVERWRITE ${fqcn}")
                 }
 
               }
@@ -375,7 +376,7 @@ class Processor extends AbstractProcessor {
         }
 
         override def finished(e: TaskEvent): Unit = {
-          println(s"[  ENDED]  =>  ${e}")
+          debug(s"[  ENDED]  =>  ${e}")
           e.getKind match {
             case TaskEvent.Kind.ENTER =>
 //              enterVisited += (e.getSourceFile -> e.getCompilationUnit)

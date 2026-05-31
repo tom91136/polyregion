@@ -28,7 +28,4 @@ object Symbols {
 
   // val Array         = p.Sym(classOf[Array[Int]])
 
-  // println(">"+Symbols.ClassTag)
-  // println(">"+Symbols.Array)
-
 }

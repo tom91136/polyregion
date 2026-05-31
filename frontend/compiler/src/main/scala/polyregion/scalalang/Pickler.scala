@@ -12,7 +12,7 @@ import polyregion.prism.StdLib.MutableSeq
 object Pickler {
 
   // Macro-time dump gate; matches `compiletime.DEBUG` semantics (POLYREGION_DEBUG=1).
-  private val DEBUG                                   = sys.env.contains("POLYREGION_DEBUG")
+  private val DEBUG                                   = sys.env.contains(Env.PolyregionDebug)
   private inline def debug(inline s: => String): Unit = if (DEBUG) println(s)
 
   def liftTpe(using q: Quotes)(t: p.Type) = t match {
@@ -301,7 +301,7 @@ object Pickler {
         '{
           val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
           val arrPtr    = $pointerOfBuffer(arrBuffer)
-          if (sys.env.contains("POLYREGION_DEBUG"))
+          if (sys.env.contains(Env.PolyregionDebug))
             println(
               s"[bind]: write array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
             )
@@ -347,7 +347,7 @@ object Pickler {
     ) = '{
       val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
       val ptr    = $pointerOfBuffer(buffer)
-      if (sys.env.contains("POLYREGION_DEBUG"))
+      if (sys.env.contains(Env.PolyregionDebug))
         println(s"[bind]: object  ${$root}(prism=${$rootAfterPrism}) => $buffer(0x${ptr.toHexString})")
       ${
         Varargs(mapping.members.map { m =>
@@ -398,7 +398,7 @@ object Pickler {
         array
       }
 
-      if (sys.env.contains("POLYREGION_DEBUG"))
+      if (sys.env.contains(Env.PolyregionDebug))
         println(s"??? target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
       $ptrMap += ($root -> ptr)
       ptr
@@ -457,7 +457,7 @@ object Pickler {
             }
             i += 1
           }
-          if (sys.env.contains("POLYREGION_DEBUG"))
+          if (sys.env.contains(Env.PolyregionDebug))
             println(
               s"[bind]: read array  [${arrayLen} * ${${ Expr(comp.repr) }}]  ${$seq} => $arrBuffer(0x${arrPtr.toHexString})"
             )
@@ -472,7 +472,7 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ) = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      if (sys.env.contains("POLYREGION_DEBUG"))
+      if (sys.env.contains(Env.PolyregionDebug))
         println(s"[bind]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
 
       def toByteArray(buffer: ByteBuffer): Array[Byte] = {
@@ -481,7 +481,7 @@ object Pickler {
         array
       }
 
-      if (sys.env.contains("POLYREGION_DEBUG"))
+      if (sys.env.contains(Env.PolyregionDebug))
         println(s">>> target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
 
       ${
@@ -541,7 +541,7 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ): Expr[t] = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      if (sys.env.contains("POLYREGION_DEBUG"))
+      if (sys.env.contains(Env.PolyregionDebug))
         println(
           s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }} <- $buffer(0x${$ptr.toHexString})"
         )

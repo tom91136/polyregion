@@ -254,8 +254,6 @@ object Retyper {
           (name, tpeVars, symbol, kind) <- resolveClsFromTpeRepr(tpeCtor) // type ctors must be a class
           (tpeCtorArgs, wit)            <- typer0N(args)
 
-          // _ = println(s"##### $name $kind $tpeCtorArgs ${tpe <:< q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.IndexedSeq[_]]).appliedTo(args) }")
-
           argAppliedSeqLikeTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[?]]).appliedTo(args)
 
           retyped <- (name, kind, tpeCtorArgs) match {

@@ -23,10 +23,7 @@ trait JitOps[F[_], O](d: rt.Device.Queue, f: Suspend[F]) {
 
   inline def foreach(inline x: Range)
   /*             */ (using inline o: O)
-  /*             */ (inline f: Int => Unit): F[Unit] = {
-    println("s" + f)
-    ???
-  }
+  /*             */ (inline f: Int => Unit): F[Unit] = ???
   inline def foreach(inline x: Range, inline y: Range)
   /*             */ (using inline o: O)
   /*             */ (inline f: (Int, Int) => Unit): this.type = ???

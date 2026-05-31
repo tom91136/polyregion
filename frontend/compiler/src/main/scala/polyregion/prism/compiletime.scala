@@ -11,6 +11,7 @@ import scala.quoted.*
 
 @compileTimeOnly("This class only exists at compile-time for internal use")
 object compiletime {
+  import Env.debug
 
   inline def derivePackedMirrors[T <: Tuple](xs: T) = {
     // XXX We are not in a macro context yet  so we don't have a quote context.
@@ -73,7 +74,7 @@ object compiletime {
           (_ -> mt, _) <- Retyper.typer0(m)
           st <- st match {
             case p.Type.Struct(sym, _) =>
-              println(s"???> Go ${sym} ==  ${m.show}")
+              debug(s"???> Go ${sym} ==  ${m.show}")
               sym.success
             case bad => s"source class ${s.show} (mirror is ${m.show}) is not a class type, got repr: ${bad.repr}".fail
           }
@@ -97,7 +98,7 @@ object compiletime {
         // XXX JVM bytecode limit is 64k per method, make sure we're under that by using 1k per constant,
         // we also generate lazy vals (could be defs if this becomes a problem) which transforms to a separate synthetic method.
         val packs = MsgPack.encode(xs).grouped(1024).toList
-        println(s"packs = ${packs.size}")
+        debug(s"packs = ${packs.size}")
         type PickleType = Array[Byte]
         val (vals, refs) = packs.zipWithIndex.map { (pack, i) =>
           val symbol =
@@ -122,7 +123,7 @@ object compiletime {
   private def extractMethodTypes(using q: Quoted) //
   (clsTpe: q.TypeRepr): Result[(q.Symbol, List[(q.Symbol, q.DefDef)])] =
     clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").flatMap { sym =>
-      println(s"$sym ${sym.methodMembers.toList}")
+      debug(s"$sym ${sym.methodMembers.toList}")
       sym.methodMembers
         .filter { m =>
           val flags = m.flags
@@ -155,17 +156,17 @@ object compiletime {
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[(p.Function, q.Dependencies)] = for {
 
     log <- sink.subLog(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}").success
-    _ = println(s"Do ${sourceMethodSym} -> ${mirrorMethodSym}")
+    _ = debug(s"Do ${sourceMethodSym} -> ${mirrorMethodSym}")
 
     sourceSignature <- sourceMethodSym.tree match {
       case d: q.DefDef => polyregion.scalalang.Compiler.deriveSignature(d)
       case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
     }
-    _ = println(s"SIG=${sourceSignature.repr}")
+    _ = debug(s"SIG=${sourceSignature.repr}")
 
     mirrorMethods <- mirrorMethodSym.tree match {
       case d: q.DefDef =>
-        println(d.show)
+        debug(d.show)
         for {
 
           (fn, fnDeps) <- polyregion.scalalang.Compiler.compileFn(log, d, Map.empty, intrinsify = true)
@@ -231,12 +232,12 @@ object compiletime {
       (sourceSym, sourceMethods) <- extractMethodTypes(source)
       (mirrorSym, mirrorMethods) <- extractMethodTypes(mirror)
 
-      _ = println(
+      _ = debug(
         s">>## ${sourceSym.fullName}(m=${sourceMethods.size})  -> ${mirrorSym.fullName}(m=${mirrorMethods.size}) "
       )
       mirrorStruct <- Retyper.structDef0(mirrorSym)
       sourceMethodTable = sourceMethods.groupBy(_._1.name)
-      _                 = println(s"Source Symbols:\n${sourceMethodTable.mkString("\n\t")}")
+      _                 = debug(s"Source Symbols:\n${sourceMethodTable.mkString("\n\t")}")
       mirroredMethods <- mirrorMethods.flatTraverse { case (reflectedSym, reflectedDef) =>
         sourceMethodTable.get(reflectedSym.name) match {
           case None => // Extra method on mirror, check that it's private.
@@ -276,8 +277,8 @@ object compiletime {
                 case Nil =>
                   val considered = sourceSigs.map("\t(no-match)=>" + _._2.repr).mkString("\n")
 
-                  println(sourceSigs(0)._2.copy(receiver = None))
-                  println(reflectedSigWithSourceTpes.copy(receiver = None).copy(receiver = None))
+                  debug(sourceSigs(0)._2.copy(receiver = None))
+                  debug(reflectedSigWithSourceTpes.copy(receiver = None).copy(receiver = None))
 
                   (s"Overload resolution for ${reflectedSym} with resulted in no match, the following signatures were considered (mirror is the requirement):" +
                     s"\n\t(mirror)    ${reflectedSig.repr}" +
@@ -303,8 +304,8 @@ object compiletime {
       //   else ().success
       // deps.classes
       // deps.modules
-      _ = println("Dependent Classes = " + deps.classes.keys.toList)
-      _ = println("Dependent Modules = " + deps.modules.keys.map(_.fullName).toList)
+      _ = debug("Dependent Classes = " + deps.classes.keys.toList)
+      _ = debug("Dependent Modules = " + deps.modules.keys.map(_.fullName).toList)
 
       // FIXME we're creating a dummy function so that the replacement works,
       //  shouldn't have to do this really.
@@ -327,7 +328,7 @@ object compiletime {
           deps
         )(Map.empty)
 
-      _ = println(sink.render(1).mkString("\n"))
+      _ = debug(sink.render(1).mkString("\n"))
 
       parents = source.baseClasses.map(c => p.Sym(c.fullName))
 
@@ -339,7 +340,7 @@ object compiletime {
       dependencies = dependentStructs.toList
     )
 
-    println(">>>" + m)
+    debug(">>>" + m)
     m
   }
 

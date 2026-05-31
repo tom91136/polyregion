@@ -17,11 +17,7 @@ import scala.util.Try
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
-
-  // Set POLYREGION_DEBUG=1 to surface the per-offload IR / captures / events dump that the
-  // main macro path would otherwise print to scalac's stdout (hundreds of MB under the test suite).
-  private val DEBUG                                   = sys.env.contains("POLYREGION_DEBUG")
-  private inline def debug(inline s: => String): Unit = if (DEBUG) println(s)
+  import Env.debug
 
   inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
   def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
@@ -357,7 +353,7 @@ object compiletime {
                         )
                       }
 
-                      if (sys.env.contains("POLYREGION_DEBUG")) {
+                      if (sys.env.contains(Env.PolyregionDebug)) {
                         println("Dispatch tid=" + Thread.currentThread.getId)
                         println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
                         println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
@@ -370,7 +366,7 @@ object compiletime {
                         fnValues.array,
                         rt.Policy($dim),
                         { () =>
-                          if (sys.env.contains("POLYREGION_DEBUG"))
+                          if (sys.env.contains(Env.PolyregionDebug))
                             println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
 
                           val objMap = scala.collection.mutable.Map[Long, Any]()
@@ -388,7 +384,7 @@ object compiletime {
                               )
                               // })
                             }
-                            if (sys.env.contains("POLYREGION_DEBUG")) println("Restore complete")
+                            if (sys.env.contains(Env.PolyregionDebug)) println("Restore complete")
                             cb_(Right(()))
                           } catch {
                             case e: Throwable =>
@@ -522,7 +518,7 @@ object compiletime {
                 debug(s"$r = " + r.asTerm.symbol.flags.show)
                 val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
                 '{
-                  if (sys.env.contains("POLYREGION_DEBUG")) println(s"Restore ${$r}")
+                  if (sys.env.contains(Env.PolyregionDebug)) println(s"Restore ${$r}")
                   ${
                     if (mutable) {
                       q.Assign(r.asTerm, read(sdef.name, r, ptr).asTerm).asExprOf[Unit]
@@ -536,7 +532,7 @@ object compiletime {
             (ref.asExpr: @scala.unchecked) match {
               case '{ $r: u } =>
                 '{
-                  if (sys.env.contains("POLYREGION_DEBUG")) println(s"[Bind] skipping primitive ${$r}")
+                  if (sys.env.contains(Env.PolyregionDebug)) println(s"[Bind] skipping primitive ${$r}")
                 }
             }
           case (t, _) =>

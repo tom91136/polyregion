@@ -14,6 +14,7 @@ import scala.collection.immutable.ArraySeq
 import scala.jdk.CollectionConverters.*
 
 object Compiler {
+  import polyregion.ast.Env.debug
 
   def visit(elem: Element, trees: Trees, t: Tree, e: ProcessingEnvironment): String = {
 
@@ -147,21 +148,21 @@ object Compiler {
     val x = new TreeScanner[String, Unit] {
 
       override def visitMethodInvocation(node: MethodInvocationTree, p: Unit): String = {
-        println(">>>" + node)
+        debug(">>>" + node)
         val cu = trees.getPath(elem).getCompilationUnit
-        println(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
-        println(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
+        debug(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
+        debug(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
 
         ""
       }
 
       override def visitLambdaExpression(node: LambdaExpressionTree, p: Unit) = {
-        println(">>>" + node)
+        debug(">>>" + node)
 
         val cu = trees.getPath(elem).getCompilationUnit
-        println(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
+        debug(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
 
-        println(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
+        debug(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
 
 //        println(trees.getElement(trees.getPath(trees.getPath(elem).getCompilationUnit, node)))
 //        println("tag="+trees.get)
@@ -173,7 +174,7 @@ object Compiler {
       override def reduce(r1: String, r2: String) = r1 ++ r2
     }
 
-    println(">" + elem.getEnclosedElements.asScala.toList)
+    debug(">" + elem.getEnclosedElements.asScala.toList)
 
     x.scan(t, ())
 
@@ -186,10 +187,10 @@ object Compiler {
       processingEnv: ProcessingEnvironment
   ): Boolean = {
 
-    println(s"Roots = ${roundEnv.getRootElements.asScala.toList}")
+    debug(s"Roots = ${roundEnv.getRootElements.asScala.toList}")
 
     roundEnv.getRootElements.asScala.foreach { e =>
-      println(visit(e, trees, trees.getTree(e), processingEnv))
+      debug(visit(e, trees, trees.getTree(e), processingEnv))
     }
 
 //    val xs = processingEnv.getFiler.getResource(StandardLocation.CLASS_OUTPUT, "polyregion", "AnnotationTest.class")
