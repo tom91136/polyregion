@@ -25,7 +25,7 @@ object Pickler {
     case p.Type.Float32 => Type.of[Float]
     case p.Type.Float64 => Type.of[Double]
     case p.Type.Unit0   => Type.of[Unit]
-    case illegal        => throw new RuntimeException(s"liftTpe: Cannot lift $illegal")
+    case illegal        => throw RuntimeException(s"liftTpe: Cannot lift $illegal")
   }
 
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
@@ -40,7 +40,7 @@ object Pickler {
     case p.Type.Ptr(_, _)    => rt.Type.PTR
     case p.Type.Struct(_, _) => rt.Type.PTR
     case p.Type.Unit0        => rt.Type.VOID
-    case illegal             => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
+    case illegal             => throw RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
   def readPrim(using q: Quotes) //
@@ -55,7 +55,7 @@ object Pickler {
     case p.Type.IntS64  => '{ $source.getLong($byteOffset) }
     case p.Type.Unit0   => '{ () }
     case x =>
-      throw new RuntimeException(s"Cannot get ${x.repr} from buffer, it is not a primitive type")
+      throw RuntimeException(s"Cannot get ${x.repr} from buffer, it is not a primitive type")
 
   }
 
@@ -71,7 +71,7 @@ object Pickler {
     case p.Type.IntS64  => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
     case p.Type.Unit0   => '{ () }
     case x =>
-      throw new RuntimeException(
+      throw RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
       )
   }
@@ -718,7 +718,7 @@ object Pickler {
                     // ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
                   }
                 case (None, readPtr) => // object not previously written, fail
-                  throw new RuntimeException(
+                  throw RuntimeException(
                     s"Val root object ${root} was not previously written, cannot read from to 0x${readPtr.toHexString}"
                   )
               }
@@ -738,11 +738,11 @@ object Pickler {
 
                   $objMap += (readPtr -> root)
                 case (Some(writePtr), readPtr) => // object reassignment for val, fail
-                  throw new RuntimeException(
+                  throw RuntimeException(
                     s"Cannot update immutable val, setting ${root} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
                   )
                 case (None, readPtr) => // object not previously written, fail
-                  throw new RuntimeException(
+                  throw RuntimeException(
                     s"Val root object ${root} was not previously written, cannot update from to 0x${readPtr.toHexString}"
                   )
               }

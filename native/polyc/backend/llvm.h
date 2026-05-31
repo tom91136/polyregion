@@ -52,6 +52,8 @@ struct StructInfo {
   Map<std::string, size_t> memberIndices;
 };
 
+enum AddrSpace : unsigned { Default = 0, CrossWorkgroup = 1, Workgroup = 3, Generic = 4, Private = 5 };
+
 struct TargetedContext {
   using AS = unsigned int;
   LLVMBackend::Options options;

@@ -88,10 +88,10 @@ object Processor {
   catch {
     case e: NoSuchFieldException =>
       // can't happen.
-      throw new RuntimeException(e)
+      throw RuntimeException(e)
     case e: SecurityException =>
       // can't happen
-      throw new RuntimeException(e)
+      throw RuntimeException(e)
   }
 
   def findCls(name: String): Option[Class[?]] =
@@ -275,16 +275,16 @@ class Processor extends AbstractProcessor {
     )
 
     val markerClosures =
-      Set("polyregion.java.OffloadRunnable", "polyregion.java.OffloadFunction")
+      Set("polyregion.javalang.OffloadRunnable", "polyregion.javalang.OffloadFunction")
 
     (for {
-      _ <- addOpens(allPkgs).adaptError(e => new RuntimeException("Unable to add opens at runtime", e))
+      _ <- addOpens(allPkgs).adaptError(e => RuntimeException("Unable to add opens at runtime", e))
       tasks <- Either
         .catchNonFatal(JavacTask.instance(processingEnv))
-        .adaptError(e => new RuntimeException("Unable to obtain an instance of JavacTask", e))
+        .adaptError(e => RuntimeException("Unable to obtain an instance of JavacTask", e))
       trees <- Either
         .catchNonFatal(Trees.instance(processingEnv))
-        .adaptError(e => new RuntimeException("Unable to obtain an instance of Trees", e))
+        .adaptError(e => RuntimeException("Unable to obtain an instance of Trees", e))
       _ = this.trees = trees
     } yield {
 

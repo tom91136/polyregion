@@ -2,7 +2,7 @@ package polyregion.scalalang
 
 object intrinsics {
 
-  private def intrinsic: Nothing = throw new AssertionError("illegal")
+  private def intrinsic: Nothing = throw AssertionError("illegal")
 
   trait TypedBuffer[A] {
     def apply(i: Int): A

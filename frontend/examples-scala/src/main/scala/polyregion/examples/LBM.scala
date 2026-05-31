@@ -20,9 +20,9 @@ object LBM {
       var s8: Num = 0f
   )
 
-  def parseInt(s: String): Either[Exception, Int] = s.trim.toIntOption.toRight(new Exception(s"No parse[Int]: $s"))
+  def parseInt(s: String): Either[Exception, Int] = s.trim.toIntOption.toRight(Exception(s"No parse[Int]: $s"))
   def parseFloat(s: String): Either[Exception, Float] =
-    s.trim.toFloatOption.toRight(new Exception(s"No parse[Float]: $s"))
+    s.trim.toFloatOption.toRight(Exception(s"No parse[Float]: $s"))
 
   case class Param(nx: Int, ny: Int, maxIters: Int, reynoldsDim: Int, density: Num, accel: Num, omega: Num)
   object Param {
@@ -38,7 +38,7 @@ object LBM {
             accel       <- parseFloat(accelLn)
             omega       <- parseFloat(omegaLn)
           } yield Param(nx, ny, maxIters, reynoldsDim, density, accel, omega)
-        case xs => Left(new Exception(s"No parse: $xs"))
+        case xs => Left(Exception(s"No parse: $xs"))
       }
   }
 
@@ -56,12 +56,12 @@ object LBM {
                 x <- parseInt(xv)
                 y <- parseInt(yv)
               } yield x -> y
-            case xs => Left(new Exception(s"Bad obstacle line: $xs"))
+            case xs => Left(Exception(s"Bad obstacle line: $xs"))
           })
 
         _ <- error match {
           case Nil => Right(())
-          case xs  => Left(new Exception(xs.map(_.getMessage).mkString("\n")))
+          case xs  => Left(Exception(xs.map(_.getMessage).mkString("\n")))
         }
         obstacles = new Image2d[Boolean](p.nx, p.ny, false)
         _         = blocks.foreach { case (x, y) => obstacles.set(x, y)(true) }
@@ -86,7 +86,7 @@ object LBM {
   }
 
   def initialiseBuffer(param: Param): Image2d[Speed] = {
-    val image   = new Image2d[Speed](param.nx, param.ny, new Speed())
+    val image   = new Image2d[Speed](param.nx, param.ny, Speed())
     val w0: Num = param.density * 4f / 9f
     val w1: Num = param.density / 9f
     val w2: Num = param.density / 36f
@@ -248,7 +248,7 @@ object LBM {
   }
 
   def timestep(sim: Simulation, image: Image2d[Speed]): Unit = {
-    val buffer = new Image2d[Speed](sim.param.nx, sim.param.ny, new Speed())
+    val buffer = new Image2d[Speed](sim.param.nx, sim.param.ny, Speed())
     val avVels = Array.ofDim[Num](sim.param.maxIters)
     for (iter <- 0 until sim.param.maxIters by 2) {
       accelerateFlow(sim, image)

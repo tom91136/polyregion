@@ -43,7 +43,7 @@ object Buffer {
       try math.multiplyExact(dim, elementSize)
       catch {
         case e: Throwable =>
-          throw new IllegalArgumentException(
+          throw IllegalArgumentException(
             s"Cannot allocated buffer of size ${dim * elementSize} bytes (overflow or negative size?)",
             e
           )

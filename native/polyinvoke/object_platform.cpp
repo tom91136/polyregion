@@ -196,14 +196,14 @@ static void *malloc_(size_t size) { return std::malloc(size); }
 // computes Delta = 4+N itself. winnt.h defines IMAGE_REL_AMD64_*/IMAGE_FILE_MACHINE_AMD64
 // as macros that collide with llvm::COFF::* enums under MSVC, hence the raw constants.
 static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
-  constexpr uint16_t kRel32 = 0x0004;
-  constexpr uint16_t kFileMachineAMD64 = 0x8664;
-  constexpr size_t kCoffHeaderMin = 20;
+  constexpr uint16_t Rel32 = 0x0004;
+  constexpr uint16_t FileMachineAMD64 = 0x8664;
+  constexpr size_t CoffHeaderMin = 20;
 
-  if (buf.size() < kCoffHeaderMin) return;
+  if (buf.size() < CoffHeaderMin) return;
   uint16_t machine;
   std::memcpy(&machine, buf.data(), 2);
-  if (machine != kFileMachineAMD64) return; // not an x86_64 COFF; ELF/Mach-O/import-lib skip the parse
+  if (machine != FileMachineAMD64) return; // not an x86_64 COFF; ELF/Mach-O/import-lib skip the parse
 
   auto memBuf = llvm::MemoryBufferRef(llvm::StringRef(buf.data(), buf.size()), "<coff>");
   auto objOrErr = llvm::object::ObjectFile::createObjectFile(memBuf);
@@ -220,22 +220,22 @@ static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
   for (const auto &secRef : coff->sections()) {
     const llvm::object::coff_section *cs = coff->getCOFFSection(secRef);
     if (!cs || cs->NumberOfRelocations == 0 || cs->SizeOfRawData == 0) continue;
-    constexpr size_t kReloc = 10; // sizeof(coff_relocation)
+    constexpr size_t Reloc = 10; // sizeof(coff_relocation)
     size_t i = 0;
     for (const auto &rel : coff->getRelocations(cs)) {
-      const size_t relOff = static_cast<size_t>(cs->PointerToRelocations) + i * kReloc;
+      const size_t relOff = static_cast<size_t>(cs->PointerToRelocations) + i * Reloc;
       ++i;
-      if (rel.Type != kRel32 || rel.VirtualAddress < cs->VirtualAddress) continue;
+      if (rel.Type != Rel32 || rel.VirtualAddress < cs->VirtualAddress) continue;
       const uint32_t off = rel.VirtualAddress - cs->VirtualAddress;
       if (off + 4 > cs->SizeOfRawData) continue;
       const size_t patchOff = static_cast<size_t>(cs->PointerToRawData) + off;
-      if (patchOff + 4 > size || relOff + kReloc > size) continue;
+      if (patchOff + 4 > size || relOff + Reloc > size) continue;
 
       int32_t addend;
       std::memcpy(&addend, base + patchOff, 4);
       if (addend < -5 || addend > -1) continue;
 
-      const uint16_t newType = static_cast<uint16_t>(kRel32 + (-addend));
+      const uint16_t newType = static_cast<uint16_t>(Rel32 + (-addend));
       std::memcpy(base + relOff + offsetof(llvm::object::coff_relocation, Type), &newType, 2);
       const uint32_t zero = 0;
       std::memcpy(base + patchOff, &zero, 4);

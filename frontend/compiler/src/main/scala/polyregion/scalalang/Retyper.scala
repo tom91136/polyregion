@@ -322,7 +322,7 @@ object Retyper {
         }
 
     }).recoverWith { case e =>
-      new CompilerException(s"Retyper failed while typing `${Try(repr.show)}`", e).asLeft
+      CompilerException(s"Retyper failed while typing `${Try(repr.show)}`", e).asLeft
     }
 
 }

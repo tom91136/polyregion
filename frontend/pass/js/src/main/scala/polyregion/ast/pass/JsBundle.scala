@@ -44,7 +44,7 @@ object JsBundle {
     }
 
     def fromArray(bytes: Array[Byte]): Uint8Array = {
-      val out = new Uint8Array(bytes.length)
+      val out = Uint8Array(bytes.length)
       var i   = 0
       while (i < bytes.length) {
         out(i) = (bytes(i).toInt & 0xff).toShort

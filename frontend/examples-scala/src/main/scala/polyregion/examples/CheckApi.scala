@@ -145,7 +145,7 @@ object CheckApi {
               Arg.of(42)
             ),
             Arg.of(),
-            new Policy(new Dim3(1, 1, 1)),
+            Policy(Dim3(1, 1, 1)),
             () => {
               println("  K done! id=" + Thread.currentThread().getId)
               val x = Array.ofDim[Int](4)

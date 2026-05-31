@@ -52,7 +52,7 @@ object MsgPack {
     def utf8String(srcPos: Int, length: Int): String = {
       val out = new Array[Byte](length)
       copyToArray(srcPos, out, 0, length)
-      new String(out, StandardCharsets.UTF_8)
+      String(out, StandardCharsets.UTF_8)
     }
   }
 
@@ -62,7 +62,7 @@ object MsgPack {
     override def copyToArray(srcPos: Int, dest: Array[Byte], destPos: Int, length: Int): Unit =
       Array.copy(bytes, srcPos, dest, destPos, length)
     override def utf8String(srcPos: Int, length: Int): String =
-      new String(bytes, srcPos, length, StandardCharsets.UTF_8)
+      String(bytes, srcPos, length, StandardCharsets.UTF_8)
   }
 
   trait ByteOutput {
@@ -180,7 +180,7 @@ object MsgPack {
     def entries: Array[String] = ids.keysIterator.toArray
   }
 
-  final class Writer(output: ByteOutput = new ArrayByteOutput(), private var interner: StringInterner | Null = null) {
+  final class Writer(output: ByteOutput = ArrayByteOutput(), private var interner: StringInterner | Null = null) {
     def size: Int                                  = output.size
     def setStringInterner(x: StringInterner): Unit = interner = x
     def toByteArray: Array[Byte]                   = output.toByteArray
@@ -249,7 +249,7 @@ object MsgPack {
     }
 
     def writeArrayHeader(n: Int): Unit =
-      if (n < 0) throw new MsgPackException(s"Negative array size: $n")
+      if (n < 0) throw MsgPackException(s"Negative array size: $n")
       else if (n <= 15) byte(0x90 | n)
       else if (n <= 0xffff) {
         byte(0xdc)
@@ -273,7 +273,7 @@ object MsgPack {
       }
 
     private def fail(message: String): Nothing =
-      throw new MsgPackException(s"$message at byte $cursor")
+      throw MsgPackException(s"$message at byte $cursor")
 
     private def require(n: Int): Unit =
       if (cursor + n > bytes.length) fail(s"Unexpected end of input, need $n byte(s)")
@@ -539,7 +539,7 @@ object MsgPack {
         },
         r => {
           val n = r.readArrayHeader()
-          if (n != 2) throw new MsgPackException(s"Expected tuple array of size 2, got $n")
+          if (n != 2) throw MsgPackException(s"Expected tuple array of size 2, got $n")
           (C0.decode(r), C1.decode(r))
         }
       )
@@ -572,7 +572,7 @@ object MsgPack {
         }
         def decodeFields(r: Reader, n: Int): Any = {
           if (n != codecs.length)
-            throw new MsgPackException(s"Expected sum case with ${codecs.length} field(s), got $n")
+            throw MsgPackException(s"Expected sum case with ${codecs.length} field(s), got $n")
           val arr = new Array[Any](codecs.length)
           var i   = 0
           while (i < codecs.length) {
@@ -627,13 +627,13 @@ object MsgPack {
             if (r.nextIsArray) {
               val n   = r.readArrayHeader()
               val ord = r.readInt32()
-              if (ord < 0 || ord >= cases.length) throw new MsgPackException(s"Bad sum ordinal: $ord")
+              if (ord < 0 || ord >= cases.length) throw MsgPackException(s"Bad sum ordinal: $ord")
               cases(ord).decodeFields(r, n - 1).asInstanceOf[T]
             } else {
               val ord = r.readInt32()
-              if (ord < 0 || ord >= cases.length) throw new MsgPackException(s"Bad sum ordinal: $ord")
+              if (ord < 0 || ord >= cases.length) throw MsgPackException(s"Bad sum ordinal: $ord")
               val c = cases(ord)
-              if (c.arity != 0) throw new MsgPackException(s"Expected array payload for non-nullary sum ordinal: $ord")
+              if (c.arity != 0) throw MsgPackException(s"Expected array payload for non-nullary sum ordinal: $ord")
               c.decodeFields(r, 0).asInstanceOf[T]
             }
         )
@@ -646,7 +646,7 @@ object MsgPack {
           },
           r => {
             val n = r.readArrayHeader()
-            if (n != arity) throw new MsgPackException(s"Expected product array of size $arity, got $n")
+            if (n != arity) throw MsgPackException(s"Expected product array of size $arity, got $n")
             p.fromProduct(readFields[p.MirroredElemTypes](r))
           }
         )
@@ -682,10 +682,10 @@ object MsgPack {
       xs.unsignedByteAt(5) == 0x49
 
   def encodeRawTo[A: Encoder](x: A, out: ByteOutput): Unit =
-    summon[Encoder[A]].encode(new Writer(out), x)
+    summon[Encoder[A]].encode(Writer(out), x)
 
   def encodeRaw[A: Encoder](x: A): Array[Byte] = {
-    val out = new ArrayByteOutput()
+    val out = ArrayByteOutput()
     encodeRawTo(x, out)
     out.toByteArray
   }
@@ -693,10 +693,10 @@ object MsgPack {
   def encodeInternedTo[A: Encoder](x: A, out: ByteOutput): Unit = {
     val C     = summon[Encoder[A]]
     val table = new StringInterner
-    C.encode(new Writer(NullByteOutput, table), x)
+    C.encode(Writer(NullByteOutput, table), x)
 
     val entries = table.entries
-    val w       = new Writer(out)
+    val w       = Writer(out)
     w.writeArrayHeader(3)
     w.writeInt32(InternedMagic)
     w.writeArrayHeader(entries.length)
@@ -710,7 +710,7 @@ object MsgPack {
   }
 
   def encodeInterned[A: Encoder](x: A): Array[Byte] = {
-    val out = new ArrayByteOutput()
+    val out = ArrayByteOutput()
     encodeInternedTo(x, out)
     out.toByteArray
   }
@@ -721,24 +721,24 @@ object MsgPack {
 
   def decodeRawInput[A: Decoder](xs: ByteInput): Either[Exception, A] =
     try {
-      val r = new Reader(xs)
+      val r = Reader(xs)
       val a = summon[Decoder[A]].decode(r)
-      if (!r.isAtEnd) throw new MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
+      if (!r.isAtEnd) throw MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
       Right(a)
     } catch {
       case e: Exception => Left(e)
     }
 
   def decodeRaw[A: Decoder](xs: Array[Byte]): Either[Exception, A] =
-    decodeRawInput(new ArrayByteInput(xs))
+    decodeRawInput(ArrayByteInput(xs))
 
   def decodeInternedInput[A: Decoder](xs: ByteInput): Either[Exception, A] =
     try {
-      val r = new Reader(xs)
+      val r = Reader(xs)
       val n = r.readArrayHeader()
-      if (n != 3) throw new MsgPackException(s"Expected interned envelope array of size 3, got $n")
+      if (n != 3) throw MsgPackException(s"Expected interned envelope array of size 3, got $n")
       val magic = r.readInt32()
-      if (magic != InternedMagic) throw new MsgPackException(s"Bad interned envelope magic: $magic")
+      if (magic != InternedMagic) throw MsgPackException(s"Bad interned envelope magic: $magic")
       val tableSize = r.readArrayHeader()
       val table     = new Array[String](tableSize)
       var i         = 0
@@ -748,18 +748,18 @@ object MsgPack {
       }
       r.setStringTable(table)
       val a = summon[Decoder[A]].decode(r)
-      if (!r.isAtEnd) throw new MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
+      if (!r.isAtEnd) throw MsgPackException(s"Trailing bytes after MessagePack value at byte ${r.offset}")
       Right(a)
     } catch {
       case e: Exception => Left(e)
     }
 
   def decodeInterned[A: Decoder](xs: Array[Byte]): Either[Exception, A] =
-    decodeInternedInput(new ArrayByteInput(xs))
+    decodeInternedInput(ArrayByteInput(xs))
 
   def decodeInput[A: Decoder](xs: ByteInput): Either[Exception, A] =
     if (isInternedEnvelope(xs)) decodeInternedInput(xs) else decodeRawInput(xs)
 
   def decode[A: Decoder](xs: Array[Byte]): Either[Exception, A] =
-    decodeInput(new ArrayByteInput(xs))
+    decodeInput(ArrayByteInput(xs))
 }

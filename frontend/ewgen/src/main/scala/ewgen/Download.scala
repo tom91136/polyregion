@@ -54,7 +54,7 @@ object Download {
     Iterator.continually(next).takeWhile(_ != null).map(_.nn)
 
   private def extractTarStream(in: InputStream, destDir: Path, stripComponents: Int): Unit =
-    Using.resource(new TarArchiveInputStream(in)) { tar =>
+    Using.resource(TarArchiveInputStream(in)) { tar =>
       entries(tar.getNextEntry()).foreach { entry =>
         if (!entry.isGlobalPaxHeader && !entry.isPaxHeader) {
           strippedPath(entry.getName, stripComponents).foreach { relative =>
@@ -74,11 +74,11 @@ object Download {
     }
 
   private def extractDeb(archive: Path, destDir: Path, stripComponents: Int): Unit =
-    Using.resource(new ArArchiveInputStream(new BufferedInputStream(Files.newInputStream(archive)))) { ar =>
+    Using.resource(ArArchiveInputStream(BufferedInputStream(Files.newInputStream(archive)))) { ar =>
       entries(ar.getNextEntry()).find(_.getName.startsWith("data.tar.")) match {
         case Some(entry) =>
           val payload =
-            if (entry.getName.endsWith(".gz")) new GzipCompressorInputStream(ar)
+            if (entry.getName.endsWith(".gz")) GzipCompressorInputStream(ar)
             else if (entry.getName.endsWith(".tar")) ar
             else sys.error(s"Unsupported deb payload: ${entry.getName}")
           extractTarStream(payload, destDir, stripComponents)
@@ -104,9 +104,9 @@ object Download {
     val name = archive.getFileName.toString
     if (name.endsWith(".deb")) extractDeb(archive, destDir, stripComponents)
     else {
-      val in = new BufferedInputStream(Files.newInputStream(archive))
+      val in = BufferedInputStream(Files.newInputStream(archive))
       val stream =
-        if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) new GzipCompressorInputStream(in)
+        if (name.endsWith(".tar.gz") || name.endsWith(".tgz")) GzipCompressorInputStream(in)
         else if (name.endsWith(".tar")) in
         else sys.error(s"Unsupported archive extension: $name")
       extractTarStream(stream, destDir, stripComponents)

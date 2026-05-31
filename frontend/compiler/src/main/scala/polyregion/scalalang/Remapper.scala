@@ -252,7 +252,7 @@ object Remapper {
         } yield (instance, c.::=(stmts*))
       case (sym, _, _) => // Anything else is a normal invoke.
         if (receiver.isEmpty)
-          throw new RuntimeException("Why is recv empty???")
+          throw RuntimeException("Why is recv empty???")
 
         val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
           case p.Type.Struct(_, tpeArgs) => tpeArgs
@@ -485,7 +485,7 @@ object Remapper {
                         .failIfEmpty(s"$sym does not contain an implementation")
                         .flatMap(synthesiseSelectOnMethodWithReceiver(_))
                     } else {
-                      throw new RuntimeException(s"Unexpected ${sym}, not a valdef or defdef!")
+                      throw RuntimeException(s"Unexpected ${sym}, not a valdef or defdef!")
                     }
 
                   }
@@ -544,7 +544,7 @@ object Remapper {
       // already produced one; otherwise this is a programming error at the IR boundary.
       val lhsSelect: p.Term.Select = lhs match {
         case p.Expr.Alias(s: p.Term.Select) => s
-        case other => throw new IllegalStateException(s"mkMut lhs must be an Alias(Term.Select); got ${other.repr}")
+        case other => throw IllegalStateException(s"mkMut lhs must be an Alias(Term.Select); got ${other.repr}")
       }
       if (lhs.tpe == rhs.tpe) {
         (p.Stmt.Mut(lhsSelect, rhs) :: Nil, c)

@@ -4,7 +4,7 @@ import polyregion.ast.{Log, PolyAST as p}
 
 case class FullOpt(level: Int = 3) extends ProgramPass derives PassArgCodec {
   def apply(program: p.Program, log: Log): p.Program =
-    run(program, PassContext(log, new PassRunner()))
+    run(program, PassContext(log, PassRunner()))
 
   override def run(program: p.Program, ctx: PassContext): p.Program =
     FullOpt.children(level).foldLeft(program)((acc, pass) => ctx.run(pass, acc))

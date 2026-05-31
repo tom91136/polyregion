@@ -42,7 +42,7 @@ object StdLib {
   }
 
   class Predef {
-    def intWrapper(x: Int): RichInt                      = new RichInt(x)
+    def intWrapper(x: Int): RichInt                      = RichInt(x)
     def intArrayOps(xs: scala.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
   }
 
@@ -343,19 +343,19 @@ object StdLib {
         { case (_ @ given Quotes, _, _) => '{ scala.reflect.ClassTag } }
       ),
       witness[scala.runtime.RichInt, RichInt](
-        { case (_ @ given Quotes, x) => '{ new RichInt($x.self) } },
+        { case (_ @ given Quotes, x) => '{ RichInt($x.self) } },
         { case (_ @ given Quotes, x) => '{ new scala.runtime.RichInt($x.x) } },
         { case (_ @ given Quotes, x, _) => '{ () } }
       ),
       witness[scala.Predef.type, Predef](
-        { case (_ @ given Quotes, _) => '{ new Predef() } },
+        { case (_ @ given Quotes, _) => '{ Predef() } },
         { case (_ @ given Quotes, _) => '{ scala.Predef } },
         { case (_ @ given Quotes, x, _) => '{ () } }
       ),
       witness[scala.math.package$, math.type](
         { case (_ @ given Quotes, _) => '{ math } },
         { case (_ @ given Quotes, bad) =>
-          '{ throw new RuntimeException(s"Prism assert: cannot restore object ${$bad}") }
+          '{ throw RuntimeException(s"Prism assert: cannot restore object ${$bad}") }
         },
         { case (_ @ given Quotes, x, _) => '{ () } }
       )

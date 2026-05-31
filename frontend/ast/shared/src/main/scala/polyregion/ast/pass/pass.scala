@@ -270,7 +270,7 @@ def printPass(pass: ProgramPass): ProgramPass = new ProgramPass {
   override def phase = pass.phase
   // XXX `apply` is the Function2 contract; the active path is `run` (called via PassContext) which
   // threads the live runner. Direct `apply` only fires if someone calls the pass outside a runner.
-  def apply(program: p.Program, l: Log): p.Program = run(program, PassContext(l, new PassRunner()))
+  def apply(program: p.Program, l: Log): p.Program = run(program, PassContext(l, PassRunner()))
   override def run(program: p.Program, ctx: PassContext): p.Program = {
     val r  = pass.run(program, ctx)
     val sl = ctx.log.subLog(s"[${pass.name}]")

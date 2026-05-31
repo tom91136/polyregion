@@ -201,7 +201,7 @@ object Compiler {
 
                           originalFnOwnerStructDef <- structDef0(originalFnOwner)
                             .adaptError(e =>
-                              new CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
+                              CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
                             )
                           // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
                         } yield (

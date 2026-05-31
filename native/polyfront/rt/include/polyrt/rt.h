@@ -49,9 +49,6 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_write(void *origin, ptrd
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_readwrite(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_malloc(size_t size);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_calloc(size_t nmemb, size_t size);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_realloc(void *ptr, size_t size);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_memalign(size_t /*alignment*/, size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_aligned_alloc(size_t /*alignment*/, size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_free(void *ptr);
 

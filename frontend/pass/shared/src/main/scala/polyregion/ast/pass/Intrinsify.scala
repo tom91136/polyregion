@@ -123,7 +123,7 @@ object Intrinsify extends ProgramPass {
           if i.tpe == p.Type.IntS32 && x.tpe == c && rtn == p.Type.Unit0 =>
         p.Expr.Alias(p.Term.Unit0Const) -> (p.Stmt.Update(s, i, x) :: Nil)
       case (unsupported, args) =>
-        throw new IllegalStateException(s"intrinsifyNamed: unsupported op `$unsupported` with ${args.size} args")
+        throw IllegalStateException(s"intrinsifyNamed: unsupported op `$unsupported` with ${args.size} args")
     }
 
   }
@@ -155,7 +155,7 @@ object Intrinsify extends ProgramPass {
               case "apply" -> (i :: Nil) if i.tpe.kind == p.Type.Kind.Integral =>
                 (p.Expr.Index(xs, i, rtn), (Nil, inv :: Nil))
               case (op, args) =>
-                throw new IllegalStateException(s"unsupported TypedBuffer op `$op` with ${args.size} args")
+                throw IllegalStateException(s"unsupported TypedBuffer op `$op` with ${args.size} args")
             }
           case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool1 && y.tpe == p.Type.Bool1 && rtn == p.Type.Bool1 =>
             val (expr, stmts) = op match {

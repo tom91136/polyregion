@@ -393,7 +393,7 @@ object compiletime {
                           } catch {
                             case e: Throwable =>
                               e.printStackTrace()
-                              cb_(Left(new Exception("Cannot sync", e)))
+                              cb_(Left(Exception("Cannot sync", e)))
                           }
 
                           // Reference keepAlive here to ensure it's captured by the callback closure
@@ -464,11 +464,11 @@ object compiletime {
         // every Type variant. Test the simple parts first, then the quoted ref.
         val expr = ((name.tpe, structDef): @scala.unchecked) match {
           case (p.Type.Ptr(_, _), None) =>
-            throw new RuntimeException(
+            throw RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), None) =>
-            throw new RuntimeException(
+            throw RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), Some(sdef)) =>
@@ -483,7 +483,7 @@ object compiletime {
               case '{ $r: u } => Pickler.writePrim(target, Expr(byteOffset), t, r)
             }
           case (t, _) =>
-            throw new RuntimeException(
+            throw RuntimeException(
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
             )
         }
@@ -509,11 +509,11 @@ object compiletime {
 
         val expr = ((name.tpe, structDef): @scala.unchecked) match {
           case (p.Type.Ptr(_, _), None) =>
-            throw new RuntimeException(
+            throw RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), None) =>
-            throw new RuntimeException(
+            throw RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
           case (p.Type.Struct(_, _), Some(sdef)) =>
@@ -540,7 +540,7 @@ object compiletime {
                 }
             }
           case (t, _) =>
-            throw new RuntimeException(
+            throw RuntimeException(
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
             )
         }

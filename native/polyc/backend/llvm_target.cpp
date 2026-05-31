@@ -31,22 +31,22 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
     // Constant (Internal)  4  Constant
     //             Private  5  Local
     case LLVMBackend::Target::NVPTX64:
-      GlobalAS = 0; // When inspecting Clang's output, they don't explicitly annotate addrspace(1) for globals
-      LocalAS = 3;
-      AllocaAS = 0;
+      GlobalAS = AddrSpace::Default; // When inspecting Clang's output, they don't explicitly annotate addrspace(1) for globals
+      LocalAS = AddrSpace::Workgroup;
+      AllocaAS = AddrSpace::Default;
       break;
     case LLVMBackend::Target::AMDGCN:
-      GlobalAS = 0;
-      LocalAS = 3;
-      AllocaAS = 5;
+      GlobalAS = AddrSpace::Default;
+      LocalAS = AddrSpace::Workgroup;
+      AllocaAS = AddrSpace::Private;
       break;
     case LLVMBackend::Target::SPIRV32_Kernel:
     case LLVMBackend::Target::SPIRV64_Kernel:
     case LLVMBackend::Target::SPIRV_GLCompute:
-      GlobalAS = 1;  // CrossWorkgroup
-      LocalAS = 3;   // Workgroup
-      AllocaAS = 0;  // Function/private
-      GenericAS = 4; // Generic
+      GlobalAS = AddrSpace::CrossWorkgroup;
+      LocalAS = AddrSpace::Workgroup;
+      AllocaAS = AddrSpace::Default; // Function/private
+      GenericAS = AddrSpace::Generic;
       break;
   }
   spirvKernel = options.target == LLVMBackend::Target::SPIRV32_Kernel || //
@@ -326,18 +326,22 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     };
   };
 
+  // XXX Pin to SPIR-V 1.2: OpenCL 1.2 conformant ICDs (Intel NEO included) only accept 1.0 via
+  // clCreateProgramWithIL; 1.2 is what OpenCL 2.1+ environments accept. Without a version
+  // suffix LLVM defaults to 1.4 and the program won't load on most current OpenCL drivers.
+  constexpr const char *Spirv32KernelTriple = "spirv32v1.2-unknown-unknown";
+  constexpr const char *Spirv64KernelTriple = "spirv64v1.2-unknown-unknown";
+  constexpr const char *SpirvVulkanComputeTriple = "spirv-unknown-vulkan1.3-compute";
+
   switch (target) {
     case Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
     case Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
     case Target::ARM: return bindCpuArch(Triple::ArchType::arm);
     case Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
     case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
-    // XXX Pin to SPIR-V 1.2: OpenCL 1.2 conformant ICDs (Intel NEO included) only accept 1.0 via
-    // clCreateProgramWithIL; 1.2 is what OpenCL 2.1+ environments accept. Without a version
-    // suffix LLVM defaults to 1.4 and the program won't load on most current OpenCL drivers.
-    case Target::SPIRV32_Kernel: return bindSpirv("spirv32v1.2-unknown-unknown");
-    case Target::SPIRV64_Kernel: return bindSpirv("spirv64v1.2-unknown-unknown");
-    case Target::SPIRV_GLCompute: return bindSpirv("spirv-unknown-vulkan1.3-compute");
+    case Target::SPIRV32_Kernel: return bindSpirv(Spirv32KernelTriple);
+    case Target::SPIRV64_Kernel: return bindSpirv(Spirv64KernelTriple);
+    case Target::SPIRV_GLCompute: return bindSpirv(SpirvVulkanComputeTriple);
     default: throw BackendException(fmt::format("Unexpected target {}", magic_enum::enum_name(target)));
   }
 }

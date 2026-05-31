@@ -90,7 +90,7 @@ lazy val `runtime-java` = project
     autoScalaLibrary    := false,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`, compiler % Compile)
+  .dependsOn(`binding-jvm`)
 
 lazy val `runtime-scala` = project
   .settings(

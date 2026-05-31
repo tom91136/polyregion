@@ -23,7 +23,10 @@ template <typename K, typename V> class HashMap {
 
   using HashFunc = size_t (*)(const K &);
 
-  static constexpr size_t MAX_BUCKETS = 1ULL << 30;
+  static constexpr size_t MaxBuckets = 1ULL << 30;
+  static constexpr float DefaultLoadFactor = 0.75f;
+  static constexpr size_t DefaultInitialBucketCount = 1024;
+  static constexpr size_t GrowthFactorNum = 5, GrowthFactorDen = 2;
 
   size_t _minBucketCount, _bucketCount, _size;
   float _loadFactor;
@@ -31,7 +34,7 @@ template <typename K, typename V> class HashMap {
   Bucket *_buckets;
 
   __RT_ODR void rehash(size_t count) {
-    count = count < MAX_BUCKETS ? count : MAX_BUCKETS;
+    count = count < MaxBuckets ? count : MaxBuckets;
     auto *newBuckets = static_cast<Bucket *>(__RT_ALTERNATIVE(malloc)(count * sizeof(Bucket)));
     for (size_t i = 0; i < count; ++i)
       new (&newBuckets[i]) Bucket();
@@ -51,7 +54,8 @@ template <typename K, typename V> class HashMap {
   }
 
 public:
-  __RT_ODR explicit HashMap(const HashFunc hash_func, const float loadFactor = 0.75f, const size_t initialBucketCount = 1024)
+  __RT_ODR explicit HashMap(const HashFunc hash_func, const float loadFactor = DefaultLoadFactor,
+                            const size_t initialBucketCount = DefaultInitialBucketCount)
       : _minBucketCount(initialBucketCount), _bucketCount(initialBucketCount), _size(0), _loadFactor(loadFactor), _hashFn(hash_func),
         _buckets(static_cast<Bucket *>(__RT_ALTERNATIVE(malloc)(_bucketCount * sizeof(Bucket)))) {
     for (size_t i = 0; i < _bucketCount; ++i)
@@ -60,7 +64,7 @@ public:
 
   __RT_ODR bool emplace(const K &key, const V &value) {
     if (_size >= _bucketCount * _loadFactor) {
-      const auto count = _bucketCount * 5 / 2;
+      const auto count = _bucketCount * GrowthFactorNum / GrowthFactorDen;
       rehash(count > _minBucketCount ? count : _minBucketCount);
     }
     const size_t idx = _hashFn(key) % _bucketCount;

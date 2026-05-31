@@ -48,7 +48,7 @@ trait BaseSuite extends munit.FunSuite {
     case AssertTarget.Offload =>
       import polyregion.scalalang.*
       import polyregion.scalalang.blocking.Host
-      val latch = new CountDownLatch(1)
+      val latch = CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
         Host.underlying.createQueue(10000L),
         {
@@ -65,7 +65,7 @@ trait BaseSuite extends munit.FunSuite {
       import polyregion.scalalang.*
       import polyregion.scalalang.blocking.Host
       val r     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
-      val latch = new CountDownLatch(1)
+      val latch = CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
         Host.underlying.createQueue(10000L),
         {
@@ -96,7 +96,7 @@ trait BaseSuite extends munit.FunSuite {
   inline def assertOffloadEffect(inline f: AssertTarget ?=> Unit): Unit = {
     try f(using AssertTarget.JDK)
     catch {
-      case e: Throwable => throw new AssertionError(s"offload reference expression failed to execute", e)
+      case e: Throwable => throw AssertionError(s"offload reference expression failed to execute", e)
     }
     if (!Toggles.NoOffload) {
       f(using AssertTarget.Offload)

@@ -8,9 +8,8 @@ set(LLVM_PATCH_DIRS
         ${CMAKE_CURRENT_LIST_DIR}/llvm-patches
         ${CMAKE_CURRENT_LIST_DIR}/llvm-patches-${LLVM_SRC_VERSION})
 
-# CUDA version list and min-arch list are parallel; polyc/CMakeLists.txt asserts.
-set(POLYREGION_CUDA_LIBDEVICE_VERSIONS "11.8.0;12.9.2;13.2.0")
-set(POLYREGION_CUDA_LIBDEVICE_MIN_ARCH "35;50;75")
+# CUDA libdevice entries as version:min-arch pairs, split in polyc/CMakeLists.txt.
+set(POLYREGION_CUDA_LIBDEVICE "11.8.0:35;12.9.2:50;13.2.0:75")
 set(POLYREGION_ROCM_TAG "rocm-7.2.3")
 set(POLYREGION_DEVICE_LIBS_DIR "${CMAKE_CURRENT_LIST_DIR}/thirdparty/device_libs")
 

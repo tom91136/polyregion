@@ -85,7 +85,7 @@ object FnInline extends ProgramPass {
 
     returnExprs match {
       case Nil =>
-        throw new AssertionError(s"no return in function ${f.signature}")
+        throw AssertionError(s"no return in function ${f.signature}")
       case expr :: Nil =>
         // single return: inject the return Expr at the callsite. Drop the Return stmts.
         val noReturnBody = substituted.body.flatMap(stripReturn)
@@ -135,11 +135,11 @@ object FnInline extends ProgramPass {
     } match {
       case f :: Nil => f
       case Nil =>
-        throw new IllegalStateException(
+        throw IllegalStateException(
           s"FnInline: no matching overload for ${ivk.repr}; candidates were ${candidates.map(_.repr).mkString("; ")}"
         )
       case xs =>
-        throw new IllegalStateException(
+        throw IllegalStateException(
           s"FnInline: ambiguous overloads for ${ivk.repr}: ${xs.map(_.repr).mkString("; ")}"
         )
     }

@@ -49,14 +49,14 @@ final class CompilerException(m: String, e: Throwable) extends Exception(m, e) {
 type Result[A] = Either[Throwable, A]
 
 extension [A](a: Result[A]) {
-  def withFilter(p: A => Boolean) = a.flatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
+  def withFilter(p: A => Boolean) = a.flatMap(x => if (p(x)) Right(x) else Left(MatchError(x)))
 }
 
 extension [A](a: A) {
   def success: Result[A] = Right(a)
 }
 extension (message: => String) {
-  def fail[A]: Result[A] = Left(new CompilerException(message))
+  def fail[A]: Result[A] = Left(CompilerException(message))
   def indent_(n: Int)    = message.linesIterator.map(x => " " * n + x).mkString("\n")
 }
 extension [A](m: Option[A]) {
@@ -206,7 +206,7 @@ def selectExpr(prefix: List[p.Named], last: p.Named): p.Expr = p.Expr.Alias(sele
 def asTerm(e: p.Expr): p.Term = e match {
   case p.Expr.Alias(t) => t
   case other =>
-    throw new IllegalStateException(s"asTerm called on non-atomic Expr: ${other.repr}")
+    throw IllegalStateException(s"asTerm called on non-atomic Expr: ${other.repr}")
 }
 
 object Builder {

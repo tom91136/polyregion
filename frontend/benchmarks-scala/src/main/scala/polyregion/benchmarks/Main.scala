@@ -10,7 +10,7 @@ object Main {
   final val Time       = TimeValue.seconds(5)
 
   def main(args: Array[String]): Unit = {
-    val opts = new OptionsBuilder()
+    val opts = OptionsBuilder()
       .warmupTime(Time)
       .warmupIterations(Iterations)
       .measurementTime(Time)
@@ -20,7 +20,7 @@ object Main {
       .shouldFailOnError(true)
       .build()
 
-    new Runner(opts).run()
+    Runner(opts).run()
   }
 
 }
