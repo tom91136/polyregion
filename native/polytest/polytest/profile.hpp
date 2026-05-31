@@ -22,6 +22,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 
+#include "polyregion/env_keys.h"
 #include "polyregion/types.h"
 
 namespace polyregion::polytest {
@@ -45,7 +46,8 @@ inline std::optional<std::string> hostname() {
 // `<backend>@<uarch>` test targets, in order: $<envKey> (verbatim, colon-split),
 // $POLYREGION_TEST_PROFILE.env, <hostname>.env, default.env, {}. Profile files concatenate every
 // `<envKey>=...` line; `#` and blank lines are skipped.
-inline std::vector<std::string> loadTestTargets(const std::string &profileDir, const char *envKey = "POLYREGION_TEST_TARGETS") {
+inline std::vector<std::string> loadTestTargets(const std::string &profileDir,
+                                                const char *envKey = polyregion::env::PolyregionTestTargets) {
   auto split = [](const std::string &s, std::vector<std::string> &out) {
     for (size_t i = 0, j = 0; i <= s.size(); ++i)
       if (i == s.size() || s[i] == ':') {
@@ -88,7 +90,7 @@ inline std::vector<std::string> loadTestTargets(const std::string &profileDir, c
     llvm::sys::path::append(p, name);
     return p;
   };
-  if (auto v = std::getenv("POLYREGION_TEST_PROFILE"))
+  if (auto v = std::getenv(polyregion::env::PolyregionTestProfile))
     if (auto t = readKey(profilePath(std::string(v) + ".env"))) return *t;
   if (auto h = hostname()) {
     if (const auto dot = h->find('.'); dot != std::string::npos) h->resize(dot);
@@ -115,7 +117,8 @@ inline std::optional<ResolvedTarget> resolveTestTarget(std::string_view token) {
   return std::nullopt;
 }
 
-inline std::vector<ResolvedTarget> resolveTestTargets(const std::string &profileDir, const char *envKey = "POLYREGION_TEST_TARGETS") {
+inline std::vector<ResolvedTarget> resolveTestTargets(const std::string &profileDir,
+                                                      const char *envKey = polyregion::env::PolyregionTestTargets) {
   std::vector<ResolvedTarget> out;
   for (const auto &t : loadTestTargets(profileDir, envKey))
     if (auto r = resolveTestTarget(t)) out.emplace_back(*r);

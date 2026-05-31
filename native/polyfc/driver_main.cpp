@@ -17,6 +17,7 @@ int flang_main(int argc, const char **argv);
 
 #include "polyfront/options_frontend.hpp"
 #include "polyregion/env.h"
+#include "polyregion/env_keys.h"
 
 #include "driver_polyc.h"
 
@@ -51,7 +52,7 @@ int main(int argc, const char *argv[]) {
   // XXX fused build has no external driver; --driver/POLYFC_DRIVER are accepted but ignored.
   (void)args.popValue("--driver");
 #else
-  flangPath = resolveExternalDriver(args, "POLYFC_DRIVER", "flang-new", execParentPath);
+  flangPath = resolveExternalDriver(args, polyregion::env::PolyfcDriver, "flang-new", execParentPath);
   if (flangPath.empty()) {
     fmt::print(stderr, "[PolyFC] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_flang-new>`\n",
                execPath);
@@ -72,8 +73,8 @@ int main(int argc, const char *argv[]) {
                std::vector<std::pair<const char *, std::string>> envs;
 
                if (opts) {
-                 auto includes = mkDelimitedEnvPaths("POLYDCO_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator);
-                 auto libs = mkDelimitedEnvPaths("POLYDCO_LIB", {}, llvm::sys::EnvPathSeparator);
+                 auto includes = mkDelimitedEnvPaths(polyregion::env::PolydcoInclude, "-isystem", llvm::sys::EnvPathSeparator);
+                 auto libs = mkDelimitedEnvPaths(polyregion::env::PolydcoLib, {}, llvm::sys::EnvPathSeparator);
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
@@ -83,7 +84,7 @@ int main(int argc, const char *argv[]) {
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
 
-                 if (const bool noRewrite = std::getenv("POLYFC_NO_REWRITE") != nullptr; !noRewrite) {
+                 if (const bool noRewrite = std::getenv(polyregion::env::PolyfcNoRewrite) != nullptr; !noRewrite) {
 #ifndef POLYREGION_FUSED_DRIVER
                    append({"-Xflang", "-load", "-Xflang", polyfcFlangPlugin});
 #endif
@@ -151,7 +152,8 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
-                   if (const char *t = std::getenv("POLYFC_LINK_THREADS"); t && *t) append({fmt::format("-Wl,--threads={}", t)});
+                   if (const char *t = std::getenv(polyregion::env::PolyfcLinkThreads); t && *t)
+                     append({fmt::format("-Wl,--threads={}", t)});
                  }
                }
 

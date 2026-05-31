@@ -8,13 +8,14 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include "polyregion/env_keys.h"
 #include "polyrt/rt.h"
 #include "polystl/algorithm_impl.h"
 #include "polystl/polystl.h"
 
 template <typename F> //
 std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
-  static bool offload = !std::getenv("POLYSTL_NO_OFFLOAD");
+  static bool offload = !std::getenv(polyregion::env::PolystlNoOffload);
   std::invoke_result_t<F> result{};
   size_t totalObjects = 0;
   if (offload) {

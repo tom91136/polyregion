@@ -8,6 +8,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 
+#include "polyregion/env_keys.h"
+
 #include "memoryfs.h"
 
 namespace lld::elf {
@@ -44,7 +46,7 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, con
   llvm::SmallString<1024> err;
   llvm::raw_svector_ostream errSteam(err);
 
-  if (std::getenv("POLYC_DEBUG_LLD")) {
+  if (std::getenv(polyregion::env::PolycDebugLld)) {
     std::fprintf(stderr, "[lld_lite] allArgs (%zu):\n", allArgs.size());
     for (size_t i = 0; i < allArgs.size(); ++i) {
       std::fprintf(stderr, "  [%zu] = %s\n", i, allArgs[i] ? allArgs[i] : "<null>");

@@ -3,6 +3,7 @@
 #include <unordered_map>
 
 #include "polyregion/dl.h"
+#include "polyregion/env_keys.h"
 
 #include "generated/mirror.h"
 #include "generated/natives.h"
@@ -20,7 +21,7 @@ static std::mutex dlMutex;
 static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
-  if (const char *d = std::getenv("POLYREGION_DEBUG"); d && *d) fprintf(stdout, "Shim JNI_OnLoad\n");
+  if (const char *d = std::getenv(polyregion::env::PolyregionDebug); d && *d) fprintf(stdout, "Shim JNI_OnLoad\n");
   files.clear(); // In case OnUnload didn't finish normally
   CurrentVM = vm;
 
@@ -31,7 +32,7 @@ static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
 
 [[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
   const bool debug = [] {
-    const char *d = std::getenv("POLYREGION_DEBUG");
+    const char *d = std::getenv(polyregion::env::PolyregionDebug);
     return d && *d;
   }();
   if (debug) fprintf(stdout, "Shim JNI_OnUnload\n");

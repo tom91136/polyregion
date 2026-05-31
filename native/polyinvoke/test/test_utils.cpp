@@ -4,6 +4,7 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
 
 #include "polytest/profile.hpp"
@@ -89,7 +90,7 @@ int runOnDevice(invoke::Backend backend, std::string_view deviceName, const Imag
 }
 
 std::vector<Task> discoverMatrix(const std::vector<Suite> &suites) {
-  const auto targets = polytest::resolveTestTargets(POLYREGION_TEST_PROFILE_DIR, "POLYINVOKE_TEST_TARGETS");
+  const auto targets = polytest::resolveTestTargets(POLYREGION_TEST_PROFILE_DIR, env::PolyinvokeTestTargets);
   const auto profileAllows = [&targets](invoke::Backend b, invoke::Device &d) -> bool {
     if (targets.empty()) return true;
     const auto features = d.features();

@@ -14,6 +14,7 @@
 
 #include "fmt/format.h"
 
+#include "polyregion/env_keys.h"
 #include "polyregion/io.hpp"
 
 namespace polyregion::polypass {
@@ -24,7 +25,7 @@ namespace fs = llvm::sys::fs;
 namespace path = llvm::sys::path;
 
 String cacheRoot() {
-  if (const char *e = std::getenv("POLYREGION_CACHE_DIR"); e && *e) return e;
+  if (const char *e = std::getenv(polyregion::env::PolyregionCacheDir); e && *e) return e;
   llvm::SmallString<256> dir;
   if (!path::cache_directory(dir)) path::system_temp_directory(/*ErasedOnReboot=*/true, dir);
   path::append(dir, "polyregion", "js");

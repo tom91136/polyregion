@@ -15,6 +15,7 @@
 #include "polyinvoke/vulkan_platform.h"
 #include "polyinvoke/ze_platform.h"
 #include "polyregion/compat.h"
+#include "polyregion/env_keys.h"
 
 #include "libm.h"
 
@@ -58,7 +59,7 @@ void invoke::init() { libm::exportAll(); }
 
 std::variant<std::string, std::unique_ptr<invoke::Platform>> invoke::Platform::of(const Backend &b) {
   using namespace polyregion::invoke;
-  if (const char *raw = std::getenv("POLYINVOKE_DISABLE_BACKENDS"); raw && *raw) {
+  if (const char *raw = std::getenv(polyregion::env::PolyinvokeDisableBackends); raw && *raw) {
     const auto needle = magic_enum::enum_name(b);
     std::string_view s(raw);
     for (size_t i = 0, j = 0; i <= s.size(); ++i)

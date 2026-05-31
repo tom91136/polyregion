@@ -6,6 +6,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/env.h"
+#include "polyregion/env_keys.h"
 
 #include "dl_util.h"
 
@@ -134,7 +135,7 @@ bool deviceSupportsIL(cl_device_id device) {
 // Returns the buffer memflags to OR into clSVMAlloc when SVM is usable (0 = coarse-grain,
 // CL_MEM_SVM_FINE_GRAIN_BUFFER otherwise); nullopt means fall back to cl_mem buffers.
 std::optional<cl_bitfield> resolveSVM(cl_device_id device) {
-  if (const char *off = std::getenv("POLYINVOKE_DISABLE_SVM"); off && *off && *off != '0') return std::nullopt;
+  if (const char *off = std::getenv(polyregion::env::PolyinvokeDisableSvm); off && *off && *off != '0') return std::nullopt;
   cl_bitfield caps = 0;
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return std::nullopt;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return std::nullopt;
@@ -182,16 +183,16 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   std::vector<std::unique_ptr<Device>> clDevices;
   // XXX OpenCL CPU ICDs duplicate the SharedObject/RelocatableObject paths and tend to
   // misbehave; restrict to GPU/accelerator devices only.
-  const cl_device_type kAcceleratorMask = CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR;
+  const cl_device_type AcceleratorMask = CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR;
   for (const auto &platform : platforms) {
     cl_uint numDevices = 0;
-    if (const auto deviceIdResult = clGetDeviceIDs(platform, kAcceleratorMask, 0, nullptr, &numDevices);
+    if (const auto deviceIdResult = clGetDeviceIDs(platform, AcceleratorMask, 0, nullptr, &numDevices);
         deviceIdResult == CL_DEVICE_NOT_FOUND) {
       continue; // no device
     } else CHECKED(deviceIdResult);
 
     std::vector<cl_device_id> devices(numDevices);
-    CHECKED(clGetDeviceIDs(platform, kAcceleratorMask, numDevices, devices.data(), nullptr));
+    CHECKED(clGetDeviceIDs(platform, AcceleratorMask, numDevices, devices.data(), nullptr));
     auto ilFn =
         reinterpret_cast<details::ClCreateProgramWithIL_fn>(clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithIL"));
     if (!ilFn)

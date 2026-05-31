@@ -25,6 +25,7 @@
 #include "fmt/format.h"
 
 #include "polyinvoke/device_lock.h"
+#include "polyregion/env_keys.h"
 #include "polyregion/io.hpp"
 
 #include "fire.hpp"
@@ -111,11 +112,11 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
   envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", archFor(t, cfg)));
   envs.emplace_back("POLYRT_HOST_FALLBACK=0");
-  envs.emplace_back(fmt::format("{}=1", polyregion::invoke::DeviceLockEnv));
+  envs.emplace_back(fmt::format("{}=1", polyregion::env::PolyinvokeTestLock));
   envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
-  if (std::getenv("POLYTEST_DEBUG")) envs.emplace_back("POLYRT_DEBUG=2");
+  if (std::getenv(polyregion::env::PolytestDebug)) envs.emplace_back("POLYRT_DEBUG=2");
   // XXX child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish.
-  for (const auto *name : {"POLYCPP_LINK_THREADS", "POLYFC_LINK_THREADS", //
+  for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads, //
                            "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
   {
@@ -505,7 +506,7 @@ inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
     if (auto ec = llvm::sys::fs::set_current_path(dir); ec)
       std::fprintf(stderr, "polytest: failed to chdir to %s='%s': %s\n", what, dir.str().c_str(), ec.message().c_str());
   };
-  if (const auto override = std::getenv("POLYTEST_WORK_DIR"); override && *override) chdirTo("POLYTEST_WORK_DIR", override);
+  if (const auto override = std::getenv(polyregion::env::PolytestWorkDir); override && *override) chdirTo(polyregion::env::PolytestWorkDir, override);
   else if (!cfg.workDir.empty()) chdirTo("workDir", cfg.workDir);
   detail::firedCfg = &cfg;
   constexpr const char *descr = "polytest runner: parallel compile, serial run";

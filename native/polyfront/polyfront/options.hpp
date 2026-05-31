@@ -1,9 +1,11 @@
 #pragma once
 
+#include "polyregion/env_keys.h"
+
 namespace polyregion::polyfront {
 
-constexpr auto PolyfrontExe = "POLYFRONT_EXE";
-constexpr auto PolyfrontVerbose = "POLYFRONT_VERBOSE";
-constexpr auto PolyfrontTargets = "POLYFRONT_TARGETS";
+constexpr auto PolyfrontExe = env::PolyfrontExe;
+constexpr auto PolyfrontVerbose = env::PolyfrontVerbose;
+constexpr auto PolyfrontTargets = env::PolyfrontTargets;
 
 } // namespace polyregion::polyfront

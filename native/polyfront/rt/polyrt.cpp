@@ -8,6 +8,7 @@
 
 #include "polyinvoke/device_lock.h"
 #include "polyregion/concurrency_utils.hpp"
+#include "polyregion/env_keys.h"
 #include "polyregion/types.h"
 #include "polyrt/rt.h"
 
@@ -15,11 +16,6 @@
 // captured pointers. On Windows the HashMap allocator routes through HeapAlloc (rt_protected.hpp)
 // to avoid recursing back into polyrt_usm_* via InterposePass.
 #include "reflect-rt/rt.hpp"
-
-constexpr auto PlatformSelectorEnv = "POLYRT_PLATFORM";
-constexpr auto DeviceSelectorEnv = "POLYRT_DEVICE";
-constexpr auto HostFallbackEnv = "POLYRT_HOST_FALLBACK";
-constexpr auto DebugEnv = "POLYRT_DEBUG";
 
 using namespace polyregion::invoke;
 using namespace aspartame;
@@ -111,15 +107,15 @@ static void selectDevice(Platform &p, const std::vector<std::string_view> &requi
 
 static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatform() {
   std::optional<std::string> envValue;
-  if (const auto env = std::getenv(PlatformSelectorEnv)) envValue = env;
+  if (const auto env = std::getenv(polyregion::env::PolyrtPlatform)) envValue = env;
   if (!envValue) {
-    log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
+    log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", polyregion::env::PolyrtPlatform);
     setupBackend(Backend::RelocatableObject);
     return std::nullopt;
   }
   auto parsed = polyregion::compiletime::TargetSpec::parse(*envValue);
   if (!parsed) {
-    log(DebugLevel::None, "Backend %s is not a supported value for %s", envValue->c_str(), PlatformSelectorEnv);
+    log(DebugLevel::None, "Backend %s is not a supported value for %s", envValue->c_str(), polyregion::env::PolyrtPlatform);
     return std::nullopt;
   }
   setupBackend(parsed->spec.runtime);
@@ -138,7 +134,7 @@ void polyregion::polyrt::initialise() {
         // An explicit POLYRT_DEVICE override is strict: no fallback to devices[0].
         bool strict = false;
         std::string effectiveHint = hint;
-        if (const auto env = std::getenv(DeviceSelectorEnv)) {
+        if (const auto env = std::getenv(polyregion::env::PolyrtDevice)) {
           effectiveHint = env;
           strict = true;
         }
@@ -147,7 +143,7 @@ void polyregion::polyrt::initialise() {
       // Test-only: cross-process lock so ctest -j workers do not race on the same device.
       // Held for process lifetime; the file lock auto-releases on exit.
       if (currentDevice && selectedBackend) {
-        if (const auto env = std::getenv(polyregion::invoke::DeviceLockEnv); env && env[0] == '1') {
+        if (const auto env = std::getenv(polyregion::env::PolyinvokeTestLock); env && env[0] == '1') {
           static std::optional<polyregion::invoke::DeviceLock> currentDeviceLock;
           const auto physical = currentDevice->physicalDevice();
           // No-op for host/CPU devices; GPU backends sharing one physical device serialise.
@@ -186,7 +182,7 @@ void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
 
 bool polyregion::polyrt::hostFallback() {
   static bool fallback = []() {
-    if (const auto env = std::getenv(HostFallbackEnv); env) {
+    if (const auto env = std::getenv(polyregion::env::PolyrtHostFallback); env) {
       if (const auto v = parseIntNoExcept(env); v && *v == 0) {
         log(DebugLevel::Debug, "<%s> No compatible backend and host fallback disabled, returning...", __func__);
         return false;
@@ -199,7 +195,7 @@ bool polyregion::polyrt::hostFallback() {
 
 polyregion::polyrt::DebugLevel polyregion::polyrt::debugLevel() {
   static DebugLevel level = []() {
-    if (const auto env = std::getenv(DebugEnv); env) {
+    if (const auto env = std::getenv(polyregion::env::PolyrtDebug); env) {
       if (const auto v = parseIntNoExcept(env)) {
         if (*v <= static_cast<std::underlying_type_t<DebugLevel>>(DebugLevel::Trace)) {
           return static_cast<DebugLevel>(*v);
@@ -272,7 +268,7 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   }
 
   if (!currentDevice->moduleLoaded(moduleName)) {
-    if (auto dumpDir = std::getenv("POLYRT_DUMP_KERNEL")) {
+    if (auto dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
       static int counter = 0;
       auto path = std::string(dumpDir) + "/kernel_" + std::to_string(counter++) + ".o";
       if (FILE *f = std::fopen(path.c_str(), "wb")) {
@@ -340,31 +336,6 @@ POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {
   polyregion::polyrt::initialise();
   const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMalloc);
   log(DebugLevel::Debug, "%p = polyrt_usm_malloc(%zu)", p, size);
-  return p;
-}
-
-POLYREGION_EXPORT extern "C" void *polyrt_usm_calloc(const size_t nmemb, const size_t size) {
-  polyregion::polyrt::initialise();
-  const auto total = nmemb * size;
-  const auto p = sharedAllocTracked(total, polyregion::rt_reflect::Type::HeapCalloc);
-  if (p) std::memset(p, 0, total);
-  log(DebugLevel::Debug, "%p = polyrt_usm_calloc(%zu, %zu)", p, nmemb, size);
-  return p;
-}
-
-POLYREGION_EXPORT extern "C" void *polyrt_usm_realloc(void *ptr, const size_t size) {
-  polyregion::polyrt::initialise();
-  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapRealloc);
-  log(DebugLevel::Debug, "%p = polyrt_usm_realloc(%p, %zu)", p, ptr, size);
-  if (p && ptr) std::memcpy(p, ptr, size);
-  if (ptr) sharedFreeTracked(ptr, polyregion::rt_reflect::Type::HeapFree);
-  return p;
-}
-
-POLYREGION_EXPORT extern "C" void *polyrt_usm_memalign(const size_t /*alignment*/, const size_t size) {
-  polyregion::polyrt::initialise();
-  const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMemalign);
-  log(DebugLevel::Debug, "%p = polyrt_usm_memalign(%zu)", p, size);
   return p;
 }
 

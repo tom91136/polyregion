@@ -8,6 +8,7 @@
 #include "aspartame/all.hpp"
 
 #include "polyfront/options_backend.hpp"
+#include "polyregion/env_keys.h"
 
 #include "ast.h"
 #include "rewriter.h"
@@ -33,7 +34,7 @@ protected:
     auto info = llvmGetPassPluginInfo();
     CI.getCodeGenOpts().PassBuilderCallbacks.push_back([info](llvm::PassBuilder &PB) { info.RegisterPassBuilderCallbacks(PB); });
 #endif
-    if (std::getenv("POLYCPP_NO_REWRITE")) return std::make_unique<clang::ASTConsumer>();
+    if (std::getenv(polyregion::env::PolycppNoRewrite)) return std::make_unique<clang::ASTConsumer>();
     return std::make_unique<polystl::OffloadRewriteConsumer>(CI, opts);
   }
 
