@@ -27,11 +27,7 @@ public final class Compiler implements AutoCloseable {
 
   public static Compiler create() {
     Loader.touch();
-    String osName = System.getProperty("os.name", "").toLowerCase();
-    String name;
-    if (osName.startsWith("mac") || osName.startsWith("darwin")) name = "libpolyc-JNI.dylib";
-    else if (osName.startsWith("windows")) name = "polyc-JNI.dll";
-    else name = "libpolyc-JNI.so";
+    String name = System.mapLibraryName("polyc-JNI");
     return new Compiler(
         NativeLibrary.load(
             Loader.searchAndCopyResourceIfNeeded(name, Paths.get("."))

@@ -201,11 +201,7 @@ public final class Loader {
 
   static {
     // Load the basic dl native library first so that we can load and unload other native libraries.
-    String osName = System.getProperty("os.name", "").toLowerCase();
-    String name;
-    if (osName.startsWith("mac") || osName.startsWith("darwin")) name = "libpolyc-JNIshim.dylib";
-    else if (osName.startsWith("windows")) name = "polyc-JNIshim.dll";
-    else name = "libpolyc-JNIshim.so";
+    String name = System.mapLibraryName("polyc-JNIshim");
     Path pwd = Paths.get(".").toAbsolutePath();
     Path path =
         searchAndCopyResourceIfNeeded(name, pwd)

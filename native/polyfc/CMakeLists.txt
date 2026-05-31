@@ -139,31 +139,6 @@ target_include_directories(polyfc-tests PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}")
 polyregion_test_profile_dir(polyfc-tests)
 
-# === test_all.h.in variables ===
-get_filename_component(POLYFC_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)
-# Isolated cache for generated test binaries so `cmake clean` removes them and stale builds
-# cannot shadow a fresh run.
-set(POLYFC_TEST_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/test-cache")
-file(MAKE_DIRECTORY "${POLYFC_TEST_CACHE_DIR}")
-set(POLYFC_TEST_INPUT_FILES "")
-file(GLOB TEST_FILE_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/test/check_*.*")
-list(LENGTH TEST_FILE_PATHS _n_polyfc_tests)
-message(STATUS "polyfc tests: ${_n_polyfc_tests} files registered (x 2 modes)")
-foreach (TEST_FILE ${TEST_FILE_PATHS})
-    string(APPEND POLYFC_TEST_INPUT_FILES "\"${TEST_FILE}\", ")
-endforeach ()
-set(POLYFC_FLANG_DRIVER "${LLVM_DIST_DIR}/bin/flang-new")
-set(POLYFC_POLYDCO_LIB "$<TARGET_FILE:polydco>")
-set(POLYFC_POLYDCO_LIBRARY_PATH "$<TARGET_FILE_DIR:polydco>")
-set(POLYFC_POLYDCO_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyfc>/$<TARGET_NAME:polydco>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include")
-# ===  end test_all.h.in variables ===
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/test/test_all.h.in" "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in")
-
-file(GENERATE
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_all.h"
-        INPUT "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in"
-)
-
 target_include_directories(polyfc PRIVATE ../compiler ../include ${LLVM_INCLUDE_DIRS})
 target_link_libraries(polyfc PRIVATE
         polycommon
@@ -179,19 +154,14 @@ polyregion_apply_common_options(polyfc)
 
 polyregion_apply_common_options(polyfc-tests)
 
-# XXX one ctest entry per test file x {offload, passthrough}.
-polytest_discover_tests(polyfc-tests
+polytest_configure_suite(polyfc-tests
         NAME_PREFIX polyfc
-        WORKING_DIRECTORY "${POLYFC_TEST_CACHE_DIR}"
-        DIST_BIN polyfc-tests
-        TEST_FILES ${TEST_FILE_PATHS})
-# Wipe the whole cache on `clean` so stale test binaries cannot survive a rebuild.
-set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${POLYFC_TEST_CACHE_DIR}")
-# Targeted clean for the test-cache dir without disturbing the rest of the build.
-add_custom_target(clean-polyfc-tests
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${POLYFC_TEST_CACHE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${POLYFC_TEST_CACHE_DIR}"
-        COMMENT "Removing polyfc test-cache binaries from ${POLYFC_TEST_CACHE_DIR}")
+        DRIVER "${LLVM_DIST_DIR}/bin/flang-new"
+        LIB "$<TARGET_FILE:polydco>"
+        LIBRARY_PATH "$<TARGET_FILE_DIR:polydco>"
+        INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyfc>/$<TARGET_NAME:polydco>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
+        GLOB "check_*.*"
+        TEST_FILES_OUT _polyfc_test_files)
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

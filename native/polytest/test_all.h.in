@@ -30,13 +30,11 @@ inline std::vector<std::string> testFilesFromEnv(const char *dirEnv, std::vector
 }
 } // namespace
 
-
-static const std::string BinaryDir = envOr("POLYTEST_BINARY_DIR", "@POLYFC_TEST_BINARY_DIR@");
-static const std::string WorkDir = envOr("POLYTEST_WORK_DIR", "@POLYFC_TEST_CACHE_DIR@");
+static const std::string BinaryDir = envOr("POLYTEST_BINARY_DIR", "@POLYTEST_BINARY_DIR@");
+static const std::string WorkDir = envOr("POLYTEST_WORK_DIR", "@POLYTEST_CACHE_DIR@");
 static const std::vector<std::string> TestFiles =
-    testFilesFromEnv("POLYTEST_FILES_DIR", { @POLYFC_TEST_INPUT_FILES@ });
-static const std::string FlangDriver = envOr("POLYTEST_FLANG_DRIVER", "@POLYFC_FLANG_DRIVER@");
-static const std::string PolyDCOLib = envOr("POLYTEST_POLYDCO_LIB", "@POLYFC_POLYDCO_LIB@");
-static const std::string PolyDCOLDLibraryPath = envOr("POLYTEST_POLYDCO_LIBRARY_PATH", "@POLYFC_POLYDCO_LIBRARY_PATH@");
-static const std::string PolyDCOInclude = envOr("POLYTEST_POLYDCO_INCLUDE", "@POLYFC_POLYDCO_INCLUDE@");
-
+    testFilesFromEnv("POLYTEST_FILES_DIR", { @POLYTEST_INPUT_FILES@ });
+static const std::string Driver = envOr("POLYTEST_DRIVER", "@POLYTEST_DRIVER@");
+static const std::string Lib = envOr("POLYTEST_LIB", "@POLYTEST_LIB@");
+static const std::string LibraryPath = envOr("POLYTEST_LIBRARY_PATH", "@POLYTEST_LIBRARY_PATH@");
+static const std::string Include = envOr("POLYTEST_INCLUDE", "@POLYTEST_INCLUDE@");

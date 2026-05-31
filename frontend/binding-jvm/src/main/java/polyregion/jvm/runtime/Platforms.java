@@ -44,11 +44,7 @@ public final class Platforms implements AutoCloseable {
 
   public static Platforms create() {
     Loader.touch();
-    String osName = System.getProperty("os.name", "").toLowerCase();
-    String name;
-    if (osName.startsWith("mac") || osName.startsWith("darwin")) name = "libpolyinvoke-JNI.dylib";
-    else if (osName.startsWith("windows")) name = "polyinvoke-JNI.dll";
-    else name = "libpolyinvoke-JNI.so";
+    String name = System.mapLibraryName("polyinvoke-JNI");
     return new Platforms(
         NativeLibrary.load(
             Loader.searchAndCopyResourceIfNeeded(name, Paths.get("."))

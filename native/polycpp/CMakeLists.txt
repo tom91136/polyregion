@@ -150,31 +150,6 @@ target_include_directories(polycpp-tests PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}")
 polyregion_test_profile_dir(polycpp-tests)
 
-# === test_all.h.in variables ===
-get_filename_component(POLYCPP_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)
-set(POLYCPP_TEST_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/test-cache")
-file(MAKE_DIRECTORY "${POLYCPP_TEST_CACHE_DIR}")
-set(POLYCPP_TEST_INPUT_FILES "")
-file(GLOB _POLYCPP_TEST_TOP "${CMAKE_CURRENT_SOURCE_DIR}/test/check_*.cpp")
-file(GLOB _POLYCPP_TEST_SUB "${CMAKE_CURRENT_SOURCE_DIR}/test/**/check_*.cpp")
-set(TEST_FILE_PATHS ${_POLYCPP_TEST_TOP} ${_POLYCPP_TEST_SUB})
-list(LENGTH TEST_FILE_PATHS _n_polycpp_tests)
-message(STATUS "polycpp tests: ${_n_polycpp_tests} files registered (x 2 modes)")
-foreach (TEST_FILE IN LISTS TEST_FILE_PATHS)
-    string(APPEND POLYCPP_TEST_INPUT_FILES "\"${TEST_FILE}\", ")
-endforeach ()
-set(POLYCPP_CLANG_DRIVER "${LLVM_DIST_DIR}/bin/clang++")
-set(POLYCPP_POLYSTL_LIB "$<TARGET_FILE:polystl>")
-set(POLYCPP_POLYSTL_LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>")
-set(POLYCPP_POLYSTL_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include")
-# ===  end test_all.h.in variables ===
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/test/test_all.h.in" "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in")
-
-file(GENERATE
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_all.h"
-        INPUT "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in"
-)
-
 target_include_directories(polycpp PRIVATE ../compiler ../include ${LLVM_INCLUDE_DIRS})
 target_link_libraries(polycpp PRIVATE
         polyc-driver
@@ -196,19 +171,15 @@ target_link_libraries(polycpp-tests PRIVATE
 polyregion_apply_common_options(polycpp EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 polyregion_apply_common_options(polycpp-tests EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 
-# XXX one ctest entry per test file x {offload, passthrough}.
-# Cross-process device serialisation lives in DeviceLock (polyinvoke/include/polyinvoke/device_lock.h).
-polytest_discover_tests(polycpp-tests
+polytest_configure_suite(polycpp-tests
         NAME_PREFIX polycpp
-        WORKING_DIRECTORY "${POLYCPP_TEST_CACHE_DIR}"
-        DIST_BIN polycpp-tests
-        TEST_FILES ${TEST_FILE_PATHS})
-
-set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${POLYCPP_TEST_CACHE_DIR}")
-add_custom_target(clean-polycpp-tests
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${POLYCPP_TEST_CACHE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${POLYCPP_TEST_CACHE_DIR}"
-        COMMENT "Removing polycpp test-cache binaries from ${POLYCPP_TEST_CACHE_DIR}")
+        DRIVER "${LLVM_DIST_DIR}/bin/clang++"
+        LIB "$<TARGET_FILE:polystl>"
+        LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>"
+        INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
+        GLOB "check_*.cpp"
+        RECURSIVE
+        TEST_FILES_OUT _polycpp_test_files)
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)

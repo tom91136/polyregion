@@ -9,7 +9,7 @@ int main(int argc, const char **argv) {
   return runMain(
       argc, argv,
       DriverConfig{
-          .driverPath = ClangDriver,
+          .driverPath = Driver,
           .binaryDir = BinaryDir,
           .workDir = WorkDir,
           .testFiles = TestFiles,

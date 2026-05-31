@@ -8,7 +8,7 @@ int main(int argc, const char **argv) {
   using namespace polyregion::polytest;
   return runMain(argc, argv,
                  DriverConfig{
-                     .driverPath = FlangDriver,
+                     .driverPath = Driver,
                      .binaryDir = BinaryDir,
                      .workDir = WorkDir,
                      .testFiles = TestFiles,
