@@ -41,7 +41,7 @@ object PassTest {
       moduleCaptures: List[p.Arg] = Nil,
       termCaptures: List[p.Arg] = Nil
   ): p.Function =
-    fn("_main", args, p.Type.Unit0, body, Nil, moduleCaptures, termCaptures, isEntry = true)
+    fn(p.Conventions.EntryName, args, p.Type.Unit0, body, Nil, moduleCaptures, termCaptures, isEntry = true)
 
   def program(
       entry: p.Function,
