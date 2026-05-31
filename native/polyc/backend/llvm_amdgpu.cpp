@@ -147,51 +147,15 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
       });
 }
 ValPtr AMDGPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
-  auto ocml1 = [&](const char *baseName, const AnyType &rtn, const AnyTerm &arg) -> ValPtr {
-    auto *fpTy = cg.resolveType(rtn);
-    const char *suffix = fpTy->isFloatTy() ? "_f32" : "_f64";
-    return cg.extFn1(std::string("__ocml_") + baseName + suffix, rtn, arg);
-  };
-  auto ocml2 = [&](const char *baseName, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) -> ValPtr {
-    auto *fpTy = cg.resolveType(rtn);
-    const char *suffix = fpTy->isFloatTy() ? "_f32" : "_f64";
-    return cg.extFn2(std::string("__ocml_") + baseName + suffix, rtn, lhs, rhs);
-  };
-  return expr.op.match_total( //
-      [&](const Math::Abs &v) -> ValPtr {
-        return cg.unaryNumOp(
-            expr, v.x, v.tpe, //
-            [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); },
-            [&](auto) { return cg.intr1(llvm::Intrinsic::fabs, v.tpe, v.x); });
-      },                                                                                 //
-      [&](const Math::Sin &v) -> ValPtr { return ocml1("sin", v.tpe, v.x); },            //
-      [&](const Math::Cos &v) -> ValPtr { return ocml1("cos", v.tpe, v.x); },            //
-      [&](const Math::Tan &v) -> ValPtr { return ocml1("tan", v.tpe, v.x); },            //
-      [&](const Math::Asin &v) -> ValPtr { return ocml1("asin", v.tpe, v.x); },          //
-      [&](const Math::Acos &v) -> ValPtr { return ocml1("acos", v.tpe, v.x); },          //
-      [&](const Math::Atan &v) -> ValPtr { return ocml1("atan", v.tpe, v.x); },          //
-      [&](const Math::Sinh &v) -> ValPtr { return ocml1("sinh", v.tpe, v.x); },          //
-      [&](const Math::Cosh &v) -> ValPtr { return ocml1("cosh", v.tpe, v.x); },          //
-      [&](const Math::Tanh &v) -> ValPtr { return ocml1("tanh", v.tpe, v.x); },          //
-      [&](const Math::Signum &v) -> ValPtr { return cg.mkSignumVal(expr, v.x, v.tpe); }, //
-      [&](const Math::Round &v) -> ValPtr {
-        const auto inTpe = v.x.tpe();
-        if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>()) return ocml1("round", v.tpe, v.x);
-        const auto rounded = ocml1("round", inTpe, v.x);
-        return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
-      },                                                                               //
-      [&](const Math::Ceil &v) -> ValPtr { return ocml1("ceil", v.tpe, v.x); },        //
-      [&](const Math::Floor &v) -> ValPtr { return ocml1("floor", v.tpe, v.x); },      //
-      [&](const Math::Rint &v) -> ValPtr { return ocml1("rint", v.tpe, v.x); },        //
-      [&](const Math::Sqrt &v) -> ValPtr { return ocml1("sqrt", v.tpe, v.x); },        //
-      [&](const Math::Cbrt &v) -> ValPtr { return ocml1("cbrt", v.tpe, v.x); },        //
-      [&](const Math::Exp &v) -> ValPtr { return ocml1("exp", v.tpe, v.x); },          //
-      [&](const Math::Expm1 &v) -> ValPtr { return ocml1("expm1", v.tpe, v.x); },      //
-      [&](const Math::Log &v) -> ValPtr { return ocml1("log", v.tpe, v.x); },          //
-      [&](const Math::Log1p &v) -> ValPtr { return ocml1("log1p", v.tpe, v.x); },      //
-      [&](const Math::Log10 &v) -> ValPtr { return ocml1("log10", v.tpe, v.x); },      //
-      [&](const Math::Pow &v) -> ValPtr { return ocml2("pow", v.tpe, v.x, v.y); },     //
-      [&](const Math::Atan2 &v) -> ValPtr { return ocml2("atan2", v.tpe, v.x, v.y); }, //
-      [&](const Math::Hypot &v) -> ValPtr { return ocml2("hypot", v.tpe, v.x, v.y); }  //
-  );
+  // XXX OCML: `__ocml_<name>_f32` / `__ocml_<name>_f64`.
+  const auto suffix = [&](const AnyType &rtn) { return cg.resolveType(rtn)->isFloatTy() ? "_f32" : "_f64"; };
+  return mkExternMathVal(
+      cg, expr, //
+      [&](const char *name, const AnyType &rtn, const AnyTerm &arg) {
+        return cg.extFn1(std::string("__ocml_") + name + suffix(rtn), rtn, arg);
+      },
+      [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
+        return cg.extFn2(std::string("__ocml_") + name + suffix(rtn), rtn, lhs, rhs);
+      },
+      [&](const AnyType &tpe, const AnyTerm &x) { return cg.intr1(llvm::Intrinsic::fabs, tpe, x); });
 }

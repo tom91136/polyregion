@@ -194,42 +194,13 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::Math
       out += tc;
     return out;
   };
-  auto unary = [&](const char *name, const auto &op) { return cg.extFn1(mangle(name, op.tpe, 1), op.tpe, op.x); };
-  auto binary = [&](const char *name, const auto &op) { return cg.extFn2(mangle(name, op.tpe, 2), op.tpe, op.x, op.y); };
-  return expr.op.match_total( //
-      [&](const Math::Abs &v) -> ValPtr {
-        return cg.unaryNumOp(
-            expr, v.x, v.tpe, //
-            [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); }, [&](auto) { return unary("fabs", v); });
-      },                                                                                 //
-      [&](const Math::Sin &v) -> ValPtr { return unary("sin", v); },                     //
-      [&](const Math::Cos &v) -> ValPtr { return unary("cos", v); },                     //
-      [&](const Math::Tan &v) -> ValPtr { return unary("tan", v); },                     //
-      [&](const Math::Asin &v) -> ValPtr { return unary("asin", v); },                   //
-      [&](const Math::Acos &v) -> ValPtr { return unary("acos", v); },                   //
-      [&](const Math::Atan &v) -> ValPtr { return unary("atan", v); },                   //
-      [&](const Math::Sinh &v) -> ValPtr { return unary("sinh", v); },                   //
-      [&](const Math::Cosh &v) -> ValPtr { return unary("cosh", v); },                   //
-      [&](const Math::Tanh &v) -> ValPtr { return unary("tanh", v); },                   //
-      [&](const Math::Signum &v) -> ValPtr { return cg.mkSignumVal(expr, v.x, v.tpe); }, //
-      [&](const Math::Round &v) -> ValPtr {
-        if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>())
-          return cg.extFn1(mangle("round", v.tpe, 1), v.tpe, v.x);
-        const auto rounded = cg.extFn1(mangle("round", v.x.tpe(), 1), v.x.tpe(), v.x);
-        return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
-      },                                                                  //
-      [&](const Math::Ceil &v) -> ValPtr { return unary("ceil", v); },    //
-      [&](const Math::Floor &v) -> ValPtr { return unary("floor", v); },  //
-      [&](const Math::Rint &v) -> ValPtr { return unary("rint", v); },    //
-      [&](const Math::Sqrt &v) -> ValPtr { return unary("sqrt", v); },    //
-      [&](const Math::Cbrt &v) -> ValPtr { return unary("cbrt", v); },    //
-      [&](const Math::Exp &v) -> ValPtr { return unary("exp", v); },      //
-      [&](const Math::Expm1 &v) -> ValPtr { return unary("expm1", v); },  //
-      [&](const Math::Log &v) -> ValPtr { return unary("log", v); },      //
-      [&](const Math::Log1p &v) -> ValPtr { return unary("log1p", v); },  //
-      [&](const Math::Log10 &v) -> ValPtr { return unary("log10", v); },  //
-      [&](const Math::Pow &v) -> ValPtr { return binary("pow", v); },     //
-      [&](const Math::Atan2 &v) -> ValPtr { return binary("atan2", v); }, //
-      [&](const Math::Hypot &v) -> ValPtr { return binary("hypot", v); }  //
-  );
+  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) {
+    return cg.extFn1(mangle(name, rtn, 1), rtn, arg);
+  };
+  const auto binary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
+    return cg.extFn2(mangle(name, rtn, 2), rtn, lhs, rhs);
+  };
+  // XXX OpenCL has no `fabs` intrinsic equivalent here; the float branch goes through the mangled libcall.
+  return mkExternMathVal(cg, expr, unary, binary,
+                         [&](const AnyType &tpe, const AnyTerm &x) { return unary("fabs", tpe, x); });
 }

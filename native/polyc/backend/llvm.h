@@ -160,6 +160,46 @@ struct CodeGen {
   Pair<Opt<std::string>, std::string> transform(const Program &program);
 };
 
+template <typename Unary, typename Binary, typename AbsFractional>
+ValPtr mkExternMathVal(CodeGen &cg, const Expr::MathOp &expr, //
+                       const Unary &unary, const Binary &binary, const AbsFractional &absFractional) {
+  return expr.op.match_total(                                                                  //
+      [&](const Math::Abs &v) -> ValPtr {                                                       //
+        return cg.unaryNumOp(expr, v.x, v.tpe,                                                  //
+                             [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); },  //
+                             [&](auto) { return absFractional(v.tpe, v.x); });                  //
+      },                                                                                        //
+      [&](const Math::Sin &v) -> ValPtr { return unary("sin", v.tpe, v.x); },                   //
+      [&](const Math::Cos &v) -> ValPtr { return unary("cos", v.tpe, v.x); },                   //
+      [&](const Math::Tan &v) -> ValPtr { return unary("tan", v.tpe, v.x); },                   //
+      [&](const Math::Asin &v) -> ValPtr { return unary("asin", v.tpe, v.x); },                 //
+      [&](const Math::Acos &v) -> ValPtr { return unary("acos", v.tpe, v.x); },                 //
+      [&](const Math::Atan &v) -> ValPtr { return unary("atan", v.tpe, v.x); },                 //
+      [&](const Math::Sinh &v) -> ValPtr { return unary("sinh", v.tpe, v.x); },                 //
+      [&](const Math::Cosh &v) -> ValPtr { return unary("cosh", v.tpe, v.x); },                 //
+      [&](const Math::Tanh &v) -> ValPtr { return unary("tanh", v.tpe, v.x); },                 //
+      [&](const Math::Signum &v) -> ValPtr { return cg.mkSignumVal(expr, v.x, v.tpe); },        //
+      [&](const Math::Round &v) -> ValPtr {                                                      //
+        if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>()) //
+          return unary("round", v.tpe, v.x);                                                    //
+        return cg.B.CreateFPToSI(unary("round", v.x.tpe(), v.x), cg.resolveType(v.tpe));        //
+      },                                                                                         //
+      [&](const Math::Ceil &v) -> ValPtr { return unary("ceil", v.tpe, v.x); },                 //
+      [&](const Math::Floor &v) -> ValPtr { return unary("floor", v.tpe, v.x); },               //
+      [&](const Math::Rint &v) -> ValPtr { return unary("rint", v.tpe, v.x); },                 //
+      [&](const Math::Sqrt &v) -> ValPtr { return unary("sqrt", v.tpe, v.x); },                 //
+      [&](const Math::Cbrt &v) -> ValPtr { return unary("cbrt", v.tpe, v.x); },                 //
+      [&](const Math::Exp &v) -> ValPtr { return unary("exp", v.tpe, v.x); },                   //
+      [&](const Math::Expm1 &v) -> ValPtr { return unary("expm1", v.tpe, v.x); },               //
+      [&](const Math::Log &v) -> ValPtr { return unary("log", v.tpe, v.x); },                   //
+      [&](const Math::Log1p &v) -> ValPtr { return unary("log1p", v.tpe, v.x); },               //
+      [&](const Math::Log10 &v) -> ValPtr { return unary("log10", v.tpe, v.x); },               //
+      [&](const Math::Pow &v) -> ValPtr { return binary("pow", v.tpe, v.x, v.y); },             //
+      [&](const Math::Atan2 &v) -> ValPtr { return binary("atan2", v.tpe, v.x, v.y); },         //
+      [&](const Math::Hypot &v) -> ValPtr { return binary("hypot", v.tpe, v.x, v.y); }          //
+  );
+}
+
 } // namespace details
 
 } // namespace polyregion::backend

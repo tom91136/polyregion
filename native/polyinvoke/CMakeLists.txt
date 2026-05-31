@@ -92,13 +92,16 @@ set(POLYINVOKE_SRC
         device_lock.cpp
         ${RUNTIME_SRC_FILES})
 
-set(POLYINVOKE_LIBS
+set(POLYINVOKE_PUBLIC_LIBS
         ${LLVM_LIBS}
         nlohmann_json::nlohmann_json
         Vulkan::Headers
         GPUOpen::VulkanMemoryAllocator
+        CACHE INTERNAL "")
+set(POLYINVOKE_PRIVATE_LIBS
         unofficial::libffi::libffi
         CACHE INTERNAL "")
+set(POLYINVOKE_LIBS ${POLYINVOKE_PUBLIC_LIBS} ${POLYINVOKE_PRIVATE_LIBS} CACHE INTERNAL "")
 
 add_library(polyinvoke SHARED)
 add_library(polyinvoke-obj OBJECT)
