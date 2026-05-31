@@ -7,6 +7,10 @@ set(POLYFC_LIB_DIR "lib/polyfc/lib")
 function(add_copy_lib_targets target)
     foreach (target ${ARGN})
         list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${target}>" "$<TARGET_FILE_DIR:polyfc>/${POLYFC_LIB_DIR}/")
+        get_target_property(_target_type ${target} TYPE)
+        if (WIN32 AND _target_type STREQUAL "SHARED_LIBRARY")
+            list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_LINKER_FILE:${target}>" "$<TARGET_FILE_DIR:polyfc>/${POLYFC_LIB_DIR}/")
+        endif ()
     endforeach ()
     add_custom_target(${target}
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polyfc>/${POLYFC_LIB_DIR}/"
