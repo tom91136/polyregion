@@ -540,7 +540,7 @@ file(WRITE "${CMAKE_BINARY_DIR}/test-dist-CTestTestfile.cmake"
 install(TARGETS ${POLYREGION_TEST_BINARIES} RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(TARGETS polyreflect-rt LIBRARY DESTINATION lib RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(DIRECTORY polycpp/test/ DESTINATION test/polycpp COMPONENT test-dist EXCLUDE_FROM_ALL
-        FILES_MATCHING PATTERN "check_*.cpp")
+        FILES_MATCHING PATTERN "check_*.cpp" PATTERN "*.h")
 install(DIRECTORY polyfc/test/ DESTINATION test/polyfc COMPONENT test-dist EXCLUDE_FROM_ALL
         FILES_MATCHING PATTERN "check_*.f95")
 install(DIRECTORY test-profiles/ DESTINATION test/profiles COMPONENT test-dist EXCLUDE_FROM_ALL)
