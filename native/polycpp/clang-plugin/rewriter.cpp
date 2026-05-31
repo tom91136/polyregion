@@ -13,6 +13,8 @@
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
+
+#include "polyfront/diag.hpp"
 #include "magic_enum/magic_enum.hpp"
 
 #include "ast.h"
@@ -22,6 +24,7 @@
 
 using namespace polyregion::polystl;
 using namespace polyregion;
+using polyregion::polyfront::emit;
 using namespace polyregion::polyast;
 using namespace polyregion::polyast::dsl;
 using namespace aspartame;
@@ -128,12 +131,11 @@ template <typename T> T *findDecl(clang::DiagnosticsEngine &D, clang::Sema &S, c
     const auto decl = result.getFoundDecl();
     if (const auto record = llvm::dyn_cast<T>(decl)) return record;
     else
-      D.Report({}, D.getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                     "[PolySTL] Name lookup for %0 resulted in unexpected type %1; this is a bug.\n"))
-          << name << decl->getDeclKindName();
+      emit(D, clang::DiagnosticsEngine::Error,
+           POLYREGION_DIAG_POLYSTL "Name lookup for %0 resulted in unexpected type %1; this is a bug.\n", name, decl->getDeclKindName());
   } else
-    D.Report({}, D.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolySTL] Name lookup for %0 unsuccessful (%1); this is a bug.\n"))
-        << name << magic_enum::enum_name(result.getResultKind());
+    emit(D, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "Name lookup for %0 unsuccessful (%1); this is a bug.\n", name,
+         magic_enum::enum_name(result.getResultKind()));
   return {};
 }
 
@@ -143,9 +145,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
     if (const auto decl = ty->getAsCXXRecordDecl()) {
       return decl->fields() | find([&](auto f) { return f->getName() == fieldName; });
     }
-    D.Report({},
-             D.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolySTL] Type %0 cannot be resolved to a CXXRecordDecl. This is a bug."))
-        << ty;
+    emit(D, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "Type %0 cannot be resolved to a CXXRecordDecl. This is a bug.", ty);
     return {};
   };
 
@@ -364,8 +364,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   for (auto r : outlinePolyregionOffload(C))
     r ^ foreach_total(
             [&](const Failure &f) { //
-              D.Report(f.callExpr->getBeginLoc(), D.getCustomDiagID(clang::DiagnosticsEngine::Warning, "[PolySTL] Outline failed: %0"))
-                  .AddString(f.reason);
+              emit(D, f.callExpr->getBeginLoc(), clang::DiagnosticsEngine::Warning, POLYREGION_DIAG_POLYSTL "Outline failed: %0", f.reason);
             },
             [&](const Callsite &c) { //
               const SpecialisationPathVisitor spv(C);
@@ -395,15 +394,14 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                   c.kind);
 
               if (opts.verbose) {
-                D.Report(c.callLambdaArgExpr->getExprLoc(),
-                         D.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
-                    << moduleId << std::string(magic_enum::enum_name(c.kind))
-                    << (bundle.objects //
-                        | map([](auto &o) {
-                            return std::string(magic_enum::enum_name(o.format)) + "=" +
-                                   std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
-                          }) //
-                        | mk_string(", "));
+                emit(D, c.callLambdaArgExpr->getExprLoc(), clang::DiagnosticsEngine::Remark,
+                     POLYREGION_DIAG_POLYSTL "Outlined function: %0 for %1 (%2)\n", moduleId, std::string(magic_enum::enum_name(c.kind)),
+                     (bundle.objects //
+                      | map([](auto &o) {
+                          return std::string(magic_enum::enum_name(o.format)) + "=" +
+                                 std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
+                        }) //
+                      | mk_string(", ")));
               }
 
               insertKernelImage(D, CI.getSema(), C, c, bundle);

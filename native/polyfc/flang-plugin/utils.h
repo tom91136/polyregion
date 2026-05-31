@@ -4,11 +4,13 @@
 
 #include "llvm/Support/raw_ostream.h"
 
+#include "polyfront/diag.hpp"
 #include "polyregion/error.h"
 
 namespace polyregion::polyfc {
 
 using polyregion::raise;
+using polyregion::polyfront::emit;
 
 template <typename T> auto value_of(T t) { return static_cast<std::underlying_type_t<T>>(t); }
 
@@ -20,12 +22,6 @@ template <typename T> std::string show(T t) {
     else t->print(s);
   } else t.print(s);
   return result;
-}
-
-template <typename Diag, std::size_t N, typename... Args>
-void emit(Diag &diag, typename Diag::Level level, const char (&fmt)[N], Args &&...args) {
-  auto b = diag.Report(diag.getCustomDiagID(level, fmt));
-  (b << ... << std::forward<Args>(args));
 }
 
 } // namespace polyregion::polyfc

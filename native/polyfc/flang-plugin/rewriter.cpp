@@ -630,12 +630,11 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     auto &wrapperBlock = doc.getRegion().front();
     auto loopOp = mlir::cast<fir::DoConcurrentLoopOp>(wrapperBlock.getTerminator());
     if (loopOp.getLowerBound().size() != 1) {
-      diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolyFC] multi-dimensional `do concurrent` is not yet supported"));
+      emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "multi-dimensional `do concurrent` is not yet supported");
       return;
     }
     if (loopOp.getNumLocalOperands() != 0) {
-      diag.Report(
-          diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolyFC] `do concurrent ... local(...)` clause is not yet supported"));
+      emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "`do concurrent ... local(...)` clause is not yet supported");
       return;
     }
     OpBuilder B(doc);
@@ -655,16 +654,14 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         for (auto a : attrs.getValue()) {
           auto ra = mlir::dyn_cast<fir::ReduceAttr>(a);
           if (!ra) {
-            diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
-                                             "[PolyFC] missing reduce attribute on `do concurrent ... reduce(...)`"));
+            emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "missing reduce attribute on `do concurrent ... reduce(...)`");
             return;
           }
           const auto op = ra.getReduceOperation();
           if (op != fir::ReduceOperationEnum::Add && op != fir::ReduceOperationEnum::Multiply && op != fir::ReduceOperationEnum::MAX &&
               op != fir::ReduceOperationEnum::MIN) {
-            diag.Report(diag.getCustomDiagID(
-                clang::DiagnosticsEngine::Error,
-                "[PolyFC] unsupported reduction operator in `do concurrent ... reduce(...)`; only +, *, min, max are supported"));
+            emit(diag, clang::DiagnosticsEngine::Error,
+                 POLYREGION_DIAG_POLYFC "unsupported reduction operator in `do concurrent ... reduce(...)`; only +, *, min, max are supported");
             return;
           }
           reduceOps.push_back(op);
@@ -675,8 +672,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       else if (auto cnv = lbV.getDefiningOp<fir::ConvertOp>())
         if (auto v = mlir::getConstantIntValue(cnv.getValue())) lbIsOne = *v == 1;
       if (!lbIsOne) {
-        diag.Report(
-            diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolyFC] `do concurrent ... reduce(...)` requires lower bound == 1"));
+        emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "`do concurrent ... reduce(...)` requires lower bound == 1");
         return;
       }
     }
@@ -1023,7 +1019,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       ^ foreach_total([&](const polyfront::Options &x) { opts = x; },
                       [&](const std::vector<std::string> &errors) {
                         for (auto error : errors)
-                          diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "%0")) << error;
+                          emit(diag, clang::DiagnosticsEngine::Error, "%0", error);
                       });
 
   llvm::errs() << " ==== FIR  ====== \n";

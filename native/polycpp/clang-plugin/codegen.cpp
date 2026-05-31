@@ -6,6 +6,7 @@
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyfront/diag.hpp"
 #include "polyregion/conventions.h"
 #include "polyregion/types.h"
 
@@ -16,6 +17,7 @@
 using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace aspartame;
+using polyregion::polyfront::emit;
 
 polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                                clang::ASTContext &C,                //
@@ -97,9 +99,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto layouts = r.layouts | values() | map([&](auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) | to_vector();
 
   if (opts.verbose) {
-    diag.Report(loc,
-                diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark, "[PolySTL] Remapped program [%0, sizeof capture=%1]\n%2"))
-        << moduleId << C.getTypeSize(C.getCanonicalTagType(parent)) << repr(program);
+    emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Remapped program [%0, sizeof capture=%1]\n%2",
+         moduleId, C.getTypeSize(C.getCanonicalTagType(parent)), repr(program));
   }
 
   auto objects =
@@ -109,38 +110,37 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
           return compileProgram(opts, program, target, features) ^
                  fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                             [&](const std::string &err) -> std::optional<CompileResult> {
-                              diag.Report(
-                                  diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
-                                                       "[PolySTL] Frontend failed to compile program [%0, target=%1, features=%2]\n%3"))
-                                  << moduleId << std::string(magic_enum::enum_name(target)) << features << err;
+                              emit(diag, clang::DiagnosticsEngine::Level::Warning,
+                                   POLYREGION_DIAG_POLYSTL "Frontend failed to compile program [%0, target=%1, features=%2]\n%3", moduleId,
+                                   std::string(magic_enum::enum_name(target)), features, err);
                               return std::nullopt;
                             }) ^
                  map([&](auto &x) { return std::tuple{target, features, x}; });
         }) //
       |
       collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
-        diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
-                                              "[PolySTL] Compilation events for [%0, target=%1, features=%2]\n%3"))
-            << moduleId << std::string(magic_enum::enum_name(target)) << features << repr(result);
+        emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
+             POLYREGION_DIAG_POLYSTL "Compilation events for [%0, target=%1, features=%2]\n%3", moduleId,
+             std::string(magic_enum::enum_name(target)), features, repr(result));
 
         if (auto bin = result.binary; !bin) {
-          diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
-                                                "[PolySTL] Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3"))
-              << moduleId << std::string(magic_enum::enum_name(target)) << features << result.messages;
+          emit(diag, loc, clang::DiagnosticsEngine::Level::Warning,
+               POLYREGION_DIAG_POLYSTL "Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3", moduleId,
+               std::string(magic_enum::enum_name(target)), features, result.messages);
           return std::nullopt;
         } else {
 
           if (!result.messages.empty()) {
-            diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
-                                                  "[PolySTL] Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4"))
-                << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(magic_enum::enum_name(target))
-                << features << result.messages;
+            emit(diag, loc, clang::DiagnosticsEngine::Level::Warning,
+                 POLYREGION_DIAG_POLYSTL "Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4",
+                 std::to_string(static_cast<float>(bin->size()) / 1000.f), moduleId, std::string(magic_enum::enum_name(target)), features,
+                 result.messages);
 
           } else {
-            diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
-                                                  "[PolySTL] Backend emitted binary (%0KB) [%1, target=%2, features=%3]"))
-                << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(magic_enum::enum_name(target))
-                << features << result.messages;
+            emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
+                 POLYREGION_DIAG_POLYSTL "Backend emitted binary (%0KB) [%1, target=%2, features=%3]",
+                 std::to_string(static_cast<float>(bin->size()) / 1000.f), moduleId, std::string(magic_enum::enum_name(target)), features,
+                 result.messages);
           }
 
           if (auto format = runtime::moduleFormatOf(target)) {
@@ -151,9 +151,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                 std::string(bin->begin(), bin->end()) //
             };
           } else {
-            diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
-                                                  "[PolySTL] Backend emitted binary for unknown target [%1, target=%2, features=%3]"))
-                << moduleId << std::string(magic_enum::enum_name(target)) << features << result.messages;
+            emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
+                 POLYREGION_DIAG_POLYSTL "Backend emitted binary for unknown target [%1, target=%2, features=%3]", moduleId,
+                 std::string(magic_enum::enum_name(target)), features, result.messages);
             return std::nullopt;
           }
         }
@@ -165,10 +165,10 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   // failure that surfaces the original backend error.
   const auto requestedForKind = opts.targets ^ count([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); });
   if (requestedForKind > 0 && objects.empty()) {
-    diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Error,
-                                          "[PolySTL] No kernels compiled successfully for [%0, kind=%1] (requested %2 target(s)); "
-                                          "see prior diagnostics for the per-target failure"))
-        << moduleId << std::string(magic_enum::enum_name(kind)) << static_cast<int>(requestedForKind);
+    emit(diag, loc, clang::DiagnosticsEngine::Level::Error,
+         POLYREGION_DIAG_POLYSTL "No kernels compiled successfully for [%0, kind=%1] (requested %2 target(s)); "
+                                 "see prior diagnostics for the per-target failure",
+         moduleId, std::string(magic_enum::enum_name(kind)), static_cast<int>(requestedForKind));
   }
   return polyfront::KernelBundle{moduleId, objects, layouts, program_to_json(program).dump()};
 }
