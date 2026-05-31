@@ -141,6 +141,10 @@ void invoke::detail::CountedCallbackHandler::consume(void *data) {
   } else POLYINVOKE_FATAL("Runtime", "Cannot consume %p, callback not found!?", data);
 }
 invoke::detail::CountedCallbackHandler::~CountedCallbackHandler() { const std::lock_guard guard(lock); }
+invoke::detail::CountedCallbackHandler &invoke::detail::CountedCallbackHandler::instance() {
+  static CountedCallbackHandler handler;
+  return handler;
+}
 
 std::string invoke::detail::allocateAndTruncate(const std::function<void(char *, size_t)> &f, const size_t length) {
   std::string xs(length, '\0');

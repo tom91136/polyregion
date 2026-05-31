@@ -208,14 +208,13 @@ HipDeviceQueue::~HipDeviceQueue() {
 void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (!cb) return;
   POLYINVOKE_TRACE();
-  static detail::CountedCallbackHandler handler;
   CHECKED(hipStreamAddCallback(
       stream,
       [](hipStream_t, hipError_t e, void *data) {
         CHECKED(e);
-        handler.consume(data);
+        detail::CountedCallbackHandler::instance().consume(data);
       },
-      handler.createHandle([cb, token = latch.acquire()]() {
+      detail::CountedCallbackHandler::instance().createHandle([cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       }),
       0));

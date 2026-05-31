@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
@@ -41,24 +43,21 @@ protected:
   detail::CountingLatch latch;
 
   template <typename F> static void threadedLaunch(size_t N, const MaybeCallback &cb, F f) {
-    static std::atomic_size_t counter(0);
-    static std::unordered_map<size_t, std::atomic_size_t> pending;
-    static std::shared_mutex pendingMutex;
-    static detail::CountedCallbackHandler handler;
-
-    auto id = counter++;
-    WriteLock wPending(pendingMutex);
-    pending.emplace(id, N);
-    for (size_t tid = 0; tid < N; ++tid) {
-      std::thread([id, cb, f, tid]() {
-        f(tid);
-        WriteLock rwPending(pendingMutex);
-        if (const auto it = pending.find(id); it != pending.end()) {
-          if (--it->second == 0) {
-            if (cb) (*cb)();
-            pending.erase(id);
-          }
-        }
+    if (N == 0) {
+      if (cb) (*cb)();
+      return;
+    }
+    const size_t hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+    const size_t workers = std::min(N, hw);
+    const size_t chunk = (N + workers - 1) / workers;
+    auto pending = std::make_shared<std::atomic_size_t>(workers);
+    for (size_t w = 0; w < workers; ++w) {
+      const size_t begin = w * chunk;
+      const size_t end = std::min(N, begin + chunk);
+      std::thread([begin, end, cb, f, pending]() {
+        for (size_t tid = begin; tid < end; ++tid)
+          f(tid);
+        if (--*pending == 0 && cb) (*cb)();
       }).detach();
     }
   }

@@ -169,6 +169,7 @@ public:
   ~CountedCallbackHandler();
   void *createHandle(const Callback &cb);
   void consume(void *data);
+  static CountedCallbackHandler &instance();
 };
 
 template <typename K, typename V> class CountedStore {

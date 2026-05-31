@@ -381,17 +381,16 @@ static hsa_signal_t createSignal(const char *message) {
 static void destroySignal(const char *message, const hsa_signal_t signal) { CHECKED(message, hsa_signal_destroy(signal)); }
 
 static void enqueueCallback(const hsa_signal_t signal, const Callback &cb) {
-  static detail::CountedCallbackHandler handler;
   CHECKED("Attach async handler to signal", //
           hsa_amd_signal_async_handler(
               signal, HSA_SIGNAL_CONDITION_LT, 1,
               [](hsa_signal_value_t value, void *data) -> bool {
                 // Signals trigger when value is set to 0 or less, anything not 0 is an error.
                 CHECKED("Validate async signal value", static_cast<hsa_status_t>(value));
-                handler.consume(data);
+                detail::CountedCallbackHandler::instance().consume(data);
                 return false;
               },
-              handler.createHandle(cb)));
+              detail::CountedCallbackHandler::instance().createHandle(cb)));
 }
 
 HsaDeviceQueue::HsaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(device) device, decltype(queue) queue)

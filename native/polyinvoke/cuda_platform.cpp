@@ -226,16 +226,15 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   auto f = [cb, token = latch.acquire()]() {
     if (cb) (*cb)();
   };
-  static detail::CountedCallbackHandler handler;
   // FIXME cuLaunchHostFunc does not retain errors from previous launches, use the deprecated cuStreamAddCallback
   //  for now. See https://stackoverflow.com/a/58173486
   CHECKED(cuStreamAddCallback(
       stream,
       [](CUstream, CUresult e, void *data) {
         CHECKED(e);
-        handler.consume(data);
+        detail::CountedCallbackHandler::instance().consume(data);
       },
-      handler.createHandle(f), 0));
+      detail::CountedCallbackHandler::instance().createHandle(f), 0));
 }
 void CudaDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                  const MaybeCallback &cb) {
