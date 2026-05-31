@@ -337,48 +337,6 @@ RelocatableDeviceQueue::RelocatableDeviceQueue(const std::chrono::duration<int64
   POLYINVOKE_TRACE();
 }
 
-template <typename F> static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, const MaybeCallback &cb, F f) {
-  static std::atomic_size_t counter(0);
-  static std::unordered_map<size_t, std::atomic_size_t> pending;
-  static std::shared_mutex pendingLock;
-
-  //  auto cbHandle = cb ? handler.createHandle(*cb) : nullptr;
-
-  //  auto id = counter++;
-  //  WriteLock wPending(pendingLock);
-  //  pending.emplace(id, N);
-  //  for (size_t tid = 0; tid < N; ++tid) {
-  //    std::thread([id, cb,  f, tid, &handler]() {
-  //      f(tid);
-  //        WriteLock rwPending(pendingLock);
-  //        if (auto it = pending.find(id); it != pending.end()) {
-  //          if (--it->second == 0) {
-  //              if(cb) (*cb)();
-  ////            handler.consume(cbHandle);
-  //            pending.erase(id);
-  //          }
-  //        }
-  //    }).detach();
-  //  }
-
-  auto id = counter++;
-  WriteLock wPending(pendingLock);
-  pending.emplace(id, N);
-  for (size_t tid = 0; tid < N; ++tid) {
-    // arena.enqueue([id, tid, f, cb]() {
-    f(tid);
-    WriteLock rwPending(pendingLock);
-    if (auto it = pending.find(id); it != pending.end()) {
-      if (--it->second == 0) {
-        pending.erase(id);
-        if (cb) (*cb)();
-        //            detail::CountedCallbackHandler::consume(cbHandle);
-      }
-    }
-    // });
-  }
-}
-
 void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
   if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0)
     POLYINVOKE_FATAL(prefix, "Scratch types are not supported on the CPU, found %td arg(s)", scratchCount);

@@ -50,24 +50,18 @@ HsaPlatform::HsaPlatform() {
   hsa_amd_register_system_event_handler(
       [](const hsa_amd_event_t *event, void *data) -> hsa_status_t {
         if (event->event_type == HSA_AMD_GPU_MEMORY_FAULT_EVENT) {
-          fprintf(stderr, "[%s] Memory fault at 0x%lx. Reason:", PREFIX, static_cast<uintptr_t>(event->memory_fault.virtual_address));
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT) //
-            fprintf(stderr, "Page not present or supervisor privilege. ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_READ_ONLY) //
-            fprintf(stderr, "Write access to a read-only page. ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_NX) //
-            fprintf(stderr, "Execute access to a page marked NX. ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_HOST_ONLY) //
-            fprintf(stderr, "Host access only. ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_DRAMECC) //
-            fprintf(stderr, "ECC failure (if supported by HW). ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_IMPRECISE) //
-            fprintf(stderr, "Can't determine the exact fault address. ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_SRAMECC) //
-            fprintf(stderr, "SRAM ECC failure (ie registers, no fault address). ");
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_HANG) //
-            fprintf(stderr, "GPU reset following unspecified hang. ");
-          fprintf(stderr, "\n");
+          const auto mask = event->memory_fault.fault_reason_mask;
+          std::string reason;
+          if (mask & HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT) reason += "Page not present or supervisor privilege. ";
+          if (mask & HSA_AMD_MEMORY_FAULT_READ_ONLY) reason += "Write access to a read-only page. ";
+          if (mask & HSA_AMD_MEMORY_FAULT_NX) reason += "Execute access to a page marked NX. ";
+          if (mask & HSA_AMD_MEMORY_FAULT_HOST_ONLY) reason += "Host access only. ";
+          if (mask & HSA_AMD_MEMORY_FAULT_DRAMECC) reason += "ECC failure (if supported by HW). ";
+          if (mask & HSA_AMD_MEMORY_FAULT_IMPRECISE) reason += "Can't determine the exact fault address. ";
+          if (mask & HSA_AMD_MEMORY_FAULT_SRAMECC) reason += "SRAM ECC failure (ie registers, no fault address). ";
+          if (mask & HSA_AMD_MEMORY_FAULT_HANG) reason += "GPU reset following unspecified hang. ";
+          fprintf(stderr, "[%s] Memory fault at 0x%lx. Reason:%s\n", PREFIX,
+                  static_cast<uintptr_t>(event->memory_fault.virtual_address), reason.c_str());
           return HSA_STATUS_ERROR;
         }
         return HSA_STATUS_SUCCESS;

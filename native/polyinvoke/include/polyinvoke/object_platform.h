@@ -46,8 +46,6 @@ protected:
     static std::shared_mutex pendingMutex;
     static detail::CountedCallbackHandler handler;
 
-    //      auto cbHandle = cb ? handler.createHandle(*cb) : nullptr;
-
     auto id = counter++;
     WriteLock wPending(pendingMutex);
     pending.emplace(id, N);
@@ -63,25 +61,6 @@ protected:
         }
       }).detach();
     }
-
-    //    auto id = counter++;
-    //    WriteLock wPending(pendingLock);
-    //    pending.emplace(id, N);
-    //    arena.enqueue([N, id, f, cb, this]() {
-    //      for (size_t tid = 0; tid < N; ++tid) {
-    //        group.run([id, tid, f, cb]() {
-    //          f(tid);
-    //          WriteLock rwPending(pendingLock);
-    //          if (auto it = pending.find(id); it != pending.end()) {
-    //            if (--it->second == 0) {
-    //              pending.erase(id);
-    //              if (cb) (*cb)();
-    //              //            detail::CountedCallbackHandler::consume(cbHandle);
-    //            }
-    //          }
-    //        });
-    //      }
-    //    });
   }
 
 public:

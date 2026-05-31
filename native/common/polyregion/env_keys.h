@@ -3,6 +3,7 @@
 namespace polyregion::env {
 
 inline constexpr auto PolyregionDebug = "POLYREGION_DEBUG";
+inline constexpr auto PolyinvokeTrace = "POLYINVOKE_TRACE";
 inline constexpr auto PolyregionCacheDir = "POLYREGION_CACHE_DIR";
 inline constexpr auto PolyregionBitcodeDir = "POLYREGION_BITCODE_DIR";
 inline constexpr auto PolyregionTestProfile = "POLYREGION_TEST_PROFILE";
