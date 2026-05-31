@@ -9,7 +9,7 @@
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
 
-#include "amd_util.h"
+#include "vendor_utils.h"
 #include "dl_util.h"
 
 using namespace polyregion::invoke;

@@ -425,14 +425,16 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   options.NoTrappingFPMath = useUnsafeMath;
   options.NoSignedZerosFPMath = useUnsafeMath;
 
-  llvm::CodeGenOptLevel genOpt;
-  switch (opt) {
-    case compiletime::OptLevel::O0: genOpt = llvm::CodeGenOptLevel::None; break;
-    case compiletime::OptLevel::O1: genOpt = llvm::CodeGenOptLevel::Less; break;
-    case compiletime::OptLevel::O2: genOpt = llvm::CodeGenOptLevel::Default; break;
-    case compiletime::OptLevel::O3: // fallthrough
-    case compiletime::OptLevel::Ofast: genOpt = llvm::CodeGenOptLevel::Aggressive; break;
-  }
+  const auto [genOpt, optLevel] = [](compiletime::OptLevel o) -> std::pair<llvm::CodeGenOptLevel, llvm::OptimizationLevel> {
+    switch (o) {
+      case compiletime::OptLevel::O0: return {llvm::CodeGenOptLevel::None, llvm::OptimizationLevel::O0};
+      case compiletime::OptLevel::O1: return {llvm::CodeGenOptLevel::Less, llvm::OptimizationLevel::O1};
+      case compiletime::OptLevel::O2: return {llvm::CodeGenOptLevel::Default, llvm::OptimizationLevel::O2};
+      case compiletime::OptLevel::O3: // fallthrough
+      case compiletime::OptLevel::Ofast: return {llvm::CodeGenOptLevel::Aggressive, llvm::OptimizationLevel::O3};
+    }
+    return {llvm::CodeGenOptLevel::Default, llvm::OptimizationLevel::O2};
+  }(opt);
 
   // We have two groups of targets:
   //  * Ones that are enabled via LLVM_TARGETS_TO_BUILD, these will have a llvm::Target and we can create a TargetMachine from it
@@ -445,15 +447,6 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   const auto isSpirvTriple = info.triple.isSPIRV();
   for (llvm::Function &F : M.functions())
     setFunctionAttributes(isSpirvTriple ? "" : info.cpu.uArch, isSpirvTriple ? "" : info.cpu.features, F, useUnsafeMath);
-
-  llvm::OptimizationLevel optLevel;
-  switch (opt) {
-    case compiletime::OptLevel::O0: optLevel = llvm::OptimizationLevel::O0; break;
-    case compiletime::OptLevel::O1: optLevel = llvm::OptimizationLevel::O1; break;
-    case compiletime::OptLevel::O2: optLevel = llvm::OptimizationLevel::O2; break;
-    case compiletime::OptLevel::O3: // fallthrough
-    case compiletime::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
-  }
 
   using TargetMachine = llvm::TargetMachine;
 

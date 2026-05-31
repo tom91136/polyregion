@@ -9,6 +9,7 @@
 #include "polyregion/env_keys.h"
 
 #include "dl_util.h"
+#include "vendor_utils.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cl;
@@ -326,22 +327,6 @@ std::vector<Property> ClDevice::properties() {
       {"CL_DEVICE_EXTENSIONS", queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS)},
   };
 }
-// Stable vendor token from CL_DEVICE_VENDOR's free-form string; values match what test profiles
-// write as the @hint (`opencl@nvidia` etc.).
-static std::string normaliseVendor(std::string vendor) {
-  std::string lower(vendor.size(), {});
-  for (size_t i = 0; i < vendor.size(); ++i)
-    lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(vendor[i])));
-  if (lower.find("nvidia") != std::string::npos) return "nvidia";
-  if (lower.find("intel") != std::string::npos) return "intel";
-  if (lower.find("advanced micro devices") != std::string::npos || lower.find("amd") != std::string::npos) return "amd";
-  if (lower.find("mesa") != std::string::npos || lower.find("rusticl") != std::string::npos) return "mesa";
-  if (lower.find("apple") != std::string::npos) return "apple";
-  if (lower.find("arm") != std::string::npos) return "arm";
-  if (lower.find("qualcomm") != std::string::npos) return "qualcomm";
-  return "unknown";
-}
-
 std::vector<std::string> ClDevice::features() {
   POLYINVOKE_TRACE();
   if (cachedFeatures) return *cachedFeatures;

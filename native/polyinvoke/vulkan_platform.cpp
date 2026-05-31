@@ -15,6 +15,8 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 
+#include "vendor_utils.h"
+
 #ifndef _MSC_VER
   #pragma clang diagnostic pop // -Wno-everything
 #endif
@@ -292,25 +294,9 @@ std::vector<Property> VulkanDevice::properties() {
       //      { "sparseProperties",   vk::to_string(props.sparseProperties ) },
   };
 }
-// Vulkan deviceName fingerprints differ from OpenCL's, so the vendor normaliser is local.
-static std::string normaliseVulkanVendor(std::string s) {
-  std::string lower(s.size(), {});
-  for (size_t i = 0; i < s.size(); ++i)
-    lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
-  if (lower.find("nvidia") != std::string::npos) return "nvidia";
-  if (lower.find("intel") != std::string::npos) return "intel";
-  // RADV / AMDVLK / AMDGPU-PRO all collapse to "amd".
-  if (lower.find("radv") != std::string::npos || lower.find("amd") != std::string::npos || lower.find("radeon") != std::string::npos)
-    return "amd";
-  if (lower.find("llvmpipe") != std::string::npos) return "llvmpipe";
-  if (lower.find("apple") != std::string::npos) return "apple";
-  if (lower.find("mesa") != std::string::npos) return "mesa";
-  return "unknown";
-}
-
 std::vector<std::string> VulkanDevice::features() {
   POLYINVOKE_TRACE();
-  std::vector<std::string> out{"vulkan", "spirv_glcompute", normaliseVulkanVendor(device.getProperties().deviceName)};
+  std::vector<std::string> out{"vulkan", "spirv_glcompute", normaliseVendor(device.getProperties().deviceName)};
   const auto f = device.getFeatures();
   if (f.shaderFloat64) out.emplace_back("fp64");
   if (f.shaderInt64) out.emplace_back("int64");
