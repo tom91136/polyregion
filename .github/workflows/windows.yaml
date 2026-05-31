@@ -333,7 +333,7 @@ jobs:
           set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
           set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
           set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
-          ctest --test-dir "%TESTS%" --timeout 300 --output-on-failure --output-junit "%TESTS%\native-test-results.xml"
+          ctest --test-dir "%TESTS%" -j %NUMBER_OF_PROCESSORS% --timeout 300 --output-on-failure --output-junit "%TESTS%\native-test-results.xml"
 
       - name: Annotate ctest results
         if: always()

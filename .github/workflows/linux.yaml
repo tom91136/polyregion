@@ -437,7 +437,7 @@ jobs:
           export POLYPASS_PLUGINS=$DIST/lib/libpolypass.so
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
           export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
-          ctest --test-dir "$TESTS" --timeout 300 --output-on-failure --output-junit "$TESTS/native-test-results.xml"
+          ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 300 --output-on-failure --output-junit "$TESTS/native-test-results.xml"
 
       - name: Annotate ctest results
         if: always()
