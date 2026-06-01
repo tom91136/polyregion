@@ -1,3 +1,14 @@
+option(POLYINVOKE_REGEN_KERNELS "Regenerate polyinvoke test-kernel blobs + embedded headers" OFF)
+
+if (NOT POLYINVOKE_REGEN_KERNELS)
+    add_custom_target(polyinvoke-regen-kernels
+            COMMAND ${CMAKE_COMMAND} -E echo
+                    "polyinvoke-regen-kernels disabled. Reconfigure with -DPOLYINVOKE_REGEN_KERNELS=ON to enable."
+            COMMAND ${CMAKE_COMMAND} -E false
+            VERBATIM)
+    return()
+endif ()
+
 set(ASSETS_HDR_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(ASSETS_BIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/bin)
 set(TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/_embed.hpp.in)
@@ -133,6 +144,9 @@ foreach (CL ${CL_SRC_FILES})
                         -mcode-object-version=4
                         -xcl ${CL} -Xclang -mlink-builtin-bitcode -Xclang ${AMDHSA_BC}
                         -o ${_bin}
+                # XXX libclc's amdhsa.bc bakes in the system clang's llvm.ident; strip so
+                # the HSACO is independent of whichever toolchain built libclc.
+                COMMAND ${LLVM_OBJCOPY} --remove-section=.comment ${_bin} ${_bin} || ${CMAKE_COMMAND} -E true
                 DEPENDS ${CL}
                 COMMENT "[hsa/${GFX}] ${CL}"
                 VERBATIM)
@@ -198,12 +212,18 @@ file(WRITE ${_shim} "int _fltused = 0;\n")
 
 function(_cpu_compile_one VARIANT C_SOURCE PROGRAM BUCKET ARCH TRIPLE EXTRA OUT_ENTRY)
     set(_bin ${ASSETS_BIN_DIR}/${VARIANT}/${PROGRAM}_${BUCKET}_${ARCH}.bin)
+    set(_zero_coff_ts "")
+    # XXX clang's COFF writer ignores SOURCE_DATE_EPOCH; zero TimeDateStamp at header offset 4.
+    if (TRIPLE MATCHES "windows")
+        set(_zero_coff_ts COMMAND sh -c "printf '\\x00\\x00\\x00\\x00' | dd of='${_bin}' bs=1 seek=4 count=4 conv=notrunc status=none")
+    endif ()
     add_custom_command(
             OUTPUT ${_bin}
             COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/${VARIANT}
             COMMAND ${KERNELGEN_CLANG} -target ${TRIPLE} -Os -g0 -std=c11 -march=${ARCH} ${REPRO_FLAGS} ${EXTRA}
                     -xc ${C_SOURCE} -o ${_bin}
             COMMAND ${LLVM_OBJCOPY} --remove-section=.comment --remove-section=.note.GNU-stack ${_bin} ${_bin} || ${CMAKE_COMMAND} -E true
+            ${_zero_coff_ts}
             DEPENDS ${C_SOURCE}
             COMMENT "[${VARIANT}/${BUCKET}/${ARCH}] ${C_SOURCE}"
             VERBATIM)
