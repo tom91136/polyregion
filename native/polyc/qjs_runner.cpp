@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <unordered_map>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "quickjs.h"
 
@@ -12,6 +13,8 @@
 #include "js_runner.h"
 
 namespace polyregion::polypass {
+
+using namespace aspartame;
 
 struct JsPassRunner::Impl {
   std::string path;
