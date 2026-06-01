@@ -30,6 +30,8 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned CodePage, unsig
 #include "flang/Frontend/FrontendPluginRegistry.h"
 #include "llvm/Option/ArgList.h"
 
+#include "aspartame/all.hpp"
+
 #include "rewriter.h"
 
 namespace {
@@ -145,10 +147,9 @@ class RewriteIRAction final : public Fortran::frontend::PluginParseTreeAction {
     Fortran::semantics::SemanticsContext &ctx = getInstance().getSemanticsContext();
     llvm::outs() << "[PolyFC] opts=" << ctx.targetCharacteristics().compilerOptionsString() << "\n";
 
+    using namespace aspartame;
     const auto cmdArgs = getCmdLine();
-    std::vector<const char *> cmdArgRef;
-    for (auto &x : cmdArgs)
-      cmdArgRef.push_back(x.c_str());
+    const auto cmdArgRef = cmdArgs ^ map([](auto &x) { return x.c_str(); });
     unsigned int missingArgIndex{};
     unsigned int missingArgCount{};
     const auto args =

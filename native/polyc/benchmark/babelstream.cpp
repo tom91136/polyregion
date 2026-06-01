@@ -47,31 +47,31 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
       std::vector<Arg> cpuArgs = {"begin"_(Ptr(Long))(), "end"_(Ptr(Long))()};
       args.insert(args.begin(), cpuArgs.begin(), cpuArgs.end());
     }
-    args ^= concat_inplace(extraArgs);
+    args ^= concat(extraArgs);
 
     Stmts stmts;
 
     if (!gpu) {
       stmts.push_back(var("i") = "begin"_(Ptr(Long))["__tid"_(Long)]); // long i = begin[__tid]
 
-      stmts ^= concat_inplace(mkPrelude("__tid"_(Long), "i"_(Long)));
+      stmts ^= concat(mkPrelude("__tid"_(Long), "i"_(Long)));
 
       auto loopBody = mkLoopBody("__tid"_(Long), "i"_(Long));
       loopBody.push_back(Mut("i"_(Long), call(Add("i"_(Long), 1_(Long), Long)))); // i++
 
-      stmts ^= concat_inplace(whileLoop(
-          {let("bound") = "end"_(Ptr(Long))["__tid"_(Long)], var("cont") = call(LogicLt("i"_(Long), "bound"_(Long)))}, "cont"_(Bool),
-          loopBody)); // while(i < end[__tid])
+      stmts ^= concat(whileLoop({let("bound") = "end"_(Ptr(Long))["__tid"_(Long)], var("cont") = call(LogicLt("i"_(Long), "bound"_(Long)))},
+                                "cont"_(Bool),
+                                loopBody)); // while(i < end[__tid])
 
-      stmts ^= concat_inplace(mkEpilogue("__tid"_(Long), "i"_(Long)));
+      stmts ^= concat(mkEpilogue("__tid"_(Long), "i"_(Long)));
     } else {
 
       stmts.push_back(var("i") = call(GpuGlobalIdx(0_(UInt)))); // uint32_t i = global_id
       stmts.push_back(let("local_i") = call(GpuLocalIdx(0_(UInt))));
 
-      stmts ^= concat_inplace(mkPrelude("local_i"_(UInt), "i"_(UInt)));
-      stmts ^= concat_inplace(mkLoopBody("local_i"_(UInt), "i"_(UInt)));
-      stmts ^= concat_inplace(mkEpilogue("local_i"_(UInt), "i"_(UInt)));
+      stmts ^= concat(mkPrelude("local_i"_(UInt), "i"_(UInt)));
+      stmts ^= concat(mkLoopBody("local_i"_(UInt), "i"_(UInt)));
+      stmts ^= concat(mkEpilogue("local_i"_(UInt), "i"_(UInt)));
     }
 
     stmts.push_back(ret(Term::Unit0Const()));
@@ -125,73 +125,72 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
       },
       empty);
 
-  auto dot =
-      !gpu ? //
-          mkCpuStreamFn(
-              "dot", {"sum"_(Ptr(type))()},
-              [&](auto id, auto i) -> Stmts { //
-                return {
-                    var("acc") = 0_(type) // mutable accumulator across iterations
-                };
-              },
-              [&](auto id, auto i) -> Stmts {
-                return {
-                    let("ai") = "a"_(Ptr(type))[i],                              // ai = a[i]
-                    let("bi") = "b"_(Ptr(type))[i],                              // bi = b[i]
-                    let("sumid") = "acc"_(type),                                 // sumid = acc
-                    let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),       // r0 = ai * bi
-                    "acc"_(type) = call(Add("r0"_(type), "sumid"_(type), type)), // acc = r0 + sumid
+  auto dot = !gpu ? //
+                 mkCpuStreamFn(
+                     "dot", {"sum"_(Ptr(type))()},
+                     [&](auto id, auto i) -> Stmts { //
+                       return {
+                           var("acc") = 0_(type) // mutable accumulator across iterations
+                       };
+                     },
+                     [&](auto id, auto i) -> Stmts {
+                       return {
+                           let("ai") = "a"_(Ptr(type))[i],                              // ai = a[i]
+                           let("bi") = "b"_(Ptr(type))[i],                              // bi = b[i]
+                           let("sumid") = "acc"_(type),                                 // sumid = acc
+                           let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),       // r0 = ai * bi
+                           "acc"_(type) = call(Add("r0"_(type), "sumid"_(type), type)), // acc = r0 + sumid
 
-                };
-              },
-              [&](auto id, auto i) -> Stmts {
-                return {
-                    "sum"_(Ptr(type))[id] = "acc"_(type) // sum[id] = acc
-                };
-              })
-           : //
-          mkCpuStreamFn(
-              "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, {}, Local))(), "array_size"_(UInt)()}, empty,
-              [&](auto local_i, auto i) -> Stmts {
-                Stmts body;
-                body.push_back(let("global_size") = call(GpuGlobalSize(0_(UInt))));
-                body.push_back("wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type));
-                body ^= concat_inplace(whileLoop({var("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                                                 {let("ai") = "a"_(Ptr(type))[i],                           // ai = a[i]
-                                                  let("bi") = "b"_(Ptr(type))[i],                           // bi = b[i]
-                                                  let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],  // sumid = sum[local_i]
-                                                  let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),    // r0 = ai * bi
-                                                  let("r1") = call(Add("r0"_(type), "sumid"_(type), type)), // r1 = r0 + sumid
-                                                  "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),   // a[i] = bi
-                                                  ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))})); // i += global_size
-                body.push_back(var("offset") = call(GpuLocalSize(0_(UInt))));
-                body.push_back("offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt))); // offset /= 2
-                body ^= concat_inplace(
-                    whileLoop({var("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
-                              {
-                                  let("_") = call(GpuBarrierLocal()), let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
-                                  Cond("__cond_lt"_(Bool), //
-                                       {
-                                           let("new_offset") = call(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // local_i + offset
-                                           let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
-                                           let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)],
-                                           "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
-                                           "wg_sum"_(Ptr(type, {}, Local))[local_i] = "wg_sum_at_offset"_(type),
-                                       },
-                                       {}),
-                                  "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
-                              }));
-                body.push_back(let("group_id") = call(GpuGroupIdx(0_(UInt))));
-                body.push_back(let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))));
-                body.push_back(Cond("__cond_eq"_(Bool), //
+                       };
+                     },
+                     [&](auto id, auto i) -> Stmts {
+                       return {
+                           "sum"_(Ptr(type))[id] = "acc"_(type) // sum[id] = acc
+                       };
+                     })
+                  : //
+                 mkCpuStreamFn(
+                     "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, {}, Local))(), "array_size"_(UInt)()}, empty,
+                     [&](auto local_i, auto i) -> Stmts {
+                       Stmts body;
+                       body.push_back(let("global_size") = call(GpuGlobalSize(0_(UInt))));
+                       body.push_back("wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type));
+                       body ^= concat(whileLoop({var("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
+                                                {let("ai") = "a"_(Ptr(type))[i],                           // ai = a[i]
+                                                 let("bi") = "b"_(Ptr(type))[i],                           // bi = b[i]
+                                                 let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],  // sumid = sum[local_i]
+                                                 let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),    // r0 = ai * bi
+                                                 let("r1") = call(Add("r0"_(type), "sumid"_(type), type)), // r1 = r0 + sumid
+                                                 "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),   // a[i] = bi
+                                                 ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))})); // i += global_size
+                       body.push_back(var("offset") = call(GpuLocalSize(0_(UInt))));
+                       body.push_back("offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt))); // offset /= 2
+                       body ^= concat(whileLoop(
+                           {var("cont2") = call(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
+                           {
+                               let("_") = call(GpuBarrierLocal()), let("__cond_lt") = call(LogicLt("local_i"_(UInt), "offset"_(UInt))),
+                               Cond("__cond_lt"_(Bool), //
                                     {
-                                        let("wg_sum_old_1") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
-                                        "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
+                                        let("new_offset") = call(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // local_i + offset
+                                        let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
+                                        let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)],
+                                        "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
+                                        "wg_sum"_(Ptr(type, {}, Local))[local_i] = "wg_sum_at_offset"_(type),
                                     },
-                                    {}));
-                return body;
-              },
-              empty);
+                                    {}),
+                               "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
+                           }));
+                       body.push_back(let("group_id") = call(GpuGroupIdx(0_(UInt))));
+                       body.push_back(let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))));
+                       body.push_back(Cond("__cond_eq"_(Bool), //
+                                           {
+                                               let("wg_sum_old_1") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
+                                               "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
+                                           },
+                                           {}));
+                       return body;
+                     },
+                     empty);
 
   //
 
@@ -251,7 +250,7 @@ int main() {
                                   target == compiletime::Target::Object_LLVM_SPIRV_GLCompute;
         if (backend == invoke::Backend::OpenCL) {
           const auto features = d->features();
-          const auto hasSpirvKernel = std::find(features.begin(), features.end(), std::string("spirv_kernel")) != features.end();
+          const auto hasSpirvKernel = features ^ contains(std::string("spirv_kernel"));
           if (isSpirvImage != hasSpirvKernel) continue;
         }
 

@@ -8,6 +8,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 
+#include "aspartame/all.hpp"
+
 #include "polyregion/env_keys.h"
 
 #include "memoryfs.h"
@@ -19,13 +21,12 @@ bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_os
 std::pair<std::optional<std::string>, std::optional<std::string>>
 polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files) {
 
+  using namespace aspartame;
   // XXX deque for stable c_str() across push_back; LLD holds the pointers below.
   std::deque<std::string> inMemoryFiles;
 
   std::vector<const char *> allArgs{""};
-  allArgs.reserve(args.size() + files.size() + 3);
-  for (auto &a : args)
-    allArgs.push_back(a.c_str());
+  allArgs ^= concat(args | map([](auto &a) { return a.c_str(); }));
   for (auto f : files) {
     if (auto path = memoryfs::open(f.getBufferIdentifier().str()); path) {
       inMemoryFiles.push_back(*path);

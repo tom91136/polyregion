@@ -96,14 +96,12 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
          fold_total(
              [&](const CPUParams &p) {
                Stmts body;
-               for (auto &r : reductions)
-                 body.emplace_back(r.partialVar());
+               reductions ^ for_each([&](auto &r) { body.emplace_back(r.partialVar()); });
                const auto begin = letBind(body, "begin", Expr::Index(p.begins, "__tid"_(Long), Long));
                const auto end = letBind(body, "end", Expr::Index(p.ends, "__tid"_(Long), Long));
                body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1),
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
-               for (auto &r : reductions)
-                 body.emplace_back(r.drainPartial("__tid"_(Long)));
+               reductions ^ for_each([&](auto &r) { body.emplace_back(r.drainPartial("__tid"_(Long))); });
                body.emplace_back(ret());
                return Function(Sym({fnName}), {}, std::optional<Arg>{}, std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {})}, {}, {},
                                Unit, body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
@@ -119,8 +117,7 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                const auto gs = letBind(body, "gs", Expr::Cast(gsU, Long));
                const auto gidU = letBind(body, "gidU", call(Spec::GpuGlobalIdx(0_(UInt))));
                const auto gid = letBind(body, "gid", Expr::Cast(gidU, Long));
-               for (auto &r : reductions)
-                 body.emplace_back(r.partialVar());
+               reductions ^ for_each([&](auto &r) { body.emplace_back(r.partialVar()); });
                body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs,
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
 
@@ -156,11 +153,10 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                }
 
                // localTgt[li] = target
-               for (size_t i = 0; i < reductions.size(); ++i) {
-                 const auto &r = reductions[i];
+               reductions | zip_with_index<size_t>() | for_each([&](auto &r, auto i) {
                  body.emplace_back(
                      Stmt::Update(Term::Select(localTargets[i], {}, localTargets[i].tpe), li, Term::Select(r.target, {}, r.target.tpe)));
-               }
+               });
 
                // Tree reduction. Stmt::While's condition is a Term, not an Expr; bind the
                // predicate to a mutable named slot updated in the body, or LLVM folds the
@@ -176,14 +172,13 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
 
                Stmts ifBody;
                const auto liPlusOff = letBind(ifBody, "liOff", Expr::IntrOp(Intr::Add(li, Term::Select(offVar, {}, Long), Long)));
-               for (size_t i = 0; i < reductions.size(); ++i) {
-                 const auto &r = reductions[i];
+               reductions | zip_with_index<size_t>() | for_each([&](auto &r, auto i) {
                  const auto localTgtSel = Term::Select(localTargets[i], {}, localTargets[i].tpe);
                  const auto a = letBind(ifBody, "lhs", Expr::Index(localTgtSel, li, r.target.tpe));
                  const auto b = letBind(ifBody, "rhs", Expr::Index(localTgtSel, liPlusOff, r.target.tpe));
                  const auto combined = letBind(ifBody, "comb", r.binaryOp(a, b));
                  ifBody.emplace_back(Stmt::Update(localTgtSel, li, combined));
-               }
+               });
                const auto cond = letBind(whileBody, "cond", Expr::IntrOp(Intr::LogicLt(li, Term::Select(offVar, {}, Long))));
                whileBody.emplace_back(Stmt::Cond(cond, ifBody, {}));
                whileBody.emplace_back(Stmt::Mut(Term::Select(offVar, {}, Long),
@@ -198,12 +193,11 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                const auto gi = letBind(body, "gi", Expr::Cast(giU, Long));
                const auto liEqZero = letBind(body, "liEqZero", Expr::IntrOp(Intr::LogicEq(li, Term::IntS64Const(0))));
                Stmts drainBody;
-               for (size_t i = 0; i < reductions.size(); ++i) {
-                 const auto &r = reductions[i];
+               reductions | zip_with_index<size_t>() | for_each([&](auto &r, auto i) {
                  const auto localTgtSel = Term::Select(localTargets[i], {}, localTargets[i].tpe);
                  const auto loaded = letBind(drainBody, "drain", Expr::Index(localTgtSel, li, r.target.tpe));
                  drainBody.emplace_back(Stmt::Update(r.partialArray, gi, loaded));
-               }
+               });
                body.emplace_back(Stmt::Cond(liEqZero, drainBody, {}));
                body.emplace_back(ret());
 

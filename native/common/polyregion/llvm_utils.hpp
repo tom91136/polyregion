@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include "aspartame/all.hpp"
+
 #include "polyregion/compat.h"
 #ifdef NO_ERROR
   #undef NO_ERROR
@@ -85,7 +87,8 @@ static void collectCPUFeatures(const std::string &CPU,             //
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());
   }
 
-  std::sort(drain.begin(), drain.end());
-  drain.erase(unique(drain.begin(), drain.end()), drain.end());
+  using namespace aspartame;
+  drain ^= sort();
+  drain ^= distinct();
 }
 } // namespace polyregion::llvm_shared

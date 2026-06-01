@@ -67,11 +67,11 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) { remaining ^= concat_inplace(xs); };
+               auto append = [&](const std::vector<std::string> &xs) { remaining ^= concat(xs); };
 
                if (opts) {
-                 remaining ^= concat_inplace(mkDelimitedEnvPaths(polyregion::env::PolystlInclude, "-isystem", llvm::sys::EnvPathSeparator));
-                 remaining ^= concat_inplace(mkDelimitedEnvPaths(polyregion::env::PolystlLib, {}, llvm::sys::EnvPathSeparator));
+                 remaining ^= concat(mkDelimitedEnvPaths(polyregion::env::PolystlInclude, "-isystem", llvm::sys::EnvPathSeparator));
+                 remaining ^= concat(mkDelimitedEnvPaths(polyregion::env::PolystlLib, {}, llvm::sys::EnvPathSeparator));
 
                  const auto polycppResourcePath = resolveResourcePath(execParentPath, "polycpp");
                  const auto polycppIncludePath = joinPath(polycppResourcePath, "include");
@@ -138,28 +138,27 @@ int main(int argc, const char *argv[]) {
                        append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
                                "/mllvm:-polyreflect-late=ReflectStack+ReflectMem"});
                        // XXX /INCLUDE: pulls polyreflect-rt's new/delete in ahead of vcruntime's.
-                       for (auto sym : {msvc_abi::OperatorNew,
-                                        msvc_abi::OperatorNewAligned,
-                                        msvc_abi::OperatorNewNothrow,
-                                        msvc_abi::OperatorNewAlignedNothrow,
-                                        msvc_abi::OperatorNewArray,
-                                        msvc_abi::OperatorNewArrayAligned,
-                                        msvc_abi::OperatorNewArrayNothrow,
-                                        msvc_abi::OperatorNewArrayAlignedNothrow,
-                                        msvc_abi::OperatorDelete,
-                                        msvc_abi::OperatorDeleteArray,
-                                        msvc_abi::OperatorDeleteAligned,
-                                        msvc_abi::OperatorDeleteArrayAligned,
-                                        msvc_abi::OperatorDeleteSized,
-                                        msvc_abi::OperatorDeleteArraySized,
-                                        msvc_abi::OperatorDeleteSizedAligned,
-                                        msvc_abi::OperatorDeleteArraySizedAligned,
-                                        msvc_abi::OperatorDeleteNothrow,
-                                        msvc_abi::OperatorDeleteArrayNothrow,
-                                        msvc_abi::OperatorDeleteAlignedNothrow,
-                                        msvc_abi::OperatorDeleteArrayAlignedNothrow}) {
-                         append({"-Xlinker", fmt::format("/INCLUDE:{}", sym)});
-                       }
+                       std::vector<std::string_view>{msvc_abi::OperatorNew,
+                                                     msvc_abi::OperatorNewAligned,
+                                                     msvc_abi::OperatorNewNothrow,
+                                                     msvc_abi::OperatorNewAlignedNothrow,
+                                                     msvc_abi::OperatorNewArray,
+                                                     msvc_abi::OperatorNewArrayAligned,
+                                                     msvc_abi::OperatorNewArrayNothrow,
+                                                     msvc_abi::OperatorNewArrayAlignedNothrow,
+                                                     msvc_abi::OperatorDelete,
+                                                     msvc_abi::OperatorDeleteArray,
+                                                     msvc_abi::OperatorDeleteAligned,
+                                                     msvc_abi::OperatorDeleteArrayAligned,
+                                                     msvc_abi::OperatorDeleteSized,
+                                                     msvc_abi::OperatorDeleteArraySized,
+                                                     msvc_abi::OperatorDeleteSizedAligned,
+                                                     msvc_abi::OperatorDeleteArraySizedAligned,
+                                                     msvc_abi::OperatorDeleteNothrow,
+                                                     msvc_abi::OperatorDeleteArrayNothrow,
+                                                     msvc_abi::OperatorDeleteAlignedNothrow,
+                                                     msvc_abi::OperatorDeleteArrayAlignedNothrow} ^
+                           for_each([&](auto sym) { append({"-Xlinker", fmt::format("/INCLUDE:{}", sym)}); });
   #else
                        // XXX At -O0 LLD's LTO codegen builds no optimisation pipeline at all, so
                        // EP-callback-registered passes never fire. Inject the late passes by name
@@ -213,10 +212,7 @@ int main(int argc, const char *argv[]) {
                const bool isCC1 =
                    remaining.size() >= 2 && (remaining[1] == "-cc1" || remaining[1] == "-cc1as" || remaining[1] == "-cc1gen-reproducer");
                if (!isCC1) remaining.insert(remaining.begin() + 1, "--driver-mode=g++");
-               std::vector<char *> rawArgs;
-               rawArgs.reserve(remaining.size());
-               for (auto &arg : remaining)
-                 rawArgs.push_back(arg.data());
+               auto rawArgs = remaining ^ map([](auto &arg) { return arg.data(); });
                llvm::ToolContext toolContext{execPath.c_str(), nullptr, false};
                return clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext);
 #else

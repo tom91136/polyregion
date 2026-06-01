@@ -89,11 +89,12 @@ struct TestCase {
       return parseRight("case:", line) ^ map([&](auto &c) {
                return TestCase{
                    .name = c ^ trim(),
-                   .matrices = parseMatrices()                                                                                           //
-                               ^ flatten()                                                                                               //
-                               ^ concat(extraMatrices)                                                                                   //
-                               ^ map([](auto &name, auto &values) { return values ^ map([&](auto &v) { return std::pair{name, v}; }); }) //
-                               ^ sequence(),
+                   .matrices = (parseMatrices()                                                                                           //
+                                | flatten()                                                                                               //
+                                | concat(extraMatrices)                                                                                   //
+                                | map([](auto &name, auto &values) { return values ^ map([&](auto &v) { return std::pair{name, v}; }); }) //
+                                | to_vector())                                                                                            //
+                               ^ cartesian_product(),
                    .runs = parseRuns()};
              });
     });

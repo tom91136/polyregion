@@ -59,10 +59,7 @@ Term::Select polyast::selectField(const Term::Select &base, const Named &field) 
 }
 
 Type::Struct polyast::typeOf(const StructDef &def) {
-  Vector<Type::Any> args;
-  for (auto &v : def.tpeVars)
-    args.push_back(Type::Var(v));
-  return Type::Struct(def.name, args);
+  return Type::Struct(def.name, def.tpeVars ^ map([](auto &v) -> Type::Any { return Type::Var(v); }));
 }
 
 string polyast::repr(const CompileResult &compilation) {
@@ -223,18 +220,13 @@ dsl::AssignmentBuilder dsl::var(const string &name) { return AssignmentBuilder{n
 
 Term::Select dsl::Select(const Vector<Named> &init, const Named &last) {
   if (init.empty()) return Term::Select(last, {}, last.tpe);
-  Vector<PathStep::Any> steps;
-  for (size_t i = 1; i < init.size(); ++i)
-    steps.push_back(PathStep::Field(init[i].symbol));
+  auto steps = init | drop(1) | map([](auto &n) -> PathStep::Any { return PathStep::Field(n.symbol); }) | to_vector();
   steps.push_back(PathStep::Field(last.symbol));
   return Term::Select(init.front(), steps, last.tpe);
 }
 
 Term::Select dsl::selectFromBuilders(const Vector<NamedBuilder> &init, const Named &last) {
-  Vector<Named> namedInit;
-  for (auto &nb : init)
-    namedInit.push_back(nb.named);
-  return dsl::Select(namedInit, last);
+  return dsl::Select(init ^ map([](auto &nb) { return nb.named; }), last);
 }
 
 Expr::IntrOp dsl::call(const Intr::Any &intr) { return Expr::IntrOp(intr); }

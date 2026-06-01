@@ -52,7 +52,7 @@ void runArgs(Context &ctx, Backend backend, Platform &, Device &device, const Im
     float out = {};
     waitAll([&](auto &h) { q->enqueueHostToDeviceAsyncTyped(&out, out_d, 1, h); });
     const size_t scalarArgCount = args == 0 ? 0 : args - 1;
-    auto values = iota(1.0f, static_cast<float>(scalarArgCount)) | to_vector();
+    auto values = iota(1.0f) | take(scalarArgCount) | to_vector();
 
     ArgBuffer buffer;
     if (device.sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);

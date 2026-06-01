@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 
 using namespace polyregion::backend::details;
 using namespace aspartame;
@@ -121,10 +122,7 @@ constexpr uint32_t Workgroup = 2;
 
 static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requestedRtn, llvm::ArrayRef<ValPtr> args) {
   auto &ctx = cg.C.actual;
-  std::vector<llvm::Type *> paramTys;
-  paramTys.reserve(b.args.size());
-  for (auto &mk : b.args)
-    paramTys.push_back(mk(ctx));
+  auto paramTys = b.args ^ map([&](auto &mk) { return mk(ctx); });
   auto *fnTy = llvm::FunctionType::get(b.ret(ctx), paramTys, /*isVarArg*/ false);
   auto fnCallee = cg.M.getOrInsertFunction(b.mangled, fnTy);
   auto *fn = llvm::cast<llvm::Function>(fnCallee.getCallee());
@@ -132,15 +130,13 @@ static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requested
   fn->addFnAttr(llvm::Attribute::Convergent);
   fn->addFnAttr(llvm::Attribute::NoUnwind);
 
-  std::vector<llvm::Value *> coerced;
-  coerced.reserve(args.size());
-  for (size_t i = 0; i < args.size(); ++i) {
-    auto *src = args[i];
-    auto *dst = paramTys[i];
-    if (src->getType() == dst) coerced.push_back(src);
-    else if (src->getType()->isIntegerTy() && dst->isIntegerTy()) coerced.push_back(cg.B.CreateIntCast(src, dst, /*isSigned*/ false));
-    else throw polyregion::backend::BackendException(std::string("cannot coerce arg to OCL builtin ") + b.mangled);
-  }
+  auto coerced = args | zip_with_index<size_t>() | map([&](auto *src, auto i) -> llvm::Value * {
+                   auto *dst = paramTys[i];
+                   if (src->getType() == dst) return src;
+                   if (src->getType()->isIntegerTy() && dst->isIntegerTy()) return cg.B.CreateIntCast(src, dst, /*isSigned*/ false);
+                   throw polyregion::backend::BackendException(std::string("cannot coerce arg to OCL builtin ") + b.mangled);
+                 }) |
+                 to_vector();
   auto *call = cg.B.CreateCall(fn, coerced);
   call->setCallingConv(llvm::CallingConv::SPIR_FUNC);
 

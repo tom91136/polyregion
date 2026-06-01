@@ -3,6 +3,7 @@
 #include <string_view>
 #include <vector>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 
 #include "polytest/test_case.hpp"
@@ -31,11 +32,9 @@ inline int runMain(int argc, char **argv) {
     }
   }
 
-  std::vector<Task> all;
-  for (auto &d : ::polyregion::polytest::cases::discoverers()) {
-    auto ts = d();
-    all.insert(all.end(), std::make_move_iterator(ts.begin()), std::make_move_iterator(ts.end()));
-  }
+  using namespace aspartame;
+
+  auto all = ::polyregion::polytest::cases::discoverers() ^ flat_map([](auto &d) { return d(); });
 
   if (mode == "list") {
     for (auto &t : all) {
@@ -68,8 +67,7 @@ inline int runMain(int argc, char **argv) {
   };
 
   if (mode == "run") {
-    for (auto &t : all)
-      if (t.id == target) return runOne(t);
+    if (auto found = all ^ find([&](auto &t) { return t.id == target; })) return runOne(*found);
     fmt::print(stderr, "No task with id `{}`\n", target);
     return 2;
   }

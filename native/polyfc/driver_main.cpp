@@ -75,8 +75,8 @@ int main(int argc, const char *argv[]) {
                if (opts) {
                  auto includes = mkDelimitedEnvPaths(polyregion::env::PolydcoInclude, "-isystem", llvm::sys::EnvPathSeparator);
                  auto libs = mkDelimitedEnvPaths(polyregion::env::PolydcoLib, {}, llvm::sys::EnvPathSeparator);
-                 remaining.insert(remaining.end(), includes.begin(), includes.end());
-                 remaining.insert(remaining.end(), libs.begin(), libs.end());
+                 remaining ^= concat(includes);
+                 remaining ^= concat(libs);
 
                  const auto polyfcLibPath = joinPath(resolveResourcePath(execParentPath, "polyfc"), "lib");
                  const auto polyreflectPlugin = joinPath(polyfcLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
@@ -183,10 +183,7 @@ int main(int argc, const char *argv[]) {
                }
   #endif
                remaining[0] = execPath;
-               std::vector<const char *> rawArgs;
-               rawArgs.reserve(remaining.size());
-               for (auto &arg : remaining)
-                 rawArgs.push_back(arg.c_str());
+               auto rawArgs = remaining ^ map([](auto &arg) { return arg.c_str(); });
                return flang_main(static_cast<int>(rawArgs.size()), rawArgs.data());
 #else
                return llvm::sys::ExecuteAndWait(flangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());

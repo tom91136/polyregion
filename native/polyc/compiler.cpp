@@ -276,7 +276,7 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
-  c.events ^= concat_inplace(preEvents);
+  c.events ^= concat(preEvents);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;
 }

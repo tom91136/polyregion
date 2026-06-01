@@ -72,14 +72,14 @@ llvm::Value *CodeGen::byteOffsetPtr(llvm::Value *base, llvm::Value *byteOff, con
 llvm::Value *CodeGen::i64SExt(llvm::Value *v) { return B.CreateSExtOrTrunc(v, C.i64Ty()); }
 
 llvm::Function *CodeGen::resolveExtFn(const Type::Any &rtn, const std::string &name, const std::vector<Type::Any> &args) {
-  return functions ^= get_or_emplace(Signature(Sym({name}), {}, {}, args, {}, {}, rtn), [&](auto &sig) -> llvm::Function * {
-           auto tpe = llvm::FunctionType::get(
-               /*Result*/ resolveType(rtn, true),
-               /*Params*/ args ^ map([&](auto &t) { return resolveType(t, true); }),
-               /*isVarArg*/ false);
-           auto fn = llvm::Function::Create(tpe, llvm::Function::ExternalLinkage, name, M);
-           return fn;
-         });
+  return get_or_emplace(functions, Signature(Sym({name}), {}, {}, args, {}, {}, rtn), [&](auto &sig) -> llvm::Function * {
+    auto tpe = llvm::FunctionType::get(
+        /*Result*/ resolveType(rtn, true),
+        /*Params*/ args ^ map([&](auto &t) { return resolveType(t, true); }),
+        /*isVarArg*/ false);
+    auto fn = llvm::Function::Create(tpe, llvm::Function::ExternalLinkage, name, M);
+    return fn;
+  });
 }
 
 ValPtr CodeGen::invokeMalloc(ValPtr size) {
@@ -466,10 +466,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else throw BackendException("unhandled cast");
       },
       [&](const Expr::Invoke &x) -> ValPtr {
-        Vector<AnyTerm> allArgs;
-        if (x.receiver) allArgs.push_back(*x.receiver);
-        for (auto &a : x.args)
-          allArgs.push_back(a);
+        auto allArgs = x.args;
+        if (x.receiver) allArgs ^= prepend(*x.receiver);
         // Mirror the declaration filter: drop Unit0/Nothing args; both lower to LLVM void at the boundary.
         const auto argNoUnit = allArgs ^ filter([](auto &arg) {
                                  return !arg.tpe().template is<Type::Unit0>() //
@@ -837,22 +835,14 @@ static bool shouldUseSret(const CodeGen &cg, const Function &fn) { return fn.rtn
 
 static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) {
 
-  Vector<Arg> allArgs;
   // CPU HostThreaded kernels receive `tid` as a leading arg from the runtime; GPU launches
   // provide it via intrinsics, so adding `__tid` there would off-by-one the kernel ABI.
   const auto cpuTarget = cg.C.options.target == LLVMBackend::Target::x86_64 ||  //
                          cg.C.options.target == LLVMBackend::Target::AArch64 || //
                          cg.C.options.target == LLVMBackend::Target::ARM;
-  if (fn.isEntry && cpuTarget) {
-    allArgs.push_back(Arg(Named("__tid", Type::IntS64()), {}));
-  }
-  if (fn.receiver) allArgs.push_back(*fn.receiver);
-  for (auto &a : fn.moduleCaptures)
-    allArgs.push_back(a);
-  for (auto &a : fn.termCaptures)
-    allArgs.push_back(a);
-  for (auto &a : fn.args)
-    allArgs.push_back(a);
+  auto allArgs = fn.moduleCaptures | concat(fn.termCaptures) | concat(fn.args) | to_vector();
+  if (fn.receiver) allArgs ^= prepend(*fn.receiver);
+  if (fn.isEntry && cpuTarget) allArgs ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));
 
   // Drop Unit0/Nothing args: both lower to void, which FunctionType::get's isValidArgumentType asserts.
   const auto argsNoUnit = allArgs | filter([](auto &arg) {
@@ -909,11 +899,8 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
 Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
   structTypes = C.resolveLayouts(program.defs);
 
-  Vector<Function> allFns;
-  allFns.reserve(program.functions.size() + 1);
-  allFns.push_back(program.entry);
-  for (auto &f : program.functions)
-    allFns.push_back(f);
+  auto allFns = program.functions;
+  allFns ^= prepend(program.entry);
   const auto prototypes = allFns ^ map([&](auto &fn) { return createPrototype(*this, M, fn); });
 
   prototypes | for_each([&](auto &llvmFn, auto &fn, auto &argsNoUnit) {

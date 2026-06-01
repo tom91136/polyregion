@@ -108,7 +108,7 @@ inline std::string archFor(const Task &t, const DriverConfig &cfg) {
 
 inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg) {
   std::vector<std::string> envs;
-  if (t.mode == Mode::Passthrough) envs ^= concat_inplace(cfg.passthroughEnvs);
+  if (t.mode == Mode::Passthrough) envs ^= concat(cfg.passthroughEnvs);
   envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
   envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", archFor(t, cfg)));
   envs.emplace_back("POLYRT_HOST_FALLBACK=0");
@@ -191,7 +191,7 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   auto [envBits, args] = fragments ^ span([](auto &x) { return x.find('=') != std::string::npos; });
 
   auto envs = baseEnvs(task, cfg);
-  envs ^= concat_inplace(envBits);
+  envs ^= concat(envBits);
 
   const std::vector<llvm::StringRef> envRefs = envs | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
   const std::vector<llvm::StringRef> argRefs = args | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
@@ -375,12 +375,12 @@ inline const char *statusTag(TaskStatus s) {
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
   if (!opts.runTask.empty()) {
-    const auto it = std::find_if(allTasks.begin(), allTasks.end(), [&](auto &t) { return t.id() == opts.runTask; });
-    if (it == allTasks.end()) {
+    auto it = allTasks ^ find([&](auto &t) { return t.id() == opts.runTask; });
+    if (!it) {
       std::fprintf(stderr, "polytest: no task with id '%s'\n", opts.runTask.c_str());
       return 1;
     }
-    Task only = std::move(*it);
+    Task only = std::move(const_cast<Task &>(*it));
     allTasks.clear();
     allTasks.push_back(std::move(only));
   }

@@ -1,9 +1,8 @@
 #pragma once
 
-#include <algorithm>
 #include <cmath>
-#include <numeric>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -46,14 +45,15 @@ void validate(size_t size, size_t times, FValidate fValidate, FValidateSum fVali
               const std::vector<T> &c, const std::vector<T> &sum) {
   auto [expectedA, expectedB, expectedC, expectedSum] = expectedResult(times, size, StartA<T>, StartA<T>, StartC<T>, StartScalar<T>);
 
+  using namespace aspartame;
   auto error = [](auto xs, auto expected) {
-    return std::accumulate(xs.begin(), xs.end(), 0.0, [&](double acc, const T x) { return acc + std::fabs(x - expected); }) / xs.size();
+    return (xs | map([&](const T x) { return std::fabs(x - expected); }) | aspartame::sum()) / xs.size();
   };
   auto eps = std::numeric_limits<T>::epsilon() * 100.0;
   fValidate(error(a, expectedA), eps);
   fValidate(error(b, expectedB), eps);
   fValidate(error(c, expectedC), eps);
-  auto reducedSum = std::reduce(sum.begin(), sum.end());
+  auto reducedSum = sum ^ aspartame::sum();
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
 }
 
@@ -67,7 +67,8 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
                                        .triad = static_cast<double>(3 * sizeof(T) * size) / 1000 / 1000, //
                                        .dot = static_cast<double>(2 * sizeof(T) * size) / 1000 / 1000};
 
-  auto bandwidth = [&](auto &&f) { return *f(sizesMB) / *std::min_element(f(elapsed)->begin(), f(elapsed)->end()); };
+  using namespace aspartame;
+  auto bandwidth = [&](auto &&f) { return *f(sizesMB) / *(*f(elapsed) ^ min()); };
 
   fmt::print(stderr,
              "===BabelStream ({})===\n"

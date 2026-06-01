@@ -52,9 +52,7 @@ namespace {
 bool deviceMatchesHint(Device &d, const std::string &hint) {
   if (hint.empty()) return true;
   const auto needle = hint ^ to_lower();
-  for (const auto &f : d.features())
-    if ((f ^ to_lower()) == needle) return true;
-  return false;
+  return d.features() ^ exists([&](auto &f) { return (f ^ to_lower()) == needle; });
 }
 
 bool deviceMatchesRequired(Device &d, const std::vector<std::string_view> &requiredFeatures) {
@@ -87,22 +85,21 @@ bool deviceMatchesRequired(Device &d, const std::vector<std::string_view> &requi
 
 static void selectDevice(Platform &p, const std::vector<std::string_view> &requiredFeatures, const std::string &hint, bool strict) {
   auto devices = p.enumerate();
-  std::vector<std::unique_ptr<Device>> eligible;
-  eligible.reserve(devices.size());
-  for (auto &d : devices)
-    if (deviceMatchesRequired(*d, requiredFeatures)) eligible.push_back(std::move(d));
+  auto eligible = devices                                                                               //
+                  | map([](auto &d) { return std::ref(d); })                                            //
+                  | filter([&](auto rw) { return deviceMatchesRequired(*rw.get(), requiredFeatures); }) //
+                  | to_vector();
 
   if (!hint.empty())
     if (const auto index = parseIntNoExcept(hint.c_str()); index && *index < eligible.size()) {
-      polyregion::polyrt::currentDevice = std::move(eligible.at(*index));
+      polyregion::polyrt::currentDevice = std::move(eligible.at(*index).get());
       return;
     }
-  for (auto &d : eligible)
-    if (deviceMatchesHint(*d, hint)) {
-      polyregion::polyrt::currentDevice = std::move(d);
-      return;
-    }
-  if (!strict && !eligible.empty()) polyregion::polyrt::currentDevice = std::move(eligible.front());
+  if (const auto match = eligible | find([&](auto rw) { return deviceMatchesHint(*rw.get(), hint); })) {
+    polyregion::polyrt::currentDevice = std::move(match->get());
+    return;
+  }
+  if (!strict && !eligible.empty()) polyregion::polyrt::currentDevice = std::move(eligible.front().get());
 }
 
 static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatform() {

@@ -6,6 +6,9 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
+#include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
+
 using namespace polyregion::backend::details;
 
 void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
@@ -117,9 +120,11 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     return sharedGlobal;
   };
 
-  std::vector<llvm::Function *> kernels;
-  for (auto &fn : M)
-    if (!fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel) kernels.push_back(&fn);
+  using namespace aspartame;
+  auto kernels = M                                                                                                              //
+                 | filter([](auto &fn) { return !fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel; }) //
+                 | map([](auto &fn) { return const_cast<llvm::Function *>(&fn); })                                              //
+                 | to_vector();
 
   for (auto *fn : kernels) {
     bool hasSharedParam = false;

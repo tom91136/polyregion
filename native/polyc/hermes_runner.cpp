@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 
 #include "polyregion/io.hpp"
@@ -233,8 +234,10 @@ Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vecto
     auto runFn = runFnVal.asObject(rt).asFunction(rt);
 
     auto stepsArr = jsi::Array(rt, steps.size());
-    for (size_t i = 0; i < steps.size(); ++i)
-      stepsArr.setValueAtIndex(rt, i, jsi::String::createFromUtf8(rt, steps[i]));
+    using namespace aspartame;
+    steps | zip_with_index<size_t>() | for_each([&](auto &s, auto i) { //
+      stepsArr.setValueAtIndex(rt, i, jsi::String::createFromUtf8(rt, s));
+    });
 
     auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
     auto abVal = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(programBytes.size()))});

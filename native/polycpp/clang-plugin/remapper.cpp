@@ -17,6 +17,7 @@
 #include "llvm/Support/FormatVariadic.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -217,7 +218,7 @@ bool Remapper::RemapContext::isEmpty(const Type::Struct &s) {
 }
 
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
-void Remapper::RemapContext::push(const Vector<Stmt::Any> &xs) { stmts ^= concat_inplace(xs); }
+void Remapper::RemapContext::push(const Vector<Stmt::Any> &xs) { stmts ^= concat(xs); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
 Term::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
   // Atomic Alias-wrapped terms can be used in-place; compound Exprs need a binding.
@@ -662,7 +663,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
         | map([&](auto &p, auto &offsetAndSize) {
             auto original = baseMember(*p);
             if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
-            auto e = r.structs ^= get_or_emplace(Empty, [](auto &k) {
+            auto e = get_or_emplace(r.structs, Empty, [](auto &k) {
               return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{});
             });
             return std::pair{Named(original.symbol, Type::Struct(e->name, {})), offsetAndSize};
@@ -1343,9 +1344,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                   return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global());
                 }();
 
-          Vector<Term::Any> ivArgs;
-          for (size_t i = 0; i < expr->getNumArgs(); ++i)
-            ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
+          auto ivArgs = expr->arguments()                           //
+                        | zip_with_index<size_t>()                  //
+                        | map([&](auto *arg, auto i) -> Term::Any { //
+                            return r.newVar(conform(r, handleExpr(arg, r), fn->args[i + 1].named.tpe));
+                          }) //
+                        | to_vector();
           auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
           auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
                                          std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
@@ -1365,10 +1369,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (fn->args.size() != expr->getNumArgs() + 1) {
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs() + 1));
         }
-        Vector<Term::Any> ivArgs;
         // fn->args[0] is the implicit `this`; explicit args are offset by 1.
-        for (size_t i = 0; i < expr->getNumArgs(); ++i)
-          ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
+        auto ivArgs = expr->arguments()                           //
+                      | zip_with_index<size_t>()                  //
+                      | map([&](auto *arg, auto i) -> Term::Any { //
+                          return r.newVar(conform(r, handleExpr(arg, r), fn->args[i + 1].named.tpe));
+                        }) //
+                      | to_vector();
 
         const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
@@ -1499,9 +1506,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           auto [name, fn] = handleCall(target, r);
           if (fn->args.size() != expr->getNumArgs())
             raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
-          Vector<Term::Any> ivArgs;
-          for (size_t i = 0; i < expr->getNumArgs(); ++i)
-            ivArgs.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
+          auto ivArgs = expr->arguments()                           //
+                        | zip_with_index<size_t>()                  //
+                        | map([&](auto *arg, auto i) -> Term::Any { //
+                            return r.newVar(conform(r, handleExpr(arg, r), fn->args[i].named.tpe));
+                          }) //
+                        | to_vector();
           return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
                                         handleType(expr->getCallReturnType(context), r)));
         }

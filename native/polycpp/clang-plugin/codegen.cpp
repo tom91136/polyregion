@@ -46,9 +46,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   // an int64 tid as their first parameter -- the runtime fills the same slot for both. Drop
   // the lambda's leading int64 from the arg list and alias it to `__tid` at the top of the body.
   Vector<Stmt::Any> tidAliases;
-  Vector<const clang::ParmVarDecl *> userParams;
-  for (auto *p : functor.parameters())
-    userParams.push_back(p);
+  Vector<const clang::ParmVarDecl *> userParams =
+      functor.parameters() | map([](auto *p) -> const clang::ParmVarDecl * { return p; }) | to_vector();
   if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
     // declName() carries the per-decl ID suffix so the alias matches what DeclRefExpr emits.
     auto name = declName(userParams.front());

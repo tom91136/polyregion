@@ -234,11 +234,7 @@ String JsPassRunner::Impl::enumeratePasses() {
 
 const Vector<String> &JsPassRunner::passNames() const { return impl->names; }
 
-std::optional<String> JsPassRunner::passDescr(std::string_view name) const {
-  const auto it = impl->descrs.find(String(name));
-  if (it == impl->descrs.end()) return std::nullopt;
-  return it->second;
-}
+std::optional<String> JsPassRunner::passDescr(std::string_view name) const { return impl->descrs ^ get_maybe(String(name)); }
 
 Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vector<uint8_t> &programBytes, String &error) {
   if (!impl->loaded) {
@@ -256,8 +252,9 @@ Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vecto
   }
 
   JSValue stepsArr = JS_NewArray(ctx);
-  for (size_t i = 0; i < steps.size(); ++i)
-    JS_SetPropertyUint32(ctx, stepsArr, static_cast<uint32_t>(i), JS_NewStringLen(ctx, steps[i].data(), steps[i].size()));
+  steps | zip_with_index<uint32_t>() | for_each([&](auto &s, auto i) { //
+    JS_SetPropertyUint32(ctx, stepsArr, i, JS_NewStringLen(ctx, s.data(), s.size()));
+  });
 
   static uint8_t empty = 0;
   auto *inputData = programBytes.empty() ? &empty : const_cast<uint8_t *>(programBytes.data());

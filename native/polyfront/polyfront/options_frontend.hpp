@@ -94,10 +94,9 @@ struct CliArgs {
 
   bool popBool(const std::string &flag) {
     const auto oldSize = deleted.size();
-    for (size_t i = 0; i < data.size(); ++i) {
-      if (deleted.count(i)) continue;
-      if (data[i] == flag) deleted.insert(i);
-    }
+    data | zip_with_index<size_t>() | for_each([&](auto &x, auto i) {
+      if (!deleted.count(i) && x == flag) deleted.insert(i);
+    });
     return oldSize != deleted.size();
   }
 
