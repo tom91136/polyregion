@@ -25,10 +25,10 @@
 #ifdef POLYINVOKE_TRACE
   #error POLYINVOKE_TRACE already defined
 #else
-  #define POLYINVOKE_TRACE()                                                                                                                \
-    do {                                                                                                                                    \
-      static const bool polyinvokeTrace = std::getenv(::polyregion::env::PolyinvokeTrace) != nullptr;                                       \
-      if (polyinvokeTrace) std::fprintf(stderr, "[TRACE] %s:%d %s\n", __FILE__, __LINE__, __PRETTY_FUNCTION__);                             \
+  #define POLYINVOKE_TRACE()                                                                                                               \
+    do {                                                                                                                                   \
+      static const bool polyinvokeTrace = std::getenv(::polyregion::env::PolyinvokeTrace) != nullptr;                                      \
+      if (polyinvokeTrace) std::fprintf(stderr, "[TRACE] %s:%d %s\n", __FILE__, __LINE__, __PRETTY_FUNCTION__);                            \
     } while (false)
 #endif
 

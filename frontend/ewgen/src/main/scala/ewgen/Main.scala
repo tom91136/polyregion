@@ -11,6 +11,8 @@ import ewgen.Config.*
 
 object Main {
 
+  private inline val RocmVersion = "5.0.0"
+
   val All: Vector[Wrangler] = Vector(
     Wrangler(
       "hsaew",
@@ -18,7 +20,7 @@ object Main {
         Group(
           name = "hsa",
           source = Source(
-            url = "https://github.com/ROCm/ROCR-Runtime/archive/refs/tags/rocm-5.0.0.tar.gz",
+            url = s"https://github.com/ROCm/ROCR-Runtime/archive/refs/tags/rocm-$RocmVersion.tar.gz",
             stripComponents = 1,
             rootSubdir = Some("src")
           ),
@@ -58,7 +60,7 @@ object Main {
         Group(
           name = "hip",
           source = Source(
-            url = "https://github.com/ROCm/HIP/archive/refs/tags/rocm-5.0.0.tar.gz",
+            url = s"https://github.com/ROCm/HIP/archive/refs/tags/rocm-$RocmVersion.tar.gz",
             stripComponents = 1
           ),
           headers = Vector("include/hip/hip_runtime_api.h"),
@@ -69,7 +71,7 @@ object Main {
         Group(
           name = "hiprtc",
           source = Source(
-            url = "https://github.com/ROCm/HIP/archive/refs/tags/rocm-5.0.0.tar.gz",
+            url = s"https://github.com/ROCm/HIP/archive/refs/tags/rocm-$RocmVersion.tar.gz",
             stripComponents = 1
           ),
           headers = Vector("include/hip/hiprtc.h"),

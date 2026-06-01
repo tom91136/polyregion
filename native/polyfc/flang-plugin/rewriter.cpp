@@ -654,14 +654,16 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         for (auto a : attrs.getValue()) {
           auto ra = mlir::dyn_cast<fir::ReduceAttr>(a);
           if (!ra) {
-            emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "missing reduce attribute on `do concurrent ... reduce(...)`");
+            emit(diag, clang::DiagnosticsEngine::Error,
+                 POLYREGION_DIAG_POLYFC "missing reduce attribute on `do concurrent ... reduce(...)`");
             return;
           }
           const auto op = ra.getReduceOperation();
           if (op != fir::ReduceOperationEnum::Add && op != fir::ReduceOperationEnum::Multiply && op != fir::ReduceOperationEnum::MAX &&
               op != fir::ReduceOperationEnum::MIN) {
             emit(diag, clang::DiagnosticsEngine::Error,
-                 POLYREGION_DIAG_POLYFC "unsupported reduction operator in `do concurrent ... reduce(...)`; only +, *, min, max are supported");
+                 POLYREGION_DIAG_POLYFC
+                 "unsupported reduction operator in `do concurrent ... reduce(...)`; only +, *, min, max are supported");
             return;
           }
           reduceOps.push_back(op);

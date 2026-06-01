@@ -3,6 +3,7 @@
 #include <thread>
 #include <utility>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -290,7 +291,7 @@ RelocatableDevice::~RelocatableDevice() {
   POLYINVOKE_TRACE();
   if (es) {
     if (auto err = es->endSession())
-      std::fprintf(stderr, "[%s] ExecutionSession::endSession failed: %s\n", RELOBJ_PREFIX, toString(std::move(err)).c_str());
+      fmt::print(stderr, "[{}] ExecutionSession::endSession failed: {}\n", RELOBJ_PREFIX, toString(std::move(err)));
   }
 }
 
@@ -425,7 +426,7 @@ SharedDevice::~SharedDevice() {
   for (auto &[_, m] : modules) {
     auto &[path, handle, symbols] = m;
     if (auto code = polyregion_dl_close(handle); code != 0) {
-      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_PREFIX, code, polyregion_dl_error());
+      fmt::print(stderr, "{} Cannot unload module, code {}: {}\n", SHOBJ_PREFIX, code, polyregion_dl_error());
     }
   }
 }
@@ -462,7 +463,7 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
       std::unique_lock<std::mutex> lock(cleanupMutex);
       for (auto &path : tmpImagePaths) {
         if (std::remove(path.c_str()) != 0) {
-          fprintf(stderr, "[%s] Warning: cannot remove temporary image file %s\n", SHOBJ_PREFIX, path.c_str());
+          fmt::print(stderr, "[{}] Warning: cannot remove temporary image file {}\n", SHOBJ_PREFIX, path);
         }
       }
       tmpImagePaths.clear();

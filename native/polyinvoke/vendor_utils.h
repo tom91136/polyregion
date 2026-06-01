@@ -26,7 +26,6 @@ inline std::string normaliseVendor(std::string_view vendor) {
 
 namespace amd {
 
-
 inline std::optional<int> amdgcn_code_object_version(const std::string &image) {
   // XXX e_ident[8] (EI_ABIVERSION) on an amdgcn ELF encodes the code object version: 2=COv4, 3=COv5, 4=COv6.
   if (image.size() < 9) return std::nullopt;

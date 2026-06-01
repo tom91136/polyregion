@@ -6,11 +6,12 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
 
-#include "vendor_utils.h"
 #include "dl_util.h"
+#include "vendor_utils.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hsa;
@@ -60,8 +61,8 @@ HsaPlatform::HsaPlatform() {
           if (mask & HSA_AMD_MEMORY_FAULT_IMPRECISE) reason += "Can't determine the exact fault address. ";
           if (mask & HSA_AMD_MEMORY_FAULT_SRAMECC) reason += "SRAM ECC failure (ie registers, no fault address). ";
           if (mask & HSA_AMD_MEMORY_FAULT_HANG) reason += "GPU reset following unspecified hang. ";
-          fprintf(stderr, "[%s] Memory fault at 0x%lx. Reason:%s\n", PREFIX,
-                  static_cast<uintptr_t>(event->memory_fault.virtual_address), reason.c_str());
+          fmt::print(stderr, "[{}] Memory fault at {:#x}. Reason:{}\n", PREFIX, static_cast<uintptr_t>(event->memory_fault.virtual_address),
+                     reason);
           return HSA_STATUS_ERROR;
         }
         return HSA_STATUS_SUCCESS;

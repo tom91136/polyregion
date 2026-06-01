@@ -124,7 +124,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
 #if defined(_WIN32)
     // XXX no rpath on Windows: prepend <binaryDir>/lib/<stem>/lib so test exes find staged DLLs.
     std::string bd = cfg.binaryDir;
-    while (!bd.empty() && (bd.back() == '/' || bd.back() == '\\')) bd.pop_back();
+    while (!bd.empty() && (bd.back() == '/' || bd.back() == '\\'))
+      bd.pop_back();
     const auto slash = bd.find_last_of("/\\");
     const std::string stem = (slash == std::string::npos) ? bd : bd.substr(slash + 1);
     if (!bd.empty() && !stem.empty()) pathVal = bd + "\\lib\\" + stem + "\\lib;" + pathVal;
@@ -506,7 +507,8 @@ inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
     if (auto ec = llvm::sys::fs::set_current_path(dir); ec)
       std::fprintf(stderr, "polytest: failed to chdir to %s='%s': %s\n", what, dir.str().c_str(), ec.message().c_str());
   };
-  if (const auto override = std::getenv(polyregion::env::PolytestWorkDir); override && *override) chdirTo(polyregion::env::PolytestWorkDir, override);
+  if (const auto override = std::getenv(polyregion::env::PolytestWorkDir); override && *override)
+    chdirTo(polyregion::env::PolytestWorkDir, override);
   else if (!cfg.workDir.empty()) chdirTo("workDir", cfg.workDir);
   detail::firedCfg = &cfg;
   constexpr const char *descr = "polytest runner: parallel compile, serial run";

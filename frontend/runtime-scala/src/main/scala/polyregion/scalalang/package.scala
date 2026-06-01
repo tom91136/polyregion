@@ -11,6 +11,8 @@ import scala.reflect.ClassTag
 type Callback[A]   = Either[Throwable, A] => Unit
 type Suspend[F[_]] = [A] => (Callback[A] => Unit) => F[A]
 
+inline val DefaultQueueCapacity = 10000L
+
 class Platform[F[_], T <: Target](r: rt.Platform, f: Suspend[F]) {
   lazy val name: String                    = r.name
   lazy val properties: Map[String, String] = r.properties.map(p => p.key -> p.value).toMap
@@ -154,19 +156,19 @@ trait DeviceQueue[F[_]](d: rt.Device.Queue, f: Suspend[F]) {
 
 class JitDevice[F[_], T](d: rt.Device.Queue, f: Suspend[F]) extends JitOps[F, T](d, f) {
   class Queue(d: rt.Device.Queue) extends JitOps[F, T](d, f) with DeviceQueue[F](d, f)
-  inline def mkQueue: Queue = Queue(d.device.createQueue(10000L))
+  inline def mkQueue: Queue = Queue(d.device.createQueue(DefaultQueueCapacity))
 }
 
 class AotDevice[F[_], T](d: rt.Device.Queue, f: Suspend[F]) extends AotOps[F, T](d, f) {
   class Queue(d: rt.Device.Queue) extends AotOps[F, T](d, f) with DeviceQueue[F](d, f)
-  inline def mkQueue: Queue = Queue(d.device.createQueue(10000L))
+  inline def mkQueue: Queue = Queue(d.device.createQueue(DefaultQueueCapacity))
 }
 
 class Device[F[_], T <: Target](val underlying: rt.Device, f: Suspend[F]) {
   lazy val name: String                                 = underlying.name
   lazy val properties: Map[String, String]              = underlying.properties.map(p => p.key -> p.value).toMap
-  lazy val jit: JitDevice[F, Config[_ <: T, _]]         = JitDevice(underlying.createQueue(10000L), f)
-  lazy val aot: AotDevice[F, Config[_ <: T, _] | Tuple] = AotDevice(underlying.createQueue(10000L), f)
+  lazy val jit: JitDevice[F, Config[_ <: T, _]]         = JitDevice(underlying.createQueue(DefaultQueueCapacity), f)
+  lazy val aot: AotDevice[F, Config[_ <: T, _] | Tuple] = AotDevice(underlying.createQueue(DefaultQueueCapacity), f)
 }
 
 enum Opt(val value: cp.Opt) {

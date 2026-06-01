@@ -16,7 +16,7 @@ struct BackendException final : std::logic_error {
                             const char *fn = __builtin_FUNCTION(), //
                             int line = __builtin_LINE());
 
-  [[nodiscard]] static BackendException semantic(const std::string &what,    //
+  [[nodiscard]] static BackendException semantic(const std::string &what, //
                                                  const char *file = __builtin_FILE(),
                                                  const char *fn = __builtin_FUNCTION(), //
                                                  int line = __builtin_LINE()) {

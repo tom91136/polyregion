@@ -13,9 +13,8 @@
 #endif
 
 #define VMA_IMPLEMENTATION
-#include "vk_mem_alloc.h"
-
 #include "vendor_utils.h"
+#include "vk_mem_alloc.h"
 
 #ifndef _MSC_VER
   #pragma clang diagnostic pop // -Wno-everything

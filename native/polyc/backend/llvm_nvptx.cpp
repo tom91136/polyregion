@@ -189,7 +189,9 @@ ValPtr NVPTXTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &ex
   const auto suffix = [&](const AnyType &rtn) { return cg.resolveType(rtn)->isFloatTy() ? "f" : ""; };
   return mkExternMathVal(
       cg, expr, //
-      [&](const char *name, const AnyType &rtn, const AnyTerm &arg) { return cg.extFn1(std::string("__nv_") + name + suffix(rtn), rtn, arg); },
+      [&](const char *name, const AnyType &rtn, const AnyTerm &arg) {
+        return cg.extFn1(std::string("__nv_") + name + suffix(rtn), rtn, arg);
+      },
       [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
         return cg.extFn2(std::string("__nv_") + name + suffix(rtn), rtn, lhs, rhs);
       },

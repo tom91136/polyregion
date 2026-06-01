@@ -591,8 +591,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               throw BackendException::semantic("Cannot take reference of an select with unit type in " + to_string(x));
             return mkSelectPtr(*lhs);
           }
-        } else
-          throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
+        } else throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
       },
       [&](const Expr::Alloc &x) -> ValPtr { //
         const auto componentTpe = B.getPtrTy(0);
@@ -611,7 +610,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
         if (x.expr && x.expr->tpe() != x.name.tpe) {
           throw BackendException::semantic("name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
-                                 " mismatch (" + repr(x) + ")");
+                                           " mismatch (" + repr(x) + ")");
         }
 
         if (x.name.tpe.is<Type::Unit0>()) {
@@ -654,7 +653,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto &lhs = x.name;
         if (x.expr.tpe() != lhs.tpe) {
           throw BackendException::semantic("name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs.tpe) +
-                                 ") mismatch (" + repr(x) + ")");
+                                           ") mismatch (" + repr(x) + ")");
         }
         if (lhs.tpe.is<Type::Unit0>()) return BlockKind::Normal;
         auto rhs = mkExprVal(x.expr, qualified(lhs) + "_mut");
@@ -682,7 +681,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         }
         if (*compTpe != x.value.tpe()) {
           throw BackendException::semantic("array comp type (" + to_string(*compTpe) + ") and rhs term (" + to_string(x.value.tpe()) +
-                                 ") mismatch (" + repr(x) + ")");
+                                           ") mismatch (" + repr(x) + ")");
         }
         // XXX Unit0 store: no-op. Host storage may be a JVM Object[]; a byte write clobbers the first ref.
         if (x.value.tpe().template is<Type::Unit0>()) return BlockKind::Normal;
@@ -978,7 +977,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
 ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
   if (l.tpe() != rtn) {
     throw BackendException::semantic("lhs type " + to_string(l.tpe()) + " of unary numeric operation in " + to_string(expr) +
-                           " doesn't match return type " + to_string(rtn));
+                                     " doesn't match return type " + to_string(rtn));
   }
   return fn(mkTermVal(l));
 }
@@ -986,11 +985,11 @@ ValPtr CodeGen::binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm 
                            const ValPtrFn2 &fn) { //
   if (l.tpe() != rtn) {
     throw BackendException::semantic("lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
-                           " doesn't match return type " + to_string(rtn));
+                                     " doesn't match return type " + to_string(rtn));
   }
   if (r.tpe() != rtn) {
     throw BackendException::semantic("rhs type " + to_string(r.tpe()) + " of binary numeric operation in " + to_string(expr) +
-                           " doesn't match return type " + to_string(rtn));
+                                     " doesn't match return type " + to_string(rtn));
   }
   return fn(mkTermVal(l), mkTermVal(r));
 }

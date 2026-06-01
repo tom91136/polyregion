@@ -1,6 +1,5 @@
 package polyregion.ast
 
-
 object Env {
 
   inline val PolyregionDebug = "POLYREGION_DEBUG"

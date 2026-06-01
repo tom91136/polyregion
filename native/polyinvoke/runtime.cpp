@@ -4,6 +4,7 @@
 #include <mutex>
 #include <utility>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/cl_platform.h"
@@ -91,8 +92,7 @@ std::unique_ptr<invoke::Platform> invoke::Platform::maybe(const Backend &b) {
   auto r = Platform::of(b);
   if (std::holds_alternative<std::string>(r)) {
     const auto &reason = std::get<std::string>(r);
-    std::fprintf(stderr, "polyinvoke: backend %s failed to initialise: %.*s\n", magic_enum::enum_name(b).data(),
-                 static_cast<int>(reason.size()), reason.data());
+    fmt::print(stderr, "polyinvoke: backend {} failed to initialise: {}\n", magic_enum::enum_name(b), reason);
     return nullptr;
   }
   return std::move(std::get<std::unique_ptr<Platform>>(r));
@@ -122,7 +122,7 @@ bool invoke::detail::CountingLatch::waitAll() {
 invoke::detail::CountingLatch::~CountingLatch() {
   POLYINVOKE_TRACE();
   if (!waitAll()) {
-    std::fprintf(stderr, "Timed out with %ld pending latches\n", pending.load());
+    fmt::print(stderr, "Timed out with {} pending latches\n", pending.load());
     std::fflush(stderr);
   }
 }

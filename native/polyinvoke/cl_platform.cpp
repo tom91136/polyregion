@@ -3,6 +3,7 @@
 #include <cstring>
 #include <thread>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/env.h"
@@ -604,8 +605,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
         else if (rcOne != CL_SUCCESS) CHECKED(rcOne);
       }
       if (rejected > 0)
-        std::fprintf(stderr, "[OpenCL] WARN: setKernelExecInfo rejected %zu / %zu SVM pointers (likely indirect-SVM not supported)\n",
-                     rejected, allSvmPtrs.size());
+        fmt::print(stderr, "[OpenCL] WARN: setKernelExecInfo rejected {} / {} SVM pointers (likely indirect-SVM not supported)\n", rejected,
+                   allSvmPtrs.size());
       rc = CL_SUCCESS;
     }
     if (rc != CL_SUCCESS) CHECKED(rc);

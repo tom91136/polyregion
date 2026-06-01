@@ -50,7 +50,7 @@ trait BaseSuite extends munit.FunSuite {
       import polyregion.scalalang.blocking.Host
       val latch = CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
-        Host.underlying.createQueue(10000L),
+        Host.underlying.createQueue(DefaultQueueCapacity),
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()
@@ -67,7 +67,7 @@ trait BaseSuite extends munit.FunSuite {
       val r     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
       val latch = CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
-        Host.underlying.createQueue(10000L),
+        Host.underlying.createQueue(DefaultQueueCapacity),
         {
           case Left(e)   => throw e
           case Right(()) => latch.countDown()

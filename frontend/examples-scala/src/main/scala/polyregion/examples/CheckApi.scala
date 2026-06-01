@@ -2,6 +2,7 @@ package polyregion.examples
 
 import java.nio.{Buffer, ByteBuffer, ByteOrder}
 import polyregion.jvm.Natives
+import polyregion.scalalang.DefaultQueueCapacity
 
 object CheckApi {
 
@@ -128,7 +129,7 @@ object CheckApi {
 
         val ptr = polyregion.jvm.runtime.Platforms.create().pointerOfDirectBuffer(data)
 
-        val q0 = d0.createQueue(10000L);
+        val q0 = d0.createQueue(DefaultQueueCapacity);
 
         for (_ <- 0 to 1)
 //          q0.enqueueHostToDeviceAsync(

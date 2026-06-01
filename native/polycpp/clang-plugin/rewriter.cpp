@@ -13,9 +13,9 @@
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
+#include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
-#include "magic_enum/magic_enum.hpp"
 
 #include "ast.h"
 #include "ast_visitors.h"

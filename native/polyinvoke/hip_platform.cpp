@@ -2,8 +2,8 @@
 
 #include "magic_enum/magic_enum.hpp"
 
-#include "vendor_utils.h"
 #include "dl_util.h"
+#include "vendor_utils.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hip;

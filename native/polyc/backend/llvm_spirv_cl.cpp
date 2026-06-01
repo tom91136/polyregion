@@ -194,13 +194,10 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::Math
       out += tc;
     return out;
   };
-  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) {
-    return cg.extFn1(mangle(name, rtn, 1), rtn, arg);
-  };
+  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) { return cg.extFn1(mangle(name, rtn, 1), rtn, arg); };
   const auto binary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
     return cg.extFn2(mangle(name, rtn, 2), rtn, lhs, rhs);
   };
   // XXX OpenCL has no `fabs` intrinsic equivalent here; the float branch goes through the mangled libcall.
-  return mkExternMathVal(cg, expr, unary, binary,
-                         [&](const AnyType &tpe, const AnyTerm &x) { return unary("fabs", tpe, x); });
+  return mkExternMathVal(cg, expr, unary, binary, [&](const AnyType &tpe, const AnyTerm &x) { return unary("fabs", tpe, x); });
 }
