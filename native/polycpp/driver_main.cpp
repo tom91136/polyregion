@@ -23,6 +23,7 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
+namespace msvc_abi = polyregion::msvc_abi;
 
 int main(int argc, const char *argv[]) {
 #ifdef POLYREGION_FUSED_DRIVER

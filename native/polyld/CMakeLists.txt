@@ -35,3 +35,9 @@ target_link_libraries(polyld-link PRIVATE
 polyregion_apply_common_options(polyld-link)
 
 install(TARGETS polyld-link RUNTIME DESTINATION bin)
+if (WIN32)
+    set(POLYLD_LLD_NAME "lld-link.exe")
+else ()
+    set(POLYLD_LLD_NAME "ld.lld")
+endif ()
+install(PROGRAMS "$<TARGET_FILE:polyld-link>" DESTINATION bin RENAME "${POLYLD_LLD_NAME}")
