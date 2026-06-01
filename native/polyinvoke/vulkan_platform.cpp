@@ -380,18 +380,16 @@ VulkanDeviceQueue::VulkanDeviceQueue(decltype(ctx) ctx, decltype(allocator) allo
       callbackQueue(), callbackThread([this]() {
         while (true) {
           auto [f, keepGoing] = callbackQueue.pop();
-          //          std::cout << "Task! " << f.has_value() << " " << keepGoing << std::endl;
           if (f) (*f)();
           if (!keepGoing) break;
         }
-        //        std::cout << "Thread stop" << std::endl;
       }) {
   POLYINVOKE_TRACE();
-  callbackThread.detach();
 }
 VulkanDeviceQueue::~VulkanDeviceQueue() {
   POLYINVOKE_TRACE();
   callbackQueue.terminate();
+  if (callbackThread.joinable()) callbackThread.join();
 }
 void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   callbackQueue.push([cb]() {

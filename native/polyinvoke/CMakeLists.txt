@@ -137,7 +137,7 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
 endforeach ()
 
 add_subdirectory(test/kernels)
-add_executable(polyinvoke-tests test/main.cpp test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
+add_executable(polyinvoke-tests test/main.cpp test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp test/queue_lifetime.cpp)
 polyregion_test_profile_dir(polyinvoke-tests)
 add_executable(polyinvoke-exec driver.cpp)
 
