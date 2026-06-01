@@ -7,6 +7,7 @@ target_sources(polyrt-obj
         FILES
         include/polyrt/rt.h
         include/polyrt/mem.hpp
+        include/polyrt/sma_runtime.hpp
 )
 target_link_libraries(polyrt-obj PUBLIC polyinvoke-obj polyreflect-rt PRIVATE Aspartame::Aspartame)
 polyregion_apply_common_options(polyrt-obj)
