@@ -199,6 +199,9 @@ install(TARGETS polystl polystl-static polyreflect-rt
         ARCHIVE DESTINATION lib/polycpp/lib
         RUNTIME DESTINATION lib/polycpp/lib
         FILE_SET HEADERS DESTINATION lib/polycpp/include)
+if (WIN32)
+    install(FILES "$<TARGET_FILE:polyreflect-rt>" DESTINATION bin)
+endif ()
 if (NOT POLYREGION_FUSED_DRIVER)
     install(TARGETS polycpp-clang-plugin polyreflect-plugin
             LIBRARY DESTINATION lib/polycpp/lib

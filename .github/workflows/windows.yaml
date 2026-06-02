@@ -334,7 +334,7 @@ jobs:
         run: |
           set "DIST=%CD%\out\polyregion-Release-${{ matrix.arch }}-static-dist"
           set "TESTS=%CD%\out\polyregion-test-Release-${{ matrix.arch }}-static-dist"
-          set "PATH=%DIST%\bin;%PATH%"
+          set "PATH=%DIST%\bin;%TESTS%\bin;%PATH%"
           set "POLYREGION_BITCODE_DIR=%DIST%\lib"
           set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
           set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
@@ -402,9 +402,10 @@ jobs:
       - name: Run munit suite
         env:
           POLYREGION_NATIVE_LIB_DIR: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib
-          PATH: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\bin;${{ env.PATH }}
           POLYPASS_PLUGINS: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib\libpolypass.dll
-        run: just test-scala
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/native/out/polyregion-Release-${{ matrix.arch }}-static-dist/bin:${PATH}"
+          just test-scala
 
       - name: Annotate scala results
         if: always()
