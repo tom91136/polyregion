@@ -17,8 +17,9 @@ runs:
       run: |
         py=$(command -v python3 || command -v python) || { echo "::warning::no python to parse ${{ inputs.label }} results"; exit 0; }
         "$py" - "${{ inputs.junit }}" "${{ inputs.label }}" <<'PY'
-        import os, sys, glob, xml.etree.ElementTree as ET
+        import os, re, sys, glob, xml.etree.ElementTree as ET
         path, label = sys.argv[1], sys.argv[2]
+        illegal = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\ufffe\\uffff]")
         if os.path.isdir(path):
             files = sorted(glob.glob(os.path.join(path, "**", "*.xml"), recursive=True))
         elif os.path.exists(path):
@@ -32,7 +33,8 @@ runs:
         failures = []
         for f in files:
             try:
-                root = ET.parse(f).getroot()
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    root = ET.fromstring(illegal.sub("", fh.read()))
             except ET.ParseError as e:
                 print(f"::warning::{label}: cannot parse {f}: {e}")
                 continue

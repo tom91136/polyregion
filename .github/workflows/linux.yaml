@@ -32,10 +32,12 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
+        uses: sbt/setup-sbt@v1
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Regenerate Scala-derived sources
         run: just _codegen-sbt
@@ -59,10 +61,12 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
+        uses: sbt/setup-sbt@v1
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Build pass bundle (js)
         run: just pass-js
@@ -128,7 +132,7 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
+        uses: sbt/setup-sbt@v1
 
       - name: Dotenv
         id: dotenv
@@ -194,7 +198,9 @@ jobs:
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Detect existing LLVM/device-libs (act fast-path)
         if: ${{ env.ACT }}
@@ -290,7 +296,7 @@ jobs:
 
       - name: Upload dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
@@ -298,7 +304,7 @@ jobs:
 
       - name: Upload test dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
@@ -308,7 +314,7 @@ jobs:
         run: install -D "$(command -v just)" just-dist/just
 
       - name: Upload just
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: just-linux-${{ matrix.arch }}
           path: just-dist/just
@@ -344,9 +350,9 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download just
-        # XXX extractions/setup-just (node20) fails in node-less containers; download the host-built musl binary instead.
+        # XXX JS setup actions fail in node-less containers; download the host-built musl binary instead.
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: just-linux-${{ matrix.arch }}
           path: just-bin
@@ -360,7 +366,7 @@ jobs:
         # XXX Under act the workspace is bind-mounted; the dist is already at this path.
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -406,14 +412,14 @@ jobs:
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
@@ -449,7 +455,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-test-results-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
@@ -480,14 +486,16 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
+        uses: sbt/setup-sbt@v1
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -509,7 +517,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scala-test-results-linux-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/

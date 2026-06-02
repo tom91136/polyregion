@@ -24,10 +24,12 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
+        uses: sbt/setup-sbt@v1
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Build pass bundle (js)
         run: just pass-js
@@ -97,7 +99,9 @@ jobs:
           key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Build LLVM
         id: build-llvm
@@ -186,7 +190,7 @@ jobs:
 
       - name: Upload dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
@@ -194,7 +198,7 @@ jobs:
 
       - name: Upload test dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
@@ -222,11 +226,13 @@ jobs:
         run: brew install --quiet cmake
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -270,14 +276,14 @@ jobs:
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
@@ -313,7 +319,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-test-results-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
@@ -344,14 +350,16 @@ jobs:
           cache: sbt
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1.1.18
+        uses: sbt/setup-sbt@v1
 
       - name: Setup just
-        uses: extractions/setup-just@v4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -373,7 +381,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scala-test-results-darwin-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/
