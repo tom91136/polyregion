@@ -115,9 +115,51 @@ std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
   std::vector<std::unique_ptr<Device>> devices;
   for (auto &[_, queueSize, agent] : agents) {
     if (agent.handle == hostAgent.handle) continue;
+    if (!HsaDevice::queryRegions(agent).complete()) {
+      POLYINVOKE_TRACE();
+      continue;
+    }
     devices.push_back(std::make_unique<HsaDevice>(queueSize, hostAgent, agent));
   }
   return devices;
+}
+
+HsaDevice::Regions HsaDevice::queryRegions(hsa_agent_t agent) {
+  POLYINVOKE_TRACE();
+  Regions regions;
+  CHECKED("Enumerate HSA agent kernarg region", //
+          hsa_agent_iterate_regions(
+              agent,
+              [](hsa_region_t region, void *data) {
+                hsa_region_segment_t segment;
+                CHECKED("Get region info (HSA_REGION_INFO_SEGMENT)", hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment));
+                if (segment != HSA_REGION_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+                hsa_region_global_flag_t flags;
+                CHECKED("Get region info (HSA_REGION_INFO_GLOBAL_FLAGS)",
+                        hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags));
+                if (flags & HSA_REGION_GLOBAL_FLAG_KERNARG) {
+                  static_cast<Regions *>(data)->kernelArgRegion = region;
+                }
+                return HSA_STATUS_SUCCESS;
+              },
+              &regions));
+  CHECKED("Enumerate HSA AMD memory pools", //
+          hsa_amd_agent_iterate_memory_pools(
+              agent,
+              [](hsa_amd_memory_pool_t pool, void *data) {
+                hsa_amd_segment_t segment;
+                hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+                if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+
+                bool accessibleByAll;
+                hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &accessibleByAll);
+                if (!accessibleByAll) {
+                  static_cast<Regions *>(data)->deviceGlobalRegion = pool;
+                }
+                return HSA_STATUS_SUCCESS;
+              },
+              &regions));
+  return regions;
 }
 
 // ---
@@ -220,50 +262,19 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
   auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   deviceName = marketingName + "(" + gfxArch + ")";
 
-  CHECKED("Enumerate HSA agent kernarg region", //
-          hsa_agent_iterate_regions(
-              agent,
-              [](hsa_region_t region, void *data) {
-                hsa_region_segment_t segment;
-                CHECKED("Get region info (HSA_REGION_INFO_SEGMENT)", hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment));
-                if (segment != HSA_REGION_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
-                hsa_region_global_flag_t flags;
-                CHECKED("Get region info (HSA_REGION_INFO_GLOBAL_FLAGS)",
-                        hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags));
-                if (flags & HSA_REGION_GLOBAL_FLAG_KERNARG) {
-                  static_cast<decltype(this)>(data)->kernelArgRegion = region;
-                }
-                return HSA_STATUS_SUCCESS;
-              },
-              this));
-
-  POLYINVOKE_TRACE();
-
-  CHECKED("Enumerate HSA AMD memory pools", //
-          hsa_amd_agent_iterate_memory_pools(
-              agent,
-              [](hsa_amd_memory_pool_t pool, void *data) {
-                hsa_amd_segment_t segment;
-                hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
-                if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
-
-                bool accessibleByAll;
-                hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &accessibleByAll);
-                if (!accessibleByAll) {
-                  static_cast<decltype(this)>(data)->deviceGlobalRegion = pool;
-                }
-                return HSA_STATUS_SUCCESS;
-              },
-              this));
+  auto regions = queryRegions(agent);
+  kernelArgRegion = regions.kernelArgRegion;
+  deviceGlobalRegion = regions.deviceGlobalRegion;
   POLYINVOKE_TRACE();
 
   if (kernelArgRegion.handle == 0) {
-    POLYINVOKE_FATAL(PREFIX, "No kernel arg region available form agent: handle=%" PRIu64, kernelArgRegion.handle);
+    POLYINVOKE_FATAL(PREFIX, "No kernel arg region available from agent: %s, handle=%" PRIu64, deviceName.c_str(), kernelArgRegion.handle);
   }
   POLYINVOKE_TRACE();
 
   if (deviceGlobalRegion.handle == 0) {
-    POLYINVOKE_FATAL(PREFIX, "No global device region available form agent: handle=%" PRIu64, deviceGlobalRegion.handle);
+    POLYINVOKE_FATAL(PREFIX, "No global device region available from agent: %s, handle=%" PRIu64, deviceName.c_str(),
+                     deviceGlobalRegion.handle);
   }
   POLYINVOKE_TRACE();
 }

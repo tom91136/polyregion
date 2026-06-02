@@ -46,6 +46,13 @@ class POLYREGION_EXPORT HsaDevice final : public Device {
   friend class HsaDeviceQueue;
 
 public:
+  struct Regions {
+    hsa_region_t kernelArgRegion{};
+    hsa_amd_memory_pool_t deviceGlobalRegion{};
+    [[nodiscard]] bool complete() const { return kernelArgRegion.handle != 0 && deviceGlobalRegion.handle != 0; }
+  };
+  POLYREGION_EXPORT static Regions queryRegions(hsa_agent_t agent);
+
   POLYREGION_EXPORT HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agent);
   POLYREGION_EXPORT ~HsaDevice() override;
   POLYREGION_EXPORT int64_t id() override;
