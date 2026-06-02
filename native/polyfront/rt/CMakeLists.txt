@@ -24,5 +24,12 @@ if (APPLE)
     target_link_options(polyrt-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()
 
+if (WIN32)
+    add_custom_command(TARGET polyrt-tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_RUNTIME_DLLS:polyrt-tests>" "$<TARGET_FILE_DIR:polyrt-tests>"
+            COMMAND_EXPAND_LISTS)
+endif ()
+
 add_test(NAME polyrt-tests COMMAND polyrt-tests)
 polyregion_test_dist_record(NAME polyrt-tests COMMAND :bin:polyrt-tests)

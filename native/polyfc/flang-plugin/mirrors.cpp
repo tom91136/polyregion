@@ -81,6 +81,7 @@ Value PolyDCOMirror::convertIfNeeded(OpBuilder &B, Value value, Type required) {
 PolyDCOMirror::PolyDCOMirror(ModuleOp &m)
     : TLB(m), ptrTy(LLVM::LLVMPointerType::get(TLB.getContext())), voidTy(LLVM::LLVMVoidType::get(TLB.getContext())), //
       recordFn(defineFunc(m, abi::Record, voidTy, {ptrTy, TLB.getI64Type()})), releaseFn(defineFunc(m, abi::Release, voidTy, {ptrTy})),
+      recordBoxFn(defineFunc(m, abi::RecordBox, voidTy, {ptrTy})), releaseBoxFn(defineFunc(m, abi::ReleaseBox, voidTy, {ptrTy})),
       debugLayoutFn(defineFunc(m, abi::DebugTypeLayout, voidTy, {ptrTy})),
       isPlatformKindFn(defineFunc(m, abi::IsPlatformKind, TLB.getI1Type(), {TLB.getI8Type()})),
       dispatchFn(defineFunc(m, abi::Dispatch, TLB.getI1Type(),
@@ -96,6 +97,12 @@ void PolyDCOMirror::record(OpBuilder &B, const Value ptr, const Value sizeInByte
   LLVM::CallOp::create(B, B.getUnknownLoc(), recordFn, ValueRange{ptr, convertIfNeeded(B, sizeInBytes, B.getI64Type())});
 }
 void PolyDCOMirror::release(OpBuilder &B, const Value ptr) { LLVM::CallOp::create(B, B.getUnknownLoc(), releaseFn, ValueRange{ptr}); }
+void PolyDCOMirror::recordBox(OpBuilder &B, const Value boxRef) {
+  LLVM::CallOp::create(B, B.getUnknownLoc(), recordBoxFn, ValueRange{boxRef});
+}
+void PolyDCOMirror::releaseBox(OpBuilder &B, const Value boxRef) {
+  LLVM::CallOp::create(B, B.getUnknownLoc(), releaseBoxFn, ValueRange{boxRef});
+}
 Value PolyDCOMirror::isPlatformKind(OpBuilder &B, runtime::PlatformKind kind) {
   return LLVM::CallOp::create(B, B.getUnknownLoc(), isPlatformKindFn, ValueRange{valueOf(B, kind)}).getResult();
 }

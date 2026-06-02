@@ -4,6 +4,8 @@
 #include <span>
 #include <thread>
 
+#include "flang/ISO_Fortran_binding.h"
+
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/concurrency_utils.hpp"
@@ -33,6 +35,12 @@ static polyrt::SynchronisedMemAllocation allocations(
         return polyrt::PtrQuery{
             .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
       }
+      // XXX Fortran PARAMETER arrays land in .rdata; resolve via the lazy RO-segment scan
+      polyrt::ensureRoSegmentsRecorded();
+      if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
+        return polyrt::PtrQuery{
+            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
+      }
       log(DebugLevel::Debug, "Local: Failed to query %p", ptr);
       return polyrt::PtrQuery{0, 0};
     },
@@ -55,6 +63,37 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release(void *ptr) {
   // XXX Keep the SVM mirror; Intel coarse-grain clSVMAlloc reuses freed addresses and collides
   // with still-live allocs in the same dispatch chain.
   allocations.disassociate(ptr, /*releaseRemote*/ false);
+}
+
+static size_t boxDataBytes(const CFI_cdesc_t *box) {
+  if (!box || !box->base_addr) return 0;
+  // total data bytes = elem_len * product(dim[i].extent)
+  size_t total = box->elem_len;
+  for (unsigned i = 0; i < box->rank; ++i) {
+    const ptrdiff_t extent = box->dim[i].extent;
+    if (extent <= 0) return 0;
+    total *= static_cast<size_t>(extent);
+  }
+  return total;
+}
+
+POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_record_box(void *boxRef) {
+  const auto *box = static_cast<const CFI_cdesc_t *>(boxRef);
+  if (!box || !box->base_addr) return;
+  const size_t total = boxDataBytes(box);
+  if (total == 0) return;
+  std::unique_lock lock(recordsMutex);
+  log(DebugLevel::Debug, "polydco_record_box(box=%p, base=%p, %zu)", boxRef, box->base_addr, total);
+  ptrRecords[reinterpret_cast<uintptr_t>(box->base_addr)] = total;
+}
+
+POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release_box(void *boxRef) {
+  const auto *box = static_cast<const CFI_cdesc_t *>(boxRef);
+  if (!box || !box->base_addr) return;
+  std::unique_lock lock(recordsMutex);
+  log(DebugLevel::Debug, "polydco_release_box(box=%p, base=%p)", boxRef, box->base_addr);
+  ptrRecords.erase(reinterpret_cast<uintptr_t>(box->base_addr));
+  allocations.disassociate(box->base_addr, /*releaseRemote*/ false);
 }
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_typelayout(const runtime::TypeLayout *layout) {

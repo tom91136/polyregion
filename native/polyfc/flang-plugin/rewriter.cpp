@@ -88,6 +88,8 @@ class Binder {
     Type type;
     Value fieldPtr;
     std::vector<Witness> dependent, temporary;
+    // XXX Set for fir.box-typed captures; carries the descriptor ref for polydco_record_box.
+    Value box;
   };
 
   struct ReductionField {
@@ -156,13 +158,44 @@ class Binder {
       } else if (auto seqTy = dyn_cast<fir::SequenceType>(refElemTy)) { // fir.ref<fir.array<X>>
         if (temporary) raise(fmt::format("Unsupported temporary type: {}", fir::mlirTypeToString(refElemTy)));
         if (seqTy.hasUnknownShape()) raise(fmt::format("Array has unknown shape: {}", fir::mlirTypeToString(refElemTy)));
-        // XXX Dynamic extents omit the size witness; SMA still mirrors via polyreflect-rt.
+        // XXX getIntOrFloatBitWidth asserts on record element types; fall back to polyast layout.
+        const auto eleTy = seqTy.getEleTy();
+        int64_t elemBytes = 0;
+        if (eleTy.isIntOrIndexOrFloat()) elemBytes = eleTy.getIntOrFloatBitWidth() / 8;
+        else if (layout) elemBytes = static_cast<int64_t>(layout->sizeInBytes);
         const bool dynamicExtent = seqTy.hasDynamicExtents();
         const auto llvmPtr = getRefPtr(B, val);
         std::vector<CaptureField::Witness> witnesses;
-        if (!dynamicExtent) {
-          const auto elemBits = seqTy.getEleTy().getIntOrFloatBitWidth();
-          witnesses.push_back({llvmPtr, intConst(B, i64Ty(B), seqTy.getConstantArraySize() * (elemBits / 8))});
+        if (!dynamicExtent && elemBytes > 0) {
+          witnesses.push_back({llvmPtr, intConst(B, i64Ty(B), seqTy.getConstantArraySize() * elemBytes)});
+        } else if (dynamicExtent && elemBytes > 0) {
+          // XXX Recover the extents from the defining op. fir.declare carries them for
+          // explicit-shape dummies (`foo(size)`); fir.allocmem carries them when -O3
+          // inlines an ALLOCATE through the descriptor. Peel fir.convert in between.
+          llvm::SmallVector<Value> extents;
+          for (auto cur = val; auto *defOp = cur.getDefiningOp();) {
+            if (auto conv = dyn_cast<fir::ConvertOp>(defOp)) {
+              cur = conv.getValue();
+              continue;
+            }
+            if (auto decl = dyn_cast<fir::DeclareOp>(defOp)) {
+              if (auto sOp = decl.getShape().getDefiningOp<fir::ShapeOp>()) llvm::append_range(extents, sOp.getExtents());
+              break;
+            }
+            if (auto allocm = dyn_cast<fir::AllocMemOp>(defOp)) {
+              llvm::append_range(extents, allocm.getShape());
+              break;
+            }
+            break;
+          }
+          if (!extents.empty()) {
+            Value bytes = intConst(B, i64Ty(B), elemBytes);
+            for (auto extent : extents) {
+              auto extI64 = fir::ConvertOp::create(B, uLoc(B), i64Ty(B), extent).getResult();
+              bytes = LLVM::MulOp::create(B, uLoc(B), bytes, extI64).getResult();
+            }
+            witnesses.push_back({llvmPtr, bytes});
+          }
         }
         fields.emplace_back(CaptureField{
             .type = refElemTy,
@@ -173,12 +206,16 @@ class Binder {
       } else if (const auto boxTy = dyn_cast<fir::BoxType>(refElemTy)) { // fir.ref<fir.box<X>>
         if (!layout) raise(fmt::format("Binding box type {} but cannot find corresponding StructLayout!", show(refElemTy)));
         const auto boxPtr = getBoxPtr(B, val);
+        // XXX Hand the descriptor to polydco_record_box so SMA mirrors the data range behind
+        // base_addr, not just the box.
+        const auto boxLLVMRef = getRefPtr(B, val);
         const std::vector witnesses{CaptureField::Witness{boxPtr, intConst(B, i64Ty(B), layout->sizeInBytes)}};
         fields.emplace_back(CaptureField{
             .type = refElemTy,                                                         //
             .fieldPtr = boxPtr,                                                        //
             .dependent = temporary ? std::vector<CaptureField::Witness>{} : witnesses, //
-            .temporary = temporary ? witnesses : std::vector<CaptureField::Witness>{}  //
+            .temporary = temporary ? witnesses : std::vector<CaptureField::Witness>{}, //
+            .box = boxLLVMRef,
         });
 
       } else raise(fmt::format("Unhandled binder type: {}", fir::mlirTypeToString(refElemTy)));
@@ -270,12 +307,16 @@ public:
   void recordTemporariesAndDependents(OpBuilder &B) {
     for (auto &field : captureFields) {
       field.dependent | concat(field.temporary) | for_each([&](auto &w) { dco.record(B, w.ptr, w.sizeInBytes); });
+      if (field.box) dco.recordBox(B, field.box);
     }
   }
 
   void releaseTemporaries(OpBuilder &B) {
     for (auto &field : captureFields) {
       field.temporary | for_each([&](auto &w) { dco.release(B, w.ptr); });
+      // XXX Release boxes only when the field itself is temporary (boxed-by-value); dependent
+      // boxes outlive the dispatch and are released by the owning scope.
+      if (field.box && !field.temporary.empty()) dco.releaseBox(B, field.box);
     }
   }
 };

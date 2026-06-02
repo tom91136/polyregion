@@ -305,7 +305,7 @@ test-dist   extra='': (_native "DIST_TEST"   extra)
 check-dist  extra='': (_native "CHECK"       extra)
 
 # Incremental build of all ninja targets.
-build-all     extra='': (_native "BUILD" ("-DTARGET=all "        + extra))
+build-all     extra='': (_native "BUILD" ("-DTARGET=all "        + extra)) check-fused
 
 # Incremental build of the polyc driver.
 build-polyc   extra='': (_native "BUILD" ("-DTARGET=polyc "      + extra))
@@ -318,6 +318,20 @@ build-polyfc  extra='': (_native "BUILD" ("-DTARGET=polyfc "     + extra))
 
 # Incremental build of an arbitrary ninja target (escape hatch for non-default names).
 build target  extra='': (_native "BUILD" ("-DTARGET=" + target + " " + extra))
+
+# Build the fused-driver on non-Windows, this recipe configures a separate `out/build-<host>-<arch>-<variant>-fused/` tree
+# with POLYREGION_FUSED_DRIVER=ON
+check-fused:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "{{ os() }}" == "windows" ]]; then
+        echo "check-fused: skipped on windows"
+        exit 0
+    fi
+    export POLYREGION_FUSED_DRIVER=ON
+    just configure
+    just build-polycpp
+    just build-polyfc
 
 # Run `cmake -DACTION=<action> -P native/build.cmake`. Auto-passes -DCMAKE_SYSROOT if it exists.
 _native action extra='':

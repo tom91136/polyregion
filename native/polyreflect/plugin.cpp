@@ -50,7 +50,7 @@ public:
 };
 } // namespace polyregion::polyreflect
 
-enum class PolyreflectPass : uint8_t { ProtectRT, Interpose, ReflectStack, ReflectMem };
+enum class PolyreflectPass : uint8_t { ProtectRT, Interpose, RecordAlloc, ReflectStack, ReflectMem };
 
 extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
   llvm::errs() << "[PolyReflect] load `" << "`\n";
@@ -77,6 +77,7 @@ extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo l
       switch (pass) {
         case PolyreflectPass::ProtectRT: MPM.addPass(polyregion::polyreflect::ProtectRTPass(verboseOpt)); break;
         case PolyreflectPass::Interpose: MPM.addPass(polyregion::polyreflect::InterposePass(verboseOpt)); break;
+        case PolyreflectPass::RecordAlloc: MPM.addPass(polyregion::polyreflect::RecordAllocPass(verboseOpt)); break;
         case PolyreflectPass::ReflectStack: MPM.addPass(polyregion::polyreflect::ReflectStackPass(verboseOpt)); break;
         case PolyreflectPass::ReflectMem: MPM.addPass(polyregion::polyreflect::ReflectMemPass(verboseOpt)); break;
         default: break;
@@ -114,6 +115,10 @@ extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo l
                   }
                   if (Name == "polyreflect-interpose") {
                     MPM.addPass(polyregion::polyreflect::InterposePass(verboseOpt));
+                    return true;
+                  }
+                  if (Name == "polyreflect-record-alloc") {
+                    MPM.addPass(polyregion::polyreflect::RecordAllocPass(verboseOpt));
                     return true;
                   }
                   if (Name == "polyreflect-stack") {

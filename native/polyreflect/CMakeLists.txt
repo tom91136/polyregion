@@ -8,7 +8,6 @@ target_sources(polyreflect-rt
         FILES
         reflect-rt/rt.hpp
         reflect-rt/rt_hashmap.hpp
-        reflect-rt/rt_memory.hpp
         reflect-rt/rt_protected.hpp
         reflect-rt/rt_reflect.hpp
 )

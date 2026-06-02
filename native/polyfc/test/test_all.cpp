@@ -19,9 +19,10 @@ int main(int argc, const char **argv) {
                      .defaultsVariants = {{"O0", "-O0 -g -cpp"}, {"O3", "-O3 -g -cpp"}},
                      .stdpar = {"polyfc_stdpar",
 #ifdef _WIN32
-                                // polyreflect-plugin is not built on Windows; force mem=direct + static rt
-                                // to exercise the static-fold compile path.
-                                "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fstdpar-mem=direct -fstdpar-rt=static"
+                                // XXX Windows CUDA/HIP have no HMM, so plain heap pointers can't reach
+                                // the GPU. Use mem=interpose to route Fortran allocations through
+                                // polyrt_usm_* (cuMemAllocManaged / hipMallocManaged) so kernels see USM.
+                                "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fstdpar-mem=interpose -fstdpar-rt=static"
 #elif defined(__APPLE__)
                                 // no -lstdc++: flang's libc++ has no rpath; libpolydco covers it.
                                 "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -fstdpar-rt=dynamic"

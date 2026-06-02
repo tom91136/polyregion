@@ -97,17 +97,27 @@ int main(int argc, const char *argv[]) {
                  const auto compileOnly =
                      std::vector{"-c", "-S", "-E", "-M", "-fsyntax-only"} ^ exists([&](auto &flag) { return args.has(flag); });
                  if (!compileOnly) {
+                   // XXX flang has no clang -fplugin / -fpass-plugin equivalent; both Interpose and
+                   // Reflect run at link time via LLD's LTO codegen. The Interpose pass rewrites
+                   // malloc / operator new uses regardless of whether the rewrite happens per-TU or
+                   // in the merged LTO module, so it works equally well as a late LTO pass.
+                   const auto lateLldFlags = [&](const std::string &latePasses) {
+#if defined(POLYREGION_FUSED_DRIVER) && defined(_WIN32)
+                     // lld-link consumes /mllvm:VAL via -Xlinker; the polyreflect-* CL options come
+                     // from polyld-link (polyreflect statically linked in), no pass-plugin load.
+                     append({fmt::format("-B{}", execParentPath), "-fuse-ld=lld"});
+                     append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), //
+                             "-Xlinker", fmt::format("/mllvm:-polyreflect-late={}", latePasses)});
+#else
+                     append(Driver::enableLLDAndLTO(args));
+                     append(Driver::lldPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                                                                           fmt::format("-polyreflect-late={}", latePasses)}));
+#endif
+                   };
                    switch (opts->mem) {
                      case StdParOptions::MemKind::Direct: break;
-                     case StdParOptions::MemKind::Interpose:
-                       append(Driver::clangPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                                                               "polyreflect-late=interpose"}));
-                       break;
-                     case StdParOptions::MemKind::Reflect:
-                       append(Driver::enableLLDAndLTO(args));
-                       append(Driver::lldPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                                                             "-polyreflect-late=ReflectMem"}));
-                       break;
+                     case StdParOptions::MemKind::Interpose: lateLldFlags("Interpose"); break;
+                     case StdParOptions::MemKind::Reflect: lateLldFlags("RecordAlloc+ReflectMem"); break;
                    }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {

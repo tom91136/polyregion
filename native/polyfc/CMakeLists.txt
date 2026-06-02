@@ -6,6 +6,13 @@ set(POLYFC_LIB_DIR "lib/polyfc/lib")
 
 if (POLYREGION_FUSED_DRIVER)
     polyregion_copy_lib_targets(polyfc-lib-resource polyfc ${POLYFC_LIB_DIR} polyreflect-rt polydco-static polydco)
+    if (WIN32)
+        set(POLYFC_LLD_NAME "lld-link.exe")
+    else ()
+        set(POLYFC_LLD_NAME "ld.lld")
+    endif ()
+    add_custom_target(polyfc-polyld-resource
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polyld-link>" "$<TARGET_FILE_DIR:polyfc>/${POLYFC_LLD_NAME}")
 else ()
     polyregion_copy_lib_targets(polyfc-lib-resource polyfc ${POLYFC_LIB_DIR} polyfc-flang-plugin polyreflect-plugin polyreflect-rt polydco-static polydco)
 endif ()
@@ -123,7 +130,7 @@ if (POLYREGION_FUSED_DRIVER)
             [["llvm/Support/Casting.h"]]
             [["aspartame/all.hpp"]]
             [["ast.h"]])
-    add_dependencies(polyfc polyfc-lib-resource)
+    add_dependencies(polyfc polyfc-lib-resource polyld-link polyfc-polyld-resource)
 else ()
     add_executable(polyfc driver_main.cpp)
     add_dependencies(polyfc polyfc-lib-resource)

@@ -17,13 +17,11 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 #include "polyfront/options_frontend.hpp"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
-#include "polyregion/msvc_abi_names.h"
 
 #include "driver_polyc.h"
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
-namespace msvc_abi = polyregion::msvc_abi;
 
 int main(int argc, const char *argv[]) {
 #ifdef POLYREGION_FUSED_DRIVER
@@ -137,44 +135,23 @@ int main(int argc, const char *argv[]) {
                        // XXX lld-link takes /mllvm:VAL, ld.lld takes -mllvm VAL; -Xlinker forwards either.
                        // lld-link has no --lto-newpm-passes equivalent, so keep the EP-callback path.
                        append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
-                               "/mllvm:-polyreflect-late=ReflectStack+ReflectMem"});
-                       // XXX /INCLUDE: pulls polyreflect-rt's new/delete in ahead of vcruntime's.
-                       std::vector<std::string_view>{msvc_abi::OperatorNew,
-                                                     msvc_abi::OperatorNewAligned,
-                                                     msvc_abi::OperatorNewNothrow,
-                                                     msvc_abi::OperatorNewAlignedNothrow,
-                                                     msvc_abi::OperatorNewArray,
-                                                     msvc_abi::OperatorNewArrayAligned,
-                                                     msvc_abi::OperatorNewArrayNothrow,
-                                                     msvc_abi::OperatorNewArrayAlignedNothrow,
-                                                     msvc_abi::OperatorDelete,
-                                                     msvc_abi::OperatorDeleteArray,
-                                                     msvc_abi::OperatorDeleteAligned,
-                                                     msvc_abi::OperatorDeleteArrayAligned,
-                                                     msvc_abi::OperatorDeleteSized,
-                                                     msvc_abi::OperatorDeleteArraySized,
-                                                     msvc_abi::OperatorDeleteSizedAligned,
-                                                     msvc_abi::OperatorDeleteArraySizedAligned,
-                                                     msvc_abi::OperatorDeleteNothrow,
-                                                     msvc_abi::OperatorDeleteArrayNothrow,
-                                                     msvc_abi::OperatorDeleteAlignedNothrow,
-                                                     msvc_abi::OperatorDeleteArrayAlignedNothrow} ^
-                           for_each([&](auto sym) { append({"-Xlinker", fmt::format("/INCLUDE:{}", sym)}); });
+                               "/mllvm:-polyreflect-late=RecordAlloc+ReflectStack+ReflectMem"});
   #else
                        // XXX At -O0 LLD's LTO codegen builds no optimisation pipeline at all, so
                        // EP-callback-registered passes never fire. Inject the late passes by name
                        // via --lto-newpm-passes so they run regardless of opt level. Comma in
                        // value uses -Xlinker to avoid `-Wl,...,...` arg splitting.
                        append({fmt::format("-Wl,-mllvm,-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
-                               "--lto-newpm-passes=polyreflect-stack,polyreflect-mem"});
+                               "--lto-newpm-passes=polyreflect-record-alloc,polyreflect-stack,polyreflect-mem"});
   #endif
 #else
-                       append(Driver::lldPassPluginFlags(polyreflectPlugin, {
-                                                                                fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"),
-                                                                                "-polyreflect-late=ReflectStack+ReflectMem",
-                                                                            }));
+                       append(Driver::lldPassPluginFlags(polyreflectPlugin, //
+                                                         {
+                                                             fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"),
+                                                             "-polyreflect-late=RecordAlloc+ReflectStack+ReflectMem",
+                                                         }));
                        // XXX -O0 LLD LTO skips EP callbacks; force the passes by name.
-                       append({"-Xlinker", "--lto-newpm-passes=polyreflect-stack,polyreflect-mem"});
+                       append({"-Xlinker", "--lto-newpm-passes=polyreflect-record-alloc,polyreflect-stack,polyreflect-mem"});
 #endif
                        break;
                    }
@@ -213,7 +190,7 @@ int main(int argc, const char *argv[]) {
                const bool isCC1 =
                    remaining.size() >= 2 && (remaining[1] == "-cc1" || remaining[1] == "-cc1as" || remaining[1] == "-cc1gen-reproducer");
                if (!isCC1) remaining.insert(remaining.begin() + 1, "--driver-mode=g++");
-               auto rawArgs = remaining ^ map([](auto &arg) { return arg.data(); });
+               auto rawArgs = remaining ^ map([](auto &arg) { return const_cast<char *>(arg.data()); });
                llvm::ToolContext toolContext{execPath.c_str(), nullptr, false};
                return clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext);
 #else

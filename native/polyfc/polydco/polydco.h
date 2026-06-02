@@ -12,6 +12,11 @@ extern "C" {
 
 [[maybe_unused]] POLYREGION_EXPORT void polydco_record(void *ptr, size_t size);
 [[maybe_unused]] POLYREGION_EXPORT void polydco_release(void *ptr);
+
+// XXX Record / release the base_addr + total bytes range that lives behind a Fortran
+// CFI_cdesc_t. polydco_record handles the descriptor itself; these handle the data it points at
+[[maybe_unused]] POLYREGION_EXPORT void polydco_record_box(void *boxRef);
+[[maybe_unused]] POLYREGION_EXPORT void polydco_release_box(void *boxRef);
 [[maybe_unused]] POLYREGION_EXPORT void polydco_debug_typelayout(const polyregion::runtime::TypeLayout *layout);
 
 [[maybe_unused]] POLYREGION_EXPORT bool polydco_is_platformkind(polyregion::runtime::PlatformKind kind);

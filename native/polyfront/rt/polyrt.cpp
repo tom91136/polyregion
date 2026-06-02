@@ -2,6 +2,13 @@
 #include <cstdarg>
 #include <mutex>
 #include <unordered_set>
+#include <vector>
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+  #include <link.h>
+#elif defined(_WIN32)
+  #include <windows.h>
+#endif
 
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
@@ -24,6 +31,65 @@ using polyregion::polyrt::DebugLevel;
 std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
 std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
+
+#if !defined(__APPLE__)
+// XXX Apple not implemented: captures into .rodata still use SMA's foreign-pointer warning there
+namespace {
+struct RoSegment {
+  uintptr_t base;
+  size_t size;
+};
+  #if !defined(_WIN32)
+POLYREGION_RT_PROTECT int collectRoSegment(struct dl_phdr_info *info, size_t, void *data) {
+  if (info->dlpi_name && info->dlpi_name[0] != '\0') return 0;
+  auto &out = *static_cast<std::vector<RoSegment> *>(data);
+  for (int i = 0; i < info->dlpi_phnum; ++i) {
+    const auto &ph = info->dlpi_phdr[i];
+    if (ph.p_type != PT_LOAD) continue;
+    if ((ph.p_flags & PF_W) != 0) continue;
+    if ((ph.p_flags & PF_X) != 0) continue;
+    if (ph.p_memsz == 0) continue;
+    out.push_back({info->dlpi_addr + ph.p_vaddr, ph.p_memsz});
+  }
+  return 0;
+}
+  #else
+POLYREGION_RT_PROTECT void collectRoSegmentsPE(std::vector<RoSegment> &out) {
+  auto *base = reinterpret_cast<unsigned char *>(::GetModuleHandleW(nullptr));
+  if (!base) return;
+  const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE) return;
+  const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS *>(base + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE) return;
+  const auto *section = IMAGE_FIRST_SECTION(nt);
+  for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+    const DWORD chars = section->Characteristics;
+    if ((chars & IMAGE_SCN_MEM_READ) == 0) continue;
+    if ((chars & IMAGE_SCN_MEM_WRITE) != 0) continue;
+    if ((chars & IMAGE_SCN_MEM_EXECUTE) != 0) continue;
+    if (section->Misc.VirtualSize == 0) continue;
+    out.push_back({reinterpret_cast<uintptr_t>(base + section->VirtualAddress), section->Misc.VirtualSize});
+  }
+}
+  #endif
+POLYREGION_RT_PROTECT std::vector<RoSegment> roSegments;
+POLYREGION_RT_PROTECT std::once_flag roSegmentsOnce;
+} // namespace
+#endif
+
+void polyregion::polyrt::ensureRoSegmentsRecorded() {
+#if !defined(__APPLE__)
+  std::call_once(roSegmentsOnce, [] {
+  #if !defined(_WIN32)
+    dl_iterate_phdr(collectRoSegment, &roSegments);
+  #else
+    collectRoSegmentsPE(roSegments);
+  #endif
+    for (const auto &s : roSegments)
+      polyregion::rt_reflect::_rt_record(reinterpret_cast<void *>(s.base), s.size, polyregion::rt_reflect::Type::StaticRodata);
+  });
+#endif
+}
 
 static std::optional<size_t> parseIntNoExcept(const char *str) {
   errno = 0;
@@ -366,4 +432,47 @@ POLYREGION_EXPORT extern "C" void polyrt_usm_operator_delete_sized(void *ptr, si
   polyregion::polyrt::initialise();
   log(DebugLevel::Debug, "polyrt_usm_operator_delete_sized(%p)", ptr);
   sharedFreeTracked(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_malloc(const size_t size) {
+  void *p = __RT_ALTERNATIVE(malloc)(size);
+  if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapMalloc);
+  return p;
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_record_free(void *ptr) {
+  if (!ptr) return;
+  polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapFree);
+  __RT_ALTERNATIVE(free)(ptr);
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_aligned_alloc(const size_t alignment, const size_t size) {
+  void *p = __RT_ALTERNATIVE(memalign)(alignment, size);
+  if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapAlignedAlloc);
+  return p;
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new(const size_t size) {
+  void *p = __RT_ALTERNATIVE(malloc)(size);
+  if (!p) {
+#if __cpp_exceptions == 199711
+    throw std::bad_alloc{};
+#else
+    std::abort();
+#endif
+  }
+  polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapCXXNew);
+  return p;
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete(void *ptr) {
+  if (!ptr) return;
+  polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
+  __RT_ALTERNATIVE(free)(ptr);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_record_operator_delete_sized(void *ptr, size_t /*size*/) {
+  if (!ptr) return;
+  polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapCXXDelete);
+  __RT_ALTERNATIVE(free)(ptr);
 }

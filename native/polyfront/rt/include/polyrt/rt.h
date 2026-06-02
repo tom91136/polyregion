@@ -33,6 +33,8 @@ enum class DebugLevel : uint8_t { None = 0, Info = 1, Debug = 2, Trace = 3 };
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void initialise();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool hostFallback();
 
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void ensureRoSegmentsRecorded();
+
 // XXX Exits with code 77 (autotools "skipped") so test runners can distinguish "no compatible
 // target on this device" from a real wrong-output / crash failure.
 [[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void noCompatibleKernelExit(const char *site);
@@ -55,4 +57,12 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_free(void *ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_operator_new(size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_operator_delete(void *ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_operator_delete_sized(void *ptr, size_t size);
+
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_malloc(size_t size);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_free(void *ptr);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_aligned_alloc(size_t alignment, size_t size);
+
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_operator_new(size_t size);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_operator_delete(void *ptr);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_operator_delete_sized(void *ptr, size_t size);
 }

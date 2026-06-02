@@ -83,7 +83,7 @@ class PolyDCOMirror {
   OpBuilder TLB;
   LLVM::LLVMPointerType ptrTy;
   LLVM::LLVMVoidType voidTy;
-  LLVM::LLVMFuncOp recordFn, releaseFn, debugLayoutFn, isPlatformKindFn, dispatchFn;
+  LLVM::LLVMFuncOp recordFn, releaseFn, recordBoxFn, releaseBoxFn, debugLayoutFn, isPlatformKindFn, dispatchFn;
 
   Value valueOf(OpBuilder &B, runtime::PlatformKind kind);
 
@@ -96,6 +96,10 @@ public:
   void record(OpBuilder &B, Value ptr, Value sizeInBytes);
 
   void release(OpBuilder &B, Value ptr);
+
+  void recordBox(OpBuilder &B, Value boxRef);
+
+  void releaseBox(OpBuilder &B, Value boxRef);
 
   Value isPlatformKind(OpBuilder &B, runtime::PlatformKind kind);
 
