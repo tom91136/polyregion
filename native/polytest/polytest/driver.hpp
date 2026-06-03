@@ -112,7 +112,9 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
   envs.emplace_back(fmt::format("POLYRT_PLATFORM={}", archFor(t, cfg)));
   envs.emplace_back("POLYRT_HOST_FALLBACK=0");
-  envs.emplace_back(fmt::format("{}=1", polyregion::env::PolyinvokeTestLock));
+  if (const auto v = std::getenv(polyregion::env::PolyinvokeTestLock))
+    envs.emplace_back(fmt::format("{}={}", polyregion::env::PolyinvokeTestLock, v));
+  else envs.emplace_back(fmt::format("{}=1", polyregion::env::PolyinvokeTestLock));
   envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
   if (std::getenv(polyregion::env::PolytestDebug)) envs.emplace_back("POLYRT_DEBUG=2");
   // XXX child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish.
