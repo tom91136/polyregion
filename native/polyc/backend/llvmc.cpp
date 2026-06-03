@@ -453,9 +453,15 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
     // XXX RuntimeDyld objects can land anywhere in the address space:
     // - x86_64: Large emits `.ltext` which SectionMemoryManager leaves non-executable, so use Medium.
-    // - AArch64: Small's BL (+-128MB) can't reach cross-module libm; Large emits movz/movk + blr.
+    // - AArch64 COFF: Large emits ADRP+ADD+BLR; RuntimeDyldCOFFAArch64 only synthesises stubs
+    //   for BRANCH26, so ADRP+ADD external refs land in unmapped VA when ucrtbase et al. sit
+    //   more than +-4GB from the JIT slab. Use Small here so codegen emits plain `BL sym` and
+    //   RTDyld inserts its 20-byte MOVZ/MOVK/BR stub when the target is out of +-128MB range.
+    // - AArch64 Mach-O: Large emits MOVZ/MOVK via Mach-O-specific absolute relocations; keep it.
     const auto isSpirv = info.triple.isSPIRV();
-    const auto codeModel = info.triple.getArch() == llvm::Triple::aarch64 ? llvm::CodeModel::Large : llvm::CodeModel::Medium;
+    const auto codeModel = info.triple.getArch() == llvm::Triple::aarch64
+                               ? (info.triple.isOSBinFormatCOFF() ? llvm::CodeModel::Small : llvm::CodeModel::Large)
+                               : llvm::CodeModel::Medium;
     auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
         info.triple,                                                         //
         isSpirv ? "" : info.cpu.uArch,                                       //
