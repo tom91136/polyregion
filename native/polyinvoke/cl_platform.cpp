@@ -183,9 +183,9 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   std::vector<cl_platform_id> platforms(numPlatforms);
   CHECKED(clGetPlatformIDs(numPlatforms, platforms.data(), nullptr));
   std::vector<std::unique_ptr<Device>> clDevices;
-  // XXX OpenCL CPU ICDs duplicate the SharedObject/RelocatableObject paths and tend to
-  // misbehave; restrict to GPU/accelerator devices only.
-  const cl_device_type AcceleratorMask = CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR;
+  cl_device_type AcceleratorMask = CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR;
+  if (const char *cpu = std::getenv(polyregion::env::PolyinvokeOpenclCpu); cpu && *cpu && *cpu != '0')
+    AcceleratorMask |= CL_DEVICE_TYPE_CPU;
   for (const auto &platform : platforms) {
     cl_uint numDevices = 0;
     if (const auto deviceIdResult = clGetDeviceIDs(platform, AcceleratorMask, 0, nullptr, &numDevices);

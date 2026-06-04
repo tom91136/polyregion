@@ -1,0 +1,383 @@
+diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
+index 55f2603b..4b0fa77f 100644
+--- a/ocelot/CMakeLists.txt
++++ b/ocelot/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+ 
+-if (APPLE)
++# CUDA language is only for the bundled CUDA tests; off by default so it builds without nvcc
++if (APPLE OR NOT ENABLE_CUDA_LANG)
+ 	project(gpuocelot C CXX ASM)
+ else()
+ 	project(gpuocelot C CXX CUDA ASM)
+@@ -8,7 +9,7 @@ endif()
+ 
+ option(BUILD_LLVM "Use LLVM compiled from sources: default OFF" OFF)
+ option(BUILD_TESTS "Build tests: default OFF" OFF)
+-option(BUILD_TESTS_CUDA "Build CUDA tests: default ON" ON)
++option(BUILD_TESTS_CUDA "Build CUDA tests (needs nvcc/ENABLE_CUDA_LANG): default OFF" OFF)
+ option(BUILD_TOOLS "Build tool executables: default ON" ON)
+ 
+ if ("x${CMAKE_BUILD_TYPE}" STREQUAL "x")
+@@ -43,7 +44,12 @@ find_package(Curses REQUIRED)
+ if ("x${BUILD_LLVM}" STREQUAL "xOFF")
+ find_package(LLVM REQUIRED CONFIG)
+ 
+-file(GLOB LLVM_LIBRARIES ${LLVM_LIBRARY_DIR}/*.a)
++# shared libLLVM.so when built as a dylib, else the static archives
++if (TARGET LLVM)
++	set(LLVM_LIBRARIES LLVM)
++else()
++	file(GLOB LLVM_LIBRARIES ${LLVM_LIBRARY_DIR}/*.a)
++endif()
+ else()
+ include(ExternalProject)
+ 
+@@ -577,6 +583,11 @@ if(APPLE)
+ 	target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,-dead_strip ${LLVM_LIBRARIES})
+ else()
+ 	target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--gc-sections -Wl,--start-group ${LLVM_LIBRARIES} -Wl,--end-group)
++	# version-script: hide the static LLVM (else it clashes with a host LLVM)
++	# noexecstack: glibc >= 2.41 refuses to dlopen an exec-stack object
++	target_link_options(${PROJECT_NAME} PRIVATE
++		"-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cu_exports.map"
++		"-Wl,-z,noexecstack")
+ endif()
+ 
+ target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
+diff --git a/ocelot/cu_exports.map b/ocelot/cu_exports.map
+new file mode 100644
+index 00000000..52424e0e
+--- /dev/null
++++ b/ocelot/cu_exports.map
+@@ -0,0 +1,7 @@
++{
++	global:
++		cu*;
++		cuda*;
++	local:
++		*;
++};
+diff --git a/ocelot/include/ocelot/cuda/cuda.h b/ocelot/include/ocelot/cuda/cuda.h
+index 22f40a30..4869f10d 100644
+--- a/ocelot/include/ocelot/cuda/cuda.h
++++ b/ocelot/include/ocelot/cuda/cuda.h
+@@ -126,7 +126,7 @@ extern "C" {
+  */ 
+ #if __CUDA_API_VERSION >= 3020
+ 
+-#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64)
++#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64) || defined(__aarch64__) || defined(__LP64__)
+ typedef unsigned long long CUdeviceptr;
+ #else
+ typedef unsigned int CUdeviceptr;
+diff --git a/ocelot/include/ocelot/cuda/cuda_internal.h b/ocelot/include/ocelot/cuda/cuda_internal.h
+index 2b73c68d..17a638a3 100644
+--- a/ocelot/include/ocelot/cuda/cuda_internal.h
++++ b/ocelot/include/ocelot/cuda/cuda_internal.h
+@@ -79,7 +79,7 @@ extern "C" {
+  */ 
+ #if __CUDA_API_VERSION >= 3020
+ 
+-#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64)
++#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64) || defined(__aarch64__) || defined(__LP64__)
+ typedef unsigned long long CUdeviceptr;
+ #else
+ typedef unsigned int CUdeviceptr;
+diff --git a/ocelot/src/cuda/CudaDriverApi.cpp b/ocelot/src/cuda/CudaDriverApi.cpp
+index 925572c9..99662dc9 100644
+--- a/ocelot/src/cuda/CudaDriverApi.cpp
++++ b/ocelot/src/cuda/CudaDriverApi.cpp
+@@ -9,11 +9,14 @@
+ */
+ 
+ // C++ includes
++#include <cctype>
++#include <cstring>
+ #include <string>
+ 
+ // Ocelot includes
+ #include <ocelot/cuda/cuda_internal.h>
+ #include <ocelot/cuda/CudaDriverFrontend.h>
++#include <ocelot/ir/PTXKernel.h>
+ 
+ // Hydrazine includes
+ #include <hydrazine/debug.h>
+@@ -32,8 +35,8 @@
+ // whether verbose error messages are printed
+ #define CUDA_VERBOSE 1
+ 
+-// whether debugging messages are printed
+-#define REPORT_BASE 1
++// off: trace()/RETURN pollute stdout, breaking string-compare tests
++#define REPORT_BASE 0
+ 
+ //////////////////////////////////////////////////////////////////////////////////////////////////
+ //
+@@ -68,6 +71,39 @@
+ // shared object or to invoke Ocelot's Driver API frontend
+ typedef cuda::CudaDriverInterface CudaApi;
+ 
++// Absent from this header's cuda.h
++typedef void (*OcelotHostFn)(void *userData);
++typedef void (*OcelotStreamCallback)(CUstream, CUresult, void *);
++
++// strip .param attributes (.ptr/.align etc.) the PTX parser rejects
++static std::string sanitisePtxParams(const void *image) {
++	const char *ptx = static_cast<const char *>(image);
++	std::string in(ptx ? ptx : ""), out;
++	out.reserve(in.size());
++	size_t pos = 0;
++	while (pos < in.size()) {
++		size_t eol = in.find('\n', pos);
++		if (eol == std::string::npos) eol = in.size();
++		std::string line = in.substr(pos, eol - pos);
++		if (line.find(".param") != std::string::npos) {
++			for (const char *tok : {" .ptr", " .global", " .const", " .shared", " .local"}) {
++				size_t p;
++				while ((p = line.find(tok)) != std::string::npos) line.erase(p, std::strlen(tok));
++			}
++			size_t p;
++			while ((p = line.find(" .align ")) != std::string::npos) {
++				size_t q = p + 8;
++				while (q < line.size() && std::isdigit((unsigned char)line[q])) q++;
++				line.erase(p, q - p);
++			}
++		}
++		out += line;
++		if (eol < in.size()) out += '\n';
++		pos = eol + 1;
++	}
++	return out;
++}
++
+ extern "C" {
+ 
+ /*********************************
+@@ -214,17 +250,19 @@ CUresult Function(cuModuleLoad)(CUmodule *module, const char *fname) {
+ 	RETURN( CudaApi::get()->cuModuleLoad(module, fname) );
+ }
+ 
+-CUresult Function(cuModuleLoadData)(CUmodule *module, 
++CUresult Function(cuModuleLoadData)(CUmodule *module,
+ 	const void *image) {
+-	trace();	
+-	RETURN( CudaApi::get()->cuModuleLoadData(module, image) );
++	trace();
++	std::string clean = sanitisePtxParams(image);
++	RETURN( CudaApi::get()->cuModuleLoadData(module, clean.c_str()) );
+ }
+ 
+-CUresult Function(cuModuleLoadDataEx)(CUmodule *module, 
+-	const void *image, unsigned int numOptions, 
++CUresult Function(cuModuleLoadDataEx)(CUmodule *module,
++	const void *image, unsigned int numOptions,
+ 	CUjit_option *options, void **optionValues) {
+-	trace();	
+-	RETURN( CudaApi::get()->cuModuleLoadDataEx(module, image, numOptions, options, optionValues) );
++	trace();
++	std::string clean = sanitisePtxParams(image);
++	RETURN( CudaApi::get()->cuModuleLoadDataEx(module, clean.c_str(), numOptions, options, optionValues) );
+ }
+ 
+ CUresult Function(cuModuleLoadFatBinary)(CUmodule *module, 
+@@ -911,6 +949,85 @@ CUresult Function(cuGLSetBufferObjectMapFlags)(GLuint buffer, unsigned int flags
+ 	RETURN ( CudaApi::get()->cuGLSetBufferObjectMapFlags(buffer, flags) );
+ }
+ 
++// modern Driver API entry points cuew resolves, mapped onto the legacy frontend
++CUresult Function(cuLaunchKernel)(CUfunction f,
++	unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
++	unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
++	unsigned int sharedMemBytes, CUstream hStream,
++	void **kernelParams, void **extra) {
++	trace();
++	ir::PTXKernel *kernel = reinterpret_cast<ir::PTXKernel *>(f);
++	if (!kernel) return CUDA_ERROR_INVALID_HANDLE;
++	CudaApi *api = CudaApi::get();
++	CUresult r;
++	if ((r = api->cuFuncSetBlockShape(f, (int)blockDimX, (int)blockDimY, (int)blockDimZ)) != CUDA_SUCCESS) return r;
++	if (sharedMemBytes && (r = api->cuFuncSetSharedSize(f, sharedMemBytes)) != CUDA_SUCCESS) return r;
++	unsigned int offset = 0, i = 0;
++	for (ir::Kernel::ParameterVector::const_iterator p = kernel->arguments.begin();
++		p != kernel->arguments.end(); ++p, ++i) {
++		unsigned int align = p->getAlignment();
++		unsigned int size = p->getSize();
++		if (align > 1) offset = (offset + align - 1) & ~(align - 1);
++		void *src = (kernelParams ? kernelParams[i] : 0);
++		if (src && (r = api->cuParamSetv(f, (int)offset, src, size)) != CUDA_SUCCESS) return r;
++		offset += size;
++	}
++	if ((r = api->cuParamSetSize(f, offset)) != CUDA_SUCCESS) return r;
++	// Legacy launch grid is 2-D; fold z into the height
++	return api->cuLaunchGrid(f, (int)gridDimX, (int)(gridDimY * (gridDimZ ? gridDimZ : 1)));
++}
++
++CUresult Function(cuMemAllocManaged)(CUdeviceptr *dptr, size_t bytesize, unsigned int flags) {
++	trace();
++	RETURN( CudaApi::get()->cuMemAlloc(dptr, (unsigned int)bytesize) );
++}
++
++CUresult Function(cuDevicePrimaryCtxRetain)(CUcontext *pctx, CUdevice dev) {
++	trace();
++	RETURN( CudaApi::get()->cuCtxCreate(pctx, 0, dev) );
++}
++CUresult Function(cuDevicePrimaryCtxRelease)(CUdevice dev) {
++	trace();
++	return CUDA_SUCCESS;
++}
++
++CUresult Function(cuGetErrorName)(CUresult error, const char **pStr) {
++	if (pStr) *pStr = (error == CUDA_SUCCESS) ? "CUDA_SUCCESS" : "CUDA_ERROR";
++	return CUDA_SUCCESS;
++}
++CUresult Function(cuGetErrorString)(CUresult error, const char **pStr) {
++	if (pStr) *pStr = (error == CUDA_SUCCESS) ? "no error" : "CUDA error (ocelot emulator)";
++	return CUDA_SUCCESS;
++}
++
++// Emulation is synchronous: run callbacks inline
++CUresult Function(cuLaunchHostFunc)(CUstream hStream, OcelotHostFn fn, void *userData) {
++	trace();
++	if (fn) fn(userData);
++	return CUDA_SUCCESS;
++}
++CUresult Function(cuStreamAddCallback)(CUstream hStream, OcelotStreamCallback callback,
++	void *userData, unsigned int flags) {
++	trace();
++	if (callback) callback(hStream, CUDA_SUCCESS, userData);
++	return CUDA_SUCCESS;
++}
++
++// _v2 ABI names cuew resolves; the frontend only carries the base names
++CUresult FunctionV(cuCtxPushCurrent)(CUcontext ctx) {
++	trace();
++	RETURN( CudaApi::get()->cuCtxPushCurrent(ctx) );
++}
++CUresult FunctionV(cuStreamDestroy)(CUstream hStream) {
++	trace();
++	RETURN( CudaApi::get()->cuStreamDestroy(hStream) );
++}
++CUresult FunctionV(cuMemcpyDtoDAsync)(CUdeviceptr dstDevice, CUdeviceptr srcDevice,
++	size_t ByteCount, CUstream hStream) {
++	trace();
++	RETURN( CudaApi::get()->cuMemcpyDtoD(dstDevice, srcDevice, (unsigned int)ByteCount) );
++}
++
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ }
+diff --git a/ocelot/src/cuda/CudaDriverFrontend.cpp b/ocelot/src/cuda/CudaDriverFrontend.cpp
+index c52ac0e3..8825a20b 100644
+--- a/ocelot/src/cuda/CudaDriverFrontend.cpp
++++ b/ocelot/src/cuda/CudaDriverFrontend.cpp
+@@ -478,11 +478,17 @@ CUresult cuda::CudaDriverFrontend::cuDeviceGetAttribute(int *pi, CUdevice_attrib
+ 		case CU_DEVICE_ATTRIBUTE_ECC_ENABLED:
+ 			*pi = 0;
+ 			break;
++		// COMPUTE_CAPABILITY_MAJOR/MINOR (75/76) postdate this enum; report sm_35
++		case (CUdevice_attribute)75:
++			*pi = 3;
++			break;
++		case (CUdevice_attribute)76:
++			*pi = 5;
++			break;
+ 		default:
++			// report 0, not NOT_FOUND: enumeration queries attributes opportunistically
+ 			*pi = 0;
+-			result = CUDA_ERROR_NOT_FOUND;
+ 			report("cuDeviceGetAttribute() - unsupported attribute requested: " << attrib);
+-			assert(0 && "cuDeviceGetAttribute() - unsupported attribute requested: ");
+ 			break;
+ 	}
+ 	
+@@ -1004,7 +1010,8 @@ CUresult cuda::CudaDriverFrontend::cuMemcpyHtoD (CUdeviceptr dstDevice,
+ 		executive::Device &device = context->_getDevice();
+ 		executive::Device::MemoryAllocation * allocation = device.getMemoryAllocation((void *)dstDevice);
+ 		if (allocation) {
+-			allocation->copy(0, srcHost, (size_t)ByteCount);
++			size_t offset = (char *)dstDevice - (char *)allocation->pointer();
++			allocation->copy(offset, srcHost, (size_t)ByteCount);
+ 			result = CUDA_SUCCESS;
+ 		}
+ 		else {
+@@ -1028,7 +1035,8 @@ CUresult cuda::CudaDriverFrontend::cuMemcpyDtoH (void *dstHost, CUdeviceptr srcD
+ 		executive::Device &device = context->_getDevice();
+ 		executive::Device::MemoryAllocation * allocation = device.getMemoryAllocation((void *)srcDevice);
+ 		if (allocation) {
+-			allocation->copy(dstHost, 0, (size_t)ByteCount);
++			size_t offset = (char *)srcDevice - (char *)allocation->pointer();
++			allocation->copy(dstHost, offset, (size_t)ByteCount);
+ 			result = CUDA_SUCCESS;
+ 		}
+ 		else {
+@@ -1158,16 +1166,14 @@ CUresult cuda::CudaDriverFrontend::cuMemcpy3D( const CUDA_MEMCPY3D *pCopy ) {
+ 
+ // 1D functions
+ // system <-> device memory
+-CUresult cuda::CudaDriverFrontend::cuMemcpyHtoDAsync (CUdeviceptr dstDevice, 
++CUresult cuda::CudaDriverFrontend::cuMemcpyHtoDAsync (CUdeviceptr dstDevice,
+ const void *srcHost, unsigned int ByteCount, CUstream hStream ) {
+-	assert(0 && "unimplemented");
+-	return CUDA_ERROR_NOT_FOUND;
++	return cuMemcpyHtoD(dstDevice, srcHost, ByteCount);
+ }
+ 
+-CUresult cuda::CudaDriverFrontend::cuMemcpyDtoHAsync (void *dstHost, 
++CUresult cuda::CudaDriverFrontend::cuMemcpyDtoHAsync (void *dstHost,
+ CUdeviceptr srcDevice, unsigned int ByteCount, CUstream hStream ) {
+-	assert(0 && "unimplemented");
+-	return CUDA_ERROR_NOT_FOUND;
++	return cuMemcpyDtoH(dstHost, srcDevice, ByteCount);
+ }
+ 
+ // system <-> array memory
+@@ -1604,13 +1610,10 @@ CUresult cuda::CudaDriverFrontend::cuLaunch(CUfunction hfunc) {
+ 				<< ") on thread " << boost::this_thread::get_id());
+ 	
+ 			try {
++				// We register none; copying persistent/nextTraceGenerators here crashes on
++				// under-constructed thread contexts
+ 				trace::TraceGeneratorVector traceGens;
+ 
+-				traceGens = context->_hostThreadContext.persistentTraceGenerators;
+-				traceGens.insert(traceGens.end(),
+-					context->_hostThreadContext.nextTraceGenerators.begin(), 
+-					context->_hostThreadContext.nextTraceGenerators.end());
+-
+ 				context->_getDevice().launch(ptxKernel->module->id(), 
+ 					ptxKernel->name, 
+ 					convert(context->_launchConfiguration.gridDim), 
+@@ -1679,13 +1682,10 @@ CUresult cuda::CudaDriverFrontend::cuLaunchGrid (CUfunction hfunc, int grid_widt
+ 				<< ") on thread " << boost::this_thread::get_id());
+ 	
+ 			try {
++				// We register none; copying persistent/nextTraceGenerators here crashes on
++				// under-constructed thread contexts
+ 				trace::TraceGeneratorVector traceGens;
+ 
+-				traceGens = context->_hostThreadContext.persistentTraceGenerators;
+-				traceGens.insert(traceGens.end(),
+-					context->_hostThreadContext.nextTraceGenerators.begin(), 
+-					context->_hostThreadContext.nextTraceGenerators.end());
+-
+ 				context->_getDevice().launch(ptxKernel->module->id(), 
+ 					ptxKernel->name, 
+ 					convert(context->_launchConfiguration.gridDim), 
+diff --git a/ocelot/src/api/OcelotConfiguration.cpp b/ocelot/src/api/OcelotConfiguration.cpp
+index 128b774a..ccaafac9 100644
+--- a/ocelot/src/api/OcelotConfiguration.cpp
++++ b/ocelot/src/api/OcelotConfiguration.cpp
+@@ -389,9 +389,9 @@ api::OcelotConfiguration::OcelotConfiguration(
+ 	}
+ 	else
+ 	{
+-		std::cout << "==Ocelot== WARNING: Failed to find 'configure.ocelot' "
++		std::cerr << "==Ocelot== WARNING: Failed to find 'configure.ocelot' "
+ 			"in current directory, loading defaults.\n" << std::endl;
+-		std::cout << "==Ocelot== INFO: You may consider adding one if you need "
++		std::cerr << "==Ocelot== INFO: You may consider adding one if you need "
+ 			"to change the Ocelot target, or runtime options.\n" << std::endl;
+ 
+ 		size_t szconfig = 0;

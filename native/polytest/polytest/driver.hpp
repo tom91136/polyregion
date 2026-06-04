@@ -119,6 +119,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   if (std::getenv(polyregion::env::PolytestDebug)) envs.emplace_back("POLYRT_DEBUG=2");
   // XXX child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish.
   for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads, //
+                           polyregion::env::PolyinvokeOpenclCpu,                                    //
                            "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
   {
