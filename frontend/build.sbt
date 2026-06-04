@@ -350,9 +350,10 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
         .withCheckFeatures(false)
         .withBuildTarget(scala.scalanative.build.BuildTarget.libraryDynamic)
         .withCompileOptions(
-          // XXX scala-native's dylib_init.c calls getenv; MSVC ucrt deprecates it so silence it on Windows
+          // XXX scala-native's dylib_init.c calls getenv; MSVC ucrt deprecates it so silence it on Windows.
+          // empty value (not =1) to match SN's own `#define _CRT_SECURE_NO_WARNINGS`, else -Wmacro-redefined
           sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath) ++
-            (if (isWin) Seq("-D_CRT_SECURE_NO_WARNINGS") else Nil)
+            (if (isWin) Seq("-D_CRT_SECURE_NO_WARNINGS=") else Nil)
         )
         // XXX macOS ld64 picks the first match so we must prepend
         .withLinkingOptions(sysrootFlag ++ crossFlag ++ thinLtoFlag ++ linkOpts ++ cfg.linkingOptions)
