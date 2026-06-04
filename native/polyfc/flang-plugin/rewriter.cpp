@@ -89,7 +89,7 @@ class Binder {
     Value fieldPtr;
     std::vector<Witness> dependent, temporary;
     // XXX Set for fir.box-typed captures; carries the descriptor ref for polydco_record_box.
-    Value box;
+    Value box = {};
   };
 
   struct ReductionField {

@@ -10,6 +10,8 @@ Global / concurrentRestrictions := Seq(
   Tags.limitAll(java.lang.Runtime.getRuntime.availableProcessors * 2)
 )
 
+Global / excludeLintKeys += assembly / artifact
+
 lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
 lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
@@ -176,13 +178,13 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     passJsDest := nativeDir / "polyc" / "polypass.js",
     exportPassBundle := {
       import com.google.javascript.jscomp.{
-        BasicErrorManager,
+        AbstractCommandLineRunner,
         CheckLevel,
-        CommandLineRunner,
         CompilationLevel,
         CompilerOptions,
         DiagnosticGroups,
         JSError,
+        SortingErrorManager,
         WarningLevel,
         Compiler => ClosureCompiler,
         SourceFile => ClosureSourceFile
@@ -198,15 +200,16 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       // Closure's parser then NPEs on the escape (`Cannot read field "features"`).
       val raw = IO.read(src).replace("\\uff3f", "_FF3F_")
 
-      val defaultExterns = CommandLineRunner.getDefaultExterns()
+      val defaultExterns = AbstractCommandLineRunner.getBuiltinExterns(CompilerOptions.Environment.BROWSER)
       val inputs         = java.util.Collections.singletonList(ClosureSourceFile.fromCode(src.getName, raw))
 
-      def quietErrorManager(onReport: (CheckLevel, JSError) => Unit) =
-        new BasicErrorManager() {
-          override def report(level: CheckLevel, error: JSError): Unit  = onReport(level, error)
-          override def println(level: CheckLevel, error: JSError): Unit = ()
-          override def printSummary(): Unit                             = ()
+      def quietErrorManager(onReport: (CheckLevel, JSError) => Unit) = {
+        val gen: SortingErrorManager.ErrorReportGenerator = (manager: SortingErrorManager) => {
+          manager.getErrors.forEach(error => onReport(CheckLevel.ERROR, error))
+          manager.getWarnings.forEach(error => onReport(CheckLevel.WARNING, error))
         }
+        new SortingErrorManager(java.util.Collections.singleton(gen))
+      }
 
       // XXX `exports.X = ...` are Scala.js @JSExportTopLevel surfaces
       val exportNames =
@@ -347,7 +350,9 @@ lazy val pass = crossProject(JVMPlatform, JSPlatform, NativePlatform)
         .withCheckFeatures(false)
         .withBuildTarget(scala.scalanative.build.BuildTarget.libraryDynamic)
         .withCompileOptions(
-          sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath)
+          // XXX scala-native's dylib_init.c calls getenv; MSVC ucrt deprecates it so silence it on Windows
+          sysrootFlag ++ crossFlag ++ cfg.compileOptions ++ Seq("-I", (gcPrefix / "include").getAbsolutePath) ++
+            (if (isWin) Seq("-D_CRT_SECURE_NO_WARNINGS") else Nil)
         )
         // XXX macOS ld64 picks the first match so we must prepend
         .withLinkingOptions(sysrootFlag ++ crossFlag ++ thinLtoFlag ++ linkOpts ++ cfg.linkingOptions)

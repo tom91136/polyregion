@@ -70,7 +70,6 @@ MetalPlatform::~MetalPlatform() {
 
 MetalDevice::MetalDevice(decltype(device) device_)
     : pool(NS::AutoreleasePool::alloc()->init()), device(device_), unified(device_->hasUnifiedMemory()),
-      memoryObjects(device_->hasUnifiedMemory()),
       store(
           PREFIX,
           [this](auto &&image) {
@@ -97,7 +96,8 @@ MetalDevice::MetalDevice(decltype(device) device_)
           [&](auto &&f) {
             POLYINVOKE_TRACE();
             f->release();
-          }) {
+          }),
+      memoryObjects(device_->hasUnifiedMemory()) {
   POLYINVOKE_TRACE();
 }
 

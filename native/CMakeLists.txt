@@ -273,6 +273,8 @@ else ()
             "$<$<CXX_COMPILER_ID:Clang>:-Werror=return-type>"
             # libstdc++ __find_if's `#pragma GCC unroll 4` is a forced transform clang can't honour.
             "$<$<CXX_COMPILER_ID:Clang>:-Wno-pass-failed>"
+            # Catch2 test macros expand __COUNTER__, which -pedantic flags as a C2y extension; no first-party use
+            "$<$<CXX_COMPILER_ID:Clang>:-Wno-c2y-extensions>"
     )
 endif ()
 
