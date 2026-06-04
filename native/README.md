@@ -8,12 +8,12 @@ recipes. The underlying cmake form still works if you prefer it.
 
 | Action        | `just` recipe   | What it does                                                                                                                                                                                                         |
 |---------------|-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `LLVM`        | `just llvm`         | Configure + build + install LLVM/Clang/LLD/Flang/MLIR into `llvm-${BUILD_TYPE}-${ARCH}-${VARIANT}/`. Slow (hours, first time).                                                                                       |
-| `DEVICE_LIBS` | `just device-libs`  | Build AMDGPU/NVPTX device libs (offload bitcode).                                                                                                                                                                    |
+| `LLVM`        | `just build-llvm`         | Configure + build + install LLVM/Clang/LLD/Flang/MLIR into `llvm-${BUILD_TYPE}-${ARCH}-${VARIANT}/`. Slow (hours, first time).                                                                                       |
+| `DEVICE_LIBS` | `just build-device-libs`  | Build AMDGPU/NVPTX device libs (offload bitcode).                                                                                                                                                                    |
 | `CONFIGURE`   | `just configure`    | Configure polyregion build into `build-${platform}-${ARCH}-${VARIANT}/`.                                                                                                                                             |
 | `BUILD`       | `just build [tgt]`  | Build a target. `-DTARGET=<name>` selects (default `all`).                                                                                                                                                           |
-| `DIST`        | `just dist`         | Install polyregion into `polyregion-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`. Builds install deps as needed.                                                                                                          |
-| `DIST_TEST`   | `just test-dist`    | Bundle the test binaries + sources into `polyregion-test-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`.                                                                                                                    |
+| `DIST`        | `just build-dist`         | Install polyregion into `polyregion-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`. Builds install deps as needed.                                                                                                          |
+| `DIST_TEST`   | `just build-test-dist`    | Bundle the test binaries + sources into `polyregion-test-${BUILD_TYPE}-${ARCH}-${VARIANT}-dist/`.                                                                                                                    |
 | `CHECK`       | `just check-dist`   | Run the dist sanity check (compiles hello/offload programs through `clang`/`flang-new`/`polycpp`/`polyfc`, verifies output binaries don't depend on shipped DSOs, compile-only checks for cuda/hsa/spirv/metal/c11). |
 
 ## Common options
@@ -40,18 +40,18 @@ If `ccache` is on `PATH` it is used automatically (set by the toolchain files).
 Full dylib release dist + smoke check (from the repo root):
 
 ```sh
-just llvm        # one-time, slow
+just build-llvm        # one-time, slow
 just configure
-just dist
+just build-dist
 just check-dist
 ```
 
 Static dist (no shipped LLVM dylibs):
 
 ```sh
-just --set dylib OFF llvm
+just --set dylib OFF build-llvm
 just --set dylib OFF configure
-just --set dylib OFF dist
+just --set dylib OFF build-dist
 just --set dylib OFF check-dist
 ```
 
@@ -61,11 +61,11 @@ Iterate on a single target without re-installing:
 just build polycpp
 ```
 
-Cross-arch (sysroot is auto-passed when `native/sysroot-${ARCH}` exists):
+Cross-arch (sysroot is auto-passed when `sysroot/out/${ARCH}` exists):
 
 ```sh
-just sysroot ARCH=aarch64    # one-time, downloads + extracts Debian sysroot
-just llvm    ARCH=aarch64
+just build-sysroot ARCH=aarch64    # one-time, builds the AL8 sysroot via container
+just build-llvm    ARCH=aarch64
 ```
 
 `just env` prints the resolved settings (`arch`, `build_type`, `dylib`, `sysroot_path`).

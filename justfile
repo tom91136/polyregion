@@ -5,24 +5,26 @@ set dotenv-path := "native/.env"
 native_build := env_var_or_default('POLYREGION_NATIVE_BUILD', '')
 arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', `uname -m`))
 build_type   := env_var_or_default('BUILD_TYPE', 'Release')
+container    := env_var_or_default('CONTAINER', 'podman')
+sbt          := 'sbt -no-colors'
 
-# `just --set dylib OFF llvm` builds a static dist (no libLLVM.so / libMLIR.so / libclang-cpp.so).
+# `just --set dylib OFF build-llvm` builds a static dist (no libLLVM.so / libMLIR.so / libclang-cpp.so).
 dylib := env_var_or_default('POLYREGION_LLVM_DYLIB', 'ON')
 export POLYREGION_LLVM_DYLIB := dylib
 
-# Auto-export VCPKG_ROOT to ./vcpkg (populated by `just vcpkg`) if the env doesn't set it.
+# Auto-export VCPKG_ROOT to ./vcpkg (populated by `just build-vcpkg`) if the env doesn't set it.
 export VCPKG_ROOT := env_var_or_default('RUNVCPKG_VCPKG_ROOT', env_var_or_default('VCPKG_ROOT', justfile_directory() / "vcpkg"))
 
-# Shared vcpkg install root so `just vcpkg-deps` and `just configure` agree on a location.
+# Shared vcpkg install root so `just build-vcpkg-deps` and `just configure` agree on a location.
 export VCPKG_INSTALLED_DIR := env_var_or_default('VCPKG_INSTALLED_DIR', justfile_directory() / "native" / ".vcpkg" / "vcpkg_installed")
 
-actionlint_version  := '1.7.7'
+actionlint_version  := '1.7.12'
 clang_format_version := '20.1.0'
 # See https://github.com/muttleyxd/clang-tools-static-binaries/releases
 clang_format_release := 'master-796e77c'
 
-# CI sets SYSROOT_PATH; locally defaults to native/sysroot-{arch}.
-sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "native" / "out" / "sysroot" / arch)
+# CI sets SYSROOT_PATH; locally defaults to sysroot/out/{arch}.
+sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "sysroot" / "out" / arch)
 
 # === Default ===
 
@@ -78,7 +80,7 @@ _format mode sbt_task_a sbt_task_b:
     pid_n=$!
     if command -v sbt >/dev/null 2>&1; then
         echo "Scala:   sbt {{ sbt_task_a }} {{ sbt_task_b }}"
-        (cd frontend && sbt -no-colors {{ sbt_task_a }} {{ sbt_task_b }}) &
+        (cd frontend && {{ sbt }} {{ sbt_task_a }} {{ sbt_task_b }}) &
         pid_s=$!
     else
         echo "sbt not found on PATH - skipping Scala format" >&2
@@ -100,7 +102,7 @@ codegen:       _codegen-sbt _codegen-format
 # codegen + git diff against committed state, fails if regenerated sources drift.
 check-codegen: check-header codegen _codegen-diff
 
-# Regen test/kernels/generated_*.hpp; needs `just llvm` plus spirv-link and glslangValidator on PATH.
+# Regen test/kernels/generated_*.hpp; needs `just build-llvm` plus spirv-link and glslangValidator on PATH.
 codegen-kernels:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -109,7 +111,7 @@ codegen-kernels:
     cmake --build "$BUILD" --target polyinvoke-regen-kernels
 
 _codegen-sbt:
-    cd frontend && sbt -no-colors 'codegen/genCodegen'
+    cd frontend && {{ sbt }} 'codegen/genCodegen'
 
 _codegen-format:
     "$(just _clang-format)" -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
@@ -120,16 +122,15 @@ _codegen-diff:
 # === Pass bundles ===
 
 # Build the Scala.js pass bundle (closure-compiled) and stage at native/polyc/polypass.js.
-pass-js:
-    cd frontend && sbt -no-colors 'passJS/exportPassBundle'
+build-pass-js:
+    cd frontend && {{ sbt }} 'passJS/exportPassBundle'
 
-# Build the Scala Native pass DSO and stage at native/polyc/libpolypass.{so,dylib,dll}.
-# Export CMAKE_SYSROOT so sbt's nativeConfig propagates --sysroot to clang
-pass-native:
+# Build the Scala Native pass DSO -> native/polyc/libpolypass.{so,dylib,dll} (sysroot propagated to clang).
+build-pass-native:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
-    cd frontend && sbt -no-colors 'passNative/exportPassDso'
+    cd frontend && {{ sbt }} 'passNative/exportPassDso'
 
 # === Lint ===
 
@@ -139,8 +140,7 @@ check-ci:
     set -euo pipefail
     "$(just _actionlint)" -color .github/workflows/*.yaml
 
-# Forbid <filesystem|regex|codecvt|iostream|sstream|ostream|iomanip> in tracked C/C++ sources.
-# Prefer LLVM sys::fs / sys::path and fmt::print.
+# Forbid <filesystem|regex|codecvt|iostream|sstream|ostream|iomanip> in tracked C/C++ sources (use LLVM sys::/fmt).
 check-header:
     #!/usr/bin/env bash
     set -u
@@ -199,22 +199,47 @@ test-scala *args='':
     if [ -z "${POLYREGION_NATIVE_LIB_DIR:-}" ] && [ -n "$BUILD" ]; then
         export POLYREGION_NATIVE_LIB_DIR="$PWD/$BUILD/bindings/jvm"
     fi
-    cd frontend && sbt -no-colors 'compiler-testsuite-scala/test' {{ args }}
+    cd frontend && {{ sbt }} 'compiler-testsuite-scala/test' {{ args }}
 
-# Run the native ctest suite, excluding the `device` label (GPU dispatch), extra ctest flags via *args.
+# Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
 test-native *args='':
     #!/usr/bin/env bash
     set -euo pipefail
     BUILD=$(just _native-build)
     ctest --test-dir "$BUILD" {{ args }}
 
+# Build the software emulator bundle (gpuocelot/PoCL/lavapipe) -> emulators/out (CONTAINER=docker overrides podman).
+build-emulators:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ justfile_directory() }}/emulators
+    TMP="${EMU_TMPDIR:-$HOME/.podman-tmp}"; mkdir -p "$TMP"
+    TMPDIR="$TMP" {{ container }} build -f Dockerfile --target export -t polyemu .
+    rm -rf out
+    cid=$({{ container }} create polyemu)
+    {{ container }} cp "$cid:/out" ./out
+    {{ container }} rm "$cid" >/dev/null
+
+# Run the native ctest suite against the software emulators; extra ctest flags via *args.
+test-native-with-emulators *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ justfile_directory() }}
+    [ -f emulators/out/env.sh ] || { echo "no emulators/out -- run 'just build-emulators' first"; exit 1; }
+    source emulators/out/env.sh
+    BUILD=$(just _native-build)
+    export POLYREGION_TEST_PROFILE=emulators
+    export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
+    export POLYINVOKE_OPENCL_CPU=1
+    # XXX ctest bakes target names at discovery; re-list under this profile first.
+    rm -f "$BUILD"/*/polytest-discover/*.ids
+    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
+    ctest --test-dir "$BUILD" --timeout 600 {{ args }}
+
 # === Build wrappers ===
 
-# Clone vcpkg into ./vcpkg at the commit pinned in native/.env. Idempotent.
-# Also syncs vcpkg.json's `builtin-baseline` to match VCPKG_COMMIT, because vcpkg rejects
-# manifests that use `overrides` without a baseline. .env is the single source of truth;
-# this rewrite is a no-op when they already agree.
-vcpkg: _vcpkg-sync-baseline
+# Clone + bootstrap vcpkg at the native/.env pin and sync vcpkg.json's builtin-baseline. Idempotent.
+build-vcpkg: _vcpkg-sync-baseline
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -d vcpkg/.git ]; then git clone https://github.com/microsoft/vcpkg.git; fi
@@ -228,7 +253,7 @@ vcpkg: _vcpkg-sync-baseline
     echo "vcpkg ready at $PWD/vcpkg"
 
 # Install vcpkg manifest deps to $VCPKG_INSTALLED_DIR for the current host/arch.
-vcpkg-deps:
+build-vcpkg-deps:
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{ os() }}-{{ arch }}" in
@@ -241,7 +266,7 @@ vcpkg-deps:
         *) echo "unsupported {{ os() }}-{{ arch }}" >&2; exit 1 ;;
     esac
     if [ -z "${VCPKG_ROOT:-}" ]; then
-        echo "VCPKG_ROOT not set; run \`just vcpkg\` first or export VCPKG_ROOT" >&2; exit 1
+        echo "VCPKG_ROOT not set; run \`just build-vcpkg\` first or export VCPKG_ROOT" >&2; exit 1
     fi
     VCPKG_BIN="$VCPKG_ROOT/vcpkg"
     BOOTSTRAP="bootstrap-vcpkg.sh"
@@ -250,7 +275,7 @@ vcpkg-deps:
         if [ -x "$VCPKG_ROOT/$BOOTSTRAP" ]; then
             (cd "$VCPKG_ROOT" && "./$BOOTSTRAP" -disableMetrics)
         else
-            echo "vcpkg checkout incomplete at $VCPKG_ROOT (no $BOOTSTRAP); run \`just vcpkg\`" >&2; exit 1
+            echo "vcpkg checkout incomplete at $VCPKG_ROOT (no $BOOTSTRAP); run \`just build-vcpkg\`" >&2; exit 1
         fi
     fi
     JS_ENGINE="${POLYC_JS_ENGINE:-hermes}"
@@ -275,52 +300,70 @@ _vcpkg-sync-baseline:
         mv native/vcpkg.json.tmp native/vcpkg.json
     fi
 
-# Build the AL8 sysroot (podman/docker required) and extract to native/sysroot-{arch}
-sysroot:
+# Build the AL8 sysroot (sysroot/Dockerfile) into sysroot/out/<arch> (CONTAINER=docker overrides podman).
+build-sysroot:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd native
-    ./make_sysroot.sh {{ arch }}
-    rm -rf "out/sysroot/{{ arch }}"
-    mkdir -p "out/sysroot/{{ arch }}"
-    tar xf "out/sysroot-build/al8/sysroot-al8-{{ arch }}.tar.xz" -C "out/sysroot/{{ arch }}"
-    echo "sysroot ready at native/out/sysroot/{{ arch }}"
+    cd {{ justfile_directory() }}/sysroot
+    case "{{ arch }}" in
+      x86_64)  rhel=x86_64-redhat-linux;  gnu=x86_64-linux-gnu;  plat=linux/amd64; extra=libquadmath ;;
+      aarch64) rhel=aarch64-redhat-linux; gnu=aarch64-linux-gnu; plat=linux/arm64; extra= ;;
+      *) echo "unsupported arch: {{ arch }} (x86_64/aarch64 only)" >&2; exit 1 ;;
+    esac
+    flags=()  # cross-arch flag only when target != host
+    if [ "{{ arch }}" != "$(uname -m)" ]; then
+      case "{{ container }}" in podman) flags=(--arch="{{ arch }}");; docker) flags=(--platform="$plat");; esac
+    fi
+    mkdir -p out
+    img=polyregion-sysroot-al8:{{ arch }}
+    {{ container }} build --pull ${flags[@]+"${flags[@]}"} \
+      --build-arg RHEL_TRIPLE="$rhel" --build-arg GNU_TRIPLE="$gnu" --build-arg EXTRA_PKGS="$extra" \
+      -t "$img" .
+    cid=$({{ container }} create "$img")
+    {{ container }} export "$cid" | xz -T0 > "out/sysroot-al8-{{ arch }}.tar.xz"
+    {{ container }} rm "$cid" >/dev/null
+    rm -rf "out/{{ arch }}"; mkdir -p "out/{{ arch }}"
+    tar xf "out/sysroot-al8-{{ arch }}.tar.xz" -C "out/{{ arch }}"
+    echo "sysroot ready at sysroot/out/{{ arch }}"
 
 # Build the bundled LLVM/Clang/LLD/Flang/MLIR dist; cached on rerun.
-llvm        extra='': (_native "LLVM"        extra)
+build-llvm        extra='': (_native "LLVM"        extra)
 
 # Build the AMDGPU/NVPTX device bitcode libs.
-device-libs extra='': (_native "DEVICE_LIBS" extra)
+build-device-libs extra='': (_native "DEVICE_LIBS" extra)
 
 # cmake-configure the polyregion native build.
-configure   extra='': (_native "CONFIGURE"   extra)
+configure         extra='': (_native "CONFIGURE"   extra)
 
 # Build + stage the relocatable polyregion dist (bin/ + lib/).
-dist        extra='': (_native "DIST"        extra)
+build-dist        extra='': (_native "DIST"        extra)
 
 # Build + stage the test-only dist (test binaries + check_* sources).
-test-dist   extra='': (_native "DIST_TEST"   extra)
+build-test-dist   extra='': (_native "DIST_TEST"   extra)
 
 # Smoke-check a built dist: compile hello/offload programs through clang/flang/polycpp/polyfc.
-check-dist  extra='': (_native "CHECK"       extra)
+check-dist        extra='': (_native "CHECK"       extra)
 
 # Incremental build of all ninja targets.
-build-all     extra='': (_native "BUILD" ("-DTARGET=all "        + extra)) check-fused
+build-all     extra='': (_build "all"     extra) check-fused
 
 # Incremental build of the polyc driver.
-build-polyc   extra='': (_native "BUILD" ("-DTARGET=polyc "      + extra))
+build-polyc   extra='': (_build "polyc"   extra)
 
 # Incremental build of the polycpp driver.
-build-polycpp extra='': (_native "BUILD" ("-DTARGET=polycpp "    + extra))
+build-polycpp extra='': (_build "polycpp" extra)
 
 # Incremental build of the polyfc driver.
-build-polyfc  extra='': (_native "BUILD" ("-DTARGET=polyfc "     + extra))
+build-polyfc  extra='': (_build "polyfc"  extra)
 
 # Incremental build of an arbitrary ninja target (escape hatch for non-default names).
-build target  extra='': (_native "BUILD" ("-DTARGET=" + target + " " + extra))
+build target  extra='': (_build target    extra)
 
-# Build the fused-driver on non-Windows, this recipe configures a separate `out/build-<host>-<arch>-<variant>-fused/` tree
-# with POLYREGION_FUSED_DRIVER=ON
+# BUILD a single ninja target; interpolation here keeps callers free of nested-paren deps.
+_build target extra='':
+    @just _native BUILD "-DTARGET={{ target }} {{ extra }}"
+
+# Build + verify the fused driver (configure + polycpp + polyfc with POLYREGION_FUSED_DRIVER=ON); non-Windows only.
 check-fused:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -363,17 +406,15 @@ clean-dist:
     echo "clean-dist: ${paths[*]}"
     rm -rf "${paths[@]}"
 
-# Remove extracted sysroots + tarballs + intermediate build state.
+# Remove the built sysroots (sysroot/out: tarballs + extracted trees).
 clean-sysroot:
     #!/usr/bin/env bash
     set -uo pipefail
-    shopt -s nullglob
-    paths=(native/out/sysroot native/out/sysroot-build)
-    [ ${#paths[@]} -eq 0 ] && { echo "clean-sysroot: nothing to remove"; exit 0; }
-    echo "clean-sysroot: ${paths[*]}"
-    rm -rf "${paths[@]}"
+    [ -d sysroot/out ] || { echo "clean-sysroot: nothing to remove"; exit 0; }
+    echo "clean-sysroot: sysroot/out"
+    rm -rf sysroot/out
 
-# Remove the repo-local vcpkg clone from `just vcpkg`; leaves $VCPKG_ROOT alone if it points elsewhere.
+# Remove the repo-local vcpkg clone from `just build-vcpkg`; leaves $VCPKG_ROOT alone if it points elsewhere.
 clean-vcpkg:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -405,8 +446,7 @@ ci: check-codegen check-format check-ci
 
 # === Internal ===
 
-# Locate the newest configured build dir. Honours $POLYREGION_NATIVE_BUILD.
-# Searches `native/out/build-*` (just-driven builds) and `native/cmake-build-*` (IDE-driven).
+# Locate the newest configured build dir (native/out/build-* or native/cmake-build-*); honours $POLYREGION_NATIVE_BUILD.
 _native-build:
     #!/usr/bin/env bash
     set -uo pipefail

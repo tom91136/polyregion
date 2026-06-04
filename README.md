@@ -13,17 +13,17 @@ Top-level orchestration is via [`just`](https://github.com/casey/just); `just` f
 
 ### Quick start (fresh clone)
 
-Only `JAVA_HOME` needs to be set externally; `just vcpkg` clones + bootstraps vcpkg into the repo and `VCPKG_ROOT` is auto-discovered there.
+Only `JAVA_HOME` needs to be set externally; `just build-vcpkg` clones + bootstraps vcpkg into the repo and `VCPKG_ROOT` is auto-discovered there.
 
 ```sh
 export JAVA_HOME=/path/to/jdk21    # any JDK 21+ install root
 
-just vcpkg               # clone + bootstrap vcpkg at the pinned commit
-just sysroot             # AL8 sysroot for portable binaries (optional; podman or docker required)
+just build-vcpkg               # clone + bootstrap vcpkg at the pinned commit
+just build-sysroot             # AL8 sysroot for portable binaries (optional; podman or docker required)
                          # skip for host-native; absence is detected as "no sysroot"
-just llvm                # bundled LLVM/Clang/LLD/Flang/MLIR (matches sysroot if present)
-just vcpkg-deps          # manifest deps (Catch2, fmt, hermes, libffi, ...) into native/.vcpkg
-just dist                # polyregion dist (bin/ + lib/)
+just build-llvm                # bundled LLVM/Clang/LLD/Flang/MLIR (matches sysroot if present)
+just build-vcpkg-deps          # manifest deps (Catch2, fmt, hermes, libffi, ...) into native/.vcpkg
+just build-dist                # polyregion dist (bin/ + lib/)
 just check-dist          # smoke test
 ```
 
