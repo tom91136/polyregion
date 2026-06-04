@@ -18,18 +18,21 @@ jobs:
   pass-js:
     runs-on: windows-2025-vs2026
     steps:
-      - uses: actions/checkout@v6
+      - uses: &checkout actions/checkout@v6
 
-      - name: Setup JDK
+      - &setup-java
+        name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup sbt
+      - &setup-sbt
+        name: Setup sbt
         uses: sbt/setup-sbt@v1
 
-      - name: Setup just
+      - &setup-just
+        name: Setup just
         uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -69,7 +72,7 @@ jobs:
       # quickjs-ng is portable C, builds on MSVC. Switch JS engine on Windows.
       POLYC_JS_ENGINE: qjs
     steps:
-      - uses: actions/checkout@v6
+      - uses: *checkout
 
       - name: Install LLVM
         # Without clang-cl the LLVM runtimes (compiler-rt builtins) fails because
@@ -85,17 +88,14 @@ jobs:
           }
           echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
 
-      - name: Setup JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
+      - *setup-java
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - *setup-sbt
 
       - name: Setup Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v6
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ninja
 
       - name: Dotenv
         id: dotenv
@@ -108,15 +108,24 @@ jobs:
         with:
           vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
 
-      - name: Setup MSVC env
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
+      - &msvc
+        name: Setup MSVC env
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
+          $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
+          if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+          Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ matrix.arch }} -no_logo' | Out-Null
+          if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+          Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - *setup-just
 
       - name: Check environment
         shell: pwsh
@@ -129,11 +138,11 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@v5
+        uses: &cache-restore actions/cache/restore@v5
         with:
-          path: |
+          path: &llvm-path |
             ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -142,19 +151,18 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: &cache-save actions/cache/save@v5
         with:
-          path: |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          path: *llvm-path
+          key: *llvm-key
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
         id: restore-device-libs
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          path: &devlibs-path ./native/thirdparty/device_libs
+          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -163,18 +171,18 @@ jobs:
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          path: *devlibs-path
+          key: *devlibs-key
 
       - name: Restore vcpkg cache
         if: ${{ !env.ACT }}
         id: restore-vcpkg
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
+          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
 
       - name: Install vcpkg dependencies
         id: build-vcpkg
@@ -183,10 +191,10 @@ jobs:
 
       - name: Save vcpkg cache
         if: steps.build-vcpkg.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          path: *vcpkg-path
+          key: *vcpkg-key
 
       - name: Build pass bundle (dso)
         run: just build-pass-native
@@ -218,7 +226,7 @@ jobs:
 
       - name: Upload dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: &upload actions/upload-artifact@v7
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist/**
@@ -226,7 +234,7 @@ jobs:
 
       - name: Upload test dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
@@ -239,36 +247,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        include: &simple-matrix
           - arch: amd64
             runs_on: windows-2025-vs2026
           - arch: arm64
             runs_on: windows-11-arm
     runs-on: ${{ matrix.runs_on }}
-    env:
+    env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Setup MSVC env
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - uses: *checkout
+      - *setup-java
+      - *msvc
+      - *setup-just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: &download actions/download-artifact@v8
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
@@ -289,38 +284,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: amd64
-            runs_on: windows-2025-vs2026
-          - arch: arm64
-            runs_on: windows-11-arm
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
+      - uses: *checkout
+      - *setup-java
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
-      - name: Setup MSVC env
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
+      - *msvc
 
       - name: Download test dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
@@ -347,7 +329,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: native-test-results-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
@@ -359,37 +341,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: amd64
-            runs_on: windows-2025-vs2026
-          - arch: arm64
-            runs_on: windows-11-arm
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - uses: *checkout
+      - *setup-java
+      - *setup-sbt
+      - *setup-just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
@@ -412,7 +378,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: scala-test-results-windows-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/

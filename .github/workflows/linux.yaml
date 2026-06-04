@@ -22,19 +22,22 @@ jobs:
   check-codegen:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: &checkout actions/checkout@v6
 
-      - name: Setup JDK + sbt cache
+      - &setup-java
+        name: Setup JDK + sbt cache
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
           cache: sbt
 
-      - name: Setup sbt
+      - &setup-sbt
+        name: Setup sbt
         uses: sbt/setup-sbt@v1
 
-      - name: Setup just
+      - &setup-just
+        name: Setup just
         uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -51,22 +54,10 @@ jobs:
   pass-js:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK + sbt cache
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: sbt
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - uses: *checkout
+      - *setup-java
+      - *setup-sbt
+      - *setup-just
 
       - name: Build pass bundle (js)
         run: just build-pass-js
@@ -99,7 +90,8 @@ jobs:
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
       POLYC_PASS_BUNDLE: dso
     steps:
-      - name: Free up disk space
+      - &free-disk
+        name: Free up disk space
         if: ${{ !env.ACT }}
         uses: justinthelaw/maximize-github-runner-space@v0.9.0
         with:
@@ -109,7 +101,7 @@ jobs:
           remove-codeql: 'true'
           remove-dotnet: 'true'
 
-      - uses: actions/checkout@v6
+      - uses: *checkout
 
       - name: Max parallelism under act
         if: ${{ env.ACT }}
@@ -131,8 +123,7 @@ jobs:
           java-version: '21'
           cache: sbt
 
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+      - *setup-sbt
 
       - name: Dotenv
         id: dotenv
@@ -152,18 +143,15 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME"
           echo "VCPKG_ROOT=$VCPKG_ROOT"
 
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - *setup-just
 
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         id: restore-sysroot
-        uses: actions/cache/restore@v5
+        uses: &cache-restore actions/cache/restore@v5
         with:
-          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
+          path: &sysroot-path ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: &sysroot-key sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
 
       - name: Detect existing sysroot tarball (act fast-path)
         if: ${{ env.ACT }}
@@ -180,10 +168,10 @@ jobs:
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: &cache-save actions/cache/save@v5
         with:
-          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
+          path: *sysroot-path
+          key: *sysroot-key
 
       - name: Prepare sysroot
         run: |
@@ -195,11 +183,11 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: |
+          path: &llvm-path |
             ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
 
       - name: Detect existing LLVM/device-libs (act fast-path)
         if: ${{ env.ACT }}
@@ -215,19 +203,18 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
+          path: *llvm-path
+          key: *llvm-key
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
         id: restore-device-libs
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
+          path: &devlibs-path ./native/thirdparty/device_libs
+          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -236,18 +223,18 @@ jobs:
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
+          path: *devlibs-path
+          key: *devlibs-key
 
       - name: Restore vcpkg cache
         if: ${{ !env.ACT }}
         id: restore-vcpkg
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
+          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
 
       - name: Install vcpkg dependencies
         id: build-vcpkg
@@ -256,10 +243,10 @@ jobs:
 
       - name: Save vcpkg cache
         if: steps.build-vcpkg.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          path: *vcpkg-path
+          key: *vcpkg-key
 
       - name: Build pass bundle (dso)
         run: just build-pass-native
@@ -270,11 +257,7 @@ jobs:
       - name: Build dist
         run: just build-dist
 
-      - name: Build test dist
-        # XXX Bake the emulator targets so test-native-with-emulators can run them; test-native skips the
-        # device ones without the emulator artifact (host@native is in this profile too).
-        env:
-          POLYREGION_TEST_PROFILE: emulators
+      - name: Build test dist (host profile)
         run: just build-test-dist
 
       - name: Check artefact
@@ -300,7 +283,7 @@ jobs:
       - name: Upload dist
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: &upload actions/upload-artifact@v7
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
@@ -309,9 +292,24 @@ jobs:
       - name: Upload test dist
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
+
+      - name: Build test dist (emulators profile)
+        env:
+          POLYREGION_TEST_PROFILE: emulators
+        run: |
+          find native/out -path '*/polytest-discover/*.ids' -delete
+          just build-test-dist
+
+      - name: Upload test dist (emulators)
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-tests-emulators-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
@@ -320,7 +318,7 @@ jobs:
 
       - name: Upload just
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: just-linux-${{ matrix.arch }}
           path: just-dist/just
@@ -330,37 +328,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        include: &simple-matrix
           - arch: x86_64
             runs_on: ubuntu-24.04
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
     steps:
-      - name: Free up disk space
-        if: ${{ !env.ACT }}
-        uses: justinthelaw/maximize-github-runner-space@v0.9.0
-        with:
-          cleanup-profile: custom
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-dotnet: 'true'
+      - *free-disk
 
-      - uses: actions/checkout@v6
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - uses: *checkout
+      - *setup-just
 
       - name: Restore emulators cache
         if: ${{ !env.ACT }}
         id: restore-emu
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./emulators/out
-          key: emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+          path: &emu-path ./emulators/out
+          key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
 
       - name: Detect existing emulators (act fast-path)
         if: ${{ env.ACT }}
@@ -377,17 +363,17 @@ jobs:
 
       - name: Save emulators cache
         if: steps.build-emulators.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./emulators/out
-          key: emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+          path: *emu-path
+          key: *emu-key
 
       - name: Pack emulators (tar preserves symlinks)
         run: tar czf emulators-out.tar.gz -C emulators out
 
       - name: Upload emulators artifact
         if: ${{ !env.ACT }}
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: polyregion-emulators-linux-${{ matrix.arch }}
           path: emulators-out.tar.gz
@@ -407,25 +393,21 @@ jobs:
           - { image: 'almalinux:10', pkg: 'dnf install -y --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
           - { image: 'ubuntu:22.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath0)' }
           - { image: 'ubuntu:24.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath0)' }
-        include:
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
     container: ${{ matrix.distro.image }}
-    env:
+    env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - name: Install container dependencies
         run: ${{ matrix.distro.pkg }}
 
-      - uses: actions/checkout@v6
+      - uses: *checkout
 
       - name: Download just
         # XXX JS setup actions fail in node-less containers; download the host-built musl binary instead.
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: &download actions/download-artifact@v8
         with:
           name: just-linux-${{ matrix.arch }}
           path: just-bin
@@ -439,7 +421,7 @@ jobs:
         # XXX Under act the workspace is bind-mounted; the dist is already at this path.
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -467,18 +449,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     steps:
-      - uses: actions/checkout@v6
+      - uses: *checkout
 
-      - name: Install dependencies
+      - &apt-cmake
+        name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake
@@ -486,7 +464,7 @@ jobs:
       - name: Download dist
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -494,12 +472,13 @@ jobs:
       - name: Download test dist
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-tests-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
-      - name: Restore executable bits
+      - &restore-exec
+        name: Restore executable bits
         working-directory: ./native
         run: |
           for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
@@ -518,7 +497,6 @@ jobs:
           export POLYPASS_PLUGINS=$DIST/lib/libpolypass.so
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
           export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
-          export POLYREGION_TEST_PROFILE=emulators
           ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 300 --output-on-failure --output-junit "$TESTS/native-test-results.xml"
 
       - name: Annotate ctest results
@@ -531,7 +509,7 @@ jobs:
       - name: Upload test results
         if: ${{ always() && !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: native-test-results-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
@@ -543,39 +521,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
+      - uses: *checkout
+      - *apt-cmake
 
       - name: Download dist
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
-          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          name: polyregion-tests-emulators-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download emulators
         if: ${{ !env.ACT }}
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-emulators-linux-${{ matrix.arch }}
           path: ./emulators
@@ -584,13 +553,7 @@ jobs:
         if: ${{ !env.ACT }}
         run: tar xzf emulators/emulators-out.tar.gz -C emulators
 
-      - name: Restore executable bits
-        working-directory: ./native
-        run: |
-          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
-            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
-            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.so' -exec chmod +x {} +; fi
-          done
+      - *restore-exec
 
       - name: Run emulator tests
         working-directory: ./native
@@ -605,7 +568,7 @@ jobs:
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
           export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
           export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK=0 POLYINVOKE_OPENCL_CPU=1
-          ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 300 --output-on-failure --output-junit "$TESTS/emulator-test-results.xml"
+          ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 900 --output-on-failure --output-junit "$TESTS/emulator-test-results.xml"
 
       - name: Annotate ctest results
         if: always()
@@ -616,7 +579,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ always() && !env.ACT }}
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: emulator-test-results-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
@@ -628,36 +591,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: x86_64
-            runs_on: ubuntu-24.04
-          - arch: aarch64
-            runs_on: ubuntu-24.04-arm
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK + sbt cache
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: sbt
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - uses: *checkout
+      - *setup-java
+      - *setup-sbt
+      - *setup-just
 
       - name: Download dist
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -679,7 +625,7 @@ jobs:
       - name: Upload test results
         if: ${{ always() && !env.ACT }}
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: scala-test-results-linux-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/

@@ -14,18 +14,21 @@ jobs:
   pass-js:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v6
+      - uses: &checkout actions/checkout@v6
 
-      - name: Setup JDK
+      - &setup-java
+        name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup sbt
+      - &setup-sbt
+        name: Setup sbt
         uses: sbt/setup-sbt@v1
 
-      - name: Setup just
+      - &setup-just
+        name: Setup just
         uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -61,7 +64,7 @@ jobs:
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
       POLYC_PASS_BUNDLE: dso
     steps:
-      - uses: actions/checkout@v6
+      - uses: *checkout
 
       - name: Install dependencies
         # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
@@ -91,16 +94,13 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@v5
+        uses: &cache-restore actions/cache/restore@v5
         with:
-          path: |
+          path: &llvm-path |
             ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - *setup-just
 
       - name: Build LLVM
         id: build-llvm
@@ -109,19 +109,18 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: &cache-save actions/cache/save@v5
         with:
-          path: |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          path: *llvm-path
+          key: *llvm-key
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
         id: restore-device-libs
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          path: &devlibs-path ./native/thirdparty/device_libs
+          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -130,18 +129,18 @@ jobs:
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          path: *devlibs-path
+          key: *devlibs-key
 
       - name: Restore vcpkg cache
         if: ${{ !env.ACT }}
         id: restore-vcpkg
-        uses: actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
+          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
 
       - name: Install vcpkg dependencies
         id: build-vcpkg
@@ -150,10 +149,10 @@ jobs:
 
       - name: Save vcpkg cache
         if: steps.build-vcpkg.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: *cache-save
         with:
-          path: ./native/.vcpkg/vcpkg_installed
-          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          path: *vcpkg-path
+          key: *vcpkg-key
 
       - name: Build pass bundle (dso)
         run: just build-pass-native
@@ -189,7 +188,7 @@ jobs:
 
       - name: Upload dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: &upload actions/upload-artifact@v7
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
@@ -197,7 +196,7 @@ jobs:
 
       - name: Upload test dist
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
@@ -210,28 +209,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        include: &simple-matrix
           - arch: arm64
             runs_on: macos-26
           - arch: x86_64
             runs_on: macos-26-intel
     runs-on: ${{ matrix.runs_on }}
-    env:
+    env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: *checkout
 
-      - name: Install dependencies
+      - &brew-cmake
+        name: Install dependencies
         run: brew install --quiet cmake
 
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - *setup-just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: &download actions/download-artifact@v8
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -259,30 +256,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: arm64
-            runs_on: macos-26
-          - arch: x86_64
-            runs_on: macos-26-intel
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: brew install --quiet cmake
+      - uses: *checkout
+      - *brew-cmake
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-tests-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
@@ -318,7 +308,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: native-test-results-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
@@ -330,34 +320,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: arm64
-            runs_on: macos-26
-          - arch: x86_64
-            runs_on: macos-26-intel
+        include: *simple-matrix
     runs-on: ${{ matrix.runs_on }}
-    env:
-      POLYREGION_ARCH: ${{ matrix.arch }}
+    env: *arch-env
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@v1
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+      - uses: *checkout
+      - *setup-java
+      - *setup-sbt
+      - *setup-just
 
       - name: Download dist
         # v4: nektos/act#6022
-        uses: actions/download-artifact@v8
+        uses: *download
         with:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
@@ -379,7 +353,7 @@ jobs:
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
-        uses: actions/upload-artifact@v7
+        uses: *upload
         with:
           name: scala-test-results-darwin-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/
