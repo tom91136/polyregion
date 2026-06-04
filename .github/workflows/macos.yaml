@@ -16,12 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup JDK + sbt cache
+      - name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-          cache: sbt
 
       - name: Setup sbt
         uses: sbt/setup-sbt@v1
@@ -32,7 +31,7 @@ jobs:
           tool: just
 
       - name: Build pass bundle (js)
-        run: just pass-js
+        run: just build-pass-js
 
       - name: Verify bundle staged
         run: |
@@ -106,7 +105,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true'
-        run: just llvm
+        run: just build-llvm
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -127,7 +126,7 @@ jobs:
       - name: Build device libs
         id: build-device-libs
         if: steps.restore-device-libs.outputs.cache-hit != 'true'
-        run: just device-libs
+        run: just build-device-libs
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
@@ -147,7 +146,7 @@ jobs:
       - name: Install vcpkg dependencies
         id: build-vcpkg
         if: steps.restore-vcpkg.outputs.cache-hit != 'true'
-        run: just vcpkg-deps
+        run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
         if: steps.build-vcpkg.outcome == 'success'
@@ -157,16 +156,16 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
 
       - name: Build pass bundle (dso)
-        run: just pass-native
+        run: just build-pass-native
 
       - name: Configure release build
         run: just configure
 
       - name: Build dist
-        run: just dist
+        run: just build-dist
 
       - name: Build test dist
-        run: just test-dist
+        run: just build-test-dist
 
       - name: Check artefact
         if: always()
@@ -342,12 +341,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup JDK + sbt cache
+      - name: Setup JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-          cache: sbt
 
       - name: Setup sbt
         uses: sbt/setup-sbt@v1

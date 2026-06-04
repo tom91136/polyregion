@@ -13,3 +13,7 @@
 
 --container-options --volume=/tmp/act-ccache:/tmp/act-ccache
 --env CCACHE_DIR=/tmp/act-ccache
+
+--container-options --volume=/run/user/1000/podman/podman.sock:/var/run/docker.sock
+--container-options --security-opt=label=disable
+--env DOCKER_BUILDKIT=0

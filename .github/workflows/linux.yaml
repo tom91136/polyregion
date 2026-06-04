@@ -69,7 +69,7 @@ jobs:
           tool: just
 
       - name: Build pass bundle (js)
-        run: just pass-js
+        run: just build-pass-js
 
       - name: Verify bundle staged
         run: |
@@ -152,40 +152,44 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME"
           echo "VCPKG_ROOT=$VCPKG_ROOT"
 
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         id: restore-sysroot
         uses: actions/cache/restore@v5
         with:
-          path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.sh') }}
+          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
 
       - name: Detect existing sysroot tarball (act fast-path)
         if: ${{ env.ACT }}
         id: act-sysroot-probe
         run: |
-          [ -f native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz ] && echo "found=true" >> "$GITHUB_OUTPUT" || true
+          [ -f sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz ] && echo "found=true" >> "$GITHUB_OUTPUT" || true
 
       - name: Build sysroot
         id: build-sysroot
         if: steps.restore-sysroot.outputs.cache-hit != 'true' && steps.act-sysroot-probe.outputs.found != 'true'
-        working-directory: ./native
-        run: ./make_sysroot.sh ${{ matrix.arch }}
+        env:
+          CONTAINER: docker
+        run: just build-sysroot
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
         uses: actions/cache/save@v5
         with:
-          path: ./native/out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/make_sysroot.sh') }}
+          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
 
       - name: Prepare sysroot
-        working-directory: ./native
         run: |
-          STAGE=out/sysroot-build/${{ env.SYSROOT_VARIANT }}/extracted-${{ matrix.arch }}
-          rm -rf "$STAGE"
-          mkdir -p "$STAGE"
-          tar xf out/sysroot-build/${{ env.SYSROOT_VARIANT }}/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz -C "$STAGE"
+          STAGE=sysroot/out/${{ matrix.arch }}
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          tar xf sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz -C "$STAGE"
           echo "SYSROOT_PATH=$PWD/$STAGE" >> "$GITHUB_ENV"
 
       - name: Restore LLVM cache
@@ -195,12 +199,7 @@ jobs:
         with:
           path: |
             ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
-
-      - name: Setup just
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
 
       - name: Detect existing LLVM/device-libs (act fast-path)
         if: ${{ env.ACT }}
@@ -212,7 +211,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.llvm != 'true'
-        run: just llvm
+        run: just build-llvm
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -220,7 +219,7 @@ jobs:
         with:
           path: |
             ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
@@ -228,19 +227,19 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
 
       - name: Build device libs
         id: build-device-libs
         if: steps.restore-device-libs.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.device-libs != 'true'
-        run: just device-libs
+        run: just build-device-libs
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: ./native/thirdparty/device_libs
-          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './native/make_sysroot.sh') }}
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile') }}
 
       - name: Restore vcpkg cache
         if: ${{ !env.ACT }}
@@ -253,7 +252,7 @@ jobs:
       - name: Install vcpkg dependencies
         id: build-vcpkg
         if: steps.restore-vcpkg.outputs.cache-hit != 'true'
-        run: just vcpkg-deps
+        run: just build-vcpkg-deps
 
       - name: Save vcpkg cache
         if: steps.build-vcpkg.outcome == 'success'
@@ -263,16 +262,20 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
 
       - name: Build pass bundle (dso)
-        run: just pass-native
+        run: just build-pass-native
 
       - name: Configure release build
         run: just configure
 
       - name: Build dist
-        run: just dist
+        run: just build-dist
 
       - name: Build test dist
-        run: just test-dist
+        # XXX Bake the emulator targets so test-native-with-emulators can run them; test-native skips the
+        # device ones without the emulator artifact (host@native is in this profile too).
+        env:
+          POLYREGION_TEST_PROFILE: emulators
+        run: just build-test-dist
 
       - name: Check artefact
         if: always()
@@ -295,6 +298,7 @@ jobs:
           done
 
       - name: Upload dist
+        if: ${{ !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v7
         with:
@@ -303,6 +307,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload test dist
+        if: ${{ !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v7
         with:
@@ -314,10 +319,78 @@ jobs:
         run: install -D "$(command -v just)" just-dist/just
 
       - name: Upload just
+        if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v7
         with:
           name: just-linux-${{ matrix.arch }}
           path: just-dist/just
+          if-no-files-found: error
+
+  build-emulators:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - name: Free up disk space
+        if: ${{ !env.ACT }}
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-dotnet: 'true'
+
+      - uses: actions/checkout@v6
+
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Restore emulators cache
+        if: ${{ !env.ACT }}
+        id: restore-emu
+        uses: actions/cache/restore@v5
+        with:
+          path: ./emulators/out
+          key: emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+
+      - name: Detect existing emulators (act fast-path)
+        if: ${{ env.ACT }}
+        id: act-emu-probe
+        run: |
+          [ -f emulators/out/env.sh ] && echo "found=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Build emulators
+        id: build-emulators
+        if: steps.restore-emu.outputs.cache-hit != 'true' && steps.act-emu-probe.outputs.found != 'true'
+        env:
+          CONTAINER: docker
+        run: just build-emulators
+
+      - name: Save emulators cache
+        if: steps.build-emulators.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: ./emulators/out
+          key: emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+
+      - name: Pack emulators (tar preserves symlinks)
+        run: tar czf emulators-out.tar.gz -C emulators out
+
+      - name: Upload emulators artifact
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: polyregion-emulators-linux-${{ matrix.arch }}
+          path: emulators-out.tar.gz
           if-no-files-found: error
 
   check-dist:
@@ -411,6 +484,7 @@ jobs:
           sudo apt-get install -y cmake
 
       - name: Download dist
+        if: ${{ !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/download-artifact@v8
         with:
@@ -418,6 +492,7 @@ jobs:
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Download test dist
+        if: ${{ !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/download-artifact@v8
         with:
@@ -443,6 +518,7 @@ jobs:
           export POLYPASS_PLUGINS=$DIST/lib/libpolypass.so
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
           export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
+          export POLYREGION_TEST_PROFILE=emulators
           ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 300 --output-on-failure --output-junit "$TESTS/native-test-results.xml"
 
       - name: Annotate ctest results
@@ -453,12 +529,97 @@ jobs:
           label: ctest
 
       - name: Upload test results
-        if: always()
+        if: ${{ always() && !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v7
         with:
           name: native-test-results-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
+          if-no-files-found: warn
+
+  test-native-with-emulators:
+    needs: [build, build-emulators]
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
+      - name: Download dist
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v8
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download test dist
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v8
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download emulators
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v8
+        with:
+          name: polyregion-emulators-linux-${{ matrix.arch }}
+          path: ./emulators
+
+      - name: Unpack emulators
+        if: ${{ !env.ACT }}
+        run: tar xzf emulators/emulators-out.tar.gz -C emulators
+
+      - name: Restore executable bits
+        working-directory: ./native
+        run: |
+          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
+            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
+            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.so' -exec chmod +x {} +; fi
+          done
+
+      - name: Run emulator tests
+        working-directory: ./native
+        run: |
+          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+          source "$GITHUB_WORKSPACE/emulators/out/env.sh"
+          export PATH=$DIST/bin:$PATH
+          export LD_LIBRARY_PATH=$DIST/lib:$LD_LIBRARY_PATH
+          export POLYREGION_BITCODE_DIR=$DIST/lib
+          export POLYPASS_PLUGINS=$DIST/lib/libpolypass.so
+          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
+          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
+          export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK=0 POLYINVOKE_OPENCL_CPU=1
+          ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 300 --output-on-failure --output-junit "$TESTS/emulator-test-results.xml"
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
+          label: ctest-emulators
+
+      - name: Upload test results
+        if: ${{ always() && !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: emulator-test-results-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
           if-no-files-found: warn
 
   test-scala:
@@ -494,6 +655,7 @@ jobs:
           tool: just
 
       - name: Download dist
+        if: ${{ !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/download-artifact@v8
         with:
@@ -515,7 +677,7 @@ jobs:
           label: scala
 
       - name: Upload test results
-        if: always()
+        if: ${{ always() && !env.ACT }}
         # v4: nektos/act#6022
         uses: actions/upload-artifact@v7
         with:

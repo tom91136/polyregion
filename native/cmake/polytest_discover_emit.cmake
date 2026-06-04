@@ -37,7 +37,8 @@ foreach (_line IN LISTS _lines)
     endif ()
 
     string(APPEND _out "add_test(\"${_name}\" \"${BINARY}\" --run-task \"${_id}\")\n")
-    set(_props "")
+    # XXX harness exits 77 for "no compatible target"; let ctest count those as skipped, not failed
+    set(_props " SKIP_RETURN_CODE 77")
     if (DEFINED WORKING_DIRECTORY AND WORKING_DIRECTORY)
         string(APPEND _props " WORKING_DIRECTORY \"${WORKING_DIRECTORY}\"")
     endif ()
@@ -53,7 +54,7 @@ foreach (_line IN LISTS _lines)
 
     if (_dist_bin)
         string(APPEND _dist "add_test(\"${_name}\" \"${_dist_bin}\" --run-task \"${_id}\")\n")
-        set(_dist_props "")
+        set(_dist_props " SKIP_RETURN_CODE 77")
         if (_labels)
             string(APPEND _dist_props " LABELS \"${_labels}\"")
         endif ()
