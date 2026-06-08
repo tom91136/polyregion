@@ -34,7 +34,7 @@ add_custom_target(polycpp-header-resource ${header_commands})
 
 # =========================== Generate header resource target ===========================
 if (POLYREGION_FUSED_DRIVER)
-    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR} polystl-static polystl)
+    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR} polyreflect-rt polystl-static polystl)
     # Fused mem=reflect uses polyld-link (polyreflect statically linked); install as the
     # platform's lld name (lld-link.exe on Windows, ld.lld on POSIX) next to polycpp so
     # `-fuse-ld=lld` resolves to it (clang's LTO check rejects anything not named lld).

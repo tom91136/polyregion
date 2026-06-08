@@ -18,7 +18,7 @@ template <typename T, typename U, typename... Fs> std::optional<T> visitDyn(U n,
   std::optional<T> result{};
   auto _ = {[&]() {
     if (!result) {
-      if (auto x = llvm::dyn_cast<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
+      if (auto x = llvm::dyn_cast_if_present<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
         result = T(fs(x));
       }
     }
@@ -29,7 +29,7 @@ template <typename T, typename U, typename... Fs> std::optional<T> visitDyn(U n,
 
 template <typename U, typename... Fs> bool visitDyn0(U n, Fs... fs) {
   return (([&]() -> bool {
-            if (auto x = llvm::dyn_cast<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
+            if (auto x = llvm::dyn_cast_if_present<std::remove_pointer_t<details::arg0_type<Fs>>>(n)) {
               fs(x);
               return true;
             }
