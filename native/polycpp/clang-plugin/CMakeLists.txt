@@ -21,6 +21,7 @@ target_include_directories(polycpp-clang-plugin PRIVATE ${LLVM_INCLUDE_DIRS} ${C
 target_compile_definitions(polycpp-clang-plugin PRIVATE ${LLVM_DEFINITIONS})
 target_compile_options(polycpp-clang-plugin PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polycpp-clang-plugin PRIVATE ${PLUGIN_LINK_OPTIONS})
+polyregion_strip_asan_on_darwin(polycpp-clang-plugin)
 target_link_libraries(polycpp-clang-plugin
         PRIVATE
         polycommon

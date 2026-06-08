@@ -376,6 +376,41 @@ check-fused:
     just build-polycpp
     just build-polyfc
 
+# === ASan variants ===
+
+# cmake-configure the ASan+UBSan build.
+configure-san extra='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ os() }}-{{ arch }}" in
+        linux-x86_64)               tc=linux-clang-amd64-asan ;;
+        linux-aarch64)              tc=linux-clang-aarch64-asan ;;
+        macos-arm64)                tc=darwin-clang-arm64-asan ;;
+        macos-x86_64|macos-amd64)   tc=darwin-clang-amd64-asan ;;
+        *) echo "configure-san: unsupported {{ os() }}-{{ arch }}" >&2; exit 1 ;;
+    esac
+    POLYREGION_ASAN=ON just configure "-DCMAKE_TOOLCHAIN_FILE={{ justfile_directory() }}/native/toolchains/${tc}.cmake {{ extra }}"
+
+# Incremental build of a ninja target in the -asan tree.
+build-san target='all' extra='':
+    POLYREGION_ASAN=ON just build {{ target }} "{{ extra }}"
+
+# Build + stage the relocatable -asan dist.
+build-dist-san extra='':
+    POLYREGION_ASAN=ON just build-dist "{{ extra }}"
+
+# Build + stage the -asan test dist.
+build-test-dist-san extra='':
+    POLYREGION_ASAN=ON just build-test-dist "{{ extra }}"
+
+# Run the native ctest suite against the -asan tree; extra ctest flags via *args.
+test-native-san *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export POLYREGION_ASAN=ON
+    BUILD=$(just _native-build)
+    ctest --test-dir "$BUILD" {{ args }}
+
 # Run `cmake -DACTION=<action> -P native/build.cmake`. Auto-passes -DCMAKE_SYSROOT if it exists.
 _native action extra='':
     #!/usr/bin/env bash
@@ -453,5 +488,15 @@ _native-build:
     shopt -s nullglob
     if [ -n "{{ native_build }}" ]; then echo "{{ native_build }}"; exit 0; fi
     caches=(native/out/build-*/CMakeCache.txt native/cmake-build-*/CMakeCache.txt)
+    # variant trees (-fused, -asan) are only selected when the matching env asks for them
+    kept=()
+    for c in "${caches[@]}"; do
+        case "$c" in
+            */build-*-asan/CMakeCache.txt)  [ "${POLYREGION_ASAN:-}" = "ON" ] && kept+=("$c") ;;
+            */build-*-fused/CMakeCache.txt) [ "${POLYREGION_FUSED_DRIVER:-}" = "ON" ] && kept+=("$c") ;;
+            *) [ "${POLYREGION_ASAN:-}" != "ON" ] && [ "${POLYREGION_FUSED_DRIVER:-}" != "ON" ] && kept+=("$c") ;;
+        esac
+    done
+    caches=(${kept[@]+"${kept[@]}"})
     [ ${#caches[@]} -eq 0 ] && exit 0
     ls -td "${caches[@]}" | head -1 | xargs -r dirname

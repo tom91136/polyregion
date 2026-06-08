@@ -73,13 +73,14 @@ struct Task {
                        variables | mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; }));
   }
 
-  // XXX ctest-name-safe stable ID; lower-case alnum + `_` + `-` only.
   std::string id() const {
     auto safe = [](std::string_view s) {
       std::string out;
       out.reserve(s.size());
-      for (char c : s)
-        out += (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') ? c : '_';
+      for (char c : s) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') out += c;
+        else out += fmt::format("_{:02x}", static_cast<unsigned char>(c));
+      }
       return out;
     };
     auto vars = variables | mk_string("", [&](auto &k, auto &v) { return "-" + safe(k) + "_" + safe(v); });
@@ -106,7 +107,7 @@ inline std::string archFor(const Task &t, const DriverConfig &cfg) {
          ^ get_or_else(std::string{});
 }
 
-inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg) {
+inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg, bool runStep) {
   std::vector<std::string> envs;
   if (t.mode == Mode::Passthrough) envs ^= concat(cfg.passthroughEnvs);
   envs.emplace_back(fmt::format("{}={}", cfg.driverEnvVar, cfg.driverPath));
@@ -115,7 +116,16 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
   if (const auto v = std::getenv(polyregion::env::PolyinvokeTestLock))
     envs.emplace_back(fmt::format("{}={}", polyregion::env::PolyinvokeTestLock, v));
   else envs.emplace_back(fmt::format("{}=1", polyregion::env::PolyinvokeTestLock));
-  envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
+  if (const auto v = std::getenv("ASAN_OPTIONS"))
+    envs.emplace_back(fmt::format("ASAN_OPTIONS={}", v));
+  else
+    envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0,protect_shadow_gap=0,verify_asan_link_order=0,strip_env=0"
+#ifdef __APPLE__
+                      ",detect_container_overflow=0"
+#endif
+    );
+  if (const auto v = std::getenv("UBSAN_OPTIONS")) envs.emplace_back(fmt::format("UBSAN_OPTIONS={}", v));
+  else envs.emplace_back("UBSAN_OPTIONS=print_stacktrace=1");
   if (std::getenv(polyregion::env::PolytestDebug)) envs.emplace_back("POLYRT_DEBUG=2");
   // XXX child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish.
   for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads, //
@@ -136,13 +146,13 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
     if (!pathVal.empty()) envs.emplace_back("PATH=" + pathVal);
   }
 #if defined(__APPLE__)
-  // XXX forward DYLD_*; compiled test binaries can't find dist libs otherwise (SIGTRAP).
+  // XXX forward DYLD_*; compiled test binaries can't find dist libs otherwise (SIGTRAP)
   for (const auto *name : {"DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "TMPDIR", "HOME"}) {
     if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
   }
 #elif defined(__linux__)
   // XXX forward LD_LIBRARY_PATH for dist-relative .so when rpath misses.
-  for (const auto *name : {"LD_LIBRARY_PATH", "LD_PRELOAD", "TMPDIR", "HOME"}) {
+  for (const auto *name : {"LD_LIBRARY_PATH", "TMPDIR", "HOME"}) {
     if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
   }
 #elif defined(_WIN32)
@@ -152,6 +162,17 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg)
                            "ProgramFiles(x86)", "ProgramData", "LOCALAPPDATA", "APPDATA", "LIB", "INCLUDE", "LIBPATH"}) {
     if (auto v = std::getenv(name)) envs.emplace_back(std::string(name) + "=" + v);
   }
+#endif
+  // XXX run-only: the child loads the instrumented runtime late, so force asan in first; compile steps
+  // must not (would reach the arm64e system ld / 3rd-party ctest, which cannot load the runtime)
+#if defined(__APPLE__) || defined(__linux__)
+  if (runStep)
+    if (const char *rt = std::getenv("POLYTEST_ASAN_PRELOAD"); rt && *rt)
+  #if defined(__APPLE__)
+      envs.emplace_back(std::string("DYLD_INSERT_LIBRARIES=") + rt);
+  #else
+      envs.emplace_back(std::string("LD_PRELOAD=") + rt);
+  #endif
 #endif
   return envs;
 }
@@ -189,11 +210,11 @@ struct StepResult {
   std::string cmdline;
 };
 
-inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {
+inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command, bool isRunStep) {
   auto fragments = command ^ split(' ');
   auto [envBits, args] = fragments ^ span([](auto &x) { return x.find('=') != std::string::npos; });
 
-  auto envs = baseEnvs(task, cfg);
+  auto envs = baseEnvs(task, cfg, isRunStep);
   envs ^= concat(envBits);
 
   const std::vector<llvm::StringRef> envRefs = envs | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector();
@@ -259,7 +280,7 @@ inline bool checkExpect(const TestCase::Run::Expect &e, const std::vector<std::s
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
   const auto start = std::chrono::steady_clock::now();
-  auto r = runStep(task, cfg, task.runs[0].command);
+  auto r = runStep(task, cfg, task.runs[0].command, /*isRunStep=*/false);
   const auto exit = r.exitCode;
   TaskOutcome o;
   absorbStep(o, std::move(r));
@@ -273,7 +294,7 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
   TaskOutcome o;
   const auto start = std::chrono::steady_clock::now();
   for (std::size_t i = 1; i < task.runs.size(); ++i) {
-    auto r = runStep(task, cfg, task.runs[i].command);
+    auto r = runStep(task, cfg, task.runs[i].command, /*isRunStep=*/true);
     const auto exit = r.exitCode;
     absorbStep(o, std::move(r));
     if (exit == 77) {
@@ -393,8 +414,16 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.listIds) {
-    tasks | for_each([](auto &t) { std::fprintf(stdout, "%s\n", t.id().c_str()); });
-    return 0;
+    const auto ids = tasks | map([](auto &t) { return t.id(); }) | to_vector();
+    ids | for_each([](auto &id) { std::fprintf(stdout, "%s\n", id.c_str()); });
+    // XXX duplicate ids shadow tasks: ctest registers both names but --run-task resolves the first
+    const auto dups = ids                                                       //
+                      | group_by([](auto &id) { return id; })                   //
+                      | filter([](auto &, auto &xs) { return xs.size() > 1; }) //
+                      | keys()                                                  //
+                      | to_vector();
+    dups | for_each([](auto &id) { std::fprintf(stderr, "polytest: duplicate task id '%s'\n", id.c_str()); });
+    return dups.empty() ? 0 : 1;
   }
   if (opts.list) {
     tasks | for_each([](auto &t) { std::fprintf(stdout, "%s\n", t.display().c_str()); });

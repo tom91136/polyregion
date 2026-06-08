@@ -33,6 +33,7 @@ target_compile_options(polyfc-flang-plugin PRIVATE ${COMPILE_OPTIONS}
         -Wno-c++20-extensions
 )
 target_link_options(polyfc-flang-plugin PRIVATE ${PLUGIN_LINK_OPTIONS})
+polyregion_strip_asan_on_darwin(polyfc-flang-plugin)
 target_link_libraries(polyfc-flang-plugin
         PRIVATE
         polycommon

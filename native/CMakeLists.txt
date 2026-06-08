@@ -38,6 +38,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -317,8 +318,7 @@ else ()
         set(STRICT_LINK_OPTIONS)
         set(PLUGIN_LINK_OPTIONS)
     else ()
-        # XXX With POLYREGION_ASAN, ASan symbols are resolved at runtime via LD_PRELOAD'd
-        # libclang_rt.asan.so, so --no-undefined would reject them at link time.
+        # XXX asan interceptors trip --no-undefined / --no-allow-shlib-undefined
         if (POLYREGION_ASAN)
             set(STRICT_LINK_OPTIONS LINKER:--no-undefined-version)
         else ()
@@ -341,21 +341,29 @@ else ()
     endif ()
     if (CMAKE_BUILD_TYPE MATCHES "Rel*")
         if (APPLE) # For Release, we also strip everything out
-            set(COMMON_LINK_OPTIONS
-                    ${COMMON_LINK_OPTIONS}
-                    LINKER:-dead_strip
-                    LINKER:-dead_strip_dylibs
-                    LINKER:-S # No debug symbols
-                    LINKER:-x # No local symbols
-            )
+            # XXX not under asan: dead-stripping breaks the __asan_globals metadata graph (its
+            # private l___unnamed_N references end up as unresolvable flat binds), and -S/-x strip
+            # the symbols asan reports need
+            if (NOT POLYREGION_ASAN)
+                set(COMMON_LINK_OPTIONS
+                        ${COMMON_LINK_OPTIONS}
+                        LINKER:-dead_strip
+                        LINKER:-dead_strip_dylibs
+                        LINKER:-S # No debug symbols
+                        LINKER:-x # No local symbols
+                )
+            endif ()
         elseif (NOT MSVC)
             set(COMMON_LINK_OPTIONS
                     ${COMMON_LINK_OPTIONS}
                     -static-libstdc++
                     LINKER:--gc-sections        # remove unused sections
-                    LINKER:--compress-debug-sections=zlib
                     # LINKER:--strip-all        # strip symbols not used for DSO
             )
+            # XXX not under asan: keep debug sections uncompressed for symbolisers
+            if (NOT POLYREGION_ASAN)
+                set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS} LINKER:--compress-debug-sections=zlib)
+            endif ()
             # Hide LLVM* from dynsym so --gc-sections can drop unreachable code.
             # -fvisibility=hidden only marks our code; LLVM .o files export by default.
             if (NOT POLYREGION_LLVM_DYLIB)
@@ -400,7 +408,11 @@ else ()
 endif ()
 set(LLVM_BUILD_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/out/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}")
 set(POLYREGION_LLVM_SRC_DIR "${LLVM_BUILD_PREFIX}/llvm-project-${LLVM_SRC_VERSION}.src")
-set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist")
+set(_DIST_SUFFIX "")
+if (POLYREGION_ASAN)
+    set(_DIST_SUFFIX "-asan")
+endif ()
+set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/out/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}${_DIST_SUFFIX}-dist")
 set(LLVM_DIR "${LLVM_DIST_DIR}/lib/cmake/llvm")
 set(LLD_DIR "${LLVM_DIST_DIR}/lib/cmake/lld")
 set(Clang_DIR "${LLVM_DIST_DIR}/lib/cmake/clang")
@@ -453,14 +465,20 @@ set(COMPILE_OPTIONS
         CACHE INTERNAL ""
 )
 
+# XXX -shared-libsan links the asan runtime as DT_NEEDED so plugins dlopen'd into the uninstrumented
+# dist clang++/flang-new self-resolve __asan_*; must reach PLUGIN_LINK_OPTIONS too
+set(ASAN_LINK_OPTIONS
+        "$<$<BOOL:${POLYREGION_ASAN}>:-fsanitize=address,undefined>"
+        "$<$<BOOL:${POLYREGION_ASAN}>:-fno-sanitize=vptr>"
+        "$<$<BOOL:${POLYREGION_ASAN}>:-shared-libsan>"
+        "$<$<BOOL:${POLYREGION_ASAN}>:-frtlib-add-rpath>"
+)
+
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${STRICT_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
-        # XXX -shared-libsan + -fsanitize=address pair: forces the dynamic ASan runtime so the
-        # JNI .so loads cleanly via the LD_PRELOAD'd libclang_rt.asan.so at JVM start.
-        "$<$<BOOL:${POLYREGION_ASAN}>:-fsanitize=address>"
-        "$<$<BOOL:${POLYREGION_ASAN}>:-shared-libsan>"
+        ${ASAN_LINK_OPTIONS}
         CACHE INTERNAL ""
 )
 
@@ -482,6 +500,7 @@ set(PLUGIN_LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${PLUGIN_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
+        ${ASAN_LINK_OPTIONS}
         CACHE INTERNAL ""
 )
 

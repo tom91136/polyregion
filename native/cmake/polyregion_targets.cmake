@@ -4,6 +4,16 @@ function(polyregion_apply_common_options target)
   target_link_options(${target} PRIVATE ${LINK_OPTIONS} ${ARG_EXTRA_LINK})
 endfunction()
 
+# XXX macOS asan cannot be dlopen'd ("interceptors loaded too late"), so code loaded into the
+# uninstrumented dist clang/flang (the plugins + the PolyAST they embed) must carry no __asan_*;
+# strip asan there. Appended last so it wins over the toolchain's global -fsanitize.
+function(polyregion_strip_asan_on_darwin target)
+  if (APPLE AND POLYREGION_ASAN)
+    target_compile_options(${target} PRIVATE -fno-sanitize=address,undefined)
+    target_link_options(${target} PRIVATE -fno-sanitize=address,undefined)
+  endif ()
+endfunction()
+
 function(polyregion_test_profile_dir target)
   target_compile_definitions(${target} PRIVATE POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 endfunction()

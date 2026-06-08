@@ -40,11 +40,14 @@ if (NOT POLYREGION_FUSED_DRIVER)
     target_compile_definitions(polyreflect-plugin PRIVATE ${LLVM_DEFINITIONS})
     target_compile_options(polyreflect-plugin PRIVATE ${COMPILE_OPTIONS})
     target_link_options(polyreflect-plugin PRIVATE ${PLUGIN_LINK_OPTIONS})
+    polyregion_strip_asan_on_darwin(polyreflect-plugin)
+    # XXX headers only (the pass uses rt_reflect::Type, a header enum) - linking the instrumented
+    # rt dylib would drag asan into the dlopen'd plugin, which macOS asan forbids
+    target_include_directories(polyreflect-plugin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(polyreflect-plugin
             PUBLIC
             polycommon
             Aspartame::Aspartame
-            magic_enum::magic_enum
-            polyreflect-rt)
+            magic_enum::magic_enum)
 endif ()
 

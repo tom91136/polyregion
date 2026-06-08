@@ -358,3 +358,168 @@ jobs:
           name: scala-test-results-darwin-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/
           if-no-files-found: warn
+
+  build-san:
+    needs: build
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-26
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_ASAN: "ON"
+      ASAN_OPTIONS: detect_leaks=0
+    steps:
+      - uses: *checkout
+
+      - name: Install dependencies
+        run: |
+          brew install --quiet cmake ninja zlib
+          echo "JAVA_HOME=$(/usr/libexec/java_home)" >> $GITHUB_ENV
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - *setup-just
+
+      - name: Restore LLVM cache
+        uses: *cache-restore
+        with:
+          path: *llvm-path
+          key: *llvm-key
+
+      - name: Restore device libs cache
+        uses: *cache-restore
+        with:
+          path: *devlibs-path
+          key: *devlibs-key
+
+      - name: Restore vcpkg cache
+        uses: *cache-restore
+        with:
+          path: *vcpkg-path
+          key: *vcpkg-key
+
+      - name: Download dist (pass bundle)
+        uses: *download
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release
+          path: ./dist-regular
+
+      - name: Stage pass bundle
+        run: |
+          if [ -f dist-regular/lib/libpolypass.dylib ]; then install -m755 dist-regular/lib/libpolypass.dylib native/polyc/libpolypass.dylib; fi
+          test -s native/polyc/libpolypass.dylib
+
+      - name: Seed asan dist from LLVM dist
+        run: |
+          SRC=native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          DST=native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+          if [ ! -x "$DST/bin/clang++" ]; then
+            rm -rf "$DST"; mkdir -p "$DST"
+            cp -a "$SRC/." "$DST"
+          fi
+
+      - name: Configure (asan)
+        run: just configure-san
+
+      - name: Build dist (asan)
+        run: just build-dist-san
+
+      - name: Build test dist (asan)
+        run: just build-test-dist-san
+
+      - name: Upload dist (asan)
+        uses: *upload
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist/**
+          if-no-files-found: error
+
+      - name: Upload test dist (asan)
+        uses: *upload
+        with:
+          name: polyregion-tests-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/**
+          if-no-files-found: error
+
+  test-native-san:
+    needs: build-san
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-26
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *brew-cmake
+
+      - name: Download dist (asan)
+        uses: *download
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Download test dist (asan)
+        uses: *download
+        with:
+          name: polyregion-tests-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Restore executable bits
+        working-directory: ./native
+        run: |
+          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist; do
+            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
+            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +; fi
+          done
+
+      - name: Run native tests (asan)
+        working-directory: ./native
+        run: |
+          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
+          RT=$(echo "$DIST"/lib/clang/*/lib/darwin/libclang_rt.asan_osx_dynamic.dylib)
+          export PATH=$DIST/bin:$PATH
+          # binaries bake an @rpath to the regular dist's rt dir (absent here); the asan dist holds the dylib
+          export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:$(dirname "$RT"):${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
+          # XXX inserted into run children only (driver); the compile step must not - it reaches the arm64e ld
+          export POLYTEST_ASAN_PRELOAD=$RT
+          export ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0,verify_asan_link_order=0,strip_env=0,detect_container_overflow=0
+          export UBSAN_OPTIONS=print_stacktrace=1
+          export POLYREGION_BITCODE_DIR=$DIST/lib
+          export POLYPASS_PLUGINS=$DIST/lib/libpolypass.dylib
+          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
+          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
+          ctest --test-dir "$TESTS" -j "$(sysctl -n hw.ncpu)" --timeout 600 --output-on-failure --output-junit "$TESTS/native-test-results-asan.xml"
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          label: ctest-asan
+
+      - name: Upload test results
+        if: always()
+        uses: *upload
+        with:
+          name: native-test-results-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          if-no-files-found: warn
