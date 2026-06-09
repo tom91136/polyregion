@@ -1,5 +1,5 @@
 diff --git a/ocelot/CMakeLists.txt b/ocelot/CMakeLists.txt
-index 55f2603b..4b0fa77f 100644
+index 55f2603b..d58ea473 100644
 --- a/ocelot/CMakeLists.txt
 +++ b/ocelot/CMakeLists.txt
 @@ -1,6 +1,7 @@
@@ -34,6 +34,114 @@ index 55f2603b..4b0fa77f 100644
  else()
  include(ExternalProject)
  
+@@ -267,7 +273,7 @@ function(ocelot_add_tests name)
+ 		    get_filename_component(TEST_WE ${TEST} NAME_WE)
+ 		    set(TEST_NAME ${PROJECT_NAME}_${name}_${TEST_WE})
+ 		    add_executable(${TEST_NAME} ${TEST})
+-		    set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD 14)
++		    set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD 17)
+ 		    target_compile_definitions(${TEST_NAME} PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ 			target_compile_options(${TEST_NAME} PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+ 			target_include_directories(${TEST_NAME} PRIVATE ${${PROJECT_NAME}_INCLUDE_DIRS})
+@@ -310,7 +316,7 @@ add_library(${PROJECT_NAME}_analysis STATIC
+ 	src/analysis/StructuralAnalysis.cpp
+ 	src/analysis/SuperblockAnalysis.cpp
+ 	src/analysis/ThreadFrontierAnalysis.cpp)
+-set_property(TARGET ${PROJECT_NAME}_analysis PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_analysis PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_analysis PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_analysis PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_analysis PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -323,7 +329,7 @@ add_library(${PROJECT_NAME}_api STATIC
+ 	src/api/OcelotRuntime.cpp
+ 	src/api/ocelot.cpp
+ 	src/api/interfaces/emulated.cpp)
+-set_property(TARGET ${PROJECT_NAME}_api PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_api PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_api PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_api PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_api PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -335,7 +341,7 @@ res_embed(TARGET ${PROJECT_NAME}_api NAME "configure_ocelot" PATH ${CMAKE_CURREN
+ 
+ add_library(${PROJECT_NAME}_cal STATIC
+ 	src/cal/CalDriver.cpp)
+-set_property(TARGET ${PROJECT_NAME}_cal PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_cal PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_cal PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_cal PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_cal PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -356,7 +362,7 @@ add_library(${PROJECT_NAME}_cuda STATIC
+ 	src/cuda/cuda_runtime.cpp
+ 	ThirdParty/cuda-fatbin-decompression/fatbin-decompress.c
+ 	ThirdParty/cuda-fatbin-decompression/utils.c)
+-set_property(TARGET ${PROJECT_NAME}_cuda PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_cuda PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_cuda PROPERTY C_STANDARD 99)
+ set_property(TARGET ${PROJECT_NAME}_cuda PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_cuda PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+@@ -391,7 +397,7 @@ add_library(${PROJECT_NAME}_executive STATIC
+ 	src/executive/RemoteDevice.cpp
+ 	src/executive/RuntimeException.cpp
+ 	src/executive/TextureOperations.cpp)
+-set_property(TARGET ${PROJECT_NAME}_executive PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_executive PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_executive PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_executive PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_executive PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -424,7 +430,7 @@ add_library(${PROJECT_NAME}_ir STATIC
+         src/ir/PTXStatement.cpp
+         src/ir/Parameter.cpp
+         src/ir/Texture.cpp)
+-set_property(TARGET ${PROJECT_NAME}_ir PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_ir PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_ir PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_ir PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_include_directories(${PROJECT_NAME}_ir PUBLIC ${${PROJECT_NAME}_INCLUDE_DIRS})
+@@ -443,7 +449,7 @@ add_library(${PROJECT_NAME}_parser STATIC
+ 	src/parser/PTXParser.cpp
+ 	"${LEXER_OUT}"
+ 	"${PARSER_OUT}")
+-set_property(TARGET ${PROJECT_NAME}_parser PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_parser PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_parser PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_parser PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_parser PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -459,7 +465,7 @@ add_library(${PROJECT_NAME}_trace STATIC
+ 	src/trace/MemoryRaceDetector.cpp
+ 	src/trace/TraceEvent.cpp
+ 	src/trace/TraceGenerator.cpp)
+-set_property(TARGET ${PROJECT_NAME}_trace PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_trace PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_trace PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_trace PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_trace PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -507,7 +513,7 @@ add_library(${PROJECT_NAME}_transforms STATIC
+ 	src/transforms/SubkernelFormationPass.cpp
+ 	src/transforms/SyncEliminationPass.cpp
+ 	src/transforms/ThreadFrontierReconvergencePass.cpp)
+-set_property(TARGET ${PROJECT_NAME}_transforms PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_transforms PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_transforms PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_transforms PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_transforms PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -519,7 +525,7 @@ add_library(${PROJECT_NAME}_translator STATIC
+ 	src/translator/PTXToILTranslator.cpp
+ 	src/translator/PTXToLLVMTranslator.cpp
+ 	src/translator/Translator.cpp)
+-set_property(TARGET ${PROJECT_NAME}_translator PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_translator PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_translator PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_translator PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_translator PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
+@@ -531,7 +537,7 @@ add_library(${PROJECT_NAME}_util STATIC
+ 	src/util/ExtractedDeviceState.cpp
+ 	src/util/OcelotServerConnection.cpp
+ 	src/util/RemoteDeviceMessage.cpp)
+-set_property(TARGET ${PROJECT_NAME}_util PROPERTY CXX_STANDARD 14)
++set_property(TARGET ${PROJECT_NAME}_util PROPERTY CXX_STANDARD 17)
+ set_property(TARGET ${PROJECT_NAME}_util PROPERTY POSITION_INDEPENDENT_CODE ON)
+ target_compile_definitions(${PROJECT_NAME}_util PRIVATE ${${PROJECT_NAME}_DEFINITIONS})
+ target_compile_options(${PROJECT_NAME}_util PRIVATE PRIVATE ${${PROJECT_NAME}_CXXFLAGS})
 @@ -577,6 +583,11 @@ if(APPLE)
  	target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,-dead_strip ${LLVM_LIBRARIES})
  else()
@@ -46,6 +154,35 @@ index 55f2603b..4b0fa77f 100644
  endif()
  
  target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
+@@ -586,23 +597,23 @@ install(CODE "execute_process(COMMAND ldconfig)")
+ 
+ if(BUILD_TOOLS)
+ 	add_executable(LoadPtx src/tools/LoadPtx.cpp)
+-	set_property(TARGET LoadPtx PROPERTY CXX_STANDARD 14)
++	set_property(TARGET LoadPtx PROPERTY CXX_STANDARD 17)
+ 	target_link_libraries(LoadPtx ${PROJECT_NAME} hydrazine)
+ 
+ 	add_executable(OcelotKernelTestHarness src/tools/KernelTestHarness.cpp)
+-	set_property(TARGET OcelotKernelTestHarness PROPERTY CXX_STANDARD 14)
++	set_property(TARGET OcelotKernelTestHarness PROPERTY CXX_STANDARD 17)
+ 	target_link_libraries(OcelotKernelTestHarness ${PROJECT_NAME} hydrazine)
+ 
+ 	add_executable(OcelotLinker src/tools/OcelotLinker.cpp)
+-	set_property(TARGET OcelotLinker PROPERTY CXX_STANDARD 14)
++	set_property(TARGET OcelotLinker PROPERTY CXX_STANDARD 17)
+ 	target_link_libraries(OcelotLinker ${PROJECT_NAME} hydrazine)
+ 
+ 	add_executable(OcelotServer src/tools/OcelotServer.cpp)
+-	set_property(TARGET OcelotServer PROPERTY CXX_STANDARD 14)
++	set_property(TARGET OcelotServer PROPERTY CXX_STANDARD 17)
+ 	target_link_libraries(OcelotServer ${PROJECT_NAME} hydrazine)
+ 
+ 	add_executable(PTXOptimizer src/tools/PTXOptimizer.cpp)
+-	set_property(TARGET PTXOptimizer PROPERTY CXX_STANDARD 14)
++	set_property(TARGET PTXOptimizer PROPERTY CXX_STANDARD 17)
+ 	target_link_libraries(PTXOptimizer ${PROJECT_NAME} hydrazine)
+ endif()
+ 
 diff --git a/ocelot/cu_exports.map b/ocelot/cu_exports.map
 new file mode 100644
 index 00000000..52424e0e
@@ -85,6 +222,22 @@ index 2b73c68d..17a638a3 100644
  typedef unsigned long long CUdeviceptr;
  #else
  typedef unsigned int CUdeviceptr;
+diff --git a/ocelot/src/api/OcelotConfiguration.cpp b/ocelot/src/api/OcelotConfiguration.cpp
+index 128b774a..ccaafac9 100644
+--- a/ocelot/src/api/OcelotConfiguration.cpp
++++ b/ocelot/src/api/OcelotConfiguration.cpp
+@@ -389,9 +389,9 @@ api::OcelotConfiguration::OcelotConfiguration(
+ 	}
+ 	else
+ 	{
+-		std::cout << "==Ocelot== WARNING: Failed to find 'configure.ocelot' "
++		std::cerr << "==Ocelot== WARNING: Failed to find 'configure.ocelot' "
+ 			"in current directory, loading defaults.\n" << std::endl;
+-		std::cout << "==Ocelot== INFO: You may consider adding one if you need "
++		std::cerr << "==Ocelot== INFO: You may consider adding one if you need "
+ 			"to change the Ocelot target, or runtime options.\n" << std::endl;
+ 
+ 		size_t szconfig = 0;
 diff --git a/ocelot/src/cuda/CudaDriverApi.cpp b/ocelot/src/cuda/CudaDriverApi.cpp
 index 925572c9..99662dc9 100644
 --- a/ocelot/src/cuda/CudaDriverApi.cpp
@@ -365,19 +518,49 @@ index c52ac0e3..8825a20b 100644
  				context->_getDevice().launch(ptxKernel->module->id(), 
  					ptxKernel->name, 
  					convert(context->_launchConfiguration.gridDim), 
-diff --git a/ocelot/src/api/OcelotConfiguration.cpp b/ocelot/src/api/OcelotConfiguration.cpp
-index 128b774a..ccaafac9 100644
---- a/ocelot/src/api/OcelotConfiguration.cpp
-+++ b/ocelot/src/api/OcelotConfiguration.cpp
-@@ -389,9 +389,9 @@ api::OcelotConfiguration::OcelotConfiguration(
- 	}
- 	else
- 	{
--		std::cout << "==Ocelot== WARNING: Failed to find 'configure.ocelot' "
-+		std::cerr << "==Ocelot== WARNING: Failed to find 'configure.ocelot' "
- 			"in current directory, loading defaults.\n" << std::endl;
--		std::cout << "==Ocelot== INFO: You may consider adding one if you need "
-+		std::cerr << "==Ocelot== INFO: You may consider adding one if you need "
- 			"to change the Ocelot target, or runtime options.\n" << std::endl;
+diff --git a/ocelot/src/ir/LLVMModuleManager.cpp b/ocelot/src/ir/LLVMModuleManager.cpp
+index c502f812..8791a9be 100644
+--- a/ocelot/src/ir/LLVMModuleManager.cpp
++++ b/ocelot/src/ir/LLVMModuleManager.cpp
+@@ -41,6 +41,7 @@
+ #include <llvm/Transforms/Scalar/GVN.h>
+ #include <llvm/Transforms/Scalar/SimpleLoopUnswitch.h>
+ #include <llvm/Transforms/InstCombine/InstCombine.h>
++#include <llvm/Passes/PassBuilder.h>
  
- 		size_t szconfig = 0;
+ // Preprocessor Macros
+ #ifdef REPORT_BASE
+@@ -969,6 +970,7 @@ static void optimize(llvm::Module& module,
+ 
+ 	if(level == 0) return;
+ 
++#if LLVM_VERSION_MAJOR < 16
+ 	llvm::legacy::PassManager manager;
+ 
+ 	if(level < 2)
+@@ -1012,6 +1014,25 @@ static void optimize(llvm::Module& module,
+ 		manager.add(llvm::createCFGSimplificationPass());
+ 	}
+ 	manager.run(module);
++#else
++	// legacy-PM pass-creation wrappers were removed in LLVM 16+; run the
++	// new-PM default pipeline instead. The LLVM JIT backend is unused by the
++	// emulator device, so this only has to compile.
++	(void) space;
++	llvm::PassBuilder passBuilder;
++	llvm::LoopAnalysisManager lam;
++	llvm::FunctionAnalysisManager fam;
++	llvm::CGSCCAnalysisManager cgam;
++	llvm::ModuleAnalysisManager mam;
++	passBuilder.registerModuleAnalyses(mam);
++	passBuilder.registerCGSCCAnalyses(cgam);
++	passBuilder.registerFunctionAnalyses(fam);
++	passBuilder.registerLoopAnalyses(lam);
++	passBuilder.crossRegisterProxies(lam, fam, cgam, mam);
++	llvm::ModulePassManager mpm = passBuilder.buildPerModuleDefaultPipeline(
++		level >= 3 ? llvm::OptimizationLevel::O3 : llvm::OptimizationLevel::O2);
++	mpm.run(module, mam);
++#endif
+ }
+ 
+ 

@@ -2,22 +2,31 @@
 set -euo pipefail
 
 OUT=/out
-mkdir -p "$OUT"/lib
+mkdir -p "$OUT"/lib "$OUT"/icd
 
-cp -a /opt/lavapipe "$OUT"/lavapipe
-cp -a /opt/pocl     "$OUT"/pocl
-cp -a /opt/vkloader "$OUT"/vkloader
-cp -a /opt/ocelot   "$OUT"/ocelot
+COMPONENTS=(mesa ocl pocl vkloader ocelot)
+for c in "${COMPONENTS[@]}"; do cp -a "/opt/$c" "$OUT/$c"; done
+OUTDIRS=("${COMPONENTS[@]/#/$OUT/}")
 ln -sf libgpuocelot.so "$OUT"/ocelot/libcuda.so.1
 ln -sf libgpuocelot.so "$OUT"/ocelot/libcuda.so
 
-LVPJSON=$(find "$OUT"/lavapipe -name 'lvp_icd*.json' | head -1)
-# XXX PoCL's embedded libOpenCL is .so.2; create libOpenCL.so.1
-POCLDIR=$(dirname "$(find "$OUT"/pocl -name 'libOpenCL.so*' | head -1)")
-[ -n "$POCLDIR" ] && ln -sf libOpenCL.so.2 "$POCLDIR/libOpenCL.so.1"
+find1()  { find "$@" 2>/dev/null | head -1; }
+reldir() { [ -n "$1" ] || return 0; realpath --relative-to="$OUT" "$(dirname "$1")"; }
+soname() { local b; b=$(basename "$1"); echo "${b%%.so*}.so"; }
 
-# XXX ICD library_path -> bare soname, resolved via LD_LIBRARY_PATH
-sed -i 's|"library_path":[^,]*|"library_path": "libvulkan_lvp.so"|' "$LVPJSON"
+RUSTICL=$(find1   "$OUT"/mesa -name 'libRusticlOpenCL.so.*' -type f)
+LVPLIB=$(find1    "$OUT"/mesa -name 'libvulkan_lvp.so'      -type f)
+LVPJSON=$(find1   "$OUT"/mesa -name 'lvp_icd*.json'         -type f)
+OCLLOADER=$(find1 "$OUT"/ocl  -name 'libOpenCL.so.1*'       -type f)
+POCLLIB=$(find1   "$OUT"/pocl -name 'libpocl.so*'           -type f)
+
+[ -n "$OCLLOADER" ] || { echo "ERROR: ocl-icd libOpenCL.so.1 not found"; exit 1; }
+[ -n "$RUSTICL" ]   || { echo "ERROR: libRusticlOpenCL not found"; exit 1; }
+
+# rewrite ICD entries to bare sonames, resolved via LD_LIBRARY_PATH
+sed -i "s|\"library_path\":[^,]*|\"library_path\": \"$(soname "$LVPLIB")\"|" "$LVPJSON"
+soname "$RUSTICL" > "$OUT"/icd/rusticl.icd
+[ -n "$POCLLIB" ] && soname "$POCLLIB" > "$OUT"/icd/pocl.icd || echo "WARN: libpocl.so not found, pocl not exposed"
 
 hostlibs='ld-linux|libc\.so|libm\.so|libdl\.so|libpthread|librt\.so|libresolv|libnsl|ld64|libstdc\+\+|libgcc_s'
 collect_deps() {
@@ -28,29 +37,45 @@ collect_deps() {
     cp -aL "$so" "$OUT"/lib/ 2>/dev/null || true
   done
 }
-find "$OUT"/lavapipe "$OUT"/pocl "$OUT"/vkloader "$OUT"/ocelot -name '*.so*' -type f | while read -r obj; do
+find "${OUTDIRS[@]}" -name '*.so*' -type f | while read -r obj; do
   collect_deps "$obj"
 done
 
-# XXX $ORIGIN RPATH so deps self-resolve from lib/ without putting common libs on LD_LIBRARY_PATH
+# $ORIGIN rpath so deps self-resolve from lib/
 find "$OUT" -name '*.so*' -type f | while read -r so; do
+  # shellcheck disable=SC2016
   patchelf --set-rpath '$ORIGIN:$ORIGIN/../lib:$ORIGIN/../../lib' "$so" 2>/dev/null || true
 done
 
-if ls "$OUT"/lib | grep -qE 'libstdc\+\+|libgcc_s'; then
+if [ -n "$(find "$OUT"/lib -maxdepth 1 \( -name 'libstdc++*' -o -name 'libgcc_s*' \) -print -quit)" ]; then
   echo "ERROR: libstdc++/libgcc_s bundled (must resolve from host)"; exit 1
 fi
 
-# ICD path resolved at build time; bake it relative so env.sh doesn't re-glob on every source
+# literal $HERE (env.sh expands it when sourced), order-preserving dedup
+LIBPATH=""; declare -A seen
+for L in "$OCLLOADER" "$RUSTICL" "$LVPLIB" "$POCLLIB"; do
+  d=$(reldir "$L"); [ -z "$d" ] && continue
+  [ -n "${seen[$d]:-}" ] && continue; seen[$d]=1
+  LIBPATH="${LIBPATH:+$LIBPATH:}\$HERE/$d"
+done
+for d in ocelot lib; do LIBPATH="${LIBPATH:+$LIBPATH:}\$HERE/$d"; done
+
 cat > "$OUT"/env.sh <<EOS
 HERE="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
-export LD_LIBRARY_PATH="\$HERE/ocelot:\$HERE/pocl/lib64:\$HERE/lavapipe/lib64:\$HERE/vkloader/lib64\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${LIBPATH}\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 export VK_DRIVER_FILES="\$HERE/${LVPJSON#"$OUT"/}"
 export VK_ICD_FILENAMES="\$VK_DRIVER_FILES"
-echo "emulators active: ocelot(CUDA) lavapipe(Vulkan) pocl(OpenCL) via \$HERE"
+export OCL_ICD_VENDORS="\$HERE/icd"
+export RUSTICL_ENABLE="\${RUSTICL_ENABLE:-llvmpipe}"
+# rusticl/pocl are CPU OpenCL devices; polyinvoke skips those unless this is set
+export POLYINVOKE_OPENCL_CPU="\${POLYINVOKE_OPENCL_CPU:-1}"
+echo "emulators active: ocelot(CUDA) lavapipe(Vulkan) rusticl+pocl(OpenCL) via \$HERE"
 EOS
 
 echo "=== /out staged ==="
-du -sh "$OUT"/lib "$OUT"/lavapipe "$OUT"/pocl "$OUT"/vkloader "$OUT"/ocelot 2>/dev/null
-echo "lib deps bundled: $(ls "$OUT"/lib | wc -l)"
+du -sh "$OUT"/lib "${OUTDIRS[@]}" 2>/dev/null
+echo "lib deps bundled: $(find "$OUT"/lib -mindepth 1 | wc -l)"
+echo "rusticl=$RUSTICL  icd=$(cat "$OUT"/icd/rusticl.icd)"
+echo "pocl=$POCLLIB"
+echo "loader=$OCLLOADER"
 echo "Done"

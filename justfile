@@ -208,13 +208,13 @@ test-native *args='':
     BUILD=$(just _native-build)
     ctest --test-dir "$BUILD" {{ args }}
 
-# Build the software emulator bundle (gpuocelot/PoCL/lavapipe) -> emulators/out (CONTAINER=docker overrides podman).
+# Build the software emulator bundle (gpuocelot/rusticl+PoCL/lavapipe) -> emulators/out (CONTAINER=docker overrides podman).
 build-emulators:
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ justfile_directory() }}/emulators
     TMP="${EMU_TMPDIR:-$HOME/.podman-tmp}"; mkdir -p "$TMP"
-    TMPDIR="$TMP" {{ container }} build -f Dockerfile --target export -t polyemu .
+    TMPDIR="$TMP" {{ container }} build -f Dockerfile --target check -t polyemu .
     rm -rf out
     cid=$({{ container }} create polyemu)
     {{ container }} cp "$cid:/out" ./out
@@ -235,6 +235,10 @@ test-native-with-emulators *args='':
     rm -f "$BUILD"/*/polytest-discover/*.ids
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
     ctest --test-dir "$BUILD" --timeout 600 {{ args }}
+
+# Smoke test of the emulator bundle (OpenCL source+SPIR-V on rusticl+pocl, CUDA on gpuocelot).
+check-emulators bundle='':
+    bash {{ justfile_directory() }}/emulators/run.sh {{ bundle }}
 
 # === Build wrappers ===
 
