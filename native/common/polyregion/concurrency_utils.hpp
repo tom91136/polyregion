@@ -5,10 +5,19 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <vector>
 
 namespace polyregion::concurrency_utils {
+
+namespace details {
+[[noreturn]] inline void waitTimeout(const char *name, size_t millis) {
+  std::fprintf(stderr, "%s: timed out after %zums\n", name, millis);
+  std::abort();
+}
+} // namespace details
 
 template <typename F> static void waitAll(F f, size_t timeoutMillis = 10000) {
   std::atomic_size_t pending(1);
@@ -23,7 +32,8 @@ template <typename F> static void waitAll(F f, size_t timeoutMillis = 10000) {
   auto now = std::chrono::system_clock::now();
   f(countdown);
   std::unique_lock lock(mutex);
-  cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; });
+  if (!cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; }))
+    details::waitTimeout("waitAll", timeoutMillis);
 }
 
 template <typename... Fs> static void waitAll(size_t timeoutMillis = 10000, Fs &&...fs) {
@@ -45,7 +55,8 @@ template <typename F> static void waitAllN(F f, size_t timeoutMillis = 10000) {
     };
   });
   std::unique_lock<std::mutex> lock(mutex);
-  cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; });
+  if (!cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; }))
+    details::waitTimeout("waitAllN", timeoutMillis);
 }
 
 template <typename T = int64_t> //

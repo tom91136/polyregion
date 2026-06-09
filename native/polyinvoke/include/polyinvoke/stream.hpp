@@ -50,9 +50,23 @@ void validate(size_t size, size_t times, FValidate fValidate, FValidateSum fVali
     return (xs | map([&](const T x) { return std::fabs(x - expected); }) | aspartame::sum()) / xs.size();
   };
   auto eps = std::numeric_limits<T>::epsilon() * 100.0;
-  fValidate(error(a, expectedA), eps);
-  fValidate(error(b, expectedB), eps);
-  fValidate(error(c, expectedC), eps);
+  auto check = [&](const char *name, const std::vector<T> &xs, T expected) {
+    const auto err = error(xs, expected);
+    if (!(err < eps)) {
+      size_t bad = 0, shown = 0;
+      for (size_t i = 0; i < xs.size(); i++) {
+        if (std::fabs(xs[i] - expected) > eps) {
+          if (shown++ < 12) fmt::print(stderr, "    {}[{}] = {:.17} want {:.17}\n", name, i, xs[i], expected);
+          bad++;
+        }
+      }
+      fmt::print(stderr, "  {}: {}/{} bad elements\n", name, bad, xs.size());
+    }
+    fValidate(err, eps);
+  };
+  check("a", a, expectedA);
+  check("b", b, expectedB);
+  check("c", c, expectedC);
   auto reducedSum = sum ^ aspartame::sum();
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
 }

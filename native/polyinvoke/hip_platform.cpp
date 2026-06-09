@@ -258,6 +258,7 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 #ifdef _WIN32
   hipStreamQuery(stream);
 #endif
+  CHECKED(hipStreamSynchronize(stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueWaitBlocking() {
