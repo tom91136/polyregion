@@ -173,7 +173,7 @@ PhysicalDevice ZeDevice::physicalDevice() {
     std::memcpy(uuid.data(), props.uuid.id, uuid.size());
     return PhysicalDevice::uuid(uuid);
   }
-  return PhysicalDevice::synthetic(Backend::LevelZero, id());
+  return PhysicalDevice::synthetic(Backend::LevelZero, static_cast<int64_t>(std::hash<std::string>{}(deviceName)));
 }
 std::string ZeDevice::name() {
   POLYINVOKE_TRACE();

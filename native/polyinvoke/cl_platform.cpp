@@ -298,9 +298,23 @@ PhysicalDevice ClDevice::physicalDevice() {
   if (clGetDeviceInfo(*device, PCI_BUS_INFO_KHR, sizeof(pci), &pci, nullptr) == CL_SUCCESS)
     return PhysicalDevice::pci(pci.domain, static_cast<uint8_t>(pci.bus), static_cast<uint8_t>(pci.device),
                                static_cast<uint8_t>(pci.function));
+  // XXX AMD runtimes predate cl_khr_pci_bus_info; without the BDF from cl_amd_device_topology the
+  // APU device gets a synthetic key and never serialises with HIP/HSA on the same device
+  if (queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS).find("cl_amd_device_attribute_query") != std::string::npos) {
+    constexpr cl_device_info TOPOLOGY_AMD = 0x4037;
+    constexpr cl_uint TOPOLOGY_TYPE_PCIE_AMD = 1;
+    struct { // cl_device_topology_amd::pcie; no padding possible, all members align <= 4
+      cl_uint type;
+      cl_char unused[17];
+      cl_char bus, dev, function;
+    } topo{};
+    static_assert(sizeof(topo) == 24, "must match cl_device_topology_amd");
+    if (clGetDeviceInfo(*device, TOPOLOGY_AMD, sizeof(topo), &topo, nullptr) == CL_SUCCESS && topo.type == TOPOLOGY_TYPE_PCIE_AMD)
+      return PhysicalDevice::pci(0, static_cast<uint8_t>(topo.bus), static_cast<uint8_t>(topo.dev), static_cast<uint8_t>(topo.function));
+  }
   std::array<uint8_t, 16> uuid{};
   if (clGetDeviceInfo(*device, UUID_KHR, uuid.size(), uuid.data(), nullptr) == CL_SUCCESS) return PhysicalDevice::uuid(uuid);
-  return PhysicalDevice::synthetic(Backend::OpenCL, id());
+  return PhysicalDevice::synthetic(Backend::OpenCL, static_cast<int64_t>(std::hash<std::string>{}(deviceName)));
 }
 std::string ClDevice::name() {
   POLYINVOKE_TRACE();

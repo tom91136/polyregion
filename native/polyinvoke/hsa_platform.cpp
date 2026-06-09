@@ -293,7 +293,7 @@ PhysicalDevice HsaDevice::physicalDevice() {
   // XXX Fall back rather than collapse distinct agents onto pci(0,0,0,0) if the query is unsupported
   uint32_t bdfid = 0, domain = 0;
   if (hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &bdfid) != HSA_STATUS_SUCCESS)
-    return PhysicalDevice::synthetic(Backend::HSA, id());
+    return PhysicalDevice::synthetic(Backend::HSA, static_cast<int64_t>(std::hash<std::string>{}(deviceName)));
   hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &domain);
   return PhysicalDevice::pci(domain, static_cast<uint8_t>((bdfid >> 8) & 0xFF), static_cast<uint8_t>((bdfid >> 3) & 0x1F),
                              static_cast<uint8_t>(bdfid & 0x7));
