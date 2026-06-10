@@ -28,9 +28,6 @@ namespace details {
 using ClModuleStore = detail::ModuleStore<cl_program, cl_kernel>;
 using ClCreateProgramWithIL_fn = cl_program(CL_API_CALL *)(cl_context, const void *, size_t, cl_int *);
 
-// Coarse-grain SVM allocations require explicit clEnqueueSVMMap/clEnqueueSVMUnmap around host
-// access. Track size + current map state here so the queue can flip allocs in/out around kernel
-// dispatch. Fine-grain SVM ignores this (map/unmap are no-ops in spec, but we skip the calls).
 struct SVMTracker {
   struct Entry {
     size_t size;
@@ -41,11 +38,18 @@ struct SVMTracker {
 };
 } // namespace details
 
+// per-device workarounds resolved once from the device name at construction
+struct DeviceQuirks {
+  bool nativeTrig;           // route POLY_* trig to native_ (llvmpipe libclc JIT crashes on precise range-reduction)
+  size_t overReadSlackBytes; // zeroed slack to absorb llvmpipe SIMD over-reads past a buffer
+};
+
 class POLYREGION_EXPORT ClDevice final : public Device {
 
   detail::LazyDroppable<cl_device_id> device;
   detail::LazyDroppable<cl_context> context;
   std::string deviceName;
+  DeviceQuirks quirks;
   ModuleFormat format;
   details::ClCreateProgramWithIL_fn ilCreateFn; // non-null iff format==SPIRV_Kernel
   // Present iff device advertises buffer SVM; value is the memflags to OR into clSVMAlloc
@@ -60,7 +64,8 @@ class POLYREGION_EXPORT ClDevice final : public Device {
   void untrackSvm(void *p);
 
 public:
-  explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm);
+  explicit ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm,
+                    const std::string &platformName);
   ~ClDevice() override;
   POLYREGION_EXPORT int64_t id() override;
   POLYREGION_EXPORT std::string name() override;

@@ -121,6 +121,14 @@ static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
   return data;
 }
 
+static std::string queryPlatformInfo(cl_platform_id platform, cl_platform_info info) {
+  size_t size = 0;
+  CHECKED(clGetPlatformInfo(platform, info, 0, nullptr, &size));
+  std::string data(size - 1, '\0');
+  CHECKED(clGetPlatformInfo(platform, info, size, data.data(), nullptr));
+  return data;
+}
+
 namespace {
 constexpr cl_uint CL_DEVICE_SVM_CAPABILITIES_ = 0x1053;
 constexpr cl_bitfield CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ = 1 << 0;
@@ -134,10 +142,11 @@ bool deviceSupportsIL(cl_device_id device) {
   return queryDeviceInfo(device, CL_DEVICE_EXTENSIONS).find("cl_khr_il_program") != std::string::npos;
 }
 
-// Returns the buffer memflags to OR into clSVMAlloc when SVM is usable (0 = coarse-grain,
-// CL_MEM_SVM_FINE_GRAIN_BUFFER otherwise); nullopt means fall back to cl_mem buffers.
-std::optional<cl_bitfield> resolveSVM(cl_device_id device) {
+// memflags to OR into clSVMAlloc (0 = coarse-grain, FINE_GRAIN otherwise); nullopt = fall back to cl_mem
+std::optional<cl_bitfield> resolveSVM(cl_device_id device, const std::string &platformName) {
   if (const char *off = std::getenv(polyregion::env::PolyinvokeDisableSvm); off && *off && *off != '0') return std::nullopt;
+  // XXX rusticl advertises SVM caps but indirect SVM access faults; force the buffer path
+  if (platformName.find("rusticl") != std::string::npos) return std::nullopt;
   cl_bitfield caps = 0;
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return std::nullopt;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return std::nullopt;
@@ -183,27 +192,27 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   std::vector<cl_platform_id> platforms(numPlatforms);
   CHECKED(clGetPlatformIDs(numPlatforms, platforms.data(), nullptr));
   std::vector<std::unique_ptr<Device>> clDevices;
-  cl_device_type AcceleratorMask = CL_DEVICE_TYPE_GPU | CL_DEVICE_TYPE_ACCELERATOR;
-  if (const char *cpu = std::getenv(polyregion::env::PolyinvokeOpenclCpu); cpu && *cpu && *cpu != '0')
-    AcceleratorMask |= CL_DEVICE_TYPE_CPU;
+  const cl_device_type AcceleratorMask = CL_DEVICE_TYPE_ALL;
   for (const auto &platform : platforms) {
     cl_uint numDevices = 0;
     if (const auto deviceIdResult = clGetDeviceIDs(platform, AcceleratorMask, 0, nullptr, &numDevices);
         deviceIdResult == CL_DEVICE_NOT_FOUND) {
-      continue; // no device
+      continue;
     } else CHECKED(deviceIdResult);
 
     std::vector<cl_device_id> devices(numDevices);
     CHECKED(clGetDeviceIDs(platform, AcceleratorMask, numDevices, devices.data(), nullptr));
+    const auto platformName = queryPlatformInfo(platform, CL_PLATFORM_NAME);
     auto ilFn =
         reinterpret_cast<details::ClCreateProgramWithIL_fn>(clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithIL"));
     if (!ilFn)
       ilFn = reinterpret_cast<details::ClCreateProgramWithIL_fn>(
           clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithILKHR"));
     for (auto &device : devices) {
-      auto svm = resolveSVM(device);
-      clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm));
-      if (ilFn && deviceSupportsIL(device)) clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::SPIRV_Kernel, ilFn, svm));
+      auto svm = resolveSVM(device, platformName);
+      clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm, platformName));
+      if (ilFn && deviceSupportsIL(device))
+        clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::SPIRV_Kernel, ilFn, svm, platformName));
     }
   }
   return clDevices;
@@ -212,7 +221,13 @@ ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 
 // ---
 
-ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm)
+static DeviceQuirks resolveQuirks(const std::string &deviceName) {
+  const bool llvmpipe = deviceName.find("llvmpipe") != std::string::npos;
+  return DeviceQuirks{/*nativeTrig*/ llvmpipe, /*overReadSlackBytes*/ llvmpipe ? size_t{4096} : size_t{0}};
+}
+
+ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm,
+                   const std::string &platformName)
     : device(
           [&, device]() {
             POLYINVOKE_TRACE();
@@ -252,7 +267,10 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
             } else {
               program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
             }
-            const std::string compilerArgs = "";
+            // XXX llvmpipe libclc crashes its JIT on precise sin/cos/tan range-reduction; route POLY_* trig to
+            // native_ for that device only (source #ifdef; SPIR-V is pre-compiled)
+            const std::string compilerArgs =
+                (this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "";
             cl_int result = clBuildProgram(program, 1, &*this->device, compilerArgs.data(), nullptr, nullptr);
             if (result != CL_SUCCESS) {
               size_t len;
@@ -289,6 +307,10 @@ int64_t ClDevice::id() {
 }
 PhysicalDevice ClDevice::physicalDevice() {
   POLYINVOKE_TRACE();
+  // XXX CPU OpenCL stacks (llvmpipe, pocl) report host scheme (needsLock()==false) so they run lock-free in parallel
+  if (cl_device_type dtype = 0;
+      clGetDeviceInfo(*device, CL_DEVICE_TYPE, sizeof(dtype), &dtype, nullptr) == CL_SUCCESS && (dtype & CL_DEVICE_TYPE_CPU))
+    return PhysicalDevice::host();
   // XXX clew doesn't have cl_khr_pci_bus_info/cl_khr_device_uuid tokens; use their published values.
   // we do PCI first then UUID fallback
   constexpr cl_device_info PCI_BUS_INFO_KHR = 0x410F, UUID_KHR = 0x106A;
@@ -394,6 +416,12 @@ uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
     case Access::RW:
     default: flags = CL_MEM_READ_WRITE; break;
   }
+  // llvmpipe doesn't predicate inactive SIMD remainder lanes, so a non-SIMD-multiple trip count reads
+  // past the buffer (SIGSEGV into dirty host heap); over-allocate zeroed slack to absorb the over-read
+  if (const size_t slack = quirks.overReadSlackBytes; slack > 0) {
+    std::vector<char> zeros(size + slack, 0);
+    return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags | CL_MEM_COPY_HOST_PTR, size + slack, zeros.data(), OUT_ERR)));
+  }
   return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
 }
 
@@ -453,8 +481,7 @@ ClDeviceQueue::~ClDeviceQueue() {
   CHECKED(clReleaseCommandQueue(queue));
 }
 void ClDeviceQueue::unmapAllSvmForDevice() {
-  // Fine-grain SVM is auto-coherent; coarse-grain needs explicit map/unmap. If the impl didn't
-  // expose map/unmap symbols there's nothing safe we can do, so silently fall through.
+  // fine-grain SVM is auto-coherent; coarse-grain needs explicit map/unmap (skip if the impl lacks them)
   if (!svmTracker || !clEnqueueSVMUnmap || *svm != 0) return;
   std::lock_guard lock(svmTracker->mtx);
   for (auto &[ptr, entry] : svmTracker->entries) {
@@ -468,7 +495,7 @@ void ClDeviceQueue::mapAllSvmForHost() {
   std::lock_guard lock(svmTracker->mtx);
   for (auto &[ptr, entry] : svmTracker->entries) {
     if (entry.mappedForHost) continue;
-    // CL_MAP_READ | CL_MAP_WRITE = 0x1 | 0x2 -- blocking so the caller can read immediately.
+    // 0x3 = CL_MAP_READ | CL_MAP_WRITE; blocking so the caller can read immediately
     CHECKED(clEnqueueSVMMap(queue, CL_TRUE, 0x3, ptr, entry.size, 0, nullptr, nullptr));
     entry.mappedForHost = true;
   }
@@ -476,9 +503,8 @@ void ClDeviceQueue::mapAllSvmForHost() {
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   POLYINVOKE_TRACE();
   if (!cb) return;
-  // SVM transfer paths use blocking memcpy and don't produce an event; the operation has
-  // already completed synchronously by the time we get here, so invoke the callback directly
-  // (clSetEventCallback would return CL_INVALID_EVENT on a null event).
+  // SVM paths use blocking memcpy with no event (already complete); invoke cb directly, clSetEventCallback
+  // would return CL_INVALID_EVENT on a null event
   if (!event) {
     (*cb)();
     return;
@@ -504,7 +530,7 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
     unmapAllSvmForDevice();
     auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
-    // XXX must be blocking on the host side as the src needs to be valid until the copy completes
+    // blocking: src must stay valid until the copy completes
     CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, srcP, size, 0, nullptr, nullptr));
   } else {
     CHECKED(clEnqueueCopyBuffer(queue, queryMemObject(src), queryMemObject(dst), srcOffset, dstOffset, size, 0, nullptr, &event));
@@ -515,6 +541,7 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
   POLYINVOKE_TRACE();
   cl_event event = {};
   if (!src) POLYINVOKE_FATAL(PREFIX, "Source pointer is NULL, destination=%lu", dst);
+  if (size == 0) return enqueueCallback(cb, {});
   if (svm) {
     unmapAllSvmForDevice();
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
@@ -528,11 +555,12 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   POLYINVOKE_TRACE();
   cl_event event = {};
   if (!dst) POLYINVOKE_FATAL(PREFIX, "Destination pointer is NULL, source=%lu", src);
+  // XXX zero-byte is a no-op; ReadBuffer/SVMMemcpy reject size 0 with CL_INVALID_VALUE (an -O3 reflect can size a result to 0)
+  if (size == 0) return enqueueCallback(cb, {});
   if (svm) {
     auto *srcP = reinterpret_cast<char *>(src) + srcOffset;
     if (*svm == 0 && clEnqueueSVMMap && clEnqueueSVMUnmap) {
-      // XXX Intel NEO clEnqueueSVMMemcpy reads stale data on coarse-grain SVM after a kernel write;
-      // Map/Unmap forces the cache flush.
+      // Intel NEO SVMMemcpy reads stale coarse-grain SVM after a kernel write; Map/Unmap forces the flush
       CHECKED(clEnqueueSVMMap(queue, CL_TRUE, /*CL_MAP_READ*/ 0x1, srcP, size, 0, nullptr, nullptr));
       std::memcpy(dst, srcP, size);
       CHECKED(clEnqueueSVMUnmap(queue, srcP, 0, nullptr, nullptr));
@@ -563,7 +591,6 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   const auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
 
-  // last arg is the return, void assertion should have been done before this
   for (cl_uint i = 0; i < types.size() - 1; ++i) {
     const auto rawPtr = args[i];
     switch (const auto tpe = types[i]) {
@@ -589,10 +616,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   }
   if (svm) {
-    // Indirect SVM allocs must be declared via CL_KERNEL_EXEC_INFO_SVM_PTRS or the driver
-    // skips coherency. Some coarse-grain-only drivers reject the batched call but accept the
-    // same set per-pointer; on CL_INVALID_VALUE fall back per-pointer, then to best-effort
-    // (map/unmap in enqueueWaitBlocking covers coherency anyway).
+    // indirect SVM allocs need CL_KERNEL_EXEC_INFO_SVM_PTRS or the driver skips coherency; some drivers
+    // reject the batched call but accept it per-pointer, so on CL_INVALID_VALUE retry per-pointer
     std::vector<void *> allSvmPtrs;
     allSvmPtrs.reserve(types.size() + (svmTracker ? svmTracker->entries.size() : 0));
     for (cl_uint i = 0; i < types.size() - 1; ++i) {

@@ -30,7 +30,6 @@ inline constexpr auto PolydcoLib = "POLYDCO_LIB";
 
 inline constexpr auto PolyinvokeDisableBackends = "POLYINVOKE_DISABLE_BACKENDS";
 inline constexpr auto PolyinvokeDisableSvm = "POLYINVOKE_DISABLE_SVM";
-inline constexpr auto PolyinvokeOpenclCpu = "POLYINVOKE_OPENCL_CPU";
 inline constexpr auto PolyinvokeTestLock = "POLYINVOKE_TEST_LOCK";
 inline constexpr auto PolyinvokeTestTargets = "POLYINVOKE_TEST_TARGETS";
 
@@ -39,6 +38,7 @@ inline constexpr auto PolyrtDevice = "POLYRT_DEVICE";
 inline constexpr auto PolyrtDumpKernel = "POLYRT_DUMP_KERNEL";
 inline constexpr auto PolyrtHostFallback = "POLYRT_HOST_FALLBACK";
 inline constexpr auto PolyrtPlatform = "POLYRT_PLATFORM";
+inline constexpr auto PolyrtStrictSelect = "POLYRT_STRICT_SELECT";
 
 inline constexpr auto PolytestDebug = "POLYTEST_DEBUG";
 inline constexpr auto PolytestProfileDir = "POLYTEST_PROFILE_DIR";

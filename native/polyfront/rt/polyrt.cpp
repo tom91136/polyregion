@@ -114,58 +114,62 @@ static void setupBackend(const Backend backend) {
 }
 
 namespace {
-// Selection is by feature equality, never by name substring -- names are for display.
-bool deviceMatchesHint(Device &d, const std::string &hint) {
-  if (hint.empty()) return true;
-  const auto needle = hint ^ to_lower();
-  return d.features() ^ exists([&](auto &f) { return (f ^ to_lower()) == needle; });
+
+bool hasFeature(Device &d, const std::string_view token) {
+  const auto needle = std::string(token) ^ to_lower();
+  return d.features() ^ exists([&](const std::string &f) { return (f ^ to_lower()) == needle; });
 }
 
-bool deviceMatchesRequired(Device &d, const std::vector<std::string_view> &requiredFeatures) {
-  if (requiredFeatures.empty()) return true;
-  const auto features = d.features();
-  for (const auto &req : requiredFeatures) {
-    bool found = false;
-    for (const auto &f : features) {
-      if (f.size() != req.size()) continue;
-      bool eq = true;
-      for (size_t i = 0; i < f.size(); ++i) {
-        char x = f[i], y = req[i];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x + 32);
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y + 32);
-        if (x != y) {
-          eq = false;
-          break;
-        }
-      }
-      if (eq) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) return false;
+bool globMatch(const std::string_view pat, const std::string_view s) {
+  const auto lc = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c; };
+  size_t pi = 0, si = 0, star = std::string_view::npos, mark = 0;
+  while (si < s.size()) {
+    if (pi < pat.size() && pat[pi] == '*') star = pi++, mark = si;
+    else if (pi < pat.size() && (pat[pi] == '?' || lc(pat[pi]) == lc(s[si]))) ++pi, ++si;
+    else if (star != std::string_view::npos) pi = star + 1, si = ++mark;
+    else return false;
   }
-  return true;
+  while (pi < pat.size() && pat[pi] == '*')
+    ++pi;
+  return pi == pat.size();
 }
 } // namespace
 
-static void selectDevice(Platform &p, const std::vector<std::string_view> &requiredFeatures, const std::string &hint, bool strict) {
+static void selectDevice(Platform &p, const std::vector<std::string_view> &requiredFeatures, const std::string &glob, bool strict) {
   auto devices = p.enumerate();
-  auto eligible = devices                                                                               //
-                  | map([](auto &d) { return std::ref(d); })                                            //
-                  | filter([&](auto rw) { return deviceMatchesRequired(*rw.get(), requiredFeatures); }) //
+  auto eligible = devices                                    //
+                  | map([](auto &d) { return std::ref(d); }) //
+                  | filter([&](auto rw) {                    //
+                      return requiredFeatures ^ forall([&](auto &r) { return hasFeature(*rw.get(), r); });
+                    }) //
                   | to_vector();
 
-  if (!hint.empty())
-    if (const auto index = parseIntNoExcept(hint.c_str()); index && *index < eligible.size()) {
-      polyregion::polyrt::currentDevice = std::move(eligible.at(*index).get());
-      return;
+  const std::string pattern = glob.empty() ? "*" : glob;
+  auto matched = eligible                                                                //
+                 | filter([&](auto rw) { return globMatch(pattern, rw.get()->name()); }) //
+                 | to_vector();
+  const auto names = [](auto &xs) { return xs | map([](auto rw) { return rw.get()->name(); }) | mk_string(", "); };
+
+  if (matched.empty()) {
+    if (strict || !eligible.empty()) {
+      log(DebugLevel::None, "Selector '%s' matched none of the %zu eligible device(s): [%s]%s", pattern.c_str(), eligible.size(),
+          names(eligible).c_str(), strict ? " (strict)" : "; refusing to run on a different device");
+      std::fflush(stderr);
+      std::abort();
     }
-  if (const auto match = eligible | find([&](auto rw) { return deviceMatchesHint(*rw.get(), hint); })) {
-    polyregion::polyrt::currentDevice = std::move(match->get());
     return;
   }
-  if (!strict && !eligible.empty()) polyregion::polyrt::currentDevice = std::move(eligible.front().get());
+  if (matched.size() > 1) {
+    if (strict) {
+      log(DebugLevel::None, "Selector '%s' is ambiguous (strict): matched %zu device(s): [%s]; tighten the glob", pattern.c_str(),
+          matched.size(), names(matched).c_str());
+      std::fflush(stderr);
+      std::abort();
+    }
+    log(DebugLevel::Info, "Selector '%s' matched %zu device(s): [%s]; using the first", pattern.c_str(), matched.size(),
+        names(matched).c_str());
+  }
+  polyregion::polyrt::currentDevice = std::move(matched.front().get());
 }
 
 static std::optional<polyregion::compiletime::TargetSpec::ParsedRef> selectPlatform() {
@@ -193,15 +197,11 @@ void polyregion::polyrt::initialise() {
       auto parsed = selectPlatform();
       if (currentPlatform) {
         const auto requiredFeatures = parsed ? parsed->spec.requiredDeviceFeatures : std::vector<std::string_view>{};
-        const auto hint = parsed ? parsed->hint : std::string{};
-        // An explicit POLYRT_DEVICE override is strict: no fallback to devices[0].
+        std::string glob = parsed ? parsed->deviceGlob : std::string{};
+        if (const auto env = std::getenv(polyregion::env::PolyrtDevice)) glob = env;
         bool strict = false;
-        std::string effectiveHint = hint;
-        if (const auto env = std::getenv(polyregion::env::PolyrtDevice)) {
-          effectiveHint = env;
-          strict = true;
-        }
-        selectDevice(*currentPlatform, requiredFeatures, effectiveHint, strict);
+        if (const auto env = std::getenv(polyregion::env::PolyrtStrictSelect); env && env[0] && env[0] != '0') strict = true;
+        selectDevice(*currentPlatform, requiredFeatures, glob, strict);
       }
       // Test-only: cross-process lock so ctest -j workers do not race on the same device.
       // Held for process lifetime; the file lock auto-releases on exit.
@@ -301,29 +301,10 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
       magic_enum::enum_name(object.format).data(), //
       magic_enum::enum_name(currentPlatform->kind()).data(), magic_enum::enum_name(currentDevice->moduleFormat()).data());
 
-  const auto deviceFeatures = currentDevice->features();
   for (size_t i = 0; i < object.featureCount; ++i) {
     std::string_view req(object.features[i]);
     if (req != "fp64" && req != "fp16" && req != "int64") continue;
-    bool found = false;
-    for (auto &f : deviceFeatures) {
-      if (f.size() != req.size()) continue;
-      bool eq = true;
-      for (size_t j = 0; j < f.size(); ++j) {
-        char x = f[j], y = req[j];
-        if (x >= 'A' && x <= 'Z') x = static_cast<char>(x + 32);
-        if (y >= 'A' && y <= 'Z') y = static_cast<char>(y + 32);
-        if (x != y) {
-          eq = false;
-          break;
-        }
-      }
-      if (eq) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
+    if (!hasFeature(*currentDevice, req)) {
       log(DebugLevel::Debug, "Device %s lacks required feature `%s` for module `%s`; skipping", currentDevice->name().c_str(),
           std::string(req).c_str(), moduleName);
       return false;

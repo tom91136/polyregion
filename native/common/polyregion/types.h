@@ -147,14 +147,17 @@ struct POLYREGION_EXPORT TargetSpec {
 
 struct POLYREGION_EXPORT TargetSpec::ParsedRef {
   TargetSpec spec;
-  std::string hint;
+  std::string deviceGlob;
 };
 
+// `<compile_target>@<arch> ! <runtime_platform>@<name_glob>`
 POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::parse(std::string_view input) {
-  auto at = input.find('@');
-  auto head = (at == std::string_view::npos) ? input : input.substr(0, at);
-  auto tail = (at == std::string_view::npos) ? std::string_view{} : input.substr(at + 1);
-  if (auto s = findByName(head)) return ParsedRef{*s, std::string(tail)};
+  auto bang = input.find('!');
+  auto sel = (bang == std::string_view::npos) ? input : input.substr(bang + 1);
+  auto at = sel.find('@');
+  auto head = (at == std::string_view::npos) ? sel : sel.substr(0, at);
+  auto glob = (at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
+  if (auto s = findByName(head)) return ParsedRef{*s, std::string(glob)};
   return std::nullopt;
 }
 

@@ -165,3 +165,18 @@ include(${CMAKE_SOURCE_DIR}/cmake/polytest_discover.cmake)
 polytest_discover_tests(polyinvoke-tests
         NAME_PREFIX polyinvoke
         DIST_BIN polyinvoke-tests)
+
+
+add_executable(polyinfo polyinfo.cpp)
+target_link_libraries(polyinfo PRIVATE polyinvoke-static Aspartame fmt::fmt)
+target_include_directories(polyinfo PRIVATE ${fire_SOURCE_DIR})
+target_compile_options(polyinfo PRIVATE ${COMPILE_OPTIONS})
+target_link_options(polyinfo PRIVATE ${LINK_OPTIONS})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(polyinfo PRIVATE
+            "SHELL:-Wl,--push-state,--no-as-needed -lstdc++ -lgcc_s -Wl,--pop-state"
+            ${GPU_RUNTIME_LINK_OPTIONS})
+else ()
+    target_link_options(polyinfo PRIVATE ${GPU_RUNTIME_LINK_OPTIONS})
+endif ()
+install(TARGETS polyinfo RUNTIME DESTINATION bin)

@@ -29,7 +29,7 @@
 #include "polyregion/compat.h"
 #include "polyregion/llvm_utils.hpp"
 
-// XXX Make sure this goes last as libffi pollutes the global namespace with macros
+// keep last: libffi pollutes the global namespace with macros
 #include "ffi_wrapped.h"
 
 using namespace polyregion::invoke;
@@ -53,7 +53,7 @@ static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vec
   };
   if (types.size() != args.size()) POLYINVOKE_FATAL(prefix, "types size (%zu) != args size (%zu)", types.size(), args.size());
 
-  // XXX kernel strips Unit0/Nothing params; ffi_type_void as a param misaligns Win x64.
+  // skip stripped Unit0/Nothing params; ffi_type_void as a param misaligns Win x64
   std::vector<ffi_type *> ffiParamTypes;
   std::vector<void *> ffiParamArgs;
   ffiParamTypes.reserve(args.size());
@@ -108,6 +108,8 @@ std::vector<std::string> ObjectDevice::features() {
   features.emplace_back("fp64");
   features.emplace_back("fp16");
   features.emplace_back("int64");
+  // the CPU host device is `@native`; expose it so host@native/c11@native match by feature under strict selection
+  features.emplace_back("native");
 
   return features;
 }
@@ -189,13 +191,10 @@ static std::string withGlobalPrefix(char prefix, std::string_view name) {
 
 static void *malloc_(size_t size) { return std::malloc(size); }
 
-// llvm::RuntimeDyldCOFFX86_64 zero-extends the 4-byte REL32 addend instead of sign-extending,
-// so RIP-rel instructions with a trailing immediate (vpinsrw imm8, vextractf128, ...) which
-// encode -1..-5 in the patch-site to compensate for the trailing byte(s) overflow the
-// `Result <= INT32_MAX` assert and miscompile in release. Rewrite each such REL32 to the
-// matching IMAGE_REL_AMD64_REL32_N (N=1..5) with a zero patch-site so stock RuntimeDyld
-// computes Delta = 4+N itself. winnt.h defines IMAGE_REL_AMD64_*/IMAGE_FILE_MACHINE_AMD64
-// as macros that collide with llvm::COFF::* enums under MSVC, hence the raw constants.
+// RuntimeDyldCOFFX86_64 zero-extends the 4-byte REL32 addend, so RIP-rel insns with a trailing imm
+// (vpinsrw, vextractf128) encoding -1..-5 in the patch-site overflow the INT32_MAX assert; rewrite each
+// to IMAGE_REL_AMD64_REL32_N (N=1..5) with a zero patch-site so RuntimeDyld computes Delta=4+N itself.
+// raw constants since winnt.h's IMAGE_REL_AMD64_* macros collide with llvm::COFF::* enums under MSVC
 static void rewriteCOFFRel32NegativeAddends(llvm::MutableArrayRef<char> buf) {
   constexpr uint16_t Rel32 = 0x0004;
   constexpr uint16_t FileMachineAMD64 = 0x8664;
@@ -253,15 +252,14 @@ RelocatableDevice::RelocatableDevice() {
   const llvm::Triple hostTriple(llvm::sys::getDefaultTargetTriple());
   globalPrefix = hostTriple.isOSBinFormatMachO() ? '_' : '\0';
 
-  // XXX RTDyld SIGBUSes on x86_64 macOS after many libm-calling kernels; JITLink covers Mach-O
-  // but lacks COFF/ARM64 + ELF backends on some hosts, so keep RTDyld elsewhere.
+  // RTDyld SIGBUSes on x86_64 macOS after many libm-calling kernels; JITLink covers Mach-O but lacks
+  // COFF/ARM64 + ELF backends on some hosts, so keep RTDyld elsewhere
   if (hostTriple.isOSBinFormatMachO()) {
     auto mm = llvm::jitlink::InProcessMemoryManager::Create();
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
     jitMemMgr = std::move(*mm);
     auto layer = std::make_unique<llvm::orc::ObjectLinkingLayer>(*es, *jitMemMgr);
-    // XXX object files we load have their own visibility/weak flags; promote ours so duplicates
-    // across modules don't fail materialisation.
+    // promote our object flags so duplicate symbols across modules don't fail materialisation
     layer->setOverrideObjectFlagsWithResponsibilityFlags(true);
     layer->setAutoClaimResponsibilityForObjectSymbols(true);
     ol = std::move(layer);
@@ -281,8 +279,7 @@ RelocatableDevice::RelocatableDevice() {
   if (auto err = processJD->define(llvm::orc::absoluteSymbols(std::move(absSyms))))
     POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot define malloc override: %s", toString(std::move(err)).c_str());
 
-  // libm::exportAll (called from invoke::init) registers sincosf et al. via sys::DynamicLibrary;
-  // the process generator below picks them up.
+  // libm::exportAll (from invoke::init) registers sincosf et al. via sys::DynamicLibrary; this generator picks them up
   if (auto gen = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(globalPrefix)) processJD->addGenerator(std::move(*gen));
   else POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create process symbol generator: %s", toString(gen.takeError()).c_str());
 }
@@ -439,10 +436,7 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
   if (auto it = modules.find(name); it != modules.end()) POLYINVOKE_FATAL(SHOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
   else {
 
-    // TODO implement Linux: https://x-c3ll.github.io/posts/fileless-memfd_create/
-    // TODO implement Windows: https://github.com/fancycode/MemoryModule
-
-    // dlopen must open from a file :(
+    // TODO fileless load: Linux memfd_create, Windows MemoryModule; dlopen needs a real file for now
     auto tmpPath = std::tmpnam(nullptr);
     if (!tmpPath) {
       POLYINVOKE_FATAL(SHOBJ_PREFIX, "Unable to buffer image to file for %s, tmpfile creation failed: cannot synthesise temp path",
