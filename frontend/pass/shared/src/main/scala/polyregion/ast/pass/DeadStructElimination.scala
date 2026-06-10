@@ -5,6 +5,7 @@ import polyregion.ast.{PolyAST as p, *, given}
 
 import scala.annotation.tailrec
 
+// drops StructDefs unreachable from the functions, following parents + member struct types
 object DeadStructElimination extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {

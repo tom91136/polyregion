@@ -15,20 +15,6 @@ object Compiler {
   import Remapper.*
   import Retyper.*
 
-//   private val ProgramPasses: List[ProgramPass] = List(
-//     printPass(Intrinsify),
-//     // printPass(DynamicDispatch),
-//     printPass(Specialisation),
-
-// //    FnInline,
-//     VarReduce,
-//     UnitExprElision,
-//     DeadArgElimination
-//   )
-
-//   private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
-//     scala.Function.chain(ProgramPasses.map(p => p(_, log)))(program).success
-
   // This derives the signature based on the *owning* symbol only!
   // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
   def deriveSignature(using q: Quoted)(f: q.DefDef): Result[p.Signature] = for {
@@ -114,7 +100,7 @@ object Compiler {
                   // scala.Array's apply/update/length etc. have stub `throw new Error` bodies in the
                   // stdlib (the JVM lowers their call sites specially). The term compiler can't
                   // handle `throw`, but Intrinsify handles xs.apply/update/length on Ptr<T>
-                  // receivers directly at IR level. So just skip compiling these — they'll never
+                  // receivers directly at IR level. So just skip compiling these - they'll never
                   // be called as functions.
                   val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
                   if (isScalaArrayMethod)
@@ -183,7 +169,7 @@ object Compiler {
                             // Add this function's body-discovered deps to next iteration's queue.
                             // Avoid duplicates: skip if already in `remaining` (this-iteration queue)
                             // or `depss` (already-queued-for-next-iter). Importantly, do NOT filter
-                            // against `deps.functions` itself — that's the SOURCE of wit0, so
+                            // against `deps.functions` itself - that's the SOURCE of wit0, so
                             // filtering against it would empty wit0 entirely and starve the loop.
                             depss ++ wit0.filterNot(x => remaining.contains(x._1) || depss.contains(x._1)),
                             clsDeps ++ clsDepss,
@@ -662,7 +648,7 @@ object Compiler {
 
     // Build a dispatch table for abstract trait methods. For each (abstract method, concrete
     // class extending its declarer with applied type args), map (abstract method name, parent
-    // applied as IR struct) → (concrete method name, concrete class struct). At IR rewrite
+    // applied as IR struct) -> (concrete method name, concrete class struct). At IR rewrite
     // time this lets us redirect `monoid.mempty()` (where monoid: Monoid[Int]) to
     // `anon$1.mempty(monoid.cast[anon$1])`, treating the unique anonymous-class override as
     // the static dispatch target.
@@ -958,7 +944,7 @@ object Compiler {
     captured.map((arg, term) => arg.named -> term),
     // For each def, we find the original name before monomorphic specialisation and then resolve the term mirrors.
     // Some defs (LLVM-side opaque placeholders, abstract typeclasses) have no entry in the
-    // monomorphic-to-polymorphic table — those have no prism, so just skip them.
+    // monomorphic-to-polymorphic table - those have no prism, so just skip them.
     opt.defs.flatMap { monomorphicDef =>
       monomorphicToPolymorphicSym.get(monomorphicDef.name) match {
         case Some(polymorphicSym) =>

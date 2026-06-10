@@ -3,15 +3,12 @@ package polyregion.ast.pass
 import polyregion.ast.Traversal.*
 import polyregion.ast.{PolyAST as p, *, given}
 
-// This pass copies all generic functions with the applied types at callsite:
-//   def foo[A](a: A) = a
-//   foo[Int]
-//   foo[Long]
-// becomes
-//   def foo_Long(a : Long) = a
-//   def foo_Int(a : Int) = a
-//   foo_Int
-//   foo_Long
+// monomorphises generic functions: one specialised copy per distinct tpeArg set reached from entry,
+// rewrites each Invoke to the monomorphic name + drops tpeArgs, then removes generic templates
+// edge cases:
+//   specialisation that invokes further generics -> recursiveSpecialise recurses into the new body
+//   tpeArg set already specialised               -> deduped by monomorphic name (no second copy)
+//   Invoke of an unknown / non-generic name      -> left untouched (no tpeArgs -> not rewritten)
 object Specialisation extends ProgramPass {
 
   def monomorphicName(ivk: p.Expr.Invoke): p.Sym = {

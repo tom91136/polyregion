@@ -4,12 +4,17 @@ import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
-// inline all calls originating from entry
+// inlines every Invoke reachable from entry to a fixed point (the result Program has no functions):
+// the callee body is type-substituted, alpha-renamed, its params bound to the call args, and spliced
+// in at the callsite scope
+// edge cases:
+//   single Return        -> the return Expr becomes the callsite value; Return stmts stripped
+//   multiple Returns     -> a mutable phi var, each Return rebound to a Mut of the phi
+//   moduleCaptures       -> NOT alpha-renamed (shared across inlinings); only locals get the per-call id
+//   nested Invoke in body -> recursed before splicing so inlining reaches a fixed point
+// inlined stmts stay in the original Invoke's enclosing scope - hoisting to the body root would let
+// references to loop-/branch-local vars escape their scope
 object FnInline extends ProgramPass {
-
-  // XXX Per-renameAll counter so locals from multiple inlinings of the same function don't collide
-  // on the polyc backend's name->slot map
-  private val inlineCounter = new java.util.concurrent.atomic.AtomicLong(0L)
 
   private def substTerms(tree: p.Function, table: Map[p.Named, p.Term]): p.Function =
     tree.modifyAll[p.Term] {
@@ -17,17 +22,14 @@ object FnInline extends ProgramPass {
         table.get(root) match {
           case Some(p.Term.Select(rRoot, rSteps, _)) => p.Term.Select(rRoot, rSteps ::: steps, tpe)
           case Some(other) if steps.isEmpty          => other
-          case Some(_)                               =>
-            // Replacement is a non-Select Term but the call wants to apply field steps;
-            // shouldn't happen for well-typed substitutions, fall through.
-            p.Term.Select(root, steps, tpe)
-          case None => p.Term.Select(root, steps, tpe)
+          case Some(_)                               => p.Term.Select(root, steps, tpe)
+          case None                                  => p.Term.Select(root, steps, tpe)
         }
       case x => x
     }
 
-  private def renameAll(f: p.Function): p.Function = {
-    val id                 = inlineCounter.incrementAndGet()
+  private def renameAll(f: p.Function, ctr: java.util.concurrent.atomic.AtomicLong): p.Function = {
+    val id                 = ctr.incrementAndGet()
     def rename(n: p.Named) = p.Named(s"_inline_${id}_${f.mangledName}_${n.symbol}", n.tpe)
     val captureNames       = f.moduleCaptures.map(_.named).toSet
     val body = f.body
@@ -55,7 +57,11 @@ object FnInline extends ProgramPass {
     )
   }
 
-  private def inlineOne(ivk: p.Expr.Invoke, f: p.Function): (p.Expr, List[p.Stmt], List[p.Arg]) = {
+  private def inlineOne(
+      ivk: p.Expr.Invoke,
+      f: p.Function,
+      ctr: java.util.concurrent.atomic.AtomicLong
+  ): (p.Expr, List[p.Stmt], List[p.Arg]) = {
 
     val concreteTpeArgs = ivk.receiver
       .map(_.tpe match {
@@ -66,10 +72,13 @@ object FnInline extends ProgramPass {
 
     val table = f.tpeVars.zip(concreteTpeArgs).toMap
 
-    val renamed = renameAll(f.modifyAll[p.Type](_.mapLeaf {
-      case p.Type.Var(name) if table.contains(name) => table(name)
-      case x                                        => x
-    }))
+    val renamed = renameAll(
+      f.modifyAll[p.Type](_.mapLeaf {
+        case p.Type.Var(name) if table.contains(name) => table(name)
+        case x                                        => x
+      }),
+      ctr
+    )
 
     // ivk.args is the flattened (moduleCaptures ::: termCaptures ::: args) per Compiler.patchIvk.
     val targetNames =
@@ -87,11 +96,9 @@ object FnInline extends ProgramPass {
       case Nil =>
         throw AssertionError(s"no return in function ${f.signature}")
       case expr :: Nil =>
-        // single return: inject the return Expr at the callsite. Drop the Return stmts.
         val noReturnBody = substituted.body.flatMap(stripReturn)
         (expr, noReturnBody, renamed.moduleCaptures)
       case xs =>
-        // multi-return: bind to a phi var, replace each Return with a Mut to the phi.
         val phiName                  = p.Named("phi", ivk.tpe)
         val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
         val phiDecl                  = p.Stmt.Var(phiName, None, isMutable = true)
@@ -145,49 +152,57 @@ object FnInline extends ProgramPass {
     }
   }
 
-  // Inlined statements stay in the enclosing scope of the original Invoke. Hoisting them to the
-  // body root previously let inlined references to loop- or branch-local vars escape their scope.
-  private def inlineExpr(expr: p.Expr, program: p.Program): (p.Expr, List[p.Stmt], List[p.Arg]) =
+  private def inlineExpr(
+      expr: p.Expr,
+      program: p.Program,
+      ctr: java.util.concurrent.atomic.AtomicLong
+  ): (p.Expr, List[p.Stmt], List[p.Arg]) =
     expr match {
       case ivk: p.Expr.Invoke =>
-        val (resultExpr, inlineStmts, caps) = inlineOne(ivk, resolveOverload(ivk, program))
-        val (rewrittenStmts, nestedCaps)    = inlineStmts.foldMap(s => inlineStmt(s, program))
+        val (resultExpr, inlineStmts, caps) = inlineOne(ivk, resolveOverload(ivk, program), ctr)
+        val (rewrittenStmts, nestedCaps)    = inlineStmts.foldMap(s => inlineStmt(s, program, ctr))
         (resultExpr, rewrittenStmts, caps ++ nestedCaps)
       case _ => (expr, Nil, Nil)
     }
 
-  private def inlineStmt(stmt: p.Stmt, program: p.Program): (List[p.Stmt], List[p.Arg]) = stmt match {
+  private def inlineStmt(
+      stmt: p.Stmt,
+      program: p.Program,
+      ctr: java.util.concurrent.atomic.AtomicLong
+  ): (List[p.Stmt], List[p.Arg]) = stmt match {
     case p.Stmt.Var(n, Some(e), mut) =>
-      val (newE, prepend, caps) = inlineExpr(e, program)
+      val (newE, prepend, caps) = inlineExpr(e, program, ctr)
       (prepend :+ p.Stmt.Var(n, Some(newE), mut), caps)
     case p.Stmt.Var(_, None, _) => (List(stmt), Nil)
     case p.Stmt.Mut(name, e) =>
-      val (newE, prepend, caps) = inlineExpr(e, program)
+      val (newE, prepend, caps) = inlineExpr(e, program, ctr)
       (prepend :+ p.Stmt.Mut(name, newE), caps)
     case _: p.Stmt.Update => (List(stmt), Nil)
     case p.Stmt.Return(e) =>
-      val (newE, prepend, caps) = inlineExpr(e, program)
+      val (newE, prepend, caps) = inlineExpr(e, program, ctr)
       (prepend :+ p.Stmt.Return(newE), caps)
     case p.Stmt.While(cond, body) =>
-      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program))
+      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program, ctr))
       (List(p.Stmt.While(cond, newBody)), caps)
     case p.Stmt.Cond(cond, t, e) =>
-      val (newT, capsT) = t.foldMap(s => inlineStmt(s, program))
-      val (newE, capsE) = e.foldMap(s => inlineStmt(s, program))
+      val (newT, capsT) = t.foldMap(s => inlineStmt(s, program, ctr))
+      val (newE, capsE) = e.foldMap(s => inlineStmt(s, program, ctr))
       (List(p.Stmt.Cond(cond, newT, newE)), capsT ++ capsE)
     case p.Stmt.ForRange(i, lb, ub, step, body) =>
-      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program))
+      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program, ctr))
       (List(p.Stmt.ForRange(i, lb, ub, step, newBody)), caps)
     case p.Stmt.Annotated(inner, pos, c) =>
-      val (rewritten, caps) = inlineStmt(inner, program)
+      val (rewritten, caps) = inlineStmt(inner, program, ctr)
       (rewritten.map(p.Stmt.Annotated(_, pos, c)), caps)
     case _ => (List(stmt), Nil)
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
-
+    // per-run counter: names from repeated inlinings stay unique within one program, and the numbering
+    // is independent of process compile order (the names embed into emitted kernel images)
+    val ctr = new java.util.concurrent.atomic.AtomicLong(0L)
     val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
-      val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, program))
+      val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, program, ctr))
       f.copy(body = stmts, moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct)
     }
 

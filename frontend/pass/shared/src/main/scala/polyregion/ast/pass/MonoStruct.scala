@@ -3,6 +3,12 @@ package polyregion.ast.pass
 import polyregion.ast.Traversal.*
 import polyregion.ast.{PolyAST as p, *, given}
 
+// monomorphises StructDefs the way Specialisation does functions: one concrete StructDef per distinct
+// applied-type-args use, members type-substituted, parents and every Type reference rewritten to the
+// zero-arg monomorphic struct. Returns the monomorphic-name -> original-name map (the boundary value)
+// edge cases:
+//   doReplacement lookup -> match a use by its original key, then by already-renamed args, then
+//                           structurally (same name + same recursively-replaced args) for a nested use
 object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
   override def phase = p.PassPhase.PostMono
@@ -35,7 +41,6 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
       parents = sdef.parents
     )
 
-    // Make sure we rename the parents too
     val nameTable = monoStructDefs.map((s, sdef) => s.name -> sdef.name).toMap
     val replacementTable =
       monoStructDefs
@@ -60,7 +65,7 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
             replacementTable.collectFirst {
               case (key, sdef)
                   if key.name == name && key.args.size == newArgs.size &&
-                    key.args.map(applyTypeReplacement) == newArgs =>
+                    key.args.map(doReplacement) == newArgs =>
                 sdef
             }
         byOriginal.orElse(byRenamed).orElse(byName) match {
@@ -71,7 +76,6 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
       case p.Type.Arr(c, l, s) => p.Type.Arr(doReplacement(c), l, s)
       case a                   => a
     }
-    def applyTypeReplacement(t: p.Type): p.Type = doReplacement(t)
 
     val rootStructDefs = monoStructDefs
       .map(_._2)

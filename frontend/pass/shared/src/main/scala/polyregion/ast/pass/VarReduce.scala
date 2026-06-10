@@ -3,6 +3,11 @@ package polyregion.ast.pass
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+// copy-propagates immutable val-aliases (`val b = a`) to a fixed point: forwards `a`'s root+steps into
+// every Select of `b`, then drops the alias decl
+// edge cases:
+//   either side later mutated -> not propagated; forwarding spans the whole function, so a `Mut` on
+//                                `a` after the alias would make a `b` read see the post-mutation value
 object VarReduce extends ProgramPass {
 
   private def filterStmts(body: List[p.Stmt])(drop: Set[p.Stmt]): List[p.Stmt] = body.flatMap {
@@ -15,20 +20,13 @@ object VarReduce extends ProgramPass {
   }
 
   private def run(f: p.Function, log: Log) = {
-    // Remove intermediate val-aliases:
-    //   val a: T = expr; val b: T = a; f(b)   ==>   val a: T = expr; f(a)
-    // mutatedNames is constant across iterations because we never rewrite Mut sites; hoisting
-    // the scan out of the fixed-point loop drops one body traversal per iteration.
-    val mutatedNames: Set[p.Named] = f
-      .collectAll[p.Stmt]
-      .collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) =>
-        name
-      }
-      .toSet
+    // mutatedNames is constant across iterations (Mut sites are never rewritten), so scan once
+    val mutatedNames: Set[p.Named] =
+      f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       f.collectFirst_[p.Stmt] {
         case source @ p.Stmt.Var(name, Some(p.Expr.Alias(that: p.Term.Select)), false)
-            if !mutatedNames.contains(name) =>
+            if !mutatedNames.contains(name) && !mutatedNames.contains(that.root) =>
           (source, name, that)
       } match {
         case Some((source, name, that)) =>

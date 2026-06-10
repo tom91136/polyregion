@@ -3,10 +3,10 @@ package polyregion.ast.pass
 import polyregion.ast.Traversal.*
 import polyregion.ast.{PolyAST as p, *, given}
 
+// drops unreferenced unit-typed Var decls (the residue of desugared statement expressions)
 object UnitExprElision extends ProgramPass {
 
-  // Drop a Stmt entirely if its RHS is a no-op unit expression *and* the name is unused.
-  // Otherwise the Return/Mut elsewhere still references it and dropping breaks the IR.
+  // a dangling Return/Mut elsewhere may still reference the name, so only drop when unused
   private def isUnusedUnit(s: p.Stmt, referenced: Set[p.Named]): Boolean = s match {
     case p.Stmt.Var(n @ p.Named(_, p.Type.Unit0), None, _)                  => !referenced.contains(n)
     case p.Stmt.Var(n @ p.Named(_, p.Type.Unit0), Some(p.Expr.Alias(_)), _) => !referenced.contains(n)
@@ -23,11 +23,8 @@ object UnitExprElision extends ProgramPass {
   }
 
   private def run(f: p.Function) = {
-    val referenced: Set[p.Named] = f.body
-      .flatMap(_.collectWhere[p.Term] { case p.Term.Select(root, _, _) =>
-        root
-      })
-      .toSet
+    val referenced: Set[p.Named] =
+      f.body.flatMap(_.collectWhere[p.Term] { case p.Term.Select(root, _, _) => root }).toSet
     f.copy(body = filter(f.body, referenced))
   }
 
