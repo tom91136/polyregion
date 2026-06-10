@@ -1,34 +1,38 @@
 #define CL_TARGET_OPENCL_VERSION 300
-#include <CL/cl.h>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <iostream>
 #include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <CL/cl.h>
+
 namespace {
 
 constexpr int N = 1024;
 
-constexpr const char *kernel_src =
-    "__kernel void vecadd(__global const float *a, __global const float *b, __global float *c) {\n"
-    "  int i = get_global_id(0); c[i] = a[i] + b[i];\n"
-    "}\n";
+constexpr const char *kernel_src = "__kernel void vecadd(__global const float *a, __global const float *b, "
+                                   "__global float *c) {\n"
+                                   "  int i = get_global_id(0); c[i] = a[i] + b[i];\n"
+                                   "}\n";
 
 bool run(cl_context ctx, cl_command_queue queue, cl_device_id dev, cl_program prog, std::string_view tag) {
   if (auto e = clBuildProgram(prog, 1, &dev, nullptr, nullptr, nullptr); e != CL_SUCCESS) {
     std::array<char, 8192> log{};
     clGetProgramBuildInfo(prog, dev, CL_PROGRAM_BUILD_LOG, log.size(), log.data(), nullptr);
-    std::cout << "    " << tag << " build FAIL (" << e << "): " << log.data() << "\n";
+    std::printf("    %.*s build FAIL (%d): %s\n", static_cast<int>(tag.size()), tag.data(), e, log.data());
     return false;
   }
   cl_int e{};
   auto kernel = clCreateKernel(prog, "vecadd", &e);
   std::array<float, N> a{}, b{}, c{};
-  for (int i = 0; i < N; ++i) { a[i] = static_cast<float>(i); b[i] = static_cast<float>(2 * i); }
+  for (int i = 0; i < N; ++i) {
+    a[i] = static_cast<float>(i);
+    b[i] = static_cast<float>(2 * i);
+  }
   auto da = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof a, a.data(), &e);
   auto db = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof b, b.data(), &e);
   auto dc = clCreateBuffer(ctx, CL_MEM_WRITE_ONLY, sizeof c, nullptr, &e);
@@ -37,13 +41,15 @@ bool run(cl_context ctx, cl_command_queue queue, cl_device_id dev, cl_program pr
   clSetKernelArg(kernel, 2, sizeof(cl_mem), &dc);
   std::size_t global = N;
   if ((e = clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &global, nullptr, 0, nullptr, nullptr)) != CL_SUCCESS) {
-    std::cout << "    " << tag << " enqueue FAIL " << e << "\n";
+    std::printf("    %.*s enqueue FAIL %d\n", static_cast<int>(tag.size()), tag.data(), e);
     return false;
   }
   clEnqueueReadBuffer(queue, dc, CL_TRUE, 0, sizeof c, c.data(), 0, nullptr, nullptr);
   int bad = 0;
-  for (int i = 0; i < N; ++i) bad += c[i] != 3.0f * static_cast<float>(i);
-  std::cout << "    " << tag << (bad ? " FAIL" : " PASS") << " (c[1023]=" << c[1023] << ", mismatches=" << bad << ")\n";
+  for (int i = 0; i < N; ++i)
+    bad += c[i] != 3.0f * static_cast<float>(i);
+  std::printf("    %.*s %s (c[1023]=%g, mismatches=%d)\n", static_cast<int>(tag.size()), tag.data(), bad ? "FAIL" : "PASS",
+              static_cast<double>(c[1023]), bad);
   return bad == 0;
 }
 
@@ -53,11 +59,13 @@ std::string spirv_from_kernel() {
     if (!cl) return {};
     cl << kernel_src;
   }
-  // clang's native SPIR-V target, else the translator (llvm-spirv) for clang builds without it
-  const bool ok =
-      std::system("clang -x cl -cl-std=CL1.2 -target spirv64 -c /tmp/vecadd.cl -o /tmp/vecadd.spv 2>/dev/null") == 0 ||
-      std::system("clang -x cl -cl-std=CL1.2 -emit-llvm -target spir64 -c /tmp/vecadd.cl -o /tmp/vecadd.bc 2>/dev/null"
-                  " && llvm-spirv /tmp/vecadd.bc -o /tmp/vecadd.spv 2>/dev/null") == 0;
+  // clang's native SPIR-V target, else the translator (llvm-spirv) for clang
+  // builds without it
+  const bool ok = std::system("clang -x cl -cl-std=CL1.2 -target spirv64 -c /tmp/vecadd.cl "
+                              "-o /tmp/vecadd.spv 2>/dev/null") == 0 ||
+                  std::system("clang -x cl -cl-std=CL1.2 -emit-llvm -target spir64 -c "
+                              "/tmp/vecadd.cl -o /tmp/vecadd.bc 2>/dev/null"
+                              " && llvm-spirv /tmp/vecadd.bc -o /tmp/vecadd.spv 2>/dev/null") == 0;
   if (!ok) return {};
   std::ifstream spv{"/tmp/vecadd.spv", std::ios::binary};
   return {std::istreambuf_iterator<char>{spv}, std::istreambuf_iterator<char>{}};
@@ -74,25 +82,31 @@ std::string name_of(cl_device_id d) {
   return buf.data();
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   cl_uint count = 0;
   clGetPlatformIDs(0, nullptr, &count);
-  if (count == 0) { std::cerr << "no OpenCL platforms found\n"; return 2; }
+  if (count == 0) {
+    std::fprintf(stderr, "no OpenCL platforms found\n");
+    return 2;
+  }
   std::vector<cl_platform_id> platforms(count);
   clGetPlatformIDs(count, platforms.data(), nullptr);
 
   const auto spirv = spirv_from_kernel();
-  if (spirv.empty()) std::cout << "  note: no SPIR-V generator available, subtest skipped\n";
+  if (spirv.empty()) std::printf("  note: no SPIR-V generator available, subtest skipped\n");
 
   int fails = 0;
   for (auto platform : platforms) {
     cl_device_id dev{};
     cl_uint ndev = 0;
     clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &dev, &ndev);
-    if (ndev == 0) { std::cout << "  '" << name_of(platform) << "': no device, skip\n"; continue; }
-    std::cout << "  '" << name_of(platform) << "' -> " << name_of(dev) << "\n";
+    if (ndev == 0) {
+      std::printf("  '%s': no device, skip\n", name_of(platform).c_str());
+      continue;
+    }
+    std::printf("  '%s' -> %s\n", name_of(platform).c_str(), name_of(dev).c_str());
     cl_int e{};
     auto ctx = clCreateContext(nullptr, 1, &dev, nullptr, nullptr, &e);
     auto queue = clCreateCommandQueueWithProperties(ctx, dev, nullptr, &e);
@@ -101,10 +115,12 @@ int main() {
     fails += !run(ctx, queue, dev, src, "source");
     if (!spirv.empty()) {
       auto prog = clCreateProgramWithIL(ctx, spirv.data(), spirv.size(), &e);
-      if (e != CL_SUCCESS) { std::cout << "    spirv  clCreateProgramWithIL FAIL " << e << "\n"; ++fails; }
-      else fails += !run(ctx, queue, dev, prog, "spirv");
+      if (e != CL_SUCCESS) {
+        std::printf("    spirv  clCreateProgramWithIL FAIL %d\n", e);
+        ++fails;
+      } else fails += !run(ctx, queue, dev, prog, "spirv");
     }
   }
-  std::cout << "opencl: " << fails << " failure(s)\n";
+  std::printf("opencl: %d failure(s)\n", fails);
   return fails == 0 ? 0 : 1;
 }

@@ -74,7 +74,7 @@ _format mode sbt_task_a sbt_task_b:
         *) echo "unknown format mode: {{ mode }}" >&2; exit 2 ;;
     esac
     echo "Native:  clang-format {{ mode }} via $CF"
-    git ls-files -z -- '*.cpp' '*.cc' '*.h' '*.hpp' \
+    git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' \
         | grep -zvE '^native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)' \
         | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
@@ -145,7 +145,7 @@ check-header:
     #!/usr/bin/env bash
     set -u
     pat='^[[:space:]]*#[[:space:]]*include[[:space:]]*<(filesystem|regex|codecvt|iostream|sstream|ostream|iomanip)>'
-    hits=$(git ls-files -z -- '*.cpp' '*.cc' '*.h' '*.hpp' '*.h.in' '*.hpp.in' | xargs -0 grep -nE "$pat" 2>/dev/null)
+    hits=$(git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' '*.h.in' '*.hpp.in' | xargs -0 grep -nE "$pat" 2>/dev/null)
     [ -z "$hits" ] || { echo "banned headers (use fmt/LLVM alternatives):"; echo "$hits"; exit 1; }
 
 _actionlint:

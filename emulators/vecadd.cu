@@ -1,6 +1,6 @@
 #if defined(__CUDA_ARCH__)
 
-#define __global__ __attribute__((global))
+  #define __global__ __attribute__((global))
 extern "C" __global__ void vecadd(const float *a, const float *b, float *c) {
   unsigned i = __nvvm_read_ptx_sreg_ctaid_x() * __nvvm_read_ptx_sreg_ntid_x() + __nvvm_read_ptx_sreg_tid_x();
   c[i] = a[i] + b[i];
@@ -8,13 +8,13 @@ extern "C" __global__ void vecadd(const float *a, const float *b, float *c) {
 
 #else
 
-#include <array>
-#include <fstream>
-#include <iostream>
-#include <iterator>
-#include <stdexcept>
-#include <string>
-#include <string_view>
+  #include <array>
+  #include <cstdio>
+  #include <fstream>
+  #include <iterator>
+  #include <stdexcept>
+  #include <string>
+  #include <string_view>
 
 extern "C" {
 typedef int CUresult, CUdevice;
@@ -51,7 +51,7 @@ int main(int argc, char **argv) try {
   check(cuDeviceGet(&dev, 0), "cuDeviceGet");
   std::array<char, 128> name{};
   cuDeviceGetName(name.data(), name.size(), dev);
-  std::cout << "  device '" << name.data() << "'\n";
+  std::printf("  device '%s'\n", name.data());
   CUcontext ctx{};
   check(cuCtxCreate_v2(&ctx, 0, dev), "cuCtxCreate");
   CUmodule mod{};
@@ -60,7 +60,10 @@ int main(int argc, char **argv) try {
   check(cuModuleGetFunction(&fn, mod, "vecadd"), "cuModuleGetFunction");
 
   std::array<float, N> a{}, b{}, c{};
-  for (int i = 0; i < N; ++i) { a[i] = static_cast<float>(i); b[i] = static_cast<float>(2 * i); }
+  for (int i = 0; i < N; ++i) {
+    a[i] = static_cast<float>(i);
+    b[i] = static_cast<float>(2 * i);
+  }
   CUdeviceptr da{}, db{}, dc{};
   check(cuMemAlloc_v2(&da, sizeof a), "cuMemAlloc");
   check(cuMemAlloc_v2(&db, sizeof b), "cuMemAlloc");
@@ -73,11 +76,12 @@ int main(int argc, char **argv) try {
   check(cuMemcpyDtoH_v2(c.data(), dc, sizeof c), "cuMemcpyDtoH");
 
   int bad = 0;
-  for (int i = 0; i < N; ++i) bad += c[i] != 3.0f * static_cast<float>(i);
-  std::cout << "  cuda " << (bad ? "FAIL" : "PASS") << " (c[1023]=" << c[1023] << ", mismatches=" << bad << ")\n";
+  for (int i = 0; i < N; ++i)
+    bad += c[i] != 3.0f * static_cast<float>(i);
+  std::printf("  cuda %s (c[1023]=%g, mismatches=%d)\n", bad ? "FAIL" : "PASS", static_cast<double>(c[1023]), bad);
   return bad == 0 ? 0 : 1;
 } catch (const std::exception &e) {
-  std::cerr << "  FAIL " << e.what() << "\n";
+  std::fprintf(stderr, "  FAIL %s\n", e.what());
   return 1;
 }
 

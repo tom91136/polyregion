@@ -116,8 +116,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   if (const auto v = std::getenv(polyregion::env::PolyinvokeTestLock))
     envs.emplace_back(fmt::format("{}={}", polyregion::env::PolyinvokeTestLock, v));
   else envs.emplace_back(fmt::format("{}=1", polyregion::env::PolyinvokeTestLock));
-  if (const auto v = std::getenv("ASAN_OPTIONS"))
-    envs.emplace_back(fmt::format("ASAN_OPTIONS={}", v));
+  if (const auto v = std::getenv("ASAN_OPTIONS")) envs.emplace_back(fmt::format("ASAN_OPTIONS={}", v));
   else
     envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0,protect_shadow_gap=0,verify_asan_link_order=0,strip_env=0"
 #ifdef __APPLE__
@@ -417,10 +416,10 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     const auto ids = tasks | map([](auto &t) { return t.id(); }) | to_vector();
     ids | for_each([](auto &id) { std::fprintf(stdout, "%s\n", id.c_str()); });
     // XXX duplicate ids shadow tasks: ctest registers both names but --run-task resolves the first
-    const auto dups = ids                                                       //
-                      | group_by([](auto &id) { return id; })                   //
+    const auto dups = ids                                                      //
+                      | group_by([](auto &id) { return id; })                  //
                       | filter([](auto &, auto &xs) { return xs.size() > 1; }) //
-                      | keys()                                                  //
+                      | keys()                                                 //
                       | to_vector();
     dups | for_each([](auto &id) { std::fprintf(stderr, "polytest: duplicate task id '%s'\n", id.c_str()); });
     return dups.empty() ? 0 : 1;
