@@ -90,6 +90,12 @@ endif ()
 set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")
 set(LLVM_BUILD_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
 set(LLVM_LINK_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
+# Namespace the bundled libLLVM so it can never collide with a system libLLVM that a dlopen'd driver
+# (e.g. a Mesa Vulkan ICD) pulls in-process: the distro's RTTI-bearing `@LLVM_<ver>` symbols vs our
+# no-RTTI bundle under the same soname means load failures or a shared cl::opt registry clash. A
+# unique symbol-version node here, paired with the unique soname from 0004-libllvm-unique-soname.patch,
+# makes the two fully independent: ours resolves against `libLLVMpolyregion.so`, the system's against `libLLVM.so`.
+set(LLVM_SHLIB_SYMBOL_VERSION "POLYREGION_LLVM" CACHE STRING "")
 # XXX Force /MT to match polyregion and vcpkg static-CRT deps; LLVM defaults to /MD and
 # the resulting MD_DynamicRelease markers conflict with /MT consumers.
 set(LLVM_USE_CRT_RELEASE MT CACHE STRING "")

@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000003 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Sun, 08 Jun 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] legalize a scalar store through a ptrcast to an array
+ dest
+
+SPIRVLegalizePointerCast::transformStore handles a store whose pointer is a
+ptrcast: struct dest (store to first member), vector<-vector, vector<-scalar
+(first element), and array<-vector. It was missing array<-scalar: storing a
+scalar through a pointer the backend deduced as an array element type. This
+arises whenever an element-0 access of a fixed local array folds to the array
+base (`getelementptr [N x T], p, 0, 0` -> `p`), so the store's pointer is the
+[N x T] alloca but the value is a single T. Without this case the pass hits
+`llvm_unreachable("Unsupported ptrcast use in store")`. storeToFirstValueAggregate
+already builds the recursive GEP-to-first-element chain (handles arrays), so route
+array<-scalar there, mirroring the existing vector<-scalar case.
+---
+ llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+--- a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+@@ -370,6 +370,8 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+       storeToFirstValueAggregate(B, Src, Dst, D_VT, Alignment);
+     else if (D_AT && S_VT && S_VT->getElementType() == D_AT->getElementType())
+       storeArrayFromVector(B, Src, Dst, D_AT, Alignment);
++    else if (D_AT && !S_VT && isTypeFirstElementAggregate(FromTy, D_AT))
++      storeToFirstValueAggregate(B, Src, Dst, D_AT, Alignment);
+     else
+       llvm_unreachable("Unsupported ptrcast use in store. Please fix.");
+
