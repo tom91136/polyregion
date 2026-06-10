@@ -9,39 +9,32 @@ function(polytest_discover_tests target)
     set(_stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/polytest-discover")
     set(_ids_file "${_stamp_dir}/${target}.ids")
     set(_tests_file "${_stamp_dir}/${target}-tests.cmake")
-    set(_props "")
-    if (ARG_WORKING_DIRECTORY)
-        list(APPEND _props "-DWORKING_DIRECTORY=${ARG_WORKING_DIRECTORY}")
-    endif ()
-    if (ARG_LABELS)
-        list(APPEND _props "-DLABELS=${ARG_LABELS}")
-    endif ()
-    if (ARG_ENVIRONMENT_MODIFICATION)
-        list(APPEND _props "-DENVIRONMENT_MODIFICATION=${ARG_ENVIRONMENT_MODIFICATION}")
-    endif ()
+    set(_dist_args "")
     set(_dist_outputs "")
     if (ARG_DIST_BIN)
         set(_dist_tests_file "${_stamp_dir}/${target}-dist-tests.cmake")
-        list(APPEND _props
-                "-DDIST_TESTS_FILE=${_dist_tests_file}"
-                "-DDIST_BIN=${ARG_DIST_BIN}"
-                "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}")
+        set(_dist_args
+                --emit-dist-ctest "${_dist_tests_file}"
+                --emit-dist-binary "\${CMAKE_CURRENT_LIST_DIR}/../bin/${ARG_DIST_BIN}${CMAKE_EXECUTABLE_SUFFIX}")
         if (ARG_TEST_FILES)
-            list(APPEND _props "-DDIST_FILES_SUBDIR=test/${ARG_NAME_PREFIX}")
+            list(APPEND _dist_args --emit-dist-subdir "test/${ARG_NAME_PREFIX}")
         endif ()
         set(_dist_outputs "${_dist_tests_file}")
+    endif ()
+    set(_workdir_args "")
+    if (ARG_WORKING_DIRECTORY)
+        set(_workdir_args --emit-workdir "${ARG_WORKING_DIRECTORY}")
     endif ()
     add_custom_command(
             OUTPUT "${_ids_file}" "${_tests_file}" ${_dist_outputs}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_stamp_dir}"
             COMMAND $<TARGET_FILE:${target}> --list-ids > "${_ids_file}"
-            COMMAND ${CMAKE_COMMAND}
-                    -DBINARY=$<TARGET_FILE:${target}>
-                    -DIDS_FILE=${_ids_file}
-                    -DTESTS_FILE=${_tests_file}
-                    -DNAME_PREFIX=${ARG_NAME_PREFIX}
-                    ${_props}
-                    -P "${CMAKE_SOURCE_DIR}/cmake/polytest_discover_emit.cmake"
+            COMMAND $<TARGET_FILE:${target}>
+                    --emit-ctest "${_tests_file}"
+                    --emit-prefix "${ARG_NAME_PREFIX}"
+                    --emit-binary "$<TARGET_FILE:${target}>"
+                    ${_workdir_args}
+                    ${_dist_args}
             DEPENDS ${target} ${ARG_TEST_FILES}
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
             COMMENT "Discovering ${target} tasks"

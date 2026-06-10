@@ -37,7 +37,7 @@ ImageGroup findTestImage(const ImageGroups &archToImage, const invoke::Backend &
     return out;
   }
 
-  if (auto direct = sortedFeatures | collect_first([&](auto &feature) {
+  if (auto direct = sortedFeatures ^ collect_first([&](auto &feature) {
                       return archToImage ^ get_maybe(feature) //
                              ^ map([&](auto &x) { return ImageGroup{{feature, std::string(x.begin(), x.end())}}; });
                     }))
@@ -58,24 +58,30 @@ ImageGroup findTestImage(const ImageGroups &archToImage, const invoke::Backend &
     if (required ^ forall([&](auto &r) { return sortedFeatures ^ contains(r); })) return {{arch, std::string(image.begin(), image.end())}};
   }
 
-  if (auto it = archToImage.find(""); it != archToImage.end()) return {{"", std::string(it->second.begin(), it->second.end())}};
+  if (const auto x = archToImage ^ get_maybe(std::string{})) return {{"", std::string(x->begin(), x->end())}};
 
   return {};
 }
 
-int runOnDevice(invoke::Backend backend, std::string_view deviceName, const ImageGroups &images, const DeviceRunner &runner) {
+int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vector<std::string> &requiredFeatures, const ImageGroups &images,
+                const DeviceRunner &runner, const DeviceSkip &skip) {
   Context ctx;
 
   std::optional<invoke::DeviceLock> lock;
   try {
     auto platform = invoke::Platform::maybe(backend);
     if (!platform) return 77;
+    const bool archAsFeature = backend != invoke::Backend::RelocatableObject && backend != invoke::Backend::SharedObject;
     std::unique_ptr<invoke::Device> device;
-    for (auto &d : platform->enumerate())
-      if (d->name() == deviceName) {
-        device = std::move(d);
-        break;
-      }
+    for (auto &d : platform->enumerate()) {
+      const auto features = d->features();
+      const auto hasFeature = [&](const std::string_view f) { return features ^ exists([&](auto &x) { return x == f; }); };
+      if (!(requiredFeatures ^ forall(hasFeature))) continue;
+      if (archAsFeature && !arch.empty() && arch != "*" && !hasFeature(arch)) continue;
+      if (skip(backend, *d)) continue;
+      device = std::move(d);
+      break;
+    }
     if (!device) return 77;
     lock.emplace(device->physicalDevice());
     auto imageGroup = findTestImage(images, backend, device->features());
@@ -91,41 +97,24 @@ int runOnDevice(invoke::Backend backend, std::string_view deviceName, const Imag
 
 std::vector<Task> discoverMatrix(const std::vector<Suite> &suites) {
   const auto targets = polytest::resolveTestTargets(POLYREGION_TEST_PROFILE_DIR, env::PolyinvokeTestTargets);
-  const auto profileAllows = [&targets](invoke::Backend b, invoke::Device &d) -> bool {
-    if (targets.empty()) return true;
-    const auto features = d.features();
-    const auto hasFeature = [&](std::string_view f) {
-      return std::any_of(features.begin(), features.end(), [&](auto &x) { return x == f; });
-    };
-    for (const auto &t : targets) {
-      if (t.spec.runtime != b) continue;
-      if (!std::all_of(t.spec.requiredDeviceFeatures.begin(), t.spec.requiredDeviceFeatures.end(), hasFeature)) continue;
-      const bool archAsFeature = b != invoke::Backend::RelocatableObject && b != invoke::Backend::SharedObject;
-      if (archAsFeature && !t.arch.empty() && t.arch != "*" && !hasFeature(t.arch)) continue;
-      return true;
-    }
-    return false;
-  };
-  return suites                                                              //
-         | flat_map([&](const Suite &s) -> std::vector<Task> {               //
-             return s.backends                                               //
-                    | flat_map([&](invoke::Backend b) -> std::vector<Task> { //
-                        auto platform = invoke::Platform::maybe(b);
-                        if (!platform) return {};
-                        return platform->enumerate()                                                     //
-                               | filter([&](auto &d) { return profileAllows(b, *d) && !s.skip(b, *d); }) //
-                               | map([&, name = s.name, images = s.images, runner = s.runner](auto &d) -> Task {
-                                   const std::string deviceName = d->name();
-                                   return Task{
-                                       fmt::format("{}-{}-{}", name, magic_enum::enum_name(b), polytest::cases::sanitiseId(deviceName)),
-                                       (b == invoke::Backend::RelocatableObject || b == invoke::Backend::SharedObject) ? "" : "device",
-                                       [b, deviceName, images, runner]() -> int { return runOnDevice(b, deviceName, *images, runner); }};
-                                 }) //
-                               | to_vector();
-                      }) //
-                    | to_vector();
-           }) //
-         | to_vector();
+  return suites ^ flat_map([&](const Suite &s) {
+           return s.backends ^ flat_map([&](const invoke::Backend b) {
+                    return targets ^ collect([&](auto &t) -> std::optional<Task> {
+                             if (t.spec.runtime != b) return {};
+                             const std::string arch = t.arch;
+                             const std::vector<std::string> required(t.spec.requiredDeviceFeatures.begin(),
+                                                                     t.spec.requiredDeviceFeatures.end());
+                             // XXX Key on the canonical spec name, not the Backend enum: opencl1_1 and spirv64_kernel both map
+                             // to Backend::OpenCL and would collide on the same arch (e.g. both `@intel`).
+                             return Task{fmt::format("{}-{}-{}", s.name, std::string(t.spec.canonical),
+                                                     polytest::cases::sanitiseId(arch.empty() ? "any" : arch)),
+                                         (b == invoke::Backend::RelocatableObject || b == invoke::Backend::SharedObject) ? "" : "device",
+                                         [b, arch, required, images = s.images, runner = s.runner, skip = s.skip]() -> int {
+                                           return runOnTarget(b, arch, required, *images, runner, skip);
+                                         }};
+                           });
+                  });
+         });
 }
 
 } // namespace polyregion::test_utils

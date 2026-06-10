@@ -206,7 +206,9 @@ test-native *args='':
     #!/usr/bin/env bash
     set -euo pipefail
     BUILD=$(just _native-build)
-    ctest --test-dir "$BUILD" {{ args }}
+    rm -f "$BUILD"/*/polytest-discover/*.ids
+    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
+    ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
 # Build the software emulator bundle (gpuocelot/rusticl+PoCL/lavapipe) -> emulators/out (CONTAINER=docker overrides podman).
 build-emulators:
@@ -230,7 +232,6 @@ test-native-with-emulators *args='':
     BUILD=$(just _native-build)
     export POLYREGION_TEST_PROFILE=emulators
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
-    export POLYINVOKE_OPENCL_CPU=1
     # XXX ctest bakes target names at discovery; re-list under this profile first.
     rm -f "$BUILD"/*/polytest-discover/*.ids
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover

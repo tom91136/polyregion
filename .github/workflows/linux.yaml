@@ -567,7 +567,7 @@ jobs:
           export POLYPASS_PLUGINS=$DIST/lib/libpolypass.so
           export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
           export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
-          export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK=0 POLYINVOKE_OPENCL_CPU=1
+          export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK=0
           ctest --test-dir "$TESTS" -j "$(nproc)" --timeout 1500 --output-on-failure --output-junit "$TESTS/emulator-test-results.xml"
 
       - name: Annotate ctest results

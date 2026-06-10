@@ -7,6 +7,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 
+#include "polyregion/env_keys.h"
+
 namespace {
 inline std::string envOr(const char *name, const char *fallback) {
   if (const char *v = std::getenv(name)) return std::string(v);
@@ -30,11 +32,11 @@ inline std::vector<std::string> testFilesFromEnv(const char *dirEnv, std::vector
 }
 } // namespace
 
-static const std::string BinaryDir = envOr("POLYTEST_BINARY_DIR", "@POLYTEST_BINARY_DIR@");
-static const std::string WorkDir = envOr("POLYTEST_WORK_DIR", "@POLYTEST_CACHE_DIR@");
+static const std::string BinaryDir = envOr(polyregion::env::PolytestBinaryDir, "@POLYTEST_BINARY_DIR@");
+static const std::string WorkDir = envOr(polyregion::env::PolytestWorkDir, "@POLYTEST_CACHE_DIR@");
 static const std::vector<std::string> TestFiles =
-    testFilesFromEnv("POLYTEST_FILES_DIR", { @POLYTEST_INPUT_FILES@ });
-static const std::string Driver = envOr("POLYTEST_DRIVER", "@POLYTEST_DRIVER@");
-static const std::string Lib = envOr("POLYTEST_LIB", "@POLYTEST_LIB@");
-static const std::string LibraryPath = envOr("POLYTEST_LIBRARY_PATH", "@POLYTEST_LIBRARY_PATH@");
-static const std::string Include = envOr("POLYTEST_INCLUDE", "@POLYTEST_INCLUDE@");
+    testFilesFromEnv(polyregion::env::PolytestFilesDir, { @POLYTEST_INPUT_FILES@ });
+static const std::string Driver = envOr(polyregion::env::PolytestDriver, "@POLYTEST_DRIVER@");
+static const std::string Lib = envOr(polyregion::env::PolytestLib, "@POLYTEST_LIB@");
+static const std::string LibraryPath = envOr(polyregion::env::PolytestLibraryPath, "@POLYTEST_LIBRARY_PATH@");
+static const std::string Include = envOr(polyregion::env::PolytestInclude, "@POLYTEST_INCLUDE@");

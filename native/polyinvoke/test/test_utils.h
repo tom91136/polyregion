@@ -42,7 +42,8 @@ struct Suite {
         skip(std::move(skip)) {}
 };
 
-int runOnDevice(invoke::Backend backend, std::string_view deviceName, const ImageGroups &images, const DeviceRunner &runner);
+int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vector<std::string> &requiredFeatures, const ImageGroups &images,
+                const DeviceRunner &runner, const DeviceSkip &skip);
 
 std::vector<polytest::cases::Task> discoverMatrix(const std::vector<Suite> &suites);
 

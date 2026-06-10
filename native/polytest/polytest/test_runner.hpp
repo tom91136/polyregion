@@ -1,11 +1,14 @@
 #pragma once
 
+#include <fstream>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
+#include "polytest/ctest_emit.hpp"
 #include "polytest/test_case.hpp"
 
 namespace polyregion::polytest::cases {
@@ -13,18 +16,32 @@ namespace polyregion::polytest::cases {
 // Modes:
 //   --list-ids               one id per line on stdout
 //   --run-task <id>          run a single task; exit 0/77/1
+//   --emit-ctest <file> --emit-prefix <p> --emit-binary <b> [--emit-workdir <w>]
+//        [--emit-dist-ctest <f> --emit-dist-binary <b> --emit-dist-subdir <s>]
+//                            write CTestTestfile fragment(s) and exit
 //   (no args)                run all tasks in registration order
 inline int runMain(int argc, char **argv) {
   std::string_view mode = "all";
   std::string_view target;
+  std::string emitFile, emitPrefix, emitBinary, emitWorkdir, emitDistFile, emitDistBinary, emitDistSubdir;
+  auto next = [&](int &i) -> std::string { return i + 1 < argc ? argv[++i] : std::string{}; };
   for (int i = 1; i < argc; ++i) {
     const std::string_view a = argv[i];
     if (a == "--list-ids") mode = "list";
     else if (a == "--run-task" && i + 1 < argc) {
       mode = "run";
       target = argv[++i];
-    } else if (a == "--help" || a == "-h") {
-      fmt::print("Usage: {} [--list-ids | --run-task <id>]\n", argv[0]);
+    } else if (a == "--emit-ctest") {
+      mode = "emit";
+      emitFile = next(i);
+    } else if (a == "--emit-prefix") emitPrefix = next(i);
+    else if (a == "--emit-binary") emitBinary = next(i);
+    else if (a == "--emit-workdir") emitWorkdir = next(i);
+    else if (a == "--emit-dist-ctest") emitDistFile = next(i);
+    else if (a == "--emit-dist-binary") emitDistBinary = next(i);
+    else if (a == "--emit-dist-subdir") emitDistSubdir = next(i);
+    else if (a == "--help" || a == "-h") {
+      fmt::print("Usage: {} [--list-ids | --run-task <id> | --emit-ctest <file> ...]\n", argv[0]);
       return 0;
     } else {
       fmt::print(stderr, "Unknown arg: {}\n", a);
@@ -37,10 +54,19 @@ inline int runMain(int argc, char **argv) {
   auto all = ::polyregion::polytest::cases::discoverers() ^ flat_map([](auto &d) { return d(); });
 
   if (mode == "list") {
-    for (auto &t : all) {
+    all | for_each([](auto &t) {
       if (t.labels.empty()) fmt::print("{}\n", t.id);
       else fmt::print("{}\t{}\n", t.id, t.labels);
-    }
+    });
+    return 0;
+  }
+
+  if (mode == "emit") {
+    const auto tasks = all ^ map([](auto &t) { return std::pair{std::string(t.id), std::string(t.labels)}; });
+    emitCtestFragment(emitFile, emitPrefix, emitBinary, emitWorkdir, {}, tasks);
+    if (!emitDistFile.empty())
+      emitCtestFragment(emitDistFile, emitPrefix, emitDistBinary, {}, emitDistSubdir.empty() ? std::string{} : distEnv(emitDistSubdir),
+                        tasks);
     return 0;
   }
 
@@ -72,12 +98,10 @@ inline int runMain(int argc, char **argv) {
     return 2;
   }
 
-  int worst = 0;
-  for (auto &t : all) {
-    const int rc = runOne(t);
-    if (rc != 0 && rc != 77 && worst == 0) worst = rc;
-  }
-  return worst;
+  return all ^ fold_left(0, [&](const int worst, auto &t) {
+           const int rc = runOne(t);
+           return worst == 0 && rc != 0 && rc != 77 ? rc : worst;
+         });
 }
 
 } // namespace polyregion::polytest::cases
