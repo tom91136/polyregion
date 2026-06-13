@@ -33,6 +33,10 @@
 #include "polytest/lit.hpp"
 #include "polytest/profile.hpp"
 
+#ifndef _WIN32
+  #include <sys/resource.h>
+#endif
+
 namespace polyregion::polytest {
 
 using namespace aspartame;
@@ -61,6 +65,11 @@ struct DriverConfig {
 enum class Mode : std::uint8_t { Offload, Passthrough };
 inline constexpr const char *modeName(Mode m) { return m == Mode::Offload ? "offload" : "passthrough"; }
 
+struct RunVariant {
+  std::string suffix;
+  std::vector<std::pair<std::string, std::string>> env;
+};
+
 struct Task {
   Mode mode;
   std::string testFile;
@@ -68,6 +77,7 @@ struct Task {
   std::vector<std::pair<std::string, std::string>> variables;
   std::string output;
   std::vector<TestCase::Run> runs; // templates already expanded against (variables + defaults + stdpar + input + output)
+  std::vector<RunVariant> variants;
 
   std::string display() const {
     return fmt::format("[{}] {}/{} {}", modeName(mode), extractTestName(testFile), caseName,
@@ -128,8 +138,16 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   put(polyregion::env::PolyrtPlatform, archFor(t, cfg));
   put(polyregion::env::PolyrtHostFallback, "0");
   put(polyregion::env::PolyrtStrictSelect, "1");
-  for (auto &kv : loadProfileEnv(cfg.profileDir))
+  // XXX NVIDIA's shader disk cache (~/.cache/nvidia/GLCache) bloats to 100k+ files across a sweep and the
+  // driver stat-scans it on every init (~20s spin); one-shot test kernels gain nothing, so disable it
+  put("__GL_SHADER_DISK_CACHE", "0");
+  // XXX rusticl loads Mesa's LLVM in-process; the ICD loader pulls it in for ANY OpenCL target, clashing
+  // with polydco/polystl's LLVM (two libLLVMSPIRVLib) -> bad_alloc. expose it only when it's selected
+  const bool rusticlTarget = archFor(t, cfg).find("rusticl") != std::string::npos;
+  for (auto &kv : loadProfileEnv(cfg.profileDir)) {
+    if (!rusticlTarget && (kv ^ starts_with("RUSTICL_ENABLE="))) continue;
     putKv(kv);
+  }
   if (const auto v = std::getenv(polyregion::env::PolyinvokeTestLock)) put(polyregion::env::PolyinvokeTestLock, v);
   else put(polyregion::env::PolyinvokeTestLock, "1");
   if (const auto v = std::getenv("ASAN_OPTIONS")) put("ASAN_OPTIONS", v);
@@ -143,10 +161,10 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   else put("UBSAN_OPTIONS", "print_stacktrace=1");
   if (std::getenv(polyregion::env::PolytestDebug)) put(polyregion::env::PolyrtDebug, "2");
   // child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish
-  for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads,   //
-                           polyregion::env::PolyinvokeDisableSvm,                                     //
-                           polyregion::env::PolyregionGenMarshal, polyregion::env::PolyregionPassLog, //
-                           polyregion::env::PolyregionDebug,                                          //
+  for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads,           //
+                           polyregion::env::PolyinvokeDisableSvm, polyregion::env::PolyinvokeDisableBackends, //
+                           polyregion::env::PolyrtMirror, polyregion::env::PolyregionPassLog,                 //
+                           polyregion::env::PolyregionDebug,                                                  //
                            "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
@@ -175,8 +193,9 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
     if (auto v = std::getenv(name)) put(name, v);
   }
 #elif defined(__linux__)
-  // XXX forward LD_LIBRARY_PATH for dist-relative .so when rpath misses; lavapipe libs must precede it
-  for (const auto *name : {"TMPDIR", "HOME"})
+  // XXX forward LD_LIBRARY_PATH (dist-relative .so when rpath misses; lavapipe must precede) and a parent
+  // LD_PRELOAD shim into the wholesale-replaced child env; the run-only ASan block layers its rt ahead
+  for (const auto *name : {"TMPDIR", "HOME", "LD_PRELOAD", "POLYRT_DUMP_KERNEL"})
     if (auto v = std::getenv(name)) put(name, v);
   const auto ld = std::getenv("LD_LIBRARY_PATH");
   if (const auto joined = lavapipeLd + (ld ? ld : ""); !joined.empty()) put("LD_LIBRARY_PATH", joined);
@@ -400,31 +419,52 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
     const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
     const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
                                         static_cast<std::uint32_t>(runsHash));
+    const auto arch = varsWithLabel ^ collect_first([&](auto &k, auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) ^
+                      get_or_else(std::string{});
+    const bool physical = (arch ^ starts_with("cuda")) || (arch ^ starts_with("hsa")) || (arch ^ starts_with("hip"));
+    const auto detBase =
+        fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
     return modes ^ map([&](const auto mode) -> Task {
-             const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
+             std::vector<RunVariant> variants;
+             if (mode == Mode::Offload && physical)
+               variants = {RunVariant{"", {}},                                                   // compiletime (default)
+                           RunVariant{"runtime", {{std::string(env::PolyrtMirror), "runtime"}}}, // generic SMA walk
+                           RunVariant{"usm", {{std::string(env::PolyrtMirror), "off"}}}};        // USM; 77 if no USM
+             const auto output = fmt::format("{}_{}", variants.empty() ? baseOutput : detBase, modeName(mode));
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
              auto runs = tc.runs ^ map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; });
-             return {mode, file, tc.name, varsWithLabel, output, std::move(runs)};
+             return {mode, file, tc.name, varsWithLabel, output, std::move(runs), std::move(variants)};
            });
   };
 
-  return cfg.testFiles ^ flat_map([&](const std::string &file) {
-           std::ifstream src(file, std::ios::in | std::ios::binary);
-           const auto cases = TestCase::parseTestCase(src, cfg.directive, {{cfg.archVar, targets}});
-           const auto shortName = extractTestName(file);
-           return cases ^ flat_map([&](auto &tc) -> std::vector<Task> {
-                    if (!matches(shortName, tc.name)) return {};
-                    return tc.matrices ^ flat_map([&](auto &vars) {
-                             return cfg.defaultsVariants ^
-                                    flat_map([&](auto &label, auto &value) { return tasksFor(file, shortName, tc, vars, label, value); });
-                           });
-                  });
+  const auto all = cfg.testFiles ^ flat_map([&](const std::string &file) {
+                     std::ifstream src(file, std::ios::in | std::ios::binary);
+                     const auto cases = TestCase::parseTestCase(src, cfg.directive, {{cfg.archVar, targets}});
+                     const auto shortName = extractTestName(file);
+                     return cases ^ flat_map([&](auto &tc) -> std::vector<Task> {
+                              if (!matches(shortName, tc.name)) return {};
+                              return tc.matrices ^ flat_map([&](auto &vars) {
+                                       return cfg.defaultsVariants ^ flat_map([&](auto &label, auto &value) {
+                                                return tasksFor(file, shortName, tc, vars, label, value);
+                                              });
+                                     });
+                            });
+                   });
+
+  return all ^ distinct_by([&](const Task &t) -> std::string {
+           if (t.mode != Mode::Passthrough) return t.id();
+           return fmt::format("P|{}|{}|{}", t.testFile, t.caseName, t.variables ^ mk_string("|", [&](auto &k, auto &v) {
+                                                                      return k + "=" + (k == cfg.archVar ? v.substr(0, v.find('@')) : v);
+                                                                    }));
          });
 }
 
 struct RunnerOptions {
   std::vector<std::string> caseFilters = {};
   std::string runTask = {};
+  std::string compileTask = {};
+  std::string runOnlyTask = {};
+  std::string cleanupTask = {};
   int compileJobs = -1;
   bool verbose = false;
   bool offload = true;
@@ -442,7 +482,14 @@ struct RunnerOptions {
 
 inline void emitCtest(const std::vector<Task> &tasks, const std::string &file, const std::string &prefix, const std::string &binary,
                       const std::string &workdir, const std::string &env) {
-  emitCtestFragment(file, prefix, binary, workdir, env, tasks ^ map([](auto &t) { return std::pair{t.id(), std::string{}}; }));
+  const auto entries = tasks ^ map([](const Task &t) {
+                         const auto vs =
+                             t.variants ^ map([](const RunVariant &v) {
+                               return std::pair{v.suffix, v.env ^ mk_string(";", [](auto &k, auto &val) { return k + "=" + val; })};
+                             });
+                         return CtestEntry{t.id(), std::string{}, vs};
+                       });
+  emitCtestFragment(file, prefix, binary, workdir, env, entries);
 }
 
 inline const char *statusTag(TaskStatus s) {
@@ -455,7 +502,40 @@ inline const char *statusTag(TaskStatus s) {
 }
 
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
+#ifndef _WIN32
+  // XXX ROCr writes a ~150 MB gpucore.<pid> per GPU VM fault (honours RLIMIT_CORE)
+  const rlimit noCore{0, 0};
+  setrlimit(RLIMIT_CORE, &noCore);
+#endif
   auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
+  // single-task compile / run / cleanup, driven by ctest fixtures for shared-compile variant tasks
+  if (const auto &single = !opts.compileTask.empty()   ? opts.compileTask
+                           : !opts.runOnlyTask.empty() ? opts.runOnlyTask
+                                                       : opts.cleanupTask;
+      !single.empty()) {
+    auto it = allTasks ^ find([&](auto &t) { return t.id() == single; });
+    if (!it) return std::fprintf(stderr, "polytest: no task with id '%s'\n", single.c_str()), 1;
+    const Task &t = *it;
+    if (!opts.cleanupTask.empty()) {
+      llvm::sys::fs::remove(t.output);
+      for (auto ext : {".exe", ".pdb", ".ilk", ".lib", ".exp"})
+        llvm::sys::fs::remove(t.output + ext);
+      return 0;
+    }
+    const bool isCompile = !opts.compileTask.empty();
+    const auto o = isCompile ? detail::compileTask(t, cfg) : detail::runTask(t, cfg);
+    if (o.status == TaskStatus::Fail) {
+      if (!o.failReason.empty()) std::fprintf(stderr, "  reason: %s\n", o.failReason.c_str());
+      if (!o.cmdline.empty()) std::fprintf(stderr, "  cmd: %s\n", o.cmdline.c_str());
+      std::fprintf(stderr, "  stdout:\n%s\n  stderr:\n%s\n", o.stdoutCapture.c_str(), o.stderrCapture.c_str());
+    }
+    if (o.status == TaskStatus::Skip) {
+      if (isCompile) return 77; // compile-skip cascades to dependents via the FIXTURES_SETUP SKIP_RETURN_CODE
+      recordSkip(t.id(), o.failReason);
+      return 0;
+    }
+    return o.status == TaskStatus::Pass ? 0 : 1;
+  }
   if (!opts.runTask.empty()) {
     auto it = allTasks ^ find([&](auto &t) { return t.id() == opts.runTask; });
     if (!it) {
@@ -465,7 +545,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     Task only = std::move(const_cast<Task &>(*it));
     allTasks.clear();
     allTasks.push_back(std::move(only));
-  }
+  } else std::remove("polytest-skips.log");
   const auto &tasks = allTasks;
   if (tasks.empty()) {
     std::fprintf(stderr, "polytest: no tasks discovered (filters=%zu)\n", opts.caseFilters.size());
@@ -534,12 +614,14 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     const auto &co = compileOutcomes[i];
     if (co.status != TaskStatus::Pass) {
       finalOutcomes[i] = co;
+      if (co.status == TaskStatus::Skip) recordSkip(tasks[i].id(), co.failReason);
       const char *label = co.status == TaskStatus::Skip ? "compile-skip" : "compile-fail";
       std::fprintf(stderr, "[run %zu/%zu] %s %s (%s)\n", i + 1, tasks.size(), statusTag(co.status), tasks[i].display().c_str(), label);
       continue;
     }
     auto out = detail::runTask(tasks[i], cfg);
     finalOutcomes[i] = out;
+    if (out.status == TaskStatus::Skip) recordSkip(tasks[i].id(), out.failReason);
     std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
     dumpDetails(out, /*includeStdout*/ true);
     if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) {
@@ -576,6 +658,9 @@ inline const DriverConfig *firedCfg = nullptr;
 inline int fired_main( //
     fire::optional<std::string> caseFilter = fire::arg({"-c", "--case", "Filter by file shortname or case name"}),
     fire::optional<std::string> runTask = fire::arg({"--run-task", "Run exactly one task by id (see --list-ids)"}),
+    fire::optional<std::string> compileTask = fire::arg({"--compile-task", "Compile one task by id, no run (ctest fixture setup)"}),
+    fire::optional<std::string> runOnlyTask = fire::arg({"--run-only-task", "Run one already-compiled task by id, no compile"}),
+    fire::optional<std::string> cleanupTask = fire::arg({"--cleanup-task", "Remove one task's binary (ctest fixture cleanup)"}),
     int jobs = fire::arg({"-j", "--jobs", "Compile parallelism (default: hardware_concurrency)"}, -1),
     bool verbose = fire::arg({"-v", "--verbose", "Dump stdout/stderr for every task"}),
     bool offloadOnly = fire::arg({"--offload-only", "Skip passthrough mode"}),
@@ -593,6 +678,9 @@ inline int fired_main( //
       .compileJobs = jobs, .verbose = verbose, .offload = !passthroughOnly, .passthrough = !offloadOnly, .list = list, .listIds = listIds};
   if (caseFilter) opts.caseFilters.push_back(caseFilter.value());
   if (runTask) opts.runTask = runTask.value();
+  if (compileTask) opts.compileTask = compileTask.value();
+  if (runOnlyTask) opts.runOnlyTask = runOnlyTask.value();
+  if (cleanupTask) opts.cleanupTask = cleanupTask.value();
   if (emitCtest) opts.emitFile = emitCtest.value();
   if (emitPrefix) opts.emitPrefix = emitPrefix.value();
   if (emitBinary) opts.emitBinary = emitBinary.value();

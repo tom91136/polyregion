@@ -4,7 +4,6 @@ namespace polyregion::env {
 
 inline constexpr auto PolyregionDebug = "POLYREGION_DEBUG";
 inline constexpr auto PolyregionPassLog = "POLYREGION_PASS_LOG";
-inline constexpr auto PolyregionGenMarshal = "POLYREGION_GEN_MARSHAL";
 inline constexpr auto PolyregionEmulatorsHome = "POLYREGION_EMULATORS_HOME";
 inline constexpr auto PolyinvokeTrace = "POLYINVOKE_TRACE";
 inline constexpr auto PolyregionCacheDir = "POLYREGION_CACHE_DIR";
@@ -40,6 +39,7 @@ inline constexpr auto PolyrtDebug = "POLYRT_DEBUG";
 inline constexpr auto PolyrtDevice = "POLYRT_DEVICE";
 inline constexpr auto PolyrtDumpKernel = "POLYRT_DUMP_KERNEL";
 inline constexpr auto PolyrtHostFallback = "POLYRT_HOST_FALLBACK";
+inline constexpr auto PolyrtMirror = "POLYRT_MIRROR";
 inline constexpr auto PolyrtPlatform = "POLYRT_PLATFORM";
 inline constexpr auto PolyrtStrictSelect = "POLYRT_STRICT_SELECT";
 

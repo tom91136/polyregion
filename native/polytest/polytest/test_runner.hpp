@@ -62,7 +62,7 @@ inline int runMain(int argc, char **argv) {
   }
 
   if (mode == "emit") {
-    const auto tasks = all ^ map([](auto &t) { return std::pair{std::string(t.id), std::string(t.labels)}; });
+    const auto tasks = all ^ map([](auto &t) { return CtestEntry{std::string(t.id), std::string(t.labels), {}}; });
     emitCtestFragment(emitFile, emitPrefix, emitBinary, emitWorkdir, {}, tasks);
     if (!emitDistFile.empty())
       emitCtestFragment(emitDistFile, emitPrefix, emitDistBinary, {}, emitDistSubdir.empty() ? std::string{} : distEnv(emitDistSubdir),
@@ -93,7 +93,11 @@ inline int runMain(int argc, char **argv) {
   };
 
   if (mode == "run") {
-    if (auto found = all ^ find([&](auto &t) { return t.id == target; })) return runOne(*found);
+    if (auto found = all ^ find([&](auto &t) { return t.id == target; })) {
+      const int rc = runOne(*found);
+      if (rc == 77) return recordSkip(std::string(found->id), "no compatible device/feature"), 0;
+      return rc;
+    }
     fmt::print(stderr, "No task with id `{}`\n", target);
     return 2;
   }

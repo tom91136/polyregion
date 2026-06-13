@@ -202,13 +202,18 @@ test-scala *args='':
     cd frontend && {{ sbt }} 'compiler-testsuite-scala/test' {{ args }}
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
+# Skips are not ctest SKIP entries (that property is O(n^2) at parse); the runner logs them per workdir.
 test-native *args='':
     #!/usr/bin/env bash
     set -euo pipefail
     BUILD=$(just _native-build)
     rm -f "$BUILD"/*/polytest-discover/*.ids
+    find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
-    ctest --test-dir "$BUILD" --timeout 600 {{ args }}
+    rc=0; ctest --test-dir "$BUILD" --timeout 600 {{ args }} || rc=$?
+    skips=$(find "$BUILD" -name polytest-skips.log -exec cat {} + 2>/dev/null | wc -l || true)
+    [ "${skips:-0}" -gt 0 ] && echo "polytest: ${skips} skipped (find $BUILD -name polytest-skips.log | xargs cat)" || true
+    exit $rc
 
 # Build the software emulator bundle (gpuocelot/rusticl+PoCL/lavapipe) -> emulators/out (CONTAINER=docker overrides podman).
 build-emulators:
