@@ -1,5 +1,6 @@
 #include "polyinvoke/hip_platform.h"
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "dl_util.h"
@@ -123,6 +124,13 @@ bool HipDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
 }
+PagingMode HipDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  if (prop.pageableMemoryAccess) return PagingMode::System;
+  return prop.managedMemory ? PagingMode::Managed : PagingMode::None;
+}
 bool HipDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -144,6 +152,10 @@ std::vector<std::string> HipDevice::features() {
   if (prop.arch.hasGlobalInt64Atomics) out.emplace_back("int64");
   // XXX No prop field for fp16; gfx9 (Vega) >= have fp16, older parts emulate via fp32
   if (prop.gcnArch >= 900) out.emplace_back("fp16");
+  const auto paging = pagingMode();
+  out.emplace_back(paging == PagingMode::System ? "xnack+" : "xnack-");
+  out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(paging)));
+  if (paging == PagingMode::System) out.emplace_back("hmm");
   return out;
 }
 void HipDevice::loadModule(const std::string &name, const std::string &image) {

@@ -117,6 +117,10 @@ bool MetalDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return unified;
 }
+PagingMode MetalDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  return unified ? PagingMode::Managed : PagingMode::None; // shared MTLBuffer only, no raw-pointer kernels
+}
 bool MetalDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -132,7 +136,7 @@ std::vector<Property> MetalDevice::properties() {
 }
 std::vector<std::string> MetalDevice::features() {
   POLYINVOKE_TRACE();
-  return {};
+  return {fmt::format("paging:{}", magic_enum::enum_name(paging))};
 }
 void MetalDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();

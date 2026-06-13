@@ -339,6 +339,8 @@ struct POLYREGION_EXPORT DeviceQueue {
   virtual POLYREGION_EXPORT void enqueueWaitBlocking() = 0;
 };
 
+enum class PagingMode { None, Managed, System };
+
 struct POLYREGION_EXPORT Device {
   virtual POLYREGION_EXPORT ~Device() = default;
   [[nodiscard]] virtual POLYREGION_EXPORT int64_t id() = 0;
@@ -346,6 +348,7 @@ struct POLYREGION_EXPORT Device {
   [[nodiscard]] virtual POLYREGION_EXPORT PhysicalDevice physicalDevice() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT ModuleFormat moduleFormat() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool sharedAddressSpace() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT PagingMode pagingMode() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool singleEntryPerModule() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<Property> properties() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<std::string> features() = 0;

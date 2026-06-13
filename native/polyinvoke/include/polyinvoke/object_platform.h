@@ -31,6 +31,7 @@ public:
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
+  POLYREGION_EXPORT PagingMode pagingMode() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;

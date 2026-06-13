@@ -4,6 +4,7 @@
 #include <cstring>
 #include <utility>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #ifndef _MSC_VER
@@ -23,13 +24,10 @@
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::vulkan;
 
-#define CHECKED(f) checked((f), __FILE__, __LINE__)
-
 static constexpr const char *PREFIX = "Vulkan";
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
-// good to haves
 static std::vector<const char *> commonExtensions = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
 #ifndef NDEBUG
@@ -44,7 +42,9 @@ static std::vector<const char *> extraLayers = {};
 static std::vector<const char *> extraExtensions = {};
 #endif
 
-static vk::ApplicationInfo AppInfo(__FILE__, 1, nullptr, 0, VK_API_VERSION_1_1);
+// SPIR-V 1.4 (the LLVM backend's GLCompute default) needs a Vulkan >= 1.2 app; lavapipe silently runs
+// a no-op shader otherwise (writes never land), so declare 1.2 to stay in-spec everywhere
+static vk::ApplicationInfo AppInfo(__FILE__, 1, nullptr, 0, VK_API_VERSION_1_2);
 
 static vk::raii::Instance createInstance(std::vector<const char *> &extensions, //
                                          std::vector<const char *> &layers,     //
@@ -118,15 +118,9 @@ std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
       return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
     });
 
-    // XXX VK_QUEUE_COMPUTE_BIT implies VK_QUEUE_TRANSFER_BIT, see
-    //   https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkQueueFlagBits.html
+    // VK_QUEUE_COMPUTE_BIT implies VK_QUEUE_TRANSFER_BIT
     if (!computeQueueIds.empty()) {
-      // Typically, we get the following queues
-      //  0 : eCompute + eTransfer + ...
-      //  1: eTransfer + ...
-      //  2: eTransfer + ...
-      // The same queue can support both xfer and compute, so we use different queues for each if possible.
-      // We first default to compute, then try to pick out a distinct transfer queue if we can find one.
+      // default transfer to the compute queue, then prefer a distinct transfer queue if one exists
       auto computeQueueId = computeQueueIds[0];
       auto transferQueueId = computeQueueId;
       for (auto xferId : transferQueueIds)
@@ -269,6 +263,10 @@ bool VulkanDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
 }
+PagingMode VulkanDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  return PagingMode::None; // no USM/managed-memory model
+}
 bool VulkanDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return true;
@@ -289,8 +287,6 @@ std::vector<Property> VulkanDevice::properties() {
       {"deviceType", vk::to_string(props.deviceType)},                        //
       {"deviceName", props.deviceName},                                       //
       {"pipelineCacheUUID", std::to_string(id())},                            //
-      //      { "limits",   vk::to_string(props.limits           ) },
-      //      { "sparseProperties",   vk::to_string(props.sparseProperties ) },
   };
 }
 std::vector<std::string> VulkanDevice::features() {
@@ -300,6 +296,7 @@ std::vector<std::string> VulkanDevice::features() {
   if (f.shaderFloat64) out.emplace_back("fp64");
   if (f.shaderInt64) out.emplace_back("int64");
   if (f.shaderInt16) out.emplace_back("int16");
+  out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
   return out;
 }
 void VulkanDevice::loadModule(const std::string &name, const std::string &image) {
@@ -425,43 +422,37 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
 
-  // pointers are uniforms sharing the same descriptor set with monotonically increasing binding
-  // anything that's scalar goes into a struct and added as the last binding of the same descriptor set
-  // See https://github.com/google/clspv/blob/main/docs/OpenCLCOnVulkan.md#example-descriptor-set-mapping
-
+  // pointers bind as storage descriptors in arg order; scalars share one trailing uniform block
+  // (clspv OpenCLCOnVulkan descriptor-set-mapping)
   auto args = detail::argDataAsPointers(types, argData);
 
+  static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
+  // the scalar uniform block uses runtime::std140ScalarLayout - the SAME rule codegen pads with, so a
+  // strict driver (lavapipe) reads each 64-bit member at its 8-aligned offset; the two tiers MUST agree
   std::vector<std::pair<vk::DescriptorBufferInfo, vk::DescriptorType>> infos;
-  size_t argBufferSize = 0;
-
-  {
-    static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
-    for (size_t i = 0; i < types.size() - 1; ++i) {
-      auto rawPtr = args[i];
-      auto tpe = types[i];
-      if (tpe == Type::Scratch) continue;
-      if (tpe != Type::Ptr) {
-        argBufferSize += byteOfType(tpe);
-      } else {
-        uintptr_t ptr = {};
-        std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
-        const auto obj = queryMemObject(ptr);
-        infos.emplace_back(vk::DescriptorBufferInfo{obj->buffer, 0, obj->size}, vk::DescriptorType::eStorageBuffer);
-      }
+  std::vector<size_t> scalarSizes;
+  std::vector<const void *> scalarSrcs;
+  size_t scratchCount = 0;
+  for (size_t i = 0; i < types.size() - 1; ++i) {
+    const auto tpe = types[i];
+    if (tpe == Type::Scratch) scratchCount++;
+    else if (tpe == Type::Ptr) {
+      uintptr_t ptr = {};
+      std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
+      const auto obj = queryMemObject(ptr);
+      infos.emplace_back(vk::DescriptorBufferInfo{obj->buffer, 0, obj->size}, vk::DescriptorType::eStorageBuffer);
+    } else {
+      scalarSizes.push_back(byteOfType(tpe));
+      scalarSrcs.push_back(args[i]);
     }
   }
+  const auto [scalarOffsets, argBufferSize] = polyregion::runtime::std140ScalarLayout(scalarSizes);
 
-  size_t scratchCount = 0;
   auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<details::MemObject>(allocate(allocator, argBufferSize, true));
   if (argObj) {
-    auto *argPtr = static_cast<std::byte *>(argObj->mappedData);
-    for (size_t i = 0; i < types.size() - 1; ++i) {
-      auto tpe = types[i];
-      if (tpe == Type::Scratch) scratchCount++;
-      if (tpe == Type::Ptr || tpe == Type::Scratch) continue;
-      std::memcpy(argPtr, args[i], byteOfType(tpe));
-      argPtr += byteOfType(tpe);
-    }
+    auto *argBase = static_cast<std::byte *>(argObj->mappedData);
+    for (size_t i = 0; i < scalarSizes.size(); ++i)
+      std::memcpy(argBase + scalarOffsets[i], scalarSrcs[i], scalarSizes[i]);
     infos.emplace_back(vk::DescriptorBufferInfo{argObj->buffer, 0, argObj->size}, vk::DescriptorType::eUniformBuffer);
   }
   if (scratchCount > 1) POLYINVOKE_FATAL(PREFIX, "Only a single scratch buffer is supported, %zu requested", scratchCount);
@@ -538,5 +529,3 @@ void VulkanDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
   ctx.waitIdle();
 }
-
-#undef CHECKED

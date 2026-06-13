@@ -86,6 +86,10 @@ bool ObjectDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return true;
 }
+PagingMode ObjectDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  return PagingMode::System; // host CPU: any pointer is directly dereferenceable
+}
 bool ObjectDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -110,6 +114,7 @@ std::vector<std::string> ObjectDevice::features() {
   features.emplace_back("int64");
   // the CPU host device is `@native`; expose it so host@native/c11@native match by feature under strict selection
   features.emplace_back("native");
+  features.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
 
   return features;
 }

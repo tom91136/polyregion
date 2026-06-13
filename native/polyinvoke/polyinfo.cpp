@@ -20,6 +20,7 @@ void dumpDevice(Device &d, const size_t i, const std::string &indent) {
   fmt::print("{}  moduleFormat:         {}\n", indent, magic_enum::enum_name(d.moduleFormat()));
   fmt::print("{}  physicalDevice:       {}\n", indent, d.physicalDevice().str());
   fmt::print("{}  sharedAddressSpace:   {}\n", indent, d.sharedAddressSpace());
+  fmt::print("{}  pagingMode:           {}\n", indent, magic_enum::enum_name(d.pagingMode()));
   fmt::print("{}  singleEntryPerModule: {}\n", indent, d.singleEntryPerModule());
   fmt::print("{}  features:             {}\n", indent, d.features() | mk_string(", "));
   if (const auto props = d.properties(); !props.empty()) {

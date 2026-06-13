@@ -72,6 +72,7 @@ public:
   POLYREGION_EXPORT PhysicalDevice physicalDevice() override;
   POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
+  POLYREGION_EXPORT PagingMode pagingMode() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT std::vector<std::string> features() override;

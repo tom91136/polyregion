@@ -252,9 +252,11 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
             POLYINVOKE_TRACE();
             CHECKED(clReleaseContext(c));
           }),
-      // XXX kernel-format suffix disambiguates source vs SPIRV_Kernel instances over the same cl_device_id.
-      deviceName(queryDeviceInfo(device, CL_DEVICE_NAME) + (format == ModuleFormat::SPIRV_Kernel ? " [SPIR-V]" : " [source]")),
-      format(format), ilCreateFn(ilCreateFn), svm(svm), svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
+      // <cl_platform>:<cl_device> [<format>] - prefix selects the ICD, suffix the source/SPIR-V instance
+      deviceName(platformName + ":" + queryDeviceInfo(device, CL_DEVICE_NAME) +
+                 (format == ModuleFormat::SPIRV_Kernel ? " [SPIR-V]" : " [source]")),
+      quirks(resolveQuirks(deviceName)), format(format), ilCreateFn(ilCreateFn), svm(svm),
+      svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
       store(
           PREFIX,
           [this](auto &&image) {
@@ -350,6 +352,12 @@ bool ClDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
 }
+PagingMode ClDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  // our OpenCL path binds capture pointers as clSVMAlloc buffers, not system pointers, so it tops out
+  // at Managed even on a fine-grain-system device; nullopt svm => no shared memory at all
+  return svm ? PagingMode::Managed : PagingMode::None;
+}
 bool ClDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -375,6 +383,7 @@ std::vector<std::string> ClDevice::features() {
   if (hasExt("cl_khr_fp64")) out.emplace_back("fp64");
   if (hasExt("cl_khr_fp16")) out.emplace_back("fp16");
   if (hasExt("cl_khr_int64_base_atomics")) out.emplace_back("int64");
+  out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
   cachedFeatures = out;
   return out;
 }

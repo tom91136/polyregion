@@ -302,6 +302,15 @@ bool HsaDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
 }
+PagingMode HsaDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  hsa_isa_t isa{};
+  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa) == HSA_STATUS_SUCCESS) {
+    const auto name = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, data); }, 128);
+    if (name.find("xnack+") != std::string::npos) return PagingMode::System;
+  }
+  return PagingMode::Managed; // xnack-/missing: coarse-grain pool only, no system paging
+}
 bool HsaDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -314,6 +323,10 @@ std::vector<std::string> HsaDevice::features() {
   POLYINVOKE_TRACE();
   auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   std::vector<std::string> out{"hsa", "amd", gfxArch};
+  const auto paging = pagingMode();
+  out.emplace_back(paging == PagingMode::System ? "xnack+" : "xnack-");
+  out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(paging)));
+  if (paging == PagingMode::System) out.emplace_back("hmm");
   // XXX HSA exposes no direct hasDoubles/hasInt64Atomics query (unlike HIP's hipDeviceProp_t.arch).
   // In practice, gfx >= 7xx supports fp64 and global int64 atomics
   int gfx = 0;

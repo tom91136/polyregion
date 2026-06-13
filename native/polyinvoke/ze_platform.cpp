@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "dl_util.h"
@@ -187,6 +188,16 @@ bool ZeDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
 }
+PagingMode ZeDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  ze_device_memory_access_properties_t props{};
+  props.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_ACCESS_PROPERTIES;
+  if (zeDeviceGetMemoryAccessProperties(device, &props) == ZE_RESULT_SUCCESS) {
+    if (props.sharedSystemAllocCapabilities & ZE_MEMORY_ACCESS_CAP_FLAG_RW) return PagingMode::System;
+    if (props.sharedSingleDeviceAllocCapabilities & ZE_MEMORY_ACCESS_CAP_FLAG_RW) return PagingMode::Managed;
+  }
+  return PagingMode::None;
+}
 bool ZeDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -205,6 +216,7 @@ std::vector<std::string> ZeDevice::features() {
     if (mod.flags & ZE_DEVICE_MODULE_FLAG_FP64) out.emplace_back("fp64");
     if (mod.flags & ZE_DEVICE_MODULE_FLAG_INT64_ATOMICS) out.emplace_back("int64");
   }
+  out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
   return out;
 }
 void ZeDevice::loadModule(const std::string &name, const std::string &image) {

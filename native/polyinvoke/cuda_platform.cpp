@@ -1,5 +1,6 @@
 #include "polyinvoke/cuda_platform.h"
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "dl_util.h"
@@ -140,6 +141,15 @@ bool CudaDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;
 }
+PagingMode CudaDevice::pagingMode() {
+  POLYINVOKE_TRACE();
+  int pageable = 0;
+  cuDeviceGetAttribute(&pageable, CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS, device);
+  if (pageable) return PagingMode::System;
+  int managed = 0;
+  cuDeviceGetAttribute(&managed, CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY, device);
+  return managed ? PagingMode::Managed : PagingMode::None;
+}
 bool CudaDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
@@ -155,6 +165,9 @@ std::vector<std::string> CudaDevice::features() {
   CHECKED(cuDeviceGetAttribute(&ccMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
   std::vector<std::string> out{"cuda", "nvidia", "sm_" + std::to_string((ccMajor * 10) + ccMinor), "fp64", "int64"};
   if (ccMajor > 5 || (ccMajor == 5 && ccMinor >= 3)) out.emplace_back("fp16");
+  const auto paging = pagingMode();
+  out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(paging)));
+  if (paging == PagingMode::System) out.emplace_back("hmm");
   return out;
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {

@@ -186,6 +186,19 @@ POLYREGION_RT_PROTECT static constexpr size_t byteOfType(Type t) {
   }
 }
 
+POLYREGION_RT_PROTECT static std::pair<std::vector<size_t>, size_t> std140ScalarLayout(const std::vector<size_t> &memberSizes) {
+  std::vector<size_t> offsets(memberSizes.size());
+  size_t off = 0, maxAlign = 1;
+  for (size_t i = 0; i < memberSizes.size(); ++i) {
+    const size_t a = memberSizes[i] == 0 ? 1 : memberSizes[i];
+    off = (off + a - 1) / a * a;
+    offsets[i] = off;
+    off += memberSizes[i];
+    if (a > maxAlign) maxAlign = a;
+  }
+  return {std::move(offsets), (off + maxAlign - 1) / maxAlign * maxAlign};
+}
+
 using TypedPointer = std::pair<Type, void *>;
 
 } // namespace polyregion::runtime
