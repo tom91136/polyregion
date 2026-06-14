@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "bcf018849116fae9ed343e8ea2173aa1";
+constexpr auto AdtHash = "ba4622d46b457e4207bee86498d221b7";
 
 namespace {
 
@@ -459,6 +459,10 @@ TypeSpace::Private TypeSpace::private_from_json(const json &j_) { return {}; }
 
 json TypeSpace::private_to_json(const TypeSpace::Private &x_) { return json::array({}); }
 
+TypeSpace::Constant TypeSpace::constant_from_json(const json &j_) { return {}; }
+
+json TypeSpace::constant_to_json(const TypeSpace::Constant &x_) { return json::array({}); }
+
 TypeSpace::Any TypeSpace::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -466,6 +470,7 @@ TypeSpace::Any TypeSpace::any_from_json(const json &j_) {
     case 0: return TypeSpace::global_from_json(t_);
     case 1: return TypeSpace::local_from_json(t_);
     case 2: return TypeSpace::private_from_json(t_);
+    case 3: return TypeSpace::constant_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -473,7 +478,8 @@ TypeSpace::Any TypeSpace::any_from_json(const json &j_) {
 json TypeSpace::any_to_json(const TypeSpace::Any &x_) {
   return x_.match_total([](const TypeSpace::Global &y_) -> json { return {0, TypeSpace::global_to_json(y_)}; },
                         [](const TypeSpace::Local &y_) -> json { return {1, TypeSpace::local_to_json(y_)}; },
-                        [](const TypeSpace::Private &y_) -> json { return {2, TypeSpace::private_to_json(y_)}; });
+                        [](const TypeSpace::Private &y_) -> json { return {2, TypeSpace::private_to_json(y_)}; },
+                        [](const TypeSpace::Constant &y_) -> json { return {3, TypeSpace::constant_to_json(y_)}; });
 }
 
 Type::Float16 Type::float16_from_json(const json &j_) { return {}; }
@@ -669,19 +675,72 @@ PathStep::Deref PathStep::deref_from_json(const json &j_) { return {}; }
 
 json PathStep::deref_to_json(const PathStep::Deref &x_) { return json::array({}); }
 
+PathStep::Index PathStep::index_from_json(const json &j_) {
+  auto idx = j_.at(0).get<int32_t>();
+  return PathStep::Index(idx);
+}
+
+json PathStep::index_to_json(const PathStep::Index &x_) {
+  auto idx = x_.idx;
+  return json::array({idx});
+}
+
+PathStep::IndexDyn PathStep::indexdyn_from_json(const json &j_) {
+  auto idx = Term::any_from_json(j_.at(0));
+  return PathStep::IndexDyn(idx);
+}
+
+json PathStep::indexdyn_to_json(const PathStep::IndexDyn &x_) {
+  auto idx = Term::any_to_json(x_.idx);
+  return json::array({idx});
+}
+
 PathStep::Any PathStep::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
   switch (ord_) {
     case 0: return PathStep::field_from_json(t_);
     case 1: return PathStep::deref_from_json(t_);
+    case 2: return PathStep::index_from_json(t_);
+    case 3: return PathStep::indexdyn_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
 json PathStep::any_to_json(const PathStep::Any &x_) {
   return x_.match_total([](const PathStep::Field &y_) -> json { return {0, PathStep::field_to_json(y_)}; },
-                        [](const PathStep::Deref &y_) -> json { return {1, PathStep::deref_to_json(y_)}; });
+                        [](const PathStep::Deref &y_) -> json { return {1, PathStep::deref_to_json(y_)}; },
+                        [](const PathStep::Index &y_) -> json { return {2, PathStep::index_to_json(y_)}; },
+                        [](const PathStep::IndexDyn &y_) -> json { return {3, PathStep::indexdyn_to_json(y_)}; });
+}
+
+Region::Rooted Region::rooted_from_json(const json &j_) {
+  auto root = named_from_json(j_.at(0));
+  return Region::Rooted(root);
+}
+
+json Region::rooted_to_json(const Region::Rooted &x_) {
+  auto root = named_to_json(x_.root);
+  return json::array({root});
+}
+
+Region::Opaque Region::opaque_from_json(const json &j_) { return {}; }
+
+json Region::opaque_to_json(const Region::Opaque &x_) { return json::array({}); }
+
+Region::Any Region::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return Region::rooted_from_json(t_);
+    case 1: return Region::opaque_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json Region::any_to_json(const Region::Any &x_) {
+  return x_.match_total([](const Region::Rooted &y_) -> json { return {0, Region::rooted_to_json(y_)}; },
+                        [](const Region::Opaque &y_) -> json { return {1, Region::opaque_to_json(y_)}; });
 }
 
 Term::Float16Const Term::float16const_from_json(const json &j_) {
@@ -811,13 +870,15 @@ json Term::bool1const_to_json(const Term::Bool1Const &x_) {
 Term::NullPtrConst Term::nullptrconst_from_json(const json &j_) {
   auto comp = Type::any_from_json(j_.at(0));
   auto space = TypeSpace::any_from_json(j_.at(1));
-  return {comp, space};
+  auto region = Region::any_from_json(j_.at(2));
+  return {comp, space, region};
 }
 
 json Term::nullptrconst_to_json(const Term::NullPtrConst &x_) {
   auto comp = Type::any_to_json(x_.comp);
   auto space = TypeSpace::any_to_json(x_.space);
-  return json::array({comp, space});
+  auto region = Region::any_to_json(x_.region);
+  return json::array({comp, space, region});
 }
 
 Term::Poison Term::poison_from_json(const json &j_) {
@@ -964,7 +1025,8 @@ Expr::RefTo Expr::refto_from_json(const json &j_) {
   auto idx = j_.at(1).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j_.at(1)));
   auto comp = Type::any_from_json(j_.at(2));
   auto space = TypeSpace::any_from_json(j_.at(3));
-  return {lhs, idx, comp, space};
+  auto region = Region::any_from_json(j_.at(4));
+  return {lhs, idx, comp, space, region};
 }
 
 json Expr::refto_to_json(const Expr::RefTo &x_) {
@@ -972,21 +1034,24 @@ json Expr::refto_to_json(const Expr::RefTo &x_) {
   auto idx = x_.idx ? Term::any_to_json(*x_.idx) : json();
   auto comp = Type::any_to_json(x_.comp);
   auto space = TypeSpace::any_to_json(x_.space);
-  return json::array({lhs, idx, comp, space});
+  auto region = Region::any_to_json(x_.region);
+  return json::array({lhs, idx, comp, space, region});
 }
 
 Expr::Alloc Expr::alloc_from_json(const json &j_) {
   auto comp = Type::any_from_json(j_.at(0));
   auto size = Term::any_from_json(j_.at(1));
   auto space = TypeSpace::any_from_json(j_.at(2));
-  return {comp, size, space};
+  auto region = Region::any_from_json(j_.at(3));
+  return {comp, size, space, region};
 }
 
 json Expr::alloc_to_json(const Expr::Alloc &x_) {
   auto comp = Type::any_to_json(x_.comp);
   auto size = Term::any_to_json(x_.size);
   auto space = TypeSpace::any_to_json(x_.space);
-  return json::array({comp, size, space});
+  auto region = Region::any_to_json(x_.region);
+  return json::array({comp, size, space, region});
 }
 
 Expr::Invoke Expr::invoke_from_json(const json &j_) {
@@ -1019,6 +1084,38 @@ json Expr::invoke_to_json(const Expr::Invoke &x_) {
   return json::array({name, tpeArgs, receiver, args, rtn});
 }
 
+Expr::ForeignCall Expr::foreigncall_from_json(const json &j_) {
+  auto name = j_.at(0).get<std::string>();
+  std::vector<Term::Any> args;
+  for (const auto &v_ : j_.at(1)) {
+    args.emplace_back(Term::any_from_json(v_));
+  }
+  auto rtn = Type::any_from_json(j_.at(2));
+  return {name, args, rtn};
+}
+
+json Expr::foreigncall_to_json(const Expr::ForeignCall &x_) {
+  auto name = x_.name;
+  std::vector<json> args;
+  for (const auto &v_ : x_.args) {
+    args.emplace_back(Term::any_to_json(v_));
+  }
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({name, args, rtn});
+}
+
+Expr::OffsetOf Expr::offsetof_from_json(const json &j_) {
+  auto structTpe = Type::any_from_json(j_.at(0));
+  auto field = j_.at(1).get<std::string>();
+  return {structTpe, field};
+}
+
+json Expr::offsetof_to_json(const Expr::OffsetOf &x_) {
+  auto structTpe = Type::any_to_json(x_.structTpe);
+  auto field = x_.field;
+  return json::array({structTpe, field});
+}
+
 Expr::Any Expr::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -1032,6 +1129,8 @@ Expr::Any Expr::any_from_json(const json &j_) {
     case 6: return Expr::refto_from_json(t_);
     case 7: return Expr::alloc_from_json(t_);
     case 8: return Expr::invoke_from_json(t_);
+    case 9: return Expr::foreigncall_from_json(t_);
+    case 10: return Expr::offsetof_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1045,7 +1144,9 @@ json Expr::any_to_json(const Expr::Any &x_) {
                         [](const Expr::Index &y_) -> json { return {5, Expr::index_to_json(y_)}; },
                         [](const Expr::RefTo &y_) -> json { return {6, Expr::refto_to_json(y_)}; },
                         [](const Expr::Alloc &y_) -> json { return {7, Expr::alloc_to_json(y_)}; },
-                        [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; });
+                        [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; },
+                        [](const Expr::ForeignCall &y_) -> json { return {9, Expr::foreigncall_to_json(y_)}; },
+                        [](const Expr::OffsetOf &y_) -> json { return {10, Expr::offsetof_to_json(y_)}; });
 }
 
 Overload overload_from_json(const json &j_) {
@@ -2230,6 +2331,29 @@ json FunctionFpMode::any_to_json(const FunctionFpMode::Any &x_) {
                         [](const FunctionFpMode::Strict &y_) -> json { return {1, FunctionFpMode::strict_to_json(y_)}; });
 }
 
+FunctionAffinity::Offload FunctionAffinity::offload_from_json(const json &j_) { return {}; }
+
+json FunctionAffinity::offload_to_json(const FunctionAffinity::Offload &x_) { return json::array({}); }
+
+FunctionAffinity::Host FunctionAffinity::host_from_json(const json &j_) { return {}; }
+
+json FunctionAffinity::host_to_json(const FunctionAffinity::Host &x_) { return json::array({}); }
+
+FunctionAffinity::Any FunctionAffinity::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return FunctionAffinity::offload_from_json(t_);
+    case 1: return FunctionAffinity::host_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json FunctionAffinity::any_to_json(const FunctionAffinity::Any &x_) {
+  return x_.match_total([](const FunctionAffinity::Offload &y_) -> json { return {0, FunctionAffinity::offload_to_json(y_)}; },
+                        [](const FunctionAffinity::Host &y_) -> json { return {1, FunctionAffinity::host_to_json(y_)}; });
+}
+
 Arg arg_from_json(const json &j_) {
   auto named = named_from_json(j_.at(0));
   auto pos = j_.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j_.at(1)));
@@ -2266,7 +2390,8 @@ Function function_from_json(const json &j_) {
   auto visibility = FunctionVisibility::any_from_json(j_.at(8));
   auto fpMode = FunctionFpMode::any_from_json(j_.at(9));
   auto isEntry = j_.at(10).get<bool>();
-  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry};
+  auto affinity = FunctionAffinity::any_from_json(j_.at(11));
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity};
 }
 
 json function_to_json(const Function &x_) {
@@ -2293,7 +2418,8 @@ json function_to_json(const Function &x_) {
   auto visibility = FunctionVisibility::any_to_json(x_.visibility);
   auto fpMode = FunctionFpMode::any_to_json(x_.fpMode);
   auto isEntry = x_.isEntry;
-  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry});
+  auto affinity = FunctionAffinity::any_to_json(x_.affinity);
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity});
 }
 
 StructDef structdef_from_json(const json &j_) {
@@ -2722,9 +2848,29 @@ Expr::Invoke invoke_fields_from_msgpack(MsgpackReader &, size_t);
 void invoke_fields_to_msgpack(MsgpackWriter &, const Expr::Invoke &);
 Expr::Invoke invoke_from_msgpack(MsgpackReader &);
 void invoke_to_msgpack(MsgpackWriter &, const Expr::Invoke &);
+Expr::ForeignCall foreigncall_fields_from_msgpack(MsgpackReader &, size_t);
+void foreigncall_fields_to_msgpack(MsgpackWriter &, const Expr::ForeignCall &);
+Expr::ForeignCall foreigncall_from_msgpack(MsgpackReader &);
+void foreigncall_to_msgpack(MsgpackWriter &, const Expr::ForeignCall &);
+Expr::OffsetOf offsetof_fields_from_msgpack(MsgpackReader &, size_t);
+void offsetof_fields_to_msgpack(MsgpackWriter &, const Expr::OffsetOf &);
+Expr::OffsetOf offsetof_from_msgpack(MsgpackReader &);
+void offsetof_to_msgpack(MsgpackWriter &, const Expr::OffsetOf &);
 Expr::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Expr::Any &);
 } // namespace Expr
+namespace Region {
+Region::Rooted rooted_fields_from_msgpack(MsgpackReader &, size_t);
+void rooted_fields_to_msgpack(MsgpackWriter &, const Region::Rooted &);
+Region::Rooted rooted_from_msgpack(MsgpackReader &);
+void rooted_to_msgpack(MsgpackWriter &, const Region::Rooted &);
+Region::Opaque opaque_fields_from_msgpack(MsgpackReader &, size_t);
+void opaque_fields_to_msgpack(MsgpackWriter &, const Region::Opaque &);
+Region::Opaque opaque_from_msgpack(MsgpackReader &);
+void opaque_to_msgpack(MsgpackWriter &, const Region::Opaque &);
+Region::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const Region::Any &);
+} // namespace Region
 namespace PathStep {
 PathStep::Field field_fields_from_msgpack(MsgpackReader &, size_t);
 void field_fields_to_msgpack(MsgpackWriter &, const PathStep::Field &);
@@ -2734,6 +2880,14 @@ PathStep::Deref deref_fields_from_msgpack(MsgpackReader &, size_t);
 void deref_fields_to_msgpack(MsgpackWriter &, const PathStep::Deref &);
 PathStep::Deref deref_from_msgpack(MsgpackReader &);
 void deref_to_msgpack(MsgpackWriter &, const PathStep::Deref &);
+PathStep::Index index_fields_from_msgpack(MsgpackReader &, size_t);
+void index_fields_to_msgpack(MsgpackWriter &, const PathStep::Index &);
+PathStep::Index index_from_msgpack(MsgpackReader &);
+void index_to_msgpack(MsgpackWriter &, const PathStep::Index &);
+PathStep::IndexDyn indexdyn_fields_from_msgpack(MsgpackReader &, size_t);
+void indexdyn_fields_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
+PathStep::IndexDyn indexdyn_from_msgpack(MsgpackReader &);
+void indexdyn_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
 PathStep::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const PathStep::Any &);
 } // namespace PathStep
@@ -2898,6 +3052,10 @@ TypeSpace::Private private_fields_from_msgpack(MsgpackReader &, size_t);
 void private_fields_to_msgpack(MsgpackWriter &, const TypeSpace::Private &);
 TypeSpace::Private private_from_msgpack(MsgpackReader &);
 void private_to_msgpack(MsgpackWriter &, const TypeSpace::Private &);
+TypeSpace::Constant constant_fields_from_msgpack(MsgpackReader &, size_t);
+void constant_fields_to_msgpack(MsgpackWriter &, const TypeSpace::Constant &);
+TypeSpace::Constant constant_from_msgpack(MsgpackReader &);
+void constant_to_msgpack(MsgpackWriter &, const TypeSpace::Constant &);
 TypeSpace::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const TypeSpace::Any &);
 } // namespace TypeSpace
@@ -2969,6 +3127,18 @@ void gpulocalsize_to_msgpack(MsgpackWriter &, const Spec::GpuLocalSize &);
 Spec::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Spec::Any &);
 } // namespace Spec
+namespace FunctionAffinity {
+FunctionAffinity::Offload offload_fields_from_msgpack(MsgpackReader &, size_t);
+void offload_fields_to_msgpack(MsgpackWriter &, const FunctionAffinity::Offload &);
+FunctionAffinity::Offload offload_from_msgpack(MsgpackReader &);
+void offload_to_msgpack(MsgpackWriter &, const FunctionAffinity::Offload &);
+FunctionAffinity::Host host_fields_from_msgpack(MsgpackReader &, size_t);
+void host_fields_to_msgpack(MsgpackWriter &, const FunctionAffinity::Host &);
+FunctionAffinity::Host host_from_msgpack(MsgpackReader &);
+void host_to_msgpack(MsgpackWriter &, const FunctionAffinity::Host &);
+FunctionAffinity::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const FunctionAffinity::Any &);
+} // namespace FunctionAffinity
 namespace Type {
 Type::Float16 float16_fields_from_msgpack(MsgpackReader &, size_t);
 void float16_fields_to_msgpack(MsgpackWriter &, const Type::Float16 &);
@@ -3460,6 +3630,23 @@ void TypeSpace::private_to_msgpack(MsgpackWriter &w_, const TypeSpace::Private &
   TypeSpace::private_fields_to_msgpack(w_, x_);
 }
 
+TypeSpace::Constant TypeSpace::constant_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected TypeSpace::Constant with 0 field(s)");
+  return {};
+}
+
+void TypeSpace::constant_fields_to_msgpack(MsgpackWriter &w_, const TypeSpace::Constant &x_) {}
+
+TypeSpace::Constant TypeSpace::constant_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return TypeSpace::constant_fields_from_msgpack(r_, n_);
+}
+
+void TypeSpace::constant_to_msgpack(MsgpackWriter &w_, const TypeSpace::Constant &x_) {
+  w_.writeArrayHeader(0);
+  TypeSpace::constant_fields_to_msgpack(w_, x_);
+}
+
 TypeSpace::Any TypeSpace::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -3469,6 +3656,7 @@ TypeSpace::Any TypeSpace::any_from_msgpack(MsgpackReader &r_) {
       case 0: return TypeSpace::global_fields_from_msgpack(r_, n_ - 1);
       case 1: return TypeSpace::local_fields_from_msgpack(r_, n_ - 1);
       case 2: return TypeSpace::private_fields_from_msgpack(r_, n_ - 1);
+      case 3: return TypeSpace::constant_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -3477,15 +3665,16 @@ TypeSpace::Any TypeSpace::any_from_msgpack(MsgpackReader &r_) {
       case 0: return TypeSpace::global_fields_from_msgpack(r_, 0);
       case 1: return TypeSpace::local_fields_from_msgpack(r_, 0);
       case 2: return TypeSpace::private_fields_from_msgpack(r_, 0);
+      case 3: return TypeSpace::constant_fields_from_msgpack(r_, 0);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
 }
 
 void TypeSpace::any_to_msgpack(MsgpackWriter &w_, const TypeSpace::Any &x_) {
-  x_.match_total([&](const TypeSpace::Global &y_) -> void { w_.writeInt32(0); },
-                 [&](const TypeSpace::Local &y_) -> void { w_.writeInt32(1); },
-                 [&](const TypeSpace::Private &y_) -> void { w_.writeInt32(2); });
+  x_.match_total(
+      [&](const TypeSpace::Global &y_) -> void { w_.writeInt32(0); }, [&](const TypeSpace::Local &y_) -> void { w_.writeInt32(1); },
+      [&](const TypeSpace::Private &y_) -> void { w_.writeInt32(2); }, [&](const TypeSpace::Constant &y_) -> void { w_.writeInt32(3); });
 }
 
 Type::Float16 Type::float16_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -3993,6 +4182,42 @@ void PathStep::deref_to_msgpack(MsgpackWriter &w_, const PathStep::Deref &x_) {
   PathStep::deref_fields_to_msgpack(w_, x_);
 }
 
+PathStep::Index PathStep::index_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected PathStep::Index with 1 field(s)");
+  auto idx = static_cast<int32_t>(r_.readInt32());
+  return PathStep::Index(idx);
+}
+
+void PathStep::index_fields_to_msgpack(MsgpackWriter &w_, const PathStep::Index &x_) { w_.writeInt32(static_cast<int32_t>(x_.idx)); }
+
+PathStep::Index PathStep::index_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PathStep::index_fields_from_msgpack(r_, n_);
+}
+
+void PathStep::index_to_msgpack(MsgpackWriter &w_, const PathStep::Index &x_) {
+  w_.writeArrayHeader(1);
+  PathStep::index_fields_to_msgpack(w_, x_);
+}
+
+PathStep::IndexDyn PathStep::indexdyn_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected PathStep::IndexDyn with 1 field(s)");
+  auto idx = Term::any_from_msgpack(r_);
+  return PathStep::IndexDyn(idx);
+}
+
+void PathStep::indexdyn_fields_to_msgpack(MsgpackWriter &w_, const PathStep::IndexDyn &x_) { Term::any_to_msgpack(w_, x_.idx); }
+
+PathStep::IndexDyn PathStep::indexdyn_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PathStep::indexdyn_fields_from_msgpack(r_, n_);
+}
+
+void PathStep::indexdyn_to_msgpack(MsgpackWriter &w_, const PathStep::IndexDyn &x_) {
+  w_.writeArrayHeader(1);
+  PathStep::indexdyn_fields_to_msgpack(w_, x_);
+}
+
 PathStep::Any PathStep::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -4001,6 +4226,8 @@ PathStep::Any PathStep::any_from_msgpack(MsgpackReader &r_) {
     switch (ord_) {
       case 0: return PathStep::field_fields_from_msgpack(r_, n_ - 1);
       case 1: return PathStep::deref_fields_from_msgpack(r_, n_ - 1);
+      case 2: return PathStep::index_fields_from_msgpack(r_, n_ - 1);
+      case 3: return PathStep::indexdyn_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -4008,6 +4235,8 @@ PathStep::Any PathStep::any_from_msgpack(MsgpackReader &r_) {
     switch (ord_) {
       case 0: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 1: return PathStep::deref_fields_from_msgpack(r_, 0);
+      case 2: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 3: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -4020,7 +4249,82 @@ void PathStep::any_to_msgpack(MsgpackWriter &w_, const PathStep::Any &x_) {
         w_.writeInt32(0);
         PathStep::field_fields_to_msgpack(w_, y_);
       },
-      [&](const PathStep::Deref &y_) -> void { w_.writeInt32(1); });
+      [&](const PathStep::Deref &y_) -> void { w_.writeInt32(1); },
+      [&](const PathStep::Index &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(2);
+        PathStep::index_fields_to_msgpack(w_, y_);
+      },
+      [&](const PathStep::IndexDyn &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(3);
+        PathStep::indexdyn_fields_to_msgpack(w_, y_);
+      });
+}
+
+Region::Rooted Region::rooted_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Region::Rooted with 1 field(s)");
+  auto root = named_from_msgpack(r_);
+  return Region::Rooted(root);
+}
+
+void Region::rooted_fields_to_msgpack(MsgpackWriter &w_, const Region::Rooted &x_) { named_to_msgpack(w_, x_.root); }
+
+Region::Rooted Region::rooted_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Region::rooted_fields_from_msgpack(r_, n_);
+}
+
+void Region::rooted_to_msgpack(MsgpackWriter &w_, const Region::Rooted &x_) {
+  w_.writeArrayHeader(1);
+  Region::rooted_fields_to_msgpack(w_, x_);
+}
+
+Region::Opaque Region::opaque_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Region::Opaque with 0 field(s)");
+  return {};
+}
+
+void Region::opaque_fields_to_msgpack(MsgpackWriter &w_, const Region::Opaque &x_) {}
+
+Region::Opaque Region::opaque_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Region::opaque_fields_from_msgpack(r_, n_);
+}
+
+void Region::opaque_to_msgpack(MsgpackWriter &w_, const Region::Opaque &x_) {
+  w_.writeArrayHeader(0);
+  Region::opaque_fields_to_msgpack(w_, x_);
+}
+
+Region::Any Region::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return Region::rooted_fields_from_msgpack(r_, n_ - 1);
+      case 1: return Region::opaque_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 1: return Region::opaque_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void Region::any_to_msgpack(MsgpackWriter &w_, const Region::Any &x_) {
+  x_.match_total(
+      [&](const Region::Rooted &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(0);
+        Region::rooted_fields_to_msgpack(w_, y_);
+      },
+      [&](const Region::Opaque &y_) -> void { w_.writeInt32(1); });
 }
 
 Term::Float16Const Term::float16const_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -4257,15 +4561,17 @@ void Term::bool1const_to_msgpack(MsgpackWriter &w_, const Term::Bool1Const &x_) 
 }
 
 Term::NullPtrConst Term::nullptrconst_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Term::NullPtrConst with 2 field(s)");
+  if (n_ != 3) throw std::runtime_error("Expected Term::NullPtrConst with 3 field(s)");
   auto comp = Type::any_from_msgpack(r_);
   auto space = TypeSpace::any_from_msgpack(r_);
-  return {comp, space};
+  auto region = Region::any_from_msgpack(r_);
+  return {comp, space, region};
 }
 
 void Term::nullptrconst_fields_to_msgpack(MsgpackWriter &w_, const Term::NullPtrConst &x_) {
   Type::any_to_msgpack(w_, x_.comp);
   TypeSpace::any_to_msgpack(w_, x_.space);
+  Region::any_to_msgpack(w_, x_.region);
 }
 
 Term::NullPtrConst Term::nullptrconst_from_msgpack(MsgpackReader &r_) {
@@ -4274,7 +4580,7 @@ Term::NullPtrConst Term::nullptrconst_from_msgpack(MsgpackReader &r_) {
 }
 
 void Term::nullptrconst_to_msgpack(MsgpackWriter &w_, const Term::NullPtrConst &x_) {
-  w_.writeArrayHeader(2);
+  w_.writeArrayHeader(3);
   Term::nullptrconst_fields_to_msgpack(w_, x_);
 }
 
@@ -4443,7 +4749,7 @@ void Term::any_to_msgpack(MsgpackWriter &w_, const Term::Any &x_) {
         Term::bool1const_fields_to_msgpack(w_, y_);
       },
       [&](const Term::NullPtrConst &y_) -> void {
-        w_.writeArrayHeader(3);
+        w_.writeArrayHeader(4);
         w_.writeInt32(13);
         Term::nullptrconst_fields_to_msgpack(w_, y_);
       },
@@ -4578,7 +4884,7 @@ void Expr::index_to_msgpack(MsgpackWriter &w_, const Expr::Index &x_) {
 }
 
 Expr::RefTo Expr::refto_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected Expr::RefTo with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected Expr::RefTo with 5 field(s)");
   auto lhs = Term::any_from_msgpack(r_);
   std::optional<Term::Any> idx;
   if (!r_.tryReadNil()) {
@@ -4587,7 +4893,8 @@ Expr::RefTo Expr::refto_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   }
   auto comp = Type::any_from_msgpack(r_);
   auto space = TypeSpace::any_from_msgpack(r_);
-  return {lhs, idx, comp, space};
+  auto region = Region::any_from_msgpack(r_);
+  return {lhs, idx, comp, space, region};
 }
 
 void Expr::refto_fields_to_msgpack(MsgpackWriter &w_, const Expr::RefTo &x_) {
@@ -4599,6 +4906,7 @@ void Expr::refto_fields_to_msgpack(MsgpackWriter &w_, const Expr::RefTo &x_) {
   }
   Type::any_to_msgpack(w_, x_.comp);
   TypeSpace::any_to_msgpack(w_, x_.space);
+  Region::any_to_msgpack(w_, x_.region);
 }
 
 Expr::RefTo Expr::refto_from_msgpack(MsgpackReader &r_) {
@@ -4607,22 +4915,24 @@ Expr::RefTo Expr::refto_from_msgpack(MsgpackReader &r_) {
 }
 
 void Expr::refto_to_msgpack(MsgpackWriter &w_, const Expr::RefTo &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   Expr::refto_fields_to_msgpack(w_, x_);
 }
 
 Expr::Alloc Expr::alloc_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected Expr::Alloc with 3 field(s)");
+  if (n_ != 4) throw std::runtime_error("Expected Expr::Alloc with 4 field(s)");
   auto comp = Type::any_from_msgpack(r_);
   auto size = Term::any_from_msgpack(r_);
   auto space = TypeSpace::any_from_msgpack(r_);
-  return {comp, size, space};
+  auto region = Region::any_from_msgpack(r_);
+  return {comp, size, space, region};
 }
 
 void Expr::alloc_fields_to_msgpack(MsgpackWriter &w_, const Expr::Alloc &x_) {
   Type::any_to_msgpack(w_, x_.comp);
   Term::any_to_msgpack(w_, x_.size);
   TypeSpace::any_to_msgpack(w_, x_.space);
+  Region::any_to_msgpack(w_, x_.region);
 }
 
 Expr::Alloc Expr::alloc_from_msgpack(MsgpackReader &r_) {
@@ -4631,7 +4941,7 @@ Expr::Alloc Expr::alloc_from_msgpack(MsgpackReader &r_) {
 }
 
 void Expr::alloc_to_msgpack(MsgpackWriter &w_, const Expr::Alloc &x_) {
-  w_.writeArrayHeader(3);
+  w_.writeArrayHeader(4);
   Expr::alloc_fields_to_msgpack(w_, x_);
 }
 
@@ -4693,6 +5003,63 @@ void Expr::invoke_to_msgpack(MsgpackWriter &w_, const Expr::Invoke &x_) {
   Expr::invoke_fields_to_msgpack(w_, x_);
 }
 
+Expr::ForeignCall Expr::foreigncall_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Expr::ForeignCall with 3 field(s)");
+  auto name = r_.readString();
+  std::vector<Term::Any> args;
+  {
+    auto args_size = r_.readArrayHeader();
+    args.reserve(args_size);
+    for (size_t args_idx = 0; args_idx < args_size; ++args_idx) {
+      auto args_elem = Term::any_from_msgpack(r_);
+      args.emplace_back(std::move(args_elem));
+    }
+  }
+  auto rtn = Type::any_from_msgpack(r_);
+  return {name, args, rtn};
+}
+
+void Expr::foreigncall_fields_to_msgpack(MsgpackWriter &w_, const Expr::ForeignCall &x_) {
+  w_.writeString(x_.name);
+  w_.writeArrayHeader(x_.args.size());
+  for (const auto &v0_ : x_.args) {
+    Term::any_to_msgpack(w_, v0_);
+  }
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Expr::ForeignCall Expr::foreigncall_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Expr::foreigncall_fields_from_msgpack(r_, n_);
+}
+
+void Expr::foreigncall_to_msgpack(MsgpackWriter &w_, const Expr::ForeignCall &x_) {
+  w_.writeArrayHeader(3);
+  Expr::foreigncall_fields_to_msgpack(w_, x_);
+}
+
+Expr::OffsetOf Expr::offsetof_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Expr::OffsetOf with 2 field(s)");
+  auto structTpe = Type::any_from_msgpack(r_);
+  auto field = r_.readString();
+  return {structTpe, field};
+}
+
+void Expr::offsetof_fields_to_msgpack(MsgpackWriter &w_, const Expr::OffsetOf &x_) {
+  Type::any_to_msgpack(w_, x_.structTpe);
+  w_.writeString(x_.field);
+}
+
+Expr::OffsetOf Expr::offsetof_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Expr::offsetof_fields_from_msgpack(r_, n_);
+}
+
+void Expr::offsetof_to_msgpack(MsgpackWriter &w_, const Expr::OffsetOf &x_) {
+  w_.writeArrayHeader(2);
+  Expr::offsetof_fields_to_msgpack(w_, x_);
+}
+
 Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -4708,6 +5075,8 @@ Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
       case 6: return Expr::refto_fields_from_msgpack(r_, n_ - 1);
       case 7: return Expr::alloc_fields_from_msgpack(r_, n_ - 1);
       case 8: return Expr::invoke_fields_from_msgpack(r_, n_ - 1);
+      case 9: return Expr::foreigncall_fields_from_msgpack(r_, n_ - 1);
+      case 10: return Expr::offsetof_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -4722,6 +5091,8 @@ Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
       case 6: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 7: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 8: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 9: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 10: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -4760,12 +5131,12 @@ void Expr::any_to_msgpack(MsgpackWriter &w_, const Expr::Any &x_) {
         Expr::index_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::RefTo &y_) -> void {
-        w_.writeArrayHeader(5);
+        w_.writeArrayHeader(6);
         w_.writeInt32(6);
         Expr::refto_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::Alloc &y_) -> void {
-        w_.writeArrayHeader(4);
+        w_.writeArrayHeader(5);
         w_.writeInt32(7);
         Expr::alloc_fields_to_msgpack(w_, y_);
       },
@@ -4773,6 +5144,16 @@ void Expr::any_to_msgpack(MsgpackWriter &w_, const Expr::Any &x_) {
         w_.writeArrayHeader(6);
         w_.writeInt32(8);
         Expr::invoke_fields_to_msgpack(w_, y_);
+      },
+      [&](const Expr::ForeignCall &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(9);
+        Expr::foreigncall_fields_to_msgpack(w_, y_);
+      },
+      [&](const Expr::OffsetOf &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(10);
+        Expr::offsetof_fields_to_msgpack(w_, y_);
       });
 }
 
@@ -7263,6 +7644,65 @@ void FunctionFpMode::any_to_msgpack(MsgpackWriter &w_, const FunctionFpMode::Any
                  [&](const FunctionFpMode::Strict &y_) -> void { w_.writeInt32(1); });
 }
 
+FunctionAffinity::Offload FunctionAffinity::offload_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected FunctionAffinity::Offload with 0 field(s)");
+  return {};
+}
+
+void FunctionAffinity::offload_fields_to_msgpack(MsgpackWriter &w_, const FunctionAffinity::Offload &x_) {}
+
+FunctionAffinity::Offload FunctionAffinity::offload_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return FunctionAffinity::offload_fields_from_msgpack(r_, n_);
+}
+
+void FunctionAffinity::offload_to_msgpack(MsgpackWriter &w_, const FunctionAffinity::Offload &x_) {
+  w_.writeArrayHeader(0);
+  FunctionAffinity::offload_fields_to_msgpack(w_, x_);
+}
+
+FunctionAffinity::Host FunctionAffinity::host_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected FunctionAffinity::Host with 0 field(s)");
+  return {};
+}
+
+void FunctionAffinity::host_fields_to_msgpack(MsgpackWriter &w_, const FunctionAffinity::Host &x_) {}
+
+FunctionAffinity::Host FunctionAffinity::host_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return FunctionAffinity::host_fields_from_msgpack(r_, n_);
+}
+
+void FunctionAffinity::host_to_msgpack(MsgpackWriter &w_, const FunctionAffinity::Host &x_) {
+  w_.writeArrayHeader(0);
+  FunctionAffinity::host_fields_to_msgpack(w_, x_);
+}
+
+FunctionAffinity::Any FunctionAffinity::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return FunctionAffinity::offload_fields_from_msgpack(r_, n_ - 1);
+      case 1: return FunctionAffinity::host_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return FunctionAffinity::offload_fields_from_msgpack(r_, 0);
+      case 1: return FunctionAffinity::host_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void FunctionAffinity::any_to_msgpack(MsgpackWriter &w_, const FunctionAffinity::Any &x_) {
+  x_.match_total([&](const FunctionAffinity::Offload &y_) -> void { w_.writeInt32(0); },
+                 [&](const FunctionAffinity::Host &y_) -> void { w_.writeInt32(1); });
+}
+
 Arg arg_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Arg with 2 field(s)");
   auto named = named_from_msgpack(r_);
@@ -7294,7 +7734,7 @@ void arg_to_msgpack(MsgpackWriter &w_, const Arg &x_) {
 }
 
 Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 11) throw std::runtime_error("Expected Function with 11 field(s)");
+  if (n_ != 12) throw std::runtime_error("Expected Function with 12 field(s)");
   auto name = sym_from_msgpack(r_);
   std::vector<std::string> tpeVars;
   {
@@ -7350,7 +7790,8 @@ Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   auto visibility = FunctionVisibility::any_from_msgpack(r_);
   auto fpMode = FunctionFpMode::any_from_msgpack(r_);
   auto isEntry = r_.readBoolean();
-  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry};
+  auto affinity = FunctionAffinity::any_from_msgpack(r_);
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity};
 }
 
 void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
@@ -7384,6 +7825,7 @@ void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
   FunctionVisibility::any_to_msgpack(w_, x_.visibility);
   FunctionFpMode::any_to_msgpack(w_, x_.fpMode);
   w_.writeBoolean(x_.isEntry);
+  FunctionAffinity::any_to_msgpack(w_, x_.affinity);
 }
 
 Function function_from_msgpack(MsgpackReader &r_) {
@@ -7392,7 +7834,7 @@ Function function_from_msgpack(MsgpackReader &r_) {
 }
 
 void function_to_msgpack(MsgpackWriter &w_, const Function &x_) {
-  w_.writeArrayHeader(11);
+  w_.writeArrayHeader(12);
   function_fields_to_msgpack(w_, x_);
 }
 

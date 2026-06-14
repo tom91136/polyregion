@@ -43,8 +43,10 @@ string polyast::qualified(const Term::Select &select) {
         [&](const PathStep::Field &f) {
           s += ".";
           s += f.name;
-        },                                          //
-        [&](const PathStep::Deref &) { s += "->"; } //
+        },                                                                         //
+        [&](const PathStep::Deref &) { s += "->"; },                               //
+        [&](const PathStep::Index &i) { s += "[" + std::to_string(i.idx) + "]"; }, //
+        [&](const PathStep::IndexDyn &i) { s += "[" + repr(i.idx) + "]"; }         //
     );
   }
   return s;
@@ -237,7 +239,7 @@ std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, con
                                                          FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode, bool isEntry) {
   return [=](auto &&stmts) {
     return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, visibility, fpMode,
-                    isEntry);
+                    isEntry, FunctionAffinity::Offload());
   };
 }
 

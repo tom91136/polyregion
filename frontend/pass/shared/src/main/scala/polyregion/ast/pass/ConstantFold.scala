@@ -18,12 +18,8 @@ object ConstantFold extends ProgramPass {
   private def run(f: p.Function, log: Log): p.Function = {
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       val mutated = f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
-      // Names whose address is taken via RefTo can be mutated indirectly through the resulting
-      // pointer; const-binding them and substituting their reads would be unsound. The backend
-      // also rejects RefTo of a constant, so even a pure-read const-bind followed by RefTo
-      // produces a semantic error -- exclude these names from the const env entirely.
       val addressTaken =
-        f.collectAll[p.Expr].collect { case p.Expr.RefTo(p.Term.Select(name, _, _), _, _, _) => name }.toSet
+        f.collectAll[p.Expr].collect { case p.Expr.RefTo(p.Term.Select(name, _, _), _, _, _, _) => name }.toSet
       f.copy(body = foldStmts(f.body, Map.empty, mutated ++ addressTaken, log)._1)
     }
     log.info(s"Constant fold is stable after ${n} passes")
@@ -118,11 +114,13 @@ object ConstantFold extends ProgramPass {
         case None    => p.Expr.Cast(from2, as)
       }
     case p.Expr.Index(lhs, idx, comp) => p.Expr.Index(foldTerm(lhs, env), foldTerm(idx, env), comp)
-    case p.Expr.RefTo(lhs, idx, comp, sp) =>
-      p.Expr.RefTo(foldTerm(lhs, env), idx.map(foldTerm(_, env)), comp, sp)
-    case p.Expr.Alloc(comp, size, sp) => p.Expr.Alloc(comp, foldTerm(size, env), sp)
+    case p.Expr.RefTo(lhs, idx, comp, sp, r) =>
+      p.Expr.RefTo(foldTerm(lhs, env), idx.map(foldTerm(_, env)), comp, sp, r)
+    case p.Expr.Alloc(comp, size, sp, r) => p.Expr.Alloc(comp, foldTerm(size, env), sp, r)
     case p.Expr.Invoke(n, ts, recv, args, rtn) =>
       p.Expr.Invoke(n, ts, recv.map(foldTerm(_, env)), args.map(foldTerm(_, env)), rtn)
+    case p.Expr.ForeignCall(n, args, rtn) => p.Expr.ForeignCall(n, args.map(foldTerm(_, env)), rtn)
+    case o: p.Expr.OffsetOf               => o
   }
 
   private def foldTerm(t: p.Term, env: Env): p.Term = t match {
@@ -147,7 +145,6 @@ object ConstantFold extends ProgramPass {
     case p.Term.IntU8Const(v)  => Some(v.toLong & 0xffL)
     case p.Term.IntU16Const(v) => Some(v.toLong & 0xffffL)
     case p.Term.IntU32Const(v) => Some(v.toLong & 0xffffffffL)
-    // signed bit-pattern is fine for shifts/bitwise.
     case p.Term.IntU64Const(v) => Some(v)
     case _                     => None
   }
@@ -193,7 +190,6 @@ object ConstantFold extends ProgramPass {
     case p.Intr.Sub(x, y, t) => foldBinNumeric(x, y, t)(_ - _)(_ - _)
     case p.Intr.Mul(x, y, t) => foldBinNumeric(x, y, t)(_ * _)(_ * _)
     case p.Intr.Div(x, y, t) =>
-      // never fold integer /0; preserve the runtime trap.
       (asLong(x), asLong(y)) match {
         case (Some(_), Some(0L)) if t.kind == p.Type.Kind.Integral => None
         case (Some(a), Some(b)) if t.kind == p.Type.Kind.Integral  => intTerm(t, signExtend(t, a) / signExtend(t, b))
@@ -323,8 +319,6 @@ object ConstantFold extends ProgramPass {
           }
         })
 
-  // Sign-extend so narrower signed types (IntS8/16/32) match runtime semantics after the
-  // surrounding intTerm truncation; IntS64 and unsigned types pass through unchanged.
   private def signExtend(t: p.Type, v: Long): Long = t match {
     case p.Type.IntS8  => v.toByte.toLong
     case p.Type.IntS16 => v.toShort.toLong

@@ -3,8 +3,6 @@ package polyregion.ast.pass
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
-import scala.annotation.tailrec
-
 object Verify {
 
   case class Context(declared: Set[p.Named] = Set.empty, errors: List[String] = Nil) {
@@ -31,10 +29,7 @@ object Verify {
       }
   }
 
-  // Validate per-address-space Alloc invariants.
   def validateAlloc(program: p.Program): List[String] = {
-    // Local allocs need a constant size (lowered to a stack slot); Global allocs go to malloc on
-    // the host but need a backend-side host-vs-shader check, which the IR layer can't make.
     def isConstSize(t: p.Term): Boolean = t match {
       case _: p.Term.IntS32Const | _: p.Term.IntS64Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const => true
       case _                                                                                             => false
@@ -44,12 +39,11 @@ object Verify {
         f.collectWhere[p.Expr] { case a: p.Expr.Alloc => (f, a) }
       }
       .collect {
-        case (f, p.Expr.Alloc(_, size, p.Type.Space.Local)) if !isConstSize(size) =>
+        case (f, p.Expr.Alloc(_, size, p.Type.Space.Local, _)) if !isConstSize(size) =>
           s"Alloc Local in ${f.name.repr} requires a constant size; got ${size.repr}"
       }
   }
 
-  // Reject Type.Var / Type.Exec when the program is in the PostMono phase.
   def validatePostMono(program: p.Program): List[String] =
     if (program.phase != p.PassPhase.PostMono) Nil
     else {
@@ -66,6 +60,41 @@ object Verify {
       typeViolations ::: tpeVarViolations
     }
 
+  def validateRegions(program: p.Program): List[String] =
+    (program.entry :: program.functions).flatMap { f =>
+      val derived = Provenance.derivedIn(f)
+      f.collectWhere[p.Expr] {
+        case p.Expr.Index(ptr, _, _) if Provenance.at(derived, ptr) == p.Region.Opaque =>
+          s"${f.name.repr}: read through opaque-origin pointer ${ptr.repr}"
+      } ::: f.collectWhere[p.Stmt] {
+        case p.Stmt.Update(lhs, _, _) if Provenance.at(derived, lhs) == p.Region.Opaque =>
+          s"${f.name.repr}: write through opaque-origin pointer ${lhs.repr}"
+      } ::: f.collectWhere[p.Term] {
+        case s @ p.Term.Select(root, steps, _)
+            if steps.nonEmpty && Provenance.isPtr(root.tpe) && Provenance.at(derived, s) == p.Region.Opaque =>
+          s"${f.name.repr}: deref through opaque-origin pointer ${s.repr}"
+      }
+    }
+
+  def validateRegionSpaces(program: p.Program): List[String] = {
+    def spaceOf(t: p.Type): Option[p.Type.Space] = t match {
+      case p.Type.Ptr(_, s)    => Some(s)
+      case p.Type.Arr(_, _, s) => Some(s)
+      case _                   => None
+    }
+    (program.entry :: program.functions).flatMap { f =>
+      Provenance.derivedIn(f).toList.sortBy(_._1.symbol).flatMap {
+        case (n, p.Region.Rooted(r)) if r != n =>
+          for {
+            sn <- spaceOf(n.tpe)
+            sr <- spaceOf(r.tpe)
+            if sn != sr
+          } yield s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr"
+        case _ => Nil
+      }
+    }
+  }
+
   def validateSingle(
       f: p.Function,
       defs: List[p.StructDef],
@@ -75,8 +104,6 @@ object Verify {
       allFnLUT: Map[p.Sym, List[p.Function]]
   ): List[String] = {
 
-    // Walk a Term.Select's path from root through steps; validate at each step that the
-    // surrounding type lets us take that step (Field requires Struct, Deref requires Ptr).
     def validatePath(c: Context, term: p.Term.Select): Context = {
       val termRepr = term.repr
       val initial  = c !! (term.root, termRepr)
@@ -88,6 +115,19 @@ object Verify {
                 case p.Type.Ptr(comp, _) => (acc, comp)
                 case other =>
                   (acc ~ s"Deref step on non-pointer type ${other.repr} in `$termRepr`", other)
+              }
+            case p.PathStep.Index(_) =>
+              currTpe match {
+                case p.Type.Ptr(comp, _) => (acc, comp)
+                case other =>
+                  (acc ~ s"Index step on non-pointer type ${other.repr} in `$termRepr`", other)
+              }
+            case p.PathStep.IndexDyn(_) =>
+              currTpe match {
+                case p.Type.Arr(comp, _, _) => (acc, comp)
+                case p.Type.Ptr(comp, _)    => (acc, comp)
+                case other =>
+                  (acc ~ s"IndexDyn step on non-indexable type ${other.repr} in `$termRepr`", other)
               }
             case p.PathStep.Field(name) =>
               currTpe match {
@@ -131,26 +171,20 @@ object Verify {
         val c0                   = validateTerm(c, from)
         def isNumeric(t: p.Type) = t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
         (from.tpe, as) match {
-          case (a, b) if a == b                              => c0
-          case (p.Type.Struct(_, _), p.Type.Struct(name, _)) =>
-            // upcast/downcast permission requires a parents lookup against StructDefs.
-            sdefLUT.get(name) match {
-              case Some(sdef)
-                  if sdef.parents.exists(_.name == name) ||
-                    sdefLUT.values.exists(_.parents.exists(_.name == name)) =>
-                c0
-              case _ => c0
-            }
+          case (a, b) if a == b                       => c0
+          case (_: p.Type.Struct, _: p.Type.Struct)   => c0
           case (a, b) if isNumeric(a) && isNumeric(b) => c0
           case (a, b) => c0 ~ s"Cannot cast unrelated type ${a.repr} to ${b.repr}: ${e.repr}"
         }
       case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
         val c0 = receiver.map(validateTerm(c, _)).getOrElse(c)
         args.foldLeft(c0)(validateTerm(_, _))
-      case p.Expr.Index(lhs, idx, _) => validateTerm(validateTerm(c, lhs), idx)
-      case p.Expr.RefTo(lhs, idx, _, _) =>
+      case p.Expr.ForeignCall(_, args, _) => args.foldLeft(c)(validateTerm(_, _))
+      case p.Expr.OffsetOf(_, _)          => c
+      case p.Expr.Index(lhs, idx, _)      => validateTerm(validateTerm(c, lhs), idx)
+      case p.Expr.RefTo(lhs, idx, _, _, _) =>
         val c0 = validateTerm(c, lhs); idx.fold(c0)(validateTerm(c0, _))
-      case p.Expr.Alloc(_, size, _) => validateTerm(c, size)
+      case p.Expr.Alloc(_, size, _, _) => validateTerm(c, size)
     }
 
     def validateStmt(c: Context, s: p.Stmt): Context = s match {
@@ -231,12 +265,7 @@ object Verify {
             case None | Some(Nil) => s"Callsite `${ivk.repr}` invokes an undefined function" :: Nil
             case Some(candidates) =>
               val matching = candidates.find { f =>
-                val sig = f.signature
-                // The call-site args carry `moduleCaptures ::: termCaptures ::: args` (see
-                // Compiler.patchFn). The actual call-site arity may be lower than the callee's
-                // expected arity if patchFn hasn't yet reached the call (e.g. mid-pass) - the
-                // backend tolerates the under-shoot via the same lookup. Accept either exact match
-                // or under-shoot here.
+                val sig      = f.signature
                 val expected = sig.args.size + sig.moduleCaptures.size + sig.termCaptures.size
                 ivk.rtn == sig.rtn &&
                 ivk.receiver.map(_.tpe) == sig.receiver &&

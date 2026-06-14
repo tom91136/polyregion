@@ -93,14 +93,30 @@ namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT json alloc_to_json(const Expr::Alloc &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Invoke invoke_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json invoke_to_json(const Expr::Invoke &);
+[[nodiscard]] POLYREGION_EXPORT Expr::ForeignCall foreigncall_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json foreigncall_to_json(const Expr::ForeignCall &);
+[[nodiscard]] POLYREGION_EXPORT Expr::OffsetOf offsetof_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json offsetof_to_json(const Expr::OffsetOf &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr
+namespace Region {
+[[nodiscard]] POLYREGION_EXPORT Region::Rooted rooted_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json rooted_to_json(const Region::Rooted &);
+[[nodiscard]] POLYREGION_EXPORT Region::Opaque opaque_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json opaque_to_json(const Region::Opaque &);
+[[nodiscard]] POLYREGION_EXPORT Region::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const Region::Any &);
+} // namespace Region
 namespace PathStep {
 [[nodiscard]] POLYREGION_EXPORT PathStep::Field field_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json field_to_json(const PathStep::Field &);
 [[nodiscard]] POLYREGION_EXPORT PathStep::Deref deref_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json deref_to_json(const PathStep::Deref &);
+[[nodiscard]] POLYREGION_EXPORT PathStep::Index index_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json index_to_json(const PathStep::Index &);
+[[nodiscard]] POLYREGION_EXPORT PathStep::IndexDyn indexdyn_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json indexdyn_to_json(const PathStep::IndexDyn &);
 [[nodiscard]] POLYREGION_EXPORT PathStep::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const PathStep::Any &);
 } // namespace PathStep
@@ -189,6 +205,8 @@ namespace TypeSpace {
 [[nodiscard]] POLYREGION_EXPORT json local_to_json(const TypeSpace::Local &);
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Private private_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json private_to_json(const TypeSpace::Private &);
+[[nodiscard]] POLYREGION_EXPORT TypeSpace::Constant constant_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json constant_to_json(const TypeSpace::Constant &);
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const TypeSpace::Any &);
 } // namespace TypeSpace
@@ -230,6 +248,14 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT Spec::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Spec::Any &);
 } // namespace Spec
+namespace FunctionAffinity {
+[[nodiscard]] POLYREGION_EXPORT FunctionAffinity::Offload offload_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json offload_to_json(const FunctionAffinity::Offload &);
+[[nodiscard]] POLYREGION_EXPORT FunctionAffinity::Host host_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json host_to_json(const FunctionAffinity::Host &);
+[[nodiscard]] POLYREGION_EXPORT FunctionAffinity::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const FunctionAffinity::Any &);
+} // namespace FunctionAffinity
 namespace Type {
 [[nodiscard]] POLYREGION_EXPORT Type::Float16 float16_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json float16_to_json(const Type::Float16 &);

@@ -55,9 +55,10 @@ object PolyAstToExpr {
 
   given ArrayAttrToExpr: ToExpr[p.Type.Space] with {
     def apply(x: p.Type.Space)(using Quotes) = x match {
-      case p.Type.Space.Local   => '{ p.Type.Space.Local }
-      case p.Type.Space.Global  => '{ p.Type.Space.Global }
-      case p.Type.Space.Private => '{ p.Type.Space.Private }
+      case p.Type.Space.Local    => '{ p.Type.Space.Local }
+      case p.Type.Space.Global   => '{ p.Type.Space.Global }
+      case p.Type.Space.Private  => '{ p.Type.Space.Private }
+      case p.Type.Space.Constant => '{ p.Type.Space.Constant }
     }
   }
 

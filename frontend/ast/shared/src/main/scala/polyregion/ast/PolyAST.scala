@@ -21,8 +21,8 @@ object PolyAST {
   }
 
   object Type {
-    enum Space derives MsgPack.Codec { case Global, Local, Private          }
-    enum Kind derives MsgPack.Codec  { case None, Ref, Integral, Fractional }
+    enum Space derives MsgPack.Codec { case Global, Local, Private, Constant }
+    enum Kind derives MsgPack.Codec  { case None, Ref, Integral, Fractional  }
   }
 
   case class SourcePosition(file: String, line: Int, col: Option[Int]) derives MsgPack.Codec
@@ -55,9 +55,16 @@ object PolyAST {
     case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
   }
 
+  enum Region derives MsgPack.Codec {
+    case Rooted(root: Named)
+    case Opaque
+  }
+
   enum PathStep derives MsgPack.Codec {
     case Field(name: String)
     case Deref
+    case Index(idx: Int)
+    case IndexDyn(idx: Term)
   }
 
   enum Term(val tpe: Type) derives MsgPack.Codec {
@@ -75,30 +82,33 @@ object PolyAST {
     case IntS32Const(value: Int)   extends Term(Type.IntS32)
     case IntS64Const(value: Long)  extends Term(Type.IntS64)
 
-    case Unit0Const                                  extends Term(Type.Unit0)
-    case Bool1Const(value: Boolean)                  extends Term(Type.Bool1)
-    case NullPtrConst(comp: Type, space: Type.Space) extends Term(Type.Ptr(comp, space))
-    case Poison(t: Type)                             extends Term(t)
+    case Unit0Const                                                  extends Term(Type.Unit0)
+    case Bool1Const(value: Boolean)                                  extends Term(Type.Bool1)
+    case NullPtrConst(comp: Type, space: Type.Space, region: Region) extends Term(Type.Ptr(comp, space))
+    case Poison(t: Type)                                             extends Term(t)
 
     case Select(root: Named, steps: List[PathStep], override val tpe: Type) extends Term(tpe)
   }
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
-    case Alias(ref: Term)                                                   extends Expr(ref.tpe)
-    case SpecOp(op: Spec)                                                   extends Expr(op.tpe)
-    case MathOp(op: Math)                                                   extends Expr(op.tpe)
-    case IntrOp(op: Intr)                                                   extends Expr(op.tpe)
-    case Cast(from: Term, as: Type)                                         extends Expr(as)
-    case Index(lhs: Term, idx: Term, comp: Type)                            extends Expr(comp)
-    case RefTo(lhs: Term, idx: Option[Term], comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, space))
-    case Alloc(comp: Type, size: Term, space: Type.Space)                   extends Expr(Type.Ptr(comp, space))
+    case Alias(ref: Term)                        extends Expr(ref.tpe)
+    case SpecOp(op: Spec)                        extends Expr(op.tpe)
+    case MathOp(op: Math)                        extends Expr(op.tpe)
+    case IntrOp(op: Intr)                        extends Expr(op.tpe)
+    case Cast(from: Term, as: Type)              extends Expr(as)
+    case Index(lhs: Term, idx: Term, comp: Type) extends Expr(comp)
+    case RefTo(lhs: Term, idx: Option[Term], comp: Type, space: Type.Space, region: Region)
+        extends Expr(Type.Ptr(comp, space))
+    case Alloc(comp: Type, size: Term, space: Type.Space, region: Region) extends Expr(Type.Ptr(comp, space))
     case Invoke(
         name: Sym,
         tpeArgs: List[Type],
         receiver: Option[Term],
         args: List[Term],
         rtn: Type
-    ) extends Expr(rtn)
+    )                                                           extends Expr(rtn)
+    case ForeignCall(name: String, args: List[Term], rtn: Type) extends Expr(rtn)
+    case OffsetOf(structTpe: Type, field: String)               extends Expr(Type.IntU64)
   }
 
   enum Stmt derives MsgPack.Codec {
@@ -317,6 +327,7 @@ object PolyAST {
   object Function {
     enum Visibility derives MsgPack.Codec { case Internal, Exported }
     enum FpMode derives MsgPack.Codec     { case Relaxed, Strict    }
+    enum Affinity derives MsgPack.Codec   { case Offload, Host      }
   }
   case class Function(
       name: Sym,
@@ -329,7 +340,8 @@ object PolyAST {
       body: List[Stmt],
       visibility: Function.Visibility,
       fpMode: Function.FpMode,
-      isEntry: Boolean
+      isEntry: Boolean,
+      affinity: Function.Affinity = Function.Affinity.Offload
   ) derives MsgPack.Codec
 
   enum PassPhase derives MsgPack.Codec { case Initial, PostMono }
@@ -339,7 +351,10 @@ object PolyAST {
       functions: List[Function],
       defs: List[StructDef],
       phase: PassPhase = PassPhase.Initial
-  ) derives MsgPack.Codec
+  ) derives MsgPack.Codec {
+    def hostFunctions: List[Function]    = functions.filter(_.affinity == Function.Affinity.Host)
+    def offloadFunctions: List[Function] = functions.filter(_.affinity == Function.Affinity.Offload)
+  }
 
   case class StructLayoutMember(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec
   case class StructLayout(
@@ -380,9 +395,8 @@ object PolyAST {
       inline val Ok            = 0
       inline val AllocFailed   = 1
       inline val PipelineError = 2
-      // Detected by polyc, never returned by plugins.
-      inline val UnknownPass = 3
-      inline val AbiMismatch = 4
+      inline val UnknownPass   = 3
+      inline val AbiMismatch   = 4
     }
     def docs(d: String): Nothing = ???
 
@@ -431,8 +445,11 @@ object PolyAST {
   }
 
   object Conventions {
-    inline val EntryName    = "_main"
-    inline val ThisReceiver = "#this"
+    inline val EntryName               = "_main"
+    inline val ThisReceiver            = "#this"
+    inline val CaptureArg              = "#capture"
+    inline val BaseFieldPrefix         = "#base"
+    inline val EmptyStructStorageField = "#empty_struct_storage"
     object Macros {
       inline val PolyreflectTrackAnnotation     = "polyreflect-track"
       inline val PolyreflectRtProtectAnnotation = "polyreflect-rt-protect"
@@ -560,9 +577,17 @@ object PolyAST {
 
   extension (t: Type.Space) {
     def repr: String = t match {
-      case Space.Global  => ""
-      case Space.Local   => "^Local"
-      case Space.Private => "^Private"
+      case Space.Global   => ""
+      case Space.Local    => "^Local"
+      case Space.Private  => "^Private"
+      case Space.Constant => "^Constant"
+    }
+  }
+
+  extension (r: Region) {
+    def repr: String = r match {
+      case Region.Rooted(root) => s"@${root.symbol}"
+      case Region.Opaque       => "@opaque"
     }
   }
 
@@ -577,8 +602,10 @@ object PolyAST {
 
   extension (s: PathStep) {
     def repr: String = s match {
-      case PathStep.Field(name) => s".$name"
-      case PathStep.Deref       => "->*"
+      case PathStep.Field(name)   => s".$name"
+      case PathStep.Deref         => "->*"
+      case PathStep.Index(idx)    => s"[$idx]"
+      case PathStep.IndexDyn(idx) => s"[${idx.repr}]"
     }
   }
 
@@ -632,10 +659,10 @@ object PolyAST {
       case Term.IntS32Const(x) => s"i32($x)"
       case Term.IntS64Const(x) => s"i64($x)"
 
-      case Term.Unit0Const             => "unit0(())"
-      case Term.Bool1Const(x)          => s"bool1($x)"
-      case Term.NullPtrConst(x, space) => s"nullptr[${x.repr}, ${space.repr}]"
-      case Term.Poison(t)              => s"__poison__ /* poison of type ${t.repr} */"
+      case Term.Unit0Const                     => "unit0(())"
+      case Term.Bool1Const(x)                  => s"bool1($x)"
+      case Term.NullPtrConst(x, space, region) => s"nullptr[${x.repr}, ${space.repr}${region.repr}]"
+      case Term.Poison(t)                      => s"__poison__ /* poison of type ${t.repr} */"
       case Term.Select(root, steps, tpe) =>
         s"${root.symbol}: ${root.tpe.repr}${steps.map(_.repr).mkString("")}"
     }
@@ -721,13 +748,15 @@ object PolyAST {
 
       case Expr.Cast(from, as)        => s"(${from.repr}).to[${as.repr}]"
       case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
-      case Expr.RefTo(lhs, idx, comp, space) =>
-        s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}](${idx.map(_.repr).getOrElse("")})"
-      case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
+      case Expr.RefTo(lhs, idx, comp, space, region) =>
+        s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}${region.repr}](${idx.map(_.repr).getOrElse("")})"
+      case Expr.Alloc(comp, size, space, region) => s"alloc[${comp.repr}, ${space.repr}${region.repr}](${size.repr})"
       case Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
         s"${receiver.map(r => s"${r.repr}.").getOrElse("")}${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
             .map(_.repr)
             .mkString(", ")}): ${rtn.repr}"
+      case Expr.ForeignCall(name, args, rtn) => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
+      case Expr.OffsetOf(tpe, field)         => s"offsetof(${tpe.repr}, $field)"
     }
   }
 

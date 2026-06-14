@@ -229,6 +229,30 @@ POLYREGION_RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(
   }
 }
 
+// Backends with binding-slot mechanisms and with no pointer in structs
+POLYREGION_RT_PROTECT static constexpr bool targetNeedsFlatten(const compiletime::Target &target) {
+  switch (target) {
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+    case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_Metal1_0: //
+      return true;
+    default: return false;
+  }
+}
+
+// Subset of targetNeedsFlatten with no shared/unified virtual memory
+POLYREGION_RT_PROTECT static constexpr bool targetRequiresFlatten(const compiletime::Target &target) {
+  switch (target) {
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+    case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_Metal1_0: //
+      return true;
+    default: return false;
+  }
+}
+
 POLYREGION_RT_PROTECT static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
   if (name == "src" || name == "source") return ModuleFormat::Source;
   if (name == "obj" || name == "object") return ModuleFormat::Object;
@@ -399,6 +423,9 @@ struct KernelObject {
   const unsigned char *image;
 };
 
+using PreludeFn = uintptr_t (*)(void *capture, size_t sizeInBytes);
+using PostludeFn = void (*)(void *capture, size_t sizeInBytes);
+
 struct KernelBundle {
   const char *moduleName;
 
@@ -410,6 +437,10 @@ struct KernelBundle {
   size_t interfaceLayoutIdx;
 
   const char *metadata;
+
+  const char *mirrorId;
+  PreludeFn prelude;
+  PostludeFn postlude;
 };
 
 static_assert(std::is_standard_layout_v<TypeLayout>);

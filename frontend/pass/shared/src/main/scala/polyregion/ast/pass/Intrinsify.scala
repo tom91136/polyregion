@@ -115,7 +115,7 @@ object Intrinsify extends ProgramPass {
 
       case "array" -> (x :: Nil) //
           if x.tpe == p.Type.IntS32 =>
-        p.Expr.Alloc(tpeArgs.head, x, p.Type.Space.Global) -> Nil
+        p.Expr.Alloc(tpeArgs.head, x, p.Type.Space.Global, p.Region.Opaque) -> Nil
       case "apply" -> ((s @ p.Term.Select(_, _, p.Type.Ptr(_, _))) :: i :: Nil) //
           if i.tpe == p.Type.IntS32 =>
         p.Expr.Index(s, i, rtn) -> Nil
@@ -286,7 +286,7 @@ object Intrinsify extends ProgramPass {
               ) if rest.size <= 1 =>
             tpeArgs.headOption match {
               case Some(elemTpe) =>
-                (p.Expr.Alloc(elemTpe, length, p.Type.Space.Global), (Nil, inv :: Nil))
+                (p.Expr.Alloc(elemTpe, length, p.Type.Space.Global, p.Region.Opaque), (Nil, inv :: Nil))
               case None => ???
             }
           case _ =>

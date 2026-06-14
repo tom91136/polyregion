@@ -25,8 +25,24 @@ std::string repr(const TypeSpace::Any &t) {
     if (t.is<TypeSpace::Private>()) {
       return "^Private"s;
     }
+    if (t.is<TypeSpace::Constant>()) {
+      return "^Constant"s;
+    }
 
     throw std::logic_error(fmt::format("Unhandled match case for t (of type TypeSpace::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
+std::string repr(const Region::Any &r) {
+  return [&] {
+    if (auto _x = r.get<Region::Rooted>()) {
+      return fmt::format("@{}", _x->root.symbol);
+    }
+    if (r.is<Region::Opaque>()) {
+      return "@opaque"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for r (of type Region::Any) at {}:{})", __FILE__, __LINE__));
   }();
 }
 
@@ -56,6 +72,12 @@ std::string repr(const PathStep::Any &s) {
     }
     if (s.is<PathStep::Deref>()) {
       return "->*"s;
+    }
+    if (auto _x = s.get<PathStep::Index>()) {
+      return fmt::format("[{}]", _x->idx);
+    }
+    if (auto _x = s.get<PathStep::IndexDyn>()) {
+      return fmt::format("[{}]", repr(_x->idx));
     }
 
     throw std::logic_error(fmt::format("Unhandled match case for s (of type PathStep::Any) at {}:{})", __FILE__, __LINE__));
@@ -171,7 +193,7 @@ std::string repr(const Term::Any &t) {
       return fmt::format("bool1({})", _x->value);
     }
     if (auto _x = t.get<Term::NullPtrConst>()) {
-      return fmt::format("nullptr[{}, {}]", repr(_x->comp), repr(_x->space));
+      return fmt::format("nullptr[{}, {}{}]", repr(_x->comp), repr(_x->space), repr(_x->region));
     }
     if (auto _x = t.get<Term::Poison>()) {
       return fmt::format("__poison__ /* poison of type {} */", repr(_x->t));
@@ -404,17 +426,24 @@ std::string repr(const Expr::Any &e) {
       return fmt::format("({}).index[{}]({})", repr(_x->lhs), repr(_x->comp), repr(_x->idx));
     }
     if (auto _x = e.get<Expr::RefTo>()) {
-      return fmt::format("({}).refTo[{}, {}]({})", repr(_x->lhs), repr(_x->comp), repr(_x->space),
+      return fmt::format("({}).refTo[{}, {}{}]({})", repr(_x->lhs), repr(_x->comp), repr(_x->space), repr(_x->region),
                          _x->idx ^ map([&](const Term::Any &_v7_0) { return repr(_v7_0); }) ^ get_or_else(""s));
     }
     if (auto _x = e.get<Expr::Alloc>()) {
-      return fmt::format("alloc[{}, {}]({})", repr(_x->comp), repr(_x->space), repr(_x->size));
+      return fmt::format("alloc[{}, {}{}]({})", repr(_x->comp), repr(_x->space), repr(_x->region), repr(_x->size));
     }
     if (auto _x = e.get<Expr::Invoke>()) {
       return fmt::format("{}{}<{}>({}): {}",
                          _x->receiver ^ map([&](const Term::Any &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s),
                          repr(_x->name), (_x->tpeArgs | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)),
                          (_x->args | map([&](const Term::Any &_v7_0) { return repr(_v7_0); }) | mk_string(", "s)), repr(_x->rtn));
+    }
+    if (auto _x = e.get<Expr::ForeignCall>()) {
+      return fmt::format("{}({}): {}", _x->name, (_x->args | map([&](const Term::Any &_v7_0) { return repr(_v7_0); }) | mk_string(", "s)),
+                         repr(_x->rtn));
+    }
+    if (auto _x = e.get<Expr::OffsetOf>()) {
+      return fmt::format("offsetof({}, {})", repr(_x->structTpe), _x->field);
     }
 
     throw std::logic_error(fmt::format("Unhandled match case for e (of type Expr::Any) at {}:{})", __FILE__, __LINE__));
