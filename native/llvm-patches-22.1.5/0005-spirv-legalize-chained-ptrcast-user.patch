@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000005 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Sun, 15 Jun 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] legalize a chained ptrcast user
+
+SPIRVLegalizePointerCast::legalizePointerCast walks the users of an
+spv_ptrcast and rewrites loads, stores, spv_gep and spv_store. It hit
+`llvm_unreachable("Unsupported ptrcast user")` when the user was itself another
+spv_ptrcast, i.e. a round-trip cast `T* -> i8* -> T*` (libstdc++ emits this for
+`vector<string>::operator[]`: the loaded `_Vector_base*` is cast to i8 then back
+to the struct). Route the chained cast through the original pointer exactly like
+spv_gep does; the outer cast is its own worklist entry and legalises against the
+real deduced type, so the redundant inner cast collapses.
+---
+ llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+--- a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+@@ -405,7 +405,11 @@
+           continue;
+         }
+
+-        if (Intrin->getIntrinsicID() == Intrinsic::spv_gep) {
++        // A chained ptrcast (e.g. struct* -> i8* -> struct*) feeds this cast into
++        // another; route it through the original pointer so the inner cast collapses.
++        // The outer cast is its own worklist entry and legalises against the real type.
++        if (Intrin->getIntrinsicID() == Intrinsic::spv_gep ||
++            Intrin->getIntrinsicID() == Intrinsic::spv_ptrcast) {
+           GR->replaceAllUsesWith(CastedOperand, OriginalOperand,
+                                  /* DeleteOld= */ false);
+           continue;
