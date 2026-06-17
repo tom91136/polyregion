@@ -238,7 +238,7 @@ object PassPipelineParser {
           if (args.isEmpty) Right(p.PassSpec(n, Nil))
           else
             args
-              .split(';')
+              .split(',')
               .toList
               .foldRight(Right(Nil): Either[String, List[p.PassArg]])((raw, acc) =>
                 parseArg(raw.trim).flatMap(a => acc.map(a :: _))
