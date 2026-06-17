@@ -1,7 +1,3 @@
-#include <unordered_set>
-
-#include "llvm/TargetParser/Host.h"
-
 #include "aspartame/all.hpp"
 #include "fmt/core.h"
 #include "magic_enum/magic_enum.hpp"
@@ -42,11 +38,18 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
       break;
     case LLVMBackend::Target::SPIRV32_Kernel:
     case LLVMBackend::Target::SPIRV64_Kernel:
-    case LLVMBackend::Target::SPIRV_GLCompute:
       GlobalAS = AddrSpace::CrossWorkgroup;
       LocalAS = AddrSpace::Workgroup;
       AllocaAS = AddrSpace::Default; // Function/private
       GenericAS = AddrSpace::Generic;
+      break;
+    case LLVMBackend::Target::SPIRV_GLCompute:
+      // logical SPIR-V can't cast Function <-> StorageBuffer; emit the body in the flat AS and let
+      // InferAddressSpaces promote buffers back from a StorageBuffer->flat cast
+      GlobalAS = AddrSpace::Default;
+      LocalAS = AddrSpace::Workgroup;
+      AllocaAS = AddrSpace::Default;
+      GenericAS = 0;
       break;
   }
   spirvKernel = options.target == LLVMBackend::Target::SPIRV32_Kernel || //
@@ -57,23 +60,26 @@ llvm::Type *TargetedContext::i32Ty() { return llvm::Type::getInt32Ty(actual); }
 llvm::Type *TargetedContext::i64Ty() { return llvm::Type::getInt64Ty(actual); }
 
 TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const {
-  // XXX Globals stay in CrossWorkgroup: routing through Generic loses kernel writes on Intel
-  // NEO's coarse-grain SVM cache. Private uses Generic so Function allocas can flow through
-  // pointer slots (CrossWorkgroup -> Function addrspacecast is illegal; OpPtrCastToGeneric is not).
-  const auto privateAS = GenericAS != 0 ? GenericAS : GlobalAS;
+  // SPIR-V Kernel keeps private in the Function AS: widening to Generic makes IGC's SIMD vectoriser
+  // read private arrays as shared, not per-lane
+  const auto privateAS = spirvKernel ? AllocaAS : (GenericAS != 0 ? GenericAS : GlobalAS);
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
-      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return privateAS; });
+      [&](const TypeSpace::Global &) { return GlobalAS; },
+      [&](const TypeSpace::Constant &) { return GlobalAS; }, // FIXME no constant AS wired; should map to AMDGPU 4 / SPIR-V UniformConstant
+      [&](const TypeSpace::Private &) { return privateAS; });
 }
 
 TargetedContext::AS TargetedContext::addressSpaceForKernelArg(const TypeSpace::Any &s) const {
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
-      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return GlobalAS; });
+      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Constant &) { return GlobalAS; },
+      [&](const TypeSpace::Private &) { return GlobalAS; });
 }
 
-llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B) const {
-  return GenericAS != 0 ? B.getPtrTy(GenericAS) : B.getPtrTy();
+llvm::PointerType *TargetedContext::loadedPtrTy(llvm::IRBuilder<> &B, const TypeSpace::Any &space) const {
+  // a loaded pointer keeps its own AS so private (Function) pointers don't round-trip through Generic
+  return B.getPtrTy(addressSpace(space));
 }
 
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {

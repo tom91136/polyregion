@@ -22,7 +22,7 @@ static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any r
                      FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
                      FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
   return Function(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), std::move(body), std::move(visibility), std::move(fpMode),
-                  isEntry);
+                  isEntry, FunctionAffinity::Offload());
 }
 
 static Expr::Invoke mkInvoke(const std::string &name, std::vector<Term::Any> args, Type::Any rtn) {
@@ -171,7 +171,8 @@ TEST_CASE("recursive struct", "[compiler]") {
     StructDef def(Sym({"foo"}), {}, {x, next}, {});
     auto entry = function("foo", {}, fooTpe)({
         let("foo") = fooTpe, //
-        Mut(Select({"foo"_(fooTpe)}, x), generateConstValue(tpe)), MutT(Select({"foo"_(fooTpe)}, next), Term::NullPtrConst(fooTpe, Global)),
+        Mut(Select({"foo"_(fooTpe)}, x), generateConstValue(tpe)),
+        MutT(Select({"foo"_(fooTpe)}, next), Term::NullPtrConst(fooTpe, Global, Region::Opaque())),
         ret("foo"_(fooTpe)) //
     });
     assertCompile(program({def}, {entry}));
@@ -344,7 +345,7 @@ TEST_CASE("return struct and take ref", "[compiler]") {
 
   auto entry = function("bar", {"in"_(Ptr(fooTpe))()}, Unit)({
       let("a") = mkInvoke("gen", {}, barTpe),                                                         //
-      let("ar") = RefTo("a"_(barTpe), {}, barTpe, Global),                                            //
+      let("ar") = RefTo("a"_(barTpe), {}, barTpe, Global, Region::Opaque()),                          //
       let("r") = mkInvoke("aux", {Select({"in"_(Ptr(fooTpe))}, y), "ar"_(Ptr(barTpe))}, Ptr(barTpe)), //
       ret(Term::Unit0Const())                                                                         //
   });
@@ -530,9 +531,9 @@ TEST_CASE("index prim array", "[compiler]") {
   DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (local)") {
     CAPTURE(repr(tpe), idx);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt), Global), "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
-        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                          //
-        ret("x"_(tpe))                                                                                            //
+        let("xs") = Alloc(tpe, 42_(SInt), Global, Region::Opaque()), "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstTerm(tpe), //
+        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                                            //
+        ret("x"_(tpe))                                                                                                              //
     })));
   }
   DYNAMIC_SECTION("xs[" << idx << "]:" << repr(tpe) << " (args)") {
@@ -552,9 +553,9 @@ TEST_CASE("update prim array", "[compiler]") {
   DYNAMIC_SECTION("(xs[" << idx << "]:" << repr(tpe) << ") = " << repr(val) << " (local)") {
     CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt), Global),  //
-        "xs"_(Ptr(tpe))[integral(SInt, idx)] = val, //
-        ret("xs"_(Ptr(tpe))[integral(SInt, idx)])   //
+        let("xs") = Alloc(tpe, 42_(SInt), Global, Region::Opaque()), //
+        "xs"_(Ptr(tpe))[integral(SInt, idx)] = val,                  //
+        ret("xs"_(Ptr(tpe))[integral(SInt, idx)])                    //
     })));
   }
   DYNAMIC_SECTION("(xs[" << idx << "]:" << repr(tpe) << ") = " << repr(val) << " (args)") {
@@ -574,16 +575,16 @@ TEST_CASE("update prim array by ref", "[compiler]") {
   DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << repr(tpe) << ") = " << repr(val) << " (local)") {
     CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt), Global),                                 //
+        let("xs") = Alloc(tpe, 42_(SInt), Global, Region::Opaque()),               //
         "xs"_(Ptr(tpe))[integral(SInt, idx.value_or(0))] = generateConstTerm(tpe), //
-        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global),
+        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global, Region::Opaque()),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
     })));
   }
   DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << repr(tpe) << ") = " << repr(val) << " (args)") {
     CAPTURE(repr(tpe), idx, repr(val));
     assertCompile(program(function("foo", {"xs"_(Ptr(tpe))()}, tpe)({
-        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global),
+        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global, Region::Opaque()),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
     })));
   }
@@ -596,16 +597,16 @@ TEST_CASE("update prim value by ref", "[compiler]") {
   DYNAMIC_SECTION("(&x:" << repr(tpe) << ") = " << repr(val) << " (local)") {
     CAPTURE(repr(tpe), repr(val));
     assertCompile(program(function("foo", {}, tpe)({
-        let("x") = val,                               //
-        let("y") = RefTo("x"_(tpe), {}, tpe, Global), //
-        ret("y"_(Ptr(tpe))[integral(SInt, 0)])        //
+        let("x") = val,                                                 //
+        let("y") = RefTo("x"_(tpe), {}, tpe, Global, Region::Opaque()), //
+        ret("y"_(Ptr(tpe))[integral(SInt, 0)])                          //
     })));
   }
   DYNAMIC_SECTION("(&x:" << repr(tpe) << ") = " << repr(val) << " (args)") {
     CAPTURE(repr(tpe), repr(val));
     assertCompile(program(function("foo", {"x"_(tpe)()}, tpe)({
-        let("y") = RefTo("x"_(tpe), {}, tpe, Global), //
-        ret("y"_(Ptr(tpe))[integral(SInt, 0)])        //
+        let("y") = RefTo("x"_(tpe), {}, tpe, Global, Region::Opaque()), //
+        ret("y"_(Ptr(tpe))[integral(SInt, 0)])                          //
     })));
   }
 }
@@ -707,7 +708,7 @@ TEST_CASE("alias array", "[compiler]") {
 
   Function fn = mkFn("foo", {}, arr,
                      {
-                         Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global)}, false),
+                         Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global, Region::Opaque())}, false),
                          Var(Named("t", arr), {Expr::Alias(Select({}, Named("s", arr)))}, false),
                          Return(Expr::Alias(Select({}, Named("s", arr)))),
                      },
@@ -750,9 +751,9 @@ TEST_CASE("mut array", "[compiler]") {
 
   Function fn = mkFn("foo", {}, arr,
                      {
-                         Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global)}, false),
-                         Var(Named("t", arr), {Alloc(arr.comp, Term::IntS32Const(20), Global)}, false),
-                         Var(Named("u", arr), {Alloc(arr.comp, Term::IntS32Const(30), Global)}, false),
+                         Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global, Region::Opaque())}, false),
+                         Var(Named("t", arr), {Alloc(arr.comp, Term::IntS32Const(20), Global, Region::Opaque())}, false),
+                         Var(Named("u", arr), {Alloc(arr.comp, Term::IntS32Const(30), Global, Region::Opaque())}, false),
                          MutT(Select({}, Named("s", arr)), Select({}, Named("t", arr))),
                          MutT(Select({}, Named("t", arr)), Select({}, Named("u", arr))),
                          MutT(Select({}, Named("t", arr)), Select({}, Named("s", arr))),
@@ -838,9 +839,9 @@ TEST_CASE("alloc array", "[compiler]") {
 
   Function fn = mkFn("foo", {}, arr,
                      {
-                         Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global)}, false),
-                         Var(Named("t", arr), {Alloc(arr.comp, Term::IntS32Const(20), Global)}, false),
-                         Var(Named("u", arr), {Alloc(arr.comp, Term::IntS32Const(30), Global)}, false),
+                         Var(Named("s", arr), {Alloc(arr.comp, Term::IntS32Const(10), Global, Region::Opaque())}, false),
+                         Var(Named("t", arr), {Alloc(arr.comp, Term::IntS32Const(20), Global, Region::Opaque())}, false),
+                         Var(Named("u", arr), {Alloc(arr.comp, Term::IntS32Const(30), Global, Region::Opaque())}, false),
                          Return(Expr::Alias(Select({}, Named("s", arr)))),
                      },
                      {FunctionVisibility::Exported()});

@@ -74,44 +74,48 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
     }
   };
 
-  switch (options.target) {
-    case compiletime::Target::Object_LLVM_HOST: {
-      auto host = backend::llvmc::defaultHostTriple();
-      validate(host.getArch());
-      switch (host.getArch()) {
-        case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
-        case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
-        case llvm::Triple::ArchType::arm: return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
-        default: throw std::logic_error(fmt::format("Unsupported host triplet: {}", host.str()));
+  auto opts = [&]() -> backend::LLVMBackend::Options {
+    switch (options.target) {
+      case compiletime::Target::Object_LLVM_HOST: {
+        auto host = backend::llvmc::defaultHostTriple();
+        validate(host.getArch());
+        switch (host.getArch()) {
+          case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
+          case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
+          case llvm::Triple::ArchType::arm: return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
+          default: throw std::logic_error(fmt::format("Unsupported host triplet: {}", host.str()));
+        }
       }
+      case compiletime::Target::Object_LLVM_x86_64:
+        validate(llvm::Triple::ArchType::x86_64);
+        return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_AArch64:
+        validate(llvm::Triple::ArchType::aarch64);
+        return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_ARM:
+        validate(llvm::Triple::ArchType::arm);
+        return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_NVPTX64:
+        validate(llvm::Triple::ArchType::nvptx64);
+        return {.target = backend::LLVMBackend::Target::NVPTX64, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_AMDGCN:
+        validate(llvm::Triple::ArchType::amdgcn);
+        return {.target = backend::LLVMBackend::Target::AMDGCN, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+        return {.target = backend::LLVMBackend::Target::SPIRV32_Kernel, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+        return {.target = backend::LLVMBackend::Target::SPIRV64_Kernel, .arch = options.arch};
+      case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+        return {.target = backend::LLVMBackend::Target::SPIRV_GLCompute, .arch = options.arch};
+      case compiletime::Target::Source_C_OpenCL1_1: //
+      case compiletime::Target::Source_C_Metal1_0:  //
+      case compiletime::Target::Source_C_C11:       //
+        throw std::logic_error("Not an object target");
+      default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
     }
-    case compiletime::Target::Object_LLVM_x86_64:
-      validate(llvm::Triple::ArchType::x86_64);
-      return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_AArch64:
-      validate(llvm::Triple::ArchType::aarch64);
-      return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_ARM:
-      validate(llvm::Triple::ArchType::arm);
-      return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_NVPTX64:
-      validate(llvm::Triple::ArchType::nvptx64);
-      return {.target = backend::LLVMBackend::Target::NVPTX64, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_AMDGCN:
-      validate(llvm::Triple::ArchType::amdgcn);
-      return {.target = backend::LLVMBackend::Target::AMDGCN, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-      return {.target = backend::LLVMBackend::Target::SPIRV32_Kernel, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
-      return {.target = backend::LLVMBackend::Target::SPIRV64_Kernel, .arch = options.arch};
-    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
-      return {.target = backend::LLVMBackend::Target::SPIRV_GLCompute, .arch = options.arch};
-    case compiletime::Target::Source_C_OpenCL1_1: //
-    case compiletime::Target::Source_C_Metal1_0:  //
-    case compiletime::Target::Source_C_C11:       //
-      throw std::logic_error("Not an object target");
-    default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
-  }
+  }();
+  opts.emitBitcode = options.hostMirroring;
+  return opts;
 }
 
 std::vector<polyast::StructLayout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
@@ -202,7 +206,7 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
     return it->second;
   };
 
-  const auto stepsWithOwner = (std::string(spec) ^ split(";"))                                  //
+  const auto stepsWithOwner = (std::string(spec) ^ split(';'))                                  //
                               | map([](auto &s) { return trim(s); })                            //
                               | filter([](auto &s) { return !s.empty(); })                      //
                               | map([&](auto &step) { return std::pair{ownerOf(step), step}; }) //
@@ -265,6 +269,11 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
     }
   };
 
+  const bool isGpuTarget = runtime::targetPlatformKind(options.target) == runtime::PlatformKind::Managed;
+  if (isGpuTarget && !program.entry.affinity.is<polyast::FunctionAffinity::Offload>())
+    throw std::logic_error(
+        fmt::format("GPU target {} requires an Offload-affinity entry function; got Host-affinity", magic_enum::enum_name(options.target)));
+
   std::vector<polyast::CompileEvent> preEvents;
   auto effective = program;
   {
@@ -273,6 +282,14 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
     auto passRun = runPipelineChain(effective, spec);
     effective = std::move(passRun.program);
     preEvents.emplace_back(std::move(passRun.event));
+  }
+
+  if (options.hostMirroring) {
+    auto hostFns = (std::vector<polyast::Function>{effective.entry} ^ concat(effective.functions)) //
+                   ^ filter([](auto &f) { return f.affinity.template is<polyast::FunctionAffinity::Host>(); });
+    if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions"};
+    effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
+                                 effective.phase, effective.metadata);
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);

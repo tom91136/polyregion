@@ -7,6 +7,7 @@
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/RuntimeLibcallInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/ValueTracking.h"
 
 namespace llvm {
 class Module;
@@ -16,11 +17,13 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 } // namespace llvm
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -48,11 +51,15 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/DCE.h"
+#include "llvm/Transforms/Scalar/EarlyCSE.h"
+#include "llvm/Transforms/Scalar/InferAddressSpaces.h"
+#include "llvm/Transforms/Scalar/SROA.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 
 #include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
@@ -367,6 +374,101 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
   throw std::logic_error(msg);
 }
 
+// SROA + mem2reg scalarise locals to SSA, dissolving the alloca round-trips SPIRVLegalizePointerCast aborts on;
+// FunctionAttrs is excluded (it would infer memory(none) -> Pure -> OpUnreachable)
+// a pointer OpPhi needs the VariablePointers capability (a Vulkan extension we exclude); std::max/min
+// return a reference, so `*std::max(a, b)` lowers to a load of a phi of two stack-slot pointers. Sink the
+// load through the phi (load each incoming pointer at its predecessor terminator, phi the loaded values)
+// so SROA can promote it away. Sound: a CFG edge holds no instructions, so loading at the predecessor
+// terminator reads the same memory as loading at the merge. NVIDIA tolerates the invalid module; Mesa
+// (RADV/lavapipe) reads it wrong.
+// dereferenceable on any control-flow edge: an alloca, or a pointer phi whose incomings are (recursively)
+static bool isStackDereferenceable(llvm::Value *v, unsigned depth = 0) {
+  v = llvm::getUnderlyingObject(v);
+  if (llvm::isa<llvm::AllocaInst>(v)) return true;
+  if (auto *ph = llvm::dyn_cast<llvm::PHINode>(v); ph && ph->getType()->isPointerTy() && depth < 8)
+    return ph->incoming_values() ^ forall([&](llvm::Value *in) { return isStackDereferenceable(in, depth + 1); });
+  return false;
+}
+
+static void sinkLoadsThroughPointerPhis(llvm::Function &F) {
+  for (bool changed = true; changed;) {
+    changed = false;
+    llvm::SmallVector<llvm::PHINode *> targets;
+    for (llvm::BasicBlock &BB : F)
+      for (llvm::PHINode &phi : BB.phis()) {
+        if (!phi.getType()->isPointerTy() || phi.use_empty()) continue;
+        llvm::Type *loadTy = nullptr;
+        // sink only when every user is a load; a phi feeding another pointer phi (nested std::max) waits
+        // until that outer phi is sunk and its users become loads
+        const bool allLoads = phi.users() ^ forall([&](llvm::User *u) {
+                                auto *ld = llvm::dyn_cast<llvm::LoadInst>(u);
+                                if (!ld || ld->getPointerOperand() != &phi || ld->isVolatile() || (loadTy && loadTy != ld->getType()))
+                                  return false;
+                                loadTy = ld->getType();
+                                return true;
+                              });
+        if (!allLoads || !loadTy) continue;
+        if (phi.incoming_values() ^ forall([](llvm::Value *in) { return isStackDereferenceable(in); })) targets.push_back(&phi);
+      }
+    for (llvm::PHINode *phi : targets) {
+      auto *loadTy = llvm::cast<llvm::LoadInst>(*phi->user_begin())->getType();
+      auto *vphi = llvm::PHINode::Create(loadTy, phi->getNumIncomingValues(), "", phi->getIterator());
+      for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+        auto *ld = new llvm::LoadInst(loadTy, phi->getIncomingValue(i), "", phi->getIncomingBlock(i)->getTerminator()->getIterator());
+        vphi->addIncoming(ld, phi->getIncomingBlock(i));
+      }
+      for (llvm::User *u : llvm::make_early_inc_range(phi->users())) {
+        auto *ld = llvm::cast<llvm::LoadInst>(u);
+        ld->replaceAllUsesWith(vphi);
+        ld->eraseFromParent();
+      }
+      phi->eraseFromParent();
+      changed = true;
+    }
+  }
+}
+
+static void scalariseForVulkan(llvm::TargetMachine &TM, llvm::Module &M) {
+  llvm::PassBuilder PB(&TM);
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager CGAM;
+  llvm::ModuleAnalysisManager MAM;
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
+
+  llvm::FunctionPassManager FPM;
+  FPM.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
+  // hoist flat pointers back to StorageBuffer, removing the casts logical SPIR-V forbids
+  FPM.addPass(llvm::InferAddressSpacesPass());
+  FPM.addPass(llvm::EarlyCSEPass());
+  FPM.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
+  FPM.addPass(llvm::InferAddressSpacesPass());
+  // no InstCombine: it folds `gep [N x T], p, 0, i` to a non-zero-first-index OpAccessChain (illegal)
+  // DCE last: struct-by-pointer leaves dead aggregate loads through a ptrcast that crash translation
+  FPM.addPass(llvm::DCEPass());
+
+  // SROA above promotes the `const int&` of std::max/min into a pointer phi (OpPhi of pointers needs the
+  // excluded VariablePointers capability); sink the load through it, then re-run SROA to promote the
+  // freed scalar allocas and drop the now-dead pointer phi
+  llvm::FunctionPassManager cleanup;
+  cleanup.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
+  cleanup.addPass(llvm::InferAddressSpacesPass());
+  cleanup.addPass(llvm::EarlyCSEPass());
+  cleanup.addPass(llvm::DCEPass());
+  for (llvm::Function &F : M)
+    if (!F.isDeclaration() && !F.getEntryBlock().empty()) {
+      FPM.run(F, FAM);
+      sinkLoadsThroughPointerPhis(F);
+      cleanup.run(F, FAM);
+    }
+}
+
 // See
 // https://github.com/pytorch/pytorch/blob/6d4d9840cd4f18232e201cbcd843ea4f6cb4aabb/torch/csrc/jit/tensorexpr/llvm_codegen.cpp#L2466
 static void optimise(llvm::TargetMachine &TM, llvm::Module &M, const llvm::OptimizationLevel &level) {
@@ -411,8 +513,8 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, const llvm::Optim
   }
 }
 
-polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
-                                            llvm::Module &M) {
+polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly, llvm::Module &M,
+                                            bool emitBitcode) {
   auto start = compiler::nowMono();
 
   auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;
@@ -495,6 +597,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // resolve nested empty-functor wrappers (e.g. polystl `transform_reduce` with
       // `std::multiplies<>`/`std::plus<>`), and uninlined calls produce zero results.
       const auto isSpirv = TM.getTargetTriple().isSPIRV();
+      // SPIR-V debug info can balloon Mesa's Intel brw compiler to 30 GB+
+      llvm::StripDebugInfo(*m);
       // Link vendor bodies before optimise so the inliner can fold them in.
       linkVendorDeviceLibs(*m, TM.getTargetTriple(), TM.getTargetCPU());
       if (!isSpirv) {
@@ -507,8 +611,12 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       if (isSpirv) {
         // XXX SPIR-V uses its own translate API; the generic addPassesToEmitFile path crashes
         // inside RegAlloc on SPIR-V due to subtarget init order.
+        if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) scalariseForVulkan(TM, *m);
+        // Vulkan forces CodeGenOptLevel::None: at O1+ LoopStrengthReduce rewrites the array GEP into a
+        // pointer induction var with no logical SPIR-V form; physical SPIR-V keeps genOpt
+        const auto spvOpt = TM.getTargetTriple().getOS() == llvm::Triple::Vulkan ? llvm::CodeGenOptLevel::None : genOpt;
         std::string spvBlob, errMsg;
-        const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, /*AllowExtNames*/ {}, genOpt, TM.getTargetTriple());
+        const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, /*AllowExtNames*/ {}, spvOpt, TM.getTargetTriple());
         if (!ok) throw std::logic_error("SPIRVTranslate failed: " + errMsg);
         // XXX LLVM SPIRVTranslate emits OpConstantNull for u32 zero constants. SPIR-V's
         // OpInBoundsPtrAccessChain forbids that for the structure-member index (must be
@@ -633,6 +741,19 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
       }
 
+      if (emitBitcode) {
+        // serialise IR as bitcode; the mirror bodies are optimised when linked into the user TU
+        auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
+        bindLLVMTargetMachineDataLayout(*llvmTM, M);
+        llvm::SmallVector<char, 0> bc;
+        llvm::raw_svector_ostream bcStream(bc);
+        llvm::WriteBitcodeToFile(M, bcStream);
+        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(start), "llvm_to_bc", objectSize(bc),
+                            std::vector<polyast::CompileEvent>{});
+        features ^= concat(collectPrecisionFeatures(M));
+        return {std::vector<int8_t>(bc.begin(), bc.end()), features, events, {}, ""};
+      }
+
       auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
       bindLLVMTargetMachineDataLayout(*llvmTM, M);
       auto [_, object, objectStart, objectElapsed] =
@@ -646,8 +767,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()),
                             std::vector<polyast::CompileEvent>{});
       }
-      for (auto &f : collectPrecisionFeatures(M))
-        features.push_back(f);
+      features ^= concat(collectPrecisionFeatures(M));
       return {binary, features, events, {}, ""};
     }
   }

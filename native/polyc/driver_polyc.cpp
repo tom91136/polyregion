@@ -65,6 +65,8 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                           "PolyPass pipeline spec: `;`-separated `Name(k=v,k=v)` steps. "
                           "Empty selects the default."},
                          ""),
+               bool hostMirroring = //
+               fire::arg({"--host-mirroring", "Compile only the generated Host-affinity functions and emit LLVM bitcode"}),
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
@@ -97,7 +99,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  compiler::initialise();
                  fmt::print(stderr, "[POLYC] Compiling program:\n=================\n{}\n=================\n", repr(program));
 
-                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes}, opt);
+                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes, hostMirroring}, opt);
                  if (verbose) fmt::print(stderr, "{}\n", repr(compilation));
                  if (!compilation.messages.empty()) fmt::print(stderr, "{}\n", compilation.messages);
                  auto resultBytes = compileresult_to_msgpack(compilation);

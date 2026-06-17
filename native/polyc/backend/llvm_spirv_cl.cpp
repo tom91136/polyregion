@@ -1,6 +1,11 @@
 #include "llvm_spirv_cl.h"
 
 #include <cstring>
+#include <string_view>
+#include <unordered_map>
+
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsSPIRV.h"
 
 #include "aspartame/all.hpp"
 #include "aspartame/ext/llvm.hpp"
@@ -118,6 +123,29 @@ namespace SpvScope {
 constexpr uint32_t Device = 1;
 constexpr uint32_t Workgroup = 2;
 } // namespace SpvScope
+
+struct OclMangledMath {
+  CodeGen &cg;
+  static const char *typeCode(const AnyType &t) {
+    if (t.is<polyregion::polyast::Type::Float32>()) return "f";
+    if (t.is<polyregion::polyast::Type::Float64>()) return "d";
+    if (t.is<polyregion::polyast::Type::Float16>()) return "Dh";
+    throw polyregion::backend::BackendException("unsupported fp type for OpenCL math builtin");
+  }
+  static std::string mangle(const char *name, const AnyType &tpe, int arity) {
+    std::string out = "_Z";
+    out += std::to_string(std::strlen(name));
+    out += name;
+    const char *tc = typeCode(tpe);
+    for (int i = 0; i < arity; ++i)
+      out += tc;
+    return out;
+  }
+  ValPtr unary(const char *name, const AnyType &rtn, const AnyTerm &arg) { return cg.extFn1(mangle(name, rtn, 1), rtn, arg); }
+  ValPtr binary(const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
+    return cg.extFn2(mangle(name, rtn, 2), rtn, lhs, rhs);
+  }
+};
 } // namespace
 
 static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requestedRtn, llvm::ArrayRef<ValPtr> args) {
@@ -175,25 +203,93 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
-  auto typeCode = [&](const AnyType &t) -> const char * {
-    if (t.is<Type::Float32>()) return "f";
-    if (t.is<Type::Float64>()) return "d";
-    if (t.is<Type::Float16>()) return "Dh";
-    throw polyregion::backend::BackendException("unsupported fp type for OpenCL math builtin");
-  };
-  auto mangle = [&](const char *name, const AnyType &tpe, int arity) {
-    std::string out = "_Z";
-    out += std::to_string(std::strlen(name));
-    out += name;
-    const char *tc = typeCode(tpe);
-    for (int i = 0; i < arity; ++i)
-      out += tc;
-    return out;
-  };
-  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) { return cg.extFn1(mangle(name, rtn, 1), rtn, arg); };
+  OclMangledMath m{cg};
+  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) { return m.unary(name, rtn, arg); };
   const auto binary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
-    return cg.extFn2(mangle(name, rtn, 2), rtn, lhs, rhs);
+    return m.binary(name, rtn, lhs, rhs);
   };
-  // XXX OpenCL has no `fabs` intrinsic equivalent here; the float branch goes through the mangled libcall.
   return mkExternMathVal(cg, expr, unary, binary, [&](const AnyType &tpe, const AnyTerm &x) { return unary("fabs", tpe, x); });
+}
+
+void SPIRVVulkanTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
+  fn.addFnAttr(llvm::Attribute::Convergent);
+  fn.addFnAttr(llvm::Attribute::NoRecurse);
+  fn.addFnAttr(llvm::Attribute::NoUnwind);
+  // block FunctionAttrs inferring memory(none): SPIRV would emit FunctionControl::Pure -> OpUnreachable
+  fn.setMemoryEffects(llvm::MemoryEffects::unknown());
+
+  // entry points use the hlsl.shader attribute, not SPIR_KERNEL; no optnone (it forces an unsupported capability)
+  if (source.isEntry) {
+    fn.addFnAttr("hlsl.shader", "compute");
+    fn.addFnAttr("hlsl.numthreads", std::to_string(cg.vkWorkgroupSizeX) + ",1,1");
+  } else fn.setCallingConv(llvm::CallingConv::SPIR_FUNC);
+}
+
+ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
+  auto &ctx = cg.C.actual;
+  auto &B = cg.B;
+  auto *i32t = cg.C.i32Ty();
+  auto dimI32 = [&](const AnyTerm &dim) { return B.CreateIntCast(cg.mkTermVal(dim), i32t, /*isSigned*/ false); };
+  auto coerce = [&](llvm::Value *v, const AnyType &tpe) -> ValPtr {
+    auto *want = cg.resolveType(tpe, true);
+    return v->getType() == want ? v : B.CreateIntCast(v, want, /*isSigned*/ false);
+  };
+  auto builtin = [&](llvm::Intrinsic::ID id, const AnyTerm &dim, const AnyType &tpe) -> ValPtr {
+    return coerce(B.CreateIntrinsic(i32t, id, {dimI32(dim)}), tpe);
+  };
+  auto localSize = [&](const AnyTerm &dim) -> llvm::Value * {
+    return B.CreateSelect(B.CreateICmpEQ(dimI32(dim), B.getInt32(0)), B.getInt32(cg.vkWorkgroupSizeX), B.getInt32(1));
+  };
+  auto groupBarrier = [&]() -> ValPtr {
+    B.CreateIntrinsic(llvm::Type::getVoidTy(ctx), llvm::Intrinsic::spv_group_memory_barrier_with_group_sync, {});
+    return cg.mkTermVal(Term::Unit0Const());
+  };
+  return expr.op.match_total( //
+      [&](const Spec::Assert &) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },
+      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_thread_id, v.dim, v.tpe); },
+      [&](const Spec::GpuGlobalSize &v) -> ValPtr {
+        auto *nw = B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_num_workgroups, {dimI32(v.dim)});
+        return coerce(B.CreateMul(nw, localSize(v.dim)), v.tpe);
+      },
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_group_id, v.dim, v.tpe); },
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_num_workgroups, v.dim, v.tpe); },
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_thread_id_in_group, v.dim, v.tpe); },
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return coerce(localSize(v.dim), v.tpe); },
+      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuBarrierAll &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuFenceLocal &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(); });
+}
+
+// XXX Vulkan float math uses LLVM intrinsics (GLSL.std.450), the OpenCL.std mangled libcalls crash the Intel driver
+ValPtr SPIRVVulkanTargetSpecificHandler::isNaN(CodeGen &cg, llvm::Value *from) {
+  return cg.B.CreateIntrinsic(llvm::Intrinsic::is_fpclass, {from->getType()}, {from, cg.B.getInt32(llvm::fcNan)});
+}
+
+ValPtr SPIRVVulkanTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
+  OclMangledMath m{cg};
+  const auto unary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) { return m.unary(name, rtn, arg); };
+  const auto binary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) {
+    return m.binary(name, rtn, lhs, rhs);
+  };
+  static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> uIntr = {
+      {"sin", llvm::Intrinsic::sin},     {"cos", llvm::Intrinsic::cos},   {"tan", llvm::Intrinsic::tan},
+      {"asin", llvm::Intrinsic::asin},   {"acos", llvm::Intrinsic::acos}, {"atan", llvm::Intrinsic::atan},
+      {"sinh", llvm::Intrinsic::sinh},   {"cosh", llvm::Intrinsic::cosh}, {"tanh", llvm::Intrinsic::tanh},
+      {"sqrt", llvm::Intrinsic::sqrt},   {"exp", llvm::Intrinsic::exp},   {"exp2", llvm::Intrinsic::exp2},
+      {"log", llvm::Intrinsic::log},     {"log2", llvm::Intrinsic::log2}, {"log10", llvm::Intrinsic::log10},
+      {"floor", llvm::Intrinsic::floor}, {"ceil", llvm::Intrinsic::ceil}, {"round", llvm::Intrinsic::round},
+      {"rint", llvm::Intrinsic::rint},   {"fabs", llvm::Intrinsic::fabs}};
+  static const std::unordered_map<std::string_view, llvm::Intrinsic::ID> bIntr = {{"pow", llvm::Intrinsic::pow}};
+  const auto vkUnary = [&](const char *name, const AnyType &rtn, const AnyTerm &arg) -> ValPtr {
+    if (const auto id = uIntr ^ get_maybe(std::string_view(name))) return cg.intr1(*id, rtn, arg);
+    return unary(name, rtn, arg);
+  };
+  const auto vkBinary = [&](const char *name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs) -> ValPtr {
+    if (const auto id = bIntr ^ get_maybe(std::string_view(name))) return cg.intr2(*id, rtn, lhs, rhs);
+    return binary(name, rtn, lhs, rhs);
+  };
+  return mkExternMathVal(cg, expr, vkUnary, vkBinary, [&](const AnyType &tpe, const AnyTerm &x) { return vkUnary("fabs", tpe, x); });
 }

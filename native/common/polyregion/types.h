@@ -23,6 +23,10 @@
   #define POLYREGION_RT_PROTECT
 #endif
 
+namespace polyregion::program_meta {
+inline constexpr auto VkWorkgroupSizeX = "polyregion.vk.workgroup_size_x";
+} // namespace polyregion::program_meta
+
 namespace polyregion::invoke {
 
 struct POLYREGION_EXPORT PhysicalDevice {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 #include <utility>
 
@@ -15,17 +16,13 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
-class AMDGPUTargetSpecificHandler;
-class NVPTXTargetSpecificHandler;
-class CPUTargetSpecificHandler;
-class SPIRVOpenCLTargetSpecificHandler;
-
 class LLVMBackend final : public Backend {
 public:
   enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV32_Kernel, SPIRV64_Kernel, SPIRV_GLCompute };
   struct Options {
     Target target;
     std::string arch;
+    bool emitBitcode = false;
     [[nodiscard]] llvmc::TargetInfo targetInfo() const;
   };
 
@@ -72,10 +69,11 @@ struct TargetedContext {
   [[nodiscard]] bool isSpirvKernel() const {
     return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel;
   }
+  [[nodiscard]] bool isVulkan() const { return options.target == LLVMBackend::Target::SPIRV_GLCompute; }
 
   [[nodiscard]] AS addressSpace(const TypeSpace::Any &s) const;
   [[nodiscard]] AS addressSpaceForKernelArg(const TypeSpace::Any &s) const;
-  [[nodiscard]] llvm::PointerType *loadedPtrTy(llvm::IRBuilder<> &B) const;
+  [[nodiscard]] llvm::PointerType *loadedPtrTy(llvm::IRBuilder<> &B, const TypeSpace::Any &space) const;
   [[nodiscard]] ValPtr allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key) const;
   [[nodiscard]] ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) const;
   [[nodiscard]] ValPtr store(llvm::IRBuilder<> &B, ValPtr rhsVal, ValPtr lhsPtr) const;
@@ -88,10 +86,24 @@ struct TargetedContext {
 
 struct CodeGen;
 
+struct PointerModel {
+  virtual ValPtr selectPtr(CodeGen &gen, const Term::Select &select) = 0;
+  virtual void copyAggregate(CodeGen &gen, ValPtr dst, ValPtr src, const AnyType &tpe) = 0;
+  virtual ValPtr indexVal(CodeGen &gen, const Expr::Index &index, const std::string &key) = 0;
+  virtual ValPtr refToVal(CodeGen &gen, const Expr::RefTo &refTo, const std::string &key) = 0;
+  virtual void storeUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) = 0;
+  virtual std::optional<ValPtr> termSelectVal(CodeGen &gen, const Term::Select &select) { return std::nullopt; }
+  virtual llvm::Type *localAllocType(CodeGen &gen, const AnyType &nameTpe, llvm::Type *tpe) { return tpe; }
+  virtual void reset() {}
+  virtual bool bindEntryArgs(llvm::Function &fn, const std::vector<Arg> &argsNoUnit, const Function &source) { return false; }
+  virtual ~PointerModel() = default;
+};
+
 struct TargetSpecificHandler {
   virtual void witnessFn(CodeGen &gen, llvm::Function &fn, const Function &source) = 0;
   virtual ValPtr mkSpecVal(CodeGen &gen, const Expr::SpecOp &op) = 0;
   virtual ValPtr mkMathVal(CodeGen &gen, const Expr::MathOp &op) = 0;
+  virtual ValPtr isNaN(CodeGen &gen, llvm::Value *from);
   // Called after all kernel/function bodies have been generated. Default is a no-op.
   virtual void postProcessModule(CodeGen &gen) {}
   virtual ~TargetSpecificHandler();
@@ -114,21 +126,26 @@ struct CodeGen {
   Map<std::string, Pair<AnyType, llvm::Value *>> stackVarPtrs{};
   Map<std::string, StructInfo> structTypes{};
   Map<Signature, llvm::Function *> functions{};
+  std::unique_ptr<PointerModel> ptrModel;
   // Out-pointer for sret-transformed bodies; `Stmt::Return` writes through it. Reset per body.
   llvm::Value *currentSretParam = nullptr;
+  // Vulkan compute workgroup size, resolved from program metadata (program_meta::VkWorkgroupSizeX)
+  unsigned vkWorkgroupSizeX = 0;
 
   // XXX SPIR-V Kernel only: byte arithmetic + memcpy works around Intel IGC's mis-routing of
   // `OpInBoundsPtrAccessChain` with `OpConstantNull` element. Logical SPIR-V (GLCompute) runs
   // SPIRVLegalizePointerCast which can't legalise inttoptr/ptrtoint; force GEP there.
   [[nodiscard]] bool spirvStructByMemcpy() const { return C.isSpirvKernel(); }
+  // structs travel by pointer on every SPIR-V target (no legalisable aggregate load)
+  [[nodiscard]] bool structByPtr() const { return spirvStructByMemcpy() || C.isVulkan(); }
+  void copyStruct(llvm::Value *dst, llvm::Value *src, const AnyType &tpe);
 
   explicit CodeGen(const LLVMBackend::Options &options, const std::string &moduleName);
+  ~CodeGen();
 
   [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, bool functionBoundary = false, bool kernelEntryArg = false);
   [[nodiscard]] llvm::Function *resolveExtFn(const AnyType &rtn, const std::string &name, const std::vector<AnyType> &args);
 
-  // XXX Lowers to `OpConvertPtrToU` + `OpIAdd` + `OpConvertUToPtr` on SPIR-V; preserves the source
-  // pointer's address space across the round-trip.
   [[nodiscard]] llvm::Value *byteOffsetPtr(llvm::Value *base, llvm::Value *byteOff, const std::string &name);
   [[nodiscard]] llvm::Value *i64SExt(llvm::Value *v);
 
@@ -145,7 +162,7 @@ struct CodeGen {
 
   [[nodiscard]] ValPtr mkTermVal(const Term::Any &term, const std::string &key = "");
   [[nodiscard]] ValPtr mkExprVal(const Expr::Any &expr, const std::string &key = "");
-  [[nodiscard]] BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx);
+  [[nodiscard]] BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx = {});
 
   [[nodiscard]] ValPtr unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn);
   [[nodiscard]] ValPtr binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &fn);
