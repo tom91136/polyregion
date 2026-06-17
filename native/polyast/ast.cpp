@@ -248,9 +248,9 @@ Stmt::Return dsl::ret(const Term::Any &term) { return Stmt::Return(Expr::Alias(t
 
 Program dsl::program(const Vector<StructDef> &structs, const Vector<Function> &functions) {
   if (functions.empty()) throw std::logic_error("dsl::program requires at least one (entry) function");
-  return Program(functions.front(), Vector<Function>(std::next(functions.begin()), functions.end()), structs, PassPhase::Initial());
+  return Program(functions.front(), Vector<Function>(std::next(functions.begin()), functions.end()), structs, PassPhase::Initial(), {});
 }
-Program dsl::program(const Function &function) { return Program(function, {}, {}, PassPhase::Initial()); }
+Program dsl::program(const Function &function) { return Program(function, {}, {}, PassPhase::Initial(), {}); }
 
 dsl::IndexBuilder::IndexBuilder(const Index &index) : index(index) {}
 dsl::IndexBuilder::operator Expr::Any() const { return index; }

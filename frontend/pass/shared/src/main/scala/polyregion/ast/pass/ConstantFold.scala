@@ -8,11 +8,9 @@ object ConstantFold extends ProgramPass {
   type Env = Map[p.Named, p.Term]
 
   override def apply(program: p.Program, log: Log): p.Program =
-    p.Program(
-      run(program.entry, log.subLog(s"ConstantFold on ${program.entry.name}")),
-      program.functions.map(f => run(f, log.subLog(s"ConstantFold on ${f.name}"))),
-      program.defs,
-      program.phase
+    program.copy(
+      entry = run(program.entry, log.subLog(s"ConstantFold on ${program.entry.name}")),
+      functions = program.functions.map(f => run(f, log.subLog(s"ConstantFold on ${f.name}")))
     )
 
   private def run(f: p.Function, log: Log): p.Function = {

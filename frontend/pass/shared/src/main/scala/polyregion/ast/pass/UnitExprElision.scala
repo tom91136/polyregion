@@ -29,6 +29,6 @@ object UnitExprElision extends ProgramPass {
   }
 
   override def apply(program: p.Program, log: Log): p.Program =
-    p.Program(run(program.entry), program.functions.map(run(_)), program.defs, program.phase)
+    program.copy(entry = run(program.entry), functions = program.functions.map(run(_)))
 
 }

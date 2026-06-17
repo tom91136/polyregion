@@ -354,6 +354,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json structdef_to_json(const StructDef &);
 [[nodiscard]] POLYREGION_EXPORT Mirror mirror_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json mirror_to_json(const Mirror &);
+[[nodiscard]] POLYREGION_EXPORT MetaEntry metaentry_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json metaentry_to_json(const MetaEntry &);
 [[nodiscard]] POLYREGION_EXPORT Program program_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json program_to_json(const Program &);
 [[nodiscard]] POLYREGION_EXPORT StructLayoutMember structlayoutmember_from_json(const json &);

@@ -207,7 +207,7 @@ object FnInline extends ProgramPass {
     }
 
     log.info(s"converged in $n iteration(s)")
-    p.Program(f, Nil, program.defs, program.phase)
+    program.copy(entry = f, functions = Nil)
 
   }
 

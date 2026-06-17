@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "ba4622d46b457e4207bee86498d221b7";
+constexpr auto AdtHash = "3dbd5c778907a71daebe840b5a584b1d";
 
 namespace {
 
@@ -2509,6 +2509,18 @@ json PassPhase::any_to_json(const PassPhase::Any &x_) {
                         [](const PassPhase::PostMono &y_) -> json { return {1, PassPhase::postmono_to_json(y_)}; });
 }
 
+MetaEntry metaentry_from_json(const json &j_) {
+  auto key = j_.at(0).get<std::string>();
+  auto value = j_.at(1).get<std::string>();
+  return {key, value};
+}
+
+json metaentry_to_json(const MetaEntry &x_) {
+  auto key = x_.key;
+  auto value = x_.value;
+  return json::array({key, value});
+}
+
 Program program_from_json(const json &j_) {
   auto entry = function_from_json(j_.at(0));
   std::vector<Function> functions;
@@ -2520,7 +2532,11 @@ Program program_from_json(const json &j_) {
     defs.emplace_back(structdef_from_json(v_));
   }
   auto phase = PassPhase::any_from_json(j_.at(3));
-  return {entry, functions, defs, phase};
+  std::vector<MetaEntry> metadata;
+  for (const auto &v_ : j_.at(4)) {
+    metadata.emplace_back(metaentry_from_json(v_));
+  }
+  return {entry, functions, defs, phase, metadata};
 }
 
 json program_to_json(const Program &x_) {
@@ -2534,7 +2550,11 @@ json program_to_json(const Program &x_) {
     defs.emplace_back(structdef_to_json(v_));
   }
   auto phase = PassPhase::any_to_json(x_.phase);
-  return json::array({entry, functions, defs, phase});
+  std::vector<json> metadata;
+  for (const auto &v_ : x_.metadata) {
+    metadata.emplace_back(metaentry_to_json(v_));
+  }
+  return json::array({entry, functions, defs, phase, metadata});
 }
 
 StructLayoutMember structlayoutmember_from_json(const json &j_) {
@@ -3327,6 +3347,10 @@ Mirror mirror_fields_from_msgpack(MsgpackReader &, size_t);
 void mirror_fields_to_msgpack(MsgpackWriter &, const Mirror &);
 Mirror mirror_from_msgpack(MsgpackReader &);
 void mirror_to_msgpack(MsgpackWriter &, const Mirror &);
+MetaEntry metaentry_fields_from_msgpack(MsgpackReader &, size_t);
+void metaentry_fields_to_msgpack(MsgpackWriter &, const MetaEntry &);
+MetaEntry metaentry_from_msgpack(MsgpackReader &);
+void metaentry_to_msgpack(MsgpackWriter &, const MetaEntry &);
 Program program_fields_from_msgpack(MsgpackReader &, size_t);
 void program_fields_to_msgpack(MsgpackWriter &, const Program &);
 Program program_from_msgpack(MsgpackReader &);
@@ -8017,8 +8041,30 @@ void PassPhase::any_to_msgpack(MsgpackWriter &w_, const PassPhase::Any &x_) {
                  [&](const PassPhase::PostMono &y_) -> void { w_.writeInt32(1); });
 }
 
+MetaEntry metaentry_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected MetaEntry with 2 field(s)");
+  auto key = r_.readString();
+  auto value = r_.readString();
+  return {key, value};
+}
+
+void metaentry_fields_to_msgpack(MsgpackWriter &w_, const MetaEntry &x_) {
+  w_.writeString(x_.key);
+  w_.writeString(x_.value);
+}
+
+MetaEntry metaentry_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return metaentry_fields_from_msgpack(r_, n_);
+}
+
+void metaentry_to_msgpack(MsgpackWriter &w_, const MetaEntry &x_) {
+  w_.writeArrayHeader(2);
+  metaentry_fields_to_msgpack(w_, x_);
+}
+
 Program program_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected Program with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected Program with 5 field(s)");
   auto entry = function_from_msgpack(r_);
   std::vector<Function> functions;
   {
@@ -8039,7 +8085,16 @@ Program program_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
     }
   }
   auto phase = PassPhase::any_from_msgpack(r_);
-  return {entry, functions, defs, phase};
+  std::vector<MetaEntry> metadata;
+  {
+    auto metadata_size = r_.readArrayHeader();
+    metadata.reserve(metadata_size);
+    for (size_t metadata_idx = 0; metadata_idx < metadata_size; ++metadata_idx) {
+      auto metadata_elem = metaentry_from_msgpack(r_);
+      metadata.emplace_back(std::move(metadata_elem));
+    }
+  }
+  return {entry, functions, defs, phase, metadata};
 }
 
 void program_fields_to_msgpack(MsgpackWriter &w_, const Program &x_) {
@@ -8053,6 +8108,10 @@ void program_fields_to_msgpack(MsgpackWriter &w_, const Program &x_) {
     structdef_to_msgpack(w_, v0_);
   }
   PassPhase::any_to_msgpack(w_, x_.phase);
+  w_.writeArrayHeader(x_.metadata.size());
+  for (const auto &v0_ : x_.metadata) {
+    metaentry_to_msgpack(w_, v0_);
+  }
 }
 
 Program program_from_msgpack(MsgpackReader &r_) {
@@ -8061,7 +8120,7 @@ Program program_from_msgpack(MsgpackReader &r_) {
 }
 
 void program_to_msgpack(MsgpackWriter &w_, const Program &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   program_fields_to_msgpack(w_, x_);
 }
 

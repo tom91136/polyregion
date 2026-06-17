@@ -149,6 +149,7 @@ private[polyregion] object CodeGen {
         :: deriveStruct[StructDef]()
         :: deriveStruct[Mirror]()
         :: deriveStruct[PassPhase]()
+        :: deriveStruct[MetaEntry]()
         :: deriveStruct[Program]()
         :: deriveStruct[StructLayoutMember]()
         :: deriveStruct[StructLayout]()

@@ -3213,23 +3213,39 @@ POLYREGION_EXPORT bool PassPhase::PostMono::operator<(const Base &rhs_) const { 
 PassPhase::PostMono::operator PassPhase::Any() const { return std::static_pointer_cast<Base>(std::make_shared<PostMono>(*this)); }
 PassPhase::Any PassPhase::PostMono::widen() const { return Any(*this); };
 
-Program::Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs, PassPhase::Any phase) noexcept
-    : entry(std::move(entry)), functions(std::move(functions)), defs(std::move(defs)), phase(std::move(phase)) {}
+MetaEntry::MetaEntry(std::string key, std::string value) noexcept : key(std::move(key)), value(std::move(value)) {}
+size_t MetaEntry::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(key)>()(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+MetaEntry MetaEntry::withKey(const std::string &v_) const { return MetaEntry(v_, value); }
+MetaEntry MetaEntry::withValue(const std::string &v_) const { return MetaEntry(key, v_); }
+POLYREGION_EXPORT bool MetaEntry::operator!=(const MetaEntry &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool MetaEntry::operator==(const MetaEntry &rhs) const { return (key == rhs.key) && (value == rhs.value); }
+
+Program::Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs, PassPhase::Any phase,
+                 std::vector<MetaEntry> metadata) noexcept
+    : entry(std::move(entry)), functions(std::move(functions)), defs(std::move(defs)), phase(std::move(phase)),
+      metadata(std::move(metadata)) {}
 size_t Program::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(entry)>()(entry) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(functions)>()(functions) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(defs)>()(defs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(phase)>()(phase) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Program Program::withEntry(const Function &v_) const { return Program(v_, functions, defs, phase); }
-Program Program::withFunctions(const std::vector<Function> &v_) const { return Program(entry, v_, defs, phase); }
-Program Program::withDefs(const std::vector<StructDef> &v_) const { return Program(entry, functions, v_, phase); }
-Program Program::withPhase(const PassPhase::Any &v_) const { return Program(entry, functions, defs, v_); }
+Program Program::withEntry(const Function &v_) const { return Program(v_, functions, defs, phase, metadata); }
+Program Program::withFunctions(const std::vector<Function> &v_) const { return Program(entry, v_, defs, phase, metadata); }
+Program Program::withDefs(const std::vector<StructDef> &v_) const { return Program(entry, functions, v_, phase, metadata); }
+Program Program::withPhase(const PassPhase::Any &v_) const { return Program(entry, functions, defs, v_, metadata); }
+Program Program::withMetadata(const std::vector<MetaEntry> &v_) const { return Program(entry, functions, defs, phase, v_); }
 POLYREGION_EXPORT bool Program::operator!=(const Program &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Program::operator==(const Program &rhs) const {
-  return (entry == rhs.entry) && (functions == rhs.functions) && (defs == rhs.defs) && (phase == rhs.phase);
+  return (entry == rhs.entry) && (functions == rhs.functions) && (defs == rhs.defs) && (phase == rhs.phase) && (metadata == rhs.metadata);
 }
 
 StructLayoutMember::StructLayoutMember(Named name, int64_t offsetInBytes, int64_t sizeInBytes) noexcept
@@ -3896,6 +3912,9 @@ std::hash<polyregion::polyast::PassPhase::Initial>::operator()(const polyregion:
 }
 std::size_t
 std::hash<polyregion::polyast::PassPhase::PostMono>::operator()(const polyregion::polyast::PassPhase::PostMono &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MetaEntry>::operator()(const polyregion::polyast::MetaEntry &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Program>::operator()(const polyregion::polyast::Program &x) const noexcept {

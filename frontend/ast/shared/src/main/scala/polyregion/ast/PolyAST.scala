@@ -346,14 +346,18 @@ object PolyAST {
 
   enum PassPhase derives MsgPack.Codec { case Initial, PostMono }
 
+  case class MetaEntry(key: String, value: String) derives MsgPack.Codec
+
   case class Program(
       entry: Function,
       functions: List[Function],
       defs: List[StructDef],
-      phase: PassPhase = PassPhase.Initial
+      phase: PassPhase = PassPhase.Initial,
+      metadata: List[MetaEntry] = Nil
   ) derives MsgPack.Codec {
-    def hostFunctions: List[Function]    = functions.filter(_.affinity == Function.Affinity.Host)
-    def offloadFunctions: List[Function] = functions.filter(_.affinity == Function.Affinity.Offload)
+    def hostFunctions: List[Function]     = functions.filter(_.affinity == Function.Affinity.Host)
+    def offloadFunctions: List[Function]  = functions.filter(_.affinity == Function.Affinity.Offload)
+    def meta(key: String): Option[String] = metadata.find(_.key == key).map(_.value)
   }
 
   case class StructLayoutMember(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec

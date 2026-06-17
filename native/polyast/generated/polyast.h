@@ -593,6 +593,7 @@ public:
 
 } // namespace PassPhase
 
+struct MetaEntry;
 struct Program;
 struct StructLayoutMember;
 struct StructLayout;
@@ -6869,16 +6870,52 @@ struct POLYREGION_EXPORT PostMono : PassPhase::Base {
 };
 } // namespace PassPhase
 
+struct POLYREGION_EXPORT MetaEntry {
+  std::string key;
+  std::string value;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT MetaEntry withKey(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT MetaEntry withValue(const std::string &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, MetaEntry>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT MetaEntry modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, MetaEntry>) {
+      return f(*this);
+    }
+    return MetaEntry(key, value);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const MetaEntry &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const MetaEntry &) const;
+  MetaEntry(std::string key, std::string value) noexcept;
+};
+
 struct POLYREGION_EXPORT Program {
   Function entry;
   std::vector<Function> functions;
   std::vector<StructDef> defs;
   PassPhase::Any phase;
+  std::vector<MetaEntry> metadata;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT Program withEntry(const Function &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Program withFunctions(const std::vector<Function> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Program withDefs(const std::vector<StructDef> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Program withPhase(const PassPhase::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Program withMetadata(const std::vector<MetaEntry> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, Program>) {
@@ -6894,6 +6931,9 @@ struct POLYREGION_EXPORT Program {
       (*it).collect_where<T, U>(results_, f);
     }
     phase.collect_where<T, U>(results_, f);
+    for (auto it = metadata.begin(); it != metadata.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
   }
   template <typename T, typename U>
   [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
@@ -6916,11 +6956,16 @@ struct POLYREGION_EXPORT Program {
     for (auto it = defs.begin(); it != defs.end(); ++it) {
       defs__.emplace_back((*it).modify_all<T>(f));
     }
-    return Program(entry.modify_all<T>(f), functions__, defs__, phase.modify_all<T>(f));
+    std::vector<MetaEntry> metadata__;
+    for (auto it = metadata.begin(); it != metadata.end(); ++it) {
+      metadata__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Program(entry.modify_all<T>(f), functions__, defs__, phase.modify_all<T>(f), metadata__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Program &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Program &) const;
-  Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs, PassPhase::Any phase) noexcept;
+  Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs, PassPhase::Any phase,
+          std::vector<MetaEntry> metadata) noexcept;
 };
 
 struct POLYREGION_EXPORT StructLayoutMember {
@@ -9093,6 +9138,9 @@ template <> struct hash<polyregion::polyast::PassPhase::Initial> {
 };
 template <> struct hash<polyregion::polyast::PassPhase::PostMono> {
   std::size_t operator()(const polyregion::polyast::PassPhase::PostMono &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::MetaEntry> {
+  std::size_t operator()(const polyregion::polyast::MetaEntry &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Program> {
   std::size_t operator()(const polyregion::polyast::Program &) const noexcept;

@@ -44,11 +44,9 @@ object VarReduce extends ProgramPass {
   }
 
   override def apply(program: p.Program, log: Log): p.Program =
-    p.Program(
-      run(program.entry, log.subLog(s"VarReduce on ${program.entry.name}")),
-      program.functions.map(f => run(f, log.subLog(s"VarReduce on ${f.name}"))),
-      program.defs,
-      program.phase
+    program.copy(
+      entry = run(program.entry, log.subLog(s"VarReduce on ${program.entry.name}")),
+      functions = program.functions.map(f => run(f, log.subLog(s"VarReduce on ${f.name}")))
     )
 
 }
