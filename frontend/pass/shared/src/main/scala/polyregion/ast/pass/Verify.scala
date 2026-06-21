@@ -3,6 +3,15 @@ package polyregion.ast.pass
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+// well-formedness checks over a program
+// examples:
+//   p rooted, p[i]                      ->  ok
+//   q opaque, q[i] / q[i] = v / q.f     ->  "read/write/deref through opaque-origin pointer q"
+//   alloc Local of a runtime size       ->  "Alloc Local ... requires a constant size"
+//   PostMono fn still holds a Type.Var  ->  "PostMono: ... contains Type.Var"
+//   Global p rooted at a Local a        ->  "p declared Global but rooted at a declared Local"
+//   r = (T*) intExpr                    ->  "Cannot cast unrelated type ..."
+//   use of an undeclared / retyped name ->  "uses the unseen/already-defined variable ..."
 object Verify {
 
   case class Context(declared: Set[p.Named] = Set.empty, errors: List[String] = Nil) {
@@ -85,11 +94,11 @@ object Verify {
     (program.entry :: program.functions).flatMap { f =>
       Provenance.derivedIn(f).toList.sortBy(_._1.symbol).flatMap {
         case (n, p.Region.Rooted(r)) if r != n =>
-          for {
+          (for {
             sn <- spaceOf(n.tpe)
             sr <- spaceOf(r.tpe)
             if sn != sr
-          } yield s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr"
+          } yield s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr").toList
         case _ => Nil
       }
     }
@@ -181,6 +190,7 @@ object Verify {
         args.foldLeft(c0)(validateTerm(_, _))
       case p.Expr.ForeignCall(_, args, _) => args.foldLeft(c)(validateTerm(_, _))
       case p.Expr.OffsetOf(_, _)          => c
+      case p.Expr.SizeOf(_)               => c
       case p.Expr.Index(lhs, idx, _)      => validateTerm(validateTerm(c, lhs), idx)
       case p.Expr.RefTo(lhs, idx, _, _, _) =>
         val c0 = validateTerm(c, lhs); idx.fold(c0)(validateTerm(c0, _))

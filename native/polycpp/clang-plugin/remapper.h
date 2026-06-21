@@ -19,6 +19,7 @@ using polyregion::raise;
 
 struct Remapper {
   clang::ASTContext &context;
+  mutable Map<std::string, Set<std::string>> readOnlyMembers{};
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
     bool ctorChain = false;
@@ -75,7 +76,6 @@ struct Remapper {
     [[nodiscard]] Named newName(const Type::Any &tpe);
     [[nodiscard]] Term::Any newVar(const Expr::Any &expr);
     [[nodiscard]] Named newVar(const Type::Any &tpe);
-    //    void operator+=(const Remapper &that);
   };
 
   explicit Remapper(clang::ASTContext &context);
@@ -86,6 +86,7 @@ struct Remapper {
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
   [[nodiscard]] Pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   [[nodiscard]] Type::Any handleType(clang::QualType qual, RemapContext &r) const;
+  [[nodiscard]] Type::Any annotateLocalSpace(const clang::ValueDecl *decl, RemapContext &r) const;
   [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
   void handleStmt(const clang::Stmt *root, RemapContext &expr);

@@ -33,7 +33,7 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
   llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
     if (F &&                                                //
         (Annotation == POLYREFLECT_RT_PROTECT_ANNOTATION || //
-         Annotation == "polyreflect-rt-odr"))
+         Annotation == POLYREFLECT_RT_ODR_ANNOTATION))
       Protected.emplace(F);
   });
   // XXX Transitive close: any function reachable from a protected one is also protected, else

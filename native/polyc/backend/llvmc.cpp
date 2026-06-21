@@ -224,6 +224,45 @@ static std::string patchSpirvConstantNull(std::string spv) {
   return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
 }
 
+// the Vulkan/GLSL memory model assumes distinct OpVariables don't alias unless decorated Aliased. the arena
+// binds ONE VkBuffer to all typed views, so they genuinely alias - without the decoration an optimiser may
+// reorder a store past a load at the same byte (type-punning: std::list node membuf, widened tails).
+// decorate every StorageBuffer Aliased; it can only forbid an optimisation, so it is conservatively correct
+static std::string patchSpirvAliased(std::string spv) {
+  constexpr uint16_t OpDecorate = 71, OpMemberDecorate = 72, OpDecorationGroup = 73, OpGroupDecorate = 74, OpGroupMemberDecorate = 75,
+                     OpVariable = 59;
+  constexpr uint32_t StorageBufferSC = 12, AliasedDecoration = 20;
+  if (spv.size() < 5 * sizeof(uint32_t)) return spv;
+  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  std::vector<uint32_t> ssboVars;
+  std::unordered_set<uint32_t> aliased;
+  size_t lastDecorEnd = 0; // word index just past the last annotation instruction (decorations go here)
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    if (wc == 0 || i + wc > nWords) return spv;
+    if (op == OpDecorate || op == OpMemberDecorate || op == OpDecorationGroup || op == OpGroupDecorate || op == OpGroupMemberDecorate)
+      lastDecorEnd = i + wc;
+    if (op == OpDecorate && wc >= 3 && src[i + 2] == AliasedDecoration) aliased.insert(src[i + 1]);
+    if (op == OpVariable && wc >= 4 && src[i + 3] == StorageBufferSC) ssboVars.push_back(src[i + 2]);
+    i += wc;
+  }
+  std::vector<uint32_t> add;
+  for (const uint32_t id : ssboVars)
+    if (aliased.insert(id).second) {
+      add.push_back((3u << 16) | OpDecorate);
+      add.push_back(id);
+      add.push_back(AliasedDecoration);
+    }
+  if (add.empty() || lastDecorEnd == 0) return spv;
+  std::vector<uint32_t> out(src, src + lastDecorEnd);
+  out.insert(out.end(), add.begin(), add.end());
+  out.insert(out.end(), src + lastDecorEnd, src + nWords);
+  return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
 static std::string module2Ir(const llvm::Module &m) {
   std::string ir;
   llvm::raw_string_ostream irOut(ir);
@@ -625,6 +664,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // `OpConstantNull %u32 %id` into `OpConstant %u32 %id 0` (u32 only, leaving
         // `OpConstantNull %ulong` and pointer-null alone).
         spvBlob = patchSpirvConstantNull(std::move(spvBlob));
+        // only Vulkan's logical memory model assumes no-alias by default; OpenCL is C-like (may-alias), already sound
+        if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) spvBlob = patchSpirvAliased(std::move(spvBlob));
         objBuffer.append(spvBlob.begin(), spvBlob.end());
       } else {
         llvm::legacy::PassManager PM;

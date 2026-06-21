@@ -17,6 +17,7 @@
 #include "ast.h"
 #include "compiler.h"
 #include "fire.hpp"
+#include "generated/polypass_symbols.h"
 #include "polyast_codec.h"
 
 using namespace polyregion;
@@ -44,7 +45,7 @@ static std::string targetDescription = [] {
           names += std::string("|") + std::string(a);
         return names + ": \t" + std::string(magic_enum::enum_name(s.codegen)) + " via " + std::string(magic_enum::enum_name(s.runtime));
       });
-  std::string env = std::string("\n\nEnvironment:\n  ") + POLYPASS_ENV_PLUGINS +
+  std::string env = std::string("\n\nEnvironment:\n  ") + polypass::abi::EnvPlugins +
                     " - PATH-separated list of PolyPass plugin paths (libpolypass.so / polypass.js). "
                     "Overrides the bundled default plugin.";
   return "PolyAST to object code compiler.\nSupported targets:" + targets + env;

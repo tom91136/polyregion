@@ -4,6 +4,13 @@ import polyregion.ast.Traversal.*
 import polyregion.ast.{PolyAST as p, *, given}
 
 // drops unreferenced unit-typed Var decls (the residue of desugared statement expressions)
+// examples:
+//   var u: Unit; g()               ->  g()                          // no rhs, u unused
+//   var u: Unit = alias(v); g()    ->  g()                          // alias rhs, u unused
+//   var u: Unit = alias(v); u.x    ->  var u: Unit = alias(v); u.x  // kept: u referenced
+// edge cases:
+//   only None or Alias rhs drop  ->  a Var with any other rhs is kept regardless of use
+//   recurses into Cond/While/ForRange/Annotated bodies
 object UnitExprElision extends ProgramPass {
 
   // a dangling Return/Mut elsewhere may still reference the name, so only drop when unused

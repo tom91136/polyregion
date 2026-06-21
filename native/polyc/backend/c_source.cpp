@@ -55,6 +55,8 @@ struct CLAddressSpaceTracePass {
                          get_or_else(rootSpace);
       return SpacedTerm{Term::Select(rebound, sel->steps, sel->tpe), space};
     }
+    // XXX null seeds its space from the pointee (refTpe=Global) so `T* p = nullptr` later infers Global not Private
+    if (auto np = term.template get<Term::NullPtrConst>()) return SpacedTerm{term, np->space};
     return SpacedTerm{term};
   }
 
@@ -87,7 +89,8 @@ struct CLAddressSpaceTracePass {
         },
         [&](const Expr::Alloc &x) -> SpacedExpr { return {Expr::Alloc(x.comp, mapTerm0_(x.size), x.space, Region::Opaque())}; },
         [&](const Expr::ForeignCall &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },
-        [&](const Expr::OffsetOf &x) -> SpacedExpr { return {Expr::OffsetOf(x.structTpe, x.field)}; });
+        [&](const Expr::OffsetOf &x) -> SpacedExpr { return {Expr::OffsetOf(x.structTpe, x.field)}; },
+        [&](const Expr::SizeOf &x) -> SpacedExpr { return {Expr::SizeOf(x.forTpe)}; });
   }
 
   static Function mapFn(const Function &fn) {
@@ -323,6 +326,11 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
                              [&](const Type::Struct &x) { return normalise(x.name); }, //
                              [&](const Type::Ptr &x) {
+                               // a pointer to an array needs the `c(*)[n]` form; `c[n]*` is not valid C
+                               if (auto arr = x.comp.template get<Type::Arr>(); arr) {
+                                 const std::string pfx = dialect == Dialect::MSL1_0 ? std::string(mslPtrPrefix(x.space)) + " " : "";
+                                 return fmt::format("{}{} (*)[{}]", pfx, mkTpe(arr->comp), arr->length);
+                               }
                                if (dialect == Dialect::MSL1_0) return fmt::format("{} {}*", mslPtrPrefix(x.space), mkTpe(x.comp));
                                return fmt::format("{}*", mkTpe(x.comp));
                              },                                                                                  //
@@ -355,8 +363,13 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                                                                  [&](TypeSpace::Local) { return "local"; },    //
                                                                  [&](TypeSpace::Private) { return "private"; } //
                                );
-                               auto comp = mkTpe(x.comp);
-                               return fmt::format("{} {}*", prefix, comp);
+                               // a pointer to an array needs the `c(*)[n]` form; `c[n]*` is not valid C
+                               if (auto arr = x.comp.template get<Type::Arr>(); arr)
+                                 return fmt::format("{} {} (*)[{}]", prefix, mkTpe(arr->comp), arr->length);
+                               // each pointer level carries its own space at its own `*`: `global T * global *`
+                               // not `global global T**` (the latter leaves the outer `*` private, breaking an arena cast)
+                               if (x.comp.template is<Type::Ptr>()) return fmt::format("{} {} *", mkTpe(x.comp), prefix);
+                               return fmt::format("{} {}*", prefix, mkTpe(x.comp));
                              }, //
                              // an array carries no own address-space qualifier; it lives in its container's space
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
@@ -413,12 +426,12 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           [](const Term::IntS32Const &x) { return fmt::format("{}", x.value); }, //
                           [](const Term::IntS64Const &x) { return fmt::format("{}", x.value); }, //
 
-                          [](const Term::Unit0Const &) { return "/*void*/"s; },                                   //
-                          [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },                 //
-                          [&](const Term::NullPtrConst &x) { return fmt::format("NULL /*{}*/", mkTpe(x.comp)); }, //
+                          [](const Term::Unit0Const &) { return "/*void*/"s; },                                //
+                          [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },              //
+                          [&](const Term::NullPtrConst &x) { return fmt::format("0 /*{}*/", mkTpe(x.comp)); }, //
                           [&](const Term::Poison &x) {
-                            // only POINTER poison may be NULL; pocl rejects a non-pointer `x = NULL`
-                            if (x.tpe.is<Type::Ptr>()) return fmt::format("(NULL /*{}*/)", repr(x.tpe));
+                            // `0` not `NULL`: comgr doesn't predefine NULL for AMD kernel sources (non-ptr poison still casts)
+                            if (x.tpe.is<Type::Ptr>()) return fmt::format("(0 /*{}*/)", repr(x.tpe));
                             return fmt::format("(({})0 /*poison {}*/)", mkTpe(x.tpe), repr(x.tpe));
                           }, //
                           [&](const Term::Select &x) {
@@ -591,7 +604,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       [&](const Expr::ForeignCall &x) {
         return fmt::format("{}({})", x.name, x.args ^ mk_string(", ", [&](auto &arg) { return mkTerm(arg); }));
       },
-      [&](const Expr::OffsetOf &x) { return fmt::format("__builtin_offsetof({}, {})", mkTpe(x.structTpe), x.field); });
+      [&](const Expr::OffsetOf &x) { return fmt::format("__builtin_offsetof({}, {})", mkTpe(x.structTpe), normalise(x.field)); },
+      [&](const Expr::SizeOf &x) { return fmt::format("sizeof({})", mkTpe(x.forTpe)); });
 }
 
 // C/OpenCL forbid whole-array assignment; copy element-wise (a nested loop per array level)

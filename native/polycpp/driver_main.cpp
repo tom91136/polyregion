@@ -15,6 +15,7 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 #include "fmt/core.h"
 
 #include "polyfront/options_frontend.hpp"
+#include "polyregion/conventions.h"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 
@@ -22,6 +23,14 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
+using polyregion::conventions::reflect::FlagLate;
+using polyregion::conventions::reflect::FlagVerbose;
+using polyregion::conventions::reflect::PassInterpose;
+using polyregion::conventions::reflect::PassLinkMirror;
+using polyregion::conventions::reflect::PassMem;
+using polyregion::conventions::reflect::PassProtectRt;
+using polyregion::conventions::reflect::PassRecordAlloc;
+using polyregion::conventions::reflect::PassStack;
 
 int main(int argc, const char *argv[]) {
 #ifdef POLYREGION_FUSED_DRIVER
@@ -110,14 +119,14 @@ int main(int argc, const char *argv[]) {
                  switch (opts->mem) {
                    case StdParOptions::MemKind::Direct: break;
                    case StdParOptions::MemKind::Interpose:
-                     append(passPluginFlags({fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                             "-polyreflect-late=Interpose+ReflectStack"}));
+                     append(passPluginFlags({fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"), //
+                                             fmt::format("-{}={}+{}", FlagLate, PassInterpose, PassStack)}));
                      break;
                    case StdParOptions::MemKind::Reflect:
                      append({"-include", "reflect-rt/rt.hpp"});
                      // XXX run ProtectRT per-TU; otherwise LLD's plugin would see the ODR error first.
-                     append(passPluginFlags({fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                             "-polyreflect-late=ProtectRT"}));
+                     append(passPluginFlags({fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"), //
+                                             fmt::format("-{}={}", FlagLate, PassProtectRt)}));
                      append(Driver::enableLLDAndLTO(args));
                      break;
                  }
@@ -134,24 +143,25 @@ int main(int argc, const char *argv[]) {
   #ifdef _WIN32
                        // XXX lld-link takes /mllvm:VAL, ld.lld takes -mllvm VAL; -Xlinker forwards either.
                        // lld-link has no --lto-newpm-passes equivalent, so keep the EP-callback path.
-                       append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
-                               "/mllvm:-polyreflect-late=RecordAlloc+ReflectStack+ReflectMem"});
+                       append({"-Xlinker", fmt::format("/mllvm:-{}={}", FlagVerbose, debug ? "1" : "0"), "-Xlinker",
+                               fmt::format("/mllvm:-{}={}+{}+{}", FlagLate, PassRecordAlloc, PassStack, PassMem)});
   #else
                        // XXX At -O0 LLD's LTO codegen builds no optimisation pipeline at all, so
                        // EP-callback-registered passes never fire. Inject the late passes by name
                        // via --lto-newpm-passes so they run regardless of opt level. Comma in
                        // value uses -Xlinker to avoid `-Wl,...,...` arg splitting.
-                       append({fmt::format("-Wl,-mllvm,-polyreflect-verbose={}", debug ? "1" : "0"), "-Xlinker",
-                               "--lto-newpm-passes=polyreflect-record-alloc,polyreflect-stack,polyreflect-mem"});
+                       append({fmt::format("-Wl,-mllvm,-{}={}", FlagVerbose, debug ? "1" : "0"), "-Xlinker",
+                               fmt::format("--lto-newpm-passes={},{},{},{}", PassRecordAlloc, PassStack, PassMem, PassLinkMirror)});
   #endif
 #else
                        append(Driver::lldPassPluginFlags(polyreflectPlugin, //
                                                          {
-                                                             fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"),
-                                                             "-polyreflect-late=RecordAlloc+ReflectStack+ReflectMem",
+                                                             fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"),
+                                                             fmt::format("-{}={}+{}+{}", FlagLate, PassRecordAlloc, PassStack, PassMem),
                                                          }));
                        // XXX -O0 LLD LTO skips EP callbacks; force the passes by name.
-                       append({"-Xlinker", "--lto-newpm-passes=polyreflect-record-alloc,polyreflect-stack,polyreflect-mem"});
+                       append({"-Xlinker",
+                               fmt::format("--lto-newpm-passes={},{},{},{}", PassRecordAlloc, PassStack, PassMem, PassLinkMirror)});
 #endif
                        break;
                    }
@@ -195,7 +205,6 @@ int main(int argc, const char *argv[]) {
                return clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext);
 #else
                remaining[0] = "clang++";
-               fmt::print(">>> {}\n", remaining ^ mk_string(" "));
                return llvm::sys::ExecuteAndWait(clangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
 #endif
              });

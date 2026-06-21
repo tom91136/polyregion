@@ -1132,6 +1132,22 @@ POLYREGION_EXPORT bool Expr::OffsetOf::operator==(const Base &rhs_) const {
 Expr::OffsetOf::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<OffsetOf>(*this)); }
 Expr::Any Expr::OffsetOf::widen() const { return Any(*this); };
 
+Expr::SizeOf::SizeOf(Type::Any forTpe) noexcept : Expr::Base(Type::IntU64()), forTpe(std::move(forTpe)) {}
+uint32_t Expr::SizeOf::id() const { return variant_id; };
+size_t Expr::SizeOf::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(forTpe)>()(forTpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Expr::SizeOf Expr::SizeOf::withForTpe(const Type::Any &v_) const { return Expr::SizeOf(v_); }
+POLYREGION_EXPORT bool Expr::SizeOf::operator==(const Expr::SizeOf &rhs) const { return (this->forTpe == rhs.forTpe); }
+POLYREGION_EXPORT bool Expr::SizeOf::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Expr::SizeOf &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Expr::SizeOf::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<SizeOf>(*this)); }
+Expr::Any Expr::SizeOf::widen() const { return Any(*this); };
+
 Overload::Overload(std::vector<Type::Any> args, Type::Any rtn) noexcept : args(std::move(args)), rtn(std::move(rtn)) {}
 size_t Overload::hash_code() const {
   size_t seed = 0;
@@ -3606,6 +3622,9 @@ std::size_t std::hash<polyregion::polyast::Expr::ForeignCall>::operator()(const 
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Expr::OffsetOf>::operator()(const polyregion::polyast::Expr::OffsetOf &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Expr::SizeOf>::operator()(const polyregion::polyast::Expr::SizeOf &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Overload>::operator()(const polyregion::polyast::Overload &x) const noexcept {

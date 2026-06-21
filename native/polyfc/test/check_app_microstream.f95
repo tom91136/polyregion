@@ -17,12 +17,14 @@ module stream
     real(kind = NK), parameter :: startScalar = 0.4_NK
 contains
 
+    ! XXX a,b,c are explicit-shape and not assumed-shape dimension(:) as flang lowers box-array access
+    ! non-deterministically, and fails repro check even without polyregion at -O3
     subroutine runAll(a, b, c, scalar, dotSum, arrSize, times, timings)
         implicit none
-        real(kind = NK), dimension(:), intent(inout) :: a, b, c
+        integer(kind = 8), intent(in) :: arrSize, times
+        real(kind = NK), dimension(arrSize), intent(inout) :: a, b, c
         real(kind = NK), intent(in) :: scalar
         real(kind = NK), intent(inout) :: dotSum
-        integer(kind = 8), intent(in) :: arrSize, times
         real(kind = 8), dimension(:, :), allocatable, intent(out) :: timings
         integer(kind = 8) :: k, rate, c1, c2, i
 

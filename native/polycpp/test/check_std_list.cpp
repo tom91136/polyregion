@@ -41,13 +41,11 @@ int main() {
 
   std::list<int> xs(CHECK_SIZE_DEF, -1);
   int result = __polyregion_offload_f1__([CHECK_CAPTURE]() mutable {
-#ifdef CHECK_MUT
     auto it = xs.begin();
     std::advance(it, CHECK_SIZE_DEF - 1);
+#ifdef CHECK_MUT
     *it *= 42;
 #endif
-    auto it = xs.begin();
-    std::advance(it, CHECK_SIZE_DEF - 1);
     return *it;
   });
 

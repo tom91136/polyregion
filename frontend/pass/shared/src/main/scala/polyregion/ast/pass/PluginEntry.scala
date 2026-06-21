@@ -1,6 +1,6 @@
 package polyregion.ast.pass
 
-import polyregion.ast.{Log, MsgPack, PolyAST as p}
+import polyregion.ast.{Env, Log, MsgPack, PolyAST as p}
 
 trait PluginEntry {
   def passNames: Vector[String]
@@ -24,7 +24,7 @@ trait PluginEntry {
       PluginEntry.timed(clock, "polyast_msgpack_deserialise", s"bytes=${inBytes.length}") {
         MsgPack.decodeInput[p.Program](MsgPack.ArrayByteInput(inBytes)).fold(throw _, identity)
       }
-    val passRun = runSteps(steps, prog, PluginEntry.NoopLog)
+    val passRun = runSteps(steps, prog, PluginEntry.defaultLog)
     val rootEvent = p.CompileEvent(
       rootEpoch,
       math.max(0L, clock.nanoTime() - rootNanos),
@@ -45,6 +45,16 @@ object PluginEntry {
     def info(message: String, details: String*): Unit = ()
     def subLog(name: String): Log                     = this
   }
+
+  private final class StderrLog(prefix: String) extends Log {
+    def info(message: String, details: String*): Unit = {
+      System.err.println(s"[polypass$prefix] $message")
+      details.foreach(d => System.err.println(s"[polypass$prefix]   $d"))
+    }
+    def subLog(name: String): Log = StderrLog(s"$prefix/$name")
+  }
+
+  def defaultLog: Log = if (sys.env.contains(Env.PolyregionPassLog)) StderrLog("") else NoopLog
 
   def timed[A](clock: PassClock, name: String, data: String)(f: => A): (A, p.CompileEvent) = {
     val epoch = clock.epochMillis()

@@ -5,6 +5,10 @@ import polyregion.ast.Traversal.*
 
 // copy-propagates immutable val-aliases (`val b = a`) to a fixed point: forwards `a`'s root+steps into
 // every Select of `b`, then drops the alias decl
+// examples:
+//   val b = a; f(b.x)            ->  f(a.x)
+//   val b = a.p; g(b[i])         ->  g(a.p[i])
+//   val b = a; f(b, b.y)         ->  f(a, a.y)
 // edge cases:
 //   either side later mutated -> not propagated; forwarding spans the whole function, so a `Mut` on
 //                                `a` after the alias would make a `b` read see the post-mutation value

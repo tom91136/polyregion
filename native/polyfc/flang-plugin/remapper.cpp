@@ -22,6 +22,7 @@
 #include "mlir/IR/Value.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -42,11 +43,25 @@ static auto asView(const mlir::Operation::operand_range range) {
   return view(range.getBase(), range.getBase() + range.size()) | map([](auto &x) { return x.get(); });
 }
 
+static std::string leafSymbol(const Term::Select &sel) {
+  return sel.steps ^ collect([](auto &s) { return s.template get<PathStep::Field>(); }) //
+         ^ last_maybe()                                                                 //
+         ^ fold([](auto &f) { return f.name; }, [&]() { return sel.root.symbol; });     //
+}
+
 static Term::Select asSelectF(const Expr::Any &expr) {
   if (auto a = expr.template get<Expr::Alias>()) {
     if (auto s = a->ref.template get<Term::Select>()) return *s;
   }
   return Term::Select(Named("_invalid_select", expr.tpe()), {}, expr.tpe());
+}
+
+static mlir::Value rootOf(mlir::Value v) {
+  while (auto *op = v.getDefiningOp()) {
+    if (op->getNumOperands() == 0) break;
+    v = op->getOperand(0);
+  }
+  return v;
 }
 
 static Stmt::Any update0(const Expr::Any &expr, const Term::Any &rhsT) {
@@ -67,8 +82,6 @@ static Expr::Any index0(const Expr::Any &rhs) {
          })                  //
          ^ get_or_else(rhs); //
 }
-
-static std::optional<mlir::Value> maybe(mlir::Value v) { return v ? std::optional{v} : std::nullopt; }
 
 const static polyfc::FBoxedNoneMirror FBoxedNoneM;
 const static polyfc::FDescExtraMirror FDescExtraM;
@@ -205,6 +218,8 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                  typesLUT.insert({t, boxed});
                  return Type::Ptr(tpe, TypeSpace::Global());
                }
+               // XXX a CHARACTER is byte data; ref<char<1,N>> is a byte pointer, not a pointer-to-(byte array)
+               if (llvm::isa<fir::CharacterType>(t.getEleTy())) return Type::Ptr(Type::IntU8(), TypeSpace::Global());
                // Otherwise use normal pointer semantic
                return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global());
              },
@@ -219,7 +234,13 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                }
                return handleSeq(t);
              },
-             [&](const fir::CharacterType) -> Type::Any { return Type::Ptr(Type::IntU8(), TypeSpace::Global()); },
+             [&](const fir::CharacterType t) -> Type::Any {
+               // a character is byte data: char<1,N> is N bytes (array element / value), a single or
+               // unknown-length char is one byte. refs to these flatten to u8* (see ReferenceType)
+               const auto len = t.getLen();
+               if (len == fir::CharacterType::unknownLen() || len <= 1) return Type::IntU8();
+               return Type::Arr(Type::IntU8(), static_cast<int32_t>(len), TypeSpace::Global());
+             },
              [&](fir::RecordType t) -> Type::Any {
                const StructDef def(Sym({t.getName().str()}), {},
                                    t.getTypeList()                                                                //
@@ -235,15 +256,6 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                return captureBoundary ? Type::Ptr(box, TypeSpace::Global()) : box;
              }) //
          ^ get_or_else(Type::Nothing());
-}
-
-Term::Select polyfc::Remapper::handleSelectExpr(const mlir::Value val) {
-  const auto expr = handleValueAs(val);
-  // Term::Select isn't an alternative of Expr::Any anymore; unwrap from Expr::Alias if present.
-  if (auto a = expr.template get<Expr::Alias>()) {
-    if (auto s = a->ref.template get<Term::Select>()) return *s;
-  }
-  return newVar(expr);
 }
 
 Expr::Any polyfc::Remapper::handleValueAsScalar(const mlir::Value val) {
@@ -290,14 +302,10 @@ struct BoxRoot {
     return walk(val) ^ map([&](const BoxRoot &r) {
              return BoxRoot{r.value, //
                             r.name ^ or_else([&]() -> std::optional<std::string> {
-                              std::optional<std::string> name;
-                              for (const auto op : r.value.getUsers()) {
-                                if (const auto decl = llvm::dyn_cast_if_present<fir::DeclareOp>(op)) {
-                                  name = resolveUniqueName(decl);
-                                  if (name) break;
-                                }
-                              }
-                              return name;
+                              return r.value.getUsers() ^ collect_first([](auto op) -> std::optional<std::string> {
+                                       if (const auto decl = llvm::dyn_cast_if_present<fir::DeclareOp>(op)) return resolveUniqueName(decl);
+                                       return std::nullopt;
+                                     });
                             })};
            });
   }
@@ -355,7 +363,7 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
                                                   // `fir.address_of` (often LICM'd above the do_concurrent at -O>0)
                                                   // does not surface as a per-global capture; the kernel module
                                                   // already has the global symbol available.
-    ) {
+        || (llvm::isa<fir::AllocaOp>(defOp) && defOp->hasAttr("adapt.valuebyref"))) {
       handleOp(defOp);
       if (const auto it = valuesLUT.find(val); it != valuesLUT.end()) return it->second;
       else {
@@ -449,6 +457,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           const auto constVal = c.getValue();
           if (const auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(constVal)) {
             const auto tpe = handleType(intAttr.getType());
+            if (tpe.is<Type::Bool1>()) return Expr::Alias(dsl::integral(Type::Bool1(), intAttr.getInt() != 0));
             if (tpe.is<Type::IntS8>()) return Expr::Alias(Term::IntS8Const(intAttr.getInt()));
             if (tpe.is<Type::IntS16>()) return Expr::Alias(Term::IntS16Const(intAttr.getInt()));
             if (tpe.is<Type::IntS32>()) return Expr::Alias(Term::IntS32Const(intAttr.getInt()));
@@ -632,6 +641,34 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         } else poison(f.getResult(), fmt::format("FieldIndexOp used against a non-struct type {} (op=`{}`)", repr(on), show(f)));
       },
       [&](fir::CoordinateOp c) {
+        // CHARACTER element: (..., idx) -> ref<char<1>> is the byte address of the idx-th character
+        if (const auto rt = llvm::dyn_cast<fir::ReferenceType>(c.getResult().getType());
+            rt && llvm::isa<fir::CharacterType>(rt.getEleTy())) {
+          const auto indices = c.getIndices();
+          if (const auto idxV = indices.empty() ? mlir::Value{} : mlir::dyn_cast_if_present<mlir::Value>(indices[0])) {
+            const auto idxT = newVar(handleValueAsScalar(idxV));
+            const auto u8p = Type::Ptr(Type::IntU8(), TypeSpace::Global());
+            const auto byteRefTo = [&](const Term::Any &base) {
+              return newVar(
+                  Expr::RefTo(base, std::optional<Term::Any>{idxT}, Type::IntU8(), TypeSpace::Global(), Region::Opaque()).widen());
+            };
+            // db(i)(j:j): byte offset is off*len + j (len = one char<1,len> element). address as bytes from
+            // the start; RefTo(Ptr(Arr),off) would index within one element (stride 1)
+            if (const auto fac = handleValue(c.getRef()) ^ get_maybe<FArrayCoord>()) {
+              const int32_t stride = fac->comp.get<Type::Arr>() ^ fold([](auto &a) { return a.length; }, [] { return 1; });
+              const auto arrU8 = newVar(Expr::Cast(newVar(fac->array), u8p).widen());
+              const auto offT = newVar(fac->offset);
+              const auto elemByte = newVar(Expr::IntrOp(Intr::Mul(offT, Term::IntS64Const(stride).widen(), Type::IntS64())).widen());
+              const auto byteIdx = newVar(Expr::IntrOp(Intr::Add(elemByte, idxT, Type::IntS64())).widen());
+              witness(c.getResult(), Expr::Alias(newVar(Expr::RefTo(arrU8, std::optional<Term::Any>{byteIdx}, Type::IntU8(),
+                                                                    TypeSpace::Global(), Region::Opaque())
+                                                            .widen())));
+            } else {
+              witness(c.getResult(), Expr::Alias(byteRefTo(newVar(handleValueAs(c.getRef())))));
+            }
+            return;
+          }
+        }
         const auto handleBoxed = [&](const Expr::Any &base) {
           const auto indices = c.getIndices();
           if (indices.empty()) {
@@ -683,15 +720,32 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                                [&](const FBoxed &e) { handleBoxed(e.addr()); },           //
                                [&](const FVar &v) { handleBoxed(Expr::Alias(v.value)); }, //
                                [&](const FArrayCoord &a) {
-                                 auto base = newVar(a.array);
-                                 auto off = newVar(a.offset);
-                                 auto elem = newVar(Expr::Index(base, off, a.comp).widen());
+                                 auto it = aggLoadCache.find(c.getRef());
+                                 auto elem = it != aggLoadCache.end() ? it->second : [&] {
+                                   auto base = newVar(a.array);
+                                   auto off = newVar(a.offset);
+                                   auto e = newVar(Expr::Index(base, off, a.comp).widen());
+                                   aggLoadCache.try_emplace(c.getRef(), e);
+                                   return e;
+                                 }();
                                  handleBoxed(Expr::Alias(elem));
                                });
         } else poison0(fmt::format("CoordinateOf ref value not an Expr|FBoxed|FVar|FArrayCoord, was {}", show(c)));
       },
       [&](fir::DeclareOp d) { witness(d.getResult(), handleValue(d.getMemref())); },
+      [&](fir::ExtractValueOp e) {
+        // O3 inlines _FortranACharacterCompareScalar1 to load char<1> + extract_value [0] -> i8; char<1>
+        // is modelled as a scalar byte so the extract is a pass-through
+        if (llvm::isa<fir::CharacterType>(e.getAdt().getType())) witness(e.getResult(), handleValueAsScalar(e.getAdt()));
+        else poison(e.getResult(), fmt::format("Unhandled extract_value on non-character aggregate {}", show(e)));
+      },
       [&](fir::ConvertOp c) {
+        // char-ref reinterprets (ref<char<1,?>> -> ref<char<1,64>> -> ref<array<Nxchar<1>>> -> ref<i8>)
+        // are no-ops on a deferred array-element address; pass the FArrayCoord through unchanged
+        if (const auto fac = handleValue(c.getOperand()) ^ get_maybe<FArrayCoord>(); fac && llvm::isa<fir::ReferenceType>(c.getType())) {
+          witness(c.getResult(), *fac);
+          return;
+        }
         const auto as = handleType(c.getType());
         if (const auto from = handleValue(c.getOperand()); from ^ holds_any<FVar, FBoxed, FBoxedNone>()) {
           if (const auto tpe = fTypeOf(c.getType())) {
@@ -743,6 +797,19 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                 [&]() { poison(a.getResult(), fmt::format("Unexpected expr ({}) on BoxAddr", fRepr(expr))); });
       },
       [&](fir::EmboxOp a) { witness(a, handleValue(a.getMemref())); },
+      // a boxchar is just its byte-data pointer here (the length is recovered at the matching unboxchar)
+      [&](fir::EmboxCharOp a) { witness(a.getResult(), handleValue(a.getMemref())); },
+      [&](fir::UnboxCharOp a) {
+        // flang boxes a char arg at the call and unboxes it in the callee; recover (addr, len) from the
+        // originating emboxchar so no boxchar {ptr,len} representation is needed
+        if (auto embox = a.getBoxchar().getDefiningOp<fir::EmboxCharOp>()) {
+          witness(a.getResult(0), handleValue(embox.getMemref()));
+          witness(a.getResult(1), handleValue(embox.getLen()));
+        } else {
+          witness(a.getResult(0), handleValue(a.getBoxchar()));
+          witness(a.getResult(1), Expr::Any(Expr::Alias(dsl::integral(handleType(a.getResult(1).getType()), 0))));
+        }
+      },
       [&](fir::AddrOfOp a) {
         if (auto global = llvm::dyn_cast_if_present<fir::GlobalOp>(mlir::SymbolTable::lookupSymbolIn(M, a.getSymbol()))) {
           {
@@ -785,6 +852,17 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                        [&](const FVar &x) { push(Stmt::Mut(x.value, rhs0)); },          //
                        [&](const FBoxed &x) { push(update0(x.addr(), newVar(rhs0))); }, //
                        [&](const FBoxedNone &x) { poison0("IMPL"); });
+          } else if (name == "_FortranACharacterCompareScalar1") {
+            // lexicographic compare of two length-1 char substrings (s(i:i) == t(j:j)); the result is
+            // checked against 0, so a signed byte difference carries the right sign
+            if (args.size() != 4) return poison0(fmt::format("expecting 4 args for {} but got {}", name, args.size()));
+            const auto p1 = newVar(handleValueAs(args[0]));
+            const auto p2 = newVar(handleValueAs(args[1]));
+            const auto b1 = newVar(Expr::Index(p1, Term::IntU64Const(0).widen(), Type::IntU8()).widen());
+            const auto b2 = newVar(Expr::Index(p2, Term::IntU64Const(0).widen(), Type::IntU8()).widen());
+            const auto i1 = newVar(Expr::Cast(b1, Type::IntS32()).widen());
+            const auto i2 = newVar(Expr::Cast(b2, Type::IntS32()).widen());
+            witness(a.getResult(0), Expr::IntrOp(Intr::Sub(i1, i2, Type::IntS32())).widen());
           } else poison0(fmt::format("Unimplemented intrinsic in {}", show(a)));
         } else poison0(fmt::format("Unknown callee in {}", show(a)));
       },
@@ -821,13 +899,10 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             return poison(c, fmt::format("array {} has dynamic extent and no shape operand", show(c.getMemref())));
           }
         } else {
-          for (auto extent : seqTy.getShape())
-            actualShape.emplace_back(Term::IntS64Const(extent).widen());
+          actualShape = seqTy.getShape() | map([](auto extent) { return Term::IntS64Const(extent).widen(); }) | to_vector();
         }
 
-        std::vector<Term::Any> indicesT;
-        for (auto v : asView(c.getIndices()))
-          indicesT.emplace_back(asTerm(handleValueAs(v)));
+        const auto indicesT = asView(c.getIndices()) | map([&](auto v) { return asTerm(handleValueAs(v)); }) | to_vector();
 
         std::vector<Term::Any> shapeT, shiftT;
         if (auto sh = c.getShape()) {
@@ -835,19 +910,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             *val ^ foreach_total( //
                        [&](const FShift &x) {
                          shapeT = actualShape;
-                         for (auto &b : x.lowerBounds)
-                           shiftT.emplace_back(asTerm(b));
+                         shiftT = x.lowerBounds ^ map([&](auto &b) { return asTerm(b); });
                        },
                        [&](const FShape &x) {
-                         for (auto &e : x.extents)
-                           shapeT.emplace_back(asTerm(e));
+                         shapeT = x.extents ^ map([&](auto &e) { return asTerm(e); });
                          shiftT = onesT(ranks);
                        },
                        [&](const FShapeShift &x) {
-                         for (auto &e : x.extents)
-                           shapeT.emplace_back(asTerm(e));
-                         for (auto &b : x.lowerBounds)
-                           shiftT.emplace_back(asTerm(b));
+                         shapeT = x.extents ^ map([&](auto &e) { return asTerm(e); });
+                         shiftT = x.lowerBounds ^ map([&](auto &b) { return asTerm(b); });
                        });
           }
         }
@@ -857,10 +928,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         std::vector<Term::Any> sliceLB, sliceStep;
         if (auto slice = c.getSlice()) {
           const auto val = handleValueAs<FSlice>(slice);
-          for (auto &b : val.lowerBounds)
-            sliceLB.emplace_back(asTerm(b));
-          for (auto &s : val.strides)
-            sliceStep.emplace_back(asTerm(s));
+          sliceLB = val.lowerBounds ^ map([&](auto &b) { return asTerm(b); });
+          sliceStep = val.strides ^ map([&](auto &s) { return asTerm(s); });
         }
         if (sliceLB.empty()) sliceLB = shiftT;
         if (sliceStep.empty()) sliceStep = onesT(ranks);
@@ -934,6 +1003,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
       },
       [&](fir::StoreOp s) {
+        if (!aggLoadCache.empty()) {
+          const auto storeRoot = rootOf(s.getMemref());
+          const auto stale = aggLoadCache | collect([&](auto &memref, auto &) -> std::optional<mlir::Value> {
+                               return rootOf(memref) == storeRoot ? std::optional<mlir::Value>{memref} : std::nullopt;
+                             }) |
+                             to_vector();
+          for (const auto m : stale)
+            aggLoadCache.erase(m);
+        }
         const auto rhs = handleValueAs(s.getValue());
         if (const auto lhs = handleValue(s.getMemref()) ^ narrow<Expr::Any, FVar, FBoxed, FArrayCoord>()) {
           *lhs ^ foreach_total([&](const Expr::Any &e) { push(update0(e, newVar(rhs))); },    //
@@ -947,10 +1025,11 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       },
       [&](fir::IfOp x) {
         const auto condE = handleValueAsScalar(x.getCondition());
+        const auto ifId = loopSeq++;
         std::vector<Term::Select> resSels;
         for (auto result : x.getResults()) {
           const auto resTy = handleType(result.getType());
-          const Named resName(fmt::format("v{}_if{}", reinterpret_cast<uintptr_t>(x.getOperation()), resSels.size()), resTy);
+          const Named resName(fmt::format("v{}_if{}", ifId, resSels.size()), resTy);
           push(Stmt::Var(resName, std::optional<Expr::Any>{}, /*isMutable*/ true).widen());
           const auto sel = Term::Select(resName, {}, resTy);
           resSels.push_back(sel);
@@ -989,7 +1068,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         // XXX fir.do_loop bounds are inclusive; ForRange's are half-open. Lift via ub + step.
         const auto ubExclT = newVar(Expr::IntrOp(Intr::Add(ubT.widen(), stepT.widen(), ivTy).widen()).widen());
 
-        const Named ivName(fmt::format("v{}_iv", reinterpret_cast<uintptr_t>(x.getOperation())), ivTy);
+        const auto loopId = loopSeq++;
+        const Named ivName(fmt::format("v{}_iv", loopId), ivTy);
         const auto ivSel = Term::Select(ivName, {}, ivTy);
         valuesLUT.insert({x.getInductionVar(), Expr::Any(Expr::Alias(ivSel))});
 
@@ -999,7 +1079,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         for (size_t i = 0; i < bodyArgs.size(); ++i) {
           const auto accTy = handleType(bodyArgs[i].getType());
           const auto initE = handleValueAsScalar(initArgs[i]);
-          const Named accName(fmt::format("v{}_acc{}", reinterpret_cast<uintptr_t>(x.getOperation()), i), accTy);
+          const Named accName(fmt::format("v{}_acc{}", loopId, i), accTy);
           push(Stmt::Var(accName, initE, /*isMutable*/ true).widen());
           const auto accSel = Term::Select(accName, {}, accTy);
           accSels.push_back(accSel);
@@ -1066,7 +1146,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   const static Named MappedInduction("#mappedInd", Long);
 
   const Type::Struct CaptureType(Sym({fmt::format("#Capture<{}>", name)}), {});
-  const Named Capture("#capture", Ptr(CaptureType));
+  const Named Capture(conventions::CaptureArg, Ptr(CaptureType));
 
   const Type::Struct ReductionType(Sym({fmt::format("#Reduction<{}>", name)}), {});
   const Named Reduction("#reduction", Ptr(ReductionType));
@@ -1077,7 +1157,6 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                              std::vector<Type::Struct>{});
   const Named Prelude("#prelude", typeOf(preludeDef));
 
-  op.getBody()->dump();
   Remapper r(m, L, op, {Capture});
 
   // Work out the reduction vars first, setting an alternative root to mask captures
@@ -1103,11 +1182,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                                                if (auto a = e.template get<Expr::Alias>()) {
                                                  if (auto sel = a->ref.template get<Term::Select>()) {
                                                    if (auto p = sel->tpe.template get<Type::Ptr>()) {
-                                                     std::string leaf = sel->root.symbol;
-                                                     for (auto &st : sel->steps) {
-                                                       if (auto f = st.template get<PathStep::Field>()) leaf = f->name;
-                                                     }
-                                                     return Named(leaf, p->comp);
+                                                     return Named(leafSymbol(*sel), p->comp);
                                                    }
                                                  }
                                                }
@@ -1116,11 +1191,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                                              [](const FBoxed &e) -> std::optional<Named> {
                                                if (auto a = e.base.template get<Expr::Alias>()) {
                                                  if (auto sel = a->ref.template get<Term::Select>()) {
-                                                   std::string leaf = sel->root.symbol;
-                                                   for (auto &st : sel->steps) {
-                                                     if (auto f = st.template get<PathStep::Field>()) leaf = f->name;
-                                                   }
-                                                   return Named(leaf, e.comp());
+                                                   return Named(leafSymbol(*sel), e.comp());
                                                  }
                                                }
                                                return std::nullopt;
@@ -1137,11 +1208,9 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                | to_vector();
       });
 
-  for (auto &[expr, rd] : exprWithReductions) {
-    for (auto &entry : r.valuesLUT) {
-      if (entry.second == expr) entry.second = Expr::Any(Expr::Alias(Term::Select(rd.named, {}, rd.named.tpe)));
-    }
-  }
+  exprWithReductions ^ for_each([&](auto &expr, auto &rd) {
+    r.valuesLUT ^= map_values([&](auto &v) { return v == expr ? Expr::Any(Expr::Alias(Term::Select(rd.named, {}, rd.named.tpe))) : v; });
+  });
 
   // Then inject induction
   r.valuesLUT.insert({op.getInductionVar(), Expr::Any(Expr::Alias(selectNamed(MappedInduction)))});
@@ -1152,15 +1221,10 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
 
   // Captures are now populated
   const auto captures = r.captures //
-                        | map([](auto &p) {
-                            // The new Term::Select stores root + path-steps; pick the leaf Named (last Field, else root).
-                            std::string leaf = p.second.root.symbol;
-                            for (auto &s : p.second.steps) {
-                              if (auto f = s.template get<PathStep::Field>()) leaf = f->name;
-                            }
-                            const Named leafNamed(leaf, p.second.tpe);
+                        | map([](auto &value, auto &select) {
+                            const Named leafNamed(leafSymbol(select), select.tpe);
                             return DoConcurrentRegion::Capture{.named = leafNamed, //
-                                                               .value = p.first,   //
+                                                               .value = value,     //
                                                                .locality = DoConcurrentRegion::Locality::Default};
                           }) //
                         | to_vector();
@@ -1210,10 +1274,8 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                             | values()                //
                             | concat(r.syntheticDefs) //
                             | to_vector(),
-                        PassPhase::Initial());
-
-  llvm::errs() << repr(program) << "\n";
-  llvm::errs().flush();
+                        PassPhase::Initial(),
+                        {MetaEntry(program_meta::VkWorkgroupSizeX, std::to_string(program_meta::VkWorkgroupSizeXValue))});
 
   const auto defLayouts = program.defs | map([&](auto &d) { return r.resolveLayout(d); }) | to_vector();
 

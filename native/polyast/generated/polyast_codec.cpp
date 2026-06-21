@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "3dbd5c778907a71daebe840b5a584b1d";
+constexpr auto AdtHash = "6500e55c5c935d5862d3a1ccb55f916f";
 
 namespace {
 
@@ -1116,6 +1116,16 @@ json Expr::offsetof_to_json(const Expr::OffsetOf &x_) {
   return json::array({structTpe, field});
 }
 
+Expr::SizeOf Expr::sizeof_from_json(const json &j_) {
+  auto forTpe = Type::any_from_json(j_.at(0));
+  return Expr::SizeOf(forTpe);
+}
+
+json Expr::sizeof_to_json(const Expr::SizeOf &x_) {
+  auto forTpe = Type::any_to_json(x_.forTpe);
+  return json::array({forTpe});
+}
+
 Expr::Any Expr::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -1131,6 +1141,7 @@ Expr::Any Expr::any_from_json(const json &j_) {
     case 8: return Expr::invoke_from_json(t_);
     case 9: return Expr::foreigncall_from_json(t_);
     case 10: return Expr::offsetof_from_json(t_);
+    case 11: return Expr::sizeof_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1146,7 +1157,8 @@ json Expr::any_to_json(const Expr::Any &x_) {
                         [](const Expr::Alloc &y_) -> json { return {7, Expr::alloc_to_json(y_)}; },
                         [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; },
                         [](const Expr::ForeignCall &y_) -> json { return {9, Expr::foreigncall_to_json(y_)}; },
-                        [](const Expr::OffsetOf &y_) -> json { return {10, Expr::offsetof_to_json(y_)}; });
+                        [](const Expr::OffsetOf &y_) -> json { return {10, Expr::offsetof_to_json(y_)}; },
+                        [](const Expr::SizeOf &y_) -> json { return {11, Expr::sizeof_to_json(y_)}; });
 }
 
 Overload overload_from_json(const json &j_) {
@@ -2876,6 +2888,10 @@ Expr::OffsetOf offsetof_fields_from_msgpack(MsgpackReader &, size_t);
 void offsetof_fields_to_msgpack(MsgpackWriter &, const Expr::OffsetOf &);
 Expr::OffsetOf offsetof_from_msgpack(MsgpackReader &);
 void offsetof_to_msgpack(MsgpackWriter &, const Expr::OffsetOf &);
+Expr::SizeOf sizeof_fields_from_msgpack(MsgpackReader &, size_t);
+void sizeof_fields_to_msgpack(MsgpackWriter &, const Expr::SizeOf &);
+Expr::SizeOf sizeof_from_msgpack(MsgpackReader &);
+void sizeof_to_msgpack(MsgpackWriter &, const Expr::SizeOf &);
 Expr::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Expr::Any &);
 } // namespace Expr
@@ -5084,6 +5100,24 @@ void Expr::offsetof_to_msgpack(MsgpackWriter &w_, const Expr::OffsetOf &x_) {
   Expr::offsetof_fields_to_msgpack(w_, x_);
 }
 
+Expr::SizeOf Expr::sizeof_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Expr::SizeOf with 1 field(s)");
+  auto forTpe = Type::any_from_msgpack(r_);
+  return Expr::SizeOf(forTpe);
+}
+
+void Expr::sizeof_fields_to_msgpack(MsgpackWriter &w_, const Expr::SizeOf &x_) { Type::any_to_msgpack(w_, x_.forTpe); }
+
+Expr::SizeOf Expr::sizeof_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Expr::sizeof_fields_from_msgpack(r_, n_);
+}
+
+void Expr::sizeof_to_msgpack(MsgpackWriter &w_, const Expr::SizeOf &x_) {
+  w_.writeArrayHeader(1);
+  Expr::sizeof_fields_to_msgpack(w_, x_);
+}
+
 Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -5101,6 +5135,7 @@ Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
       case 8: return Expr::invoke_fields_from_msgpack(r_, n_ - 1);
       case 9: return Expr::foreigncall_fields_from_msgpack(r_, n_ - 1);
       case 10: return Expr::offsetof_fields_from_msgpack(r_, n_ - 1);
+      case 11: return Expr::sizeof_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -5117,6 +5152,7 @@ Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
       case 8: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 9: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 10: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 11: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -5178,6 +5214,11 @@ void Expr::any_to_msgpack(MsgpackWriter &w_, const Expr::Any &x_) {
         w_.writeArrayHeader(3);
         w_.writeInt32(10);
         Expr::offsetof_fields_to_msgpack(w_, y_);
+      },
+      [&](const Expr::SizeOf &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(11);
+        Expr::sizeof_fields_to_msgpack(w_, y_);
       });
 }
 

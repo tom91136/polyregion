@@ -30,7 +30,7 @@ int main(int argc, const char **argv) {
                                 "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -lstdc++ -fstdpar-rt=dynamic"
 #endif
                      },
-                     .driverEnvVar = "POLYFC_DRIVER",
+                     .driverEnvVar = polyregion::env::PolyfcDriver,
                      .passthroughEnvs = {std::string(polyregion::env::PolyfcNoRewrite) + "=1"},
                      .outputPrefix = "polyfc_test_",
                      .tempPrefix = "polyfc_",

@@ -50,6 +50,17 @@ using Property = std::pair<std::string, std::string>;
 using Callback = std::function<void()>;
 using MaybeCallback = std::optional<Callback>;
 
+// XXX a device whose vectoriser over-reads past a buffer end (Mesa/llvmpipe's unpredicated SIMD remainder)
+// advertises `overread_pad:<bytes>` in features(); allocations and arena objects pad by that many zeroed
+// bytes so the over-read lands in zeros. absent => 0 (sound devices predicate their remainder lanes)
+inline constexpr auto OverReadPadFeature = "overread_pad";
+[[nodiscard]] inline size_t overReadPadBytes(const std::vector<std::string> &features) {
+  const std::string prefix = std::string(OverReadPadFeature) + ":";
+  for (const auto &f : features)
+    if (f.rfind(prefix, 0) == 0) return std::stoull(f.substr(prefix.size()));
+  return 0;
+}
+
 template <typename T> constexpr std::optional<T> POLYREGION_EXPORT from_underlying(std::underlying_type_t<T>);
 template <typename T> constexpr std::optional<T> POLYREGION_EXPORT from_string(const char *);
 

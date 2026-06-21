@@ -221,3 +221,51 @@ object Builder {
 
   def lift(t: p.Term): p.Expr = p.Expr.Alias(t)
 }
+
+val BytePtr: p.Type.Ptr = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)
+val U64: p.Type         = p.Type.IntU64
+val I64: p.Type         = p.Type.IntS64
+
+def call(name: String, args: List[p.Term], rtn: p.Type): p.Expr = p.Expr.ForeignCall(name, args, rtn)
+def sel(n: p.Named): p.Term.Select                              = selectTerm(Nil, n)
+def vlet(name: String, tpe: p.Type, e: p.Expr): (p.Named, p.Stmt) = {
+  val n = p.Named(name, tpe); (n, p.Stmt.Var(n, Some(e), isMutable = false))
+}
+
+def typedCapture(capture: p.Named, ptr: p.Type): (p.Named, p.Stmt) = vlet("typed", ptr, p.Expr.Cast(sel(capture), ptr))
+
+def mapStmtsRec(stmts: List[p.Stmt])(leaf: p.Stmt => List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
+  case p.Stmt.While(c, b)                => List(p.Stmt.While(c, mapStmtsRec(b)(leaf)))
+  case p.Stmt.Cond(c, t, e)              => List(p.Stmt.Cond(c, mapStmtsRec(t)(leaf), mapStmtsRec(e)(leaf)))
+  case p.Stmt.ForRange(i, lb, ub, st, b) => List(p.Stmt.ForRange(i, lb, ub, st, mapStmtsRec(b)(leaf)))
+  case p.Stmt.Annotated(inner, pos, c)   => mapStmtsRec(List(inner))(leaf).map(p.Stmt.Annotated(_, pos, c))
+  case s                                 => leaf(s)
+}
+
+def dropAliasDecls(stmts: List[p.Stmt], aliases: Set[String]): List[p.Stmt] = mapStmtsRec(stmts) {
+  case p.Stmt.Var(n, _, _) if aliases(n.symbol) => Nil
+  case s                                        => List(s)
+}
+
+def constIntValue(t: p.Term): Option[Long] = t match {
+  case p.Term.IntS64Const(v) => Some(v)
+  case p.Term.IntU64Const(v) => Some(v)
+  case p.Term.IntS32Const(v) => Some(v.toLong)
+  case p.Term.IntU32Const(v) => Some(v.toLong)
+  case _                     => None
+}
+def isZeroConst(t: p.Term): Boolean = constIntValue(t).contains(0L)
+
+def scalarBytes(t: p.Type): Option[Long] = t match {
+  case p.Type.Bool1 | p.Type.IntU8 | p.Type.IntS8                     => Some(1)
+  case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16                 => Some(2)
+  case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32                 => Some(4)
+  case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 | _: p.Type.Ptr => Some(8)
+  case _                                                              => None
+}
+def scalarBytesOr8(t: p.Type): Int = scalarBytes(t).getOrElse(8L).toInt
+
+def captureRoot(entry: p.Function): Option[(p.Named, p.Type.Struct)] =
+  (entry.receiver.toList ::: entry.args).map(_.named).collectFirst {
+    case n @ p.Named(p.Conventions.ThisReceiver | p.Conventions.CaptureArg, p.Type.Ptr(s: p.Type.Struct, _)) => (n, s)
+  }

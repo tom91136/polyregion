@@ -26,7 +26,7 @@ int main(int argc, const char **argv) {
                      "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic -v"
 #endif
           },
-          .driverEnvVar = "POLYCPP_DRIVER",
+          .driverEnvVar = polyregion::env::PolycppDriver,
           .passthroughEnvs = {std::string(polyregion::env::PolycppNoRewrite) + "=1", std::string(polyregion::env::PolystlNoOffload) + "=1"},
           .outputPrefix = "polycpp_test_",
           .tempPrefix = "polycpp_",

@@ -12,7 +12,7 @@ case class FullOpt(level: Int = 3) extends ProgramPass derives PassArgCodec {
 
 object FullOpt {
   private val baseline: Vector[ProgramPass] =
-    Vector(ConstantFold, VarReduce, UnitExprElision, DeadArgElimination)
+    Vector(ConstantFold, VarReduce, UnitExprElision, EmptyStorageElision, DeadArgElimination)
 
   // XXX Intrinsify runs once to recognise direct `intrinsics.X` calls, then again after
   // FnInline so calls revealed by inlining a prism replacement (e.g. `StdLib.math.abs`
@@ -33,9 +33,15 @@ object PassRegistry {
     PassDef.singleton(FnInline),
     PassDef.singleton(Intrinsify),
     PassDef.singleton(MonoStruct),
+    PassDef.configured(Anchor()),
     PassDef.singleton(Specialisation),
     PassDef.singleton(UnitExprElision),
-    PassDef.singleton(VarReduce)
+    PassDef.singleton(EmptyStorageElision),
+    PassDef.singleton(VarReduce),
+    PassDef.configured(VerifyAnchors()),
+    PassDef.singleton(ArenaLower),
+    PassDef.singleton(ArenaView),
+    PassDef.configured(Mirror())
   )
 
   private val byName = definitions.map(d => d.name -> d).toMap

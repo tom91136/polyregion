@@ -27,6 +27,7 @@
   #define __RT_NOINLINE
 #endif
 
+// XXX keep in sync with conventions::Macros.PolyreflectRtOdrAnnotation
 #define __RT_ODR __RT_ANNOTATE("polyreflect-rt-odr")
 
 #if defined(__linux__) || defined(__APPLE__)

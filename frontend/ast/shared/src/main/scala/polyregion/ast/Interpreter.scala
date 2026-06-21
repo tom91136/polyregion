@@ -1,6 +1,7 @@
 package polyregion.ast
 
 import polyregion.ast.PolyAST as p
+import polyregion.ast.PolyAST.Conventions.RuntimeAbi
 
 import scala.collection.mutable
 
@@ -236,6 +237,7 @@ object Interpreter {
         call(name, recv.toList.map(t => t.tpe -> evalT(t, fr)) ::: args.map(t => t.tpe -> evalT(t, fr)))
       case p.Expr.ForeignCall(name, args, rtn) => foreign(name, args.map(t => t.tpe -> evalT(t, fr)), rtn)
       case p.Expr.OffsetOf(st, field)          => V.I(offsetOf(structSym(st), field))
+      case p.Expr.SizeOf(t)                    => V.I(sizeOf(t))
     }
 
     private def evalT(t: p.Term, fr: Frame): V = t match {
@@ -386,11 +388,7 @@ object Interpreter {
     private val table   = mutable.Map.empty[Long, (Long, Long)]
     private val visited = mutable.Set.empty[Long]
 
-    private val argBuf      = mutable.ArrayBuffer.empty[(Long, Long)]
     private val poolOffsets = mutable.ArrayBuffer.empty[Long]
-    private var poolNodes   = Vector.empty[Long]
-    private var poolBase    = 0L
-    private var poolNodeSz  = 0L
 
     private def ensureBase(local: Long, minSize: Long): Long = {
       val (b, sz) = vm.findAlloc(local)
@@ -437,28 +435,6 @@ object Interpreter {
         }
       }
 
-    private def poolGraph(root: Long, nodeSz: Long): Long = {
-      val nodes = mutable.ArrayBuffer.empty[Long]
-      val idx   = mutable.LinkedHashMap.empty[Long, Long]
-      def intern(n: Long): Long =
-        if (n == 0) -1L else idx.getOrElseUpdate(n, { val i = nodes.size.toLong; nodes += n; i })
-      intern(root)
-      var i = 0
-      while (i < nodes.size) { poolOffsets.foreach(off => intern(vm.loadPtr(nodes(i) + off))); i += 1 }
-      val pool = vm.allocDevice(nodeSz * nodes.size)
-      nodes.zipWithIndex.foreach { case (n, k) =>
-        vm.copy(pool + k * nodeSz, n, nodeSz)
-        poolOffsets.foreach(off => vm.storePtr(pool + k * nodeSz + off, intern(vm.loadPtr(n + off))))
-      }
-      poolNodes = nodes.toVector; poolBase = pool; poolNodeSz = nodeSz
-      pool
-    }
-    private def readPool(): Unit = poolNodes.zipWithIndex.foreach { case (host, k) =>
-      val saved = poolOffsets.map(off => vm.loadPtr(host + off))
-      vm.copy(host, poolBase + k * poolNodeSz, poolNodeSz)
-      poolOffsets.zip(saved).foreach { case (off, ptr) => vm.storePtr(host + off, ptr) }
-    }
-
     private var graphNodes = Vector.empty[Long]
     private def discover(root: Long): Vector[Long] = {
       val nodes = mutable.ArrayBuffer.empty[Long]
@@ -467,8 +443,7 @@ object Interpreter {
         if (n != 0 && seen.add(n)) { nodes += n; poolOffsets.foreach(off => go(vm.loadPtr(n + off))) }
       go(root); nodes.toVector
     }
-    // Mirror's graph path keeps the pointer shape (unlike pool_graph's index form): deep-copy each node
-    // and patch its self-pointers to the device copies
+
     private def mirrorGraph(root: Long): Long = if (root == 0) 0L
     else {
       val nodes = discover(root)
@@ -493,41 +468,28 @@ object Interpreter {
       }
     }
 
-    def boundArgs(entry: p.Function): List[(p.Type, V)] = {
-      val params = entry.receiver.toList ::: entry.args ::: entry.moduleCaptures ::: entry.termCaptures
-      params.zip(argBuf.toList).map { case (arg, (_, bits)) => arg.named.tpe -> vm.decodeBits(bits, arg.named.tpe) }
-    }
-
     val handler: Foreign = (name, args, _) => {
       def a(i: Int): Long = args(i)._2 match { case V.I(x) => x; case V.D(d) => d.toLong; case V.U => 0L }
       name match {
-        case "polyrt_sma_alloc" =>
+        case RuntimeAbi.SmaAlloc =>
           val (local, size) = (a(0), a(1))
           V.I(table.get(local) match {
             case Some((d, _)) => d
             case _            => val d = vm.allocDevice(size); vm.copy(d, local, size); table(local) = (d, size); d
           })
-        case "polyrt_sma_ensure"          => V.I(ensure(a(0), 0))
-        case "polyrt_sma_ensure_min"      => V.I(ensure(a(0), a(1)))
-        case "polyrt_sma_ensure_base_min" => V.I(ensureBase(a(0), a(1)))
-        case "polyrt_sma_ensure_deep"     => V.I(ensureDeep(a(0), a(1)))
-        case "polyrt_sma_offset_bytes"    => val (b, _) = vm.findAlloc(a(0)); V.I(a(0) - b)
-        case "polyrt_sma_pointee_size"    => val (b, sz) = vm.findAlloc(a(0)); V.I(b + sz - a(0))
-        case "polyrt_sma_patch"           => vm.storePtr(a(0) + a(1), a(2)); V.U
-        case "polyrt_sma_read_alloc"      => readAlloc(a(0)); V.U
-        case "polyrt_sma_read_deep"       => readDeep(a(0), a(1)); V.U
-        case "polyrt_sma_visit_clear"     => visited.clear(); V.U
-        case "polyrt_sma_release"         => V.U
-        case "polyrt_sma_mirror_graph"    => V.I(mirrorGraph(a(0)))
-        case "polyrt_sma_read_graph"      => readGraph(); V.U
-        case "polyrt_args_reset"          => argBuf.clear(); V.U
-        case "polyrt_args_put"            => argBuf += ((a(0), a(1))); V.U
-        case "polyrt_sma_pool_reset"      => poolOffsets.clear(); V.U
-        case "polyrt_sma_pool_ptr"        => poolOffsets += a(0); V.U
-        case "polyrt_sma_pool_graph"      => V.I(poolGraph(a(0), a(1)))
-        case "polyrt_sma_pool_root_index" => V.I(0)
-        case "polyrt_sma_read_pool"       => readPool(); V.U
-        case other                        => sys.error(s"unsupported foreign $other")
+        case RuntimeAbi.SmaEnsure      => V.I(ensure(a(0), 0))
+        case RuntimeAbi.SmaEnsureMin   => V.I(ensure(a(0), a(1)))
+        case RuntimeAbi.SmaEnsureDeep  => V.I(ensureDeep(a(0), a(1)))
+        case RuntimeAbi.SmaPointeeSize => val (b, sz) = vm.findAlloc(a(0)); V.I(b + sz - a(0))
+        case RuntimeAbi.SmaPatch       => vm.storePtr(a(0) + a(1), a(2)); V.U
+        case RuntimeAbi.SmaReadAlloc   => readAlloc(a(0)); V.U
+        case RuntimeAbi.SmaReadDeep    => readDeep(a(0), a(1)); V.U
+        case RuntimeAbi.SmaVisitClear  => visited.clear(); V.U
+        case RuntimeAbi.SmaMirrorGraph => V.I(mirrorGraph(a(0)))
+        case RuntimeAbi.SmaReadGraph   => readGraph(); V.U
+        case RuntimeAbi.SmaPoolReset   => poolOffsets.clear(); V.U
+        case RuntimeAbi.SmaPoolPtr     => poolOffsets += a(0); V.U
+        case other                     => sys.error(s"unsupported foreign $other")
       }
     }
   }

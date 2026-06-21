@@ -16,6 +16,7 @@ int flang_main(int argc, const char **argv);
 #include "fmt/core.h"
 
 #include "polyfront/options_frontend.hpp"
+#include "polyregion/conventions.h"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 
@@ -23,6 +24,11 @@ int flang_main(int argc, const char **argv);
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
+using polyregion::conventions::reflect::FlagLate;
+using polyregion::conventions::reflect::FlagVerbose;
+using polyregion::conventions::reflect::PassInterpose;
+using polyregion::conventions::reflect::PassMem;
+using polyregion::conventions::reflect::PassRecordAlloc;
 
 int main(int argc, const char *argv[]) {
   CliArgs args(std::vector(argv, argv + argc));
@@ -106,18 +112,18 @@ int main(int argc, const char *argv[]) {
                      // lld-link consumes /mllvm:VAL via -Xlinker; the polyreflect-* CL options come
                      // from polyld-link (polyreflect statically linked in), no pass-plugin load.
                      append({fmt::format("-B{}", execParentPath), "-fuse-ld=lld"});
-                     append({"-Xlinker", fmt::format("/mllvm:-polyreflect-verbose={}", debug ? "1" : "0"), //
-                             "-Xlinker", fmt::format("/mllvm:-polyreflect-late={}", latePasses)});
+                     append({"-Xlinker", fmt::format("/mllvm:-{}={}", FlagVerbose, debug ? "1" : "0"), //
+                             "-Xlinker", fmt::format("/mllvm:-{}={}", FlagLate, latePasses)});
 #else
                      append(Driver::enableLLDAndLTO(args));
-                     append(Driver::lldPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                                                           fmt::format("-polyreflect-late={}", latePasses)}));
+                     append(Driver::lldPassPluginFlags(polyreflectPlugin, {fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"), //
+                                                                           fmt::format("-{}={}", FlagLate, latePasses)}));
 #endif
                    };
                    switch (opts->mem) {
                      case StdParOptions::MemKind::Direct: break;
-                     case StdParOptions::MemKind::Interpose: lateLldFlags("Interpose"); break;
-                     case StdParOptions::MemKind::Reflect: lateLldFlags("RecordAlloc+ReflectMem"); break;
+                     case StdParOptions::MemKind::Interpose: lateLldFlags(PassInterpose); break;
+                     case StdParOptions::MemKind::Reflect: lateLldFlags(fmt::format("{}+{}", PassRecordAlloc, PassMem)); break;
                    }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {

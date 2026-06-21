@@ -22,6 +22,8 @@
 // XXX __RT_IMPL defines polyreflect-rt singletons in this TU so SMA's localReflect can resolve
 // captured pointers. On Windows the HashMap allocator routes through HeapAlloc (rt_protected.hpp)
 // to avoid recursing back into polyrt_usm_* via InterposePass.
+// __RT_NO_GLOBAL_NEW: the global operator new override belongs in user executables, not this DSO.
+#define __RT_NO_GLOBAL_NEW
 #include "reflect-rt/rt.hpp"
 
 using namespace polyregion::invoke;
@@ -239,6 +241,12 @@ void polyregion::polyrt::initialise() {
 
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
   std::fprintf(stderr, "[PolyRT] %s: no kernel object matched any enumerated device, exiting 77 (skip)\n", site);
+  std::fflush(stderr);
+  std::_Exit(77);
+}
+
+void polyregion::polyrt::skipExit(const char *reason) {
+  std::fprintf(stderr, "[PolyRT] %s, exiting 77 (skip)\n", reason);
   std::fflush(stderr);
   std::_Exit(77);
 }

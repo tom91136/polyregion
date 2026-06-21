@@ -21,6 +21,9 @@ object PassTest {
   def select(n: p.Named): p.Expr                                        = p.Expr.Alias(selectT(n))
   def select(name: String, tpe: p.Type = p.Type.IntS32): p.Expr         = select(named(name, tpe))
 
+  def fieldOf(root: p.Named)(name: String, t: p.Type): p.Term.Select =
+    p.Term.Select(root, List(p.PathStep.Field(name)), t)
+
   def fn(
       name: String,
       args: List[p.Arg] = Nil,

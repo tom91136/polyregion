@@ -195,7 +195,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
 #elif defined(__linux__)
   // XXX forward LD_LIBRARY_PATH (dist-relative .so when rpath misses; lavapipe must precede) and a parent
   // LD_PRELOAD shim into the wholesale-replaced child env; the run-only ASan block layers its rt ahead
-  for (const auto *name : {"TMPDIR", "HOME", "LD_PRELOAD", "POLYRT_DUMP_KERNEL"})
+  for (const auto *name : {"TMPDIR", "HOME", "LD_PRELOAD", polyregion::env::PolyrtDumpKernel})
     if (auto v = std::getenv(name)) put(name, v);
   const auto ld = std::getenv("LD_LIBRARY_PATH");
   if (const auto joined = lavapipeLd + (ld ? ld : ""); !joined.empty()) put("LD_LIBRARY_PATH", joined);

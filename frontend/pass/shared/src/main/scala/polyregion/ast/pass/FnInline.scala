@@ -7,6 +7,11 @@ import polyregion.ast.Traversal.*
 // inlines every Invoke reachable from entry to a fixed point (the result Program has no functions):
 // the callee body is type-substituted, alpha-renamed, its params bound to the call args, and spliced
 // in at the callsite scope
+// examples:
+//   f(x){ ret x+1 }; y=f(2)            ->  y=2+1   // body spliced, x bound to 2, return becomes the value
+//   f[T](x:T){ ret x }; y=f[Int](a)    ->  y=a     // T -> Int before splicing
+//   f(x){ if c {ret x} else {ret 0} }  ->  var _phi; if c {_phi=x} else {_phi=0}; ..; _phi  (multi-return phi)
+//   g(){ ret f(1) }; z=g()             ->  z=1+1   // nested Invoke inlined first, to a fixed point
 // edge cases:
 //   single Return        -> the return Expr becomes the callsite value; Return stmts stripped
 //   multiple Returns     -> a mutable phi var, each Return rebound to a Mut of the phi
@@ -90,21 +95,46 @@ object FnInline extends ProgramPass {
     val substTable   = targetNames.zip(replacements).toMap
     val substituted  = substTerms(renamed, substTable)
 
-    val returnExprs = substituted.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e }
+    // rebindReturn turns each `return` into a phi store but cannot model early exit; sink the
+    // fall-through after a returning branch into the sibling branch so the returns become mutually
+    // exclusive (else an unconditional tail return clobbers the phi set in a conditional branch)
+    val sunk        = substituted.copy(body = sinkAfterReturn(substituted.body))
+    val returnExprs = sunk.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e }
 
     returnExprs match {
       case Nil =>
         throw AssertionError(s"no return in function ${f.signature}")
       case expr :: Nil =>
-        val noReturnBody = substituted.body.flatMap(stripReturn)
+        val noReturnBody = sunk.body.flatMap(stripReturn)
         (expr, noReturnBody, renamed.moduleCaptures)
       case xs =>
-        val phiName                  = p.Named("phi", ivk.tpe)
+        val phiName                  = p.Named(s"_inline_phi_${ctr.incrementAndGet()}", ivk.tpe)
         val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
         val phiDecl                  = p.Stmt.Var(phiName, None, isMutable = true)
-        val rebound                  = substituted.body.map(rebindReturn(phiSelect))
+        val rebound                  = sunk.body.map(rebindReturn(phiSelect))
         (p.Expr.Alias(phiSelect), phiDecl :: rebound, renamed.moduleCaptures)
     }
+  }
+
+  private def alwaysReturns(stmts: List[p.Stmt]): Boolean = stmts.lastOption match {
+    case Some(p.Stmt.Return(_))          => true
+    case Some(p.Stmt.Cond(_, t, f))      => alwaysReturns(t) && alwaysReturns(f)
+    case Some(p.Stmt.Annotated(s, _, _)) => alwaysReturns(List(s))
+    case _                               => false
+  }
+
+  private def sinkAfterReturn(stmts: List[p.Stmt]): List[p.Stmt] = stmts match {
+    case Nil => Nil
+    case p.Stmt.Cond(c, t, f) :: rest =>
+      val t2 = sinkAfterReturn(t)
+      val f2 = sinkAfterReturn(f)
+      (alwaysReturns(t2), alwaysReturns(f2)) match {
+        case (true, true)                   => List(p.Stmt.Cond(c, t2, f2)) // rest unreachable
+        case (true, false) if rest.nonEmpty => List(p.Stmt.Cond(c, t2, sinkAfterReturn(f2 ::: rest)))
+        case (false, true) if rest.nonEmpty => List(p.Stmt.Cond(c, sinkAfterReturn(t2 ::: rest), f2))
+        case _                              => p.Stmt.Cond(c, t2, f2) :: sinkAfterReturn(rest)
+      }
+    case other :: rest => other :: sinkAfterReturn(rest)
   }
 
   private def stripReturn(s: p.Stmt): List[p.Stmt] = s match {

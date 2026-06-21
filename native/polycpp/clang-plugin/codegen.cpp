@@ -7,7 +7,10 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
+#include "polyfront/pass_specs.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/env_keys.h"
+#include "polyregion/mirror_names.h"
 #include "polyregion/types.h"
 
 #include "ast.h"
@@ -59,31 +62,18 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   }
   stmts.insert(stmts.begin(), tidAliases.begin(), tidAliases.end());
 
-  auto args = userParams | map([&](const clang::ParmVarDecl *x) {
-                auto local = x->attrs() | exists([](const clang::Attr *a) {
-                               if (auto annotated = llvm::dyn_cast<clang::AnnotateAttr>(a); annotated) {
-                                 return annotated->getAnnotation() == "__polyregion_local";
-                               }
-                               return false;
-                             });
-
-                auto tpe = remapper.handleType(x->getType(), r);
-
-                auto annotatedTpe =
-                    tpe.get<Type::Ptr>() ^
-                    fold([&](auto p) { return Type::Ptr(p.comp, local ? TypeSpace::Local() : p.space).widen(); }, [&]() { return tpe; });
-
-                return Arg(Named(declName(x), annotatedTpe), {});
-              })             //
-              | append(recv) //
+  auto args = userParams |
+              map([&](const clang::ParmVarDecl *x) { return Arg(Named(declName(x), remapper.annotateLocalSpace(x, r)), {}); }) //
+              | append(recv)                                                                                                   //
               | to_vector();
 
-  auto f0 =
-      std::make_shared<Function>(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
-                                 std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  auto f0 = std::make_shared<Function>(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args,
+                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(),
+                                       FunctionFpMode::Relaxed(), true, FunctionAffinity::Offload());
 
   auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial());
+                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial(),
+                         {MetaEntry(program_meta::VkWorkgroupSizeX, std::to_string(program_meta::VkWorkgroupSizeXValue))});
 
   auto exportedFns = (std::vector<Function>{program.entry} ^ concat(program.functions))                         //
                      | filter([](auto &f) { return f.visibility.template is<FunctionVisibility::Exported>(); }) //
@@ -105,7 +95,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto objects = opts.targets                                                                                //
                  | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
                  | collect([&](auto &target, auto &features) {
-                     return compileProgram(opts, program, target, features) ^
+                     return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target)) ^
                             fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                                        [&](const std::string &err) -> std::optional<CompileResult> {
                                          emit(diag, clang::DiagnosticsEngine::Level::Warning,
@@ -167,5 +157,10 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                  "see prior diagnostics for the per-target failure",
          moduleId, std::string(magic_enum::enum_name(kind)), static_cast<int>(requestedForKind));
   }
-  return polyfront::KernelBundle{moduleId, objects, layouts, program_to_json(program).dump()};
+  auto mir = polyfront::compileManagedHostMirror(opts, program, kind, moduleId);
+  if (mir.error)
+    emit(diag, loc, clang::DiagnosticsEngine::Level::Warning, POLYREGION_DIAG_POLYSTL "Host mirroring compile failed [%0]: %1", moduleId,
+         *mir.error);
+  return polyfront::KernelBundle{moduleId,    objects,     layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
+                                 mir.bitcode, mir.mirrorId};
 }

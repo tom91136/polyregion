@@ -48,6 +48,7 @@ if (NOT POLYREGION_FUSED_DRIVER)
             PUBLIC
             polycommon
             Aspartame::Aspartame
-            magic_enum::magic_enum)
+            magic_enum::magic_enum
+            fmt::fmt-header-only)
 endif ()
 

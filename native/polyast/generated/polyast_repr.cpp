@@ -445,6 +445,9 @@ std::string repr(const Expr::Any &e) {
     if (auto _x = e.get<Expr::OffsetOf>()) {
       return fmt::format("offsetof({}, {})", repr(_x->structTpe), _x->field);
     }
+    if (auto _x = e.get<Expr::SizeOf>()) {
+      return fmt::format("sizeof({})", repr(_x->forTpe));
+    }
 
     throw std::logic_error(fmt::format("Unhandled match case for e (of type Expr::Any) at {}:{})", __FILE__, __LINE__));
   }();

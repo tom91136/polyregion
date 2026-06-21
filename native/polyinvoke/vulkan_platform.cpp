@@ -428,7 +428,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
   // the scalar uniform block uses runtime::std140ScalarLayout - the SAME rule codegen pads with, so a
-  // strict driver (lavapipe) reads each 64-bit member at its 8-aligned offset; the two tiers MUST agree
+  // strict driver (lavapipe) reads each 64-bit member at its 8-aligned offset; host and device MUST agree
   std::vector<std::pair<vk::DescriptorBufferInfo, vk::DescriptorType>> infos;
   std::vector<size_t> scalarSizes;
   std::vector<const void *> scalarSrcs;

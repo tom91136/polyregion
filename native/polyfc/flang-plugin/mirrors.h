@@ -19,18 +19,19 @@ struct CharStarMirror final : AggregateMirror<1> {
   std::array<Type, 1> types() const override;
 };
 
-struct AggregateMemberMirror final : AggregateMirror<7> {
+struct AggregateMemberMirror final : AggregateMirror<8> {
   Field<LLVM::LLVMPointerType, 0> name;
   Field<IntegerType, 1> offsetInBytes;
   Field<IntegerType, 2> sizeInBytes;
   Field<IntegerType, 3> ptrIndirection;
   Field<IntegerType, 4> componentSize;
   Field<LLVM::LLVMPointerType, 5> type;
-  Field<LLVM::LLVMPointerType, 6> resolvePtrSizeInBytes;
+  Field<IntegerType, 6> readOnly;
+  Field<LLVM::LLVMPointerType, 7> resolvePtrSizeInBytes;
 
   explicit AggregateMemberMirror(ModuleOp &M);
   const char *typeName() const override;
-  std::array<Type, 7> types() const override;
+  std::array<Type, 8> types() const override;
 };
 
 struct TypeLayoutMirror final : AggregateMirror<6> {
@@ -57,7 +58,7 @@ struct KernelObjectMirror final : AggregateMirror<6> {
   std::array<Type, 6> types() const override;
 };
 
-struct KernelBundleMirror final : AggregateMirror<7> {
+struct KernelBundleMirror final : AggregateMirror<10> {
   Field<LLVM::LLVMPointerType, 0> moduleName;
   Field<IntegerType, 1> objectCount;
   Field<LLVM::LLVMPointerType, 2> objects;
@@ -65,9 +66,12 @@ struct KernelBundleMirror final : AggregateMirror<7> {
   Field<LLVM::LLVMPointerType, 4> structs;
   Field<IntegerType, 5> interfaceLayoutIdx;
   Field<LLVM::LLVMPointerType, 6> metadata;
+  Field<LLVM::LLVMPointerType, 7> mirrorId;
+  Field<LLVM::LLVMPointerType, 8> prelude;
+  Field<LLVM::LLVMPointerType, 9> postlude;
   explicit KernelBundleMirror(ModuleOp &M);
   const char *typeName() const override;
-  std::array<Type, 7> types() const override;
+  std::array<Type, 10> types() const override;
 };
 
 struct FReductionMirror final : AggregateMirror<3> {

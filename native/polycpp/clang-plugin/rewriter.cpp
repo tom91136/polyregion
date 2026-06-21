@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
@@ -16,6 +17,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
+#include "polyregion/conventions.h"
 
 #include "ast.h"
 #include "ast_visitors.h"
@@ -105,38 +107,6 @@ static Vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::A
       },
       callExpr(callee(functionDecl(hasName(offloadFunctionName)))).bind(offloadFunctionName));
   return results;
-}
-
-// static std::string createHumanReadableFunctionIdentifier(clang::ASTContext &c, clang::FunctionDecl *decl) {
-//   SpecialisationPathVisitor spv(c);
-//   auto xs = spv.resolve(decl);
-//   std::string identifier;
-//   for (std::make_signed_t<size_t> i = xs.size() - 1; i >= 0; --i) {
-//     auto loc = getLocation(*xs[i].second, c);
-//     identifier += xs[i].first->getName();
-//     identifier += "<";
-//     identifier += loc.filename;
-//     identifier += ":";
-//     identifier += std::to_string(loc.line);
-//     identifier += ">";
-//     if (i != 0) identifier += "->";
-//   }
-//   return identifier;
-// }
-
-template <typename T> T *findDecl(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTContext &C, const char *name) {
-  clang::LookupResult result(S, clang::DeclarationName(&C.Idents.get(name)), clang::SourceLocation(), clang::Sema::LookupAnyName);
-  S.LookupName(result, S.getScopeForContext(C.getTranslationUnitDecl()));
-  if (result.isSingleResult()) {
-    const auto decl = result.getFoundDecl();
-    if (const auto record = llvm::dyn_cast<T>(decl)) return record;
-    else
-      emit(D, clang::DiagnosticsEngine::Error,
-           POLYREGION_DIAG_POLYSTL "Name lookup for %0 resulted in unexpected type %1; this is a bug.\n", name, decl->getDeclKindName());
-  } else
-    emit(D, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "Name lookup for %0 unsuccessful (%1); this is a bug.\n", name,
-         magic_enum::enum_name(result.getResultKind()));
-  return {};
 }
 
 void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTContext &C, const Callsite &c,
@@ -288,6 +258,8 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                  });
                       });
 
+                  const bool readOnly =
+                      bundle.readOnlyMembers ^ get_maybe(sl.name) ^ exists([&](auto &ms) { return ms ^ contains(m.name.symbol); });
                   return mkInitList(C,
                                     *AggregateMemberTy,                                                                         //
                                     {/*name            */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, m.name.symbol)), //
@@ -295,7 +267,8 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                      /*sizeInBytes     */ mkIntLit(C, C.getSizeType(), m.sizeInBytes),                          //
                                      /*ptrIndirections */ mkIntLit(C, C.getSizeType(), indirections),                           //
                                      /*componentSize   */ mkIntLit(C, C.getSizeType(), componentSize.value_or(m.sizeInBytes)),  //
-                                     /*type            */ typeDecl ^ get_or_else(mkNullPtrLit(C, *TypeLayoutTy))});
+                                     /*type            */ typeDecl ^ get_or_else(mkNullPtrLit(C, *TypeLayoutTy)),               //
+                                     /*readOnly        */ mkIntLit(C, C.getSizeType(), readOnly ? 1 : 0)});
                 }) | to_vector())};
       }) //
       | to<Map>();
@@ -325,7 +298,24 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
           /*structs            */ mkArrayToPtrDecay(C, C.getPointerType(*TypeLayoutTy), mkDeclRef(C, structTypeLayoutArrayDecl)),
           /*interfaceLayoutIdx */ mkIntLit(C, C.getSizeType(), interfaceLayoutIdx),
           /*metadata           */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, bundle.metadata)),
+          /*mirrorId           */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, bundle.mirrorId)),
+          /*prelude           */ mkNullPtrLit(C, (*typeOfFieldWithName(KernelBundleTy, "prelude"))->getPointeeType()),
+          /*postlude          */ mkNullPtrLit(C, (*typeOfFieldWithName(KernelBundleTy, "postlude"))->getPointeeType()),
       });
+
+  // embed the host mirroring BC
+  Opt<clang::VarDecl *> hostBcDecl;
+  if (!bundle.hostMirrorBitcode.empty()) {
+    const auto arrTy =
+        C.getConstantArrayType(C.getConstType(C.CharTy), llvm::APInt(C.getTypeSize(C.IntTy), bundle.hostMirrorBitcode.size()), nullptr,
+                               clang::ArraySizeModifier::Normal, 0);
+    auto *lit = clang::StringLiteral::Create(C, bundle.hostMirrorBitcode, clang::StringLiteralKind::Ordinary, false, arrTy, {{}});
+    auto d = clang::VarDecl::Create(C, c.calleeDecl, {}, {}, &C.Idents.get(std::string("__") + conventions::reflect::MirrorBitcodeGlobal),
+                                    arrTy, nullptr, clang::SC_Static);
+    d->setInit(lit);
+    d->addAttr(clang::UsedAttr::CreateImplicit(C));
+    hostBcDecl = d;
+  }
 
   Vector<clang::Stmt *> newStmts =                                                                                //
       kernelImageDecls                                                                                            //
@@ -339,25 +329,13 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
       | concat(assignTypeLayoutMembers)                                                                           //
       | append(clang::ReturnStmt::Create(C, {}, mkDeclRef(C, kernelBundleDecl), {}))                              //
       | to_vector();
+  if (hostBcDecl) newStmts.insert(newStmts.begin(), new (C) clang::DeclStmt(clang::DeclGroupRef(*hostBcDecl), {}, {}));
 
   c.calleeDecl->setBody(clang::CompoundStmt::Create(C, newStmts, {}, {}, {}));
-  // c.calleeDecl->dump(); // void __polyregion_offload__(F __polyregion__f)
-  c.calleeDecl->print(llvm::outs());
 }
 
 OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts)
     : clang::ASTConsumer(), CI(CI), opts(opts) {}
-
-template <typename Parent, typename Node> const Parent *findParentOfType(clang::ASTContext &context, Node *from) {
-  auto step = [&](const auto *n) -> const clang::Decl * {
-    auto parents = context.getParents(*n);
-    return parents.empty() ? nullptr : parents.begin()->template get<clang::Decl>();
-  };
-  for (auto node = step(from); node; node = step(node)) {
-    if (auto parent = llvm::dyn_cast<Parent>(node); parent) return parent;
-  }
-  return {};
-}
 
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   auto &D = CI.getDiagnostics();
@@ -384,8 +362,6 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
               // flat moduleName->object map keeps the first kernel and silently mis-dispatches
               // the rest. Disambiguate with the lambda's CXXRecordDecl ID.
               moduleId += fmt::format("@{:x}", c.functorDecl->getParent()->getID());
-
-              fmt::print("{}\n", moduleId);
 
               const auto bundle = compileRegion(
                   opts, C, D, moduleId, *c.functorDecl,

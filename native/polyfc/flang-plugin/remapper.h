@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
@@ -26,11 +27,15 @@ struct Remapper {
 
   llvm::DenseMap<mlir::Value, FExpr> valuesLUT;
   llvm::DenseMap<mlir::Type, FType> typesLUT;
-  llvm::DenseMap<mlir::Value, polyast::Term::Select> captures;
+  llvm::MapVector<mlir::Value, polyast::Term::Select> captures;
 
   std::unordered_set<polyast::StructDef> syntheticDefs;
   std::unordered_map<polyast::Type::Struct, polyast::StructDef> defs;
   std::unordered_map<polyast::Type::Struct, std::variant<FBoxedMirror, FBoxedNoneMirror>> boxTypes;
+
+  size_t loopSeq = 0;
+
+  llvm::DenseMap<mlir::Value, polyast::Term::Select> aggLoadCache;
 
   std::vector<polyast::Stmt::Any> stmts;
   std::vector<polyast::Function> functions;
@@ -42,7 +47,6 @@ struct Remapper {
   polyast::StructLayout resolveLayout(const polyast::StructDef &def);
   polyast::Type::Any handleType(mlir::Type type, bool captureBoundary = false);
   FExpr handleValue(mlir::Value val, const std::optional<std::vector<polyast::Named>> &altRoot = {});
-  polyast::Term::Select handleSelectExpr(mlir::Value val);
   polyast::Expr::Any handleValueAsScalar(mlir::Value val);
 
   template <typename T = polyast::Expr::Any> T handleValueAs(const mlir::Value val) {

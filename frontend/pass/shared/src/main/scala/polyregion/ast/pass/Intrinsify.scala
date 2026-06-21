@@ -4,6 +4,34 @@ import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+// lowers recognised library/builtin Invokes into Spec/Math/Intr ops; binary operands are cast-promoted
+// to the result (or widest) type first, casts emitted as preceding Var stmts
+// examples:
+//   intrinsics.gpuGlobalIdx(d)  ->  Spec.GpuGlobalIdx(d)
+//   intrinsics.gpuBarrierAll()  ->  Spec.GpuBarrierAll
+//   intrinsics.assert()         ->  Spec.Assert
+//   intrinsics.sin(x)           ->  Math.Sin(x)
+//   intrinsics.pow(x, y)        ->  Math.Pow(x, y)
+//   intrinsics.min(x, y)        ->  Intr.Min(x, y)
+//   intrinsics.array[T](n)      ->  Alloc(T, n, Global, Opaque)
+//   buf.apply(i)                ->  Index(buf, i)
+//   buf.update(i, x)            ->  Update(buf, i, x); Unit0
+//   a < b   (numeric -> Bool)   ->  Intr.LogicLt(a, b)
+//   p && q  (Bool)              ->  Intr.LogicAnd(p, q)
+//   !p      (Bool)              ->  Intr.LogicNot(p)
+//   a + b   (numeric)           ->  Intr.Add(a, b)
+//   a << b                      ->  Intr.BSL(a, b)
+//   x.toDouble                  ->  Cast(x, Float64)
+//   x.toDegrees                 ->  Intr.Mul(x, RadiansToDegrees)
+//   -x                          ->  Intr.Neg(x)
+//   xs(i) / xs.update(i, v)     ->  Index / Update (Array, Buffer, SeqOps)
+//   Array.ofDim[T](n)           ->  Alloc(T, n, Global, Opaque)
+//   int2double(x)               ->  Cast(x, Float64)
+// edge cases:
+//   IntS8/IntS16/IntU16 unary   ->  promoted to IntS32 before the op
+//   already-correct operand tpe ->  no Cast stmt emitted (castOrId identity)
+//   unrecognised op             ->  Invoke left unchanged
+//   unsupported intrinsics/TypedBuffer op  ->  throws IllegalStateException
 object Intrinsify extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {

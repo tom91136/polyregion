@@ -5,6 +5,10 @@ import polyregion.ast.{PolyAST as p, *, given}
 
 // monomorphises generic functions: one specialised copy per distinct tpeArg set reached from entry,
 // rewrites each Invoke to the monomorphic name + drops tpeArgs, then removes generic templates
+// examples:
+//   id[Int](3); id[Float](1.0)  ->  Int_id(3); Float_id(1.0)   (+ two specialised copies, template dropped)
+//   id[Int](3); id[Int](7)      ->  Int_id(3); Int_id(7)       (+ one specialised copy, deduped)
+//   pair[Int,Float](3, 1.0)     ->  Int_Float_pair(3, 1.0)     (+ one specialised copy, template dropped)
 // edge cases:
 //   specialisation that invokes further generics -> recursiveSpecialise recurses into the new body
 //   tpeArg set already specialised               -> deduped by monomorphic name (no second copy)

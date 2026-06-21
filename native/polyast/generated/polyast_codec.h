@@ -97,6 +97,8 @@ namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT json foreigncall_to_json(const Expr::ForeignCall &);
 [[nodiscard]] POLYREGION_EXPORT Expr::OffsetOf offsetof_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json offsetof_to_json(const Expr::OffsetOf &);
+[[nodiscard]] POLYREGION_EXPORT Expr::SizeOf sizeof_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json sizeof_to_json(const Expr::SizeOf &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr

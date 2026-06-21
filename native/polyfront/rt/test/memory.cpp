@@ -53,6 +53,7 @@ template <typename T> StructWithStorage liftToStruct(const char *name, std::init
         .ptrIndirection = indirections<decltype(type_::member_)>(), /**/                                                                   \
         .componentSize = componentSize<decltype(type_::member_)>(), /**/                                                                   \
         .type = typePtr_,                                           /**/                                                                   \
+        .readOnly = 0,                                              /**/                                                                   \
         .resolvePtrSizeInBytes = nullptr                                                                                                   \
   }
 #define Struct_(type_, ...) liftToStruct<type_>(#type_, {__VA_ARGS__})
@@ -513,4 +514,36 @@ TEST_CASE("ptr-offset-internal") {
   CHECK(fixture.remoteToLocal(expected.a) == std::optional{reinterpret_cast<uintptr_t>(actual.a)});
   CHECK(expected.a[0] == 42);
   CHECK(expected.b[0] == 43);
+}
+
+TEST_CASE("gen-arena-mirror") {
+  Fixture f;
+  struct Rec {
+    int8_t *p;
+    uint64_t len;
+  };
+  auto i8 = NamedType(int8_t);
+  auto recLayout = Struct_(Rec, StructMember_(Rec, p, &i8), StructMember_(Rec, len, &int64Type));
+
+  auto *chars = f.mallocLocal<int8_t>(4);
+  chars[0] = 'a', chars[1] = 'b', chars[2] = 'c', chars[3] = 0;
+  auto *rec = f.mallocLocal<Rec>(1);
+  rec->p = chars, rec->len = 3;
+
+  // the whole reachable graph laid into one arena: Rec body first, then its char payload appended,
+  // the `p` slot rewritten to the chars' arena byte offset
+  const uint64_t off = f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
+  auto &arena = f.allocation.genArenaStaging;
+  CHECK(off == 0);
+  CHECK(arena.size() == sizeof(Rec) + 4);
+  CHECK(*reinterpret_cast<const uint64_t *>(arena.data() + offsetof(Rec, p)) == sizeof(Rec));
+  CHECK(*reinterpret_cast<const uint64_t *>(arena.data() + offsetof(Rec, len)) == 3);
+  CHECK(std::memcmp(arena.data() + sizeof(Rec), "abc", 3) == 0);
+
+  // a null pointer slot becomes the arenaNull sentinel (0); the capture root sits at offset 0 with
+  // nothing pointing back at it, so every real pointee offset is > 0 and 0 unambiguously means null
+  f.allocation.genArenaReset();
+  rec->p = nullptr;
+  f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
+  CHECK(*reinterpret_cast<const uint64_t *>(f.allocation.genArenaStaging.data() + offsetof(Rec, p)) == 0);
 }

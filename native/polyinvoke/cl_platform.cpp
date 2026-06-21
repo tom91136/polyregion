@@ -223,7 +223,7 @@ ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 
 static DeviceQuirks resolveQuirks(const std::string &deviceName) {
   const bool llvmpipe = deviceName.find("llvmpipe") != std::string::npos;
-  return DeviceQuirks{/*nativeTrig*/ llvmpipe, /*overReadSlackBytes*/ llvmpipe ? size_t{4096} : size_t{0}};
+  return DeviceQuirks{/*nativeTrig*/ llvmpipe, /*overReadPad*/ llvmpipe ? size_t{4096} : size_t{0}};
 }
 
 ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm,
@@ -384,6 +384,7 @@ std::vector<std::string> ClDevice::features() {
   if (hasExt("cl_khr_fp16")) out.emplace_back("fp16");
   if (hasExt("cl_khr_int64_base_atomics")) out.emplace_back("int64");
   out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
+  if (quirks.overReadPad) out.emplace_back(fmt::format("{}:{}", OverReadPadFeature, quirks.overReadPad));
   cachedFeatures = out;
   return out;
 }
@@ -427,7 +428,7 @@ uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
   }
   // llvmpipe doesn't predicate inactive SIMD remainder lanes, so a non-SIMD-multiple trip count reads
   // past the buffer (SIGSEGV into dirty host heap); over-allocate zeroed slack to absorb the over-read
-  if (const size_t slack = quirks.overReadSlackBytes; slack > 0) {
+  if (const size_t slack = quirks.overReadPad; slack > 0) {
     std::vector<char> zeros(size + slack, 0);
     return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags | CL_MEM_COPY_HOST_PTR, size + slack, zeros.data(), OUT_ERR)));
   }

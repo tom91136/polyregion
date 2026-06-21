@@ -3,6 +3,27 @@ package polyregion.ast.pass
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+// folds constant expressions and prunes statically-decidable control flow, iterating to a fixed point per function
+// const non-mut Vars bind their literal into an env that is forward-substituted into later Selects; a name is excluded
+// once mutated or address-taken anywhere in the function
+// examples:
+//   Add(2, 3)             ->  5
+//   Neg(4)                ->  -4
+//   BAnd(6, 3)            ->  2
+//   LogicLt(1, 2)         ->  true
+//   LogicAnd(true, x)     ->  unchanged (x not const)
+//   Cast(3, Float32)      ->  3.0f
+//   val a = 7; b = a + 1  ->  val a = 7; b = 8
+//   if(true) t else f     ->  t
+//   if(false) t else f    ->  f
+//   while(false) body     ->  drop
+//   for(i = 5; < 3; += 1) ->  drop (empty range)
+// edge cases:
+//   integral Div/Rem by 0          ->  not folded (left as-is)
+//   name later mutated or RefTo'd  ->  not const-bound
+//   Cast where from.tpe == as      ->  identity (returns from)
+//   for loop emptiness only when lb, ub, and step are all literal
+
 object ConstantFold extends ProgramPass {
 
   type Env = Map[p.Named, p.Term]
@@ -119,6 +140,7 @@ object ConstantFold extends ProgramPass {
       p.Expr.Invoke(n, ts, recv.map(foldTerm(_, env)), args.map(foldTerm(_, env)), rtn)
     case p.Expr.ForeignCall(n, args, rtn) => p.Expr.ForeignCall(n, args.map(foldTerm(_, env)), rtn)
     case o: p.Expr.OffsetOf               => o
+    case o: p.Expr.SizeOf                 => o
   }
 
   private def foldTerm(t: p.Term, env: Env): p.Term = t match {

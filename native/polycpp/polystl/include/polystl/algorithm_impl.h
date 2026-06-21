@@ -93,7 +93,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
           f(static_cast<int64_t>(i));
         }
       };
-      int64_t blocks = 256;
+      int64_t blocks = program_meta::VkWorkgroupSizeXValue;
 
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
       if (!bundleIsRewritten(bundle)) {
@@ -113,7 +113,8 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         const auto grid = (global + blocks - 1) / blocks;
-        details::dispatchManaged(grid, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
+        details::dispatchManaged(grid, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude,
+                                 bundle.postlude);
         return;
       }
       break;
@@ -181,7 +182,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       break;
     }
     case polyregion::runtime::PlatformKind::Managed: {
-      int64_t groups = 256;
+      int64_t groups = program_meta::VkWorkgroupSizeXValue;
       auto groupPartial = polyrt::currentDevice->mallocSharedTyped<T>(groups, polyrt::Access::RW);
 
       if (!groupPartial) {
@@ -192,7 +193,8 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
         return acc;
       }
 
-      auto kernel = [groupPartial = *groupPartial, init, f, reduce, global]([[clang::annotate("__polyregion_local")]] T *localPartialSum) {
+      auto kernel = [groupPartial = *groupPartial, init, f, reduce,
+                     global]([[clang::annotate(POLYREGION_LOCAL_ANNOTATION)]] T *localPartialSum) {
         const auto lim = static_cast<uint32_t>(global);
         const auto localIdx = __polyregion_builtin_gpu_local_idx(0);
         localPartialSum[localIdx] = init;
@@ -221,7 +223,8 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       void *kernelPtr = polyreflectTrackPtr(&kernel);
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchManaged(256, groups, groups * sizeof(T), &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
+        details::dispatchManaged(program_meta::VkWorkgroupSizeXValue, groups, groups * sizeof(T),
+                                 &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude, bundle.postlude);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, (*groupPartial)[groupIdx]);

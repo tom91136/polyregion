@@ -4,6 +4,7 @@
 #include <stack>
 #include <unordered_set>
 
+#include "llvm/ADT/MapVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LazyCallGraph.h"
@@ -416,7 +417,32 @@ void insertMapCalls(llvm::Module &M, //
 
   if (verbose) llvm::errs() << "[ReflectMemPass] Inserting map calls for " << groups.size() << " functions\n";
 
-  std::unordered_map<llvm::BasicBlock *, std::vector<Target>> targets;
+  // XXX order tainted values by module position so instrumentation is deterministic
+  llvm::DenseMap<const llvm::Instruction *, size_t> instrPos;
+  {
+    size_t n = 0;
+    for (auto &F : M)
+      for (auto &BB : F)
+        for (auto &I : BB)
+          instrPos[&I] = n++;
+  }
+  const auto posOf = [&](llvm::Value *V) -> size_t {
+    if (auto *I = llvm::dyn_cast<llvm::Instruction>(V)) return instrPos.lookup(I);
+    if (auto *A = llvm::dyn_cast<llvm::Argument>(V)) return A->getArgNo(); // args sort ahead of body
+    return 0;
+  };
+  // total order (module position, then first-seen index) for deterministic std::sort (avoids stable_sort's deprecated get_temporary_buffer)
+  for (auto &[F, Vs] : groups) {
+    llvm::DenseMap<llvm::Value *, size_t> seen;
+    for (auto *V : Vs)
+      seen.try_emplace(V, seen.size());
+    std::sort(Vs.begin(), Vs.end(), [&](llvm::Value *a, llvm::Value *b) {
+      const size_t pa = posOf(a), pb = posOf(b);
+      return pa != pb ? pa < pb : seen.lookup(a) < seen.lookup(b);
+    });
+  }
+
+  llvm::MapVector<llvm::BasicBlock *, std::vector<Target>> targets;
   for (auto &[F, Vs] : groups) {
     // TODO we need to run AA to group pointers that alias, with the following possible outcomes:
     //  a. Single group: ideal outcome
@@ -540,9 +566,9 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   // XXX populate unconditionally: empty `ignored` lets CGTA tag polyreflect-rt's own functions,
   // and LTO-inlined polyrt_map_* then recurses through SMA and overflows the stack at dispatch.
   llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
-    if (F &&                                       //
-        (Annotation == "polyreflect-rt-protect" || //
-         Annotation == "polyreflect-rt-odr"))
+    if (F &&                                                //
+        (Annotation == POLYREFLECT_RT_PROTECT_ANNOTATION || //
+         Annotation == POLYREFLECT_RT_ODR_ANNOTATION))
       ignored.emplace(F);
   });
   if (verbose) llvm::errs() << "[ReflectMemPass] Found " << ignored.size() << " ignored functions values in module " << M.getName() << "\n";

@@ -6,6 +6,10 @@ import polyregion.ast.{PolyAST as p, *, given}
 // monomorphises StructDefs the way Specialisation does functions: one concrete StructDef per distinct
 // applied-type-args use, members type-substituted, parents and every Type reference rewritten to the
 // zero-arg monomorphic struct. Returns the monomorphic-name -> original-name map (the boundary value)
+// examples:
+//   Box[A]{A v}; uses Box[Int], Box[Float]   ->  Box_Int{Int v}, Box_Float{Float v}  // + map *_Int->Box etc.
+//   Pair[A]{Box[A] b}; uses Pair[Int]        ->  Pair_Int{Box_Int b}                 // member Box[Int] -> Box_Int
+//   Dog[A] extends Animal[A]; uses Dog[Int]  ->  Dog_Int extends Animal_Int          // parent -> monomorphic
 // edge cases:
 //   doReplacement lookup -> match a use by its original key, then by already-renamed args, then
 //                           structurally (same name + same recursively-replaced args) for a nested use

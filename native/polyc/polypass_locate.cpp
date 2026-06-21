@@ -7,6 +7,8 @@
 
 #include "aspartame/all.hpp"
 
+#include "generated/polypass_symbols.h"
+
 namespace polyregion::polypass {
 
 using namespace aspartame;
@@ -88,23 +90,23 @@ std::optional<PluginKind> pluginKindFor(std::string_view path) {
 Vector<PluginRef> resolvePlugins(String &error) {
   namespace fs = llvm::sys::fs;
 
-  if (const char *envList = std::getenv("POLYPASS_PLUGINS"); envList && *envList) {
+  if (const char *envList = std::getenv(abi::EnvPlugins); envList && *envList) {
 
     const auto paths = (String(envList) ^ split(PathSep)) | filter([](const auto &e) { return !e.empty(); }) | to_vector();
     if (paths.empty()) {
-      error = "POLYPASS_PLUGINS set but empty after splitting";
+      error = std::string(abi::EnvPlugins) + " set but empty after splitting";
       return {};
     }
     Vector<PluginRef> out;
     out.reserve(paths.size());
     for (const auto &path : paths) {
       if (!fs::exists(path)) {
-        error = "POLYPASS_PLUGINS: missing file " + path;
+        error = std::string(abi::EnvPlugins) + ": missing file " + path;
         return {};
       }
       const auto kind = pluginKindFor(path);
       if (!kind) {
-        error = "POLYPASS_PLUGINS: unrecognised extension " + path;
+        error = std::string(abi::EnvPlugins) + ": unrecognised extension " + path;
         return {};
       }
       out.push_back({resolveSymlink(path), *kind});
@@ -114,7 +116,7 @@ Vector<PluginRef> resolvePlugins(String &error) {
 
   const auto bundled = findBundledPlugin();
   if (bundled.empty()) {
-    error = "no polypass plugin found (set $POLYPASS_PLUGINS or install the dist)";
+    error = std::string("no polypass plugin found (set $") + abi::EnvPlugins + " or install the dist)";
     return {};
   }
   const auto kind = pluginKindFor(bundled);

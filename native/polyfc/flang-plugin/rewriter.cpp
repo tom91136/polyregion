@@ -28,6 +28,7 @@
 #include "mlir/Transforms/Passes.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -218,6 +219,17 @@ class Binder {
             .box = boxLLVMRef,
         });
 
+      } else if (const auto charTy = dyn_cast<fir::CharacterType>(refElemTy)) { // fir.ref<fir.char<k,N>>
+        if (temporary) raise(fmt::format("Unsupported temporary type: {}", fir::mlirTypeToString(refElemTy)));
+        const auto llvmPtr = getRefPtr(B, val);
+        const int64_t len = charTy.getLen() == fir::CharacterType::unknownLen() ? 1 : charTy.getLen();
+        const std::vector witnesses{CaptureField::Witness{llvmPtr, intConst(B, i64Ty(B), len * charTy.getFKind())}};
+        fields.emplace_back(CaptureField{
+            .type = refElemTy,
+            .fieldPtr = llvmPtr,
+            .dependent = witnesses,
+            .temporary = {},
+        });
       } else raise(fmt::format("Unhandled binder type: {}", fir::mlirTypeToString(refElemTy)));
     } else {
       if (const auto boxTy = llvm::dyn_cast<fir::BoxType>(val.getType())) {
@@ -305,19 +317,19 @@ public:
   Value createReductionsCount(OpBuilder &B) const { return intConst(B, i64Ty(B), reductionFields.size()); }
 
   void recordTemporariesAndDependents(OpBuilder &B) {
-    for (auto &field : captureFields) {
+    captureFields ^ for_each([&](auto &field) {
       field.dependent | concat(field.temporary) | for_each([&](auto &w) { dco.record(B, w.ptr, w.sizeInBytes); });
       if (field.box) dco.recordBox(B, field.box);
-    }
+    });
   }
 
   void releaseTemporaries(OpBuilder &B) {
-    for (auto &field : captureFields) {
+    captureFields ^ for_each([&](auto &field) {
       field.temporary | for_each([&](auto &w) { dco.release(B, w.ptr); });
       // XXX Release boxes only when the field itself is temporary (boxed-by-value); dependent
       // boxes outlive the dispatch and are released by the owning scope.
       if (field.box && !field.temporary.empty()) dco.releaseBox(B, field.box);
-    }
+    });
   }
 };
 
@@ -381,12 +393,6 @@ public:
     const auto gpu = kind == runtime::PlatformKind::Managed;
     const auto region = Remapper::createRegion(diagLoc, gpu, M, L, doLoop);
     const auto bundle = compileRegion(diag, diagLoc, opts, kind, moduleId, region);
-
-    llvm::errs() << "[Captures]\n";
-    for (auto &c : region.captures) {
-      llvm::errs() << " - " << repr(c.named) << ": " << polyast::repr(c.named.tpe) << " = `" << c.value << "` ("
-                   << magic_enum::enum_name(c.locality) << ")\n";
-    }
 
     const auto table = bundle.layouts                                                                //
                        | values()                                                                    //
@@ -453,7 +459,6 @@ public:
                 });
             return l.members ^ map([&](auto &m) {
                      const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
-                     const auto compType = polyast::extractComponent(m.name.tpe);
                      const auto ptrToTypeLayout =
                          polyast::extractComponent(m.name.tpe) ^ flat_map([&](auto &t) {
                            return primitiveTypeLayouts                                        //
@@ -473,7 +478,8 @@ public:
                          intConst(B0, i64Ty(B0), indirections),                          //
                          intConst(B0, i64Ty(B0), componentSize.value_or(m.sizeInBytes)), //
                          ptrToTypeLayout ^ get_or_else(nullConst(B0)),
-                         fbm                                                                                     //
+                         intConst(B0, i64Ty(B0), 0), /* readOnly: Fortran captures always synced back */
+                         fbm                         //
                              ^ filter([&](auto &field, auto &) { return field == m.name; })                      //
                              ^ fold([](auto &, auto &v) -> Value { return v; }, [&]() { return nullConst(B0); }) //
                      };
@@ -504,6 +510,7 @@ public:
              });
     });
 
+    if (!bundle.hostMirrorBitcode.empty()) emitMirrorBcGlobal(M, bundle.hostMirrorBitcode);
     auto globalBundle = KernelBundle.global(M, [&](OpBuilder &B0) {
       return std::vector{std::array{strConst(B0, M, moduleId), //
 
@@ -514,7 +521,9 @@ public:
                                     structLayoutsArray.gep(B0),
                                     intConst(B0, i64Ty(B0), bundle.layouts | index_where([](auto &iface, auto) { return iface; })),
 
-                                    strConst(B0, M, bundle.metadata)}};
+                                    strConst(B0, M, bundle.metadata), //
+                                    strConst(B0, M, bundle.mirrorId), //
+                                    nullConst(B0), nullConst(B0)}};
     });
 
     Binder binder(B, dco, FReduction, moduleId, region);
@@ -572,21 +581,18 @@ void doRewrite(ModuleOp op) {
       // XXX find the convert+store-to-IV-storage pattern among ALL uses of induction; reduce
       // lowering adds extra uses (ArrayCoor for the scratch slot) so a strict hasOneUse check
       // would skip the rewrite and leave the IV storage as a shared race across threads.
-      fir::ConvertOp convertOp;
-      fir::StoreOp storeOp;
-      for (auto *user : induction.getUsers()) {
-        auto cv = llvm::dyn_cast<fir::ConvertOp>(user);
-        if (!cv) continue;
-        for (auto *cvUser : cv->getUsers()) {
-          if (auto st = llvm::dyn_cast<fir::StoreOp>(cvUser)) {
-            convertOp = cv;
-            storeOp = st;
-            break;
-          }
-        }
-        if (convertOp) break;
-      }
-      if (!convertOp || !storeOp) return failure();
+      const auto match =
+          induction.getUsers() ^ collect_first([](auto *user) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
+            auto cv = llvm::dyn_cast<fir::ConvertOp>(user);
+            if (!cv) return std::nullopt;
+            return cv->getUsers() ^ collect_first([&](auto *cvUser) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
+                     if (auto st = llvm::dyn_cast<fir::StoreOp>(cvUser)) return std::pair{cv, st};
+                     return std::nullopt;
+                   });
+          });
+      if (!match) return failure();
+      auto convertOp = match->first;
+      auto storeOp = match->second;
       auto inductionRef = storeOp.getMemref(); // this is the outer scope induction capture
       // XXX walk the whole body (nested loops/regions too) and follow fir.declare wrappers.
       // Inlined callees may load the iv-alloca via a chain of declares emitted by hlfir-lowering;
@@ -602,8 +608,7 @@ void doRewrite(ModuleOp op) {
         }
         loadsToReplace.push_back(loadOp);
       });
-      for (auto loadOp : loadsToReplace)
-        R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes());
+      loadsToReplace ^ for_each([&](auto loadOp) { R.replaceAllUsesWith(loadOp.getRes(), convertOp.getRes()); });
 
       // XXX Stop at the innermost loop holding the inductionRef alloca; hoisting past it would
       // place the store outside the alloca's scope (LLVM Translation: "operand does not dominate").
@@ -837,34 +842,33 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     // and writes its own slot without a race through the shared box descriptor.
     llvm::DenseMap<mlir::Operation *, mlir::Value> fakeBoxStorageToSlot;
     llvm::SmallVector<mlir::Operation *> fakeBoxSetupOps;
+    llvm::SmallVector<mlir::Value> localAccumSlots;
     if (hasReduce) {
       OpBuilder br(unordered.getBody(), unordered.getBody()->begin());
       for (auto [idx, src] : llvm::enumerate(srcReduceArgs)) {
         const auto scalarTy = scratchElemTys[idx];
         const auto rop = idx < reduceOps.size() ? reduceOps[idx] : fir::ReduceOperationEnum::Add;
-        auto slot = fir::ArrayCoorOp::create(br, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
-                                             /*slice=*/mlir::Value{}, mlir::ValueRange{unordered.getInductionVar()},
-                                             /*typeparams=*/mlir::ValueRange{})
-                        .getResult();
-        fir::StoreOp::create(br, loc, identityConstFor(br, scalarTy, rop), slot);
+        auto localSlot = fir::AllocaOp::create(br, loc, scalarTy).getResult();
+        fir::StoreOp::create(br, loc, identityConstFor(br, scalarTy, rop), localSlot);
+        localAccumSlots.push_back(localSlot);
         if (rvIsAllocatable[idx]) {
-          // XXX per-thread box<heap<T>> over the scratch slot; flang loads through the box,
+          // XXX per-thread box<heap<T>> over the local accumulator; flang loads through the box,
           // and the post-splice rewrite turns hlfir.assign into a direct fir.store.
           auto refEleTy = mlir::cast<fir::ReferenceType>(src.getType()).getEleTy();
           auto boxTy = mlir::cast<fir::BoxType>(refEleTy);
           auto heapTy = mlir::cast<fir::HeapType>(boxTy.getEleTy());
-          auto heapAddr = fir::ConvertOp::create(br, loc, heapTy, slot);
+          auto heapAddr = fir::ConvertOp::create(br, loc, heapTy, localSlot);
           auto fakeBox = fir::EmboxOp::create(br, loc, boxTy, heapAddr.getResult(), /*shape=*/mlir::Value{});
           auto fakeBoxStorage = fir::AllocaOp::create(br, loc, refEleTy);
           auto fakeBoxStore = fir::StoreOp::create(br, loc, fakeBox.getResult(), fakeBoxStorage.getResult());
-          fakeBoxStorageToSlot[fakeBoxStorage.getOperation()] = slot;
+          fakeBoxStorageToSlot[fakeBoxStorage.getOperation()] = localSlot;
           fakeBoxSetupOps.push_back(fakeBoxStore);
           fakeBoxSetupOps.push_back(fakeBoxStorage);
           fakeBoxSetupOps.push_back(fakeBox);
           fakeBoxSetupOps.push_back(heapAddr);
           src.replaceAllUsesWith(fakeBoxStorage.getResult());
         } else {
-          src.replaceAllUsesWith(slot);
+          src.replaceAllUsesWith(localSlot);
         }
       }
     } else {
@@ -874,6 +878,18 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     auto *destBody = unordered.getBody();
     destBody->getOperations().splice(destBody->getTerminator()->getIterator(), loopBlock.getOperations());
     doc.erase();
+    if (hasReduce) {
+      OpBuilder dr(destBody->getTerminator());
+      for (auto [idx, localSlot] : llvm::enumerate(localAccumSlots)) {
+        const auto scalarTy = scratchElemTys[idx];
+        auto scratchSlot = fir::ArrayCoorOp::create(dr, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
+                                                    /*slice=*/mlir::Value{}, mlir::ValueRange{unordered.getInductionVar()},
+                                                    /*typeparams=*/mlir::ValueRange{})
+                               .getResult();
+        auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();
+        fir::StoreOp::create(dr, loc, v, scratchSlot);
+      }
+    }
     // XXX For each scratch slot, also bypass any `fir.declare`/`hlfir.declare` in the body that
     // ended up wrapping the slot. flang re-uses the original Fortran reduce-var symbol name on
     // these declares (e.g. `uniq_name = "_QMstreamFrunallEdotsum"`), which polypass and later
@@ -892,21 +908,13 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         auto memref = chaseDef(op->getOperand(0));
         auto coor = memref.getDefiningOp<fir::ArrayCoorOp>();
         if (!coor) return;
-        // Is this ArrayCoor on one of our scratchBoxes?
-        bool isScratchSlot = false;
-        for (auto sb : scratchBoxes)
-          if (coor.getMemref() == sb) {
-            isScratchSlot = true;
-            break;
-          }
-        if (!isScratchSlot) return;
+        if (!(scratchBoxes ^ exists([&](auto sb) { return coor.getMemref() == sb; }))) return;
         // Replace declare uses with the underlying memref so the symbol name no longer aliases.
         for (auto r : op->getResults())
           r.replaceAllUsesWith(op->getOperand(0));
         declsToErase.push_back(op);
       });
-      for (auto *d : declsToErase)
-        d->erase();
+      declsToErase ^ for_each([](auto *d) { d->erase(); });
     }
     // XXX rewrite allocatable-reduce body: box_addr(load(fakeBoxStorage)) -> per-thread slot,
     // hlfir.assign through fakeBoxStorage -> direct fir.store (polypass can't lower the runtime call).
@@ -978,8 +986,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         fir::StoreOp::create(rb, rloc, rhs, it->second);
         assignToErase.push_back(assign);
       });
-      for (auto a : assignToErase)
-        a.erase();
+      assignToErase ^ for_each([](auto a) { a.erase(); });
       // XXX alloca/store have side effects and won't self-DCE before polypass runs.
       llvm::SmallVector<mlir::Operation *> declaresToErase;
       unordered.walk([&](mlir::Operation *op) {
@@ -988,8 +995,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         if (fakeBoxStorageToSlot.find(op->getOperand(0).getDefiningOp()) == fakeBoxStorageToSlot.end()) return;
         declaresToErase.push_back(op);
       });
-      for (auto *d : declaresToErase)
-        d->erase();
+      declaresToErase ^ for_each([](auto *d) { d->erase(); });
       bool progress = true;
       while (progress) {
         progress = false;
@@ -1052,8 +1058,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   m.walk([&](fir::DeclareReductionOp op) {
     if (mlir::SymbolTable::symbolKnownUseEmpty(op, m)) deadReductions.push_back(op);
   });
-  for (auto op : deadReductions)
-    op.erase();
+  deadReductions ^ for_each([](auto op) { op.erase(); });
 }
 
 void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
@@ -1061,11 +1066,9 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   polyfront::Options::parseArgsFromEnv() //
       ^ foreach_total([&](const polyfront::Options &x) { opts = x; },
                       [&](const std::vector<std::string> &errors) {
-                        for (auto error : errors)
-                          emit(diag, clang::DiagnosticsEngine::Error, "%0", error);
+                        errors ^ for_each([&](auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
                       });
 
-  llvm::errs() << " ==== FIR  ====== \n";
   doRewrite(m);
   OpBuilder B(m);
   Rewriter rewriter(m);
@@ -1080,10 +1083,6 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         moduleId = fmt::format("kernel_{}:{}:{}", filename, flc.getLine(), flc.getColumn());
         diagLoc = fmt::format("{}:{}:{}", filename, flc.getLine(), flc.getColumn());
       }
-
-      llvm::errs() << " === DCO: " << moduleId << " === ";
-      doLoop->getParentOp()->dumpPretty();
-      llvm::errs() << " === Rewrite: " << moduleId << " === ";
 
       // The overall outlining logic is as follows:
       //   bool executeOriginal = true;

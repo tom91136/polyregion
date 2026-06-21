@@ -23,13 +23,15 @@ POLYREGION_RT_PROTECT const polyregion::runtime::KernelBundle &__polyregion_offl
   // Default body: returns an empty bundle so callers (e.g. polystl::details::parallel_for)
   // skip kernel dispatch and fall through to the host path. The polycpp clang plugin replaces
   // this body in offload-enabled builds (POLYCPP_NO_REWRITE not set).
-  static const polyregion::runtime::KernelBundle empty{"", 0, nullptr, 0, nullptr, 0, ""};
+  static const polyregion::runtime::KernelBundle empty{"", 0, nullptr, 0, nullptr, 0, "", nullptr, nullptr, nullptr};
   return empty;
 }
 namespace polyregion::polystl::details {
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void dispatchHostThreaded(size_t global, void *functorData, const char *moduleId);
 
+// XXX prelude/postlude have no defaults: a call site omitting them would silently degrade to the SMA walk
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void dispatchManaged(size_t global, size_t local, size_t localMemBytes,
-                                                             const runtime::TypeLayout *layout, void *functorData, const char *moduleId);
+                                                             const runtime::TypeLayout *layout, void *functorData, const char *moduleId,
+                                                             runtime::PreludeFn prelude, runtime::PostludeFn postlude);
 } // namespace polyregion::polystl::details

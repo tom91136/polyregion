@@ -32,7 +32,10 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
       }
     }
     {
-      auto kernel = [&result, f]() mutable { result = f(); };
+      // XXX managed dispatch launches a whole workgroup; guard to lane 0 so a non-idempotent f runs once
+      auto kernel = [&result, f]() mutable {
+        if (__polyregion_builtin_gpu_global_idx(0) == 0) result = f();
+      };
       auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
 
       for (size_t i = 0; i < bundle.structCount; ++i) {
@@ -48,12 +51,15 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
         totalObjects++;
         if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
           void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
-          polyregion::polystl::details::dispatchManaged(1, 0, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
+          polyregion::polystl::details::dispatchManaged(1, 0, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName,
+                                                        bundle.prelude, bundle.postlude);
           return result;
         }
       }
     }
-    throw std::logic_error("Dispatch failed: no compatible backend after trying " + std::to_string(totalObjects) + " different objects");
+    // no compatible image is a device capability gap (e.g. fp64), not a codegen bug: exit 77 (SKIP)
+    (void)totalObjects;
+    polyregion::polyrt::noCompatibleKernelExit("__polyregion_offload_f1__");
   } else {
     [&result, &f]() { result = f(); }();
     return result;

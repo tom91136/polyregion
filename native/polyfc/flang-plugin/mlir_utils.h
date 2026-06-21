@@ -18,7 +18,6 @@ namespace polyregion::polyfc {
 using namespace mlir;
 using namespace aspartame;
 
-std::optional<func::FuncOp> resolveDefiningFunction(Operation *op);
 Location uLoc(OpBuilder &B);
 Type i64Ty(OpBuilder &B);
 Type i32Ty(OpBuilder &B);
@@ -31,6 +30,7 @@ Value boolConst(OpBuilder &B, bool value);
 Value idxConst(OpBuilder &B, int64_t value);
 Value zeroConst(OpBuilder &B, Type ty);
 Value strConst(OpBuilder &B, ModuleOp &m, const std::string &value, bool nullTerminate = true);
+void emitMirrorBcGlobal(ModuleOp &m, const std::string &bitcode);
 LLVM::LLVMFuncOp defineFunc(ModuleOp &m, const std::string &name, Type rtnTy, const std::vector<Type> &argTys,
                             LLVM::Linkage linkage = LLVM::Linkage::External,
                             const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f = {});

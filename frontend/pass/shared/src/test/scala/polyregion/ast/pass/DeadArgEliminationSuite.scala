@@ -15,7 +15,7 @@ class DeadArgEliminationSuite extends munit.FunSuite {
   }
 
   // the entry's params are the kernel ABI the JVM macro packs before this pass runs; pruning them
-  // would desync host marshalling from the kernel
+  // would desync host mirroring from the kernel
   test("entry function: module captures are kept even when unused") {
     val used   = arg("a")
     val unused = arg("u")

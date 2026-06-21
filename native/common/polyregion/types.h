@@ -25,6 +25,7 @@
 
 namespace polyregion::program_meta {
 inline constexpr auto VkWorkgroupSizeX = "polyregion.vk.workgroup_size_x";
+inline constexpr int64_t VkWorkgroupSizeXValue = 256;
 } // namespace polyregion::program_meta
 
 namespace polyregion::invoke {
@@ -160,7 +161,7 @@ POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::pa
   auto sel = (bang == std::string_view::npos) ? input : input.substr(bang + 1);
   auto at = sel.find('@');
   auto head = (at == std::string_view::npos) ? sel : sel.substr(0, at);
-  auto glob = (at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
+  auto glob = (bang == std::string_view::npos || at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
   if (auto s = findByName(head)) return ParsedRef{*s, std::string(glob)};
   return std::nullopt;
 }
@@ -203,17 +204,10 @@ POLYREGION_RT_PROTECT static std::pair<std::vector<size_t>, size_t> std140Scalar
   return {std::move(offsets), (off + maxAlign - 1) / maxAlign * maxAlign};
 }
 
-using TypedPointer = std::pair<Type, void *>;
-
 } // namespace polyregion::runtime
 
 namespace polyregion::runtime {
 
-POLYREGION_RT_PROTECT static constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
-  if (name == "host" || name == "hostthreaded") return PlatformKind::HostThreaded;
-  if (name == "managed") return PlatformKind::Managed;
-  return {};
-}
 POLYREGION_RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(const compiletime::Target &target) {
   switch (target) {
     case compiletime::Target::Object_LLVM_HOST:
@@ -231,41 +225,6 @@ POLYREGION_RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(
     case compiletime::Target::Source_C_Metal1_0: //
       return runtime::PlatformKind::Managed;
   }
-}
-
-// Backends with binding-slot mechanisms and with no pointer in structs
-POLYREGION_RT_PROTECT static constexpr bool targetNeedsFlatten(const compiletime::Target &target) {
-  switch (target) {
-    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
-    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
-    case compiletime::Target::Source_C_OpenCL1_1:
-    case compiletime::Target::Source_C_Metal1_0: //
-      return true;
-    default: return false;
-  }
-}
-
-// Subset of targetNeedsFlatten with no shared/unified virtual memory
-POLYREGION_RT_PROTECT static constexpr bool targetRequiresFlatten(const compiletime::Target &target) {
-  switch (target) {
-    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
-    case compiletime::Target::Source_C_OpenCL1_1:
-    case compiletime::Target::Source_C_Metal1_0: //
-      return true;
-    default: return false;
-  }
-}
-
-POLYREGION_RT_PROTECT static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
-  if (name == "src" || name == "source") return ModuleFormat::Source;
-  if (name == "obj" || name == "object") return ModuleFormat::Object;
-  if (name == "dso") return ModuleFormat::DSO;
-  if (name == "ptx") return ModuleFormat::PTX;
-  if (name == "hsaco") return ModuleFormat::HSACO;
-  if (name == "spirv_kernel" || name == "spirv") return ModuleFormat::SPIRV_Kernel;
-  if (name == "spirv_glcompute") return ModuleFormat::SPIRV_GLCompute;
-  return {};
 }
 
 POLYREGION_RT_PROTECT static constexpr std::optional<runtime::ModuleFormat> moduleFormatOf(const compiletime::Target &target) {
@@ -322,6 +281,7 @@ struct AggregateMember {
   size_t ptrIndirection;
   size_t componentSize;
   const TypeLayout *type;
+  size_t readOnly;
   ResolvePtrSize resolvePtrSizeInBytes;
 };
 

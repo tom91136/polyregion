@@ -738,6 +738,10 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                          fold([&]() -> size_t { throw BackendException("Unknown field `" + x.field + "` in OffsetOf"); });
         return llvm::ConstantInt::get(C.i64Ty(), static_cast<uint64_t>(info.layout.members[idx].offsetInBytes));
       },
+      [&](const Expr::SizeOf &x) -> ValPtr {
+        // alloc size (includes trailing padding) so it doubles as the array element stride
+        return llvm::ConstantInt::get(C.i64Ty(), M.getDataLayout().getTypeAllocSize(resolveType(x.forTpe)).getFixedValue());
+      },
       [&](const Expr::Index &x) -> ValPtr { return ptrModel->indexVal(*this, x, key); },
       [&](const Expr::RefTo &x) -> ValPtr { return ptrModel->refToVal(*this, x, key); },
       [&](const Expr::Alloc &x) -> ValPtr { //

@@ -160,6 +160,9 @@ struct PtrRecord {
   PtrInfo info;
 };
 
+// path env var: when set, the service writes a chrome-tracing JSON trace there
+inline constexpr auto TraceEnv = "POLYREFLECT_TRACE";
+
 class ReflectService {
 
   HashMap<uintptr_t, PtrRecord> data;
@@ -187,7 +190,7 @@ class ReflectService {
 
 public:
   __RT_ODR ReflectService() : data([](auto x) { return x; }), start(steady_clock::now()) {
-    if (const char *path = std::getenv("POLYREFLECT_TRACE")) {
+    if (const char *path = std::getenv(TraceEnv)) {
       trace = std::fopen(path, "w");
       if (trace) safe_fprintf(trace, "[\n");
     }

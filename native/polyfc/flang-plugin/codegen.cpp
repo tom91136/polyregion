@@ -3,6 +3,9 @@
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyfront/pass_specs.hpp"
+#include "polyregion/env_keys.h"
+
 #include "ast.h"
 #include "utils.h"
 
@@ -14,10 +17,10 @@ polyfront::KernelBundle polyfc::compileRegion( //
     const std::string &moduleId, const Remapper::DoConcurrentRegion &region) {
   using Level = clang::DiagnosticsEngine::Level;
   const auto objects =
-      opts.targets                                                                             //
-      | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; }) //
-      | collect([&](auto &target, auto &features) {                                            //
-          return polyfront::compileProgram(opts, region.program, target, features)             //
+      opts.targets                                                                                                            //
+      | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; })                                //
+      | collect([&](auto &target, auto &features) {                                                                           //
+          return polyfront::compileProgram(opts, region.program, target, features, polyfront::passes::arenaPassesFor(target)) //
                  ^ fold_total([&](const polyast::CompileResult &r) -> std::optional<polyast::CompileResult> { return r; },
                               [&](const std::string &err) -> std::optional<polyast::CompileResult> {
                                 emit(diag, Level::Warning, //
@@ -71,5 +74,10 @@ polyfront::KernelBundle polyfc::compileRegion( //
          "failure",
          diagLoc, moduleId, std::string(magic_enum::enum_name(kind)), std::to_string(static_cast<int>(requestedForKind)));
   }
-  return polyfront::KernelBundle{moduleId, objects, region.layouts, polyast::program_to_json(region.program).dump()};
+  auto mir = polyfront::compileManagedHostMirror(opts, region.program, kind, moduleId);
+  if (mir.error)
+    emit(diag, Level::Warning, "%0 " POLYREGION_DIAG_POLYDCO "Host mirroring compile failed [%1]: %2", diagLoc, moduleId, *mir.error);
+  return polyfront::KernelBundle{
+      moduleId,    objects,     region.layouts, /*readOnlyMembers*/ {}, polyast::program_to_json(region.program).dump(),
+      mir.bitcode, mir.mirrorId};
 }

@@ -109,6 +109,7 @@ object PolyAST {
     )                                                           extends Expr(rtn)
     case ForeignCall(name: String, args: List[Term], rtn: Type) extends Expr(rtn)
     case OffsetOf(structTpe: Type, field: String)               extends Expr(Type.IntU64)
+    case SizeOf(forTpe: Type)                                   extends Expr(Type.IntU64)
   }
 
   enum Stmt derives MsgPack.Codec {
@@ -454,9 +455,42 @@ object PolyAST {
     inline val CaptureArg              = "#capture"
     inline val BaseFieldPrefix         = "#base"
     inline val EmptyStructStorageField = "#empty_struct_storage"
+    inline val KernelBundleType        = "KernelBundle"
     object Macros {
       inline val PolyreflectTrackAnnotation     = "polyreflect-track"
       inline val PolyreflectRtProtectAnnotation = "polyreflect-rt-protect"
+      inline val PolyreflectRtOdrAnnotation     = "polyreflect-rt-odr"
+      inline val PolyregionLocalAnnotation      = "__polyregion_local"
+    }
+    object RuntimeAbi {
+      inline val SmaAlloc       = "polyrt_sma_alloc"
+      inline val SmaEnsure      = "polyrt_sma_ensure"
+      inline val SmaEnsureMin   = "polyrt_sma_ensure_min"
+      inline val SmaEnsureDeep  = "polyrt_sma_ensure_deep"
+      inline val SmaPointeeSize = "polyrt_sma_pointee_size"
+      inline val SmaPatch       = "polyrt_sma_patch"
+      inline val SmaReadAlloc   = "polyrt_sma_read_alloc"
+      inline val SmaReadDeep    = "polyrt_sma_read_deep"
+      inline val SmaVisitClear  = "polyrt_sma_visit_clear"
+      inline val SmaMirrorGraph = "polyrt_sma_mirror_graph"
+      inline val SmaReadGraph   = "polyrt_sma_read_graph"
+      inline val SmaPoolReset   = "polyrt_sma_pool_reset"
+      inline val SmaPoolPtr     = "polyrt_sma_pool_ptr"
+    }
+    object Reflect {
+      inline val MirrorBitcodeGlobal = "polyregion_mirror_bc"
+      inline val MirrorPrelude       = "__polyregion_mirror_prelude"
+      inline val MirrorPostlude      = "__polyregion_mirror_postlude"
+
+      inline val FlagVerbose     = "polyreflect-verbose"
+      inline val FlagEarly       = "polyreflect-early"
+      inline val FlagLate        = "polyreflect-late"
+      inline val PassRecordAlloc = "polyreflect-record-alloc"
+      inline val PassStack       = "polyreflect-stack"
+      inline val PassMem         = "polyreflect-mem"
+      inline val PassLinkMirror  = "polyreflect-link-mirror"
+      inline val PassProtectRt   = "polyreflect-protect-rt"
+      inline val PassInterpose   = "polyreflect-interpose"
     }
   }
 
@@ -761,6 +795,7 @@ object PolyAST {
             .mkString(", ")}): ${rtn.repr}"
       case Expr.ForeignCall(name, args, rtn) => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
       case Expr.OffsetOf(tpe, field)         => s"offsetof(${tpe.repr}, $field)"
+      case Expr.SizeOf(tpe)                  => s"sizeof(${tpe.repr})"
     }
   }
 

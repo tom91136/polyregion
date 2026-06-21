@@ -3073,6 +3073,43 @@ struct POLYREGION_EXPORT OffsetOf : Expr::Base {
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
+
+struct POLYREGION_EXPORT SizeOf : Expr::Base {
+  Type::Any forTpe;
+  constexpr static uint32_t variant_id = 11;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Expr::SizeOf withForTpe(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, SizeOf>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    forTpe.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT SizeOf modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, SizeOf>) {
+      return f(*this);
+    }
+    return Expr::SizeOf(forTpe.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Expr::SizeOf &) const;
+  explicit SizeOf(Type::Any forTpe) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
 } // namespace Expr
 
 struct POLYREGION_EXPORT Overload {
@@ -7833,7 +7870,7 @@ POLYREGION_EXPORT polyregion::polyast::Term::Any polyregion::polyast::Term::Any:
   return *result_;
 }
 namespace polyregion::polyast::Expr {
-using All = alternatives<Alias, SpecOp, MathOp, IntrOp, Cast, Index, RefTo, Alloc, Invoke, ForeignCall, OffsetOf>;
+using All = alternatives<Alias, SpecOp, MathOp, IntrOp, Cast, Index, RefTo, Alloc, Invoke, ForeignCall, OffsetOf, SizeOf>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Expr::Any::is() const {
   static_assert((polyregion::polyast::Expr::All::contains<T>), "type not part of the variant");
@@ -8850,6 +8887,9 @@ template <> struct hash<polyregion::polyast::Expr::ForeignCall> {
 };
 template <> struct hash<polyregion::polyast::Expr::OffsetOf> {
   std::size_t operator()(const polyregion::polyast::Expr::OffsetOf &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Expr::SizeOf> {
+  std::size_t operator()(const polyregion::polyast::Expr::SizeOf &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Overload> {
   std::size_t operator()(const polyregion::polyast::Overload &) const noexcept;

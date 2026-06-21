@@ -2,6 +2,8 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/conventions.h"
+
 #include "ast.h"
 #include "ftypes.h"
 #include "polydco_abi.h"
@@ -14,17 +16,19 @@ const char *CharStarMirror::typeName() const { return "CharStar"; }
 std::array<Type, 1> CharStarMirror::types() const { return {ptr.widen()}; }
 AggregateMemberMirror::AggregateMemberMirror(ModuleOp &M)
     : AggregateMirror(M), //
-      name(M), offsetInBytes(M, 64), sizeInBytes(M, 64), ptrIndirection(M, 64), componentSize(M, 64), type(M), resolvePtrSizeInBytes(M) {
+      name(M), offsetInBytes(M, 64), sizeInBytes(M, 64), ptrIndirection(M, 64), componentSize(M, 64), type(M), readOnly(M, 64),
+      resolvePtrSizeInBytes(M) {
   validateMirrorSize<runtime::AggregateMember>();
 }
 const char *AggregateMemberMirror::typeName() const { return "AggregateMember"; }
-std::array<Type, 7> AggregateMemberMirror::types() const {
+std::array<Type, 8> AggregateMemberMirror::types() const {
   return {name.widen(),           //
           offsetInBytes.widen(),  //
           sizeInBytes.widen(),    //
           ptrIndirection.widen(), //
           componentSize.widen(),  //
           type.widen(),           //
+          readOnly.widen(),       //
           resolvePtrSizeInBytes.widen()};
 }
 TypeLayoutMirror::TypeLayoutMirror(ModuleOp &M)
@@ -56,18 +60,22 @@ std::array<Type, 6> KernelObjectMirror::types() const {
 }
 KernelBundleMirror::KernelBundleMirror(ModuleOp &M)
     : AggregateMirror(M), //
-      moduleName(M), objectCount(M, 64), objects(M), structCount(M, 64), structs(M), interfaceLayoutIdx(M, 64), metadata(M) {
+      moduleName(M), objectCount(M, 64), objects(M), structCount(M, 64), structs(M), interfaceLayoutIdx(M, 64), metadata(M), mirrorId(M),
+      prelude(M), postlude(M) {
   validateMirrorSize<runtime::KernelBundle>();
 }
-const char *KernelBundleMirror::typeName() const { return "KernelBundle"; }
-std::array<Type, 7> KernelBundleMirror::types() const {
+const char *KernelBundleMirror::typeName() const { return polyregion::conventions::KernelBundleType; }
+std::array<Type, 10> KernelBundleMirror::types() const {
   return {moduleName.widen(),         //
           objectCount.widen(),        //
           objects.widen(),            //
           structCount.widen(),        //
           structs.widen(),            //
           interfaceLayoutIdx.widen(), //
-          metadata.widen()};
+          metadata.widen(),           //
+          mirrorId.widen(),           //
+          prelude.widen(),            //
+          postlude.widen()};
 }
 FReductionMirror::FReductionMirror(ModuleOp &M) : AggregateMirror(M), kind(M, 8), type(M, 8), dest(M) {
   validateMirrorSize<polydco::FReduction>();

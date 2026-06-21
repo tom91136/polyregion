@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdlib>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "llvm/ADT/ScopeExit.h"
@@ -13,9 +15,11 @@
 #include "aspartame/all.hpp"
 #include "nlohmann/json.hpp"
 
+#include "polyregion/mirror_names.h"
 #include "polyregion/types.h"
 
 #include "options.hpp"
+#include "pass_specs.hpp"
 #include "polyast_codec.h"
 
 template <> struct std::hash<std::pair<polyregion::compiletime::Target, std::string>> {
@@ -41,7 +45,10 @@ struct KernelBundle {
   std::string moduleName{};
   std::vector<KernelObject> objects{};
   std::vector<std::pair<bool, polyast::StructLayout>> layouts{};
+  std::unordered_map<std::string, std::unordered_set<std::string>> readOnlyMembers{};
   std::string metadata;
+  std::string hostMirrorBitcode{};
+  std::string mirrorId{};
 };
 
 struct Options {
@@ -59,11 +66,14 @@ struct Options {
     if (auto exe = maybeExe) opts.executable = *exe;
     else errors.emplace_back("exe argument missing");
     if (auto targets = maybeTargets) {
-      // archA@featureA:archB@featureB:...archN@featureN
-      for (auto &rawArchAndFeaturesList : *targets ^ split(':')) {
+      for (auto &rawEntry : *targets ^ split(';')) {
+        const auto bang = rawEntry.find('!');
+        const auto rawArchAndFeaturesList = bang == std::string::npos ? rawEntry : rawEntry.substr(0, bang);
         auto archAndFeatures = rawArchAndFeaturesList ^ split('@');
-        if (archAndFeatures.size() != 2)
+        if (archAndFeatures.size() != 2) {
           errors.emplace_back("Missing or invalid placement of arch and feature separator '@' in " + rawArchAndFeaturesList);
+          continue;
+        }
         if (auto s = polyregion::compiletime::TargetSpec::findByName(archAndFeatures[0]); s) {
           for (auto &feature : archAndFeatures[1] ^ split(','))
             opts.targets.emplace_back(s->codegen, feature);
@@ -98,7 +108,8 @@ struct Options {
 static std::variant<std::string, polyast::CompileResult> compileProgram(const polyfront::Options &opts,    //
                                                                         const polyast::Program &p,         //
                                                                         const compiletime::Target &target, //
-                                                                        const std::string &arch) {
+                                                                        const std::string &arch,           //
+                                                                        const std::vector<std::string> &extraArgs = {}) {
   auto data = polyast::hashed_program_to_msgpack(p);
 
   // Use createTemporaryFile (returns path, closes its FD) rather than fs::TempFile (keeps the FD
@@ -130,6 +141,8 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   std::vector<llvm::StringRef> args{
       //
       "", "--polyc", inputPath.str(), "--out", outputPath.str(), "--target", std::string_view(canonical->canonical), "--arch", arch};
+  for (const auto &a : extraArgs)
+    args.emplace_back(a);
 
   if (opts.verbose) {
     (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
@@ -149,6 +162,40 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   const auto *begin = reinterpret_cast<const uint8_t *>((*BufferOrErr)->getBufferStart());
   const auto *end = begin + (*BufferOrErr)->getBufferSize();
   return polyast::compileresult_from_msgpack(begin, end);
+}
+
+struct HostMirrorResult {
+  std::optional<std::string> error;
+  std::string bitcode;
+};
+
+static HostMirrorResult compileHostMirror(const polyfront::Options &opts,  //
+                                          const polyast::Program &program, //
+                                          const std::string &passSpec) {
+  auto result = compileProgram(opts, program, compiletime::Target::Object_LLVM_HOST, "native", {"--host-mirroring", "--passes", passSpec});
+  if (auto *err = std::get_if<std::string>(&result)) return {*err, {}};
+  const auto &r = std::get<polyast::CompileResult>(result);
+  if (r.binary) return {std::nullopt, std::string(reinterpret_cast<const char *>(r.binary->data()), r.binary->size())};
+  return {std::nullopt, {}};
+}
+
+struct ManagedHostMirror {
+  std::string bitcode;
+  std::string mirrorId;
+  std::optional<std::string> error;
+};
+
+static ManagedHostMirror compileManagedHostMirror(const Options &opts, const polyast::Program &program, const runtime::PlatformKind kind,
+                                                  const std::string &moduleId) {
+  using namespace aspartame;
+  const auto managed = [](auto &t, auto &) { return runtime::targetPlatformKind(t) == runtime::PlatformKind::Managed; };
+  if (kind != runtime::PlatformKind::Managed || !(opts.targets ^ exists(managed))) return {};
+  // physical backends (cuda/hsa Compiletime mirror) consume this host prelude; binding-slot targets
+  // marshal through the runtime arena and ignore it
+  const auto id = mirror::idFor(moduleId);
+  if (auto res = compileHostMirror(opts, program, passes::hostMirror(id)); res.error)
+    return {.bitcode = {}, .mirrorId = {}, .error = res.error};
+  else return {.bitcode = std::move(res.bitcode), .mirrorId = id, .error = std::nullopt};
 }
 
 } // namespace polyregion::polyfront

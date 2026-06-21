@@ -44,7 +44,7 @@ TEST_CASE("run", "[backend]") {
                Return(Expr::Alias(Term::Unit0Const()).widen()).widen(),
            });
 
-  Program p(fn, {}, {}, PassPhase::Initial());
+  Program p(fn, {}, {}, PassPhase::Initial(), {});
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O3);
   INFO(repr(c));
@@ -80,7 +80,7 @@ TEST_CASE("host prelude with foreign calls compiles to host object", "[backend]"
                    },
                    FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Host());
 
-  Program p(prelude, {}, {}, PassPhase::Initial());
+  Program p(prelude, {}, {}, PassPhase::Initial(), {});
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, {Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
   INFO(repr(c));
@@ -96,7 +96,7 @@ TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[ba
   Function entry(Sym({"_main"}), {}, std::optional<Arg>{}, {Arg(Named("capture", bytePtr), {})}, {}, {}, Type::Unit0(),
                  {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Exported(),
                  FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
-  Program p(entry, {}, {}, PassPhase::Initial());
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
   opts.pipelineSpec = "Mirror";

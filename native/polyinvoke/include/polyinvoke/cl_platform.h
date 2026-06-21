@@ -40,8 +40,8 @@ struct SVMTracker {
 
 // per-device workarounds resolved once from the device name at construction
 struct DeviceQuirks {
-  bool nativeTrig;           // route POLY_* trig to native_ (llvmpipe libclc JIT crashes on precise range-reduction)
-  size_t overReadSlackBytes; // zeroed slack to absorb llvmpipe SIMD over-reads past a buffer
+  bool nativeTrig;    // route POLY_* trig to native_ (llvmpipe libclc JIT crashes on precise range-reduction)
+  size_t overReadPad; // zeroed pad per allocation to absorb llvmpipe SIMD over-reads past a buffer end
 };
 
 class POLYREGION_EXPORT ClDevice final : public Device {

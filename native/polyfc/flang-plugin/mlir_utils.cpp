@@ -5,15 +5,9 @@
 
 #include "fmt/format.h"
 
-#include "utils.h"
+#include "polyregion/conventions.h"
 
-std::optional<mlir::func::FuncOp> polyregion::polyfc::resolveDefiningFunction(Operation *op) {
-  while (op) {
-    if (const auto funcOp = llvm::dyn_cast<func::FuncOp>(op)) return funcOp;
-    op = op->getParentOp();
-  }
-  return {};
-}
+#include "utils.h"
 
 mlir::Location polyregion::polyfc::uLoc(OpBuilder &B) { return B.getUnknownLoc(); }
 mlir::Type polyregion::polyfc::i64Ty(OpBuilder &B) { return B.getI64Type(); }
@@ -45,6 +39,15 @@ mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::s
                              ValueRange{intConst(B, i32Ty(B), 0)});
 }
 
+void polyregion::polyfc::emitMirrorBcGlobal(ModuleOp &m, const std::string &bitcode) {
+  static size_t id = 0;
+  OpBuilder B(m);
+  B.setInsertionPointToStart(m.getBody());
+  const StringRef ref(bitcode.data(), bitcode.size());
+  LLVM::GlobalOp::create(B, uLoc(B), LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), true, LLVM::Linkage::External,
+                         fmt::format("{}_{}", conventions::reflect::MirrorBitcodeGlobal, ++id), B.getStringAttr(ref));
+}
+
 mlir::LLVM::LLVMFuncOp polyregion::polyfc::defineFunc(ModuleOp &m, const std::string &name, const Type rtnTy,
                                                       const std::vector<Type> &argTys, LLVM::Linkage linkage,
                                                       const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f) {
@@ -73,16 +76,15 @@ polyregion::polyfc::DynamicAggregateMirror::DynamicAggregateMirror(MLIRContext *
 
 mlir::Value polyregion::polyfc::DynamicAggregateMirror::local(OpBuilder &B, const std::vector<std::vector<Value>> &fieldGroups) const {
   auto alloca = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
-  for (size_t g = 0; g < fieldGroups.size(); ++g) {
-    auto &fields = fieldGroups[g];
+  fieldGroups | zip_with_index() | for_each([&](auto &fields, auto group) {
     if (ty.getBody().size() != fields.size()) {
       raise(fmt::format("Cannot initialise LLVM struct {} with mismatching ({}) field counts", show(static_cast<Type>(ty)), fields.size()));
     }
-    for (size_t i = 0; i < ty.getBody().size(); ++i) {
-      auto fieldPtr =
-          LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), g), intConst(B, i64Ty(B), i)});
-      LLVM::StoreOp::create(B, uLoc(B), fields[i], fieldPtr.getResult());
-    }
-  }
+    fields | zip_with_index() | for_each([&](auto &field, auto idx) {
+      LLVM::StoreOp::create(
+          B, uLoc(B), field,
+          LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), group), intConst(B, i64Ty(B), idx)}));
+    });
+  });
   return alloca;
 }

@@ -1,6 +1,7 @@
 #include "polydco.h"
 
 #include <cinttypes>
+#include <cstring>
 #include <span>
 #include <thread>
 
@@ -113,6 +114,8 @@ POLYREGION_EXPORT extern "C" void polyrt_map_readwrite(void *origin, const ptrdi
   polyrt::sma::mapReadwrite(allocations, origin, sizeInBytes, unitInBytes);
 }
 
+POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations);
+
 template <typename T> static void validatePrelude(const runtime::TypeLayout *layout, const char *moduleId) {
   if (layout->memberCount < 1) {
     log(DebugLevel::Debug, "<%s> Struct layout has no members", moduleId);
@@ -143,7 +146,11 @@ struct ManagedPartialReduction {
       : reductions(reductions), range(range), devicePartials(), allocations(reductions.size()) {}
 
   size_t allocatePartialsAsync() {
-    if (reductions.empty()) return 0;
+    if (reductions.empty()) {
+      // binding-slot backends reject a null buffer at binding 0 so bind a placeholder the kernel never reads
+      devicePartials = polyrt::currentDevice->mallocDevice(sizeof(void *), polyrt::Access::RW);
+      return 0;
+    }
     devicePartials = polyrt::currentDevice->mallocDevice(sizeof(void *) * reductions.size(), polyrt::Access::RW);
     size_t localMemBytes = 0;
     for (size_t i = 0; i < reductions.size(); ++i) {
@@ -158,8 +165,8 @@ struct ManagedPartialReduction {
   }
 
   void releaseAndReduce() const {
-    if (reductions.empty()) return;
     polyrt::currentDevice->freeDevice(devicePartials);
+    if (reductions.empty()) return;
     if (polyrt::currentDevice->sharedAddressSpace()) {
       for (size_t i = 0; i < allocations.size(); ++i)
         reductions[i].reduce(range, reinterpret_cast<const char *>(allocations[i].ptr));
@@ -183,20 +190,18 @@ struct ManagedPartialReduction {
 static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
                             const runtime::TypeLayout *layout,                                                        //
                             const std::span<const polydco::FReduction> &reductions,                                   //
-                            char *captures, const char *moduleId) {
+                            char *captures, const char *moduleId,                                                     //
+                            const runtime::PreludeFn prelude, const runtime::PostludeFn postlude) {
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
-  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch managed, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
+  log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch managed, arg=%p prelude=%p", __func__, moduleId, tripCount,
+      static_cast<void *>(captures), reinterpret_cast<void *>(prelude));
 
   validatePrelude<polydco::FManagedPrelude>(layout, moduleId);
 
-  const polydco::FManagedPrelude prelude{lowerBoundInclusive, upperBoundInclusive, step, tripCount};
-  std::memcpy(captures, &prelude, sizeof(polydco::FManagedPrelude));
-
-  auto functorDevicePtr = allocations.syncLocalToRemote(captures, *layout);
-
-  polyrt::sma::dumpAllocationTable(allocations);
+  const polydco::FManagedPrelude bounds{lowerBoundInclusive, upperBoundInclusive, step, tripCount};
+  std::memcpy(captures, &bounds, sizeof(polydco::FManagedPrelude));
 
   constexpr size_t blockSize = 256;
   const bool isReduction = !reductions.empty();
@@ -211,6 +216,65 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   log(DebugLevel::Debug, "<%s:%s:%zu> localMemBytes=%zu", __func__, moduleId, threadsPerBlock, localMemBytes);
 
   using namespace invoke;
+  const auto launch = [&](const ArgBuffer &buffer) {
+    polyrt::currentQueue->enqueueInvokeAsync(
+        moduleId, conventions::EntryName, buffer, //
+        Policy{                                   //
+               Dim3{threadsPerBlock, 1, 1},       //
+               blocks > 0 ? std::optional{std::pair{Dim3{blocks, 1, 1}, localMemBytes}} : std::nullopt},
+        {});
+    polyrt::currentQueue->enqueueWaitBlocking();
+  };
+
+  const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
+  if (mode == polyrt::sma::MirrorMode::Off) {
+    if (polyrt::currentDevice->pagingMode() != PagingMode::System)
+      polyrt::skipExit("POLYRT_MIRROR=off needs system paging (HMM / XNACK+ / system-USM)");
+    const auto buffer = isReduction
+                            ? ArgBuffer{{Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Scratch, {}}, {Type::Void, {}}}
+                            : ArgBuffer{{Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Void, {}}};
+    launch(buffer);
+    polyrt::currentQueue->enqueueWaitBlocking();
+    mpr.releaseAndReduce();
+    log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Done (usm)", __func__, moduleId, tripCount);
+    return;
+  }
+
+  if (mode == polyrt::sma::MirrorMode::Arena) {
+    // marshal the whole capture graph into one device arena (pointers -> arena offsets)
+    allocations.genArenaReset();
+    allocations.genArenaObjectSlack = invoke::overReadPadBytes(polyrt::currentDevice->features());
+    allocations.genArenaMirror(captures, 1, 1, *layout, layout->sizeInBytes);
+    auto arenaBase = reinterpret_cast<void *>(allocations.genArenaFinish());
+    // logical SPIR-V (ArenaView) drops the capture arg and reads via the typed views, so partials shifts to
+    // binding 0; the flat byte form (ArenaLower) keeps the capture as binding 0 (the arena base)
+    const bool logical = polyrt::sma::arenaViewForm(polyrt::currentDevice->moduleFormat());
+    ArgBuffer buffer;
+    if (logical) {
+      buffer.append(Type::Ptr, &mpr.devicePartials);
+      if (isReduction) buffer.append(Type::Scratch, nullptr);
+      for (int i = 0; i < polyrt::sma::arenaViewCount; ++i)
+        buffer.append(Type::Ptr, &arenaBase);
+    } else {
+      buffer.append(Type::Ptr, &arenaBase);
+      buffer.append(Type::Ptr, &mpr.devicePartials);
+      if (isReduction) buffer.append(Type::Scratch, nullptr);
+    }
+    buffer.append(Type::Void, nullptr);
+    launch(buffer);
+    allocations.genArenaReadback();
+    mpr.releaseAndReduce();
+    polyrt::currentQueue->enqueueWaitBlocking();
+    log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Done (arena)", __func__, moduleId, tripCount);
+    return;
+  }
+
+  const bool useGenerated = mode == polyrt::sma::MirrorMode::Compiletime && prelude;
+  const uintptr_t preludeResult = useGenerated ? prelude(captures, layout->sizeInBytes) : 0;
+  auto functorDevicePtr =
+      useGenerated ? reinterpret_cast<void *>(preludeResult) : reinterpret_cast<void *>(allocations.syncLocalToRemote(captures, *layout));
+  polyrt::sma::dumpAllocationTable(allocations);
+
   const auto buffer = isReduction ? ArgBuffer{{Type::Ptr, &functorDevicePtr},   //
                                               {Type::Ptr, &mpr.devicePartials}, //
                                               {Type::Scratch, {}},              //
@@ -222,16 +286,10 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=0x%jx", __func__, moduleId, threadsPerBlock,
       static_cast<void *>(captures), mpr.devicePartials);
-  polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, //
-                                           Policy{                                   //
-                                                  Dim3{threadsPerBlock, 1, 1},       //
-                                                  blocks > 0 ? std::optional{std::pair{Dim3{blocks, 1, 1}, localMemBytes}} : std::nullopt},
-                                           {});
+  launch(buffer);
 
-  log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, threadsPerBlock);
-  polyrt::currentQueue->enqueueWaitBlocking();
-
-  allocations.syncRemoteToLocal(captures);
+  if (useGenerated && postlude) postlude(captures, layout->sizeInBytes);
+  else allocations.syncRemoteToLocal(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 
   // XXX See polydco_release: keep SVM, drop only host tracking.
@@ -361,7 +419,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
         dispatchManaged(lowerBoundInclusive, upperBoundInclusive, step,
                         &bundle->structs[bundle->interfaceLayoutIdx],     //
                         std::span{reductions, reductionsCount}, captures, //
-                        bundle->moduleName);
+                        bundle->moduleName, bundle->prelude, bundle->postlude);
         return true;
       }
       break;
