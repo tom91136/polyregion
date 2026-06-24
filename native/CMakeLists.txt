@@ -526,6 +526,7 @@ add_subdirectory(bindings)
 add_custom_target(polyregion-dist
         DEPENDS
         polyc-bin
+        polyinfo
         polycpp
         polyfc
         polyc-JNI
