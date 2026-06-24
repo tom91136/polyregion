@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::invoke;
@@ -136,7 +137,7 @@ std::vector<Property> MetalDevice::properties() {
 }
 std::vector<std::string> MetalDevice::features() {
   POLYINVOKE_TRACE();
-  return {fmt::format("paging:{}", magic_enum::enum_name(paging))};
+  return {fmt::format("paging:{}", magic_enum::enum_name(pagingMode()))};
 }
 void MetalDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
