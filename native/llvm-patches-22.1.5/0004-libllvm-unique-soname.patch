@@ -18,7 +18,7 @@ are fully independent in one process.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/llvm/tools/llvm-shlib/CMakeLists.txt b/llvm/tools/llvm-shlib/CMakeLists.txt
-index 0000000..0000001 100644
+index aaaaaaaaaaaa1..bbbbbbbbbbbbb 100644
 --- a/llvm/tools/llvm-shlib/CMakeLists.txt
 +++ b/llvm/tools/llvm-shlib/CMakeLists.txt
 @@ -36,7 +36,7 @@ if(LLVM_BUILD_LLVM_DYLIB)
