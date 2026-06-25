@@ -339,13 +339,19 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
                          return w.size() == 2 && w[0] == "-o" ? w[1] : acc;
                        });
       if (!out.empty()) {
-        const std::string out2 = out + ".repro";
-        const auto cmd2 = toks ^ mk_string(" ", [&](auto &t) { return t == out ? out2 : t; });
-        auto r2 = runStep(task, cfg, cmd2, /*isRunStep=*/false);
-        if (r2.exitCode != 0) reproReason = fmt::format("repro recompile failed (exit {})", r2.exitCode);
-        else if (polyregion::read_string(out) != polyregion::read_string(out2))
+        // XXX macOS embeds a non-deterministic LC_UUID and ad-hoc code signature in linked executables, just compare objects here
+        const std::string obj1 = out + ".r1.o", obj2 = out + ".r2.o";
+        const auto objCmd = [&](const std::string &o) {
+          return (toks ^ mk_string(" ", [&](auto &t) { return t == out ? o : t; })) + " -c";
+        };
+        const auto r1 = runStep(task, cfg, objCmd(obj1), /*isRunStep=*/false);
+        const auto r2 = runStep(task, cfg, objCmd(obj2), /*isRunStep=*/false);
+        if (r1.exitCode != 0 || r2.exitCode != 0)
+          reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode);
+        else if (polyregion::read_string(obj1) != polyregion::read_string(obj2))
           reproReason = "non-reproducible build: two compiles of the same source produced different objects";
-        llvm::sys::fs::remove(out2);
+        llvm::sys::fs::remove(obj1);
+        llvm::sys::fs::remove(obj2);
       }
     }
   absorbStep(o, std::move(r));

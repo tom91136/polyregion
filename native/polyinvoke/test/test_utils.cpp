@@ -1,3 +1,7 @@
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+  #define _DARWIN_C_SOURCE
+#endif
+
 #include "test_utils.h"
 
 #include <cctype>
