@@ -156,7 +156,14 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset
 }
 void ObjectDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
-  latch.waitAll();
+  bool warned = false;
+  while (!latch.waitAll()) {
+    if (!warned) {
+      fmt::print(stderr, "polyinvoke: kernel still running past the watchdog timeout, continuing to wait\n");
+      std::fflush(stderr);
+      warned = true;
+    }
+  }
 }
 ObjectDeviceQueue::ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout) : latch(timeout) { POLYINVOKE_TRACE(); }
 

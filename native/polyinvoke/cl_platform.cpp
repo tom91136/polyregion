@@ -147,6 +147,16 @@ std::optional<cl_bitfield> resolveSVM(cl_device_id device, const std::string &pl
   if (const char *off = std::getenv(polyregion::env::PolyinvokeDisableSvm); off && *off && *off != '0') return std::nullopt;
   // XXX rusticl advertises SVM caps but indirect SVM access faults; force the buffer path
   if (platformName.find("rusticl") != std::string::npos) return std::nullopt;
+  // gfx1036 (Raphael) / gfx1037 (Mendocino) - the minimal 2-CU RDNA2 desktop/low-power iGPUs - silently
+  // corrupt fine-grain SVM under concurrent oversubscription (validated: cl_mem clean, fine-grain SVM
+  // ~12/30 stale-read mismatches; gfx1103/gfx1034 and matched oversubscription+clock are unaffected). The
+  // defect is specific to this 2-CU RDNA part, so gate on RDNA (gfx>=1000) + <=2 CU and fall back to plain
+  // cl_mem buffers; low-CU Vega (gfx9xx) APUs are a different arch and stay on the SVM path
+  if (const std::string name = queryDeviceInfo(device, CL_DEVICE_NAME); name.rfind("gfx", 0) == 0) {
+    cl_uint cus = 0;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cus), &cus, nullptr);
+    if (std::strtol(name.c_str() + 3, nullptr, 10) >= 1000 && cus <= 2) return std::nullopt;
+  }
   cl_bitfield caps = 0;
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return std::nullopt;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return std::nullopt;
@@ -362,6 +372,11 @@ PagingMode ClDevice::pagingMode() {
 bool ClDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
+}
+size_t ClDevice::maxThreadsPerBlock() {
+  POLYINVOKE_TRACE();
+  size_t v = 0;
+  return clGetDeviceInfo(*device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(v), &v, nullptr) == CL_SUCCESS && v ? v : 1024;
 }
 std::vector<Property> ClDevice::properties() {
   POLYINVOKE_TRACE();
@@ -599,7 +614,20 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   };
 
   const auto args = detail::argDataAsPointers(types, argData);
-  const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
+  auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
+  // clamp the work-group to the kernel's max: gfx1036's 2-CU iGPU caps a reduction's group below the
+  // requested 256 (local-memory pressure) -> CL_INVALID_WORK_GROUP_SIZE. global is groups*local
+  // componentwise, so shrinking local keeps the group count and the reduction's one-partial-per-group
+  if (local.x > 1) {
+    cl_device_id dev = {};
+    size_t kernelMax = 0;
+    if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(dev), &dev, nullptr) == CL_SUCCESS &&
+        clGetKernelWorkGroupInfo(kernel, dev, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelMax), &kernelMax, nullptr) == CL_SUCCESS &&
+        kernelMax) {
+      const size_t lyz = std::max<size_t>(1, local.y * local.z);
+      if (local.x * lyz > kernelMax) local.x = std::max<size_t>(1, kernelMax / lyz);
+    }
+  }
   const auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
 
   for (cl_uint i = 0; i < types.size() - 1; ++i) {

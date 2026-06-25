@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
 #include <utility>
 
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
+#include "spirv/unified1/spirv.hpp"
 
 #ifndef _MSC_VER
   #pragma clang diagnostic push
@@ -27,6 +29,66 @@ using namespace polyregion::invoke::vulkan;
 static constexpr const char *PREFIX = "Vulkan";
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+
+// XXX lavapipe mis-vectorises a multi-subgroup work-group once the per-invocation private footprint is large
+static constexpr uint32_t lavapipeMaxFunctionPrivateBytes = 768;
+
+// total bytes of Function-storage OpVariables - the kernel's per-invocation private (stack) memory
+static uint32_t spirvFunctionPrivateBytes(const std::vector<uint32_t> &w) {
+  if (w.size() < 5) return 0;
+  auto op = [](uint32_t x) { return uint16_t(x & 0xFFFF); };
+  auto wc = [](uint32_t x) { return uint16_t(x >> 16); };
+  struct Inst {
+    const uint32_t *p;
+    uint16_t n;
+  };
+  std::vector<Inst> insts;
+  for (size_t i = 5; i < w.size();) {
+    const uint16_t n = wc(w[i]);
+    if (n == 0 || i + n > w.size()) break;
+    insts.push_back({&w[i], n});
+    i += n;
+  }
+  std::unordered_map<uint32_t, uint32_t> typeSize, constVal, ptrPointee;
+  for (const auto &in : insts)
+    if (op(in.p[0]) == spv::OpConstant && in.n >= 4) constVal[in.p[2]] = in.p[3];
+  for (bool more = true; more;) {
+    more = false;
+    for (const auto &in : insts) {
+      const uint32_t *p = in.p;
+      const uint16_t n = in.n, o = op(p[0]);
+      const uint32_t id = n > 1 ? p[1] : 0;
+      if (!id || typeSize.count(id)) continue;
+      auto put = [&](uint32_t v) { typeSize[id] = v, more = true; };
+      if ((o == spv::OpTypeInt || o == spv::OpTypeFloat) && n >= 3) put(p[2] / 8);
+      else if (o == spv::OpTypeBool) put(1);
+      else if ((o == spv::OpTypeVector || o == spv::OpTypeMatrix) && typeSize.count(p[2])) put(typeSize[p[2]] * p[3]);
+      else if (o == spv::OpTypeArray && typeSize.count(p[2]) && constVal.count(p[3])) put(typeSize[p[2]] * constVal[p[3]]);
+      else if (o == spv::OpTypeStruct) {
+        uint32_t s = 0;
+        bool all = true;
+        for (uint16_t m = 2; m < n; ++m)
+          if (!typeSize.count(p[m])) {
+            all = false;
+            break;
+          } else s += typeSize[p[m]];
+        if (all) put(s);
+      } else if (o == spv::OpTypePointer && n >= 4) {
+        ptrPointee[id] = p[3];
+        if (typeSize.count(p[3])) put(8);
+      }
+    }
+  }
+  uint32_t total = 0;
+  for (const auto &in : insts) {
+    const uint32_t *p = in.p;
+    if (op(p[0]) == spv::OpVariable && in.n >= 4 && p[3] == spv::StorageClassFunction) {
+      const auto it = ptrPointee.find(p[1]);
+      if (it != ptrPointee.end() && typeSize.count(it->second)) total += typeSize[it->second];
+    }
+  }
+  return total;
+}
 
 static std::vector<const char *> commonExtensions = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
@@ -164,18 +226,21 @@ static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32
   queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId, 1, &priority);
   if (computeQueueId != transferQueueId) queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), transferQueueId, 1, &priority);
 
-  auto f = dev.getFeatures();
-  return dev.createDevice({{}, queueCreateInfos, {}, {}, &f});
+  auto features = dev.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features>();
+  vk::DeviceCreateInfo info{{}, queueCreateInfos};
+  info.pNext = &features.get<vk::PhysicalDeviceFeatures2>();
+  return dev.createDevice(info);
 }
 
 // ---
 
 details::Resolved::Resolved(uint32_t computeQueueId,
                             const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
+                            uint32_t maxWorkGroupX,                                      //
                             const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
                             const std::vector<vk::DescriptorPoolSize> &sizes,
                             const vk::raii::Device &ctx)        //
-    : shaderModule(shaderModule),                               //
+    : shaderModule(shaderModule), maxWorkGroupX(maxWorkGroupX), //
       dscLayout(ctx.createDescriptorSetLayout({{}, bindings})), //
       dscPool(ctx.createDescriptorPool(
           vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, sizes))), //
@@ -195,6 +260,14 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
       transferQueueId(transferQueueId), //
       device(std::move(device_)),       //
       ctx(createDevice(device, computeQueueId.first, transferQueueId.first)), allocator(createAllocator(instance, device, ctx)),
+      deviceMaxAllocSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMaintenance3Properties>()
+                             .get<vk::PhysicalDeviceMaintenance3Properties>()
+                             .maxMemoryAllocationSize),
+      deviceMaxWorkGroupInvocations(device.getProperties().limits.maxComputeWorkGroupInvocations),
+      lavapipe(std::string(device.getProperties().deviceName.data()).find("llvmpipe") != std::string::npos),
+      subgroupSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceSubgroupProperties>()
+                       .get<vk::PhysicalDeviceSubgroupProperties>()
+                       .subgroupSize),
       transferCmdPool(std::make_shared<vk::raii::CommandPool>(
           ctx.createCommandPool({vk::CommandPoolCreateFlagBits::eResetCommandBuffer, transferQueueId.first}))), //
       transferCmdBuffer(std::make_shared<vk::raii::CommandBuffer>(
@@ -205,8 +278,11 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             POLYINVOKE_TRACE();
             auto data = std::vector<uint32_t>((s.size() + 3) / 4, 0);
             std::copy(s.begin(), s.end(), reinterpret_cast<char *>(data.data()));
-            return std::make_shared<vk::raii::ShaderModule>(
+            auto module = std::make_shared<vk::raii::ShaderModule>(
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
+            uint32_t maxWgX = UINT32_MAX;
+            if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = subgroupSize;
+            return details::LoadedModule{module, maxWgX};
           },
           [this](auto &&m, auto &&name, auto &&types) {
             POLYINVOKE_TRACE();
@@ -226,7 +302,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             if (storages != 0) sizes.emplace_back(vk::DescriptorType::eStorageBuffer, storages);
             if (scalars != 0) sizes.emplace_back(vk::DescriptorType::eUniformBuffer, scalars);
 
-            return details::Resolved(this->computeQueueId.first, m, bindings, sizes, ctx);
+            return details::Resolved(this->computeQueueId.first, m.module, m.maxWorkGroupX, bindings, sizes, ctx);
           }) {
   POLYINVOKE_TRACE();
 }
@@ -271,6 +347,10 @@ bool VulkanDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return true;
 }
+size_t VulkanDevice::maxThreadsPerBlock() {
+  POLYINVOKE_TRACE();
+  return deviceMaxWorkGroupInvocations;
+}
 std::vector<Property> VulkanDevice::properties() {
   POLYINVOKE_TRACE();
   const auto props = device.getProperties();
@@ -292,10 +372,12 @@ std::vector<Property> VulkanDevice::properties() {
 std::vector<std::string> VulkanDevice::features() {
   POLYINVOKE_TRACE();
   std::vector<std::string> out{"vulkan", "spirv_glcompute", normaliseVendor(device.getProperties().deviceName)};
-  const auto f = device.getFeatures();
+  const auto f2 = device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features>();
+  const auto &f = f2.get<vk::PhysicalDeviceFeatures2>().features;
   if (f.shaderFloat64) out.emplace_back("fp64");
   if (f.shaderInt64) out.emplace_back("int64");
   if (f.shaderInt16) out.emplace_back("int16");
+  if (f2.get<vk::PhysicalDeviceShaderFloat16Int8Features>().shaderFloat16) out.emplace_back("fp16");
   out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
   return out;
 }
@@ -321,12 +403,21 @@ static details::MemObject allocate(VmaAllocator &allocator, size_t size, bool un
   VkBuffer buffer{};
   VmaAllocation allocation{};
   VmaAllocationInfo allocInfo;
-  vmaCreateBuffer(allocator, &bufferInfo, &allocCreateInfo, &buffer, &allocation, &allocInfo);
+  if (const VkResult r = vmaCreateBuffer(allocator, &bufferInfo, &allocCreateInfo, &buffer, &allocation, &allocInfo); r != VK_SUCCESS)
+    POLYINVOKE_FATAL(PREFIX, "vmaCreateBuffer failed for %zu bytes (VkResult %d); likely exceeds the device maxMemoryAllocationSize", size,
+                     static_cast<int>(r));
   return {vk::Buffer(buffer), allocation, allocInfo.pMappedData, size};
 }
 
 uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
+  // XXX a buffer past maxMemoryAllocationSize is unaddressable (lavapipe's SSBO byte offset is 32-bit -> reads
+  // past ~2GB silently return 0), but the alloc itself does not fail, so check explicitly here.
+  // maxStorageBufferRange is not a reliable bound - lavapipe reports 128MB yet binds far larger ranges fine
+  if (size > deviceMaxAllocSize)
+    POLYINVOKE_FATAL(PREFIX,
+                     "device buffer of %zu bytes exceeds maxMemoryAllocationSize (%zu); the marshalling arena is too large for this device",
+                     size, deviceMaxAllocSize);
   return memoryObjects.malloc(std::make_shared<details::MemObject>(allocate(allocator, size, false)));
 }
 void VulkanDevice::freeDevice(uintptr_t ptr) {
@@ -465,6 +556,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
       {2, 2 * sizeof(uint32_t), sizeof(uint32_t)},
   };
   auto specValues = std::vector<uint32_t>{uint32_t(local.x), uint32_t(local.y), uint32_t(local.z)};
+  specValues[0] = std::min(specValues[0], fn.maxWorkGroupX);
   if (scratchCount > 0) {
     specEntries.emplace_back(3, 3 * sizeof(uint32_t), sizeof(uint32_t));
     specValues.emplace_back(uint32_t(sharedMem));

@@ -96,6 +96,7 @@ set(POLYINVOKE_PUBLIC_LIBS
         ${LLVM_LIBS}
         nlohmann_json::nlohmann_json
         Vulkan::Headers
+        SPIRV-Headers::SPIRV-Headers
         GPUOpen::VulkanMemoryAllocator
         CACHE INTERNAL "")
 set(POLYINVOKE_PRIVATE_LIBS

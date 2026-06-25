@@ -391,6 +391,8 @@ struct POLYREGION_EXPORT Device {
   }
 
   [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) = 0;
+
+  [[nodiscard]] virtual POLYREGION_EXPORT size_t maxThreadsPerBlock() { return 1024; }
 };
 
 class POLYREGION_EXPORT Platform {

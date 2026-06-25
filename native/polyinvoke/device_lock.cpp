@@ -81,16 +81,19 @@ struct DeviceLock::Impl {
 DeviceLock::DeviceLock(const PhysicalDevice &device) : impl_(std::make_unique<Impl>()) {
   if (!device.needsLock()) return;
   impl_->path = lockPath(device);
-  impl_->fd = ::open(impl_->path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-  if (impl_->fd < 0) {
+  int fd = ::open(impl_->path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  if (fd < 0) {
     throw std::runtime_error("DeviceLock: cannot open lock file " + impl_->path + " (errno=" + std::to_string(errno) + ")");
   }
-  if (::flock(impl_->fd, LOCK_EX) != 0) {
+  if (::flock(fd, LOCK_EX) != 0) {
     int err = errno;
-    ::close(impl_->fd);
-    impl_->fd = -1;
+    ::close(fd);
     throw std::runtime_error("DeviceLock: flock failed on " + impl_->path + " (errno=" + std::to_string(err) + ")");
   }
+  if (int hi = ::fcntl(fd, F_DUPFD_CLOEXEC, 900); hi >= 0) {
+    ::close(fd);
+    impl_->fd = hi;
+  } else impl_->fd = fd;
 }
 
 DeviceLock::~DeviceLock() {

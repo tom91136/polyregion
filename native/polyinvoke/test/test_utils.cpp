@@ -1,5 +1,14 @@
 #include "test_utils.h"
 
+#include <cctype>
+
+#if !defined(_WIN32)
+  #include <fcntl.h>
+  #include <unistd.h>
+
+  #include <sys/file.h>
+#endif
+
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
@@ -67,7 +76,59 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
                 const DeviceRunner &runner, const DeviceSkip &skip) {
   Context ctx;
 
-  std::optional<invoke::DeviceLock> lock;
+#if !defined(_WIN32)
+  // The gfx1036 (2-CU Raphael iGPU) silently miscomputes a contiguous region of its output when any
+  // other GPU work runs concurrently. The wrong data is produced device-side during the compute kernels
+  // and is stably resident in device memory (verified: the input H2D lands intact, two back-to-back
+  // readbacks agree, and the driver logs no fault) - it is not a dropped copy or a host-side readback
+  // race, and an explicit per-kernel flush does not prevent it. The iGPU shares the system-memory
+  // subsystem with everything else, and two concurrent stressors reproduce the fault:
+  //   1. a concurrent KFD op - device enumeration, runtime init, or teardown (the /dev/kfd close that
+  //      frees its 2 SDMA queues). Foreign OpenCL/Vulkan tasks reach this through their ICD loader, which
+  //      dlopens the AMD ICD (amdocl64, RADV) and probes /dev/kfd even when targeting another vendor.
+  //   2. raw memory-subsystem contention - a discrete GPU (e.g. CUDA) running heavy host<->device DMA,
+  //      with no KFD op involved at all.
+  // The fragility is in AMD hardware/firmware and cannot be fixed from here; the only lever we hold is
+  // the concurrency that triggers it, so the iGPU dispatch must run exclusively against all other GPU
+  // work. A discrete GPU with its own VRAM and memory controller does not share this path, which is why
+  // no other vendor is affected.
+  //
+  // A reader-writer flock, taken before any GPU access and held past /dev/kfd close (fd relocated above
+  // it, leaked, so it releases after exit_files frees the SDMA queues). The fragile AMD GPU task is the
+  // exclusive WRITER (one iGPU dispatch at a time, with nothing else on the GPU). Every other GPU task -
+  // CUDA, NVIDIA/Intel OpenCL/Vulkan, Level Zero - is a shared READER: readers run concurrently with
+  // each other (full per-device parallelism across the discrete GPUs) but never alongside an AMD
+  // dispatch. Host/object backends touch no GPU and take no lock.
+  {
+    std::string a(arch);
+    for (auto &ch : a)
+      ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    const bool amdArch = a == "amd" || a.find("gfx") != std::string::npos || a.find("radeon") != std::string::npos;
+    const bool icdBackend = backend == invoke::Backend::OpenCL || backend == invoke::Backend::Vulkan;
+    const bool gpuBackend = backend != invoke::Backend::RelocatableObject && backend != invoke::Backend::SharedObject;
+    const bool writer = backend == invoke::Backend::HSA || backend == invoke::Backend::HIP || (icdBackend && amdArch);
+    const bool reader = gpuBackend && !writer;
+    if (writer || reader) {
+      [[maybe_unused]] static const int coarseLock = [&] {
+        int fd = ::open("/tmp/polyinvoke-gpu-coarse-amd.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+        if (fd < 0) return -1;
+        if (::flock(fd, writer ? LOCK_EX : LOCK_SH) != 0) {
+          ::close(fd);
+          return -1;
+        }
+        if (const int hi = ::fcntl(fd, F_DUPFD_CLOEXEC, 900); hi >= 0) {
+          ::close(fd);
+          fd = hi;
+        }
+        return fd;
+      }();
+    }
+  }
+#endif
+
+  // leaked so the flock is never released before process exit: a scope release runs before exit_files
+  // closes /dev/kfd, re-opening the teardown-handoff window on gfx1036 (see device_lock.cpp)
+  auto &lock = *new std::optional<invoke::DeviceLock>();
   try {
     auto platform = invoke::Platform::maybe(backend);
     if (!platform) return 77;

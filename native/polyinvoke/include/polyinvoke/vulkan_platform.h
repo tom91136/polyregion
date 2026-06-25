@@ -49,6 +49,7 @@ namespace details {
 
 struct Resolved {
   std::shared_ptr<vk::raii::ShaderModule> shaderModule;
+  uint32_t maxWorkGroupX;
   vk::raii::DescriptorSetLayout dscLayout;
   vk::raii::DescriptorPool dscPool;
   vk::raii::DescriptorSet dscSet;
@@ -60,6 +61,7 @@ struct Resolved {
 
   Resolved(uint32_t computeQueueId,
            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
+           uint32_t maxWorkGroupX,                                      //
            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
            const std::vector<vk::DescriptorPoolSize> &size,             //
            const vk::raii::Device &ctx);
@@ -78,7 +80,11 @@ struct Enqueued {
   std::shared_ptr<MemObject> argObject;
 };
 
-using VulkanModuleStore = detail::ModuleStore<std::shared_ptr<vk::raii::ShaderModule>, Resolved>;
+struct LoadedModule {
+  std::shared_ptr<vk::raii::ShaderModule> module;
+  uint32_t maxWorkGroupX;
+};
+using VulkanModuleStore = detail::ModuleStore<LoadedModule, Resolved>;
 using VkMemObject = std::shared_ptr<MemObject>;
 } // namespace details
 
@@ -91,6 +97,10 @@ class POLYREGION_EXPORT VulkanDevice final : public Device {
   vk::raii::PhysicalDevice device;
   vk::raii::Device ctx;
   VmaAllocator allocator;
+  size_t deviceMaxAllocSize;
+  uint32_t deviceMaxWorkGroupInvocations;
+  bool lavapipe; // XXX Mesa llvmpipe vectorisation bug: we need to caps high-footprint work-groups
+  uint32_t subgroupSize;
 
   //  std::shared_ptr<vk::raii::CommandPool> computeCmdPool;
   //  std::shared_ptr<vk::raii::CommandBuffer> computeCmdBuffer;
@@ -116,6 +126,7 @@ public:
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT PagingMode pagingMode() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
+  POLYREGION_EXPORT size_t maxThreadsPerBlock() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
