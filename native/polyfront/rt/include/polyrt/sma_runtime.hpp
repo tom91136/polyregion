@@ -168,5 +168,14 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
     return (allocations).mirrorGraph(root, poolPtrOffsets.data(), poolPtrOffsets.size());                                                  \
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) { (allocations).unmirrorReadGraph(root); }                     \
+  namespace { /* XXX clears the SMA free-hook before `allocations` is destroyed (declared after it) */                                     \
+  struct ReleaseHookRegistrar {                                                                                                            \
+    ReleaseHookRegistrar() {                                                                                                               \
+      ::polyregion::rt_reflect::_rt_set_release_cb(                                                                                        \
+          +[](void *p) { (allocations).disassociateExact(p, ::polyregion::polyrt::currentDevice != nullptr); });                           \
+    }                                                                                                                                      \
+    ~ReleaseHookRegistrar() { ::polyregion::rt_reflect::_rt_set_release_cb(nullptr); }                                                     \
+  } releaseHookRegistrar;                                                                                                                  \
+  }                                                                                                                                        \
   POLYREGION_RUNTIME_ABI(POLYREGION_SMA_ABI_SYMBOL_CHECK)                                                                                  \
   static_assert(true, "swallow trailing semicolon")

@@ -12,6 +12,7 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/types.h"
 
 #include "ast.h"
@@ -1010,6 +1011,8 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
                                                       : llvm::Function::InternalLinkage,
                                                   normalisedName, //
                                                   mod);
+
+  if (fn.affinity.is<FunctionAffinity::Host>()) llvmFn->addFnAttr(POLYREFLECT_RT_PROTECT_ANNOTATION);
 
   // Attach sret attributes here, before any other prototype's body emission can look this
   // function up via Expr::Invoke. Deferring until the body loop would let the first caller see

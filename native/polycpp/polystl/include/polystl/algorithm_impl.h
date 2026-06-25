@@ -182,18 +182,9 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       break;
     }
     case polyregion::runtime::PlatformKind::Managed: {
-      int64_t groups = program_meta::VkWorkgroupSizeXValue;
-      auto groupPartial = polyrt::currentDevice->mallocSharedTyped<T>(groups, polyrt::Access::RW);
-
-      if (!groupPartial) {
-        log(DebugLevel::Debug, "<%s, %d> No USM support; host fallback", __func__, global);
-        T acc = init;
-        for (int64_t i = 0; i < global; ++i)
-          acc = reduce(acc, f(i));
-        return acc;
-      }
-
-      auto kernel = [groupPartial = *groupPartial, init, f, reduce,
+      const int64_t groups = program_meta::VkWorkgroupSizeXValue;
+      std::vector<T> groupPartial(groups);
+      auto kernel = [out = groupPartial.data(), init, f, reduce,
                      global]([[clang::annotate(POLYREGION_LOCAL_ANNOTATION)]] T *localPartialSum) {
         const auto lim = static_cast<uint32_t>(global);
         const auto localIdx = __polyregion_builtin_gpu_local_idx(0);
@@ -210,7 +201,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
           }
         }
         if (localIdx == 0) {
-          groupPartial[__polyregion_builtin_gpu_group_idx(0)] = localPartialSum[localIdx];
+          out[__polyregion_builtin_gpu_group_idx(0)] = localPartialSum[localIdx];
         }
       };
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
@@ -227,7 +218,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
                                  &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude, bundle.postlude);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
-          acc = reduce(acc, (*groupPartial)[groupIdx]);
+          acc = reduce(acc, groupPartial[groupIdx]);
         }
         return acc;
       }

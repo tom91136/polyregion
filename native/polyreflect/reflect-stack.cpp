@@ -36,6 +36,8 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
          Annotation == POLYREFLECT_RT_ODR_ANNOTATION))
       Protected.emplace(F);
   });
+  for (llvm::Function &F : M)
+    if (F.hasFnAttribute(POLYREFLECT_RT_PROTECT_ANNOTATION)) Protected.emplace(&F);
   // XXX Transitive close: any function reachable from a protected one is also protected, else
   // the alloca walk below instruments stdlib helpers (e.g. std::atomic::load) inlined or called
   // from _rt_record's body and the inserted _rt_record calls recurse.

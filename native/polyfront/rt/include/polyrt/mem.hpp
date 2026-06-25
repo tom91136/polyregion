@@ -129,8 +129,6 @@ class SynchronisedMemAllocation {
       const uintptr_t memberRemotePtr = pastEnd ? baseRemotePtr + meta.offsetInBytes : baseRemotePtr;
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
-      // XXX First-foreign-pointer warning: polyreflect is inactive, so captured heap pointers
-      // cannot be sized or mirrored to the device.
       static std::atomic<bool> warnedOnce{false};
       bool expected = false;
       if (warnedOnce.compare_exchange_strong(expected, true)) {
@@ -319,7 +317,7 @@ public:
     return {};
   }
 
-  std::optional<uintptr_t> invalidateLocal(const void *p) { // any valid pointer, not just base
+  std::optional<uintptr_t> invalidateLocal(const void *p) {
     if (debug) std::fprintf(stderr, "[SMA] invalidateLocal(p=%p)\n", p);
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
@@ -331,7 +329,7 @@ public:
 
   std::unordered_set<uintptr_t> syncVisited{};
 
-  std::optional<uintptr_t> syncRemoteToLocal(void *p, const std::optional<size_t> &sizeInByte = {}) { // any valid pointer, not just base
+  std::optional<uintptr_t> syncRemoteToLocal(void *p, const std::optional<size_t> &sizeInByte = {}) {
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
       // cycle break for circular structures (a list node's `prev` -> the sentinel embedded in the kernel
@@ -341,11 +339,11 @@ public:
       if (debug)
         std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%jx, sizeInByte=%ld, offsetInBytes=%ld, t=@%s)\n", p,
                      alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes, alloc->layout ? alloc->layout->name : "???");
-      // we want to perform an inclusive copy: an object is copied if its range intersects with the request range
+      // inclusive copy: an object is copied if its range intersects the request range
       const runtime::TypeLayout *tl = alloc->layout;
 
       const size_t objSize = tl ? tl->sizeInBytes : sizeof(uintptr_t);
-      const size_t objIdxOffset = offsetInBytes % objSize; // offset to return to base at p
+      const size_t objIdxOffset = offsetInBytes % objSize;
       char *baseAtObjIdx = static_cast<char *>(p) - objIdxOffset;
 
       const size_t maxObjCount = alloc->remote.sizeInBytes / objSize;
@@ -383,7 +381,7 @@ public:
     return {};
   }
 
-  void disassociate(const void *p, bool releaseRemote = true) { // any valid pointer, not just base
+  void disassociate(const void *p, bool releaseRemote = true) {
     if (const auto query = queryLocalIt(p)) {
       const auto [it, offsetInBytes] = *query;
       if (debug)
@@ -393,6 +391,17 @@ public:
       remoteToLocalPtr.erase(it->second.remote.ptr);
       localToRemoteAlloc.erase(it);
     }
+  }
+
+  void disassociateExact(const void *p, const bool releaseRemote = true) {
+    const auto it = localToRemoteAlloc.find(reinterpret_cast<uintptr_t>(p));
+    if (it == localToRemoteAlloc.end()) return;
+    if (debug)
+      std::fprintf(stderr, "[SMA] disassociateExact(host=0x%jx, remote=%jx, size=%ld)\n", it->first, it->second.remote.ptr,
+                   it->second.remote.sizeInBytes);
+    if (releaseRemote) remoteRelease(it->second.remote.ptr);
+    remoteToLocalPtr.erase(it->second.remote.ptr);
+    localToRemoteAlloc.erase(it);
   }
 
   uintptr_t mirrorAlloc(const void *local, const size_t sizeInBytes, const bool hostReadOnly) {
@@ -545,7 +554,7 @@ public:
   uintptr_t genArenaDevBase = 0;
   size_t genArenaDevCapacity = 0; // reuse the device arena across launches; realloc only to grow
   size_t genArenaDevValid = 0;    // persist: bytes of live device content to carry across a realloc (kernel outputs)
-  bool genArenaActive = false; // a backend may hand out device handle 0 (cl_mem index), so track validity separately
+  bool genArenaActive = false;    // a backend may hand out device handle 0 (cl_mem index), so track validity separately
   // trailing zeroed pad after each arena object: the arena packs objects adjacently, so a vectoriser's
   // over-read past an array end must land in zeroed slack, not neighbour bytes (Mesa/llvmpipe runs
   // unpredicated SIMD-remainder lanes). set from the device's overread_pad feature (0 = off for sound backends)
@@ -556,7 +565,7 @@ public:
     uint64_t off;
     size_t count, indirection, size;
     const runtime::TypeLayout *l;
-    bool readOnly; // a const input the device cannot have written; never copy it back (would corrupt it)
+    bool readOnly;            // a const input the device cannot have written; never copy it back (would corrupt it)
     bool hostDirty = false;   // persist mode: host wrote this leaf since the last upload, so re-send it
     bool deviceDirty = false; // persist mode: a kernel wrote this leaf; the host copy is stale until map_read
   };
@@ -568,10 +577,10 @@ public:
   // leaf offsets never shift); a bigger root grows CAP and re-lays the union. correct for deep graphs too -
   // a leaf's inner pointer holds the pointee's absolute (stable) offset
   bool genArenaPersist = std::getenv(env::PolyrtArenaPersist) != nullptr;
-  bool genArenaSeenRoot = false;      // first mirror call of the launch is the capture root
-  size_t genArenaCaptureCap = 0;      // reserved capture-region size; leaves bump-allocate above it
+  bool genArenaSeenRoot = false;                              // first mirror call of the launch is the capture root
+  size_t genArenaCaptureCap = 0;                              // reserved capture-region size; leaves bump-allocate above it
   std::vector<std::pair<uint64_t, size_t>> genArenaUploads{}; // regions to H2D this launch (capture + dirty/new leaves)
-  std::vector<uint64_t> genArenaTouched{}; // leaf offsets this kernel reached, marked device-dirty after the launch
+  std::vector<uint64_t> genArenaTouched{};                    // leaf offsets this kernel reached, marked device-dirty after the launch
 
   void genArenaReset() {
     genArenaUploads.clear();
@@ -579,8 +588,7 @@ public:
     genArenaSeenRoot = false;
     if (genArenaPersist && genArenaCaptureCap) {
       // keep resident leaves; drop only the transient root rec (off 0)
-      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](auto &r) { return r.off == 0; }),
-                         genArenaRecs.end());
+      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](auto &r) { return r.off == 0; }), genArenaRecs.end());
       return;
     }
     genArenaStaging.clear();

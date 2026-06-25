@@ -82,11 +82,13 @@ extern "C" __declspec(dllimport) PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" __declspec(dllimport) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" __declspec(dllimport) void _rt_record(const void *ptr, size_t size, Type type);
 extern "C" __declspec(dllimport) void _rt_release(void *ptr, Type type);
+extern "C" __declspec(dllimport) void _rt_set_release_cb(void (*cb)(void *));
   #else
 extern "C" PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" void _rt_record(const void *ptr, size_t size, Type type);
 extern "C" void _rt_release(void *ptr, Type type);
+extern "C" void _rt_set_release_cb(void (*cb)(void *));
   #endif
 #endif
 
@@ -276,7 +278,14 @@ struct _rt_service_guard {
   __RT_ODR ~_rt_service_guard() { _rt_in_service() = prev; }
 };
 
+__RT_ODR inline std::atomic<void (*)(void *)> &_rt_release_cb() {
+  static std::atomic<void (*)(void *)> cb{nullptr};
+  return cb;
+}
+
 } // namespace details
+
+extern "C" __RT_ODR __RT_EXPORTED void _rt_set_release_cb(void (*cb)(void *)) { details::_rt_release_cb().store(cb); }
 
 extern "C" __RT_ODR __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
   if (!details::serviceInit.load()) return;
@@ -290,6 +299,8 @@ extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   if (details::_rt_in_service()) return;
   details::_rt_service_guard guard;
   details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
+  if (type == Type::HeapFree || type == Type::HeapCXXDelete)
+    if (const auto cb = details::_rt_release_cb().load(std::memory_order_relaxed)) cb(ptr);
 }
 
 extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) {
