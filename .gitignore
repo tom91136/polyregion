@@ -213,3 +213,8 @@ typings/
 # ctest scratch dir written at the repo root when ctest runs out-of-build
 /Testing/
 vcpkg/
+
+/ci/check_miniapps/*
+!/ci/check_miniapps/CMakeLists.txt
+!/ci/check_miniapps/cloverleaf-gold-from-file.patch
+!/ci/check_miniapps/run.sh

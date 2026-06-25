@@ -22,6 +22,9 @@
       "name": "vulkan-headers"
     },
     {
+      "name": "spirv-headers"
+    },
+    {
       "name": "vulkan-memory-allocator"
     },
     {
@@ -74,6 +77,10 @@
     },
     {
       "name": "vulkan-headers",
+      "version": "1.4.341.0"
+    },
+    {
+      "name": "spirv-headers",
       "version": "1.4.341.0"
     },
     {

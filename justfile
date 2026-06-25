@@ -367,6 +367,10 @@ build-test-dist   extra='': (_native "DIST_TEST"   extra)
 # Smoke-check a built dist: compile hello/offload programs through clang/flang/polycpp/polyfc.
 check-dist        extra='': (_native "CHECK"       extra)
 
+# Run the mini-app matrix against a built dist + optional emulators.
+check-miniapps:
+    ./ci/check_miniapps.sh
+
 # Incremental build of all ninja targets.
 build-all     extra='': (_build "all"     extra) check-fused
 

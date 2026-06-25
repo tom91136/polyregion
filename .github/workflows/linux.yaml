@@ -585,6 +585,47 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
           if-no-files-found: warn
 
+  check-miniapps:
+    needs: [build, build-emulators]
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake git g++ libtbb-dev
+
+      - name: Download dist
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download emulators
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-emulators-linux-${{ matrix.arch }}
+          path: ./emulators
+
+      - name: Unpack emulators
+        if: ${{ !env.ACT }}
+        run: tar xzf emulators/emulators-out.tar.gz -C emulators
+
+      - *restore-exec
+
+      - name: Run mini-app matrix (dist + emulators)
+        env:
+          POLYREGION_EMULATORS_HOME: ${{ github.workspace }}/emulators/out
+        run: ./ci/check_miniapps.sh
+
   test-scala:
     needs: build
     if: ${{ !cancelled() }}

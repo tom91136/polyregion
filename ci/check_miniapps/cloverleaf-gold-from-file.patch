@@ -1,0 +1,37 @@
+diff --git a/driver/report.cpp b/driver/report.cpp
+index 768e561..76dcdc5 100644
+--- a/driver/report.cpp
++++ b/driver/report.cpp
+@@ -22,6 +22,7 @@
+ //  @details Outputs error messages and aborts the calculation.
+ 
+ #include <cmath>
++#include <cstdio>
+ #include <iomanip>
+ #include <iostream>
+ 
+@@ -74,7 +75,23 @@ void clover_report_step(global_variables &globals, parallel_ &parallel, //
+     if (parallel.boss) {
+       if (globals.config.test_problem >= 1) {
+         double qa_diff{};
+-        if (globals.config.test_problem == 1) {
++        double gold = 0;
++        if (FILE *pf = std::fopen("clover.problems", "r")) { // custom decks inject the reference ke here, keyed on grid+steps
++          char line[256];
++          int x, y, s;
++          double v;
++          while (std::fgets(line, sizeof(line), pf))
++            if (std::sscanf(line, "%d %d %d %lf", &x, &y, &s, &v) == 4 && x == globals.config.grid.x_cells &&
++                y == globals.config.grid.y_cells && s == globals.config.end_step) {
++              gold = v;
++              break;
++            }
++          std::fclose(pf);
++        }
++        std::printf(" Actual %.15e\n", ke); // the harness records this line as the gold for the other backends
++        if (gold > 0) {
++          qa_diff = std::fabs((100.0 * (ke / gold)) - 100.0);
++        } else if (globals.config.test_problem == 1) {
+           qa_diff = std::fabs((100.0 * (ke / 1.82280367310258)) - 100.0);
+         } else if (globals.config.test_problem == 2) { // bm * 87
+           qa_diff = std::fabs((100.0 * (ke / 1.19316898756307)) - 100.0);
