@@ -219,7 +219,7 @@ test-native *args='':
 build-emulators:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd {{ justfile_directory() }}/emulators
+    cd "{{ replace(justfile_directory(), "\\", "/") }}/emulators"
     case "{{ os() }}" in
       macos)   exec bash macos.sh "$PWD/out" ;;
       windows) exec cmd //c "windows.bat $(cygpath -w "$PWD" 2>/dev/null || echo "$PWD")\\out" ;;
@@ -252,7 +252,7 @@ test-native-with-emulators *args='':
 check-emulators bundle='':
     #!/usr/bin/env bash
     set -euo pipefail
-    cd {{ justfile_directory() }}/emulators
+    cd "{{ replace(justfile_directory(), "\\", "/") }}/emulators"
     case "{{ os() }}" in
       macos)   exec bash macos.sh --check "${1:-$PWD/out}" ;;
       windows) exec cmd //c "windows.bat --check" ;;
