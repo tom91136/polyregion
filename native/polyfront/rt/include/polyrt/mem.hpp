@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "polyregion/env_keys.h"
 #include "polyregion/types.h"
 
 namespace polyregion::polyrt {
@@ -542,6 +543,8 @@ public:
   std::vector<char> genArenaStaging{};
   std::unordered_map<uintptr_t, uint64_t> genArenaOffsetOf{};
   uintptr_t genArenaDevBase = 0;
+  size_t genArenaDevCapacity = 0; // reuse the device arena across launches; realloc only to grow
+  size_t genArenaDevValid = 0;    // persist: bytes of live device content to carry across a realloc (kernel outputs)
   bool genArenaActive = false; // a backend may hand out device handle 0 (cl_mem index), so track validity separately
   // trailing zeroed pad after each arena object: the arena packs objects adjacently, so a vectoriser's
   // over-read past an array end must land in zeroed slack, not neighbour bytes (Mesa/llvmpipe runs
@@ -554,13 +557,43 @@ public:
     size_t count, indirection, size;
     const runtime::TypeLayout *l;
     bool readOnly; // a const input the device cannot have written; never copy it back (would corrupt it)
+    bool hostDirty = false;   // persist mode: host wrote this leaf since the last upload, so re-send it
+    bool deviceDirty = false; // persist mode: a kernel wrote this leaf; the host copy is stale until map_read
   };
   std::vector<GenArenaRec> genArenaRecs{};
 
+  // persist mode: captured leaves stay resident across launches at stable offsets so only the capture root
+  // (re-laid each launch) and host-dirtied/new leaves re-upload, and a kernel's output flows to the next
+  // kernel on-device. the capture sits in a reserved [0, CAP) prefix (so the kernel still reads root at 0 and
+  // leaf offsets never shift); a bigger root grows CAP and re-lays the union. correct for deep graphs too -
+  // a leaf's inner pointer holds the pointee's absolute (stable) offset
+  bool genArenaPersist = std::getenv(env::PolyrtArenaPersist) != nullptr;
+  bool genArenaSeenRoot = false;      // first mirror call of the launch is the capture root
+  size_t genArenaCaptureCap = 0;      // reserved capture-region size; leaves bump-allocate above it
+  std::vector<std::pair<uint64_t, size_t>> genArenaUploads{}; // regions to H2D this launch (capture + dirty/new leaves)
+  std::vector<uint64_t> genArenaTouched{}; // leaf offsets this kernel reached, marked device-dirty after the launch
+
   void genArenaReset() {
+    genArenaUploads.clear();
+    genArenaTouched.clear();
+    genArenaSeenRoot = false;
+    if (genArenaPersist && genArenaCaptureCap) {
+      // keep resident leaves; drop only the transient root rec (off 0)
+      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](auto &r) { return r.off == 0; }),
+                         genArenaRecs.end());
+      return;
+    }
     genArenaStaging.clear();
     genArenaOffsetOf.clear();
     genArenaRecs.clear();
+  }
+
+  // find the resident leaf a host pointer falls in; drives map_read/map_write dirty tracking in persist mode
+  GenArenaRec *genArenaRecOf(const void *p) {
+    const auto a = reinterpret_cast<const char *>(p);
+    for (auto &r : genArenaRecs)
+      if (r.off != 0 && a >= r.host && a < r.host + r.size) return &r;
+    return nullptr;
   }
 
   // patch the pointer at host `hostBase+hostOff` (already copied into the arena at `arenaPtrOff`) to its
@@ -625,10 +658,46 @@ public:
   uint64_t genArenaMirror(const char *hostData, const size_t count, const size_t indirection, const runtime::TypeLayout &l,
                           const size_t hostAllocSizeInBytes = 0, const bool readOnly = false) {
     if (!hostData) return arenaNull;
-    if (const auto it = genArenaOffsetOf.find(reinterpret_cast<uintptr_t>(hostData)); it != genArenaOffsetOf.end()) return it->second;
     const size_t unit = indirection > 1 ? sizeof(uintptr_t) : l.sizeInBytes;
-    const size_t typeTotal = unit * count;
-    const size_t allocSize = std::max(typeTotal, hostAllocSizeInBytes);
+    const size_t allocSize = std::max(unit * count, hostAllocSizeInBytes);
+
+    if (genArenaPersist) {
+      if (!genArenaSeenRoot) { // the capture root: re-laid at offset 0 each launch, never persisted/deduped
+        genArenaSeenRoot = true;
+        if (allocSize > genArenaCaptureCap) { // grow the reserved prefix and re-lay the whole union below it
+          genArenaCaptureCap = (allocSize + 255) & ~size_t(255);
+          genArenaStaging.assign(genArenaCaptureCap, 0);
+          genArenaOffsetOf.clear();
+          genArenaRecs.clear();
+          genArenaDevValid = 0; // layout changed: the resident device image is stale, force a full re-upload
+        } else if (genArenaStaging.size() < genArenaCaptureCap) genArenaStaging.assign(genArenaCaptureCap, 0);
+        std::memcpy(genArenaStaging.data(), hostData, allocSize);
+        std::memset(genArenaStaging.data() + allocSize, 0, genArenaCaptureCap - allocSize); // zero slack for over-reads
+        genArenaRecs.push_back({hostData, 0, count, indirection, allocSize, &l, readOnly});
+        genArenaUploads.emplace_back(0, genArenaCaptureCap);
+        if (indirection > 1)
+          for (size_t i = 0; i < count; ++i)
+            genArenaPatch(hostData, i * sizeof(uintptr_t), i * sizeof(uintptr_t), indirection - 1,
+                          indirection - 1 == 1 ? l.sizeInBytes : sizeof(uintptr_t), 0, l, nullptr, readOnly);
+        else genArenaWalk(hostData, 0, 0, count, l, readOnly);
+        return 0;
+      }
+      // a resident leaf: the device copy is current (kernel-to-kernel flow); re-send only if the host dirtied it
+      if (const auto it = genArenaOffsetOf.find(reinterpret_cast<uintptr_t>(hostData)); it != genArenaOffsetOf.end()) {
+        const uint64_t off = it->second;
+        genArenaTouched.push_back(off);
+        for (auto &r : genArenaRecs)
+          if (r.off == off && r.hostDirty) {
+            std::memcpy(genArenaStaging.data() + off, hostData, r.size);
+            genArenaUploads.emplace_back(off, r.size);
+            r.hostDirty = false;
+          }
+        return off;
+      }
+      // new leaf: fall through to bump-allocate above the capture region, then schedule its upload + touch
+    } else if (const auto it = genArenaOffsetOf.find(reinterpret_cast<uintptr_t>(hostData)); it != genArenaOffsetOf.end())
+      return it->second;
+
     // pad to the object's alignment: the device reads each pointer/scalar field via a typed access-chain
     // off the arena base, so an under-aligned offset faults (CUDA misaligned-address / SPIR-V UB)
     const size_t align = indirection > 1 ? sizeof(uintptr_t) : std::max<size_t>(1, l.alignmentInBytes);
@@ -639,6 +708,10 @@ public:
     genArenaStaging.insert(genArenaStaging.end(), hostData, hostData + allocSize);
     // pad before any child object is appended, so this object's over-read lands in its own zeroed slack
     if (genArenaObjectSlack) genArenaStaging.resize(genArenaStaging.size() + genArenaObjectSlack);
+    if (genArenaPersist) {
+      genArenaUploads.emplace_back(off, allocSize);
+      genArenaTouched.push_back(off);
+    }
     if (indirection > 1)
       for (size_t i = 0; i < count; ++i)
         genArenaPatch(hostData, i * sizeof(uintptr_t), off + i * sizeof(uintptr_t), indirection - 1,
@@ -648,11 +721,35 @@ public:
   }
 
   uintptr_t genArenaFinish() {
-    if (genArenaActive) remoteRelease(genArenaDevBase);
-    genArenaDevBase = remoteAlloc(genArenaStaging.size() + 1);
-    genArenaActive = true;
-    remoteWrite(genArenaStaging.data(), genArenaDevBase, 0, genArenaStaging.size());
-    if (debug) std::fprintf(stderr, "[SMA] genArenaFinish -> %zu bytes\n", genArenaStaging.size());
+    const size_t need = genArenaStaging.size() + 1;
+    if (!genArenaActive || need > genArenaDevCapacity) {
+      // the resident leaves carry kernel outputs (not in staging), so preserve the live device image across
+      // the realloc instead of re-uploading stale staging - else a growth (a later kernel's new leaf) clobbers
+      // every prior kernel's result. headroom keeps growths logarithmic during warmup
+      std::vector<char> keep;
+      if (genArenaPersist && genArenaActive && genArenaDevValid) {
+        keep.resize(genArenaDevValid);
+        remoteRead(keep.data(), genArenaDevBase, 0, genArenaDevValid);
+      }
+      if (genArenaActive) remoteRelease(genArenaDevBase);
+      genArenaDevCapacity = std::max(need, genArenaDevCapacity * 2);
+      genArenaDevBase = remoteAlloc(genArenaDevCapacity);
+      genArenaActive = true;
+      if (!keep.empty()) remoteWrite(keep.data(), genArenaDevBase, 0, keep.size());
+    }
+    if (genArenaPersist && genArenaDevValid) {
+      // resident leaves are already on-device (just restored if we grew); only the capture + dirty/new leaves
+      for (const auto &[off, sz] : genArenaUploads)
+        remoteWrite(genArenaStaging.data() + off, genArenaDevBase, off, sz);
+      if (debug)
+        std::fprintf(stderr, "[SMA] genArenaFinish(persist) -> %zu region(s), %zu bytes resident\n", genArenaUploads.size(),
+                     genArenaStaging.size());
+    } else {
+      // first launch (or a re-laid union): nothing resident yet, upload the whole image once
+      remoteWrite(genArenaStaging.data(), genArenaDevBase, 0, genArenaStaging.size());
+      if (debug) std::fprintf(stderr, "[SMA] genArenaFinish -> %zu bytes\n", genArenaStaging.size());
+    }
+    genArenaDevValid = genArenaStaging.size();
     return genArenaDevBase;
   }
 
@@ -689,25 +786,72 @@ public:
       }
   }
 
+  // scatter one downloaded rec back to its host, translating pointer slots; `buf` must be indexable at r.off
+  void genArenaScatterRec(const std::vector<char> &buf, const GenArenaRec &r) {
+    if (r.readOnly) return; // const input: never copy back
+    char *host = const_cast<char *>(r.host);
+    if (r.indirection > 1) {
+      // an array of `count` pointers (each an arena offset); translate the ones the kernel changed
+      for (size_t i = 0; i < r.count; ++i)
+        genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * sizeof(uintptr_t));
+      return;
+    }
+    if (r.l->memberCount == 0) std::memcpy(host, buf.data() + r.off, r.count * r.l->sizeInBytes);
+    else genArenaReadbackWalk(buf, host, r.off, 0, r.count, *r.l);
+    // a downcast widens the object past its static pointee type (a `_List_node_base*` link reaches a
+    // `_List_node<int>` tail beyond the prefix); copy the remainder wholesale, it holds no pointer slot
+    if (const size_t typed = r.count * r.l->sizeInBytes; r.size > typed)
+      std::memcpy(host + typed, buf.data() + r.off + typed, r.size - typed);
+  }
+
   void genArenaReadback() {
     if (!genArenaActive || genArenaRecs.empty()) return;
+    if (genArenaPersist) {
+      // POLYRT_ARENA_EAGER: diagnostic/conservative - copy this kernel's touched outputs straight back, so
+      // correctness does not depend on map_read coverage (isolates upload bugs from the lazy-readback path)
+      static const bool eager = std::getenv(env::PolyrtArenaEager) != nullptr;
+      if (eager) {
+        std::vector<char> buf(genArenaStaging.size());
+        remoteRead(buf.data(), genArenaDevBase, 0, buf.size());
+        for (const uint64_t off : genArenaTouched)
+          for (const auto &r : genArenaRecs)
+            if (r.off == off) genArenaScatterRec(buf, r);
+        return;
+      }
+      // lazy: the kernel's outputs stay device-resident and flow to the next kernel on-device; just flag them
+      // so a later host read (map_read) pulls the touched leaf home. nothing is copied at the launch boundary
+      for (const uint64_t off : genArenaTouched)
+        for (auto &r : genArenaRecs)
+          if (r.off == off && !r.readOnly) r.deviceDirty = true;
+      return;
+    }
     std::vector<char> buf(genArenaStaging.size());
     remoteRead(buf.data(), genArenaDevBase, 0, buf.size());
-    for (const auto &r : genArenaRecs) {
-      if (r.readOnly) continue; // const input: never copy back
-      char *host = const_cast<char *>(r.host);
-      if (r.indirection > 1) {
-        // an array of `count` pointers (each an arena offset); translate the ones the kernel changed
-        for (size_t i = 0; i < r.count; ++i)
-          genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * sizeof(uintptr_t));
-        continue;
-      }
-      if (r.l->memberCount == 0) std::memcpy(host, buf.data() + r.off, r.count * r.l->sizeInBytes);
-      else genArenaReadbackWalk(buf, host, r.off, 0, r.count, *r.l);
-      // a downcast widens the object past its static pointee type (a `_List_node_base*` link reaches a
-      // `_List_node<int>` tail beyond the prefix); copy the remainder wholesale, it holds no pointer slot
-      if (const size_t typed = r.count * r.l->sizeInBytes; r.size > typed)
-        std::memcpy(host + typed, buf.data() + r.off + typed, r.size - typed);
+    for (const auto &r : genArenaRecs)
+      genArenaScatterRec(buf, r);
+  }
+
+  // the host is about to read `p`: pull the device-dirty leaf it falls in back home (the lazy half of persist)
+  void genArenaMapRead(const void *p) {
+    if (!genArenaPersist) return;
+    GenArenaRec *r = genArenaRecOf(p);
+    if (!r || !r->deviceDirty) return;
+    char *host = const_cast<char *>(r->host);
+    if (r->indirection == 1 && r->l->memberCount == 0) remoteRead(host, genArenaDevBase, r->off, r->size); // flat: straight copy
+    else { // deep: needs the arena-indexed buf for pointer-slot translation
+      std::vector<char> buf(r->off + r->size);
+      remoteRead(buf.data() + r->off, genArenaDevBase, r->off, r->size);
+      genArenaScatterRec(buf, *r);
+    }
+    r->deviceDirty = false;
+  }
+
+  // the host is about to write `p`: it becomes authoritative, so re-send its leaf before the next kernel reads it
+  void genArenaMapWrite(const void *p) {
+    if (!genArenaPersist) return;
+    if (GenArenaRec *r = genArenaRecOf(p)) {
+      r->hostDirty = true;
+      r->deviceDirty = false;
     }
   }
 

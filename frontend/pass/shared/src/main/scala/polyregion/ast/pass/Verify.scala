@@ -69,6 +69,13 @@ object Verify {
       typeViolations ::: tpeVarViolations
     }
 
+  def validatePoison(program: p.Program): List[String] =
+    (program.entry :: program.functions).flatMap { f =>
+      f.collectWhere[p.Term] { case x: p.Term.Poison =>
+        s"${f.name.repr}: unlowered poison value of type ${x.tpe.repr}"
+      }
+    }
+
   def validateRegions(program: p.Program): List[String] =
     (program.entry :: program.functions).flatMap { f =>
       val derived = Provenance.derivedIn(f)

@@ -84,12 +84,13 @@ final case class Anchor() extends ProgramPass derives PassArgCodec {
       syms: Set[String],
       seeds: => List[String],
       exprRw: (Set[String], p.Expr) => p.Expr,
-      stmtRw: (Set[String], p.Stmt) => List[p.Stmt]
+      stmtRw: (Set[String], p.Stmt) => List[p.Stmt],
+      termRw: (Set[String], p.Term) => p.Term = (_, t) => t
   ): (p.Function, Int) = {
     val drop = if (syms.isEmpty) Set.empty[String] else foldable(f, syms)(seeds)
     if (drop.isEmpty) (f, 0)
     else {
-      val rewritten = f.modifyAll[p.Expr](exprRw(drop, _))
+      val rewritten = f.modifyAll[p.Expr](exprRw(drop, _)).modifyAll[p.Term](termRw(drop, _))
       val body = mapStmtsRec(rewritten.body) {
         case p.Stmt.Var(n, _, _) if drop(n.symbol) => Nil
         case s                                     => stmtRw(drop, s)
@@ -167,11 +168,10 @@ final case class Anchor() extends ProgramPass derives PassArgCodec {
       syms,
       f.collectAll[p.Stmt].collect {
         case p.Stmt.Update(p.Term.Select(n, Nil, _), idx, _) if syms(n.symbol) && isZeroConst(idx) => n.symbol
-        case p.Stmt.Var(w, Some(p.Expr.RefTo(p.Term.Select(n, List(p.PathStep.Field(_)), selTpe), _, _, _, _)), _)
-            if syms(n.symbol) && syms(w.symbol) && isArr(selTpe) =>
-          n.symbol
       } ::: f.collectAll[p.Expr].collect {
         case p.Expr.Index(p.Term.Select(n, Nil, _), idx, _) if syms(n.symbol) && isZeroConst(idx) => n.symbol
+      } ::: f.collectAll[p.Term].collect {
+        case p.Term.Select(n, steps, _) if syms(n.symbol) && steps.nonEmpty => n.symbol
       },
       (drop, e) =>
         e match {
@@ -184,6 +184,12 @@ final case class Anchor() extends ProgramPass derives PassArgCodec {
           case p.Stmt.Update(p.Term.Select(n, Nil, _), idx, v) if drop(n.symbol) && isZeroConst(idx) =>
             List(p.Stmt.Mut(rooted(n, v.tpe), p.Expr.Alias(v)))
           case _ => List(s)
+        },
+      (drop, t) =>
+        t match {
+          case p.Term.Select(n, steps, tp) if steps.nonEmpty && drop(n.symbol) =>
+            val (root, path) = chain(n.symbol); p.Term.Select(root, path ::: steps, tp)
+          case _ => t
         }
     )
   }

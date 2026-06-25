@@ -114,6 +114,7 @@ template <typename SMA>
 POLYREGION_RT_PROTECT inline void mapRead(SMA &sma, void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
   log(DebugLevel::Debug, "polyrt_map_read(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
+  sma.genArenaMapRead(origin);
   sma.syncRemoteToLocal(origin, sizeInBytes);
   dumpAllocations(sma);
 }
@@ -122,6 +123,7 @@ template <typename SMA>
 POLYREGION_RT_PROTECT inline void mapWrite(SMA &sma, void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
   log(DebugLevel::Debug, "polyrt_map_write(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
+  sma.genArenaMapWrite(origin);
   sma.invalidateLocal(origin);
 }
 
@@ -129,7 +131,9 @@ template <typename SMA>
 POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
   log(DebugLevel::Debug, "polyrt_map_readwrite(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
+  sma.genArenaMapRead(origin);
   sma.syncRemoteToLocal(origin);
+  sma.genArenaMapWrite(origin);
   sma.invalidateLocal(origin);
 }
 

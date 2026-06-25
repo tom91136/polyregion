@@ -217,7 +217,13 @@ void polyregion::polyrt::initialise() {
           currentDeviceLock.emplace(physical);
         }
       }
-      if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
+      if (currentDevice) {
+        auto timeout = std::chrono::seconds(10);
+        if (const auto env = std::getenv(polyregion::env::PolyrtQueueTimeoutSec); env && env[0]) {
+          if (const auto secs = std::strtol(env, nullptr, 10); secs > 0) timeout = std::chrono::seconds(secs);
+        }
+        currentQueue = currentDevice->createQueue(timeout);
+      }
       // XXX HIP/CUDA/HSA runtimes don't survive explicit teardown during __cxa_finalize. their globals are being destroyed concurrently and
       // the destroy-stream call SIGSEGVs. Just leak it as program is terminating anyway.
       std::atexit([] {

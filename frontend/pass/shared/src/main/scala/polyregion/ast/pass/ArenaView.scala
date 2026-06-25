@@ -95,6 +95,10 @@ object ArenaView extends ProgramPass {
       // into a preceding Var. bounds are loop-invariant so hoisting once is sound; While conds are plain vars
       val body =
         mapStmtsRec(hoistInlineTerms(f.body))(rewriteLeaf(members, capN, capTpe, views, derived, arenaRegion, isArena))
+      // neutralise view binding slots to an i8 view so the slot stays aligned, so we can avoid dragging unused types in
+      val usedViews = body.flatMap(_.collectWhere[p.Term] { case p.Term.Select(r, _, _) => r.symbol }).toSet
+      val pinnedViews =
+        views.map(v => if (usedViews(v.symbol)) v else p.Named(v.symbol, p.Type.Ptr(p.Type.IntS8, Global)))
       // the views replace ONLY the capture; a reduction also has a Local-AS partials/scratch arg (kept,
       // a real workgroup pointer) which must stay first to line up with the dispatch's leading Scratch arg
       val keptArgs    = f.args.filterNot(_.named == capN)
@@ -103,7 +107,7 @@ object ArenaView extends ProgramPass {
         receiver = newReceiver,
         moduleCaptures = Nil,
         termCaptures = Nil,
-        args = keptArgs ++ views.map(p.Arg(_)),
+        args = keptArgs ++ pinnedViews.map(p.Arg(_)),
         body = body
       )
   }

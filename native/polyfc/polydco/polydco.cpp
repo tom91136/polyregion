@@ -204,13 +204,13 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   std::memcpy(captures, &bounds, sizeof(polydco::FManagedPrelude));
 
   constexpr size_t blockSize = 256;
+  const size_t maxThreadsPerBlock = polyrt::currentDevice->maxThreadsPerBlock();
   const bool isReduction = !reductions.empty();
-  const size_t threadsPerBlock = //
-      isReduction ? blockSize    // use local==global for reduction
-                  : (static_cast<size_t>(tripCount) < blockSize ? 1 : static_cast<size_t>(tripCount) / blockSize);
-  const size_t blocks =       //
-      isReduction ? blockSize // use local==global for reduction
-                  : (static_cast<size_t>(tripCount) < blockSize ? static_cast<size_t>(tripCount) : blockSize);
+  const auto trip = static_cast<size_t>(tripCount);
+  const bool small = trip < blockSize; // fewer items than one work-group
+  // reduction keeps local==global; otherwise cap the work-group at the device max
+  const size_t threadsPerBlock = isReduction ? blockSize : std::min<size_t>(maxThreadsPerBlock, small ? trip : trip / blockSize);
+  const size_t blocks = isReduction ? blockSize : (small ? 1 : trip / threadsPerBlock);
   ManagedPartialReduction mpr(reductions, blockSize);
   const size_t localMemBytes = mpr.allocatePartialsAsync();
   log(DebugLevel::Debug, "<%s:%s:%zu> localMemBytes=%zu", __func__, moduleId, threadsPerBlock, localMemBytes);

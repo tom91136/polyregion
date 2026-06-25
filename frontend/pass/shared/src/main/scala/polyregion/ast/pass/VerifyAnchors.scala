@@ -10,6 +10,9 @@ import polyregion.ast.{PolyAST as p, *}
 //   p Global rooted at a Local           ->  log.info "region-space drift: ..."
 case class VerifyAnchors(strict: Boolean = false) extends ProgramPass derives PassArgCodec {
   override def apply(program: p.Program, log: Log): p.Program = {
+    val poison = Verify.validatePoison(program)
+    if (poison.nonEmpty)
+      log.info(s"poison reaches backend: ${poison.size} unlowered value(s):\n  ${poison.mkString("\n  ")}")
     val errs = Verify.validateRegions(program)
     if (errs.nonEmpty) {
       val msg =

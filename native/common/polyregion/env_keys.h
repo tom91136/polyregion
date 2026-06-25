@@ -40,8 +40,11 @@ inline constexpr auto PolyrtDevice = "POLYRT_DEVICE";
 inline constexpr auto PolyrtDumpKernel = "POLYRT_DUMP_KERNEL";
 inline constexpr auto PolyrtHostFallback = "POLYRT_HOST_FALLBACK";
 inline constexpr auto PolyrtMirror = "POLYRT_MIRROR";
+inline constexpr auto PolyrtArenaPersist = "POLYRT_ARENA_PERSIST";
+inline constexpr auto PolyrtArenaEager = "POLYRT_ARENA_EAGER";
 inline constexpr auto PolyrtPlatform = "POLYRT_PLATFORM";
 inline constexpr auto PolyrtStrictSelect = "POLYRT_STRICT_SELECT";
+inline constexpr auto PolyrtQueueTimeoutSec = "POLYRT_QUEUE_TIMEOUT_SEC";
 
 inline constexpr auto PolytestDebug = "POLYTEST_DEBUG";
 inline constexpr auto PolytestProfileDir = "POLYTEST_PROFILE_DIR";
