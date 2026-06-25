@@ -10,6 +10,8 @@
 #include "aspartame/all.hpp"
 #include "aspartame/ext/llvm.hpp"
 
+#include "polyregion/types.h"
+
 using namespace polyregion::backend::details;
 using namespace aspartame;
 
@@ -221,7 +223,7 @@ void SPIRVVulkanTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   // entry points use the hlsl.shader attribute, not SPIR_KERNEL; no optnone (it forces an unsupported capability)
   if (source.isEntry) {
     fn.addFnAttr("hlsl.shader", "compute");
-    fn.addFnAttr("hlsl.numthreads", std::to_string(cg.vkWorkgroupSizeX) + ",1,1");
+    fn.addFnAttr("hlsl.numthreads", std::to_string(program_meta::VkWorkgroupSizeXValue) + ",1,1");
   } else fn.setCallingConv(llvm::CallingConv::SPIR_FUNC);
 }
 
@@ -238,7 +240,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
     return coerce(B.CreateIntrinsic(i32t, id, {dimI32(dim)}), tpe);
   };
   auto localSize = [&](const AnyTerm &dim) -> llvm::Value * {
-    return B.CreateSelect(B.CreateICmpEQ(dimI32(dim), B.getInt32(0)), B.getInt32(cg.vkWorkgroupSizeX), B.getInt32(1));
+    return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_workgroup_size, {dimI32(dim)});
   };
   auto groupBarrier = [&]() -> ValPtr {
     B.CreateIntrinsic(llvm::Type::getVoidTy(ctx), llvm::Intrinsic::spv_group_memory_barrier_with_group_sync, {});

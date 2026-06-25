@@ -1158,19 +1158,10 @@ std::vector<StructLayout> LLVMBackend::resolveLayouts(const std::vector<StructDe
   return TargetedContext(options).resolveLayouts(structs) | values() | map([&](auto &i) { return i.layout; }) | to_vector();
 }
 
-static unsigned programMetaU32(const Program &program, const char *key) {
-  return program.metadata ^ find([&](auto &x) { return x.key == key; }) //
-         ^ map([](auto &e) { return std::stoul(e.value); })             //
-         ^ static_as<unsigned>()                                        //
-         ^ fold([](auto v) { return v; },                               //
-                [&]() -> unsigned { throw std::logic_error(std::string("missing program metadata key: ") + key); });
-}
-
 CompileResult LLVMBackend::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
   using namespace llvm;
 
   CodeGen cg(options, "program");
-  if (cg.C.isVulkan()) cg.vkWorkgroupSizeX = programMetaU32(program, program_meta::VkWorkgroupSizeX);
   auto transformStart = compiler::nowMono();
   auto [maybeTransformErr, transformMsg] = cg.transform(program);
   CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg, {});

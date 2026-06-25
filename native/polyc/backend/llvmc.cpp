@@ -9,6 +9,8 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 
+#include "spirv/unified1/spirv.hpp"
+
 namespace llvm {
 class Module;
 // XXX SPIRVTranslate is `extern "C"` in lib/Target/SPIRV/SPIRVAPI.cpp but lacks a public header.
@@ -190,7 +192,6 @@ Pair<Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
 // it as a zero of the given integer type (Khronos SPIRV-Headers#50, still open). We catch
 // every integer width; pointer/null OpConstantNull entries are left alone.
 static std::string patchSpirvConstantNull(std::string spv) {
-  constexpr uint16_t OpTypeInt = 21, OpConstant = 43, OpConstantNull = 46;
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
   auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
@@ -201,8 +202,8 @@ static std::string patchSpirvConstantNull(std::string spv) {
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
-    if (opcode(src[i]) == OpTypeInt && wc == 4) intTypeWidth[src[i + 1]] = src[i + 2];
-    else if (opcode(src[i]) == OpConstantNull && wc == 3 && intTypeWidth.count(src[i + 1])) needsRewrite = true;
+    if (opcode(src[i]) == spv::OpTypeInt && wc == 4) intTypeWidth[src[i + 1]] = src[i + 2];
+    else if (opcode(src[i]) == spv::OpConstantNull && wc == 3 && intTypeWidth.count(src[i + 1])) needsRewrite = true;
     i += wc;
   }
   if (!needsRewrite) return spv;
@@ -210,10 +211,10 @@ static std::string patchSpirvConstantNull(std::string spv) {
   out.reserve(nWords + 16);
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]);
-    const auto it = (opcode(src[i]) == OpConstantNull && wc == 3) ? intTypeWidth.find(src[i + 1]) : intTypeWidth.end();
+    const auto it = (opcode(src[i]) == spv::OpConstantNull && wc == 3) ? intTypeWidth.find(src[i + 1]) : intTypeWidth.end();
     if (it != intTypeWidth.end()) {
       const uint32_t literalWords = (it->second + 31u) / 32u;
-      out.push_back(((3u + literalWords) << 16) | OpConstant);
+      out.push_back(((3u + literalWords) << 16) | spv::OpConstant);
       out.push_back(src[i + 1]);
       out.push_back(src[i + 2]);
       for (uint32_t w = 0; w < literalWords; ++w)
@@ -229,9 +230,6 @@ static std::string patchSpirvConstantNull(std::string spv) {
 // reorder a store past a load at the same byte (type-punning: std::list node membuf, widened tails).
 // decorate every StorageBuffer Aliased; it can only forbid an optimisation, so it is conservatively correct
 static std::string patchSpirvAliased(std::string spv) {
-  constexpr uint16_t OpDecorate = 71, OpMemberDecorate = 72, OpDecorationGroup = 73, OpGroupDecorate = 74, OpGroupMemberDecorate = 75,
-                     OpVariable = 59;
-  constexpr uint32_t StorageBufferSC = 12, AliasedDecoration = 20;
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
   auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
@@ -243,23 +241,110 @@ static std::string patchSpirvAliased(std::string spv) {
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
-    if (op == OpDecorate || op == OpMemberDecorate || op == OpDecorationGroup || op == OpGroupDecorate || op == OpGroupMemberDecorate)
+    if (op == spv::OpDecorate || op == spv::OpMemberDecorate || op == spv::OpDecorationGroup || op == spv::OpGroupDecorate ||
+        op == spv::OpGroupMemberDecorate)
       lastDecorEnd = i + wc;
-    if (op == OpDecorate && wc >= 3 && src[i + 2] == AliasedDecoration) aliased.insert(src[i + 1]);
-    if (op == OpVariable && wc >= 4 && src[i + 3] == StorageBufferSC) ssboVars.push_back(src[i + 2]);
+    if (op == spv::OpDecorate && wc >= 3 && src[i + 2] == spv::DecorationAliased) aliased.insert(src[i + 1]);
+    if (op == spv::OpVariable && wc >= 4 && src[i + 3] == spv::StorageClassStorageBuffer) ssboVars.push_back(src[i + 2]);
     i += wc;
   }
   std::vector<uint32_t> add;
   for (const uint32_t id : ssboVars)
     if (aliased.insert(id).second) {
-      add.push_back((3u << 16) | OpDecorate);
+      add.push_back((3u << 16) | spv::OpDecorate);
       add.push_back(id);
-      add.push_back(AliasedDecoration);
+      add.push_back(spv::DecorationAliased);
     }
   if (add.empty() || lastDecorEnd == 0) return spv;
   std::vector<uint32_t> out(src, src + lastDecorEnd);
   out.insert(out.end(), add.begin(), add.end());
   out.insert(out.end(), src + lastDecorEnd, src + nWords);
+  return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
+// make the work-group size host-settable. the backend reads it via the WorkgroupSize built-in, which the LLVM
+// SPIR-V backend emits as an Input variable - invalid, the built-in must decorate a constant. rewrite it into a
+// spec-constant composite (SpecId 0/1/2, defaults from the LocalSize literal) decorated WorkgroupSize, redirect
+// each load to it via OpCopyObject (same word count, no id substitution), and drop the variable + LocalSize. the
+// runtime already supplies spec constants 0/1/2, so the host sets the group size at pipeline creation
+static std::string patchSpirvWorkgroupSpecConstant(std::string spv) {
+  if (spv.size() < 5 * sizeof(uint32_t)) return spv;
+  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  auto opcode = [](uint32_t x) { return static_cast<uint16_t>(x & 0xFFFF); };
+  auto wcount = [](uint32_t x) { return static_cast<uint16_t>(x >> 16); };
+
+  uint32_t wgVar = 0, uintTy = 0, v3uintTy = 0, defaults[3] = {0, 0, 0};
+  size_t execModeIdx = 0, lastDecorEnd = 0, funcStart = 0;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    if (wc == 0 || i + wc > nWords) return spv;
+    if (op == spv::OpDecorate && wc == 4 && src[i + 2] == spv::DecorationBuiltIn && src[i + 3] == spv::BuiltInWorkgroupSize)
+      wgVar = src[i + 1];
+    else if (op == spv::OpTypeInt && wc == 4 && src[i + 2] == 32 && src[i + 3] == 0 && !uintTy) uintTy = src[i + 1];
+    else if (op == spv::OpTypeVector && wc == 4 && src[i + 2] == uintTy && src[i + 3] == 3 && !v3uintTy) v3uintTy = src[i + 1];
+    else if (op == spv::OpExecutionMode && wc == 6 && src[i + 2] == spv::ExecutionModeLocalSize)
+      execModeIdx = i, defaults[0] = src[i + 3], defaults[1] = src[i + 4], defaults[2] = src[i + 5];
+    if (op >= spv::OpDecorate && op <= spv::OpGroupMemberDecorate) lastDecorEnd = i + wc;
+    if (op == spv::OpFunction && !funcStart) funcStart = i;
+    i += wc;
+  }
+  if (!wgVar || !uintTy || !v3uintTy || !execModeIdx || !lastDecorEnd || !funcStart) return spv;
+
+  const uint32_t bound = src[3], sc0 = bound, sc1 = bound + 1, sc2 = bound + 2, comp = bound + 3;
+  std::vector<uint32_t> out;
+  out.reserve(nWords + 32);
+  out.insert(out.end(), src, src + 5);
+  out[3] = bound + 4;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    if (i == funcStart) { // emit the spec constants + composite just before the first function
+      for (uint32_t d = 0; d < 3; ++d) {
+        out.push_back((4u << 16) | spv::OpSpecConstant);
+        out.push_back(uintTy);
+        out.push_back(bound + d);
+        out.push_back(defaults[d]);
+      }
+      out.push_back((6u << 16) | spv::OpSpecConstantComposite);
+      out.push_back(v3uintTy);
+      out.push_back(comp);
+      out.push_back(sc0), out.push_back(sc1), out.push_back(sc2);
+    }
+    if (i == execModeIdx) { /* drop the literal LocalSize execution mode */
+    } else if ((op == spv::OpDecorate || op == spv::OpName) && wc >= 2 && src[i + 1] == wgVar) { /* drop the var's name/decoration */
+    } else if (op == spv::OpVariable && wc >= 3 && src[i + 2] == wgVar) {                        /* drop the WorkgroupSize Input variable */
+    } else if (op == spv::OpLoad && wc == 4 && src[i + 3] == wgVar) { // OpLoad %ty %res %wgVar -> OpCopyObject %ty %res %comp
+      out.push_back((4u << 16) | spv::OpCopyObject);
+      out.push_back(src[i + 1]);
+      out.push_back(src[i + 2]);
+      out.push_back(comp);
+    } else if (op == spv::OpEntryPoint) { // drop wgVar from the interface list
+      size_t w = i + 3;                   // skip ExecutionModel + entry id, then the name string
+      while (w < i + wc) {
+        const uint32_t word = src[w++];
+        if (!(word & 0xFFu) || !(word & 0xFF00u) || !(word & 0xFF0000u) || !(word & 0xFF000000u)) break;
+      }
+      std::vector<uint32_t> ep(src + i, src + i + wc);
+      for (size_t k = w - i; k < ep.size();)
+        if (ep[k] == wgVar) ep.erase(ep.begin() + static_cast<long>(k));
+        else ++k;
+      ep[0] = (static_cast<uint32_t>(ep.size()) << 16) | spv::OpEntryPoint;
+      out.insert(out.end(), ep.begin(), ep.end());
+    } else out.insert(out.end(), src + i, src + i + wc);
+    if (i + wc == lastDecorEnd) {
+      for (uint32_t d = 0; d < 3; ++d) {
+        out.push_back((4u << 16) | spv::OpDecorate);
+        out.push_back(bound + d);
+        out.push_back(spv::DecorationSpecId);
+        out.push_back(d);
+      }
+      out.push_back((4u << 16) | spv::OpDecorate);
+      out.push_back(comp);
+      out.push_back(spv::DecorationBuiltIn);
+      out.push_back(spv::BuiltInWorkgroupSize);
+    }
+    i += wc;
+  }
   return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
 }
 
@@ -665,7 +750,10 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // `OpConstantNull %ulong` and pointer-null alone).
         spvBlob = patchSpirvConstantNull(std::move(spvBlob));
         // only Vulkan's logical memory model assumes no-alias by default; OpenCL is C-like (may-alias), already sound
-        if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) spvBlob = patchSpirvAliased(std::move(spvBlob));
+        if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) {
+          spvBlob = patchSpirvAliased(std::move(spvBlob));
+          spvBlob = patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
+        }
         objBuffer.append(spvBlob.begin(), spvBlob.end());
       } else {
         llvm::legacy::PassManager PM;

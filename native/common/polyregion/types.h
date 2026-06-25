@@ -24,7 +24,6 @@
 #endif
 
 namespace polyregion::program_meta {
-inline constexpr auto VkWorkgroupSizeX = "polyregion.vk.workgroup_size_x";
 inline constexpr int64_t VkWorkgroupSizeXValue = 256;
 } // namespace polyregion::program_meta
 

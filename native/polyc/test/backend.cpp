@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "catch2/catch_all.hpp"
 #include "fmt/format.h"
 
@@ -86,6 +88,32 @@ TEST_CASE("host prelude with foreign calls compiles to host object", "[backend]"
   INFO(repr(c));
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
+}
+
+TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named xField("x", Type::Float32());
+  const StructDef capDef(Sym({"Cap"}), {}, {xField}, {});
+  const Type::Struct capTpe(Sym({"Cap"}), {});
+  const Named capture("#capture", Type::Ptr(capTpe, TypeSpace::Global()));
+
+  std::vector<Stmt::Any> body{
+      Stmt::Mut(Select({capture}, xField), Expr::Alias(Term::Float32Const(1.0f)).widen()).widen(),
+      Stmt::Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+  };
+  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {Arg(capture, {})}, {}, {}, Type::Unit0(), body, FunctionVisibility::Exported(),
+                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Program p(entry, {}, {capDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV_GLCompute, ""};
+  opts.pipelineSpec = "FullOpt;Anchor;ArenaView;VerifyAnchors(strict=true)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O3);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+  CHECK(std::find(c.features.begin(), c.features.end(), "fp16") == c.features.end());
 }
 
 TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[backend]") {

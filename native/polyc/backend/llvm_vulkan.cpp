@@ -211,7 +211,7 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
   // local-AS pointers back workgroup-shared globals
   localBases ^= concat(argsNoUnit | filter(localPtr) | map([&](auto &arg) {
                          const auto p = *arg.named.tpe.template get<Type::Ptr>();
-                         auto *arrTy = llvm::ArrayType::get(cg.resolveType(p.comp), cg.vkWorkgroupSizeX);
+                         auto *arrTy = llvm::ArrayType::get(cg.resolveType(p.comp), program_meta::VkWorkgroupSizeXValue);
                          auto *gv = new llvm::GlobalVariable(cg.M, arrTy, /*isConstant*/ false, llvm::GlobalValue::InternalLinkage,
                                                              llvm::PoisonValue::get(arrTy), "wg_" + arg.named.symbol, nullptr,
                                                              llvm::GlobalValue::NotThreadLocal, AddrSpace::Workgroup);

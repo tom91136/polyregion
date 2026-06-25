@@ -124,6 +124,7 @@ target_link_libraries(polyc
         Aspartame::Aspartame
         magic_enum::magic_enum
         fmt::fmt
+        SPIRV-Headers::SPIRV-Headers
         ${POLYC_JS_LIBS}
         ${POLYREGION_SYSTEM_LIBS}
         ${LLVM_LIBS}

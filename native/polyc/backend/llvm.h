@@ -129,8 +129,6 @@ struct CodeGen {
   std::unique_ptr<PointerModel> ptrModel;
   // Out-pointer for sret-transformed bodies; `Stmt::Return` writes through it. Reset per body.
   llvm::Value *currentSretParam = nullptr;
-  // Vulkan compute workgroup size, resolved from program metadata (program_meta::VkWorkgroupSizeX)
-  unsigned vkWorkgroupSizeX = 0;
 
   // XXX SPIR-V Kernel only: byte arithmetic + memcpy works around Intel IGC's mis-routing of
   // `OpInBoundsPtrAccessChain` with `OpConstantNull` element. Logical SPIR-V (GLCompute) runs
