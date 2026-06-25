@@ -17,11 +17,16 @@ set "SED=C:\Program Files\Git\usr\bin\sed.exe"
 rem LLVM21 ignores LLVM_USE_CRT_RELEASE; CMP0091 makes CMAKE_MSVC_RUNTIME_LIBRARY apply
 set "MT_CMAKE=-DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
 
-rem arch-aware toolchain/target (amd64 default; arm64 override)
-rem POCL_CPU pins pocl's kernel-codegen target - runtime auto-detect picks micro-archs (znver4 etc.) it mishandles
+rem arch-aware toolchain/target (amd64 default; arm64 override). PROCESSOR_ARCHITECTURE reads AMD64 when this
+rem runs under x64 emulation on a Windows-on-ARM runner (an x64 just -> bash -> cmd), so also honour the CI
+rem matrix arch + WOW6432; POCL_CPU pins pocl's kernel target (auto-detect mishandles micro-archs like znver4)
+set "ARM=0"
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "ARM=1"
+if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64" set "ARM=1"
+if /i "%POLYREGION_ARCH%"=="arm64" set "ARM=1"
 set "VCARCH=64" & set "VCREQ=Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 set "LLVM_TGT=X86" & set "ICDARCH=x86_64" & set "POCL_CPU=-DLLC_HOST_CPU=x86-64" & set "SS=1"
-if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
+if "%ARM%"=="1" (
   set "VCARCH=arm64" & set "VCREQ=Microsoft.VisualStudio.Component.VC.Tools.ARM64"
   set "LLVM_TGT=AArch64" & set "ICDARCH=aarch64" & set "POCL_CPU=-DLLC_HOST_CPU=generic"
 )
@@ -36,7 +41,13 @@ for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 if not defined VS (echo no VC-capable Visual Studio found & exit /b 1)
 call "%VS%\VC\Auxiliary\Build\vcvars%VCARCH%.bat" >nul || (echo VCVARS-FAIL & exit /b 1)
 for /f "delims=" %%p in ('where python 2^>nul') do if not defined PY set "PY=%%p"
-set "PATH=%WORK%\llvm\bin;%WORK%\winflexbison;%WORK%\glslang-prefix\bin;%PATH%"
+rem keep llvm\bin OFF PATH here: on arm64 cmake otherwise grabs the from-source clang/llvm-ar by name for the
+rem pure-MSVC components (glslang/vk-loader/swiftshader); it's added only around mesa/pocl which need llvm-config
+set "PATH=%WORK%\winflexbison;%WORK%\glslang-prefix\bin;%PATH%"
+rem MSVC archiver, forward-slashed for cmake: on arm64 cmake derives the cl compiler's AR as the from-source
+rem llvm-ar (which rejects MSVC /out: flags), so the cl-based cmake builds below pin CMAKE_<LANG>_COMPILER_AR to it
+for /f "delims=" %%i in ('where lib 2^>nul') do if not defined LIBEXE set "LIBEXE=%%i"
+set "LIBEXE=%LIBEXE:\=/%"
 
 if "%MODE%"=="check"   goto :check
 if "%MODE%"=="collect" goto :collect
@@ -47,33 +58,38 @@ rem deps
 if not exist "%WORK%\winflexbison\win_flex.exe" (
   curl -fL -o "%WORK%\wfb.zip" "%WFB_URL%" || (echo WFB-DL-FAIL & exit /b 1)
   if not exist "%WORK%\winflexbison" mkdir "%WORK%\winflexbison"
-  tar -xf "%WORK%\wfb.zip" -C "%WORK%\winflexbison" || (echo WFB-EXTRACT-FAIL & exit /b 1)
+  powershell -NoProfile -Command "Expand-Archive -Force -Path '%WORK%\wfb.zip' -DestinationPath '%WORK%\winflexbison'" || (echo WFB-EXTRACT-FAIL & exit /b 1)
 )
 
-rem LLVM (clang, static CRT) -- winget LLVM has no dev libs
+rem LLVM (clang, static CRT) -- winget LLVM has no dev libs; reuse an existing install to skip the long rebuild
+if exist "%WORK%\llvm\bin\llvm-config.exe" goto :llvm_done
 if not exist "%WORK%\llvm-project\.git" git clone --depth 1 -b %LLVM_REF% https://github.com/llvm/llvm-project "%WORK%\llvm-project" || exit /b 1
 cmake -S "%WORK%\llvm-project\llvm" -B "%WORK%\build-llvm" -G Ninja -DCMAKE_BUILD_TYPE=Release %MT_CMAKE% ^
   -DLLVM_ENABLE_PROJECTS=clang -DLLVM_TARGETS_TO_BUILD=%LLVM_TGT% ^
-  -DLLVM_ENABLE_RTTI=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_ZSTD=OFF ^
+  -DLLVM_ENABLE_RTTI=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_DIA_SDK=OFF ^
   -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF ^
   -DLLVM_ENABLE_BINDINGS=OFF -DCMAKE_INSTALL_PREFIX="%WORK%\llvm" || exit /b 1
 ninja -C "%WORK%\build-llvm" install || (echo LLVM-FAIL & exit /b 1)
+:llvm_done
 
 rem glslang (build tool for lavapipe; invoked as a subprocess, so CRT is irrelevant)
 if not exist "%WORK%\glslang-src\.git" git clone -b %GLSLANG_REF% --depth 1 https://github.com/KhronosGroup/glslang "%WORK%\glslang-src" || exit /b 1
 cmake -S "%WORK%\glslang-src" -B "%WORK%\build-glslang" -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+  -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" ^
   -DENABLE_OPT=OFF -DGLSLANG_TESTS=OFF -DENABLE_GLSLANG_BINARIES=ON -DCMAKE_INSTALL_PREFIX="%WORK%\glslang-prefix" || exit /b 1
 ninja -C "%WORK%\build-glslang" install || (echo GLSLANG-FAIL & exit /b 1)
 if not exist "%WORK%\glslang-prefix\bin\glslangValidator.exe" copy /y "%WORK%\glslang-prefix\bin\glslang.exe" "%WORK%\glslang-prefix\bin\glslangValidator.exe" >nul
 
 rem Vulkan-Loader (vulkan-1.dll, static CRT)
 if not exist "%WORK%\vkh\.git" git clone -b %VKL_REF% --depth 1 https://github.com/KhronosGroup/Vulkan-Headers "%WORK%\vkh" || exit /b 1
-cmake -S "%WORK%\vkh" -B "%WORK%\vkh\b" -G Ninja -DCMAKE_INSTALL_PREFIX="%WORK%\vkinstall" && cmake --install "%WORK%\vkh\b" || exit /b 1
+cmake -S "%WORK%\vkh" -B "%WORK%\vkh\b" -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" -DCMAKE_INSTALL_PREFIX="%WORK%\vkinstall" && cmake --install "%WORK%\vkh\b" || exit /b 1
 if not exist "%WORK%\vkl\.git" git clone -b %VKL_REF% --depth 1 https://github.com/KhronosGroup/Vulkan-Loader "%WORK%\vkl" || exit /b 1
-cmake -S "%WORK%\vkl" -B "%WORK%\vkl\b" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="%WORK%\vkinstall" ^
+cmake -S "%WORK%\vkl" -B "%WORK%\vkl\b" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" -DCMAKE_INSTALL_PREFIX="%WORK%\vkinstall" ^
   -DVULKAN_HEADERS_INSTALL_DIR="%WORK%\vkinstall" -DBUILD_TESTS=OFF -DUSE_GAS=OFF %MT_CMAKE% || exit /b 1
 ninja -C "%WORK%\vkl\b" install || (echo VKLOADER-FAIL & exit /b 1)
 
+set "MSVCPATH=%PATH%"
+set "PATH=%WORK%\llvm\bin;%PATH%"
 rem Mesa lavapipe (static LLVM + CRT). drm.h assumes non-Linux==BSD and pulls sys/ioccom.h (idempotent guard);
 rem cpp_rtti matches LLVM RTTI=OFF; expat off (POSIX xmlconfig); /wd* demote Mesa's warning-as-error;
 rem platforms=windows declares vk_icdEnumerateAdapterPhysicalDevices
@@ -92,6 +108,8 @@ rmdir /s /q "%WORK%\mesa-prefix" 2>nul
 
 rem pocl as a direct OpenCL.dll (static device + LLVM + CRT)
 if not exist "%WORK%\pocl-src\.git" git clone -b %POCL_REF% --depth 1 https://github.com/pocl/pocl "%WORK%\pocl-src" || exit /b 1
+rem pocl 7.1 treats getTargetTriple() as a string (.rfind/.find), but LLVM 21 returns llvm::Triple - take .str()
+findstr /c:"getTargetTriple().str()" "%WORK%\pocl-src\lib\llvmopencl\linker.cpp" >nul || powershell -NoProfile -Command "$f='%WORK%\pocl-src\lib\llvmopencl\linker.cpp'; (Get-Content -Raw $f) -replace 'auto TT = ParallelBC->getTargetTriple\(\);', 'auto TT = ParallelBC->getTargetTriple().str();' | Set-Content -NoNewline $f" || (echo POCL-PATCH-FAIL & exit /b 1)
 rmdir /s /q "%WORK%\build-pocl" 2>nul
 rmdir /s /q "%WORK%\pocl-prefix" 2>nul
 cmake -S "%WORK%\pocl-src" -B "%WORK%\build-pocl" -G Ninja -DCMAKE_BUILD_TYPE=Release ^
@@ -102,6 +120,7 @@ cmake -S "%WORK%\pocl-src" -B "%WORK%\build-pocl" -G Ninja -DCMAKE_BUILD_TYPE=Re
   -DCMAKE_INSTALL_PREFIX="%WORK%\pocl-prefix" || (echo POCL-CFG-FAIL & exit /b 1)
 ninja -C "%WORK%\build-pocl" install || (echo POCL-FAIL & exit /b 1)
 
+set "PATH=%MSVCPATH%"
 rem SwiftShader (second Vulkan; vendored static LLVM + static CRT, self-contained, hidden symbols)
 if not defined SS goto :collect
 if not exist "%WORK%\swiftshader\.git" git clone --filter=blob:none https://github.com/google/swiftshader "%WORK%\swiftshader" || exit /b 1
@@ -113,7 +132,7 @@ rmdir /s /q "%WORK%\swiftshader\build-ss" 2>nul
 rem force cl (MSVC): else SwiftShader's vendored-LLVM-10 build picks the from-source clang++ on PATH and
 rem feeds it GNU flags (-fPIC/-march) invalid for the *-pc-windows-msvc target
 cmake -S "%WORK%\swiftshader" -B "%WORK%\swiftshader\build-ss" -G Ninja -DCMAKE_BUILD_TYPE=Release %MT_CMAKE% ^
-  -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+  -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" ^
   -DSWIFTSHADER_BUILD_TESTS=OFF -DSWIFTSHADER_WARNINGS_AS_ERRORS=OFF || (echo SS-CFG-FAIL & exit /b 1)
 cmake --build "%WORK%\swiftshader\build-ss" --target vk_swiftshader || (echo SS-FAIL & exit /b 1)
 
