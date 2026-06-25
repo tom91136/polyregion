@@ -240,6 +240,20 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
           if-no-files-found: error
 
+      - name: Build test dist (emulators profile)
+        env:
+          POLYREGION_TEST_PROFILE: emulators
+        run: |
+          del /s /q native\out\*.ids 2>nul
+          just build-test-dist
+
+      - name: Upload test dist (emulators)
+        uses: *upload
+        with:
+          name: polyregion-tests-emulators-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
+          if-no-files-found: error
+
   check-dist:
     needs: build
     # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
@@ -382,4 +396,96 @@ jobs:
         with:
           name: scala-test-results-windows-${{ matrix.arch }}-Release
           path: ./frontend/compiler-testsuite-scala/target/test-reports/
+          if-no-files-found: warn
+
+  build-emulators:
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *setup-just
+      - name: Restore emulators cache
+        if: ${{ !env.ACT }}
+        id: restore-emu
+        uses: *cache-restore
+        with:
+          path: &emu-path ./emulators/out
+          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/windows.bat') }}
+      - name: Build emulators
+        id: build-emulators
+        if: steps.restore-emu.outputs.cache-hit != 'true'
+        run: just build-emulators
+      - name: Save emulators cache
+        if: steps.build-emulators.outcome == 'success'
+        uses: *cache-save
+        with:
+          path: *emu-path
+          key: *emu-key
+      - name: Pack emulators (tar preserves symlinks)
+        run: tar czf emulators-out.tar.gz -C emulators out
+      - name: Upload emulators artifact
+        uses: *upload
+        with:
+          name: polyregion-emulators-windows-${{ matrix.arch }}
+          path: emulators-out.tar.gz
+          if-no-files-found: error
+
+  test-native-with-emulators:
+    needs: [build, build-emulators]
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - name: Download dist
+        uses: *download
+        with:
+          name: polyregion-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
+      - name: Download test dist (emulators)
+        uses: *download
+        with:
+          name: polyregion-tests-emulators-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-windows-${{ matrix.arch }}
+          path: ./emulators
+      - name: Unpack emulators
+        run: tar xzf emulators\emulators-out.tar.gz -C emulators
+      - name: Run emulator tests
+        working-directory: ./native
+        run: |
+          set "DIST=%CD%\out\polyregion-Release-${{ matrix.arch }}-static-dist"
+          set "TESTS=%CD%\out\polyregion-test-Release-${{ matrix.arch }}-static-dist"
+          call "%GITHUB_WORKSPACE%\emulators\out\env.bat"
+          set "PATH=%DIST%\bin;%TESTS%\bin;%PATH%"
+          set "POLYREGION_BITCODE_DIR=%DIST%\lib"
+          set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
+          set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
+          set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
+          set "POLYREGION_TEST_PROFILE=emulators"
+          set "POLYINVOKE_TEST_LOCK=0"
+          ctest --test-dir "%TESTS%" -j %NUMBER_OF_PROCESSORS% --timeout 1500 --output-on-failure --output-junit "%TESTS%\emulator-test-results.xml"
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results.xml
+          label: ctest-emulators
+      - name: Upload test results
+        if: always()
+        uses: *upload
+        with:
+          name: emulator-test-results-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results.xml
           if-no-files-found: warn

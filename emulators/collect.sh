@@ -4,7 +4,7 @@ set -euo pipefail
 OUT=/out
 mkdir -p "$OUT"/lib "$OUT"/icd
 
-COMPONENTS=(mesa ocl pocl vkloader ocelot)
+COMPONENTS=(mesa ocl pocl vkloader ocelot swiftshader)
 for c in "${COMPONENTS[@]}"; do cp -a "/opt/$c" "$OUT/$c"; done
 OUTDIRS=("${COMPONENTS[@]/#/$OUT/}")
 ln -sf libgpuocelot.so "$OUT"/ocelot/libcuda.so.1
@@ -19,12 +19,15 @@ LVPLIB=$(find1    "$OUT"/mesa -name 'libvulkan_lvp.so'      -type f)
 LVPJSON=$(find1   "$OUT"/mesa -name 'lvp_icd*.json'         -type f)
 OCLLOADER=$(find1 "$OUT"/ocl  -name 'libOpenCL.so.1*'       -type f)
 POCLLIB=$(find1   "$OUT"/pocl -name 'libpocl.so*'           -type f)
+SSLIB=$(find1     "$OUT"/swiftshader -name 'libvk_swiftshader.so' -type f)
+SSJSON=$(find1    "$OUT"/swiftshader -name 'vk_swiftshader_icd.json')
 
 [ -n "$OCLLOADER" ] || { echo "ERROR: ocl-icd libOpenCL.so.1 not found"; exit 1; }
 [ -n "$RUSTICL" ]   || { echo "ERROR: libRusticlOpenCL not found"; exit 1; }
 
 # rewrite ICD entries to bare sonames, resolved via LD_LIBRARY_PATH
 sed -i "s|\"library_path\":[^,]*|\"library_path\": \"$(soname "$LVPLIB")\"|" "$LVPJSON"
+[ -n "$SSLIB" ] && sed -i "s|\"library_path\":[^,]*|\"library_path\": \"$(soname "$SSLIB")\"|" "$SSJSON"
 soname "$RUSTICL" > "$OUT"/icd/rusticl.icd
 [ -n "$POCLLIB" ] && soname "$POCLLIB" > "$OUT"/icd/pocl.icd || echo "WARN: libpocl.so not found, pocl not exposed"
 
@@ -53,23 +56,27 @@ fi
 
 # literal $HERE (env.sh expands it when sourced), order-preserving dedup
 LIBPATH=""; declare -A seen
-for L in "$OCLLOADER" "$RUSTICL" "$LVPLIB" "$POCLLIB"; do
+for L in "$OCLLOADER" "$RUSTICL" "$LVPLIB" "$POCLLIB" "$SSLIB"; do
   d=$(reldir "$L"); [ -z "$d" ] && continue
   [ -n "${seen[$d]:-}" ] && continue; seen[$d]=1
   LIBPATH="${LIBPATH:+$LIBPATH:}\$HERE/$d"
 done
 for d in ocelot lib; do LIBPATH="${LIBPATH:+$LIBPATH:}\$HERE/$d"; done
 
+# both Vulkan ICDs enumerate (lavapipe + swiftshader); polyregion selects by device name
+VKDRIVERS="\$HERE/${LVPJSON#"$OUT"/}"
+[ -n "$SSJSON" ] && VKDRIVERS="${VKDRIVERS}:\$HERE/${SSJSON#"$OUT"/}"
+
 cat > "$OUT"/env.sh <<EOS
 HERE="\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)"
 export LD_LIBRARY_PATH="${LIBPATH}\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
-export VK_DRIVER_FILES="\$HERE/${LVPJSON#"$OUT"/}"
+export VK_DRIVER_FILES="${VKDRIVERS}"
 export VK_ICD_FILENAMES="\$VK_DRIVER_FILES"
 export OCL_ICD_VENDORS="\$HERE/icd"
 export RUSTICL_ENABLE="\${RUSTICL_ENABLE:-llvmpipe}"
 # rusticl/pocl are CPU OpenCL devices; polyinvoke skips those unless this is set
 export POLYINVOKE_OPENCL_CPU="\${POLYINVOKE_OPENCL_CPU:-1}"
-echo "emulators active: ocelot(CUDA) lavapipe(Vulkan) rusticl+pocl(OpenCL) via \$HERE"
+echo "emulators active: ocelot(CUDA) lavapipe+swiftshader(Vulkan) rusticl+pocl(OpenCL) via \$HERE"
 EOS
 
 echo "=== /out staged ==="

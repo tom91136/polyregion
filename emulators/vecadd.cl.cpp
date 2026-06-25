@@ -10,6 +10,12 @@
 
 #include <CL/cl.h>
 
+#ifdef _WIN32
+  #define NULDEV "nul"
+#else
+  #define NULDEV "/dev/null"
+#endif
+
 namespace {
 
 constexpr int N = 1024;
@@ -54,21 +60,25 @@ bool run(cl_context ctx, cl_command_queue queue, cl_device_id dev, cl_program pr
 }
 
 std::string spirv_from_kernel() {
+  const char *td = std::getenv("TMPDIR");
+  if (!td) td = std::getenv("TEMP");
+  if (!td) td = std::getenv("TMP");
+  if (!td) td = "/tmp";
+  const std::string dir = td;
+  const auto cl = dir + "/vecadd.cl", bc = dir + "/vecadd.bc", spv = dir + "/vecadd.spv";
   {
-    std::ofstream cl{"/tmp/vecadd.cl"};
-    if (!cl) return {};
-    cl << kernel_src;
+    std::ofstream f{cl};
+    if (!f) return {};
+    f << kernel_src;
   }
-  // clang's native SPIR-V target, else the translator (llvm-spirv) for clang
-  // builds without it
-  const bool ok = std::system("clang -x cl -cl-std=CL1.2 -target spirv64 -c /tmp/vecadd.cl "
-                              "-o /tmp/vecadd.spv 2>/dev/null") == 0 ||
-                  std::system("clang -x cl -cl-std=CL1.2 -emit-llvm -target spir64 -c "
-                              "/tmp/vecadd.cl -o /tmp/vecadd.bc 2>/dev/null"
-                              " && llvm-spirv /tmp/vecadd.bc -o /tmp/vecadd.spv 2>/dev/null") == 0;
+  // clang's native SPIR-V target, else the translator (llvm-spirv) for clang builds without it
+  auto sys = [](const std::string &c) { return std::system(c.c_str()) == 0; };
+  const bool ok = sys("clang -x cl -cl-std=CL1.2 -target spirv64 -c \"" + cl + "\" -o \"" + spv + "\" 2>" NULDEV) ||
+                  sys("clang -x cl -cl-std=CL1.2 -emit-llvm -target spir64 -c \"" + cl + "\" -o \"" + bc +
+                      "\" 2>" NULDEV " && llvm-spirv \"" + bc + "\" -o \"" + spv + "\" 2>" NULDEV);
   if (!ok) return {};
-  std::ifstream spv{"/tmp/vecadd.spv", std::ios::binary};
-  return {std::istreambuf_iterator<char>{spv}, std::istreambuf_iterator<char>{}};
+  std::ifstream f{spv, std::ios::binary};
+  return {std::istreambuf_iterator<char>{f}, std::istreambuf_iterator<char>{}};
 }
 
 std::string name_of(cl_platform_id p) {
@@ -80,6 +90,12 @@ std::string name_of(cl_device_id d) {
   std::array<char, 256> buf{};
   clGetDeviceInfo(d, CL_DEVICE_NAME, buf.size(), buf.data(), nullptr);
   return buf.data();
+}
+
+bool device_takes_il(cl_device_id d) {
+  std::array<char, 256> il{};
+  clGetDeviceInfo(d, CL_DEVICE_IL_VERSION, il.size(), il.data(), nullptr);
+  return il[0] != '\0';
 }
 
 } // namespace
@@ -114,8 +130,9 @@ int main() {
     auto src = clCreateProgramWithSource(ctx, 1, &text, nullptr, &e);
     fails += !run(ctx, queue, dev, src, "source");
     if (!spirv.empty()) {
-      auto prog = clCreateProgramWithIL(ctx, spirv.data(), spirv.size(), &e);
-      if (e != CL_SUCCESS) {
+      if (!device_takes_il(dev)) {
+        std::printf("    spirv  device has no IL version, subtest skipped\n");
+      } else if (auto prog = clCreateProgramWithIL(ctx, spirv.data(), spirv.size(), &e); e != CL_SUCCESS) {
         std::printf("    spirv  clCreateProgramWithIL FAIL %d\n", e);
         ++fails;
       } else fails += !run(ctx, queue, dev, prog, "spirv");

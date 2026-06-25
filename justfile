@@ -215,11 +215,17 @@ test-native *args='':
     [ "${skips:-0}" -gt 0 ] && echo "polytest: ${skips} skipped (find $BUILD -name polytest-skips.log | xargs cat)" || true
     exit $rc
 
-# Build the software emulator bundle (gpuocelot/rusticl+PoCL/lavapipe) -> emulators/out (CONTAINER=docker overrides podman).
+# Build the software emulator bundle -> emulators/out. linux: container (CONTAINER=docker overrides podman); macos/windows: native on the host via macos.sh / windows.bat
 build-emulators:
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ justfile_directory() }}/emulators
+    case "{{ os() }}" in
+      macos)   exec bash macos.sh "$PWD/out" ;;
+      windows) exec cmd //c "windows.bat $(cygpath -w "$PWD" 2>/dev/null || echo "$PWD")\\out" ;;
+      linux)   : ;;
+      *) echo "build-emulators: unsupported OS {{ os() }}" >&2; exit 1 ;;
+    esac
     TMP="${EMU_TMPDIR:-$HOME/.podman-tmp}"; mkdir -p "$TMP"
     TMPDIR="$TMP" {{ container }} build -f Dockerfile --target check -t polyemu .
     rm -rf out
@@ -242,9 +248,16 @@ test-native-with-emulators *args='':
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
     ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
-# Smoke test of the emulator bundle (OpenCL source+SPIR-V on rusticl+pocl, CUDA on gpuocelot).
+# Smoke test of the emulator bundle (Vulkan on lavapipe, OpenCL on pocl[+rusticl], CUDA on gpuocelot/linux).
 check-emulators bundle='':
-    bash {{ justfile_directory() }}/emulators/run.sh {{ bundle }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ justfile_directory() }}/emulators
+    case "{{ os() }}" in
+      macos)   exec bash macos.sh --check "${1:-$PWD/out}" ;;
+      windows) exec cmd //c "windows.bat --check" ;;
+      *)       exec bash run.sh {{ bundle }} ;;
+    esac
 
 # === Build wrappers ===
 

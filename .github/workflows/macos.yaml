@@ -202,6 +202,20 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
+      - name: Build test dist (emulators profile)
+        env:
+          POLYREGION_TEST_PROFILE: emulators
+        run: |
+          find native/out -path '*/polytest-discover/*.ids' -delete
+          just build-test-dist
+
+      - name: Upload test dist (emulators)
+        uses: *upload
+        with:
+          name: polyregion-tests-emulators-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
+
   check-dist:
     needs: build
     # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
@@ -522,4 +536,111 @@ jobs:
         with:
           name: native-test-results-darwin-${{ matrix.arch }}-Release-asan
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          if-no-files-found: warn
+
+  build-emulators:
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: *checkout
+      - *setup-just
+      - name: Restore emulators cache
+        if: ${{ !env.ACT }}
+        id: restore-emu
+        uses: *cache-restore
+        with:
+          path: &emu-path ./emulators/out
+          key: &emu-key emulators-darwin-${{ matrix.arch }}-${{ hashFiles('./emulators/macos.sh') }}
+      - name: Build emulators
+        id: build-emulators
+        if: steps.restore-emu.outputs.cache-hit != 'true'
+        run: just build-emulators
+      - name: Save emulators cache
+        if: steps.build-emulators.outcome == 'success'
+        uses: *cache-save
+        with:
+          path: *emu-path
+          key: *emu-key
+      - name: Pack emulators (tar preserves symlinks)
+        run: tar czf emulators-out.tar.gz -C emulators out
+      - name: Upload emulators artifact
+        uses: *upload
+        with:
+          name: polyregion-emulators-darwin-${{ matrix.arch }}
+          path: emulators-out.tar.gz
+          if-no-files-found: error
+
+  test-native-with-emulators:
+    needs: [build, build-emulators]
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *brew-cmake
+
+      - name: Download dist
+        uses: *download
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download test dist (emulators)
+        uses: *download
+        with:
+          name: polyregion-tests-emulators-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-darwin-${{ matrix.arch }}
+          path: ./emulators
+
+      - name: Unpack emulators
+        run: tar xzf emulators/emulators-out.tar.gz -C emulators
+
+      - name: Restore executable bits
+        working-directory: ./native
+        run: |
+          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
+            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
+            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +; fi
+          done
+
+      - name: Run emulator tests
+        working-directory: ./native
+        run: |
+          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+          source "$GITHUB_WORKSPACE/emulators/out/env.sh"
+          export PATH=$DIST/bin:$PATH
+          export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
+          export POLYREGION_BITCODE_DIR=$DIST/lib
+          export POLYPASS_PLUGINS=$DIST/lib/libpolypass.dylib
+          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
+          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
+          export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK=0
+          ctest --test-dir "$TESTS" -j "$(sysctl -n hw.ncpu)" --timeout 1500 --output-on-failure --output-junit "$TESTS/emulator-test-results.xml"
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
+          label: ctest-emulators
+
+      - name: Upload test results
+        if: always()
+        uses: *upload
+        with:
+          name: emulator-test-results-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
           if-no-files-found: warn

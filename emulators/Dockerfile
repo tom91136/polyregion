@@ -9,6 +9,7 @@ ARG OPENCL_HEADERS_REF=v2026.05.29
 ARG OCL_ICD_REF=v2.3.5
 ARG POCL_REF=v7.1
 ARG GPUOCELOT_COMMIT=b16039dc
+ARG SWIFTSHADER_COMMIT=2843cbcc714fe111e1083127c048a18002bc10ed
 
 FROM almalinux:8 AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -28,6 +29,7 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/llvm/lib
 ENV CC=gcc CXX=g++
 
 ARG NJOBS=
+ARG LLVM_LINK_JOBS=8
 ARG LLVM_REF
 RUN git clone --depth 1 -b ${LLVM_REF} https://github.com/llvm/llvm-project /src/llvm \
  && cmake -S /src/llvm/llvm -B /src/llvm/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -38,7 +40,7 @@ RUN git clone --depth 1 -b ${LLVM_REF} https://github.com/llvm/llvm-project /src
       -DLLVM_ENABLE_DUMP=ON \
       -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
       -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_ENABLE_BINDINGS=OFF \
-      -DLLVM_PARALLEL_LINK_JOBS=8 -DCMAKE_INSTALL_PREFIX=/opt/llvm \
+      -DLLVM_PARALLEL_LINK_JOBS=${LLVM_LINK_JOBS} -DCMAKE_INSTALL_PREFIX=/opt/llvm \
  && ninja ${NJOBS:+-j$NJOBS} -C /src/llvm/build install \
  && rm -rf /src/llvm/build
 ENV LLVM_DIR=/opt/llvm/lib/cmake/llvm
@@ -167,15 +169,33 @@ RUN git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot /src/g
       -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG -fno-strict-aliasing -fwrapv" \
  && ninja -C build gpuocelot
 
+FROM base AS swiftshader
+ARG SWIFTSHADER_COMMIT
+RUN TRIPLE=$(gcc -dumpmachine) \
+ && GCC_DIR="--gcc-install-dir=/opt/rh/gcc-toolset-13/root/usr/lib/gcc/$TRIPLE/13" \
+ && git clone --filter=blob:none https://github.com/google/swiftshader /src/swiftshader \
+ && git -C /src/swiftshader checkout -q ${SWIFTSHADER_COMMIT} \
+ && cmake -S /src/swiftshader -B /src/swiftshader/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+      -DCMAKE_C_FLAGS="$GCC_DIR" -DCMAKE_CXX_FLAGS="$GCC_DIR" \
+      -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,noexecstack \
+      -DSWIFTSHADER_BUILD_TESTS=OFF -DSWIFTSHADER_WARNINGS_AS_ERRORS=OFF \
+ && ninja -C /src/swiftshader/build vk_swiftshader \
+ && mkdir -p /opt/swiftshader \
+ && cp "$(find /src/swiftshader/build -name libvk_swiftshader.so -type f | head -1)" /opt/swiftshader/ \
+ && cp "$(find /src/swiftshader/build -name vk_swiftshader_icd.json | head -1)" /opt/swiftshader/
+
 FROM base AS export
 COPY --from=mesa     /opt/mesa     /opt/mesa
 COPY --from=vkloader /opt/vkloader /opt/vkloader
+COPY --from=vkloader /usr/local/include /opt/vkloader/include
 COPY --from=icdloader /opt/ocl     /opt/ocl
 COPY --from=pocl     /opt/pocl     /opt/pocl
 COPY --from=ocelot   /src/gpuocelot/ocelot/build/libgpuocelot.so /opt/ocelot/libgpuocelot.so
+COPY --from=swiftshader /opt/swiftshader /opt/swiftshader
 COPY collect.sh /src/collect.sh
 RUN dnf install -y -q patchelf && bash /src/collect.sh
 
 FROM export AS check
-COPY vecadd.cu vecadd.cpp run.sh /src/
+COPY vecadd.cu vecadd.cl.cpp vecadd.vk.cpp run.sh /src/
 RUN bash /src/run.sh /out

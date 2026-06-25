@@ -11,9 +11,15 @@ CXX="${CXX:-g++}"
 rc=0
 
 echo "== OpenCL (rusticl + pocl) =="
-if "$CXX" -O2 -std=c++17 "$DIR/vecadd.cpp" -o "$B/cl" \
+if "$CXX" -O2 -std=c++17 "$DIR/vecadd.cl.cpp" -o "$B/cl" \
       -I"$BUNDLE/ocl/include" -L"$BUNDLE/ocl/lib" -lOpenCL -Wl,-rpath,"$BUNDLE/ocl/lib"; then
   "$B/cl" || rc=1
+else echo "  build FAIL"; rc=1; fi
+
+echo "== Vulkan (lavapipe + swiftshader) =="
+if "$CXX" -O2 -std=c++17 "$DIR/vecadd.vk.cpp" -o "$B/vk" \
+      -I"$BUNDLE/vkloader/include" -L"$BUNDLE/vkloader/lib64" -lvulkan -Wl,-rpath,"$BUNDLE/vkloader/lib64"; then
+  "$B/vk" || rc=1
 else echo "  build FAIL"; rc=1; fi
 
 echo "== CUDA (gpuocelot) =="

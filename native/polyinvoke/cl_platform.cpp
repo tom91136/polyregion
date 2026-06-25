@@ -163,7 +163,8 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
 #ifdef _WIN32
   void *lib = dl::open_first({"OpenCL.dll"});
 #elif defined(__APPLE__)
-  void *lib = dl::open_first({"/Library/Frameworks/OpenCL.framework/OpenCL", "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
+  void *lib = dl::open_first({"libOpenCL.dylib", "libOpenCL.1.dylib", "/Library/Frameworks/OpenCL.framework/OpenCL",
+                              "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
 #else
   void *lib = dl::open_first({"libOpenCL.so.1", "libOpenCL.so", "libOpenCL.so.0", "libOpenCL.so.2"});
 #endif
