@@ -288,6 +288,19 @@ template <class ForwardIt, class T> void fill(execution::parallel_unsequenced_po
   polyregion::polystl::details::parallel_for(std::distance(first, last), [value = value, first](auto idx) { (*(first + idx)) = value; });
 }
 
+template <class ForwardIt, class Size, class UnaryFunction>
+ForwardIt for_each_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n, UnaryFunction f) {
+  polyregion::polystl::details::parallel_for(static_cast<int64_t>(n), [f, first](auto idx) { f(*(first + idx)); });
+  return first + n;
+}
+
+template <class ForwardIt, class Size, class T>
+ForwardIt fill_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n, const T &value) {
+  // XXX `value = value` strips the T& so the capture is by value.
+  polyregion::polystl::details::parallel_for(static_cast<int64_t>(n), [value = value, first](auto idx) { (*(first + idx)) = value; });
+  return first + n;
+}
+
 template <class ForwardIt1, class ForwardIt2>
 ForwardIt2 copy(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
   polyregion::polystl::details::parallel_for(std::distance(first, last),
@@ -348,6 +361,18 @@ template <class ExecutionPolicy, class ForwardIt, class T>
 std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, void> //
 fill(ExecutionPolicy &&, ForwardIt first, ForwardIt last, const T &value) {
   std::fill(first, last, value);
+}
+
+template <class ExecutionPolicy, class ForwardIt, class Size, class UnaryFunction>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, ForwardIt> //
+for_each_n(ExecutionPolicy &&, ForwardIt first, Size n, UnaryFunction f) {
+  return std::for_each_n(first, n, f);
+}
+
+template <class ExecutionPolicy, class ForwardIt, class Size, class T>
+std::enable_if_t<is_execution_policy_v<std::decay_t<ExecutionPolicy>>, ForwardIt> //
+fill_n(ExecutionPolicy &&, ForwardIt first, Size n, const T &value) {
+  return std::fill_n(first, n, value);
 }
 
 template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2>

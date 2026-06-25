@@ -419,6 +419,13 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     }
     r.push(Stmt::Return(Expr::MathOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
   };
+  auto emitBinaryIntr = [&](auto &r, auto mkOp) {
+    if (args.size() != 2) {
+      r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
+      return;
+    }
+    r.push(Stmt::Return(Expr::IntrOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
+  };
 
   auto fnBody = r.scoped(
       [&](auto &r) {
@@ -449,6 +456,13 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   case clang::Builtin::BI__builtin_##BASE##f:                                                                                              \
   case clang::Builtin::BI__builtin_##BASE:                                                                                                 \
   case clang::Builtin::BI__builtin_##BASE##l: emitBinaryMath(r, [](auto x, auto y, auto t) { return Math::NODE(x, y, t); }); break;
+#define POLYC_BINARY_INTR(BASE, NODE)                                                                                                      \
+  case clang::Builtin::BI##BASE##f:                                                                                                        \
+  case clang::Builtin::BI##BASE:                                                                                                           \
+  case clang::Builtin::BI##BASE##l:                                                                                                        \
+  case clang::Builtin::BI__builtin_##BASE##f:                                                                                              \
+  case clang::Builtin::BI__builtin_##BASE:                                                                                                 \
+  case clang::Builtin::BI__builtin_##BASE##l: emitBinaryIntr(r, [](auto x, auto y, auto t) { return Intr::NODE(x, y, t); }); break;
 
             POLYC_UNARY_MATH(fabs, Abs)
             POLYC_UNARY_MATH(sqrt, Sqrt)
@@ -474,9 +488,12 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
             POLYC_BINARY_MATH(pow, Pow)
             POLYC_BINARY_MATH(atan2, Atan2)
             POLYC_BINARY_MATH(hypot, Hypot)
+            POLYC_BINARY_INTR(fmin, Min)
+            POLYC_BINARY_INTR(fmax, Max)
 
 #undef POLYC_UNARY_MATH
 #undef POLYC_BINARY_MATH
+#undef POLYC_BINARY_INTR
 
           case clang::Builtin::NotBuiltin:
             if (const auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
@@ -534,6 +551,10 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
           case clang::Builtin::BI__builtin_expect_with_probability:
             if (args.empty()) r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
             else r.push(Stmt::Return(Expr::Alias(select(r, {}, args[0].named))));
+            break;
+          case clang::Builtin::BI__builtin_is_constant_evaluated:
+            // XXX always false outside constant evaluation;, seen in _GLIBCXX_ASSERTIONS bounds-check branches
+            r.push(Stmt::Return(Expr::Alias(Term::Bool1Const(false))));
             break;
           default:
             if (isTrapBuiltin(decl->getBuiltinID())) {
@@ -692,7 +713,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                              if (var->getType().isConstQualified()) readOnlyMembers[name].emplace(var->getName().str());
                              switch (capture.getCaptureKind()) {
                                case clang::LCK_ByCopy: {
-                                 const auto tpe = handleType(var->getType(), r);
+                                 const auto tpe = handleType(field->getType(), r);
                                  return resolveField(field, var->getName().str(), tpe);
                                }
                                case clang::LCK_ByRef: {
@@ -776,6 +797,9 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
           // MSVC maps `long` to 32-bit; ptrdiff_t/size_t/int64_t come through as LongLong/ULongLong.
           case clang::BuiltinType::LongLong: return Type::IntS64();
           case clang::BuiltinType::ULongLong: return Type::IntU64();
+          // FIXME 128-bit ints surface only as iterator difference_types, it folds away today but need proper support for IntS128 etc
+          case clang::BuiltinType::Int128: return Type::IntS64();
+          case clang::BuiltinType::UInt128: return Type::IntU64();
           case clang::BuiltinType::Int: return Type::IntS32();
           case clang::BuiltinType::UInt: return Type::IntU32();
           case clang::BuiltinType::Short: return Type::IntS16();
@@ -805,7 +829,8 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         auto inner = handleType(tpe->getPointeeType(), r);
         if (inner.is<Type::Ptr>()) return inner;
         return refTpe(inner);
-      },                                                                                                                 // T
+      },                                                                                                        // T
+      [&](const clang::EnumType *tpe) -> Type::Any { return handleType(tpe->getDecl()->getIntegerType(), r); }, // enum -> underlying int
       [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}); } // struct T { ... }
   );
   if (!result) {
@@ -899,6 +924,22 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       // scalar/pointer brace-init: T{} is zero, T{x} is x (member inits like `_M_len{__len}` in libstdc++)
       [&](const clang::InitListExpr *expr) -> Expr::Any {
         const auto tpe = handleType(expr->getType(), r);
+        if (const auto structTpe = tpe.get<Type::Struct>()) {
+          const auto allocated = r.newVar(tpe);
+          defaultInitialiseStruct(r, *structTpe, allocated);
+          if (const auto rd = expr->getType()->getAsRecordDecl()) {
+            unsigned i = 0;
+            for (const auto *field : rd->fields()) {
+              if (i >= expr->getNumInits()) break;
+              const auto *init = expr->getInit(i++);
+              if (llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
+              const auto ftpe = handleType(field->getType(), r);
+              const auto member = select(r, {allocated}, Named(repr(structTpe->name) + "::" + field->getNameAsString(), ftpe));
+              r.push(Stmt::Mut(member, conform(r, handleExpr(init, r), ftpe)));
+            }
+          }
+          return Expr::Alias(select(r, {}, allocated));
+        }
         if (expr->getNumInits() == 0) return integralConstOfType(tpe, 0);
         if (expr->getNumInits() == 1) return conform(r, handleExpr(expr->getInit(0), r), tpe);
         failExpr();
@@ -1058,6 +1099,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto actual = handleType(expr->getType(), r);
         const auto refDeclName = declName(decl);
 
+        if (const auto ec = llvm::dyn_cast<clang::EnumConstantDecl>(decl)) {
+          return integralConstOfType(actual, static_cast<uint64_t>(ec->getInitVal().getExtValue()));
+        }
+
         // Inline namespace-scope constexpr / const-init refs; otherwise we'd Select an unbound
         // name and polyc would reject it. Locals stay on the normal stack-lookup path.
         if (auto var = llvm::dyn_cast<clang::VarDecl>(decl); var && !var->isLocalVarDecl()) {
@@ -1216,13 +1261,20 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           return *drV;
         };
 
+        const auto compTpe = clang::isa<clang::CompoundAssignOperator>(expr)
+                                 ? handleType(clang::cast<clang::CompoundAssignOperator>(expr)->getComputationResultType(), r)
+                                 : tpe_;
+        auto cl = [&]() -> Term::Any { return r.newVar(conform(r, Expr::Alias(dl()), compTpe)); };
+        auto cr = [&]() -> Term::Any { return r.newVar(conform(r, Expr::Alias(dr()), compTpe)); };
+
         auto opAssign = [&](const Intr::Any &op) -> Term::Any {
           auto v = r.newVar(Expr::IntrOp(op));
+          auto stored = r.newVar(conform(r, Expr::Alias(v), tpe_)); // narrow the computation type back to the LHS type
           if (lhs.tpe().is<Type::Ptr>()) {
             auto z = r.newVar(integralConstOfType(Type::IntS64(), 0));
-            r.push(Stmt::Update(termToSel(lhs), z, v));
+            r.push(Stmt::Update(termToSel(lhs), z, stored));
           } else {
-            r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(v)));
+            r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(stored)));
           }
           return lhs;
         };
@@ -1271,9 +1323,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_LAnd: return Expr::IntrOp(Intr::LogicAnd(dl(), dr()));
           case clang::BO_LOr: return Expr::IntrOp(Intr::LogicOr(dl(), dr()));
           case clang::BO_Assign: return Expr::Alias(assign(lhs, rhs)); // Builtin direct assignment
-          case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(dl(), dr(), tpe_)));
-          case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(dl(), dr(), tpe_)));
-          case clang::BO_RemAssign: return Expr::Alias(opAssign(Intr::Rem(dl(), dr(), tpe_)));
+          case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(cl(), cr(), compTpe)));
+          case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(cl(), cr(), compTpe)));
+          case clang::BO_RemAssign: return Expr::Alias(opAssign(Intr::Rem(cl(), cr(), compTpe)));
           case clang::BO_AddAssign:
             // Pointer +=/-= must rebase the pointer itself; the scalar opAssign path would
             // write through it.
@@ -1282,7 +1334,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(newPtr)));
               return Expr::Alias(lhs);
             } else {
-              return Expr::Alias(opAssign(Intr::Add(dl(), dr(), tpe_)));
+              return Expr::Alias(opAssign(Intr::Add(cl(), cr(), compTpe)));
             }
           case clang::BO_SubAssign:
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
@@ -1291,7 +1343,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(newPtr)));
               return Expr::Alias(lhs);
             } else {
-              return Expr::Alias(opAssign(Intr::Sub(dl(), dr(), tpe_)));
+              return Expr::Alias(opAssign(Intr::Sub(cl(), cr(), compTpe)));
             }
           case clang::BO_ShlAssign: return Expr::Alias(opAssign(Intr::BSL(dl(), dr(), tpe_)));
           case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(dl(), dr(), tpe_)));
@@ -1386,13 +1438,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                         }) //
                       | to_vector();
 
+        // XXX member operators carry an implicit `this` (a Ptr arg); free/friend operators do not - arg 0 is the
+        // receiver itself, so conform it to fn->args[0]
         const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
                                        });
-        if (!actualReceiverTpe) raise("No actual receiver type in member call");
-
-        auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
+        const auto recvTpe = actualReceiverTpe ? *actualReceiverTpe : fn->args[0].named.tpe;
+        auto recvTerm = r.newVar(conform(r, ref(receiver), recvTpe));
         return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
       },
@@ -1586,7 +1639,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
               defaultInitialiseStruct(r, *structTpe, name);
             } else {
-              raise(std::string("unhandled var rhs: "));
+              const bool isMutable = !var->getType().isConstQualified();
+              r.push(Stmt::Var(name, std::optional<Expr::Any>{}, isMutable));
             }
           }
         }

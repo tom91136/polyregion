@@ -72,8 +72,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                        FunctionFpMode::Relaxed(), true, FunctionAffinity::Offload());
 
   auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial(),
-                         {MetaEntry(program_meta::VkWorkgroupSizeX, std::to_string(program_meta::VkWorkgroupSizeXValue))});
+                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
 
   auto exportedFns = (std::vector<Function>{program.entry} ^ concat(program.functions))                         //
                      | filter([](auto &f) { return f.visibility.template is<FunctionVisibility::Exported>(); }) //

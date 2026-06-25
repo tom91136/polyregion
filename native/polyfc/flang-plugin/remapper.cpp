@@ -1274,8 +1274,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                             | values()                //
                             | concat(r.syntheticDefs) //
                             | to_vector(),
-                        PassPhase::Initial(),
-                        {MetaEntry(program_meta::VkWorkgroupSizeX, std::to_string(program_meta::VkWorkgroupSizeXValue))});
+                        PassPhase::Initial(), {});
 
   const auto defLayouts = program.defs | map([&](auto &d) { return r.resolveLayout(d); }) | to_vector();
 
