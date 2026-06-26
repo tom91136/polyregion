@@ -200,7 +200,7 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
 }
 
 bool Remapper::RemapContext::isEmpty(const Type::Struct &s) {
-  return structs ^ get_maybe(repr(s.name)) ^ exists([&](auto &def) { return emptyStruct(*def); });
+  return structs ^ get_maybe(repr(s.name)) ^ exists([&](auto &def) { return def && emptyStruct(*def); });
 }
 
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
@@ -1492,9 +1492,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                         });
         } else {
           if (isTrapBuiltin(target->getBuiltinID())) return Expr::Any(Expr::Alias(Term::Unit0Const()));
+          // a kernel arg is never a compile-time constant here, so __builtin_constant_p folds to 0
+          if (target->getBuiltinID() == clang::Builtin::BI__builtin_constant_p)
+            return integralConstOfType(handleType(expr->getType(), r), 0);
           auto [name, fn] = handleCall(target, r);
           if (fn->args.size() != expr->getNumArgs())
-            raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
+            raise("Arg count mismatch for " + qualifiedName + ", expected " + std::to_string(fn->args.size()) + " but was " +
+                  std::to_string(expr->getNumArgs()));
           auto ivArgs = expr->arguments()                           //
                         | zip_with_index<size_t>()                  //
                         | map([&](auto *arg, auto i) -> Term::Any { //
