@@ -33,9 +33,12 @@ if /i "%POLYREGION_ARCH%"=="arm64" set "ARM=1"
 rem NVPTX target: gpuocelot's runtime doesn't need it, but the CUDA smoke emits PTX via clang's NVPTX backend
 set "VCARCH=64" & set "VCREQ=Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 set "LLVM_TGT=X86;NVPTX" & set "ICDARCH=x86_64" & set "POCL_CPU=-DLLC_HOST_CPU=x86-64" & set "SS=1"
+rem res_embed (configure.ocelot incbin): NASM is x64-only, so arm64 takes the GAS .incbin path via clang-cl
+set "OCELOT_RES=-DOCELOT_WIN_ASM=ASM_NASM"
 if "%ARM%"=="1" (
   set "VCARCH=arm64" & set "VCREQ=Microsoft.VisualStudio.Component.VC.Tools.ARM64"
   set "LLVM_TGT=AArch64;NVPTX" & set "ICDARCH=aarch64" & set "POCL_CPU=-DLLC_HOST_CPU=generic"
+  set "OCELOT_RES=-DOCELOT_WIN_ASM=ASM -DUSE_NASM=OFF -DCMAKE_ASM_COMPILER=clang-cl"
 )
 
 set "MODE=build"
@@ -128,7 +131,8 @@ cmake -S "%WORK%\pocl-src" -B "%WORK%\build-pocl" -G Ninja -DCMAKE_BUILD_TYPE=Re
 ninja -C "%WORK%\build-pocl" install || (echo POCL-FAIL & exit /b 1)
 
 rem === gpuocelot -> nvcuda.dll (CUDA/PTX emulator; emulated device, LLVM link-time only) ===
-rem nasm: res_embed embeds configure.ocelot via incbin, which MSVC's assembler can't emit
+rem nasm: res_embed embeds configure.ocelot via incbin, which MSVC's assembler can't emit (x64 only)
+if "%ARM%"=="1" goto :nasm_done
 if exist "%WORK%\%NASM_DIR%\nasm.exe" goto :nasm_done
 curl -fL -o "%WORK%\nasm.zip" "%NASM_URL%" || (echo NASM-DL-FAIL & exit /b 1)
 powershell -NoProfile -Command "Expand-Archive -Force -Path '%WORK%\nasm.zip' -DestinationPath '%WORK%'" || (echo NASM-EXTRACT-FAIL & exit /b 1)
@@ -162,10 +166,12 @@ git -C "%OCELOT%" submodule foreach --recursive "git checkout -q -- ." >nul
 if exist "%OCELOT%\ocelot\cu_exports.map" del /q "%OCELOT%\ocelot\cu_exports.map"
 git -C "%OCELOT%" apply "%DIR%gpuocelot.patch" || (echo OCELOT-BASE-PATCH-FAIL & exit /b 1)
 git -C "%OCELOT%" apply "%DIR%gpuocelot.windows.patch" || (echo OCELOT-WIN-PATCH-FAIL & exit /b 1)
+rem res_embed GAS path: 4-align hex_size so arm64's scaled LDR reloc (PAGEOFFSET_12L) is valid for link.exe
+if "%ARM%"=="1" "%SED%" -i "/^\.byte 0$/a .balign 4" "%OCELOT%\ocelot\ThirdParty\res_embed\include\res_embed.gas.in" || (echo RES-EMBED-ALIGN-FAIL & exit /b 1)
 rmdir /s /q "%OCELOT%\ocelot\build" 2>nul
 rem FlexLexer.h ships with winflexbison; /EHsc is re-added because -DCMAKE_CXX_FLAGS clobbers the default
 cmake -S "%OCELOT%\ocelot" -B "%OCELOT%\ocelot\build" -G Ninja -DCMAKE_BUILD_TYPE=Release %MT_CMAKE% ^
-  -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ^
+  -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_POLICY_VERSION_MINIMUM=3.5 %OCELOT_RES% ^
   -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_TESTS_CUDA=OFF -DBUILD_EXAMPLE=OFF ^
   -DLLVM_DIR="%WORK%\llvm\lib\cmake\llvm" ^
   -DBoost_DIR="%WORK%\boost-prefix\lib\cmake\Boost-%BOOST_VER%" -DBoost_USE_STATIC_LIBS=ON -DBoost_USE_STATIC_RUNTIME=ON ^

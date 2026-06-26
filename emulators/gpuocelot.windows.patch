@@ -8,9 +8,9 @@ index d58ea47..d4564df 100644
  # CUDA language is only for the bundled CUDA tests; off by default so it builds without nvcc
 -if (APPLE OR NOT ENABLE_CUDA_LANG)
 +if (WIN32)
-+	# ASM_NASM at file scope so res_embed's incbin resource compiles; its own
-+	# enable_language() runs inside a function, too late for the Ninja generator
-+	project(gpuocelot C CXX ASM_NASM)
++	# the asm language (clang GAS .incbin on arm64, NASM on x64) at file scope so res_embed's incbin
++	# resource compiles; res_embed's own enable_language() runs inside a function, too late for Ninja
++	project(gpuocelot C CXX ${OCELOT_WIN_ASM})
 +elseif (APPLE OR NOT ENABLE_CUDA_LANG)
  	project(gpuocelot C CXX ASM)
  else()
