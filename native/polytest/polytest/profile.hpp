@@ -21,12 +21,11 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/TargetParser/Triple.h"
 
 #include "aspartame/all.hpp"
 
 #include "polyregion/env_keys.h"
+#include "polyregion/host.h"
 #include "polyregion/types.h"
 
 namespace polyregion::polytest {
@@ -75,12 +74,12 @@ inline std::vector<std::string> profileCandidates(const std::string &profileDir)
     llvm::sys::path::append(p, name);
     return std::string(p);
   };
-  const std::string os = llvm::Triple(llvm::sys::getProcessTriple()).getOSName().str();
+
   std::vector<std::string> bases; // the profile name, then the short hostname
   if (const auto v = std::getenv(polyregion::env::PolyregionTestProfile)) bases ^= append(v);
   if (auto h = hostname()) bases ^= append(*h ^ take_while([](char c) { return c != '.'; }));
-  return bases                                                                                           //
-         ^ flat_map([&](auto &b) { return std::vector{path(b + "." + os + ".env"), path(b + ".env")}; }) //
+  return bases                                                                                                              //
+         ^ flat_map([&](auto &b) { return std::vector{path(b + "." + std::string(hostOs()) + ".env"), path(b + ".env")}; }) //
          ^ append(path("default.env"));
 }
 
