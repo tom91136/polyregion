@@ -771,10 +771,19 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         } else {
           const auto tpe = resolveType(x.name.tpe);
           auto allocTy = ptrModel->localAllocType(*this, x.name.tpe, tpe);
-          auto stackPtr = C.allocaAS(B, allocTy, C.AllocaAS, x.name.symbol + "_stack_ptr");
+          const auto localArr =
+              x.name.tpe.template get<Type::Arr>() ^ exists([](auto &a) { return a.space.template is<TypeSpace::Local>(); });
+          llvm::Value *stackPtr;
+          if (localArr && !C.isSpirv()) {
+            stackPtr = new llvm::GlobalVariable(M, allocTy, /*isConstant*/ false, llvm::GlobalValue::InternalLinkage,
+                                                llvm::PoisonValue::get(allocTy), x.name.symbol + "_wg", nullptr,
+                                                llvm::GlobalValue::NotThreadLocal, C.LocalAS);
+          } else {
+            stackPtr = C.allocaAS(B, allocTy, C.AllocaAS, x.name.symbol + "_stack_ptr");
+          }
           // inline Type::Arr needs a flat ptr slot (AMDGCN's 32-bit alloca AS overflows the 64-bit store); not on SPIR-V
           if (x.name.tpe.template is<Type::Arr>() && !C.isSpirv()) {
-            auto refSlot = C.allocaAS(B, B.getPtrTy(), C.AllocaAS, x.name.symbol + "_ref_ptr");
+            auto refSlot = C.allocaAS(B, B.getPtrTy(localArr ? C.LocalAS : 0u), C.AllocaAS, x.name.symbol + "_ref_ptr");
             const auto _ = C.store(B, stackPtr, refSlot);
             stackPtr = refSlot;
           }

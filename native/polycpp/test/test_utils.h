@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -12,6 +13,19 @@
 #include "polyrt/rt.h"
 #include "polystl/algorithm_impl.h"
 #include "polystl/polystl.h"
+
+inline uint32_t __polyregion_builtin_gpu_global_idx(uint32_t) { return 0; }
+inline uint32_t __polyregion_builtin_gpu_global_size(uint32_t) { return 1; }
+inline uint32_t __polyregion_builtin_gpu_group_idx(uint32_t) { return 0; }
+inline uint32_t __polyregion_builtin_gpu_group_size(uint32_t) { return 1; }
+inline uint32_t __polyregion_builtin_gpu_local_idx(uint32_t) { return 0; }
+inline uint32_t __polyregion_builtin_gpu_local_size(uint32_t) { return 1; }
+inline void __polyregion_builtin_gpu_barrier_global() {}
+inline void __polyregion_builtin_gpu_barrier_local() {}
+inline void __polyregion_builtin_gpu_barrier_all() {}
+inline void __polyregion_builtin_gpu_fence_global() {}
+inline void __polyregion_builtin_gpu_fence_local() {}
+inline void __polyregion_builtin_gpu_fence_all() {}
 
 template <typename F> //
 std::invoke_result_t<F> __polyregion_offload_f1__(F f) {

@@ -8,20 +8,22 @@ void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const
   }
 }
 ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
+  const auto noop = [&] { return cg.mkTermVal(Term::Unit0Const()); };
+  const auto k = [&](const auto &v, uint64_t n) -> ValPtr { return llvm::ConstantInt::get(cg.resolveType(v.tpe), n); };
   return expr.op.match_total(                                           //
       [&](const Spec::Assert &) -> ValPtr { return cg.invokeAbort(); }, //
-      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuBarrierLocal &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuBarrierAll &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuFenceGlobal &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuFenceLocal &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuFenceAll &) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return noop(); }, //
+      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return noop(); },  //
+      [&](const Spec::GpuBarrierAll &) -> ValPtr { return noop(); },    //
+      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return noop(); },   //
+      [&](const Spec::GpuFenceLocal &) -> ValPtr { return noop(); },    //
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return noop(); },      //
       [&](const Spec::GpuGlobalIdx &) -> ValPtr { throw BackendException("unimplemented"); },
       [&](const Spec::GpuGlobalSize &) -> ValPtr { throw BackendException("unimplemented"); }, //
       [&](const Spec::GpuGroupIdx &) -> ValPtr { throw BackendException("unimplemented"); },   //
       [&](const Spec::GpuGroupSize &) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Spec::GpuLocalIdx &) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Spec::GpuLocalSize &) -> ValPtr { throw BackendException("unimplemented"); }   //
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return k(v, 0); },                           //
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return k(v, 1); }                           //
   );
 }
 ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {

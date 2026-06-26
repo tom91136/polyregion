@@ -26,6 +26,10 @@ std::string cFloatLiteral(double v, const std::string &suffix) {
 using namespace polyast;
 using namespace std::string_literals;
 
+static bool isLocalArr(const Type::Any &t) {
+  return t.template get<Type::Arr>() ^ exists([](auto &a) { return a.space.template is<TypeSpace::Local>(); });
+}
+
 struct CLAddressSpaceTracePass {
 
   struct StackScope {
@@ -46,10 +50,10 @@ struct CLAddressSpaceTracePass {
   static SpacedTerm mapTerm(const Term::Any &term, StackScope &scope) {
     if (auto sel = term.template get<Term::Select>()) {
       const auto rebound = scope.vars ^ get_or_default(sel->root.symbol, sel->root);
-      // a final pointer field keeps its own space; a value subobject takes the root pointer space
-      const auto rootSpace = rebound.tpe.template get<Type::Ptr>() ^ //
-                             map([](auto &p) { return p.space; }) ^  //
-                             get_or_else(TypeSpace::Private().widen());
+      // a final pointer field keeps its own space; a value subobject takes the root's space (local for a
+      // declared local array, private otherwise)
+      const auto rootSpace = rebound.tpe.template get<Type::Ptr>() ^ map([](auto &p) { return p.space; }) ^
+                             get_or_else(isLocalArr(rebound.tpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
       const auto space = (sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>()) ^
                          map([](auto &p) { return p.space; }) ^ //
                          get_or_else(rootSpace);
@@ -622,6 +626,8 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   return stmt.match_total( //
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
+        // hoisted to the kernel's outermost scope by mkFn; drop the nested decl
+        if (!x.expr && isLocalArr(x.name.tpe)) return ""s;
         if (x.expr && x.name.tpe.is<Type::Arr>())
           return fmt::format("{}; {}", mkDecl(x.name.tpe, normalise(x.name.symbol)),
                              mkArrayCopy(normalise(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
@@ -739,8 +745,14 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 }
 
 std::string backend::CSource::mkFn(const Function &fnTree) {
-  return fmt::format("{} {}", mkFnProto(fnTree),
-                     fnTree.body ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); }));
+  // OpenCL local-AS declarations must sit in the kernel's outermost scope
+  const auto allVars = fnTree.body | flat_map([](auto &s) { return s.template collect_all<Stmt::Var>(); }) | to_vector();
+  const auto localDecls = allVars ^ collect([&](auto &v) -> std::optional<std::string> {
+                            if (!v.expr && isLocalArr(v.name.tpe)) return fmt::format("{};", mkDecl(v.name.tpe, normalise(v.name.symbol)));
+                            return std::nullopt;
+                          });
+  const auto stmts = concat(localDecls, fnTree.body ^ map([&](auto &s) { return mkStmt(s); }));
+  return fmt::format("{} {}", mkFnProto(fnTree), stmts ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return s ^ indent(2); }));
 }
 
 CompileResult backend::CSource::compileProgram(const Program &program_, const compiletime::OptLevel &opt) {

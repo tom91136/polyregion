@@ -773,8 +773,13 @@ Type::Any Remapper::annotateLocalSpace(const clang::ValueDecl *decl, RemapContex
                        return false;
                      });
   auto tpe = handleType(decl->getType(), r);
+  if (!local) return tpe;
   return tpe.get<Type::Ptr>() ^
-         fold([&](auto &p) { return Type::Ptr(p.comp, local ? TypeSpace::Local() : p.space).widen(); }, [&] { return tpe; });
+         fold([&](auto &p) { return Type::Ptr(p.comp, TypeSpace::Local()).widen(); },
+              [&] {
+                return tpe.get<Type::Arr>() ^
+                       fold([&](auto &a) { return Type::Arr(a.comp, a.length, TypeSpace::Local()).widen(); }, [&] { return tpe; });
+              });
 }
 
 Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
@@ -1592,7 +1597,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           };
 
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
-            auto name = Named(declName(var), handleType(var->getType(), r));
+            auto name = Named(declName(var), annotateLocalSpace(var, r));
 
             if (auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit())) {
               if (auto structTpe = name.tpe.get<Type::Struct>(); structTpe) {
