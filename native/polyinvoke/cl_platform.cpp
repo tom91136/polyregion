@@ -398,7 +398,8 @@ std::vector<std::string> ClDevice::features() {
   const auto hasExt = [&](std::string_view e) { return exts.find(e) != std::string::npos; };
   if (hasExt("cl_khr_fp64")) out.emplace_back("fp64");
   if (hasExt("cl_khr_fp16")) out.emplace_back("fp16");
-  if (hasExt("cl_khr_int64_base_atomics")) out.emplace_back("int64");
+  // XXX int64 is behind cles_khr_int64 for embedded profiles
+  if (queryDeviceInfo(*device, CL_DEVICE_PROFILE) == "FULL_PROFILE" || hasExt("cles_khr_int64")) out.emplace_back("int64");
   out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
   if (quirks.overReadPad) out.emplace_back(fmt::format("{}:{}", OverReadPadFeature, quirks.overReadPad));
   cachedFeatures = out;

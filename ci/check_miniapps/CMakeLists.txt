@@ -51,7 +51,7 @@ endif ()
 # cpu-tbb is the correctness reference (system compiler + oneTBB); emulators are added when the bundle is present
 if (NOT DEFINED MINIAPP_BACKENDS)
   if (HAVE_EMULATORS)
-    set(MINIAPP_BACKENDS cpu-tbb vk-lavapipe cl-llvmpipe cpu)
+    set(MINIAPP_BACKENDS cpu-tbb vk-lavapipe cl-llvmpipe cl-pocl cpu)
   else ()
     set(MINIAPP_BACKENDS cpu-tbb cpu)
   endif ()
@@ -61,15 +61,18 @@ endif ()
 # ...) is sourced from the bundle's env.sh by run.sh, so it lives only in emulators/collect.sh.
 set(ARCH_vk-lavapipe spirv_glcompute@)
 set(ARCH_cl-llvmpipe opencl1_1@)
+set(ARCH_cl-pocl     opencl1_1@)
 set(ARCH_cpu         host@native)
 set(RUN_WRAPPER "${CMAKE_CURRENT_SOURCE_DIR}/run.sh")
-set(ENV_vk-lavapipe "POLYRT_PLATFORM=spirv_glcompute@*llvmpipe*;POLYRT_HOST_FALLBACK=0")
-set(ENV_cl-llvmpipe "POLYRT_PLATFORM=opencl1_1@*llvmpipe*source*;POLYRT_HOST_FALLBACK=0")
+set(ENV_vk-lavapipe "POLYRT_PLATFORM=spirv_glcompute@!spirv_glcompute@*llvmpipe*;POLYRT_HOST_FALLBACK=0")
+set(ENV_cl-llvmpipe "POLYRT_PLATFORM=opencl1_1@!opencl1_1@*llvmpipe*source*;POLYRT_HOST_FALLBACK=0")
+set(ENV_cl-pocl     "POLYRT_PLATFORM=opencl1_1@!opencl1_1@*Portable*source*;POLYRT_HOST_FALLBACK=0")
 set(ENV_cpu         "POLYRT_PLATFORM=host")
 set(ENV_cpu-tbb     "")                                    # the reference runs natively, no polyrt
 # bundle for run.sh to source per backend (`-` = none); only the emulator backends need it
 set(BUNDLE_vk-lavapipe "${MINIAPP_EMULATORS}")
 set(BUNDLE_cl-llvmpipe "${MINIAPP_EMULATORS}")
+set(BUNDLE_cl-pocl     "${MINIAPP_EMULATORS}")
 set(BUNDLE_cpu         -)
 set(BUNDLE_cpu-tbb     -)
 
@@ -152,6 +155,7 @@ foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
       DEPENDS "${app}-${backend}-build"
       WORKING_DIRECTORY "${src}"
       ENVIRONMENT "${ENV_${backend}}"
+      SKIP_RETURN_CODE 77
       RESOURCE_LOCK run-cpu # runs are CPU-bound (host threads / CPU software rasterisers)
       TIMEOUT 1200)
     if (DEFINED PASS_${app})

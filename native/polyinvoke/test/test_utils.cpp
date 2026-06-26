@@ -142,7 +142,10 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
       const auto features = d->features();
       const auto hasFeature = [&](const std::string_view f) { return features ^ exists([&](auto &x) { return x == f; }); };
       if (!(requiredFeatures ^ forall(hasFeature))) continue;
-      if (archAsFeature && !arch.empty() && arch != "*" && !hasFeature(arch)) continue;
+      // arch matches a device feature (sm_35, gfx1036, fp64, ...) or a case-insensitive substring of the device name
+      if (archAsFeature && !arch.empty() && arch != "*" && !hasFeature(arch) &&
+          !((d->name() ^ to_lower()) ^ contains_slice(std::string(arch) ^ to_lower())))
+        continue;
       if (skip(backend, *d)) continue;
       device = std::move(d);
       break;

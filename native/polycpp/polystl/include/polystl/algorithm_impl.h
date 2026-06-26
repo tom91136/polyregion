@@ -271,12 +271,12 @@ template <typename T> constexpr bool is_execution_policy_v = is_execution_policy
 
 template <class ForwardIt, class UnaryFunction>
 void for_each(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, UnaryFunction f) {
-  polyregion::polystl::details::parallel_for(std::distance(first, last), [f, first](auto idx) { f(*(first + idx)); });
+  polyregion::polystl::details::parallel_for(last - first, [f, first](auto idx) { f(*(first + idx)); });
 }
 
 template <class ForwardIt, class T> void fill(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, const T &value) {
   // XXX `value = value` strips the T& so the capture is by value.
-  polyregion::polystl::details::parallel_for(std::distance(first, last), [value = value, first](auto idx) { (*(first + idx)) = value; });
+  polyregion::polystl::details::parallel_for(last - first, [value = value, first](auto idx) { (*(first + idx)) = value; });
 }
 
 template <class ForwardIt, class Size, class UnaryFunction>
@@ -294,15 +294,14 @@ ForwardIt fill_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n
 
 template <class ForwardIt1, class ForwardIt2>
 ForwardIt2 copy(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
-  polyregion::polystl::details::parallel_for(std::distance(first, last),
-                                             [d_first, first](auto idx) { (*(d_first + idx)) = (*(first + idx)); });
+  polyregion::polystl::details::parallel_for(last - first, [d_first, first](auto idx) { (*(d_first + idx)) = (*(first + idx)); });
   return d_first;
 }
 
 template <class ForwardIt1, class ForwardIt2, class UnaryOperation>
 ForwardIt2 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 d_first,
                      UnaryOperation unary_op) {
-  polyregion::polystl::details::parallel_for(std::distance(first1, last1),
+  polyregion::polystl::details::parallel_for(last1 - first1,
                                              [d_first, first1, unary_op](auto idx) { *(d_first + idx) = unary_op(*(first1 + idx)); });
   return d_first;
 }
@@ -310,16 +309,15 @@ ForwardIt2 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, 
 template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation>
 ForwardIt3 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first,
                      BinaryOperation binary_op) {
-  polyregion::polystl::details::parallel_for(std::distance(first1, last1), [d_first, first1, first2, binary_op](auto idx) {
-    (*(d_first + idx)) = binary_op(*(first1 + idx), *(first2 + idx));
-  });
+  polyregion::polystl::details::parallel_for(
+      last1 - first1, [d_first, first1, first2, binary_op](auto idx) { (*(d_first + idx)) = binary_op(*(first1 + idx), *(first2 + idx)); });
   return d_first;
 }
 
 template <class ForwardIt1, class ForwardIt2, class T>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
   return polyregion::polystl::details::parallel_reduce(
-      std::distance(first1, last1), init, //
+      last1 - first1, init, //
       [first1, first2](auto idx) { return *(first1 + idx) * *(first2 + idx); }, [](auto l, auto r) { return l + r; });
 }
 
@@ -329,15 +327,14 @@ T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, Fo
   // XXX Wrap `reduce` in a by-value lambda; perfect-forwarded references confuse SPIR-V
   // storage-class tracking and IGC emits null pointers.
   return polyregion::polystl::details::parallel_reduce(
-      std::distance(first1, last1), init, [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); },
+      last1 - first1, init, [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); },
       [reduce](auto l, auto r) { return reduce(l, r); });
 }
 
 template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce,
                    UnaryTransformOp transform) {
-  return polyregion::polystl::details::parallel_reduce(std::distance(first, last), init, transform,
-                                                       [reduce](auto l, auto r) { return reduce(l, r); });
+  return polyregion::polystl::details::parallel_reduce(last - first, init, transform, [reduce](auto l, auto r) { return reduce(l, r); });
 }
 
 // Sequential fallbacks for par/seq/unseq when no stdlib <execution> is available.

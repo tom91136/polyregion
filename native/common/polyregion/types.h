@@ -154,13 +154,14 @@ struct POLYREGION_EXPORT TargetSpec::ParsedRef {
   std::string deviceGlob;
 };
 
-// `<compile_target>@<arch> ! <runtime_platform>@<name_glob>`
+// `[<compile_target>@<arch> !] <runtime_platform>@<name_glob>` note the compile prefix is optional;
+// without `!`  the whole string is the runtime selector
 POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::parse(std::string_view input) {
   auto bang = input.find('!');
   auto sel = (bang == std::string_view::npos) ? input : input.substr(bang + 1);
   auto at = sel.find('@');
   auto head = (at == std::string_view::npos) ? sel : sel.substr(0, at);
-  auto glob = (bang == std::string_view::npos || at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
+  auto glob = (at == std::string_view::npos) ? std::string_view{} : sel.substr(at + 1);
   if (auto s = findByName(head)) return ParsedRef{*s, std::string(glob)};
   return std::nullopt;
 }

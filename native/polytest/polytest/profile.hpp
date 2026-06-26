@@ -21,6 +21,8 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include "aspartame/all.hpp"
 
@@ -65,21 +67,21 @@ inline std::vector<std::string> fileLines(const std::string &file) {
   return out;
 }
 
-// candidate profile files, in precedence order: $POLYREGION_TEST_PROFILE.env, <hostname>.env, default.env
+// candidate profile files, most-specific first: <profile>.<os>.env, <profile>.env, <hostname>.<os>.env, <hostname>.env, default.env
 inline std::vector<std::string> profileCandidates(const std::string &profileDir) {
-  auto profilePath = [&](const std::string &name) {
+  using namespace aspartame;
+  const auto path = [&](const std::string &name) {
     llvm::SmallString<128> p(profileDir);
     llvm::sys::path::append(p, name);
     return std::string(p);
   };
-  std::vector<std::string> out;
-  if (const auto v = std::getenv(polyregion::env::PolyregionTestProfile)) out.push_back(profilePath(std::string(v) + ".env"));
-  if (auto h = hostname()) {
-    if (const auto dot = h->find('.'); dot != std::string::npos) h->resize(dot);
-    out.push_back(profilePath(*h + ".env"));
-  }
-  out.push_back(profilePath("default.env"));
-  return out;
+  const std::string os = llvm::Triple(llvm::sys::getProcessTriple()).getOSName().str();
+  std::vector<std::string> bases; // the profile name, then the short hostname
+  if (const auto v = std::getenv(polyregion::env::PolyregionTestProfile)) bases ^= append(v);
+  if (auto h = hostname()) bases ^= append(*h ^ take_while([](char c) { return c != '.'; }));
+  return bases                                                                                           //
+         ^ flat_map([&](auto &b) { return std::vector{path(b + "." + os + ".env"), path(b + ".env")}; }) //
+         ^ append(path("default.env"));
 }
 
 inline std::vector<std::string> loadTestTargets(const std::string &profileDir,
