@@ -92,24 +92,12 @@ object Verify {
       }
     }
 
-  def validateRegionSpaces(program: p.Program): List[String] = {
-    def spaceOf(t: p.Type): Option[p.Type.Space] = t match {
-      case p.Type.Ptr(_, s)    => Some(s)
-      case p.Type.Arr(_, _, s) => Some(s)
-      case _                   => None
-    }
+  def validateRegionSpaces(program: p.Program): List[String] =
     (program.entry :: program.functions).flatMap { f =>
-      Provenance.derivedIn(f).toList.sortBy(_._1.symbol).flatMap {
-        case (n, p.Region.Rooted(r)) if r != n =>
-          (for {
-            sn <- spaceOf(n.tpe)
-            sr <- spaceOf(r.tpe)
-            if sn != sr
-          } yield s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr").toList
-        case _ => Nil
+      Provenance.spaceMismatches(f).map { (n, r, sn, sr) =>
+        s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr"
       }
     }
-  }
 
   def validateSingle(
       f: p.Function,

@@ -15,7 +15,7 @@ namespace polyregion::polyfront::passes {
 inline std::string deviceArena() { return "FullOpt;ArenaLower;VerifyAnchors(strict=true)"; }
 // VerifyAnchors(strict) after ArenaView asserts every opaque-origin access resolved to an arena view
 // (logical SPIR-V cannot deref a raw pointer) - a missed deref becomes a compile error, not a device fault
-inline std::string deviceArenaLogical() { return "FullOpt;Anchor;ArenaView;VerifyAnchors(strict=true)"; }
+inline std::string deviceArenaLogical() { return "FullOpt;Anchor;ArenaView;RegionRespace;VerifyAnchors(strict=true)"; }
 
 inline std::string hostMirror(const std::string &mirrorId) { return fmt::format("Mirror(id={})", mirrorId); }
 

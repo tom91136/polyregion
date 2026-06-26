@@ -19,6 +19,29 @@ object Provenance {
 
   def isPtr(t: p.Type): Boolean = t match { case _: p.Type.Ptr => true; case _ => false }
 
+  def spaceOf(t: p.Type): Option[p.Type.Space] = t match {
+    case p.Type.Ptr(_, s)    => Some(s)
+    case p.Type.Arr(_, _, s) => Some(s)
+    case _                   => None
+  }
+
+  def withSpace(t: p.Type, s: p.Type.Space): p.Type = t match {
+    case p.Type.Ptr(c, _)    => p.Type.Ptr(c, s)
+    case p.Type.Arr(c, l, _) => p.Type.Arr(c, l, s)
+    case other               => other
+  }
+
+  // rooted pointers whose own space differs from the resource they address: (pointer, root, ptrSpace, rootSpace)
+  def spaceMismatches(f: p.Function): List[(p.Named, p.Named, p.Type.Space, p.Type.Space)] =
+    derivedIn(f).toList.sortBy(_._1.symbol).flatMap {
+      case (n, p.Region.Rooted(r)) if r != n =>
+        for {
+          sn <- spaceOf(n.tpe)
+          sr <- spaceOf(r.tpe) if sn != sr
+        } yield (n, r, sn, sr)
+      case _ => None
+    }
+
   // disagreement is Opaque, except distinct stack scalars (e.g. `std::min(&a, &b)`) which are never arena-marshalled
   def joinRegions(x: p.Region, y: p.Region): p.Region = (x, y) match {
     case (p.Region.Rooted(a), p.Region.Rooted(b)) if a == b || (!isPtr(a.tpe) && !isPtr(b.tpe)) => x

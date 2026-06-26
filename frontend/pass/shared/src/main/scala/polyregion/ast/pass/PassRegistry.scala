@@ -41,6 +41,7 @@ object PassRegistry {
     PassDef.configured(VerifyAnchors()),
     PassDef.singleton(ArenaLower),
     PassDef.singleton(ArenaView),
+    PassDef.singleton(RegionRespace),
     PassDef.configured(Mirror())
   )
 
