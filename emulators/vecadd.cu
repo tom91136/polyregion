@@ -16,12 +16,47 @@ extern "C" __global__ void vecadd(const float *a, const float *b, float *c) {
   #include <string>
   #include <string_view>
 
-extern "C" {
 typedef int CUresult, CUdevice;
 typedef struct CUctx_st *CUcontext;
 typedef struct CUmod_st *CUmodule;
 typedef struct CUfunc_st *CUfunction;
 typedef unsigned long long CUdeviceptr;
+
+  #ifdef _WIN32
+    #include <windows.h>
+static CUresult (*cuInit)(unsigned);
+static CUresult (*cuDeviceGet)(CUdevice *, int);
+static CUresult (*cuDeviceGetName)(char *, int, CUdevice);
+static CUresult (*cuCtxCreate_v2)(CUcontext *, unsigned, CUdevice);
+static CUresult (*cuModuleLoadData)(CUmodule *, const void *);
+static CUresult (*cuModuleGetFunction)(CUfunction *, CUmodule, const char *);
+static CUresult (*cuMemAlloc_v2)(CUdeviceptr *, size_t);
+static CUresult (*cuMemcpyHtoD_v2)(CUdeviceptr, const void *, size_t);
+static CUresult (*cuMemcpyDtoH_v2)(void *, CUdeviceptr, size_t);
+static CUresult (*cuLaunchKernel)(CUfunction, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, void *, void **,
+                                  void **);
+static CUresult (*cuCtxSynchronize)();
+static void loadCuda() {
+  HMODULE h = LoadLibraryA("nvcuda.dll");
+  if (!h) throw std::runtime_error("LoadLibrary nvcuda.dll failed");
+    #define LD(f)                                                                                                                          \
+      f = reinterpret_cast<decltype(f)>(GetProcAddress(h, #f));                                                                            \
+      if (!f) throw std::runtime_error("missing export " #f)
+  LD(cuInit);
+  LD(cuDeviceGet);
+  LD(cuDeviceGetName);
+  LD(cuCtxCreate_v2);
+  LD(cuModuleLoadData);
+  LD(cuModuleGetFunction);
+  LD(cuMemAlloc_v2);
+  LD(cuMemcpyHtoD_v2);
+  LD(cuMemcpyDtoH_v2);
+  LD(cuLaunchKernel);
+  LD(cuCtxSynchronize);
+    #undef LD
+}
+  #else
+extern "C" {
 CUresult cuInit(unsigned);
 CUresult cuDeviceGet(CUdevice *, int);
 CUresult cuDeviceGetName(char *, int, CUdevice);
@@ -34,8 +69,12 @@ CUresult cuMemcpyDtoH_v2(void *, CUdeviceptr, size_t);
 CUresult cuLaunchKernel(CUfunction, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, void *, void **, void **);
 CUresult cuCtxSynchronize();
 }
+  #endif
 
 int main(int argc, char **argv) try {
+  #ifdef _WIN32
+  loadCuda();
+  #endif
   const std::string dir = argc > 1 ? argv[1] : ".";
   auto file = std::ifstream{dir + "/vecadd.ptx", std::ios::binary};
   const auto ptx = std::string{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
