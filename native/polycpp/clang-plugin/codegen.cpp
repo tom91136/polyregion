@@ -74,15 +74,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
                          r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
 
-  auto exportedFns = (std::vector<Function>{program.entry} ^ concat(program.functions))                         //
-                     | filter([](auto &f) { return f.visibility.template is<FunctionVisibility::Exported>(); }) //
-                     | to_vector();
-  auto exportedStructNames =
-      exportedFns                                                                                                                         //
-      | flat_map([](auto &f) { return f.args; })                                                                                          //
-      | collect([](auto &a) { return extractComponent(a.named.tpe) ^ flat_map([](auto &t) { return t.template get<Type::Struct>(); }); }) //
-      | map([](auto &s) { return repr(s.name); })                                                                                         //
-      | to<std::unordered_set>();
+  auto exportedStructNames = std::unordered_set<std::string>{repr(parentDef->name)};
 
   auto layouts = r.layouts | values() | map([&](auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) | to_vector();
 
