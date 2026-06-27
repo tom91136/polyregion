@@ -1,9 +1,9 @@
 set shell := ["bash", "-cu"]
 set windows-shell := ["bash", "-cu"]
 set dotenv-path := "native/.env"
-set unstable := true   # for which() in the Git Bash guard below
+set unstable := true   # for the [parallel] attribute on clean-all
 
-_git_bash_guard := if os() != "windows" { "" } else if which("cygpath") != "" { "" } else { error('Run "just" from Git Bash: Open the Git Bash terminal or prepend Git to PATH and rerun: `set "PATH=C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;%PATH%"`') }
+_git_bash_guard := if os() != "windows" { "" } else if env_var_or_default("MSYSTEM", "") != "" { "" } else { error('Run "just" from Git Bash: Open the Git Bash terminal or prepend Git to PATH and rerun: `set "PATH=C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;%PATH%"`') }
 
 native_build := env_var_or_default('POLYREGION_NATIVE_BUILD', '')
 arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', if os() == "windows" { arch() } else { `uname -m` }))
