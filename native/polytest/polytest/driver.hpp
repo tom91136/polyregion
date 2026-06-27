@@ -281,13 +281,18 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   if (args.empty()) return {-1, {}, "empty command", command};
   auto resolved = resolveBin(args[0], cfg);
   std::string execErr;
-  unsigned secondsToWait = 0;
-  if (const char *t = std::getenv(polyregion::env::PolytestTimeout)) {
-    char *end = nullptr;
-    const unsigned long v = std::strtoul(t, &end, 10);
-    if (end != t && *end == '\0') secondsToWait = static_cast<unsigned>(v);
-  }
-  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath}, secondsToWait, 0, &execErr);
+  const auto envUnsigned = [](const char *key) -> unsigned {
+    if (const char *v = std::getenv(key)) {
+      char *end = nullptr;
+      const unsigned long n = std::strtoul(v, &end, 10);
+      if (end != v && *end == '\0') return static_cast<unsigned>(n);
+    }
+    return 0;
+  };
+  const unsigned secondsToWait = envUnsigned(polyregion::env::PolytestTimeout);
+  const unsigned memLimitMb = envUnsigned(polyregion::env::PolytestMemLimitMb);
+  auto code =
+      llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath}, secondsToWait, memLimitMb, &execErr);
 
   auto stdoutText = polyregion::read_string(*outPath);
   auto stderrText = polyregion::read_string(*errPath);
