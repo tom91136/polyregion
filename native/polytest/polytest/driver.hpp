@@ -343,7 +343,8 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
       const auto out = toks ^ sliding(2, 1) ^ fold_left(std::string{}, [](auto acc, auto &w) { //
                          return w.size() == 2 && w[0] == "-o" ? w[1] : acc;
                        });
-      if (!out.empty()) {
+      const bool offloadCompile = toks ^ exists([](auto &t) { return t == "-fstdpar"; });
+      if (!out.empty() && offloadCompile) {
         // XXX macOS embeds a non-deterministic LC_UUID and ad-hoc code signature in linked executables, just compare objects here
         const std::string obj1 = out + ".r1.o", obj2 = out + ".r2.o";
         const auto objCmd = [&](const std::string &o) {
