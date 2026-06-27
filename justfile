@@ -1,9 +1,12 @@
 set shell := ["bash", "-cu"]
 set windows-shell := ["bash", "-cu"]
 set dotenv-path := "native/.env"
+set unstable := true   # for which() in the Git Bash guard below
+
+_git_bash_guard := if os() != "windows" { "" } else if which("cygpath") != "" { "" } else { error('Run "just" from Git Bash: Open the Git Bash terminal or prepend Git to PATH and rerun: `set "PATH=C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;%PATH%"`') }
 
 native_build := env_var_or_default('POLYREGION_NATIVE_BUILD', '')
-arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', `uname -m`))
+arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', if os() == "windows" { arch() } else { `uname -m` }))
 build_type   := env_var_or_default('BUILD_TYPE', 'Release')
 container    := env_var_or_default('CONTAINER', 'podman')
 sbt          := 'sbt -no-colors'
@@ -12,8 +15,23 @@ sbt          := 'sbt -no-colors'
 dylib := env_var_or_default('POLYREGION_LLVM_DYLIB', 'ON')
 export POLYREGION_LLVM_DYLIB := dylib
 
-# Auto-export VCPKG_ROOT to ./vcpkg (populated by `just build-vcpkg`) if the env doesn't set it.
-export VCPKG_ROOT := env_var_or_default('RUNVCPKG_VCPKG_ROOT', env_var_or_default('VCPKG_ROOT', justfile_directory() / "vcpkg"))
+local_vcpkg := justfile_directory() / "vcpkg"
+export VCPKG_ROOT := if path_exists(local_vcpkg) == "true" { local_vcpkg } else { env_var_or_default('RUNVCPKG_VCPKG_ROOT', env_var_or_default('VCPKG_ROOT', local_vcpkg)) }
+
+msvc_reenter := '''
+if [ "${OS:-}" = "Windows_NT" ] && [ -z "${VSCMD_VER:-}" ] && [ -z "${POLYREGION_NO_MSVC_AUTOLOAD:-}" ]; then
+    _vsw="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    _inst=$([ -x "$_vsw" ] && "$_vsw" -latest -products '*' -property installationPath | tr -d '\r' || true)
+    if [ -n "$_inst" ] && [ -f "$_inst/Common7/Tools/VsDevCmd.bat" ]; then
+        _arch=amd64; case "$(uname -m)" in aarch64|arm64) _arch=arm64;; esac
+        _bat=$(mktemp --suffix=.bat)
+        printf '@echo off\r\ncall "%s" -arch=%s -host_arch=%s -no_logo >nul\r\n"%s" "%s"\r\nexit /b %%errorlevel%%\r\n' \
+            "$(cygpath -w "$_inst/Common7/Tools/VsDevCmd.bat")" "$_arch" "$_arch" "$(cygpath -w "$(command -v bash)")" "$(cygpath -w "$0")" > "$_bat"
+        _rc=0; cmd //c "$(cygpath -w "$_bat")" || _rc=$?
+        rm -f "$_bat"; exit $_rc
+    fi
+fi
+'''
 
 # Shared vcpkg install root so `just build-vcpkg-deps` and `just configure` agree on a location.
 export VCPKG_INSTALLED_DIR := env_var_or_default('VCPKG_INSTALLED_DIR', justfile_directory() / "native" / ".vcpkg" / "vcpkg_installed")
@@ -129,7 +147,15 @@ build-pass-js:
 build-pass-native:
     #!/usr/bin/env bash
     set -euo pipefail
+    {{ msvc_reenter }}
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
+    # Point Scala Native's clang at the bundled dist when LLVM_BIN isn't already set.
+    if [ -z "${LLVM_BIN:-}" ]; then
+        shopt -s nullglob
+        for d in "{{ justfile_directory() }}"/native/out/polyregion-{{ build_type }}-*-dist; do
+            if [ -x "$d/bin/clang" ] || [ -x "$d/bin/clang.exe" ]; then export LLVM_BIN="$d/bin"; break; fi
+        done
+    fi
     cd frontend && {{ sbt }} 'passNative/exportPassDso'
 
 # === Lint ===
@@ -206,6 +232,7 @@ test-scala *args='':
 test-native *args='':
     #!/usr/bin/env bash
     set -euo pipefail
+    {{ msvc_reenter }}
     BUILD=$(just _native-build)
     rm -f "$BUILD"/*/polytest-discover/*.ids
     find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
@@ -301,7 +328,10 @@ build-vcpkg-deps:
             echo "vcpkg checkout incomplete at $VCPKG_ROOT (no $BOOTSTRAP); run \`just build-vcpkg\`" >&2; exit 1
         fi
     fi
-    JS_ENGINE="${POLYC_JS_ENGINE:-hermes}"
+    # Match native/CMakeLists.txt's default: qjs on Windows (hermes needs a non-MSVC compiler).
+    DEFAULT_JS_ENGINE=hermes
+    [[ "{{ os() }}" == "windows" ]] && DEFAULT_JS_ENGINE=qjs
+    JS_ENGINE="${POLYC_JS_ENGINE:-$DEFAULT_JS_ENGINE}"
     # Match polyregion's sysroot pin so vcpkg ports compile against the same glibc/libstdc++.
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
     echo "Installing vcpkg deps (triplet=$TRIPLET, feature=$JS_ENGINE, sysroot=${CMAKE_SYSROOT:-none}) -> $VCPKG_INSTALLED_DIR" >&2
@@ -442,6 +472,7 @@ test-native-san *args='':
 _native action extra='':
     #!/usr/bin/env bash
     set -euo pipefail
+    {{ msvc_reenter }}
     SYSROOT_FLAG=()
     [ -d "{{ sysroot_path }}" ] && SYSROOT_FLAG=(-DCMAKE_SYSROOT="{{ sysroot_path }}")
     cd native && cmake -DCMAKE_BUILD_TYPE={{ build_type }} -DARCH={{ arch }} -DACTION={{ action }} ${SYSROOT_FLAG[@]+"${SYSROOT_FLAG[@]}"} {{ extra }} -P build.cmake

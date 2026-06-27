@@ -13,25 +13,38 @@ Top-level orchestration is via [`just`](https://github.com/casey/just); `just` f
 
 ### Quick start (fresh clone)
 
-Only `JAVA_HOME` needs to be set externally; `just build-vcpkg` clones + bootstraps vcpkg into the repo and `VCPKG_ROOT` is auto-discovered there.
+Prerequisites:
+ * `JAVA_HOME` (JDK 21+)
+   * Fedora: `sudo dnf install java-latest-openjdk-devel` 
+   * Windows: `winget install -e --id EclipseAdoptium.Temurin.21.JDK` 
+ * `sbt` - https://www.scala-sbt.org/download/
+ * bash
+   * Windows: use Git bash 
 
-```sh
-export JAVA_HOME=/path/to/jdk21    # any JDK 21+ install root
+***Important: Use Git Bash on Windows; just recipies are bash scripts***
+
+```shell
+export JAVA_HOME=/usr/lib/jvm/java  # any JDK 21+ install root
 
 just build-vcpkg               # clone + bootstrap vcpkg at the pinned commit
 just build-sysroot             # AL8 sysroot for portable binaries (optional; podman or docker required)
-                         # skip for host-native; absence is detected as "no sysroot"
+                               # skip for host-native; absence is detected as "no sysroot"
 just build-llvm                # bundled LLVM/Clang/LLD/Flang/MLIR (matches sysroot if present)
-just build-vcpkg-deps          # manifest deps (Catch2, fmt, hermes, libffi, ...) into native/.vcpkg
+just build-vcpkg-deps          # manifest deps (Catch2, fmt, libffi, JS engine, ...) into native/.vcpkg
+just build-pass-native         # Scala-Native pass DSO (libpolypass) that polyc embeds (needs sbt)
+just configure                 # CMake-configure the native build
 just build-dist                # polyregion dist (bin/ + lib/)
-just check-dist          # smoke test
+just check-dist                # smoke test
 ```
+
+`build-pass-native` builds the default `dso` pass bundle that `configure` then requires; to use the
+JavaScript bundle instead, run `just build-pass-js` and pass `--set POLYC_PASS_BUNDLE js` to `configure`.
 
 `just env` prints the resolved settings (`arch`, `build_type`, `dylib`, `sysroot_path`, `vcpkg_root`, `vcpkg_commit`, `java_home`).
 
 ### Native - incremental
 
-```sh
+```shell
 just configure              # one-time CMake configure of native/
 
 just build polycpp          # build a single component
@@ -53,7 +66,7 @@ The `polycpp` and `polyfc` targets transitively rebuild everything they depend o
 
 `polycpp` is a clang wrapper. It forwards to a real clang via `POLYCPP_DRIVER` and adds the polycpp clang plugin, polyreflect plugin, and runtime link.
 
-```sh
+```shell
 export POLYCPP_DRIVER=$PWD/native/out/polyregion-Release-x86_64-dylib-dist/bin/clang++
 POLYCPP=$PWD/native/out/build-linux-x86_64-dylib/polycpp/polycpp
 
@@ -81,9 +94,17 @@ Runtime platform selectors (`POLYRT_PLATFORM`):
 | `POLYSTL_NO_OFFLOAD` | any non-empty | skip GPU/host dispatch entirely; run the lambda inline on the calling thread |
 | `POLYFRONT_VERBOSE` | `0`/`1` | when `1`, dump polyAST IR before invoking polyc |
 
-### Test suite
+### Native test suite
 
-Tests are `#pragma region`-annotated `.cpp` files under `native/polycpp/test/`. Each file declares one or more cases, the compile flags, and the expected stdout via `#pragma region requires:`. There's no built-in test runner yet; use a small loop that invokes `$POLYCPP` then runs the binary under each `POLYRT_PLATFORM` you want to cover.
+The native suite is driven by ctest:
+
+```sh
+just build all       # build the drivers, runtime and test binaries first
+just test-native     # run the ctest suite (extra ctest flags pass through, e.g. `just test-native -j 8`)
+```
+
+Tests are `#pragma region`-annotated `.cpp` files under `native/polycpp/test/`. 
+Each file declares one or more cases, the compile flags, and the expected stdout via `#pragma region requires:`.
 
 ### Frontend (Scala)
 

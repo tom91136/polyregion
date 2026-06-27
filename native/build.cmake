@@ -20,6 +20,14 @@ else ()
     message(FATAL_ERROR "Unknown platform (not Unix-like or Windows)")
 endif ()
 
+if (WIN32)
+    string(TOUPPER "${ARCH}" _ARCH_UPPER)
+    if (_ARCH_UPPER STREQUAL "X86_64" OR _ARCH_UPPER STREQUAL "AMD64")
+        set(ARCH amd64)
+    elseif (_ARCH_UPPER STREQUAL "AARCH64" OR _ARCH_UPPER STREQUAL "ARM64")
+        set(ARCH arm64)
+    endif ()
+endif ()
 
 string(TOLOWER ${CMAKE_HOST_SYSTEM_NAME} CMAKE_HOST_SYSTEM_NAME)
 

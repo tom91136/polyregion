@@ -67,7 +67,12 @@ cmake_policy(SET CMP0091 NEW)
 
 # XXX JS engine selection must precede project() so the vcpkg toolchain reads VCPKG_MANIFEST_FEATURES
 # at the right time and only installs the engine we actually use
-set(POLYC_JS_ENGINE "hermes" CACHE STRING "JS engine for polyc: qjs or hermes")
+if (WIN32)
+    set(_POLYC_JS_ENGINE_DEFAULT "qjs")
+else ()
+    set(_POLYC_JS_ENGINE_DEFAULT "hermes")
+endif ()
+set(POLYC_JS_ENGINE "${_POLYC_JS_ENGINE_DEFAULT}" CACHE STRING "JS engine for polyc: qjs or hermes")
 set_property(CACHE POLYC_JS_ENGINE PROPERTY STRINGS qjs hermes)
 string(TOLOWER "${POLYC_JS_ENGINE}" POLYC_JS_ENGINE)
 if (NOT POLYC_JS_ENGINE STREQUAL "qjs" AND NOT POLYC_JS_ENGINE STREQUAL "hermes")
