@@ -553,7 +553,7 @@ static void sinkLoadsThroughPointerPhis(llvm::Function &F) {
   }
 }
 
-static void scalariseForVulkan(llvm::TargetMachine &TM, llvm::Module &M) {
+static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bool logical) {
   llvm::PassBuilder PB(&TM);
   llvm::LoopAnalysisManager LAM;
   llvm::FunctionAnalysisManager FAM;
@@ -566,6 +566,8 @@ static void scalariseForVulkan(llvm::TargetMachine &TM, llvm::Module &M) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
   FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
 
+  // O0 emits spill-everything IR and we lean on the device driver to optimise, but rusticl's Mesa nir_opt_cse runs
+  // away (20GB+) on the load/store-heavy std::string-capture blob -- SROA/mem2reg the locals to SSA to defuse it
   llvm::FunctionPassManager FPM;
   FPM.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
   // hoist flat pointers back to StorageBuffer, removing the casts logical SPIR-V forbids
@@ -588,7 +590,7 @@ static void scalariseForVulkan(llvm::TargetMachine &TM, llvm::Module &M) {
   for (llvm::Function &F : M)
     if (!F.isDeclaration() && !F.getEntryBlock().empty()) {
       FPM.run(F, FAM);
-      sinkLoadsThroughPointerPhis(F);
+      if (logical) sinkLoadsThroughPointerPhis(F); // a pointer OpPhi is only invalid under Vulkan's logical model
       cleanup.run(F, FAM);
     }
 }
@@ -735,7 +737,10 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       if (isSpirv) {
         // XXX SPIR-V uses its own translate API; the generic addPassesToEmitFile path crashes
         // inside RegAlloc on SPIR-V due to subtarget init order.
-        if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) scalariseForVulkan(TM, *m);
+        // promote the O0 spill-everything allocas to SSA before translate: we emit unoptimised IR and lean on the
+        // device driver to optimise, but rusticl's Mesa nir_opt_cse runs away (20GB+) on the load/store-heavy
+        // std::string-capture blob; SROA shrinks the kernel ~10x and sidesteps that
+        scalariseForSpirv(TM, *m, TM.getTargetTriple().getOS() == llvm::Triple::Vulkan);
         // Vulkan forces CodeGenOptLevel::None: at O1+ LoopStrengthReduce rewrites the array GEP into a
         // pointer induction var with no logical SPIR-V form; physical SPIR-V keeps genOpt
         const auto spvOpt = TM.getTargetTriple().getOS() == llvm::Triple::Vulkan ? llvm::CodeGenOptLevel::None : genOpt;
