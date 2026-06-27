@@ -1,7 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,30 +53,40 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
     const auto e = joinEnv(extra);
     return e.empty() ? std::string{} : fmt::format(" ENVIRONMENT \"{}\"", e);
   };
-  const auto out =
-      tasks ^ mk_string("", [&](const CtestEntry &t) {
-        const auto name = prefix.empty() ? t.id : prefix + "-" + t.id;
-        if (t.variants.empty()) {
-          auto line = fmt::format("add_test(\"{}\" \"{}\" --run-task \"{}\")\n", name, binary, t.id);
-          const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
-          if (const auto p = labelsProp + envProp({}); !p.empty())
-            line += fmt::format("set_tests_properties(\"{}\" PROPERTIES{})\n", name, p);
-          return line;
-        }
-        // shared-compile: one setup, a run per variant, one cleanup, gated on a per-task fixture
-        const auto fix = "fix-" + t.id;
-        auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\")\n", name, binary, t.id) +
-                    fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{})\n", name, fix,
-                                envProp({}));
-        frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
-                  const auto vname = suffix.empty() ? name : name + "-" + suffix;
-                  return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\")\n", vname, binary, t.id) +
-                         fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\"{})\n", vname, fix, envProp(extraEnv));
-                });
-        return frag + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\")\n", name, binary, t.id) +
-               fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{})\n", name, fix, envProp({}));
-      });
-  std::ofstream(file, std::ios::binary) << out;
+
+  unsigned long long seed = 0x9e3779b97f4a7c15ull;
+  if (const char *s = std::getenv(env::PolytestSeed)) {
+    char *end = nullptr;
+    if (const auto v = std::strtoull(s, &end, 10); end != s && *end == '\0') seed = v;
+  }
+
+  std::ofstream(file, std::ios::binary)
+      << (tasks                                         //
+          ^ sort_by([](const auto &t) { return t.id; }) //
+          ^ shuffle(std::mt19937_64(seed))              //
+          ^ mk_string("", [&](const CtestEntry &t) {
+              const auto name = prefix.empty() ? t.id : prefix + "-" + t.id;
+              if (t.variants.empty()) {
+                auto line = fmt::format("add_test(\"{}\" \"{}\" --run-task \"{}\")\n", name, binary, t.id);
+                const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
+                if (const auto p = labelsProp + envProp({}); !p.empty())
+                  line += fmt::format("set_tests_properties(\"{}\" PROPERTIES{})\n", name, p);
+                return line;
+              }
+              // shared-compile: one setup, a run per variant, one cleanup, gated on a per-task fixture
+              const auto fix = "fix-" + t.id;
+              auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\")\n", name, binary, t.id) +
+                          fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{})\n", name,
+                                      fix, envProp({}));
+              frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
+                        const auto vname = suffix.empty() ? name : name + "-" + suffix;
+                        return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\")\n", vname, binary, t.id) +
+                               fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\"{})\n", vname, fix,
+                                           envProp(extraEnv));
+                      });
+              return frag + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\")\n", name, binary, t.id) +
+                     fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{})\n", name, fix, envProp({}));
+            }));
 }
 
 inline std::string distEnv(const std::string &filesSubdir) {

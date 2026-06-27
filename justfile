@@ -227,15 +227,17 @@ test-scala *args='':
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
 # Skips are not ctest SKIP entries (that property is O(n^2) at parse); the runner logs them per workdir.
-test-native *args='':
+test-native *args='': build-pass-native
     #!/usr/bin/env bash
     set -euo pipefail
     {{ msvc_reenter }}
     BUILD=$(just _native-build)
     rm -f "$BUILD"/*/polytest-discover/*.ids
+    rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
     find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
-    rc=0; ctest --test-dir "$BUILD" --timeout 600 {{ args }} || rc=$?
+    # force ctest colour on a terminal; auto (off) when piped to a log so it stays greppable
+    rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }} || rc=$?
     skips=$(find "$BUILD" -name polytest-skips.log -exec cat {} + 2>/dev/null | wc -l || true)
     [ "${skips:-0}" -gt 0 ] && echo "polytest: ${skips} skipped (find $BUILD -name polytest-skips.log | xargs cat)" || true
     exit $rc
@@ -271,7 +273,7 @@ test-native-with-emulators *args='':
     # XXX ctest bakes target names at discovery; re-list under this profile first.
     rm -f "$BUILD"/*/polytest-discover/*.ids
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
-    ctest --test-dir "$BUILD" --timeout 600 {{ args }}
+    CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
 # Smoke test of the emulator bundle (Vulkan on lavapipe, OpenCL on pocl[+rusticl], CUDA on gpuocelot/linux).
 check-emulators bundle='':
@@ -400,7 +402,7 @@ check-miniapps:
     ./ci/check_miniapps.sh
 
 # Incremental build of all ninja targets.
-build-all     extra='': (_build "all"     extra) check-fused
+build-all     extra='': build-pass-native (_build "all"     extra) check-fused
 
 # Incremental build of the polyc driver.
 build-polyc   extra='': (_build "polyc"   extra)
@@ -464,7 +466,7 @@ test-native-san *args='':
     set -euo pipefail
     export POLYREGION_ASAN=ON
     BUILD=$(just _native-build)
-    ctest --test-dir "$BUILD" {{ args }}
+    CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" {{ args }}
 
 # Run `cmake -DACTION=<action> -P native/build.cmake`. Auto-passes -DCMAKE_SYSROOT if it exists.
 _native action extra='':

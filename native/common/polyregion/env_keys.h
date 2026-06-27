@@ -59,5 +59,6 @@ inline constexpr auto PolytestAsanPreload = "POLYTEST_ASAN_PRELOAD";
 inline constexpr auto PolytestTimeout = "POLYTEST_TIMEOUT";
 inline constexpr auto PolytestMemLimitMb = "POLYTEST_MEM_LIMIT_MB";
 inline constexpr auto PolytestReproCheck = "POLYTEST_REPRO_CHECK";
+inline constexpr auto PolytestSeed = "POLYTEST_SEED";
 
 } // namespace polyregion::env
