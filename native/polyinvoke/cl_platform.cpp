@@ -5,6 +5,8 @@
 
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
+#include "spirv/unified1/OpenCL.std.h"
+#include "spirv/unified1/spirv.hpp"
 
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
@@ -237,6 +239,40 @@ static DeviceQuirks resolveQuirks(const std::string &deviceName) {
   return DeviceQuirks{/*nativeTrig*/ llvmpipe, /*overReadPad*/ llvmpipe ? size_t{4096} : size_t{0}};
 }
 
+// llvmpipe's libclc JIT crashes on precise sin/cos/tan range-reduction; rewrite the OpenCL.std trig extinsts to
+// their native_ variants in the SPIR-V blob (a same-size opcode swap); this is the SPIR-V dual of -DPOLY_NATIVE_TRIG
+static std::string patchSpirvNativeTrig(const char *data, size_t len) {
+  std::string out(data, len);
+  if (len < 5 * sizeof(uint32_t) || len % sizeof(uint32_t) != 0) return out;
+  auto *w = reinterpret_cast<uint32_t *>(out.data());
+  const size_t n = len / sizeof(uint32_t);
+  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  uint32_t openclSet = 0;
+  for (size_t i = 5; i < n;) {
+    const uint16_t wc = wcount(w[i]);
+    if (wc == 0 || i + wc > n) return out;
+    if (opcode(w[i]) == spv::OpExtInstImport && wc >= 3 &&
+        std::strncmp(reinterpret_cast<const char *>(&w[i + 2]), "OpenCL.std", sizeof("OpenCL.std")) == 0)
+      openclSet = w[i + 1];
+    i += wc;
+  }
+  if (!openclSet) return out;
+  for (size_t i = 5; i < n;) {
+    const uint16_t wc = wcount(w[i]);
+    if (opcode(w[i]) == spv::OpExtInst && wc >= 5 && w[i + 3] == openclSet) {
+      switch (w[i + 4]) {
+        case OpenCLLIB::Sin: w[i + 4] = OpenCLLIB::Native_sin; break;
+        case OpenCLLIB::Cos: w[i + 4] = OpenCLLIB::Native_cos; break;
+        case OpenCLLIB::Tan: w[i + 4] = OpenCLLIB::Native_tan; break;
+        default: break;
+      }
+    }
+    i += wc;
+  }
+  return out;
+}
+
 ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm,
                    const std::string &platformName)
     : device(
@@ -276,12 +312,14 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
             auto imageLen = image.size();
             cl_program program;
             if (this->format == ModuleFormat::SPIRV_Kernel) {
-              program = OUT_CHECKED(this->ilCreateFn(*context, imageData, imageLen, OUT_ERR));
+              const std::string spv = this->quirks.nativeTrig ? patchSpirvNativeTrig(imageData, imageLen) : std::string{};
+              const char *il = this->quirks.nativeTrig ? spv.data() : imageData;
+              program = OUT_CHECKED(this->ilCreateFn(*context, il, this->quirks.nativeTrig ? spv.size() : imageLen, OUT_ERR));
             } else {
               program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
             }
             // XXX llvmpipe libclc crashes its JIT on precise sin/cos/tan range-reduction; route POLY_* trig to
-            // native_ for that device only (source #ifdef; SPIR-V is pre-compiled)
+            // native_ for that device only -- source via this #ifdef, SPIR-V via patchSpirvNativeTrig above
             const std::string compilerArgs =
                 (this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "";
             cl_int result = clBuildProgram(program, 1, &*this->device, compilerArgs.data(), nullptr, nullptr);
