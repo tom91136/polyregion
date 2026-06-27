@@ -13,6 +13,12 @@ sbt          := 'sbt -no-colors'
 dylib := env_var_or_default('POLYREGION_LLVM_DYLIB', 'ON')
 export POLYREGION_LLVM_DYLIB := dylib
 
+# Dist-name infix: Windows always stages static (build.cmake forces it); elsewhere follows the LLVM dylib build.
+lib_kind := if os() == "windows" { "static" } else if dylib == "ON" { "dylib" } else { "static" }
+
+# Repo root with forward slashes - justfile_directory() yields backslashes on Windows that bash recipes mangle.
+repo := replace(justfile_directory(), "\\", "/")
+
 local_vcpkg := justfile_directory() / "vcpkg"
 export VCPKG_ROOT := if path_exists(local_vcpkg) == "true" { local_vcpkg } else { env_var_or_default('RUNVCPKG_VCPKG_ROOT', env_var_or_default('VCPKG_ROOT', local_vcpkg)) }
 
@@ -246,7 +252,7 @@ test-native *args='': build-pass-native
 build-emulators:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd "{{ replace(justfile_directory(), "\\", "/") }}/emulators"
+    cd "{{ repo }}/emulators"
     case "{{ os() }}" in
       macos)   exec bash macos.sh "$PWD/out" ;;
       windows) exec cmd //c "windows.bat $(cygpath -w "$PWD" 2>/dev/null || echo "$PWD")\\out" ;;
@@ -275,11 +281,64 @@ test-native-with-emulators *args='':
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
+# Run ctest against a relocated dist (CI download-artifact shape); profile ''|emulators|asan, junit = result-xml basename.
+test-native-dist profile='' junit='native-test-results' *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ msvc_reenter }}
+    cd "{{ repo }}/native"
+    tag="{{ build_type }}-{{ arch }}-{{ lib_kind }}"
+    [ "{{ profile }}" = asan ] && tag="${tag}-asan"
+    DIST="$PWD/out/polyregion-${tag}-dist"
+    TESTS="$PWD/out/polyregion-test-${tag}-dist"
+    case "{{ os() }}" in
+      macos)   dso=dylib; exe=;     libvar=DYLD_FALLBACK_LIBRARY_PATH ;;
+      windows) dso=dll;   exe=.exe; libvar=PATH ;;
+      *)       dso=so;    exe=;     libvar=LD_LIBRARY_PATH ;;
+    esac
+    export PATH="$DIST/bin:$PATH"
+    export POLYREGION_BITCODE_DIR="$DIST/lib"
+    export POLYPASS_PLUGINS="$DIST/lib/libpolypass.${dso}"
+    export POLYTEST_CLANG_DRIVER="$DIST/bin/clang++${exe}"
+    export POLYTEST_FLANG_DRIVER="$DIST/bin/flang-new${exe}"
+    libpath="$DIST/lib"
+    if [ "{{ profile }}" = asan ]; then
+      case "{{ os() }}" in
+        macos) rt=$(echo "$DIST"/lib/clang/*/lib/darwin/libclang_rt.asan_osx_dynamic.dylib)
+               export ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0,verify_asan_link_order=0,strip_env=0,detect_container_overflow=0 ;;
+        *)     rt=$(echo "$DIST"/lib/clang/*/lib/*/libclang_rt.asan.so)
+               export ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0,protect_shadow_gap=0,verify_asan_link_order=0,strip_env=0 ;;
+      esac
+      [ -e "$rt" ] || { echo "test-native-dist: no asan runtime under $DIST/lib/clang" >&2; exit 1; }
+      # preloaded into run children only (the driver); ctest itself must not get it - it crashes under asan
+      export POLYTEST_ASAN_PRELOAD="$rt"
+      libpath="$DIST/lib:$(dirname "$rt")"
+      for t in "$DIST"/lib/*-linux-*; do [ -d "$t" ] && libpath="${libpath}:$t"; done
+      export UBSAN_OPTIONS=print_stacktrace=1
+    fi
+    export "${libvar}=${libpath}:${!libvar:-}"
+    if [ "{{ profile }}" = emulators ]; then
+      emu="{{ repo }}/emulators/out"
+      if [ -f "$emu/env.sh" ]; then
+        source "$emu/env.sh"
+      else
+        # windows bundle ships env.bat (cmd) only; reconstruct the same vars in bash
+        export PATH="$(cygpath -u "$emu" 2>/dev/null || echo "$emu")/bin:$PATH"
+        vk="$emu/share/vulkan/icd.d"; icd=$(echo "$vk"/lvp_icd.*.json)
+        [ -f "$vk/vk_swiftshader_icd.json" ] && icd="$icd;$vk/vk_swiftshader_icd.json" || true
+        export VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" POLYINVOKE_OPENCL_CPU=1
+      fi
+      export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
+    fi
+    j=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")
+    to=600; if [ "{{ profile }}" = emulators ]; then to=1500; fi
+    CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$TESTS/{{ junit }}.xml" {{ args }}
+
 # Smoke test of the emulator bundle (Vulkan on lavapipe, OpenCL on pocl[+rusticl], CUDA on gpuocelot/linux).
 check-emulators bundle='':
     #!/usr/bin/env bash
     set -euo pipefail
-    cd "{{ replace(justfile_directory(), "\\", "/") }}/emulators"
+    cd "{{ repo }}/emulators"
     case "{{ os() }}" in
       macos)   exec bash macos.sh --check "${1:-$PWD/out}" ;;
       windows) exec cmd //c "windows.bat --check" ;;
@@ -375,9 +434,7 @@ build-sysroot:
     cid=$({{ container }} create "$img")
     {{ container }} export "$cid" | xz -T0 > "out/sysroot-al8-{{ arch }}.tar.xz"
     {{ container }} rm "$cid" >/dev/null
-    rm -rf "out/{{ arch }}"; mkdir -p "out/{{ arch }}"
-    tar xf "out/sysroot-al8-{{ arch }}.tar.xz" -C "out/{{ arch }}"
-    echo "sysroot ready at sysroot/out/{{ arch }}"
+    just prepare-sysroot
 
 # Build the bundled LLVM/Clang/LLD/Flang/MLIR dist; cached on rerun.
 build-llvm        extra='': (_native "LLVM"        extra)
@@ -400,6 +457,43 @@ check-dist        extra='': (_native "CHECK"       extra)
 # Run the mini-app matrix against a built dist + optional emulators.
 check-miniapps:
     ./ci/check_miniapps.sh
+
+# Restore the executable bit on dist binaries + shared libs (download-artifact strips it). args: dist dirs.
+restore-exec-bits +dirs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ os() }}" in macos) so='*.dylib' ;; windows) so='*.dll' ;; *) so='*.so*' ;; esac
+    for d in {{ dirs }}; do
+      if [ -d "$d/bin" ]; then find "$d/bin" -type f -exec chmod +x {} +; fi
+      if [ -d "$d/lib" ]; then find "$d/lib" -type f -name "$so" -exec chmod +x {} +; fi
+    done
+
+# Extract a prebuilt AL8 sysroot tarball into sysroot/out/<arch> (CI downloads the tarball, not the tree).
+prepare-sysroot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ repo }}/sysroot"
+    rm -rf "out/{{ arch }}"; mkdir -p "out/{{ arch }}"
+    tar xf "out/sysroot-al8-{{ arch }}.tar.xz" -C "out/{{ arch }}"
+    echo "sysroot ready at sysroot/out/{{ arch }}"
+
+# List a dist's binary dependencies (file+objdump/otool/dumpbin per OS); diagnostic, never fails. arg: dist dir.
+check-dist-deps dist:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    ls -lah "{{ dist }}/bin" "{{ dist }}/lib" 2>/dev/null || true
+    case "{{ os() }}" in windows) exe=.exe ;; *) exe= ;; esac
+    inspect() {
+      [ -e "$1" ] || { echo "MISSING: $1"; return; }
+      echo "== $(basename "$1") =="
+      case "{{ os() }}" in
+        macos)   otool -L "$1" || true ;;
+        windows) dumpbin //dependents "$1" || true ;;
+        *)       file "$1"; objdump -p "$1" | grep -E '^[[:space:]]+NEEDED' || true ;;
+      esac
+    }
+    for b in polyc polycpp polyfc clang++ flang-new; do inspect "{{ dist }}/bin/${b}${exe}"; done
+    for j in "{{ dist }}"/lib/*JNI*; do inspect "$j"; done
 
 # Incremental build of all ninja targets.
 build-all     extra='': build-pass-native (_build "all"     extra) check-fused

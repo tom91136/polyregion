@@ -168,23 +168,7 @@ jobs:
 
       - name: Check artefact
         if: always()
-        working-directory: ./native
-        run: |
-          DIST=out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          ls -lah "$DIST/bin" "$DIST/lib"
-          inspect () {
-            local f="$1"
-            if [[ ! -f "$f" ]]; then echo "MISSING: $f"; return; fi
-            file "$f"
-            otool -L "$f"
-            echo "----"
-          }
-          for b in polyc polycpp polyfc clang++ flang-new; do
-            inspect "$DIST/bin/$b"
-          done
-          for l in "$DIST"/lib/libpolyc-JNI.dylib "$DIST"/lib/libpolyc-JNIshim.dylib "$DIST"/lib/libpolyinvoke-JNI.dylib; do
-            inspect "$l"
-          done
+        run: just check-dist-deps native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Upload dist
         # v4: nektos/act#6022
@@ -248,11 +232,7 @@ jobs:
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Restore executable bits
-        working-directory: ./native
-        run: |
-          DIST=out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          find "$DIST/bin" -type f -exec chmod +x {} +
-          find "$DIST/lib" -type f -name '*.dylib' -exec chmod +x {} +
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run check-dist
         run: just check-dist
@@ -292,25 +272,10 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Restore executable bits
-        working-directory: ./native
-        run: |
-          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
-            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
-            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +; fi
-          done
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run native tests
-        working-directory: ./native
-        run: |
-          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
-          export PATH=$DIST/bin:$PATH
-          export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
-          export POLYREGION_BITCODE_DIR=$DIST/lib
-          export POLYPASS_PLUGINS=$DIST/lib/libpolypass.dylib
-          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
-          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
-          ctest --test-dir "$TESTS" -j "$(sysctl -n hw.ncpu)" --timeout 300 --output-on-failure --output-junit "$TESTS/native-test-results.xml"
+        run: just test-native-dist
 
       - name: Annotate ctest results
         if: always()
@@ -497,31 +462,10 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
 
       - name: Restore executable bits
-        working-directory: ./native
-        run: |
-          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist; do
-            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
-            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +; fi
-          done
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
 
       - name: Run native tests (asan)
-        working-directory: ./native
-        run: |
-          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
-          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
-          RT=$(echo "$DIST"/lib/clang/*/lib/darwin/libclang_rt.asan_osx_dynamic.dylib)
-          export PATH=$DIST/bin:$PATH
-          # binaries bake an @rpath to the regular dist's rt dir (absent here); the asan dist holds the dylib
-          export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:$(dirname "$RT"):${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
-          # XXX inserted into run children only (driver); the compile step must not - it reaches the arm64e ld
-          export POLYTEST_ASAN_PRELOAD=$RT
-          export ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0,verify_asan_link_order=0,strip_env=0,detect_container_overflow=0
-          export UBSAN_OPTIONS=print_stacktrace=1
-          export POLYREGION_BITCODE_DIR=$DIST/lib
-          export POLYPASS_PLUGINS=$DIST/lib/libpolypass.dylib
-          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
-          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
-          ctest --test-dir "$TESTS" -j "$(sysctl -n hw.ncpu)" --timeout 600 --output-on-failure --output-junit "$TESTS/native-test-results-asan.xml"
+        run: just test-native-dist asan native-test-results-asan
 
       - name: Annotate ctest results
         if: always()
@@ -608,27 +552,10 @@ jobs:
         run: tar xzf emulators/emulators-out.tar.gz -C emulators
 
       - name: Restore executable bits
-        working-directory: ./native
-        run: |
-          for d in out/polyregion-Release-${{ matrix.arch }}-dylib-dist out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist; do
-            if [[ -d "$d/bin" ]]; then find "$d/bin" -type f -exec chmod +x {} +; fi
-            if [[ -d "$d/lib" ]]; then find "$d/lib" -type f -name '*.dylib' -exec chmod +x {} +; fi
-          done
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run emulator tests
-        working-directory: ./native
-        run: |
-          DIST=$PWD/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
-          TESTS=$PWD/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
-          source "$GITHUB_WORKSPACE/emulators/out/env.sh"
-          export PATH=$DIST/bin:$PATH
-          export DYLD_FALLBACK_LIBRARY_PATH=$DIST/lib:${DYLD_FALLBACK_LIBRARY_PATH:-$HOME/lib:/usr/local/lib:/usr/lib}
-          export POLYREGION_BITCODE_DIR=$DIST/lib
-          export POLYPASS_PLUGINS=$DIST/lib/libpolypass.dylib
-          export POLYTEST_CLANG_DRIVER=$DIST/bin/clang++
-          export POLYTEST_FLANG_DRIVER=$DIST/bin/flang-new
-          export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK=0
-          ctest --test-dir "$TESTS" -j "$(sysctl -n hw.ncpu)" --timeout 1500 --output-on-failure --output-junit "$TESTS/emulator-test-results.xml"
+        run: just test-native-dist emulators emulator-test-results
 
       - name: Annotate ctest results
         if: always()

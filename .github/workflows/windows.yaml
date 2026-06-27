@@ -210,19 +210,7 @@ jobs:
 
       - name: Check artefact
         if: always()
-        working-directory: ./native
-        run: |
-          set "DIST=out/polyregion-Release-${{ matrix.arch }}-static-dist"
-          dir "%DIST%\bin"
-          dir "%DIST%\lib"
-          for %%B in (polyc.exe polycpp.exe polyfc.exe clang++.exe flang-new.exe) do (
-            echo ---- %%B ----
-            if exist "%DIST%\bin\%%B" (dumpbin /dependents "%DIST%\bin\%%B") else echo MISSING: %DIST%\bin\%%B
-          )
-          for %%L in (polyc-JNI.dll polyc-JNIshim.dll polyinvoke-JNI.dll) do (
-            echo ---- %%L ----
-            if exist "%DIST%\lib\%%L" (dumpbin /dependents "%DIST%\lib\%%L") else echo MISSING: %DIST%\lib\%%L
-          )
+        run: just check-dist-deps native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
       - name: Upload dist
         # v4: nektos/act#6022
@@ -322,16 +310,7 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
 
       - name: Run native tests
-        working-directory: ./native
-        run: |
-          set "DIST=%CD%\out\polyregion-Release-${{ matrix.arch }}-static-dist"
-          set "TESTS=%CD%\out\polyregion-test-Release-${{ matrix.arch }}-static-dist"
-          set "PATH=%DIST%\bin;%TESTS%\bin;%PATH%"
-          set "POLYREGION_BITCODE_DIR=%DIST%\lib"
-          set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
-          set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
-          set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
-          ctest --test-dir "%TESTS%" -j %NUMBER_OF_PROCESSORS% --timeout 300 --output-on-failure --output-junit "%TESTS%\native-test-results.xml"
+        run: just test-native-dist
 
       - name: Annotate ctest results
         if: always()
@@ -463,19 +442,7 @@ jobs:
       - name: Unpack emulators
         run: tar xzf emulators\emulators-out.tar.gz -C emulators
       - name: Run emulator tests
-        working-directory: ./native
-        run: |
-          set "DIST=%CD%\out\polyregion-Release-${{ matrix.arch }}-static-dist"
-          set "TESTS=%CD%\out\polyregion-test-Release-${{ matrix.arch }}-static-dist"
-          call "%GITHUB_WORKSPACE%\emulators\out\env.bat"
-          set "PATH=%DIST%\bin;%TESTS%\bin;%PATH%"
-          set "POLYREGION_BITCODE_DIR=%DIST%\lib"
-          set "POLYPASS_PLUGINS=%DIST%\lib\libpolypass.dll"
-          set "POLYTEST_CLANG_DRIVER=%DIST%\bin\clang++.exe"
-          set "POLYTEST_FLANG_DRIVER=%DIST%\bin\flang-new.exe"
-          set "POLYREGION_TEST_PROFILE=emulators"
-          set "POLYINVOKE_TEST_LOCK=0"
-          ctest --test-dir "%TESTS%" -j %NUMBER_OF_PROCESSORS% --timeout 1500 --output-on-failure --output-junit "%TESTS%\emulator-test-results.xml"
+        run: just test-native-dist emulators emulator-test-results
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
