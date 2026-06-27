@@ -3147,23 +3147,26 @@ POLYREGION_EXPORT bool Function::operator==(const Function &rhs) const {
          (visibility == rhs.visibility) && (fpMode == rhs.fpMode) && (isEntry == rhs.isEntry) && (affinity == rhs.affinity);
 }
 
-StructDef::StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents) noexcept
-    : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)) {}
+StructDef::StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents,
+                     bool isUnion) noexcept
+    : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)), isUnion(isUnion) {}
 size_t StructDef::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(members)>()(members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(parents)>()(parents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(isUnion)>()(isUnion) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-StructDef StructDef::withName(const Sym &v_) const { return StructDef(v_, tpeVars, members, parents); }
-StructDef StructDef::withTpeVars(const std::vector<std::string> &v_) const { return StructDef(name, v_, members, parents); }
-StructDef StructDef::withMembers(const std::vector<Named> &v_) const { return StructDef(name, tpeVars, v_, parents); }
-StructDef StructDef::withParents(const std::vector<Type::Struct> &v_) const { return StructDef(name, tpeVars, members, v_); }
+StructDef StructDef::withName(const Sym &v_) const { return StructDef(v_, tpeVars, members, parents, isUnion); }
+StructDef StructDef::withTpeVars(const std::vector<std::string> &v_) const { return StructDef(name, v_, members, parents, isUnion); }
+StructDef StructDef::withMembers(const std::vector<Named> &v_) const { return StructDef(name, tpeVars, v_, parents, isUnion); }
+StructDef StructDef::withParents(const std::vector<Type::Struct> &v_) const { return StructDef(name, tpeVars, members, v_, isUnion); }
+StructDef StructDef::withIsUnion(const bool &v_) const { return StructDef(name, tpeVars, members, parents, v_); }
 POLYREGION_EXPORT bool StructDef::operator!=(const StructDef &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool StructDef::operator==(const StructDef &rhs) const {
-  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (members == rhs.members) && (parents == rhs.parents);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (members == rhs.members) && (parents == rhs.parents) && (isUnion == rhs.isUnion);
 }
 
 Mirror::Mirror(Sym source, std::vector<Sym> sourceParents, StructDef structDef, std::vector<Function> functions,

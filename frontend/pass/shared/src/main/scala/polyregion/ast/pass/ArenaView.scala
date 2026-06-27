@@ -52,8 +52,10 @@ object ArenaView extends ProgramPass {
     // ORIGINAL member types drive the offset walk (each pointer field's pointee struct); retyping preserves
     // the layout, so emitted OffsetOf resolves the same against the retyped def
     val members = program.defs.iterator.map(d => d.name -> d.members).toMap
+    // union: copy only the canonical (largest, head) member
+    val unions  = program.defs.iterator.filter(_.isUnion).map(_.name).toSet
     val retyped = program.defs.map(d => d.copy(members = d.members.map(m => m.copy(tpe = i64ify(m.tpe)))))
-    program.copy(defs = retyped, entry = run(members, program.entry))
+    program.copy(defs = retyped, entry = run(members, unions, program.entry))
   }
 
   // lift a stepped Select (the only term shape that can carry an arena access) out of a ForRange bound or
@@ -77,7 +79,9 @@ object ArenaView extends ProgramPass {
     }
   }
 
-  private def run(members: Map[p.Sym, List[p.Named]], f: p.Function): p.Function = captureRoot(f) match {
+  private def run(members: Map[p.Sym, List[p.Named]], unions: Set[p.Sym], f: p.Function): p.Function = captureRoot(
+    f
+  ) match {
     case None => f
     case Some((capN, capTpe)) =>
       val derived = Provenance.derivedIn(f, arena = true)
@@ -94,7 +98,9 @@ object ArenaView extends ProgramPass {
       // ForRange bounds / Cond conditions hold terms inline (not in a visited leaf); hoist any stepped Select
       // into a preceding Var. bounds are loop-invariant so hoisting once is sound; While conds are plain vars
       val body =
-        mapStmtsRec(hoistInlineTerms(f.body))(rewriteLeaf(members, capN, capTpe, views, derived, arenaRegion, isArena))
+        mapStmtsRec(hoistInlineTerms(f.body))(
+          rewriteLeaf(members, unions, capN, capTpe, views, derived, arenaRegion, isArena)
+        )
       // neutralise view binding slots to an i8 view so the slot stays aligned, so we can avoid dragging unused types in
       val usedViews = body.flatMap(_.collectWhere[p.Term] { case p.Term.Select(r, _, _) => r.symbol }).toSet
       val pinnedViews =
@@ -114,6 +120,7 @@ object ArenaView extends ProgramPass {
 
   private def rewriteLeaf(
       members: Map[p.Sym, List[p.Named]],
+      unions: Set[p.Sym],
       capN: p.Named,
       capTpe: p.Type.Struct,
       views: List[p.Named],
@@ -135,6 +142,10 @@ object ArenaView extends ProgramPass {
 
     def memberTpe(sym: p.Sym, field: String): p.Type =
       members.get(sym).flatMap(_.find(_.symbol == field).map(_.tpe)).getOrElse(I64)
+    // union: copy/read just the canonical (largest, head) member
+    def canonicalMembers(sym: p.Sym): List[p.Named] = {
+      val ms = members.getOrElse(sym, Nil); if (unions.contains(sym)) ms.take(1) else ms
+    }
     def structSym(t: p.Type): Option[p.Sym] = t match { case p.Type.Struct(s, _) => Some(s); case _ => None }
     def arenaTerm(t: p.Term): Boolean       = arenaRegion(Provenance.at(derived, t, arena = true))
 
@@ -167,7 +178,7 @@ object ArenaView extends ProgramPass {
       val sv = fresh("sv", t); pre += p.Stmt.Var(sv, None, isMutable = true)
       def fill(prefix: List[p.PathStep], o: p.Term, ft: p.Type): Unit = ft match {
         case s: p.Type.Struct =>
-          members.getOrElse(s.name, Nil).foreach { m =>
+          canonicalMembers(s.name).foreach { m =>
             fill(
               prefix :+ p.PathStep.Field(m.symbol),
               add(o, asI64(bind("of", p.Expr.OffsetOf(ft, m.symbol)))),
@@ -196,8 +207,7 @@ object ArenaView extends ProgramPass {
       val out             = ListBuffer.empty[p.Stmt]
       def copy(prefix: List[p.PathStep], o: p.Term, ft: p.Type): Unit = ft match {
         case s: p.Type.Struct =>
-          members
-            .getOrElse(s.name, Nil)
+          canonicalMembers(s.name)
             .foreach(m =>
               copy(
                 prefix :+ p.PathStep.Field(m.symbol),

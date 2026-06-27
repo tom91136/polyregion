@@ -42,7 +42,8 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
           case x                => x
         }
       ),
-      parents = sdef.parents
+      parents = sdef.parents,
+      isUnion = sdef.isUnion
     )
 
     val nameTable = monoStructDefs.map((s, sdef) => s.name -> sdef.name).toMap

@@ -6710,11 +6710,13 @@ struct POLYREGION_EXPORT StructDef {
   std::vector<std::string> tpeVars;
   std::vector<Named> members;
   std::vector<Type::Struct> parents;
+  bool isUnion;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withName(const Sym &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withTpeVars(const std::vector<std::string> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withMembers(const std::vector<Named> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withParents(const std::vector<Type::Struct> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT StructDef withIsUnion(const bool &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, StructDef>) {
@@ -6751,11 +6753,12 @@ struct POLYREGION_EXPORT StructDef {
     for (auto it = parents.begin(); it != parents.end(); ++it) {
       parents__.emplace_back((*it).modify_all<T>(f));
     }
-    return StructDef(name.modify_all<T>(f), tpeVars, members__, parents__);
+    return StructDef(name.modify_all<T>(f), tpeVars, members__, parents__, isUnion);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const StructDef &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const StructDef &) const;
-  StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents) noexcept;
+  StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents,
+            bool isUnion) noexcept;
 };
 
 struct POLYREGION_EXPORT Mirror {

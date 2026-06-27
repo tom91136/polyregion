@@ -168,7 +168,7 @@ TEST_CASE("recursive struct", "[compiler]") {
     Type::Struct fooTpe(Sym({"foo"}), {});
     Named x("x", tpe);
     Named next("next", Ptr(fooTpe));
-    StructDef def(Sym({"foo"}), {}, {x, next}, {});
+    StructDef def(Sym({"foo"}), {}, {x, next}, {}, false);
     auto entry = function("foo", {}, fooTpe)({
         let("foo") = fooTpe, //
         Mut(Select({"foo"_(fooTpe)}, x), generateConstValue(tpe)),
@@ -269,7 +269,7 @@ TEST_CASE("return ptr to struct", "[compiler]") {
   DYNAMIC_SECTION(repr(tpe)) {
 
     Named x("x", tpe);
-    StructDef def(Sym({"foo"}), {}, {x}, {});
+    StructDef def(Sym({"foo"}), {}, {x}, {}, false);
     Type::Struct fooTpe(Sym({"foo"}), {});
     auto entry = function("foo", {"foo"_(Ptr(fooTpe))()}, Ptr(fooTpe))({
         Mut(Select({"foo"_(Ptr(fooTpe))}, x), generateConstValue(tpe)),
@@ -285,7 +285,7 @@ TEST_CASE("return struct", "[compiler]") {
   DYNAMIC_SECTION(repr(tpe)) {
 
     Named x("x", tpe);
-    StructDef def(Sym({"foo"}), {}, {x}, {});
+    StructDef def(Sym({"foo"}), {}, {x}, {}, false);
     Type::Struct fooTpe(Sym({"foo"}), {});
     auto entry = function("foo", {}, fooTpe)({
         let("foo") = fooTpe, //
@@ -300,12 +300,12 @@ TEST_CASE("nested struct select", "[compiler]") {
   compiler::initialise();
 
   Named z("z", Ptr(SInt));
-  StructDef barDef(Sym({"bar"}), {}, {z}, {});
+  StructDef barDef(Sym({"bar"}), {}, {z}, {}, false);
   Type::Struct barTpe(Sym({"bar"}), {});
 
   Named x("x", Ptr(SInt));
   Named y("y", Ptr(barTpe));
-  StructDef fooDef(Sym({"foo"}), {}, {x, y}, {});
+  StructDef fooDef(Sym({"foo"}), {}, {x, y}, {}, false);
   Type::Struct fooTpe(Sym({"foo"}), {});
 
   auto aux = function("aux", {"in"_(Ptr(barTpe))()}, SInt)({
@@ -325,12 +325,12 @@ TEST_CASE("return struct and take ref", "[compiler]") {
   compiler::initialise();
 
   Named z("z", SInt);
-  StructDef barDef(Sym({"bar"}), {}, {z}, {});
+  StructDef barDef(Sym({"bar"}), {}, {z}, {}, false);
   Type::Struct barTpe(Sym({"bar"}), {});
 
   Named x("x", Ptr(SInt));
   Named y("y", Ptr(barTpe));
-  StructDef fooDef(Sym({"foo"}), {}, {x, y}, {});
+  StructDef fooDef(Sym({"foo"}), {}, {x, y}, {}, false);
   Type::Struct fooTpe(Sym({"foo"}), {});
 
   auto aux = function("aux", {"out"_(Ptr(barTpe))(), "in"_(Ptr(barTpe))()}, Ptr(barTpe))({
@@ -616,7 +616,7 @@ TEST_CASE("index struct array member", "[compiler]") {
 
   Named defX("x", Type::IntS32());
   Named defY("y", Type::IntS32());
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
 
   Function fn = mkFn("foo", {Arg(Named("s", Ptr(myStruct)), {})}, Type::IntS32(),
@@ -637,7 +637,7 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   compiler::initialise();
   Named defX("x", Type::IntS32());
   Named defY("y", Type::IntS32());
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
 
   Function fn = mkFn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Type::IntS32(),
@@ -654,7 +654,7 @@ TEST_CASE("array update struct elem", "[compiler]") {
   compiler::initialise();
   Named defX("x", Type::IntS32());
   Named defY("y", Type::IntS32());
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
 
   Function fn = mkFn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Type::IntS32(),
@@ -671,7 +671,7 @@ TEST_CASE("alias struct", "[compiler]") {
   compiler::initialise();
   Named defX("x", SInt);
   Named defY("y", SInt);
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
   assertCompile(program({def}, {function("foo", {"in"_(myStruct)()}, myStruct)({
                                    let("s") = "in"_(myStruct),
@@ -683,7 +683,7 @@ TEST_CASE("alias struct", "[compiler]") {
 TEST_CASE("alias struct member", "[compiler]") {
   compiler::initialise();
 
-  StructDef def(Sym({"a.b"}), {}, {(Named("x", SInt)), (Named("y", SInt))}, {});
+  StructDef def(Sym({"a.b"}), {}, {(Named("x", SInt)), (Named("y", SInt))}, {}, false);
   Named arg("in", Type::Struct(Sym({"a.b"}), {}));
   Function fn = mkFn("foo", {Arg(arg, {})}, Unit,
                      {
@@ -722,7 +722,7 @@ TEST_CASE("mut struct", "[compiler]") {
 
   Named defX("x", SInt);
   Named defY("y", SInt);
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
 
   Function fn = mkFn("foo", {Arg(Named("out", myStruct), {})}, Unit,
@@ -783,9 +783,9 @@ TEST_CASE("alloc struct", "[compiler]") {
 
   Named defX("x", SInt);
   Named defY("y", SInt);
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
-  StructDef def2(Sym({"MyStruct2"}), {}, {defX}, {});
+  StructDef def2(Sym({"MyStruct2"}), {}, {defX}, {}, false);
   Type::Struct myStruct2(Sym({"MyStruct2"}), {});
 
   Function fn = mkFn("foo", {Arg(Named("out", myStruct), {})}, SInt,
@@ -810,11 +810,11 @@ TEST_CASE("alloc struct nested", "[compiler]") {
   Named defX("x", SInt);
   Named defY("y", SInt);
 
-  StructDef def2(Sym({"MyStruct2"}), {}, {defX}, {});
+  StructDef def2(Sym({"MyStruct2"}), {}, {defX}, {}, false);
   Type::Struct myStruct2(Sym({"MyStruct2"}), {});
   Named defZ("z", myStruct2);
 
-  StructDef def(Sym({"MyStruct"}), {}, {defX, defY, defZ}, {});
+  StructDef def(Sym({"MyStruct"}), {}, {defX, defY, defZ}, {}, false);
   Type::Struct myStruct(Sym({"MyStruct"}), {});
 
   Function fn = mkFn("foo", {}, SInt,

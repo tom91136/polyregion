@@ -245,7 +245,7 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
       // Fabricate a Sym from the dotted name. The kernel can only treat this as opaque (no
       // member access) — adequate for type-only references that the Scala frontend doesn't
       // bring along.
-      allDefs.push_back(StructDef(Sym({name}), {}, {Named("__opaque", Type::IntS8())}, {}));
+      allDefs.push_back(StructDef(Sym({name}), {}, {Named("__opaque", Type::IntS8())}, {}, /*isUnion*/ false));
     }
   }
 
@@ -262,17 +262,41 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // outer struct and reads inline fields directly. The previous design used functionBoundary=true
   // (8-byte pointer slots) to defend against empty-struct fields computing to 0 bytes; we keep that
   // defence narrowly by giving empty structs a single placeholder byte.
+  const auto dataLayout = options.targetInfo().resolveDataLayout();
   for (auto &def : allDefs) {
     auto tpe = opaqueTypes.at(repr(def.name));
     if (!tpe->isOpaque()) continue; // body already set; safe in case of duplicate StructDefs
     auto memberTypes = def.members ^ map([&](auto &m) { return resolveType(m.tpe, resolved, /*functionBoundary*/ false); });
-    tpe->setBody(memberTypes);
+    if (def.isUnion && !memberTypes.empty()) {
+      const auto maxSize = memberTypes ^ fold_left(uint64_t{0}, [&](auto acc, auto *mt) { //
+                             return std::max(acc, dataLayout.getTypeAllocSize(mt).getFixedValue());
+                           });
+      auto *const leadTy = (memberTypes ^ max_by([&](auto *mt) { return dataLayout.getABITypeAlign(mt).value(); })).value();
+      const auto leadSize = dataLayout.getTypeAllocSize(leadTy).getFixedValue();
+      std::vector<llvm::Type *> storage{leadTy};
+      if (maxSize > leadSize) storage.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(actual), maxSize - leadSize));
+      tpe->setBody(storage);
+    } else tpe->setBody(memberTypes);
   }
   // Phase 2c: now that all bodies are set, compute layouts.
   for (auto &def : allDefs) {
     auto tpe = opaqueTypes.at(repr(def.name));
     const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to_vector()) ^ to<Map>();
-    const auto dataLayout = options.targetInfo().resolveDataLayout();
+    if (def.isUnion) {
+      const StructLayout layout(
+          /*name*/ repr(def.name),
+          /*sizeInBytes*/ static_cast<int64_t>(dataLayout.getTypeAllocSize(tpe).getFixedValue()),
+          /*alignment*/ static_cast<int64_t>(dataLayout.getABITypeAlign(tpe).value()),
+          /*members*/ def.members | map([&](auto &named) {
+            return StructLayoutMember(
+                /*name*/ named, /*offsetInBytes*/ 0,
+                /*sizeInBytes*/
+                static_cast<int64_t>(
+                    dataLayout.getTypeAllocSize(resolveType(named.tpe, resolved, /*functionBoundary*/ false)).getFixedValue()));
+          }) | to_vector());
+      resolved.insert_or_assign(repr(def.name), StructInfo{.def = def, .layout = layout, .tpe = tpe, .memberIndices = table});
+      continue;
+    }
     const auto structLayout = dataLayout.getStructLayout(tpe);
     const StructLayout layout(/*name*/ repr(def.name),
                               /*sizeInBytes*/ structLayout->getSizeInBytes(),

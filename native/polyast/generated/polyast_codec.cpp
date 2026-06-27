@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "6500e55c5c935d5862d3a1ccb55f916f";
+constexpr auto AdtHash = "0a8f0cb0d7317fec1896c41336627a9c";
 
 namespace {
 
@@ -2445,7 +2445,8 @@ StructDef structdef_from_json(const json &j_) {
   for (const auto &v_ : j_.at(3)) {
     parents.emplace_back(Type::struct_from_json(v_));
   }
-  return {name, tpeVars, members, parents};
+  auto isUnion = j_.at(4).get<bool>();
+  return {name, tpeVars, members, parents, isUnion};
 }
 
 json structdef_to_json(const StructDef &x_) {
@@ -2459,7 +2460,8 @@ json structdef_to_json(const StructDef &x_) {
   for (const auto &v_ : x_.parents) {
     parents.emplace_back(Type::struct_to_json(v_));
   }
-  return json::array({name, tpeVars, members, parents});
+  auto isUnion = x_.isUnion;
+  return json::array({name, tpeVars, members, parents, isUnion});
 }
 
 Mirror mirror_from_json(const json &j_) {
@@ -7904,7 +7906,7 @@ void function_to_msgpack(MsgpackWriter &w_, const Function &x_) {
 }
 
 StructDef structdef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected StructDef with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected StructDef with 5 field(s)");
   auto name = sym_from_msgpack(r_);
   std::vector<std::string> tpeVars;
   {
@@ -7933,7 +7935,8 @@ StructDef structdef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
       parents.emplace_back(std::move(parents_elem));
     }
   }
-  return {name, tpeVars, members, parents};
+  auto isUnion = r_.readBoolean();
+  return {name, tpeVars, members, parents, isUnion};
 }
 
 void structdef_fields_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
@@ -7950,6 +7953,7 @@ void structdef_fields_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
   for (const auto &v0_ : x_.parents) {
     Type::struct_to_msgpack(w_, v0_);
   }
+  w_.writeBoolean(x_.isUnion);
 }
 
 StructDef structdef_from_msgpack(MsgpackReader &r_) {
@@ -7958,7 +7962,7 @@ StructDef structdef_from_msgpack(MsgpackReader &r_) {
 }
 
 void structdef_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   structdef_fields_to_msgpack(w_, x_);
 }
 

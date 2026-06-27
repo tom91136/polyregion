@@ -95,7 +95,7 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
   using namespace polyregion::polyast::dsl;
 
   const Named xField("x", Type::Float32());
-  const StructDef capDef(Sym({"Cap"}), {}, {xField}, {});
+  const StructDef capDef(Sym({"Cap"}), {}, {xField}, {}, false);
   const Type::Struct capTpe(Sym({"Cap"}), {});
   const Named capture("#capture", Type::Ptr(capTpe, TypeSpace::Global()));
 

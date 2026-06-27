@@ -314,7 +314,8 @@ object PolyAST {
       name: Sym,
       tpeVars: List[String],
       members: List[Named],
-      parents: List[Type.Struct]
+      parents: List[Type.Struct],
+      isUnion: Boolean = false
   ) derives MsgPack.Codec
 
   case class Mirror(

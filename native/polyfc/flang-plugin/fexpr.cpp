@@ -24,9 +24,9 @@ Expr::Any polyfc::selectAny(const Expr::Any &base, const Named &that) {
   return Expr::Alias(Term::Poison(that.tpe));
 }
 Type::Struct polyfc::FDescExtraMirror::tpe() { return Type::Struct(Sym({"FDescExtra"}), {}); }
-StructDef polyfc::FDescExtraMirror::def() const { return StructDef(tpe().name, {}, {derivedType, typeParamValue}, {}); }
+StructDef polyfc::FDescExtraMirror::def() const { return StructDef(tpe().name, {}, {derivedType, typeParamValue}, {}, false); }
 Type::Struct polyfc::FDimMirror::tpe() { return Type::Struct(Sym({"FDim"}), {}); }
-StructDef polyfc::FDimMirror::def() const { return StructDef(tpe().name, {}, {lowerBound, extent, stride}, {}); }
+StructDef polyfc::FDimMirror::def() const { return StructDef(tpe().name, {}, {lowerBound, extent, stride}, {}, false); }
 polyfc::FBoxedMirror::FBoxedMirror(const Type::Any &t, size_t ranks)
     : addr("addr", t), //
       ranks(ranks), dims("dim", Type::Arr(FDimMirror::tpe(), static_cast<int32_t>(ranks), TypeSpace::Global())),
@@ -42,7 +42,7 @@ StructDef polyfc::FBoxedMirror::def() const {
   // XXX A zero-length `dims` lowers to OpTypeRuntimeArray, rejected by OpenCL Kernel SPIR-V.
   std::vector<Named> members{addr, sizeInBytes, version, rank, type, attributes, extra};
   if (ranks > 0) members.push_back(dims);
-  return StructDef(tpe().name, {}, members ^ concat(derivedTypeInfo ^ to_vector()), {});
+  return StructDef(tpe().name, {}, members ^ concat(derivedTypeInfo ^ to_vector()), {}, false);
 }
 
 polyfc::FBoxed::FBoxed(const Expr::Any &base, const FBoxedMirror &aggregate) : base(base), mirror(aggregate) {}
@@ -59,7 +59,7 @@ Expr::Any polyfc::FBoxed::dimAt(const size_t rank) const {
   return Expr::Alias(Term::Poison(FDimMirror::tpe()));
 }
 Type::Struct polyfc::FBoxedNoneMirror::tpe() { return Type::Struct(Sym({"FBoxedNone"}), {}); }
-StructDef polyfc::FBoxedNoneMirror::def() const { return StructDef(tpe().name, {}, {addr}, {}); }
+StructDef polyfc::FBoxedNoneMirror::def() const { return StructDef(tpe().name, {}, {addr}, {}, false); }
 
 bool polyfc::operator==(const FBoxedMirror &lhs, const FBoxedMirror &rhs) {
   return lhs.addr == rhs.addr && lhs.ranks == rhs.ranks && lhs.dims == rhs.dims && lhs.derivedTypeInfo == rhs.derivedTypeInfo;

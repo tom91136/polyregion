@@ -313,6 +313,17 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     //   int &lhs = rhs;
     return Expr::RefTo(exprIndex->lhs, exprIndex->idx, exprIndex->comp, TypeSpace::Global(), Region::Opaque());
   } else if (!rhsPtrTpe && tgtPtrTpe) {
+    // array-to-pointer decay: `T arr[N]; T *p = arr` yields `&arr[0]` (`T*`), not `&arr` (`T(*)[N]`)
+    // std::string `_Myptr` needs this (`char* = _Bx._Buf` where `_Buf` is `char[16]`); index element 0
+    if (const auto arr = rhsTpe.get<Type::Arr>(); arr && tgtPtrTpe->comp == arr->comp) {
+      const auto arrLval = rhsSelectTerm ? rhsSelectTerm->widen() : [&] {
+        const auto bound = Stmt::Var(r.newName(rhsTpe), expr, /*isMutable*/ false);
+        r.push(bound);
+        return select(r, {}, bound.name).widen();
+      }();
+      const auto idx = r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0));
+      return Expr::RefTo(arrLval, idx, arr->comp, TypeSpace::Global(), Region::Opaque());
+    }
     // Handle promote
     //   int rhs = /* */;
     //   int *lhs = &rhs;
@@ -519,9 +530,25 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       } else {
                         auto chainedCtorStmts = r.scoped(
                             [&](auto &r) {
-                              if (baseStruct) {
+                              if (const auto inh = llvm::dyn_cast<clang::CXXInheritedCtorInitExpr>(init->getInit())) {
+                                // `using Base::Base;`: forward this synthesised ctor's `args` to the
+                                // inherited base ctor (none are on the node); conform bridges Derived*->Base*
+                                const auto [baseName, baseFn] = handleCall(inh->getConstructor(), r);
+                                if (baseFn->args.size() == args.size() + 1 && receiver) {
+                                  auto thisArg =
+                                      r.newVar(conform(r, Expr::Alias(select(r, {}, receiver->named)), baseFn->args.front().named.tpe));
+                                  const auto fwd =
+                                      args                       //
+                                      | zip_with_index<size_t>() //
+                                      | map([&](auto &a, auto i) -> Term::Any {
+                                          return r.newVar(conform(r, Expr::Alias(select(r, {}, a.named)), baseFn->args[i + 1].named.tpe));
+                                        }) //
+                                      | to_vector();
+                                  auto _ = r.newVar(
+                                      Expr::Invoke(Sym({baseName}), {}, {}, Vector<Term::Any>{thisArg} ^ concat(fwd), Type::Unit0()));
+                                }
+                              } else if (baseStruct) {
                                 auto _ = r.newVar(handleExpr(init->getInit(), r));
-                              } else {
                               }
                             },
                             true, rtnType, parent, true);
@@ -595,7 +622,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   // the *name* (we form `Type::Struct(name)` in handleType, never reading members), so an empty
   // stub is enough to break the cycle. Members and parents are filled in below by overwriting the
   // shared_ptr's contents in place.
-  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{});
+  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
   r.structs.emplace(name, stub);
 
   auto resolveStruct = [&](const Vector<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
@@ -626,7 +653,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
             auto original = baseMember(*p);
             if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
             auto e = get_or_emplace(r.structs, Empty, [](auto &k) {
-              return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{});
+              return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
             });
             return std::pair{Named(original.symbol, Type::Struct(e->name, {})), offsetAndSize};
           }) //
@@ -649,7 +676,8 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
         Sym({name}), std::vector<std::string>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
-        std::vector<Type::Struct>{});
+        std::vector<Type::Struct>{},
+        /*isUnion*/ decl->isUnion());
     const auto layout = std::make_shared<StructLayout>(                            //
         name,                                                                      //
         sizeInBytes,                                                               //
@@ -679,11 +707,11 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                    return resolveField(field, fmt::format("{}::{}", name, field->getName().str()), handleType(field->getType(), r));
                  })           //
                | to_vector(); //
-    // a union's members overlap at offset 0; the sequential layout would sum them (std::string SSO
-    // char[16]|size_t -> 24 not 16), so collapse to the largest member to match the C++ union size
-    if (decl->isUnion() && all.size() > 1)
-      return Vector<StructLayoutMember>{
-          *std::max_element(all.begin(), all.end(), [](auto &a, auto &b) { return a.sizeInBytes < b.sizeInBytes; })};
+    // XXX largest member first = canonical storage spanning the whole union
+    if (decl->isUnion() && all.size() > 1) {
+      auto maxIt = std::max_element(all.begin(), all.end(), [](auto &a, auto &b) { return a.sizeInBytes < b.sizeInBytes; });
+      std::rotate(all.begin(), maxIt, maxIt + 1);
+    }
     return all;
   };
 
@@ -797,9 +825,11 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
       desugared,                                        //
       [&](const clang::BuiltinType *tpe) -> Type::Any { // char|short|int|long
         switch (tpe->getKind()) {
-          case clang::BuiltinType::Long: return Type::IntS64();
-          case clang::BuiltinType::ULong: return Type::IntU64();
-          // MSVC maps `long` to 32-bit; ptrdiff_t/size_t/int64_t come through as LongLong/ULongLong.
+          // XXX `long`/`ulong` are 32-bit on LLP64 (Windows) but 64-bit on LP64 (Linux/macOS)
+          case clang::BuiltinType::Long:
+            return context.getTypeSize(clang::QualType(tpe, 0)) == 64 ? Type::IntS64().widen() : Type::IntS32().widen();
+          case clang::BuiltinType::ULong:
+            return context.getTypeSize(clang::QualType(tpe, 0)) == 64 ? Type::IntU64().widen() : Type::IntU32().widen();
           case clang::BuiltinType::LongLong: return Type::IntS64();
           case clang::BuiltinType::ULongLong: return Type::IntU64();
           // FIXME 128-bit ints surface only as iterator difference_types, it folds away today but need proper support for IntS128 etc
@@ -1093,10 +1123,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::AbstractConditionalOperator *expr) -> Expr::Any { // covers a?b:c and a?:c
         const auto lhs = select(r, {}, r.newVar(handleType(expr->getType(), r)));
+        // XXX a scalar lvalue conditional yields ref arms (`T*`) but the result slot is value `T` (e.g.
+        // std::max's `cond ? b : a`) so deref the arms
+        const auto k = lhs.tpe.kind();
+        const bool scalarResult = k.is<TypeKind::Integral>() || k.is<TypeKind::Fractional>();
+        auto arm = [&](RemapContext &r_, const Expr::Any &e) -> Expr::Any {
+          const auto ap = e.tpe().get<Type::Ptr>();
+          if (scalarResult && ap && ap->comp == lhs.tpe) return conform(r_, e, lhs.tpe);
+          return e;
+        };
         auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
         r.push(Stmt::Cond(condTerm, //
-                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, handleExpr(expr->getTrueExpr(), r_))); }),
-                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, handleExpr(expr->getFalseExpr(), r_))); })));
+                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, handleExpr(expr->getTrueExpr(), r_)))); }),
+                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, handleExpr(expr->getFalseExpr(), r_)))); })));
         return Expr::Alias(lhs);
       },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {

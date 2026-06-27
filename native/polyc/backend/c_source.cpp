@@ -784,7 +784,9 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                                                 : std::vector<std::string>{};
   // forward-declare every struct so pointer members (including cyclic ones) resolve
   const auto typedefs =
-      program.defs ^ map([&](auto &def) { return fmt::format("typedef struct {} {};", normalise(def.name), normalise(def.name)); });
+      program.defs ^ map([&](auto &def) {
+        return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", normalise(def.name), normalise(def.name));
+      });
 
   // emit struct bodies in by-value dependency order; a recursive cycle bails with a note
   std::vector<std::string> structBodies;
@@ -799,13 +801,13 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       structBodies ^= concat(std::vector<std::string>{"// Some structs cannot be resolved due to recursive by-value dependencies"});
       break;
     }
-    structBodies ^=
-        concat(noDeps | map([&](auto &s) {
-                 return fmt::format("struct {} {};\n", normalise(s.name), s.members | mk_string("{\n", "\n", "\n}", [&](auto &m) {
-                                                                            return fmt::format("  {};", mkDecl(m.tpe, normalise(m.symbol)));
-                                                                          }));
-               }) |
-               to_vector());
+    structBodies ^= concat(noDeps | map([&](auto &s) {
+                             return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", normalise(s.name),
+                                                s.members | mk_string("{\n", "\n", "\n}", [&](auto &m) {
+                                                  return fmt::format("  {};", mkDecl(m.tpe, normalise(m.symbol)));
+                                                }));
+                           }) |
+                           to_vector());
     resolved ^= concat(noDeps | map([](auto &s) { return s.name; }) | to_vector());
   }
 

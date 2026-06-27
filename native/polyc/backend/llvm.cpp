@@ -253,6 +253,11 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
                              fail());
     }
     const auto idx = *idxOpt;
+    if (info.def.isUnion) {
+      flush();
+      if (idx < info.def.members.size()) tpe = info.def.members[idx].tpe;
+      continue;
+    }
     if (gen.spirvStructByMemcpy()) {
       const auto offsetBytes = static_cast<size_t>(info.layout.members[idx].offsetInBytes);
       auto *off = llvm::ConstantInt::get(C.i64Ty(), offsetBytes);

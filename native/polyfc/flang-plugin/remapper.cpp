@@ -246,7 +246,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
                                    t.getTypeList()                                                                //
                                        | map([&](auto &name, auto &tpe) { return Named(name, handleType(tpe)); }) //
                                        | to_vector(),
-                                   std::vector<Type::Struct>{});
+                                   std::vector<Type::Struct>{}, false);
                const Type::Struct ty(def.name, {});
                defs.insert({ty, def});
                return ty;
@@ -1154,7 +1154,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   const StructDef preludeDef(Sym({"#Prelude"}), {},
                              gpu ? std::vector{LowerBound, UpperBound, Step, TripCount} //
                                  : std::vector{LowerBound, UpperBound, Step, TripCount, Begins, Ends},
-                             std::vector<Type::Struct>{});
+                             std::vector<Type::Struct>{}, false);
   const Named Prelude("#prelude", typeOf(preludeDef));
 
   Remapper r(m, L, op, {Capture});
@@ -1233,10 +1233,11 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                               std::vector{Prelude}                                          //
                                   | concat(captures | map([](auto &c) { return c.named; })) //
                                   | to_vector(),
-                              std::vector<Type::Struct>{});
+                              std::vector<Type::Struct>{}, false);
 
   const StructDef reductionsDef(ReductionType.name, {}, //
-                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }), std::vector<Type::Struct>{});
+                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }), std::vector<Type::Struct>{},
+                                false);
 
   r.syntheticDefs.emplace(preludeDef);
   r.syntheticDefs.emplace(capturesDef);
