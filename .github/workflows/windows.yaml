@@ -309,6 +309,7 @@ jobs:
           name: polyregion-tests-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
 
+      - *setup-just
       - name: Run native tests
         run: just test-native-dist
 
@@ -441,6 +442,7 @@ jobs:
           path: ./emulators
       - name: Unpack emulators
         run: tar xzf emulators\emulators-out.tar.gz -C emulators
+      - *setup-just
       - name: Run emulator tests
         run: just test-native-dist emulators emulator-test-results
       - name: Annotate ctest results

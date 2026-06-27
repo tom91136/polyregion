@@ -255,6 +255,7 @@ jobs:
     env: *arch-env
     steps:
       - uses: *checkout
+      - *setup-just
       - *brew-cmake
 
       - name: Download dist
@@ -447,6 +448,7 @@ jobs:
     env: *arch-env
     steps:
       - uses: *checkout
+      - *setup-just
       - *brew-cmake
 
       - name: Download dist (asan)
@@ -528,6 +530,7 @@ jobs:
     env: *arch-env
     steps:
       - uses: *checkout
+      - *setup-just
       - *brew-cmake
 
       - name: Download dist
