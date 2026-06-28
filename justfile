@@ -207,7 +207,7 @@ _clang-format:
         case "{{ os() }}-{{ arch() }}" in
             linux-x86_64|linux-amd64)      asset=clang-format-20_linux-amd64 ;;
             linux-aarch64|linux-arm64)     asset=clang-format-20_linux-arm64 ;;
-            macos-aarch64|macos-arm64)     asset=clang-format-20_macosx-arm64 ;;
+            macos-aarch64|macos-arm64)     asset=clang-format-20_macos-arm-arm64 ;;
             macos-x86_64|macos-amd64)      asset=clang-format-20_macosx-amd64 ;;
             windows-x86_64|windows-amd64)  asset=clang-format-20_windows-amd64.exe ;;
             *) echo "unsupported {{ os() }}-{{ arch() }}" >&2; exit 1 ;;
