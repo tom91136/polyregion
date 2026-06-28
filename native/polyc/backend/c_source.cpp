@@ -540,7 +540,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                 [&](const Intr::BXor &v) { return fmt::format("({} ^ {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BSL &v) { return fmt::format("({} << {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BSR &v) { return fmt::format("({} >> {})", mkTerm(v.x), mkTerm(v.y)); },
-                                [&](const Intr::BZSR &v) { return fmt::format("({} <<< {})", mkTerm(v.x), mkTerm(v.y)); },
+                                [&](const Intr::BZSR &v) { return fmt::format("({} >> {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::LogicAnd &v) { return fmt::format("({} && {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::LogicOr &v) { return fmt::format("({} || {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::LogicEq &v) { return fmt::format("({} == {})", mkTerm(v.x), mkTerm(v.y)); },
