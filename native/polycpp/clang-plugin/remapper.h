@@ -20,6 +20,12 @@ using polyregion::raise;
 struct Remapper {
   clang::ASTContext &context;
   mutable Map<std::string, Set<std::string>> readOnlyMembers{};
+  struct BitFieldInfo {
+    Named storage;
+    Type::Any valueTpe;
+    uint64_t bitOffset;
+    uint64_t bitWidth;
+  };
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
     bool ctorChain = false;
@@ -30,6 +36,7 @@ struct Remapper {
     Map<std::string, std::shared_ptr<StructDef>> structs{};
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
+    Map<std::string, BitFieldInfo> bitFields{};
 
     template <typename T>
     [[nodiscard]] Pair<T, Vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
@@ -46,7 +53,8 @@ struct Remapper {
                      functions,
                      structs,
                      layouts,
-                     parents};
+                     parents,
+                     bitFields};
       auto result = f(r);
       if (persistCounter) {
         counter = r.counter;
@@ -55,6 +63,7 @@ struct Remapper {
       structs = r.structs;
       layouts = r.layouts;
       parents = r.parents;
+      bitFields = r.bitFields;
       return {result, r.stmts};
     }
     // persistCounter=true keeps `_v<N>` temporaries unique across sibling scopes within one

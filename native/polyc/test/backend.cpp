@@ -1,5 +1,11 @@
 #include <algorithm>
 
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/MemoryBuffer.h"
+
 #include "catch2/catch_all.hpp"
 #include "fmt/format.h"
 
@@ -134,9 +140,15 @@ TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[ba
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
   REQUIRE(c.binary->size() >= 4);
-  // LLVM bitcode magic 'B' 'C' 0xC0 0xDE
-  CHECK(static_cast<unsigned char>((*c.binary)[0]) == 'B');
-  CHECK(static_cast<unsigned char>((*c.binary)[1]) == 'C');
-  CHECK(static_cast<unsigned char>((*c.binary)[2]) == 0xC0);
-  CHECK(static_cast<unsigned char>((*c.binary)[3]) == 0xDE);
+
+  llvm::LLVMContext context;
+  const llvm::StringRef bytes(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  auto buffer = llvm::MemoryBuffer::getMemBuffer(bytes, "mirror.bc", /*RequiresNullTerminator*/ false);
+  auto module = llvm::parseBitcodeFile(buffer->getMemBufferRef(), context);
+  if (!module) {
+    INFO(llvm::toString(module.takeError()));
+    FAIL("host mirror output is not parseable LLVM bitcode");
+  }
+
+  CHECK((*module)->getFunction("__polyregion_mirror_prelude") != nullptr);
 }

@@ -481,13 +481,27 @@ void insertMapCalls(llvm::Module &M, //
         }
         const auto scLB = AddRec->getStart();
         const auto scStride = AddRec->getStepRecurrence(SE);
+        const auto scExitCount = SE.getExitCount(AddRec->getLoop(), AddRec->getLoop()->getExitingBlock());
+        if (llvm::isa<llvm::SCEVCouldNotCompute>(scExitCount)) {
+          emplaceNonSCEV("SCEVNoExit");
+          continue;
+        }
         const auto scTripCount = SE.getTripCountFromExitCount(
-            /*ExitCount*/ SE.getExitCount(AddRec->getLoop(), AddRec->getLoop()->getExitingBlock()),
+            /*ExitCount*/ scExitCount,
             // XXX 64 bit will overflow if trip count is UINT_MAX, LLVM defaults to a 65 bit APInt but that causes mulExpr to fail (!!)
             /*EvalTy*/ llvm::IntegerType::getIntNTy(M.getContext(), 64),
             /*L*/ AddRec->getLoop());
+        if (llvm::isa<llvm::SCEVCouldNotCompute>(scTripCount)) {
+          emplaceNonSCEV("SCEVNoTrip");
+          continue;
+        }
         const auto scUB = SE.getAddExpr(scLB, SE.getMulExpr(scStride, scTripCount));
-        const auto predecessor = AddRec->getLoop()->getLoopPredecessor()->getTerminator();
+        const auto loopPredecessor = AddRec->getLoop()->getLoopPredecessor();
+        if (!loopPredecessor) {
+          emplaceNonSCEV("SCEVNoPredecessor");
+          continue;
+        }
+        const auto predecessor = loopPredecessor->getTerminator();
         // LLVM 22 dropped the DataLayout parameter from SCEVExpander; the expander now pulls
         // it from `SE.getDataLayout()` directly.
         llvm::SCEVExpander Expander(SE, "scev");

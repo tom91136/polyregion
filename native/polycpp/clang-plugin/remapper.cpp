@@ -264,6 +264,25 @@ Remapper::Remapper(clang::ASTContext &context) : context(context) {}
 
 static Type::Ptr ptrTo(const Type::Any &tpe) { return Type::Ptr(tpe, TypeSpace::Global()); }
 
+static Type::Any storageType(const uint64_t sizeInBytes, const bool isSigned) {
+  switch (sizeInBytes) {
+    case 1: return isSigned ? Type::IntS8().widen() : Type::IntU8().widen();
+    case 2: return isSigned ? Type::IntS16().widen() : Type::IntU16().widen();
+    case 4: return isSigned ? Type::IntS32().widen() : Type::IntU32().widen();
+    case 8: return isSigned ? Type::IntS64().widen() : Type::IntU64().widen();
+    default: raise(fmt::format("Unsupported bitfield storage size {} bytes", sizeInBytes));
+  }
+}
+
+static bool signedIntegralType(const Type::Any &tpe) {
+  return tpe.is<Type::IntS8>() || tpe.is<Type::IntS16>() || tpe.is<Type::IntS32>() || tpe.is<Type::IntS64>();
+}
+
+static uint64_t maskForWidth(const uint64_t width, const uint64_t storageBits) {
+  if (width >= storageBits) return ~uint64_t{0};
+  return (uint64_t{1} << width) - 1;
+}
+
 static constexpr bool isTrapBuiltin(unsigned id) {
   switch (id) {
     case clang::Builtin::BI__builtin_unreachable:
@@ -561,15 +580,20 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                 } else raise("receiver is not a struct type!");
               } else raise("receiver is not a instance ptr type!");
             } else {
-              // XXX a defaulted copy/move assign on an empty struct has an empty body (no members), leaving the placeholder byte poison, so
-              // copy explicitly
               if (auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl);
                   method && method->isDefaulted() && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator()) && //
-                  parent && r.emptyStruct(*parent) && args.size() == 1) {
+                  parent && args.size() == 1) {
                 auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
-                auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
-                auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
-                r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
+                // Defaulted assignment has an empty body for empty structs (only the placeholder byte) and for
+                // unions (Clang elides the member-wise copy), so copy the canonical storage member explicitly.
+                const auto storage = r.emptyStruct(*parent)                        ? Opt<Named>{EmptyStructMarker}
+                                     : parent->isUnion && !parent->members.empty() ? Opt<Named>{parent->members.front()}
+                                                                                   : Opt<Named>{};
+                if (storage) {
+                  auto thisRef = select(r, {Named(This, thisPtr)}, *storage);
+                  auto rhsRef = select(r, {args[0].named}, *storage);
+                  r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
+                }
               }
               handleStmt(decl->getBody(), r);
             }
@@ -702,15 +726,46 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   };
 
   auto resolveFields = [&] {
-    auto all = decl->fields() //
-               | map([&](auto &field) {
-                   return resolveField(field, fmt::format("{}::{}", name, field->getName().str()), handleType(field->getType(), r));
-                 })           //
-               | to_vector(); //
+    auto emptyStruct = [&] {
+      return get_or_emplace(r.structs, Empty, [](auto &k) {
+        return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
+      });
+    };
+    Vector<StructLayoutMember> all;
+    Map<std::string, size_t> bitfieldStorageIndices;
+    for (auto *field : decl->fields()) {
+      const auto fieldName = fmt::format("{}::{}", name, field->getName().str());
+      if (!field->isBitField()) {
+        if (field->isZeroSize(context)) {
+          const auto e = emptyStruct();
+          all ^= append(
+              StructLayoutMember{Named(fieldName, Type::Struct(e->name, {})), static_cast<int64_t>(context.getFieldOffset(field) / 8), 0});
+        } else all ^= append(resolveField(field, fieldName, handleType(field->getType(), r)));
+        continue;
+      }
+      const auto bitWidth = static_cast<uint64_t>(field->getBitWidthValue());
+      if (bitWidth == 0) continue;
+      const auto fieldBitOffset = static_cast<uint64_t>(context.getFieldOffset(field));
+      const auto storageSizeBytes = static_cast<uint64_t>(context.getTypeSizeInChars(field->getType()).getQuantity());
+      const auto storageSizeBits = storageSizeBytes * 8;
+      const auto storageOffsetBytes = (fieldBitOffset / storageSizeBits) * storageSizeBytes;
+      const auto storageKey = fmt::format("{}:{}", storageOffsetBytes, storageSizeBytes);
+      const auto storageName = fmt::format("{}::#bitfield_{}_{}", name, storageOffsetBytes, storageSizeBytes);
+      const auto storageIndex = [&] {
+        if (auto index = bitfieldStorageIndices ^ get_maybe(storageKey)) return *index;
+        const auto index = all.size();
+        all ^= append(StructLayoutMember{Named(storageName, storageType(storageSizeBytes, /*isSigned*/ false)),
+                                         static_cast<int64_t>(storageOffsetBytes), static_cast<int64_t>(storageSizeBytes)});
+        bitfieldStorageIndices.emplace(storageKey, index);
+        return index;
+      }();
+      r.bitFields.emplace(fieldName, Remapper::BitFieldInfo{all[storageIndex].name, handleType(field->getType(), r),
+                                                            fieldBitOffset - storageOffsetBytes * 8, bitWidth});
+    }
     // XXX largest member first = canonical storage spanning the whole union
     if (decl->isUnion() && all.size() > 1) {
-      auto maxIt = std::max_element(all.begin(), all.end(), [](auto &a, auto &b) { return a.sizeInBytes < b.sizeInBytes; });
-      std::rotate(all.begin(), maxIt, maxIt + 1);
+      const auto maxIdx = (all | index_of_max_by([](auto &m) { return m.sizeInBytes; })).value();
+      return all | slice(maxIdx, maxIdx + 1) | concat(all | take(maxIdx)) | concat(all | drop(maxIdx + 1)) | to_vector();
     }
     return all;
   };
@@ -780,9 +835,16 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
   };
   if (const auto spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(tpe->getDecl())) {
     return specName(spec);
-  } else if (auto name = tpe->getDecl()->getNameAsString(); name.empty()) { // some decl don't have names (lambdas), so synthesise
+  } else if (auto name = tpe->getDecl()->getNameAsString();
+             name.empty()) { // some decl don't have names (lambdas/anonymous records), so synthesise
     const auto l = getLocation(tpe->getDecl()->getLocation(), context);
-    return fmt::format("{}:{}:{}", l.filename, l.line, l.col);
+    std::string nested = fmt::format("{}:{}:{}", l.filename, l.line, l.col);
+    for (const clang::DeclContext *dc = tpe->getDecl()->getDeclContext(); dc; dc = dc->getParent()) {
+      if (const auto enc = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(dc)) return specName(enc) + "::" + nested;
+      if (const auto rd = llvm::dyn_cast<clang::RecordDecl>(dc); rd && !rd->getName().empty())
+        nested = rd->getNameAsString() + "::" + nested;
+    }
+    return nested;
   } else {
     std::string nested = name;
     for (const clang::DeclContext *dc = tpe->getDecl()->getDeclContext(); dc; dc = dc->getParent()) {
@@ -901,6 +963,115 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       return Expr::RefTo(termToSel(term), {}, term.tpe(), TypeSpace::Global(), Region::Opaque());
     }
     return Expr::Alias(term);
+  };
+
+  auto extractBitField = [&r](const Term::Select &storageSelect, const Remapper::BitFieldInfo &info) -> Expr::Any {
+    const auto storageTpe = info.storage.tpe;
+    Term::Any storage = storageSelect;
+    if (info.bitOffset != 0) {
+      const auto shift = r.newVar(integralConstOfType(storageTpe, info.bitOffset));
+      storage = r.newVar(Expr::IntrOp(Intr::BZSR(storage, shift, storageTpe)));
+    }
+    const auto storageBits = static_cast<uint64_t>(primitiveSize(storageTpe).value_or(8) * 8);
+    const auto mask = r.newVar(integralConstOfType(storageTpe, maskForWidth(info.bitWidth, storageBits)));
+    const auto masked = r.newVar(Expr::IntrOp(Intr::BAnd(storage, mask, storageTpe)));
+    if (signedIntegralType(info.valueTpe) && info.bitWidth < storageBits) {
+      const auto signedStorageTpe = storageType(storageBits / 8, /*isSigned*/ true);
+      const auto signShift = r.newVar(integralConstOfType(signedStorageTpe, storageBits - info.bitWidth));
+      const auto signedMasked = r.newVar(Expr::Cast(masked, signedStorageTpe));
+      const auto signAtTop = r.newVar(Expr::IntrOp(Intr::BSL(signedMasked, signShift, signedStorageTpe)));
+      const auto signExtended = r.newVar(Expr::IntrOp(Intr::BSR(signAtTop, signShift, signedStorageTpe)));
+      if (info.valueTpe == signedStorageTpe) return Expr::Alias(signExtended);
+      return Expr::Cast(signExtended, info.valueTpe);
+    }
+    if (info.valueTpe == storageTpe) return Expr::Alias(masked);
+    return Expr::Cast(masked, info.valueTpe);
+  };
+
+  struct MemberAccess {
+    Vector<Named> prefix;
+    Named storage;
+    Opt<Remapper::BitFieldInfo> bitField;
+  };
+
+  auto resolveMemberAccess = [&](const clang::MemberExpr *expr, const Expr::Any &baseExpr) -> MemberAccess {
+    const auto chain = [&]() -> Vector<const clang::FieldDecl *> {
+      if (const auto field = llvm::dyn_cast<clang::FieldDecl>(expr->getMemberDecl())) return {field};
+      if (const auto indirect = llvm::dyn_cast<clang::IndirectFieldDecl>(expr->getMemberDecl()))
+        return indirect->chain() | collect([](auto *decl) -> Opt<const clang::FieldDecl *> {
+                 if (const auto field = llvm::dyn_cast<clang::FieldDecl>(decl)) return field;
+                 return {};
+               }) |
+               to_vector();
+      return {};
+    }();
+    if (chain.empty()) raise("Member expr on non-field member is not legal:" + repr(baseExpr));
+
+    auto fieldOwnerName = [&](const clang::FieldDecl *field) {
+      const auto *recordDecl = llvm::dyn_cast<clang::RecordDecl>(field->getDeclContext());
+      if (!recordDecl) raise("Field decl with non-record context: " + field->getNameAsString());
+      if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>()) return repr(s->name);
+      raise("Field owner is not a struct: " + field->getNameAsString());
+    };
+
+    auto sourceNamed = [&](const clang::FieldDecl *field) {
+      return Named(fmt::format("{}::{}", fieldOwnerName(field), field->getName().str()), handleType(field->getType(), r));
+    };
+
+    auto storageNamed = [&](const clang::FieldDecl *field) {
+      auto source = sourceNamed(field);
+      if (auto info = r.bitFields ^ get_maybe(source.symbol)) return info->storage;
+      return source;
+    };
+
+    std::optional<Term::Select> rootSel;
+    if (auto a = baseExpr.template get<Expr::Alias>()) {
+      if (auto s1 = a->ref.template get<Term::Select>()) rootSel = *s1;
+    }
+    Vector<Named> namesPath;
+    if (rootSel) {
+      namesPath = rootSel->steps //
+                  | collect([](auto &step) {
+                      return step.template get<PathStep::Field>() ^ map([](auto &f) { return Named(f.name, Type::Nothing()); });
+                    }) //
+                  | prepend(rootSel->root) | to_vector();
+    } else {
+      auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr, /*isMutable*/ false);
+      r.push(baseVar);
+      namesPath = {baseVar.name};
+    }
+
+    const auto finalField = chain.back();
+    const auto prefix = namesPath | concat(chain | take(chain.size() - 1) | map(storageNamed)) | to_vector();
+
+    const auto source = sourceNamed(finalField);
+    if (auto info = r.bitFields ^ get_maybe(source.symbol)) {
+      return MemberAccess{prefix, info->storage, *info};
+    }
+    return MemberAccess{prefix, storageNamed(finalField), {}};
+  };
+
+  auto storeBitField = [&](const MemberAccess &access, const Term::Any &value) -> Term::Any {
+    const auto info = access.bitField.value();
+    const auto storageTpe = info.storage.tpe;
+    const auto storageBits = static_cast<uint64_t>(primitiveSize(storageTpe).value_or(8) * 8);
+    const auto fieldMaskBits = maskForWidth(info.bitWidth, storageBits) << info.bitOffset;
+    const auto clearMaskBits = maskForWidth(storageBits, storageBits) ^ fieldMaskBits;
+
+    const auto storageSel = select(r, access.prefix, info.storage);
+    const auto keptMask = r.newVar(integralConstOfType(storageTpe, clearMaskBits));
+    const auto kept = r.newVar(Expr::IntrOp(Intr::BAnd(storageSel, keptMask, storageTpe)));
+
+    auto narrowed = value.tpe() == storageTpe ? value : r.newVar(Expr::Cast(value, storageTpe));
+    const auto valueMask = r.newVar(integralConstOfType(storageTpe, maskForWidth(info.bitWidth, storageBits)));
+    Term::Any fieldValue = r.newVar(Expr::IntrOp(Intr::BAnd(narrowed, valueMask, storageTpe)));
+    if (info.bitOffset != 0) {
+      const auto shift = r.newVar(integralConstOfType(storageTpe, info.bitOffset));
+      fieldValue = r.newVar(Expr::IntrOp(Intr::BSL(fieldValue, shift, storageTpe)));
+    }
+    const auto combined = r.newVar(Expr::IntrOp(Intr::BOr(kept, fieldValue, storageTpe)));
+    r.push(Stmt::Mut(storageSel, Expr::Alias(combined)));
+    return r.newVar(extractBitField(storageSel, info));
   };
 
   auto assign = [&r, termToSel](const Term::Any &lhs, const Term::Any &rhs) -> Term::Any {
@@ -1291,6 +1462,17 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::BinaryOperator *expr) -> Expr::Any {
         // Here we're just dealing with the builtin operators, overloaded operators will be a clang::CXXOperatorCallExpr.
+        if (expr->getOpcode() == clang::BO_Assign) {
+          if (auto *lhsMember = llvm::dyn_cast<clang::MemberExpr>(expr->getLHS()->IgnoreParens())) {
+            const auto baseExpr = handleExpr(lhsMember->getBase(), r);
+            const auto access = resolveMemberAccess(lhsMember, baseExpr);
+            if (access.bitField) {
+              const auto rhs = r.newVar(handleExpr(expr->getRHS(), r));
+              return Expr::Alias(storeBitField(access, rhs));
+            }
+          }
+        }
+
         auto lhs = r.newVar(handleExpr(expr->getLHS(), r));
         auto rhs = r.newVar(handleExpr(expr->getRHS(), r));
         auto tpe_ = handleType(expr->getType(), r);
@@ -1497,6 +1679,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const static std::string builtinPrefix = "__polyregion_builtin_";
         const auto target = expr->getCalleeDecl()->getAsFunction();
         const auto qualifiedName = target->getQualifiedNameAsString();
+        if ((qualifiedName == "std::addressof" || qualifiedName == "std::__addressof" || qualifiedName == "__builtin_addressof") &&
+            expr->getNumArgs() == 1) {
+          return ref(r.newVar(handleExpr(expr->getArg(0), r)));
+        }
         // XXX host-only error sinks (__glibcxx_assert_fail, abort, __assert_fail) are [[noreturn]] with no
         // device body; elide the call rather than lift its string-literal args into the kernel
         if (target->isNoReturn() && !target->hasBody() && expr->getType()->isVoidType()) return Expr::Any(Expr::Alias(Term::Unit0Const()));
@@ -1553,40 +1739,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::MemberExpr *expr) -> Expr::Any { //  instance.member; instance->member
         const auto baseExpr = handleExpr(expr->getBase(), r);
-        auto baseTpe = baseExpr.tpe();
-        if (auto opt = baseTpe.get<Type::Ptr>(); opt) baseTpe = opt->comp;
-
-        if (auto recordDecl = llvm::dyn_cast<clang::RecordDecl>(expr->getMemberDecl()->getDeclContext()); recordDecl) {
-          if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>(); s) {
-            auto member =
-                Named(repr(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
-            // Reconstruct the names list (root + path-as-fields) for the inheritance walker.
-            std::optional<Term::Select> rootSel;
-            if (auto a = baseExpr.template get<Expr::Alias>()) {
-              if (auto s1 = a->ref.template get<Term::Select>()) rootSel = *s1;
-            }
-            if (rootSel) {
-              // Approximate names list from the steps: each Field step contributes a Named with
-              // the segment's source name. Type info is no longer carried per-step in the new AST,
-              // so we leave each segment's tpe as Nothing -- the inheritance walker only uses .symbol.
-              const auto namesPath =
-                  rootSel->steps             //
-                  ^ collect([](auto &step) { //
-                      return step.template get<PathStep::Field>() ^ map([](auto &f) { return Named(f.name, Type::Nothing()); });
-                    }) //
-                  ^ prepend(rootSel->root);
-              return Expr::Alias(select(r, namesPath, member));
-            } else {
-              auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr, /*isMutable*/ false);
-              r.push(baseVar);
-              return Expr::Alias(select(r, {baseVar.name}, member));
-            }
-          } else {
-            raise("Member expr on non-struct type is not legal:" + repr(baseExpr));
-          }
-        } else {
-          raise("Member expr on non-record type is not legal:" + repr(baseExpr));
+        const auto access = resolveMemberAccess(expr, baseExpr);
+        if (access.bitField) {
+          return extractBitField(select(r, access.prefix, access.storage), *access.bitField);
         }
+        return Expr::Alias(select(r, access.prefix, access.storage));
       },
       [&](const clang::Expr *) { return failExpr(); });
   if (result) {
