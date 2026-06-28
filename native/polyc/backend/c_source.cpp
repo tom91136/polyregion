@@ -77,6 +77,8 @@ struct CLAddressSpaceTracePass {
         [&](const Expr::MathOp &x) -> SpacedExpr { return {Expr::MathOp(x.op.modify_all<Term::Any>(mapTerm0_))}; },
         [&](const Expr::Cast &x) -> SpacedExpr {
           auto st = mapTerm_(x.from);
+          if (auto asPtr = x.as.template get<Type::Ptr>(); asPtr && !x.from.tpe().template is<Type::Ptr>())
+            return {Expr::Cast(st.actual, x.as), asPtr->space};
           // re-space the cast target so OpenCL doesn't see a global<-private mismatch
           auto as = x.as.template get<Type::Ptr>() ^ map([&](auto &p) { return Type::Ptr(p.comp, st.space).widen(); }) ^ get_or_else(x.as);
           return {Expr::Cast(st.actual, as), st.space};
@@ -335,7 +337,11 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                                  const std::string pfx = dialect == Dialect::MSL1_0 ? std::string(mslPtrPrefix(x.space)) + " " : "";
                                  return fmt::format("{}{} (*)[{}]", pfx, mkTpe(arr->comp), arr->length);
                                }
-                               if (dialect == Dialect::MSL1_0) return fmt::format("{} {}*", mslPtrPrefix(x.space), mkTpe(x.comp));
+                               if (dialect == Dialect::MSL1_0) {
+                                 // each level qualified at its own `*` (`device T * device *`), else the outer `*` is unqualified
+                                 if (x.comp.template is<Type::Ptr>()) return fmt::format("{} {} *", mkTpe(x.comp), mslPtrPrefix(x.space));
+                                 return fmt::format("{} {}*", mslPtrPrefix(x.space), mkTpe(x.comp));
+                               }
                                return fmt::format("{}*", mkTpe(x.comp));
                              },                                                                                  //
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
@@ -406,10 +412,10 @@ std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &na
       dims += fmt::format("[{}]", a->length);
       base = a->comp;
     }
-    const auto q = p->space.match_total([&](TypeSpace::Global) { return "global "s; }, //
-                                        [&](TypeSpace::Constant) { return "global "s; },
+    const auto q = p->space.match_total([&](TypeSpace::Global) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },    //
+                                        [&](TypeSpace::Constant) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },  //
                                         [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; }, //
-                                        [&](TypeSpace::Private) { return "private "s; });
+                                        [&](TypeSpace::Private) { return dialect == Dialect::MSL1_0 ? "thread "s : "private "s; });
     return fmt::format("{}{} (*{}){}", q, mkTpe(base), name, dims);
   }
   return fmt::format("{} {}", mkTpe(tpe), name);
@@ -554,34 +560,43 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         const auto fp = [](const Type::Any &t) {
           return t.template is<Type::Float16>() || t.template is<Type::Float32>() || t.template is<Type::Float64>();
         };
+        const auto mathFn = [&](std::string_view name) {
+          return dialect == Dialect::MSL1_0 ? "metal::" + std::string(name) : std::string(name);
+        };
         return x.op.match_total(
             // OpenCL/C `abs` is integer-only; floats need `fabs`
-            [&](const Math::Abs &v) { return fmt::format("{}({})", fp(v.tpe) ? "fabs" : "abs", mkTerm(v.x)); },
+            [&](const Math::Abs &v) { return fmt::format("{}({})", mathFn(fp(v.tpe) ? "fabs" : "abs"), mkTerm(v.x)); },
             // POLY_* macro on OpenCL: llvmpipe libclc crashes on precise sin/cos/tan range-reduction
-            [&](const Math::Sin &v) { return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_SIN" : "sin", mkTerm(v.x)); },
-            [&](const Math::Cos &v) { return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_COS" : "cos", mkTerm(v.x)); },
-            [&](const Math::Tan &v) { return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_TAN" : "tan", mkTerm(v.x)); },
-            [&](const Math::Asin &v) { return fmt::format("asin({})", mkTerm(v.x)); },
-            [&](const Math::Acos &v) { return fmt::format("acos({})", mkTerm(v.x)); },
-            [&](const Math::Atan &v) { return fmt::format("atan({})", mkTerm(v.x)); },
-            [&](const Math::Sinh &v) { return fmt::format("sinh({})", mkTerm(v.x)); },
-            [&](const Math::Cosh &v) { return fmt::format("cosh({})", mkTerm(v.x)); },
-            [&](const Math::Tanh &v) { return fmt::format("tanh({})", mkTerm(v.x)); },
-            [&](const Math::Signum &v) { return fmt::format("signum({})", mkTerm(v.x)); },
-            [&](const Math::Round &v) { return fmt::format("round({})", mkTerm(v.x)); },
-            [&](const Math::Ceil &v) { return fmt::format("ceil({})", mkTerm(v.x)); },
-            [&](const Math::Floor &v) { return fmt::format("floor({})", mkTerm(v.x)); },
-            [&](const Math::Rint &v) { return fmt::format("rint({})", mkTerm(v.x)); },
-            [&](const Math::Sqrt &v) { return fmt::format("sqrt({})", mkTerm(v.x)); },
-            [&](const Math::Cbrt &v) { return fmt::format("cbrt({})", mkTerm(v.x)); },
-            [&](const Math::Exp &v) { return fmt::format("exp({})", mkTerm(v.x)); },
-            [&](const Math::Expm1 &v) { return fmt::format("expm1({})", mkTerm(v.x)); },
-            [&](const Math::Log &v) { return fmt::format("log({})", mkTerm(v.x)); },
-            [&](const Math::Log1p &v) { return fmt::format("log1p({})", mkTerm(v.x)); },
-            [&](const Math::Log10 &v) { return fmt::format("log10({})", mkTerm(v.x)); },
-            [&](const Math::Pow &v) { return fmt::format("pow({}, {})", mkTerm(v.x), mkTerm(v.y)); },
-            [&](const Math::Atan2 &v) { return fmt::format("atan2({}, {})", mkTerm(v.x), mkTerm(v.y)); },
-            [&](const Math::Hypot &v) { return fmt::format("hypot({}, {})", mkTerm(v.x), mkTerm(v.y)); });
+            [&](const Math::Sin &v) {
+              return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_SIN" : mathFn("sin"), mkTerm(v.x));
+            },
+            [&](const Math::Cos &v) {
+              return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_COS" : mathFn("cos"), mkTerm(v.x));
+            },
+            [&](const Math::Tan &v) {
+              return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_TAN" : mathFn("tan"), mkTerm(v.x));
+            },
+            [&](const Math::Asin &v) { return fmt::format("{}({})", mathFn("asin"), mkTerm(v.x)); },
+            [&](const Math::Acos &v) { return fmt::format("{}({})", mathFn("acos"), mkTerm(v.x)); },
+            [&](const Math::Atan &v) { return fmt::format("{}({})", mathFn("atan"), mkTerm(v.x)); },
+            [&](const Math::Sinh &v) { return fmt::format("{}({})", mathFn("sinh"), mkTerm(v.x)); },
+            [&](const Math::Cosh &v) { return fmt::format("{}({})", mathFn("cosh"), mkTerm(v.x)); },
+            [&](const Math::Tanh &v) { return fmt::format("{}({})", mathFn("tanh"), mkTerm(v.x)); },
+            [&](const Math::Signum &v) { return fmt::format("{}({})", mathFn("signum"), mkTerm(v.x)); },
+            [&](const Math::Round &v) { return fmt::format("{}({})", mathFn("round"), mkTerm(v.x)); },
+            [&](const Math::Ceil &v) { return fmt::format("{}({})", mathFn("ceil"), mkTerm(v.x)); },
+            [&](const Math::Floor &v) { return fmt::format("{}({})", mathFn("floor"), mkTerm(v.x)); },
+            [&](const Math::Rint &v) { return fmt::format("{}({})", mathFn("rint"), mkTerm(v.x)); },
+            [&](const Math::Sqrt &v) { return fmt::format("{}({})", mathFn("sqrt"), mkTerm(v.x)); },
+            [&](const Math::Cbrt &v) { return fmt::format("{}({})", mathFn("cbrt"), mkTerm(v.x)); },
+            [&](const Math::Exp &v) { return fmt::format("{}({})", mathFn("exp"), mkTerm(v.x)); },
+            [&](const Math::Expm1 &v) { return fmt::format("{}({})", mathFn("expm1"), mkTerm(v.x)); },
+            [&](const Math::Log &v) { return fmt::format("{}({})", mathFn("log"), mkTerm(v.x)); },
+            [&](const Math::Log1p &v) { return fmt::format("{}({})", mathFn("log1p"), mkTerm(v.x)); },
+            [&](const Math::Log10 &v) { return fmt::format("{}({})", mathFn("log10"), mkTerm(v.x)); },
+            [&](const Math::Pow &v) { return fmt::format("{}({}, {})", mathFn("pow"), mkTerm(v.x), mkTerm(v.y)); },
+            [&](const Math::Atan2 &v) { return fmt::format("{}({}, {})", mathFn("atan2"), mkTerm(v.x), mkTerm(v.y)); },
+            [&](const Math::Hypot &v) { return fmt::format("{}({}, {})", mathFn("hypot"), mkTerm(v.x), mkTerm(v.y)); });
       },
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
       [&](const Expr::Invoke &x) {
@@ -600,8 +615,37 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         const auto lhsSel = x.lhs.template get<Term::Select>();
         const auto lastField = lhsSel && !lhsSel->steps.empty() ? lhsSel->steps.back().template get<PathStep::Field>() : std::nullopt;
         // EBO empty base addressed as the base type: cast to the declared pointer type so Rusticl accepts it
-        if (lastField && (lastField->name ^ starts_with(conventions::BaseFieldPrefix)) && x.comp.template is<Type::Struct>())
+        if (lastField && (lastField->name ^ starts_with(conventions::BaseFieldPrefix)) && x.comp.template is<Type::Struct>()) {
+          // an empty base is elided from the struct, so `&obj.#base_X` is dangling: address the parent (offset
+          // 0) instead. the Select is typed as the logical base, so key elision on the field's owner-declared
+          // type (#empty for an EBO base), not the Select type
+          Type::Any owner = lhsSel->root.tpe;
+          for (size_t i = 0; i + 1 < lhsSel->steps.size(); ++i)
+            lhsSel->steps[i].match_total(
+                [&](const PathStep::Field &f) {
+                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
+                  owner = resolveFieldType(owner, f.name);
+                },
+                [&](const PathStep::Deref &) {
+                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
+                },
+                [&](const PathStep::Index &) {},
+                [&](const PathStep::IndexDyn &) {
+                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
+                  else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
+                });
+          if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
+          const bool emptyBase = resolveFieldType(owner, lastField->name).template get<Type::Struct>() ^ exists([&](auto &s) {
+                                   const auto it = structDefsByName.find(normalise(s.name));
+                                   return it != structDefsByName.end() && it->second.empty();
+                                 });
+          if (emptyBase) {
+            const auto full = mkTerm(x.lhs);
+            const auto cut = full.rfind('.');
+            str = fmt::format("&({})", cut == std::string::npos ? full : full.substr(0, cut));
+          }
           str = fmt::format("(({}) {})", mkTpe(Type::Ptr(x.comp, x.space).widen()), str);
+        }
         return str;
       },
       [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); },
@@ -634,6 +678,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         return fmt::format("{}{};", mkDecl(x.name.tpe, normalise(x.name.symbol)), x.expr ? " = " + mkExpr(*x.expr) : "");
       },
       [&](const Stmt::Mut &x) {
+        if (x.name.tpe.template is<Type::Unit0>()) return fmt::format("{};", mkExpr(x.expr));
         if (x.name.tpe.template is<Type::Arr>()) return mkArrayCopy(mkTerm(x.name), mkExpr(x.expr), x.name.tpe, 0);
         return fmt::format("{} = {};", mkTerm(x.name), mkExpr(x.expr));
       },
@@ -703,23 +748,16 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
   if (dialect == Dialect::MSL1_0) {
 
     std::set<std::pair<std::string, std::string>> iargs; // ordered set for consistency
-    for (auto &stmt : fnTree.body) {
-      auto findIntrinsics = [&](Expr::Any &expr) {
-        if (auto spec = expr.get<Expr::SpecOp>(); spec) {
-          if (spec->op.is<Spec::GpuGlobalIdx>()) iargs.emplace("get_global_id", "thread_position_in_grid");
-          if (spec->op.is<Spec::GpuGlobalSize>()) iargs.emplace("get_global_size", "threads_per_grid");
-          if (spec->op.is<Spec::GpuGroupIdx>()) iargs.emplace("get_group_id", "threadgroup_position_in_grid");
-          if (spec->op.is<Spec::GpuGroupSize>()) iargs.emplace("get_num_groups", "threadgroups_per_grid");
-          if (spec->op.is<Spec::GpuLocalIdx>()) iargs.emplace("get_local_id", "thread_position_in_threadgroup");
-          if (spec->op.is<Spec::GpuLocalSize>()) iargs.emplace("get_local_size", "threads_per_threadgroup");
-        }
-      };
-      if (auto var = stmt.get<Stmt::Var>(); var) {
-        if (var->expr) findIntrinsics(*var->expr);
-      } else if (auto mut = stmt.get<Stmt::Mut>(); mut) {
-        findIntrinsics(mut->expr);
-      }
-      // Cond.cond is now a Term (atomic) - SpecOp lives in Expr only, so nothing to find here.
+    // a SpecOp can nest in a loop/branch body, not just a top-level Var/Mut, so scan the whole function
+    for (const auto &expr : fnTree.collect_all<Expr::Any>()) {
+      auto spec = expr.template get<Expr::SpecOp>();
+      if (!spec) continue;
+      if (spec->op.is<Spec::GpuGlobalIdx>()) iargs.emplace("get_global_id", "thread_position_in_grid");
+      if (spec->op.is<Spec::GpuGlobalSize>()) iargs.emplace("get_global_size", "threads_per_grid");
+      if (spec->op.is<Spec::GpuGroupIdx>()) iargs.emplace("get_group_id", "threadgroup_position_in_grid");
+      if (spec->op.is<Spec::GpuGroupSize>()) iargs.emplace("get_num_groups", "threadgroups_per_grid");
+      if (spec->op.is<Spec::GpuLocalIdx>()) iargs.emplace("get_local_id", "thread_position_in_threadgroup");
+      if (spec->op.is<Spec::GpuLocalSize>()) iargs.emplace("get_local_size", "threads_per_threadgroup");
     }
     for (auto &[name, attr] : iargs)
       argExprs.emplace_back(fmt::format("uint3 __{}__ [[ {} ]]", name, attr));
@@ -767,6 +805,11 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         return std::pair{normalise(def.name), def.members ^ map([&](auto &m) { return std::pair{normalise(m.symbol), m.tpe}; })};
       }) ^
       to<Map>();
+  const Set<Sym> zeroSizeStructs =
+      program.defs ^ filter([](auto &def) { return def.members.empty(); }) ^ map([](auto &def) { return def.name; }) ^ to<Set>();
+  auto realStorageMember = [&](const Named &m) {
+    return !(m.tpe.template get<Type::Struct>() ^ exists([&](auto &s) { return zeroSizeStructs.contains(s.name); }));
+  };
 
   // only by-value members create a definition-order dependency; pointer members resolve via the forward decl
   auto structsAndDeps = program.defs ^ map([&](auto &def) {
@@ -803,7 +846,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     }
     structBodies ^= concat(noDeps | map([&](auto &s) {
                              return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", normalise(s.name),
-                                                s.members | mk_string("{\n", "\n", "\n}", [&](auto &m) {
+                                                s.members | filter(realStorageMember) | mk_string("{\n", "\n", "\n}", [&](auto &m) {
                                                   return fmt::format("  {};", mkDecl(m.tpe, normalise(m.symbol)));
                                                 }));
                            }) |
@@ -816,19 +859,21 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   auto code = includes | concat(typedefs) | concat(structBodies) | append(protos) | append(std::string("\n")) |
               concat(allFns ^ map([&](auto &f) { return mkFn(f); })) | mk_string("\n");
 
-  // half/double is behind cl_khr_fp16/cl_khr_fp64
+  const auto usesTpe = [&](auto pred) {
+    return (allFns ^ exists([&](const Function &f) { return f.collect_all<Type::Any>() ^ exists(pred); })) ||
+           (program.defs ^ exists([&](const StructDef &d) {
+              return d.members ^ exists([&](const Named &m) { return m.tpe.collect_all<Type::Any>() ^ exists(pred); });
+            }));
+  };
+
   std::vector<std::string> features;
+  if (usesTpe([](const Type::Any &t) { return t.is<Type::Float64>(); })) features.emplace_back("fp64");
+
+  // OpenCL half/double is behind cl_khr_fp16/cl_khr_fp64.
   if (dialect == Dialect::OpenCL1_1) {
-    const auto usesTpe = [&](auto pred) {
-      return (allFns ^ exists([&](const Function &f) { return f.collect_all<Type::Any>() ^ exists(pred); })) ||
-             (program.defs ^ exists([&](const StructDef &d) {
-                return d.members ^ exists([&](const Named &m) { return m.tpe.collect_all<Type::Any>() ^ exists(pred); });
-              }));
-    };
     std::string pragmas;
     if (usesTpe([](const Type::Any &t) { return t.is<Type::Float64>(); })) {
       pragmas += "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n";
-      features.emplace_back("fp64");
     }
     if (usesTpe([](const Type::Any &t) { return t.is<Type::Float16>(); })) {
       pragmas += "#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n";

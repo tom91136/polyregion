@@ -122,6 +122,60 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
   CHECK(std::find(c.features.begin(), c.features.end(), "fp16") == c.features.end());
 }
 
+TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer space", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named off("off", Type::IntU64());
+  const auto ptrTpe = Type::Ptr(Type::IntS8(), TypeSpace::Global());
+  const Named ptr("p", ptrTpe);
+  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
+                 {
+                     Var(off, Expr::Alias(Term::IntU64Const(16).widen()).widen(), false).widen(),
+                     Var(ptr, Expr::Cast(selectNamed(off).widen(), ptrTpe).widen(), false).widen(),
+                     Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+                 },
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("global char* p = ((global char*) off);") != std::string::npos);
+  CHECK(source.find("private char* p") == std::string::npos);
+}
+
+TEST_CASE("metal source does not emit zero-size empty marker members", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto emptySym = Sym({"#empty"});
+  const auto ownerSym = Sym({"Owner"});
+  const StructDef empty(emptySym, {}, {}, {}, false);
+  const StructDef owner(ownerSym, {},
+                        {
+                            Named("bytes", Type::Arr(Type::IntS8(), 23, TypeSpace::Global())),
+                            Named("pad", Type::Struct(emptySym, {})),
+                            Named("tail", Type::IntU8()),
+                        },
+                        {}, false);
+  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
+                 {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Exported(),
+                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Program p(entry, {}, {empty, owner}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("_empty pad") == std::string::npos);
+  CHECK(source.find("uint8_t tail;") != std::string::npos);
+}
+
 TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

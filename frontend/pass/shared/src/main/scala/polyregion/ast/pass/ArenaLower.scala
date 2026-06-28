@@ -50,21 +50,71 @@ object ArenaLower extends ProgramPass {
   private def run(members: Map[p.Sym, List[p.Named]], f: p.Function): p.Function = captureRoot(f) match {
     case None => f
     case Some((capN, _)) =>
-      val derived   = Provenance.derivedIn(f, arena = true)
-      val arena8    = p.Named("#arena_base", BytePtr)
-      val rewritten = mapStmtsRec(f.body)(rwLeaf(members, derived, arena8))
-      val arenaDecl = p.Stmt.Var(arena8, Some(p.Expr.Cast(sel(capN), BytePtr)), isMutable = false)
-      f.copy(body = arenaDecl :: rewritten)
+      val derived     = Provenance.derivedIn(f, arena = true)
+      val offsetRoots = arenaOffsetRoots(f, derived, capN)
+      val arena8      = p.Named("#arena_base", BytePtr)
+      val rewritten   = mapStmtsRec(f.body)(rwLeaf(members, derived, offsetRoots, capN, arena8))
+      val capDecl     = p.Stmt.Var(capN, Some(p.Expr.Cast(sel(arena8), capN.tpe)), isMutable = false)
+      def replaceCapture(a: p.Arg): p.Arg = if (a.named == capN) a.copy(named = arena8) else a
+      f.copy(receiver = f.receiver.map(replaceCapture), args = f.args.map(replaceCapture), body = capDecl :: rewritten)
+  }
+
+  private def arenaOffsetRoots(f: p.Function, derived: Map[p.Named, p.Region], capN: p.Named): Set[String] = {
+    def arenaRegion(r: p.Region): Boolean = r match {
+      case p.Region.Opaque       => true
+      case p.Region.Rooted(root) => root == capN
+    }
+    def arenaLValue(t: p.Term): Boolean = arenaRegion(Provenance.at(derived, t, arena = true))
+    def offsetTerm(roots: Set[String], t: p.Term): Boolean = t match {
+      case p.Term.Select(root, _, _) => roots(root.symbol) || Provenance.at(derived, t, arena = true) == p.Region.Opaque
+      case _                         => false
+    }
+    def offsetExpr(roots: Set[String], e: p.Expr): Boolean = e match {
+      case p.Expr.RefTo(t, _, _, _, _) if !isPtr(t.tpe) && arenaLValue(t) => true
+      case p.Expr.Alias(t)                                                => offsetTerm(roots, t)
+      case p.Expr.Cast(t, _: p.Type.Ptr)                                  => offsetTerm(roots, t)
+      case _                                                              => false
+    }
+
+    f.collectAll[p.Stmt].foldLeft(Set.empty[String]) {
+      case (roots, p.Stmt.Var(n, Some(e), _)) if isPtr(n.tpe) && offsetExpr(roots, e) => roots + n.symbol
+      case (roots, p.Stmt.Mut(p.Term.Select(n, Nil, _), e)) if isPtr(n.tpe) && offsetExpr(roots, e) =>
+        roots + n.symbol
+      case (roots, _) => roots
+    }
   }
 
   private def rwLeaf(
       members: Map[p.Sym, List[p.Named]],
       derived: Map[p.Named, p.Region],
+      offsetRoots: Set[String],
+      capN: p.Named,
       arena8: p.Named
   )(leaf: p.Stmt): List[p.Stmt] = {
     val pre = ListBuffer.empty[p.Stmt]
 
     def opaqueVal(t: p.Term): Boolean = Provenance.at(derived, t, arena = true) == p.Region.Opaque
+    def arenaRegion(r: p.Region): Boolean = r match {
+      case p.Region.Opaque       => true
+      case p.Region.Rooted(root) => root == capN
+    }
+    def arenaLValue(t: p.Term): Boolean  = arenaRegion(Provenance.at(derived, t, arena = true))
+    def rootedArena(n: p.Named): Boolean = derived.get(n).contains(p.Region.Rooted(capN))
+    def rootedArenaVal(t: p.Term): Boolean = t match {
+      case p.Term.Select(root, _, _) =>
+        root.symbol != capN.symbol && isPtr(root.tpe) && Provenance.at(derived, t, arena = true) == p.Region.Rooted(
+          capN
+        )
+      case _ => false
+    }
+    def offsetVal(t: p.Term): Boolean = t match {
+      case p.Term.Select(root, _, _) => offsetRoots(root.symbol) || rootedArenaVal(t) || opaqueVal(t)
+      case _                         => opaqueVal(t)
+    }
+    def offsetNamed(n: p.Named): p.Named =
+      if (offsetRoots(n.symbol) || (n.symbol != capN.symbol && isPtr(n.tpe) && rootedArena(n)))
+        n.copy(tpe = globalOuter(n.tpe))
+      else n
 
     def memberTpe(sym: p.Sym, field: String): Option[p.Type] =
       members.get(sym).flatMap(_.find(_.symbol == field).map(_.tpe))
@@ -83,6 +133,20 @@ object ArenaLower extends ProgramPass {
       else {
         val n = p.Named(s"#ao${ctr.incrementAndGet()}", U64);
         (sel(n), List(p.Stmt.Var(n, Some(p.Expr.Cast(t, U64)), isMutable = false)))
+      }
+    def emitU64(t: p.Term): p.Term = {
+      val (u, ss) = toU64(t); pre ++= ss; u
+    }
+    def bind(hint: String, e: p.Expr): p.Term = {
+      val n = p.Named(s"#$hint${ctr.incrementAndGet()}", e.tpe); pre += p.Stmt.Var(n, Some(e), isMutable = false);
+      sel(n)
+    }
+    def byteSize(t: p.Type): p.Term =
+      scalarBytes(t).fold(bind("sz", p.Expr.SizeOf(t)))(n => p.Term.IntU64Const(n.toLong))
+    def offsetAt(base: p.Term, idx: Option[p.Term], comp: p.Type): p.Term =
+      idx.fold(emitU64(base)) { i =>
+        val scaled = bind("om", p.Expr.IntrOp(p.Intr.Mul(emitU64(rwTerm(i)), byteSize(comp), U64)))
+        bind("op", p.Expr.IntrOp(p.Intr.Add(emitU64(base), scaled, U64)))
       }
 
     // bind `(baseTpe)&arena8[(u64)offVal]` and return the base var: a real arena pointer for an offset
@@ -108,10 +172,14 @@ object ArenaLower extends ProgramPass {
 
     // walk the path, arena-resolving every loaded-pointer deref; a bare value or pure rooted access stays
     def rwTerm(t: p.Term): p.Term = t match {
+      case p.Term.Select(root, Nil, _) if offsetRoots(root.symbol) =>
+        val n = offsetNamed(root)
+        p.Term.Select(n, Nil, n.tpe)
       case sel0 @ p.Term.Select(_, Nil, _) => sel0
       case p.Term.Select(root, steps, resultT) =>
-        val base0 = if (opaqueVal(sel(root))) arenaBase(sel(root), root.tpe) else root
-        val (baseN, accSteps, _) = steps.foldLeft((base0, List.empty[p.PathStep], root.tpe)) {
+        val rootN = offsetNamed(root)
+        val base0 = if (offsetVal(sel(rootN))) arenaBase(sel(rootN), rootN.tpe) else rootN
+        val (baseN, accSteps, _) = steps.foldLeft((base0, List.empty[p.PathStep], rootN.tpe)) {
           case ((baseN, accSteps, curTpe), raw) =>
             // a loaded pointer (a pointer field already read, then stepped through) resolves to the arena
             val (b, acc) =
@@ -128,14 +196,17 @@ object ArenaLower extends ProgramPass {
       case p.Expr.Alias(t)   => p.Expr.Alias(rwTerm(t))
       case p.Expr.Cast(t, a) => p.Expr.Cast(rwTerm(t), a)
       case p.Expr.Index(b, i, comp) =>
-        if (opaqueVal(b))
+        if (offsetVal(b))
           p.Expr.Index(sel(arenaBase(rwTerm(b), p.Type.Ptr(comp, pointeeSpace(b.tpe)))), rwTerm(i), comp)
         else p.Expr.Index(rwTerm(b), rwTerm(i), comp)
+      // address-of through an arena offset pointer (`&p[i]`) remains an offset token. emitting a real
+      // address here would make the next arena deref add the arena base twice.
+      case p.Expr.RefTo(t, idx, comp, _, _) if isPtr(t.tpe) && offsetVal(t) =>
+        p.Expr.Cast(offsetAt(rwTerm(t), idx, comp), p.Type.Ptr(comp, p.Type.Space.Global))
       // address-of a non-pointer subobject reached through an arena-relative pointer (e.g. `&result.#base`
       // where result is an offset): the result must stay an offset, else a downstream deref re-adds the
       // arena base. take the real address then subtract the base back to offset space
-      case p.Expr.RefTo(t, idx, comp, sp, r)
-          if !isPtr(t.tpe) && Provenance.at(derived, t, arena = true) == p.Region.Opaque =>
+      case p.Expr.RefTo(t, idx, comp, sp, r) if !isPtr(t.tpe) && arenaLValue(t) =>
         val real = p.Named(s"#ar${ctr.incrementAndGet()}", p.Type.Ptr(comp, sp))
         pre += p.Stmt.Var(
           real,
@@ -148,7 +219,7 @@ object ArenaLower extends ProgramPass {
         pre += p.Stmt.Var(ba, Some(p.Expr.Cast(sel(arena8), U64)), isMutable = false)
         val off = p.Named(s"#aro${ctr.incrementAndGet()}", U64)
         pre += p.Stmt.Var(off, Some(p.Expr.IntrOp(p.Intr.Sub(sel(ra), sel(ba), U64))), isMutable = false)
-        p.Expr.Cast(sel(off), p.Type.Ptr(comp, sp))
+        p.Expr.Cast(sel(off), p.Type.Ptr(comp, p.Type.Space.Global))
       case p.Expr.RefTo(t, idx, comp, sp, r)     => p.Expr.RefTo(rwTerm(t), idx.map(rwTerm), comp, sp, r)
       case p.Expr.Alloc(c, sz, sp, r)            => p.Expr.Alloc(c, rwTerm(sz), sp, r)
       case p.Expr.ForeignCall(n, args, rtn)      => p.Expr.ForeignCall(n, args.map(rwTerm), rtn)
@@ -163,10 +234,11 @@ object ArenaLower extends ProgramPass {
     }
 
     val out = leaf match {
-      case p.Stmt.Var(n, Some(e), m) => p.Stmt.Var(n, Some(rwExpr(e)), m)
+      case p.Stmt.Var(n, Some(e), m) => p.Stmt.Var(offsetNamed(n), Some(rwExpr(e)), m)
+      case p.Stmt.Var(n, None, m)    => p.Stmt.Var(offsetNamed(n), None, m)
       case p.Stmt.Mut(t, e)          => p.Stmt.Mut(rwTerm(t).asInstanceOf[p.Term.Select], rwExpr(e))
       case p.Stmt.Update(lhs, i, v) =>
-        if (opaqueVal(lhs))
+        if (offsetVal(lhs))
           p.Stmt.Update(sel(arenaBase(rwTerm(lhs), lhs.tpe)), rwTerm(i), rwTerm(v))
         else p.Stmt.Update(rwTerm(lhs).asInstanceOf[p.Term.Select], rwTerm(i), rwTerm(v))
       case p.Stmt.Return(e) => p.Stmt.Return(rwExpr(e))
