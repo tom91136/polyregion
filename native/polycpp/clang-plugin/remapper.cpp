@@ -1394,7 +1394,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(dl(), dr(), tpe_)));
           case clang::BO_XorAssign: return Expr::Alias(opAssign(Intr::BXor(dl(), dr(), tpe_)));
           case clang::BO_OrAssign: return Expr::Alias(opAssign(Intr::BOr(dl(), dr(), tpe_)));
-          case clang::BO_Comma: return failExpr(); // TODO what does this do for a builtin???
+          case clang::BO_Comma: return Expr::Alias(rhs);
         }
 
         return Expr::Alias(Term::IntS64Const(0));
