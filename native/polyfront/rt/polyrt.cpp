@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdarg>
+#include <cstring>
 #include <mutex>
 #include <unordered_set>
 #include <vector>
@@ -8,6 +9,11 @@
   #include <link.h>
 #elif defined(_WIN32)
   #include <windows.h>
+#elif defined(__APPLE__)
+  #include <cstring>
+
+  #include <mach-o/dyld.h>
+  #include <mach-o/loader.h>
 #endif
 
 #include "aspartame/all.hpp"
@@ -34,14 +40,12 @@ std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
 std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
 
-#if !defined(__APPLE__)
-// XXX Apple not implemented: captures into .rodata still use SMA's foreign-pointer warning there
 namespace {
 struct RoSegment {
   uintptr_t base;
   size_t size;
 };
-  #if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__APPLE__)
 POLYREGION_RT_PROTECT int collectRoSegment(struct dl_phdr_info *info, size_t, void *data) {
   if (info->dlpi_name && info->dlpi_name[0] != '\0') return 0;
   auto &out = *static_cast<std::vector<RoSegment> *>(data);
@@ -55,7 +59,27 @@ POLYREGION_RT_PROTECT int collectRoSegment(struct dl_phdr_info *info, size_t, vo
   }
   return 0;
 }
-  #else
+#elif defined(__APPLE__)
+// const data lives in __TEXT (r-x) and __DATA_CONST (name-matched since its initprot keeps W for dyld fixups)
+POLYREGION_RT_PROTECT void collectRoSegmentsMachO(std::vector<RoSegment> &out) {
+  const auto *hdr = reinterpret_cast<const mach_header_64 *>(_dyld_get_image_header(0));
+  if (!hdr || hdr->magic != MH_MAGIC_64) return;
+  const auto slide = _dyld_get_image_vmaddr_slide(0);
+  const char *cursor = reinterpret_cast<const char *>(hdr) + sizeof(mach_header_64);
+  for (uint32_t i = 0; i < hdr->ncmds; ++i) {
+    const auto *lc = reinterpret_cast<const load_command *>(cursor);
+    if (lc->cmd == LC_SEGMENT_64) {
+      const auto *seg = reinterpret_cast<const segment_command_64 *>(cursor);
+      const bool readOnly = (seg->initprot & VM_PROT_READ) && !(seg->initprot & VM_PROT_WRITE);
+      const bool dataConst = std::strncmp(seg->segname, "__DATA_CONST", sizeof(seg->segname)) == 0;
+      const bool linkEdit = std::strncmp(seg->segname, SEG_LINKEDIT, sizeof(seg->segname)) == 0;
+      if ((readOnly || dataConst) && !linkEdit && seg->vmsize != 0)
+        out.push_back({static_cast<uintptr_t>(seg->vmaddr) + static_cast<uintptr_t>(slide), static_cast<size_t>(seg->vmsize)});
+    }
+    cursor += lc->cmdsize;
+  }
+}
+#else
 POLYREGION_RT_PROTECT void collectRoSegmentsPE(std::vector<RoSegment> &out) {
   auto *base = reinterpret_cast<unsigned char *>(::GetModuleHandleW(nullptr));
   if (!base) return;
@@ -73,24 +97,23 @@ POLYREGION_RT_PROTECT void collectRoSegmentsPE(std::vector<RoSegment> &out) {
     out.push_back({reinterpret_cast<uintptr_t>(base + section->VirtualAddress), section->Misc.VirtualSize});
   }
 }
-  #endif
+#endif
 POLYREGION_RT_PROTECT std::vector<RoSegment> roSegments;
 POLYREGION_RT_PROTECT std::once_flag roSegmentsOnce;
 } // namespace
-#endif
 
 void polyregion::polyrt::ensureRoSegmentsRecorded() {
-#if !defined(__APPLE__)
   std::call_once(roSegmentsOnce, [] {
-  #if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__APPLE__)
     dl_iterate_phdr(collectRoSegment, &roSegments);
-  #else
+#elif defined(__APPLE__)
+    collectRoSegmentsMachO(roSegments);
+#else
     collectRoSegmentsPE(roSegments);
-  #endif
+#endif
     for (const auto &s : roSegments)
       polyregion::rt_reflect::_rt_record(reinterpret_cast<void *>(s.base), s.size, polyregion::rt_reflect::Type::StaticRodata);
   });
-#endif
 }
 
 static std::optional<size_t> parseIntNoExcept(const char *str) {

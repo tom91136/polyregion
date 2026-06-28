@@ -107,8 +107,9 @@ class SynchronisedMemAllocation {
     if (char *memberLocalPtr = readPtrValue(hostData + memberOffsetInBytes); !memberLocalPtr) {
       constexpr uintptr_t nullValue = 0;
       remoteWrite(&nullValue, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
-    } else if (resolvePtrSizeInBytes) {
-      const size_t sizeInBytes = std::max(resolvePtrSizeInBytes(hostData + memberOffsetInBytes), pointeeMinBytes);
+    } else if (const size_t resolvedSizeInBytes = resolvePtrSizeInBytes ? resolvePtrSizeInBytes(hostData + memberOffsetInBytes) : 0;
+               resolvedSizeInBytes != 0) {
+      const size_t sizeInBytes = std::max(resolvedSizeInBytes, pointeeMinBytes);
       if (debug)
         std::fprintf(stderr, "[SMA]   localResolve<%p>(%p) = {size=%ld}\n", //
                      (void *)resolvePtrSizeInBytes, static_cast<void *>(memberLocalPtr), sizeInBytes);
@@ -624,20 +625,28 @@ public:
       }
       const char *base = target;
       size_t sz = 0, pastEndAdd = 0;
-      bool sized = true, ro = readOnly;
-      if (resolve) sz = std::max(resolve(hostBase + hostOff), pointeeMinBytes);
-      else if (const PtrQuery meta = localReflect(target); meta.sizeInBytes != 0) {
-        const bool pastEnd = meta.offsetInBytes == meta.sizeInBytes;
-        base = pastEnd ? target - meta.offsetInBytes : target;
-        sz = std::max(pastEnd ? meta.sizeInBytes : meta.sizeInBytes - meta.offsetInBytes, pointeeMinBytes);
-        pastEndAdd = pastEnd ? meta.offsetInBytes : 0;
-        ro = ro || meta.hostReadOnly;
-      } else sized = false; // foreign / unsized -> leave null
+      bool sized = false, ro = readOnly;
+      if (resolve) {
+        if (const size_t resolvedSize = resolve(hostBase + hostOff); resolvedSize != 0) {
+          sz = std::max(resolvedSize, pointeeMinBytes);
+          sized = true;
+        }
+      }
+      if (!sized) {
+        if (const PtrQuery meta = localReflect(target); meta.sizeInBytes != 0) {
+          const bool pastEnd = meta.offsetInBytes == meta.sizeInBytes;
+          base = pastEnd ? target - meta.offsetInBytes : target;
+          sz = std::max(pastEnd ? meta.sizeInBytes : meta.sizeInBytes - meta.offsetInBytes, pointeeMinBytes);
+          pastEndAdd = pastEnd ? meta.offsetInBytes : 0;
+          ro = ro || meta.hostReadOnly;
+          sized = true;
+        }
+      }
       if (sized) {
         const size_t cnt = componentSize ? sz / componentSize : 1;
         childOff = genArenaMirror(base, cnt ? cnt : 1, indirection, tl, sz, ro);
         if (childOff != arenaNull) childOff += pastEndAdd;
-      }
+      } else return; // XXX foreign / unsized: preserve copied bytes
     }
     std::memcpy(genArenaStaging.data() + arenaPtrOff, &childOff, sizeof(uint64_t));
   }

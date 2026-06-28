@@ -188,6 +188,12 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
+                   // XXX on macOS static libc++ so the interposer sees its internal allocations; last so it resolves
+                   // against the user + polystl objects
+                   if (opts->mem == StdParOptions::MemKind::Reflect) {
+                     const auto toolchainBin = clangPath.empty() ? execParentPath : llvm::sys::path::parent_path(clangPath).str();
+                     append(appleDistLibcxxStatic(joinPath(toolchainBin, "..", "lib")));
+                   }
                    if (const char *t = std::getenv(polyregion::env::PolycppLinkThreads); t && *t)
                      append({fmt::format("-Wl,--threads={}", t)});
                  }

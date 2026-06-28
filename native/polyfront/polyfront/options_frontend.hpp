@@ -63,6 +63,17 @@ inline std::vector<std::string> appleDistLibcxxRpath(const std::string &execPare
 #endif
 }
 
+// XXX macOS: static-link our libc++ so we can see into the operators symbols; Apple's libc++ is a
+// prebuilt dylib and there is no static system libc++ to relink
+inline std::vector<std::string> appleDistLibcxxStatic(const std::string &distLibDir) {
+#if defined(__APPLE__)
+  return {"-nostdlib++", joinPath(distLibDir, "libc++.a"), joinPath(distLibDir, "libc++abi.a")};
+#else
+  (void)distLibDir;
+  return {};
+#endif
+}
+
 struct CliArgs {
 
   std::vector<const char *> data;
