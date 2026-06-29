@@ -66,6 +66,8 @@ object Provenance {
         case p.Expr.Cast(p.Term.Select(root, steps, t), _: p.Type.Ptr) => of(root, steps, t)
         case p.Expr.Alias(p.Term.Select(root, steps, t))               => of(root, steps, t)
         case _: p.Expr.Alloc                                           => p.Region.Rooted(n)
+        case p.Expr.Alias(p.Term.StringConst(_))                       => p.Region.Rooted(n)
+        case p.Expr.Cast(p.Term.StringConst(_), _: p.Type.Ptr)         => p.Region.Rooted(n)
         case _                                                         => p.Region.Opaque
       }
       def join(n: p.Named, r: p.Region): Map[p.Named, p.Region] =
@@ -84,6 +86,7 @@ object Provenance {
     case p.Term.Select(root, steps, tpe) =>
       val base = derived.getOrElse(root, p.Region.Rooted(root))
       if (arena) selectRegion(base, steps, tpe) else base
-    case _ => p.Region.Opaque
+    case _: p.Term.StringConst => p.Region.Rooted(p.Named("#strconst", t.tpe))
+    case _                     => p.Region.Opaque
   }
 }

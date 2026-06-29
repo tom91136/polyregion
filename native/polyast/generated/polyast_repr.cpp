@@ -195,6 +195,9 @@ std::string repr(const Term::Any &t) {
     if (auto _x = t.get<Term::NullPtrConst>()) {
       return fmt::format("nullptr[{}, {}{}]", repr(_x->comp), repr(_x->space), repr(_x->region));
     }
+    if (auto _x = t.get<Term::StringConst>()) {
+      return fmt::format("str({})", _x->value);
+    }
     if (auto _x = t.get<Term::Poison>()) {
       return fmt::format("__poison__ /* poison of type {} */", repr(_x->t));
     }

@@ -329,6 +329,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json bool1const_to_json(const Term::Bool1Const &);
 [[nodiscard]] POLYREGION_EXPORT Term::NullPtrConst nullptrconst_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json nullptrconst_to_json(const Term::NullPtrConst &);
+[[nodiscard]] POLYREGION_EXPORT Term::StringConst stringconst_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json stringconst_to_json(const Term::StringConst &);
 [[nodiscard]] POLYREGION_EXPORT Term::Poison poison_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json poison_to_json(const Term::Poison &);
 [[nodiscard]] POLYREGION_EXPORT Term::Select select_from_json(const json &);

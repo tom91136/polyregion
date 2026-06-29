@@ -2490,9 +2490,45 @@ struct POLYREGION_EXPORT NullPtrConst : Term::Base {
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
+struct POLYREGION_EXPORT StringConst : Term::Base {
+  std::string value;
+  constexpr static uint32_t variant_id = 14;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Term::StringConst withValue(const std::string &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, StringConst>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT StringConst modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, StringConst>) {
+      return f(*this);
+    }
+    return Term::StringConst(value);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Term::StringConst &) const;
+  explicit StringConst(std::string value) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
 struct POLYREGION_EXPORT Poison : Term::Base {
   Type::Any t;
-  constexpr static uint32_t variant_id = 14;
+  constexpr static uint32_t variant_id = 15;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Term::Poison withT(const Type::Any &v_) const;
@@ -2531,7 +2567,7 @@ struct POLYREGION_EXPORT Select : Term::Base {
   Named root;
   std::vector<PathStep::Any> steps;
   Type::Any tpe;
-  constexpr static uint32_t variant_id = 15;
+  constexpr static uint32_t variant_id = 16;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Term::Select withRoot(const Named &v_) const;
@@ -7787,7 +7823,7 @@ polyregion::polyast::Region::Any::modify_all(const std::function<T(const T &)> &
 }
 namespace polyregion::polyast::Term {
 using All = alternatives<Float16Const, Float32Const, Float64Const, IntU8Const, IntU16Const, IntU32Const, IntU64Const, IntS8Const,
-                         IntS16Const, IntS32Const, IntS64Const, Unit0Const, Bool1Const, NullPtrConst, Poison, Select>;
+                         IntS16Const, IntS32Const, IntS64Const, Unit0Const, Bool1Const, NullPtrConst, StringConst, Poison, Select>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Term::Any::is() const {
   static_assert((polyregion::polyast::Term::All::contains<T>), "type not part of the variant");
@@ -8848,6 +8884,9 @@ template <> struct hash<polyregion::polyast::Term::Bool1Const> {
 };
 template <> struct hash<polyregion::polyast::Term::NullPtrConst> {
   std::size_t operator()(const polyregion::polyast::Term::NullPtrConst &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Term::StringConst> {
+  std::size_t operator()(const polyregion::polyast::Term::StringConst &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Term::Poison> {
   std::size_t operator()(const polyregion::polyast::Term::Poison &) const noexcept;

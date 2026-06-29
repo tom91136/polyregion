@@ -255,8 +255,13 @@ object Interpreter {
       case p.Term.Unit0Const            => V.U
       case p.Term.Bool1Const(v)         => V.I(if (v) 1 else 0)
       case p.Term.NullPtrConst(_, _, _) => V.I(0)
-      case p.Term.Poison(_)             => sys.error("poison evaluated")
-      case s: p.Term.Select             => val (a, lt) = resolve(s.root, s.steps, fr); load(a, lt)
+      case p.Term.StringConst(s) =>
+        val addr = alloc(s.length + 1L)
+        s.zipWithIndex.foreach((c, i) => storeBits(addr + i, 1, c.toLong))
+        storeBits(addr + s.length, 1, 0L)
+        V.I(addr)
+      case p.Term.Poison(_) => sys.error("poison evaluated")
+      case s: p.Term.Select => val (a, lt) = resolve(s.root, s.steps, fr); load(a, lt)
     }
 
     private def base(lhs: p.Term, fr: Frame): Long = lhs.tpe match {

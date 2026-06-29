@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "0a8f0cb0d7317fec1896c41336627a9c";
+constexpr auto AdtHash = "6d254f2d57889595f8214cc9da519b5b";
 
 namespace {
 
@@ -881,6 +881,16 @@ json Term::nullptrconst_to_json(const Term::NullPtrConst &x_) {
   return json::array({comp, space, region});
 }
 
+Term::StringConst Term::stringconst_from_json(const json &j_) {
+  auto value = j_.at(0).get<std::string>();
+  return Term::StringConst(value);
+}
+
+json Term::stringconst_to_json(const Term::StringConst &x_) {
+  auto value = x_.value;
+  return json::array({value});
+}
+
 Term::Poison Term::poison_from_json(const json &j_) {
   auto t = Type::any_from_json(j_.at(0));
   return Term::Poison(t);
@@ -929,8 +939,9 @@ Term::Any Term::any_from_json(const json &j_) {
     case 11: return Term::unit0const_from_json(t_);
     case 12: return Term::bool1const_from_json(t_);
     case 13: return Term::nullptrconst_from_json(t_);
-    case 14: return Term::poison_from_json(t_);
-    case 15: return Term::select_from_json(t_);
+    case 14: return Term::stringconst_from_json(t_);
+    case 15: return Term::poison_from_json(t_);
+    case 16: return Term::select_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -950,8 +961,9 @@ json Term::any_to_json(const Term::Any &x_) {
                         [](const Term::Unit0Const &y_) -> json { return {11, Term::unit0const_to_json(y_)}; },
                         [](const Term::Bool1Const &y_) -> json { return {12, Term::bool1const_to_json(y_)}; },
                         [](const Term::NullPtrConst &y_) -> json { return {13, Term::nullptrconst_to_json(y_)}; },
-                        [](const Term::Poison &y_) -> json { return {14, Term::poison_to_json(y_)}; },
-                        [](const Term::Select &y_) -> json { return {15, Term::select_to_json(y_)}; });
+                        [](const Term::StringConst &y_) -> json { return {14, Term::stringconst_to_json(y_)}; },
+                        [](const Term::Poison &y_) -> json { return {15, Term::poison_to_json(y_)}; },
+                        [](const Term::Select &y_) -> json { return {16, Term::select_to_json(y_)}; });
 }
 
 Expr::Alias Expr::alias_from_json(const json &j_) {
@@ -3314,6 +3326,10 @@ Term::NullPtrConst nullptrconst_fields_from_msgpack(MsgpackReader &, size_t);
 void nullptrconst_fields_to_msgpack(MsgpackWriter &, const Term::NullPtrConst &);
 Term::NullPtrConst nullptrconst_from_msgpack(MsgpackReader &);
 void nullptrconst_to_msgpack(MsgpackWriter &, const Term::NullPtrConst &);
+Term::StringConst stringconst_fields_from_msgpack(MsgpackReader &, size_t);
+void stringconst_fields_to_msgpack(MsgpackWriter &, const Term::StringConst &);
+Term::StringConst stringconst_from_msgpack(MsgpackReader &);
+void stringconst_to_msgpack(MsgpackWriter &, const Term::StringConst &);
 Term::Poison poison_fields_from_msgpack(MsgpackReader &, size_t);
 void poison_fields_to_msgpack(MsgpackWriter &, const Term::Poison &);
 Term::Poison poison_from_msgpack(MsgpackReader &);
@@ -4626,6 +4642,24 @@ void Term::nullptrconst_to_msgpack(MsgpackWriter &w_, const Term::NullPtrConst &
   Term::nullptrconst_fields_to_msgpack(w_, x_);
 }
 
+Term::StringConst Term::stringconst_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Term::StringConst with 1 field(s)");
+  auto value = r_.readString();
+  return Term::StringConst(value);
+}
+
+void Term::stringconst_fields_to_msgpack(MsgpackWriter &w_, const Term::StringConst &x_) { w_.writeString(x_.value); }
+
+Term::StringConst Term::stringconst_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Term::stringconst_fields_from_msgpack(r_, n_);
+}
+
+void Term::stringconst_to_msgpack(MsgpackWriter &w_, const Term::StringConst &x_) {
+  w_.writeArrayHeader(1);
+  Term::stringconst_fields_to_msgpack(w_, x_);
+}
+
 Term::Poison Term::poison_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 1) throw std::runtime_error("Expected Term::Poison with 1 field(s)");
   auto t = Type::any_from_msgpack(r_);
@@ -4699,8 +4733,9 @@ Term::Any Term::any_from_msgpack(MsgpackReader &r_) {
       case 11: return Term::unit0const_fields_from_msgpack(r_, n_ - 1);
       case 12: return Term::bool1const_fields_from_msgpack(r_, n_ - 1);
       case 13: return Term::nullptrconst_fields_from_msgpack(r_, n_ - 1);
-      case 14: return Term::poison_fields_from_msgpack(r_, n_ - 1);
-      case 15: return Term::select_fields_from_msgpack(r_, n_ - 1);
+      case 14: return Term::stringconst_fields_from_msgpack(r_, n_ - 1);
+      case 15: return Term::poison_fields_from_msgpack(r_, n_ - 1);
+      case 16: return Term::select_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -4722,6 +4757,7 @@ Term::Any Term::any_from_msgpack(MsgpackReader &r_) {
       case 13: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 14: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 15: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 16: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -4795,14 +4831,19 @@ void Term::any_to_msgpack(MsgpackWriter &w_, const Term::Any &x_) {
         w_.writeInt32(13);
         Term::nullptrconst_fields_to_msgpack(w_, y_);
       },
-      [&](const Term::Poison &y_) -> void {
+      [&](const Term::StringConst &y_) -> void {
         w_.writeArrayHeader(2);
         w_.writeInt32(14);
+        Term::stringconst_fields_to_msgpack(w_, y_);
+      },
+      [&](const Term::Poison &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(15);
         Term::poison_fields_to_msgpack(w_, y_);
       },
       [&](const Term::Select &y_) -> void {
         w_.writeArrayHeader(4);
-        w_.writeInt32(15);
+        w_.writeInt32(16);
         Term::select_fields_to_msgpack(w_, y_);
       });
 }

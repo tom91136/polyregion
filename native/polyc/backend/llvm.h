@@ -94,6 +94,9 @@ struct PointerModel {
   virtual void storeUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) = 0;
   virtual std::optional<ValPtr> termSelectVal(CodeGen &gen, const Term::Select &select) { return std::nullopt; }
   virtual llvm::Type *localAllocType(CodeGen &gen, const AnyType &nameTpe, llvm::Type *tpe) { return tpe; }
+  virtual bool defineLocalString(CodeGen &gen, const std::string &symbol, const std::string &bytes, const AnyType &elemTpe) {
+    return false;
+  }
   virtual void reset() {}
   virtual bool bindEntryArgs(llvm::Function &fn, const std::vector<Arg> &argsNoUnit, const Function &source) { return false; }
   virtual ~PointerModel() = default;

@@ -466,6 +466,10 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
         }
         return llvm::PoisonValue::get(tpe);
       },
+      [&](const Term::StringConst &x) -> ValPtr {
+        // XXX __constant, not __global: rusticl's program loader panics on a __global initialised string
+        return B.CreateGlobalString(x.value, "strlit", C.addressSpace(TypeSpace::Constant()), &M);
+      },
       [&](const Term::Select &x) -> ValPtr {
         if (x.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
         if (auto v = ptrModel->termSelectVal(*this, x)) return *v;
@@ -768,6 +772,15 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         if (x.expr && x.expr->tpe() != x.name.tpe) {
           throw BackendException::semantic("name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
                                            " mismatch (" + repr(x) + ")");
+        }
+
+        if (C.isVulkan() && x.expr) {
+          std::optional<Term::StringConst> sc;
+          if (const auto alias = x.expr->template get<Expr::Alias>()) sc = alias->ref.template get<Term::StringConst>();
+          else if (const auto cast = x.expr->template get<Expr::Cast>()) sc = cast->from.template get<Term::StringConst>();
+          if (sc)
+            if (const auto pc = x.name.tpe.template get<Type::Ptr>())
+              if (ptrModel->defineLocalString(*this, x.name.symbol, sc->value, pc->comp)) return BlockKind::Normal;
         }
 
         if (x.name.tpe.is<Type::Unit0>()) {

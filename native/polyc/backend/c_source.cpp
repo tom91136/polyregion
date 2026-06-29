@@ -22,6 +22,10 @@ std::string cFloatLiteral(double v, const std::string &suffix) {
   if (s.find_first_of(".eE") == std::string::npos) s += ".0";
   return s + suffix;
 }
+
+std::string escapeCString(const std::string &s) {
+  return s ^ mk_string("", [](char c) { return c == '"' || c == '\\' ? fmt::format("\\{}", c) : std::string(1, c); });
+}
 } // namespace
 using namespace polyast;
 using namespace std::string_literals;
@@ -68,6 +72,7 @@ struct CLAddressSpaceTracePass {
     }
     // XXX null seeds its space from the pointee (refTpe=Global) so `T* p = nullptr` later infers Global not Private
     if (auto np = term.template get<Term::NullPtrConst>()) return SpacedTerm{term, np->space};
+    if (term.template is<Term::StringConst>()) return SpacedTerm{term, TypeSpace::Constant()};
     return SpacedTerm{term};
   }
 
@@ -375,10 +380,10 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
                              [&](const Type::Struct &x) { return normalise(x.name); }, //
                              [&](const Type::Ptr &x) {
-                               auto prefix = x.space.match_total([&](TypeSpace::Global) { return "global"; }, //
-                                                                 [&](TypeSpace::Constant) { return "global"; },
-                                                                 [&](TypeSpace::Local) { return "local"; },    //
-                                                                 [&](TypeSpace::Private) { return "private"; } //
+                               auto prefix = x.space.match_total([&](TypeSpace::Global) { return "global"; },     //
+                                                                 [&](TypeSpace::Constant) { return "constant"; }, //
+                                                                 [&](TypeSpace::Local) { return "local"; },       //
+                                                                 [&](TypeSpace::Private) { return "private"; }    //
                                );
                                // a pointer to an array needs the `c(*)[n]` form; `c[n]*` is not valid C
                                if (auto arr = x.comp.template get<Type::Arr>(); arr)
@@ -419,9 +424,9 @@ std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &na
       dims += fmt::format("[{}]", a->length);
       base = a->comp;
     }
-    const auto q = p->space.match_total([&](TypeSpace::Global) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },    //
-                                        [&](TypeSpace::Constant) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },  //
-                                        [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; }, //
+    const auto q = p->space.match_total([&](TypeSpace::Global) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },     //
+                                        [&](TypeSpace::Constant) { return dialect == Dialect::MSL1_0 ? "device "s : "constant "s; }, //
+                                        [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; },  //
                                         [&](TypeSpace::Private) { return dialect == Dialect::MSL1_0 ? "thread "s : "private "s; });
     return fmt::format("{}{} (*{}){}", q, mkTpe(base), name, dims);
   }
@@ -450,6 +455,10 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                             // `0` not `NULL`: comgr doesn't predefine NULL for AMD kernel sources (non-ptr poison still casts)
                             if (x.tpe.is<Type::Ptr>()) return fmt::format("(0 /*{}*/)", repr(x.tpe));
                             return fmt::format("(({})0 /*poison {}*/)", mkTpe(x.tpe), repr(x.tpe));
+                          }, //
+                          [&](const Term::StringConst &x) {
+                            // an inline OpenCL literal has no addressable storage so it must be referenced by name
+                            return stringConstNames ^ get_or_default(x.value, fmt::format("\"{}\"", escapeCString(x.value)));
                           }, //
                           [&](const Term::Select &x) {
                             std::string acc = normalise(x.root.symbol);
@@ -862,8 +871,25 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   }
 
   const auto allFns = std::vector<Function>{program.entry} ^ concat(program.functions);
+
+  // hoist string literals to named program-scope constant arrays (collection order is deterministic); an inline
+  // OpenCL literal has no addressable storage so reading it through a pointer yields garbage
+  const char *constQual = dialect == Dialect::OpenCL1_1 ? "__constant " : dialect == Dialect::MSL1_0 ? "constant " : "static const ";
+  stringConstNames.clear();
+  const auto stringDecls =                                                               //
+      allFns                                                                             //
+      | flat_map([](const Function &fn) { return fn.collect_all<Term::StringConst>(); }) //
+      | map([](const Term::StringConst &sc) { return sc.value; })                        //
+      | distinct()                                                                       //
+      | map([&](const std::string &value) {                                              //
+          const auto name = fmt::format("_polyregion_str_{}", stringConstNames.size());
+          stringConstNames.emplace(value, name);
+          return fmt::format("{}char {}[] = \"{}\";", constQual, name, escapeCString(value));
+        }) //
+      | to_vector();
+
   const auto protos = allFns | mk_string("\n", [&](auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
-  auto code = includes | concat(typedefs) | concat(structBodies) | append(protos) | append(std::string("\n")) |
+  auto code = includes | concat(typedefs) | concat(structBodies) | concat(stringDecls) | append(protos) | append(std::string("\n")) |
               concat(allFns ^ map([&](auto &f) { return mkFn(f); })) | mk_string("\n");
 
   std::vector<std::string> features;

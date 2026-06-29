@@ -202,6 +202,22 @@ llvm::Type *VulkanLowering::localAllocType(CodeGen &, const Type::Any &nameTpe, 
   return tpe;
 }
 
+bool VulkanLowering::defineLocalString(CodeGen &, const std::string &symbol, const std::string &bytes, const AnyType &elemTpe) {
+  auto &B = cg.B;
+  auto *elemTy = cg.resolveType(elemTpe);
+  const auto n = bytes.size() + 1; // NUL-terminated
+  auto *arrTy = llvm::ArrayType::get(elemTy, n);
+  auto *base = cg.C.allocaAS(B, arrTy, cg.C.AllocaAS, symbol + "_str");
+  for (size_t k = 0; k < n; ++k) {
+    const uint8_t byte = k < bytes.size() ? static_cast<uint8_t>(bytes[k]) : 0;
+    auto *gep = B.CreateInBoundsGEP(arrTy, base, {B.getInt32(0), B.getInt32(static_cast<unsigned>(k))});
+    const auto _ = cg.C.store(B, llvm::ConstantInt::get(elemTy, byte), gep);
+  }
+  // register as a local array so s[i] resolves through the logical access chain instead of a bare pointer GEP
+  localBases.insert_or_assign(symbol, std::tuple{elemTpe, static_cast<llvm::Type *>(arrTy), static_cast<llvm::Value *>(base)});
+  return true;
+}
+
 bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg> &argsNoUnit, const Function &fn) {
   auto &B = cg.B;
   cg.stackVarPtrs.clear();

@@ -845,6 +845,23 @@ POLYREGION_EXPORT bool Term::NullPtrConst::operator==(const Base &rhs_) const {
 Term::NullPtrConst::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<NullPtrConst>(*this)); }
 Term::Any Term::NullPtrConst::widen() const { return Any(*this); };
 
+Term::StringConst::StringConst(std::string value) noexcept
+    : Term::Base(Type::Ptr(Type::IntS8(), TypeSpace::Constant())), value(std::move(value)) {}
+uint32_t Term::StringConst::id() const { return variant_id; };
+size_t Term::StringConst::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Term::StringConst Term::StringConst::withValue(const std::string &v_) const { return Term::StringConst(v_); }
+POLYREGION_EXPORT bool Term::StringConst::operator==(const Term::StringConst &rhs) const { return (this->value == rhs.value); }
+POLYREGION_EXPORT bool Term::StringConst::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Term::StringConst &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Term::StringConst::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<StringConst>(*this)); }
+Term::Any Term::StringConst::widen() const { return Any(*this); };
+
 Term::Poison::Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
 uint32_t Term::Poison::id() const { return variant_id; };
 size_t Term::Poison::hash_code() const {
@@ -3583,6 +3600,9 @@ std::size_t std::hash<polyregion::polyast::Term::Bool1Const>::operator()(const p
 }
 std::size_t
 std::hash<polyregion::polyast::Term::NullPtrConst>::operator()(const polyregion::polyast::Term::NullPtrConst &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Term::StringConst>::operator()(const polyregion::polyast::Term::StringConst &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Term::Poison>::operator()(const polyregion::polyast::Term::Poison &x) const noexcept {

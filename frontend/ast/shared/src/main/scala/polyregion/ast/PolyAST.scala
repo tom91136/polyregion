@@ -85,7 +85,8 @@ object PolyAST {
     case Unit0Const                                                  extends Term(Type.Unit0)
     case Bool1Const(value: Boolean)                                  extends Term(Type.Bool1)
     case NullPtrConst(comp: Type, space: Type.Space, region: Region) extends Term(Type.Ptr(comp, space))
-    case Poison(t: Type)                                             extends Term(t)
+    case StringConst(value: String) extends Term(Type.Ptr(Type.IntS8, Type.Space.Constant))
+    case Poison(t: Type)            extends Term(t)
 
     case Select(root: Named, steps: List[PathStep], override val tpe: Type) extends Term(tpe)
   }
@@ -701,6 +702,7 @@ object PolyAST {
       case Term.Unit0Const                     => "unit0(())"
       case Term.Bool1Const(x)                  => s"bool1($x)"
       case Term.NullPtrConst(x, space, region) => s"nullptr[${x.repr}, ${space.repr}${region.repr}]"
+      case Term.StringConst(value)             => s"str($value)"
       case Term.Poison(t)                      => s"__poison__ /* poison of type ${t.repr} */"
       case Term.Select(root, steps, tpe) =>
         s"${root.symbol}: ${root.tpe.repr}${steps.map(_.repr).mkString("")}"

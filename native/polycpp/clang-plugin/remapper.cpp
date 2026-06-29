@@ -1281,6 +1281,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::CharacterLiteral *stmt) -> Expr::Any {
         return integralConstOfType(handleType(stmt->getType(), r), stmt->getValue());
       },
+      [&](const clang::StringLiteral *stmt) -> Expr::Any { return Expr::Alias(Term::StringConst(stmt->getString().str())); },
       [&](const clang::FloatingLiteral *stmt) -> Expr::Any {
         const auto apFloat = stmt->getValue();
         if (auto builtin = llvm::dyn_cast<clang::BuiltinType>(stmt->getType().getDesugaredType(context))) {

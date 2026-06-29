@@ -83,6 +83,16 @@ static Expr::Any index0(const Expr::Any &rhs) {
          ^ get_or_else(rhs); //
 }
 
+static std::optional<Expr::Any> charGlobalStringConst(fir::GlobalOp g) {
+  if (!llvm::isa<fir::CharacterType>(g.getType())) return std::nullopt;
+  std::optional<std::string> bytes;
+  g.walk([&](fir::StringLitOp lit) {
+    if (const auto s = llvm::dyn_cast<mlir::StringAttr>(lit.getValue())) bytes = s.str();
+  });
+  if (!bytes) return std::nullopt;
+  return Expr::Cast(Term::StringConst(*bytes).widen(), Type::Ptr(Type::IntU8(), TypeSpace::Global())).widen();
+}
+
 const static polyfc::FBoxedNoneMirror FBoxedNoneM;
 const static polyfc::FDescExtraMirror FDescExtraM;
 const static polyfc::FDimMirror FDimM;
@@ -372,6 +382,31 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
     }
 
     if (!isEnclosedWithin(perimeter, defOp)) { // The value is from outside the region: handle captures
+      // XXX a captured character parameter reaches the kernel as a pointer through a declare/convert/address_of
+      // chain; trace it back to the global
+      const auto capturedCharGlobal = [&](mlir::Value v) -> std::optional<Expr::Any> {
+        for (mlir::Value cur = v; auto *def = cur.getDefiningOp();) {
+          if (auto d = llvm::dyn_cast<fir::DeclareOp>(def)) {
+            cur = d.getMemref();
+            continue;
+          }
+          if (auto c = llvm::dyn_cast<fir::ConvertOp>(def)) {
+            cur = c.getValue();
+            continue;
+          }
+          if (auto addr = llvm::dyn_cast<fir::AddrOfOp>(def))
+            if (auto g = llvm::dyn_cast_if_present<fir::GlobalOp>(mlir::SymbolTable::lookupSymbolIn(M, addr.getSymbol())))
+              return charGlobalStringConst(g);
+          break;
+        }
+        return std::nullopt;
+      };
+      if (const auto sc = capturedCharGlobal(val)) {
+        const FExpr expr = *sc;
+        valuesLUT.insert({val, expr});
+        return expr;
+      }
+
       // XXX For memrefs in general, it's possible to find two different defining ops that have the same root, for example,
       //   %7 = fir.load %6 : !fir.ref<!fir.box<!fir.array<?xf64>>>
       //   %8:3 = fir.box_dims %7, %c0 : (!fir.box<!fir.array<?xf64>>, index) -> (index, index, index)
@@ -444,9 +479,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
     auto r = newVar(handleValueAsScalar(x.getRhs()));
     witness(x.getResult(), Expr::MathOp(ap(l, r, handleType(x.getType())).widen()));
   };
-  const auto poison = [&](auto x, const std::string &reason) -> void { witness(x, Expr::Alias(Term::Poison(handleType(x.getType())))); };
-  const auto poison0 = [&](const std::string &reason) { ; };
+  const auto poison0 = [&](const std::string &reason) { llvm::errs() << "[PolyFC] remapper poison: " << reason << "\n"; };
+  const auto poison = [&](auto x, const std::string &reason) -> void {
+    poison0(reason);
+    witness(x, Expr::Alias(Term::Poison(handleType(x.getType()))));
+  };
   const auto push = [&](const auto &x) { stmts.emplace_back(x); };
+  const auto scalarCast = [&](auto x) {
+    witness(x.getResult(), Expr::Cast(newVar(handleValueAsScalar(x.getIn())), handleType(x.getType())).widen());
+  };
 
   // push(Term::Unit0Const().widen());
 
@@ -514,6 +555,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                  .widen());
         witness(x.getResult(), Expr::Alias(value));
       },
+      [&](mlir::arith::ExtUIOp x) { scalarCast(x); }, [&](mlir::arith::ExtSIOp x) { scalarCast(x); },
+      [&](mlir::arith::TruncIOp x) { scalarCast(x); },
       [&](mlir::arith::CmpIOp x) {
         switch (x.getPredicate()) {
           case mlir::arith::CmpIPredicate::eq: return intr2(x, Bind<Intr::LogicEq>());
@@ -812,10 +855,13 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       },
       [&](fir::AddrOfOp a) {
         if (auto global = llvm::dyn_cast_if_present<fir::GlobalOp>(mlir::SymbolTable::lookupSymbolIn(M, a.getSymbol()))) {
-          {
-            const auto gName = Named(global.getSymName().str(), handleType(global.getType()));
-            witness(a.getResult(), Expr::Alias(Term::Select(gName, {}, gName.tpe)));
+          // an in-kernel character literal (e.g. "o" -> @_QQclX6F); other globals fall through to a Select
+          if (const auto sc = charGlobalStringConst(global)) {
+            witness(a.getResult(), *sc);
+            return;
           }
+          const auto gName = Named(global.getSymName().str(), handleType(global.getType()));
+          witness(a.getResult(), Expr::Alias(Term::Select(gName, {}, gName.tpe)));
         } else {
           return poison(a.getResult(),
                         fmt::format("FIR AddrOf lookup of symbol {} is not a FIR global", a.getSymbol().getLeafReference().str()));
