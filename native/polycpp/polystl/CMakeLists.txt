@@ -23,7 +23,7 @@ foreach (TARGET polystl polystl-static)
     target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polyreflect-rt)
     polyregion_apply_common_options(${TARGET})
     if (APPLE)
-        target_link_options(${TARGET} PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
+        target_link_options(${TARGET} PRIVATE LINKER:-undefined,dynamic_lookup)
     elseif (UNIX)
         # LLVM's static libs drag a copy of libstdc++ ABI symbols (e.g. _ZSt21ios_base_library_initv,
         # codecvt facets) into our exported dynamic symbol table. When this .so loads before the
