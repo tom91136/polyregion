@@ -30,6 +30,13 @@ static bool isLocalArr(const Type::Any &t) {
   return t.template get<Type::Arr>() ^ exists([](auto &a) { return a.space.template is<TypeSpace::Local>(); });
 }
 
+template <typename T> static bool usesTpe(const std::vector<Function> &fns, const std::vector<StructDef> &defs) {
+  return (fns ^ exists([](const Function &f) { return !f.template collect_all<T>().empty(); })) ||
+         (defs ^ exists([](const StructDef &d) {
+            return d.members ^ exists([](const Named &m) { return !m.tpe.template collect_all<T>().empty(); });
+          }));
+}
+
 struct CLAddressSpaceTracePass {
 
   struct StackScope {
@@ -859,23 +866,16 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   auto code = includes | concat(typedefs) | concat(structBodies) | append(protos) | append(std::string("\n")) |
               concat(allFns ^ map([&](auto &f) { return mkFn(f); })) | mk_string("\n");
 
-  const auto usesTpe = [&](auto pred) {
-    return (allFns ^ exists([&](const Function &f) { return f.collect_all<Type::Any>() ^ exists(pred); })) ||
-           (program.defs ^ exists([&](const StructDef &d) {
-              return d.members ^ exists([&](const Named &m) { return m.tpe.collect_all<Type::Any>() ^ exists(pred); });
-            }));
-  };
-
   std::vector<std::string> features;
-  if (usesTpe([](const Type::Any &t) { return t.is<Type::Float64>(); })) features.emplace_back("fp64");
+  if (usesTpe<Type::Float64>(allFns, program.defs)) features.emplace_back("fp64");
 
   // OpenCL half/double is behind cl_khr_fp16/cl_khr_fp64.
   if (dialect == Dialect::OpenCL1_1) {
     std::string pragmas;
-    if (usesTpe([](const Type::Any &t) { return t.is<Type::Float64>(); })) {
+    if (usesTpe<Type::Float64>(allFns, program.defs)) {
       pragmas += "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n";
     }
-    if (usesTpe([](const Type::Any &t) { return t.is<Type::Float16>(); })) {
+    if (usesTpe<Type::Float16>(allFns, program.defs)) {
       pragmas += "#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n";
       features.emplace_back("fp16");
     }
