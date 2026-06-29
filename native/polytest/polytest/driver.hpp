@@ -143,7 +143,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   put("__GL_SHADER_DISK_CACHE", "0");
   // XXX rusticl loads Mesa's LLVM in-process; the ICD loader pulls it in for ANY OpenCL target, clashing
   // with polydco/polystl's LLVM (two libLLVMSPIRVLib) -> bad_alloc. expose it only when it's selected
-  const bool rusticlTarget = archFor(t, cfg).find("rusticl") != std::string::npos;
+  const bool rusticlTarget = archFor(t, cfg) ^ contains_slice("rusticl");
   for (auto &kv : loadProfileEnv(cfg.profileDir)) {
     if (!rusticlTarget && (kv ^ starts_with("RUSTICL_ENABLE="))) continue;
     putKv(kv);
@@ -168,12 +168,32 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
-  std::string lavapipeLd;
-  if (archFor(t, cfg) == "llvmpipe")
-    if (const auto *emu = std::getenv(polyregion::env::PolyregionEmulatorsHome)) {
-      put("VK_ICD_FILENAMES", std::string(emu) + "/lavapipe/share/vulkan/icd.d/lvp_icd.x86_64.json");
-      lavapipeLd = std::string(emu) + "/lib:" + emu + "/lavapipe/lib64:";
+  // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls
+  // Mesa's LLVM in-process clashing with polystl's, so a pocl target must never see rusticl.icd (or vice versa)
+  if (const char *vendors = std::getenv("OCL_ICD_VENDORS")) {
+    const auto a = archFor(t, cfg);
+    if (const char *vendorIcd = rusticlTarget ? "rusticl.icd" : a ^ contains_slice("Portable") ? "pocl.icd" : nullptr) {
+      const std::string narrowed = std::string(vendors) + "/" + vendorIcd;
+      put("OCL_ICD_VENDORS", llvm::sys::fs::exists(narrowed) ? narrowed : vendors);
+      if (rusticlTarget) { // pin Mesa to the software rasteriser like env.sh
+        const char *re = std::getenv("RUSTICL_ENABLE"), *gd = std::getenv("GALLIUM_DRIVER");
+        put("RUSTICL_ENABLE", re ? re : "llvmpipe");
+        put("GALLIUM_DRIVER", gd ? gd : "llvmpipe");
+      }
     }
+  }
+#if defined(__linux__)
+  // XXX likewise forward VK_DRIVER_FILES narrowed to the selected device's manifest, else the child falls back
+  // to a system Vulkan driver. Linux-only: macOS/Windows glcompute resolves its driver differently and is green
+  if (const char *icds = std::getenv("VK_DRIVER_FILES") ? std::getenv("VK_DRIVER_FILES") : std::getenv("VK_ICD_FILENAMES")) {
+    const auto a = archFor(t, cfg);
+    if (const char *want = a ^ contains_slice("llvmpipe") ? "lvp_icd" : a ^ contains_slice("SwiftShader") ? "swiftshader" : nullptr)
+      if (const auto entry = std::string(icds) ^ split(':') ^ find([&](auto &e) { return e ^ contains_slice(want); })) {
+        put("VK_DRIVER_FILES", *entry);
+        put("VK_ICD_FILENAMES", *entry);
+      }
+  }
+#endif
   {
     std::string pathVal = std::getenv("PATH") ? std::getenv("PATH") : "";
 #if defined(_WIN32)
@@ -197,8 +217,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   // LD_PRELOAD shim into the wholesale-replaced child env; the run-only ASan block layers its rt ahead
   for (const auto *name : {"TMPDIR", "HOME", "LD_PRELOAD", polyregion::env::PolyrtDumpKernel})
     if (auto v = std::getenv(name)) put(name, v);
-  const auto ld = std::getenv("LD_LIBRARY_PATH");
-  if (const auto joined = lavapipeLd + (ld ? ld : ""); !joined.empty()) put("LD_LIBRARY_PATH", joined);
+  if (const auto *ld = std::getenv("LD_LIBRARY_PATH")) put("LD_LIBRARY_PATH", ld);
 #elif defined(_WIN32)
   // XXX CreateProcess needs SYSTEMROOT; clang needs TEMP/TMP; link.exe needs LIB/INCLUDE for
   // CRT and SDK lookup (flang does not auto-populate -libpath). Inherit a vcvars-style env.
