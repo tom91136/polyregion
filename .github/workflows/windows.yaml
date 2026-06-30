@@ -142,7 +142,7 @@ jobs:
         with:
           path: &llvm-path |
             ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -162,7 +162,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
-          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -431,7 +431,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &emu-path ./emulators/out
-          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/windows.bat') }}
+          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/windows.bat', './emulators/gpuocelot.patch', './emulators/gpuocelot.windows.patch') }}
       - name: Build emulators
         id: build-emulators
         if: steps.restore-emu.outputs.cache-hit != 'true'
