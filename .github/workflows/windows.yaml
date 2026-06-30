@@ -304,6 +304,7 @@ jobs:
           path: .
       - id: gen
         name: Build shard matrix
+        shell: bash
         run: |
           shards=$(jq -R -s -c '[split("\n")[] | select(length > 0)]' shards.txt)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
