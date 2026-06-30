@@ -172,17 +172,19 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
   // we set it unless it's already defined with some other value
   env::put("OverrideDefaultFP64Settings", "1", false);
   env::put("IGC_EnableDPEmulation", "1", false);
-#ifdef _WIN32
   // XXX Windows searches PATH last
   const char *oclLib = std::getenv(polyregion::env::PolyinvokeOpenclLib);
   void *lib = (oclLib && *oclLib) ? dl::open_first({oclLib}) : nullptr;
-  if (!lib) lib = dl::open_first({"OpenCL.dll"});
+  if (!lib) {
+#ifdef _WIN32
+    lib = dl::open_first({"OpenCL.dll"});
 #elif defined(__APPLE__)
-  void *lib = dl::open_first({"libOpenCL.dylib", "libOpenCL.1.dylib", "/Library/Frameworks/OpenCL.framework/OpenCL",
-                              "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
+    lib = dl::open_first({"libOpenCL.dylib", "libOpenCL.1.dylib", "/Library/Frameworks/OpenCL.framework/OpenCL",
+                          "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
 #else
-  void *lib = dl::open_first({"libOpenCL.so.1", "libOpenCL.so", "libOpenCL.so.0", "libOpenCL.so.2"});
+    lib = dl::open_first({"libOpenCL.so.1", "libOpenCL.so", "libOpenCL.so.0", "libOpenCL.so.2"});
 #endif
+  }
   if (!lib) return "OpenCL: failed to open libOpenCL dynamic library";
   clew_cl_resolve(dl::lookup, lib);
   return std::unique_ptr<Platform>(new ClPlatform());
