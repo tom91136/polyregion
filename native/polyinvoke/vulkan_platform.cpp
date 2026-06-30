@@ -169,7 +169,13 @@ template <typename T, typename U, typename F> constexpr static auto transform_id
 std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
   POLYINVOKE_TRACE();
   std::vector<std::unique_ptr<Device>> devices;
-  for (const vk::raii::PhysicalDevice &dev : instance.enumeratePhysicalDevices()) {
+  std::vector<vk::raii::PhysicalDevice> physicalDevices;
+  try {
+    physicalDevices = instance.enumeratePhysicalDevices();
+  } catch (const vk::SystemError &) {
+    return devices;
+  }
+  for (const vk::raii::PhysicalDevice &dev : physicalDevices) {
     std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
 
     auto computeQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
