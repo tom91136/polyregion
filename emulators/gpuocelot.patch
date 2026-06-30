@@ -564,3 +564,32 @@ index c502f812..8791a9be 100644
  }
  
  
+diff --git a/ocelot/src/parser/PTXParser.cpp b/ocelot/src/parser/PTXParser.cpp
+index 636237be..bcb7969a 100644
+--- a/ocelot/src/parser/PTXParser.cpp
++++ b/ocelot/src/parser/PTXParser.cpp
+@@ -896,12 +896,19 @@ namespace parser
+ 				expected *= 4;
+ 			}
+ 		
+-			if( expected != statement.array.values.size() )
++			if( statement.array.values.size() < expected )
+ 			{
+-				throw_exception( toString( two, *this ) 
+-					<< "Array size " << expected 
+-					<< " does not match initializer size " 
+-					<< statement.array.values.size(), 
++				// PTX permits fewer initializers than the array size; the
++				// remainder is zero-filled (ptxas accepts this, NVPTX emits it
++				// for trailing zero bytes e.g. a string literal's NUL)
++				statement.array.values.resize( expected );
++			}
++			else if( expected != statement.array.values.size() )
++			{
++				throw_exception( toString( two, *this )
++					<< "Array size " << expected
++					<< " does not match initializer size "
++					<< statement.array.values.size(),
+ 					InitializerSizeMismatch );
+ 			}
+ 		}
