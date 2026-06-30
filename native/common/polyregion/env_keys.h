@@ -32,6 +32,7 @@ inline constexpr auto PolydcoLib = "POLYDCO_LIB";
 
 inline constexpr auto PolyinvokeDisableBackends = "POLYINVOKE_DISABLE_BACKENDS";
 inline constexpr auto PolyinvokeDisableSvm = "POLYINVOKE_DISABLE_SVM";
+inline constexpr auto PolyinvokeOpenclLib = "POLYINVOKE_OPENCL_LIB";
 inline constexpr auto PolyinvokeTestLock = "POLYINVOKE_TEST_LOCK";
 inline constexpr auto PolyinvokeTestTargets = "POLYINVOKE_TEST_TARGETS";
 

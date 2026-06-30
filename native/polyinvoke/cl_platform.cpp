@@ -173,7 +173,10 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
   env::put("OverrideDefaultFP64Settings", "1", false);
   env::put("IGC_EnableDPEmulation", "1", false);
 #ifdef _WIN32
-  void *lib = dl::open_first({"OpenCL.dll"});
+  // XXX Windows searches PATH last
+  const char *oclLib = std::getenv(polyregion::env::PolyinvokeOpenclLib);
+  void *lib = (oclLib && *oclLib) ? dl::open_first({oclLib}) : nullptr;
+  if (!lib) lib = dl::open_first({"OpenCL.dll"});
 #elif defined(__APPLE__)
   void *lib = dl::open_first({"libOpenCL.dylib", "libOpenCL.1.dylib", "/Library/Frameworks/OpenCL.framework/OpenCL",
                               "/System/Library/Frameworks/OpenCL.framework/OpenCL"});
