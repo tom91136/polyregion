@@ -80,6 +80,10 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
                 const DeviceRunner &runner, const DeviceSkip &skip) {
   Context ctx;
 
+  const char *lockEnv = std::getenv(env::PolyinvokeTestLock);
+  // XXX Metal is paravirtualised on GHA
+  const bool serialise = backend == invoke::Backend::Metal || !(lockEnv && lockEnv[0] == '0');
+
 #if !defined(_WIN32)
   // The gfx1036 (2-CU Raphael iGPU) silently miscomputes a contiguous region of its output when any
   // other GPU work runs concurrently. The wrong data is produced device-side during the compute kernels
@@ -112,7 +116,7 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
     const bool gpuBackend = backend != invoke::Backend::RelocatableObject && backend != invoke::Backend::SharedObject;
     const bool writer = backend == invoke::Backend::HSA || backend == invoke::Backend::HIP || (icdBackend && amdArch);
     const bool reader = gpuBackend && !writer;
-    if (writer || reader) {
+    if (serialise && (writer || reader)) {
       [[maybe_unused]] static const int coarseLock = [&] {
         int fd = ::open("/tmp/polyinvoke-gpu-coarse-amd.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
         if (fd < 0) return -1;
@@ -151,7 +155,7 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
       break;
     }
     if (!device) return 77;
-    lock.emplace(device->physicalDevice());
+    if (serialise) lock.emplace(device->physicalDevice());
     auto imageGroup = findTestImage(images, backend, device->features());
     if (imageGroup.empty()) return 77;
     runner(ctx, backend, *platform, *device, imageGroup);

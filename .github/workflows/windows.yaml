@@ -242,6 +242,17 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/**
           if-no-files-found: error
 
+      - name: List shards
+        shell: bash
+        run: just list-shards emulators > shards.txt
+
+      - name: Upload shards
+        uses: *upload
+        with:
+          name: polyregion-shards-windows-${{ matrix.arch }}
+          path: shards.txt
+          if-no-files-found: error
+
   check-dist:
     needs: build
     # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
@@ -280,8 +291,26 @@ jobs:
           junit: native/out/build-dist-check-${{ matrix.arch }}-static/dist-check-results.xml
           label: dist-check
 
-  test-native:
+  discover-shards:
     needs: build
+    runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.gen.outputs.shards }}
+    steps:
+      - name: Download shards
+        uses: *download
+        with:
+          name: polyregion-shards-windows-amd64
+          path: .
+      - id: gen
+        name: Build shard matrix
+        run: |
+          shards=$(jq -R -s -c '[split("\n")[] | select(length > 0)]' shards.txt)
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+          echo "shards: $shards"
+
+  test-native-misc:
+    needs: [build, build-emulators]
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -291,7 +320,6 @@ jobs:
     env: *arch-env
     steps:
       - uses: *checkout
-      - *setup-java
 
       - name: Download dist
         # v4: nektos/act#6022
@@ -300,33 +328,41 @@ jobs:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
 
-      - *msvc
-
-      - name: Download test dist
+      - name: Download test dist (emulators)
         # v4: nektos/act#6022
         uses: *download
         with:
-          name: polyregion-tests-windows-${{ matrix.arch }}-Release
+          name: polyregion-tests-emulators-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
 
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-windows-${{ matrix.arch }}
+          path: ./emulators
+
+      - name: Unpack emulators
+        run: tar xzf emulators\emulators-out.tar.gz -C emulators
+
+      - *msvc
       - *setup-just
-      - name: Run native tests
-        run: just test-native-dist
+      - name: Run misc tests (non-codegen)
+        run: just test-native-dist emulators misc-test-results -LE codegen
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
-          label: ctest
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/misc-test-results.xml
+          label: ctest-misc
 
       - name: Upload test results
         if: always()
         # v4: nektos/act#6022
         uses: *upload
         with:
-          name: native-test-results-windows-${{ matrix.arch }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/native-test-results.xml
+          name: misc-test-results-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/misc-test-results.xml
           if-no-files-found: warn
 
   test-scala:
@@ -415,14 +451,16 @@ jobs:
           if-no-files-found: error
 
   test-native-with-emulators:
-    needs: [build, build-emulators]
+    needs: [build, build-emulators, discover-shards]
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
-        include: *simple-matrix
-    runs-on: ${{ matrix.runs_on }}
-    env: *arch-env
+        arch: [amd64, arm64]
+        shard: ${{ fromJSON(needs.discover-shards.outputs.shards) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: *checkout
       - name: Download dist
@@ -444,18 +482,19 @@ jobs:
         run: tar xzf emulators\emulators-out.tar.gz -C emulators
       - *msvc
       - *setup-just
-      - name: Run emulator tests
-        run: just test-native-dist emulators emulator-test-results
+      - name: Run emulator tests (${{ matrix.shard }})
+        shell: bash
+        run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results.xml
-          label: ctest-emulators
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
+          label: ctest-emulators-${{ matrix.shard }}
       - name: Upload test results
         if: always()
         uses: *upload
         with:
-          name: emulator-test-results-windows-${{ matrix.arch }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results.xml
+          name: emulator-test-results-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
           if-no-files-found: warn

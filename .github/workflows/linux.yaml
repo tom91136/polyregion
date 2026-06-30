@@ -295,6 +295,17 @@ jobs:
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
           if-no-files-found: error
 
+      - name: List shards
+        run: just list-shards emulators > shards.txt
+
+      - name: Upload shards
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-shards-linux-${{ matrix.arch }}
+          path: shards.txt
+          if-no-files-found: error
+
       - name: Stage just
         run: install -D "$(command -v just)" just-dist/just
 
@@ -421,8 +432,27 @@ jobs:
           junit: native/out/build-dist-check-${{ matrix.arch }}-dylib/dist-check-results.xml
           label: dist-check
 
-  test-native:
+  discover-shards:
     needs: build
+    runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.gen.outputs.shards }}
+    steps:
+      - name: Download shards
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-shards-linux-x86_64
+          path: .
+      - id: gen
+        name: Build shard matrix
+        run: |
+          if [ -f shards.txt ]; then shards=$(jq -R -s -c '[split("\n")[] | select(length > 0)]' shards.txt); else shards='[]'; fi
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+          echo "shards: $shards"
+
+  test-native-misc:
+    needs: [build, build-emulators]
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -454,41 +484,54 @@ jobs:
         # v4: nektos/act#6022
         uses: *download
         with:
-          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          name: polyregion-tests-emulators-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download emulators
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-emulators-linux-${{ matrix.arch }}
+          path: ./emulators
+
+      - name: Unpack emulators
+        if: ${{ !env.ACT }}
+        run: tar xzf emulators/emulators-out.tar.gz -C emulators
 
       - &restore-exec
         name: Restore executable bits
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
-      - name: Run native tests
-        run: just test-native-dist
+      - name: Run misc tests (non-codegen)
+        run: just test-native-dist emulators misc-test-results -LE codegen
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
-          label: ctest
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
+          label: ctest-misc
 
       - name: Upload test results
         if: ${{ always() && !env.ACT }}
         # v4: nektos/act#6022
         uses: *upload
         with:
-          name: native-test-results-linux-${{ matrix.arch }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/native-test-results.xml
+          name: misc-test-results-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
           if-no-files-found: warn
 
   test-native-with-emulators:
-    needs: [build, build-emulators]
+    needs: [build, build-emulators, discover-shards]
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
-        include: *simple-matrix
-    runs-on: ${{ matrix.runs_on }}
-    env: *arch-env
+        arch: [x86_64, aarch64]
+        shard: ${{ fromJSON(needs.discover-shards.outputs.shards) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
     steps:
       - uses: *checkout
       - *setup-just
@@ -521,22 +564,22 @@ jobs:
 
       - *restore-exec
 
-      - name: Run emulator tests
-        run: just test-native-dist emulators emulator-test-results
+      - name: Run emulator tests (${{ matrix.shard }})
+        run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
-          label: ctest-emulators
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
+          label: ctest-emulators-${{ matrix.shard }}
 
       - name: Upload test results
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
-          name: emulator-test-results-linux-${{ matrix.arch }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results.xml
+          name: emulator-test-results-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
           if-no-files-found: warn
 
   check-miniapps:

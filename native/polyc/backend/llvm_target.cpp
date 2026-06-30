@@ -67,8 +67,7 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
   const auto privateAS = spirvKernel ? AllocaAS : (GenericAS != 0 ? GenericAS : GlobalAS);
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
-      [&](const TypeSpace::Global &) { return GlobalAS; },
-      [&](const TypeSpace::Constant &) { return ConstantAS; },
+      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Constant &) { return ConstantAS; },
       [&](const TypeSpace::Private &) { return privateAS; });
 }
 

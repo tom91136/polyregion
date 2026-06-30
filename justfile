@@ -248,6 +248,16 @@ test-native *args='': build-pass-native
     [ "${skips:-0}" -gt 0 ] && echo "polytest: ${skips} skipped (find $BUILD -name polytest-skips.log | xargs cat)" || true
     exit $rc
 
+# Print the unique shard labels (ctest -L keys) for a profile, one per line; CI builds the shard matrix from this.
+list-shards profile='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ msvc_reenter }}
+    BUILD=$(just _native-build)
+    ninja -C "$BUILD" polycpp-tests >/dev/null
+    bin=$(find "$BUILD" \( -name polycpp-tests -o -name polycpp-tests.exe \) -type f | head -1)
+    POLYREGION_TEST_PROFILE="{{ profile }}" "$bin" --list-shards
+
 # Build the software emulator bundle -> emulators/out. linux: container (CONTAINER=docker overrides podman); macos/windows: native on the host via macos.sh / windows.bat
 build-emulators:
     #!/usr/bin/env bash

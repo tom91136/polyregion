@@ -70,6 +70,15 @@ struct RunVariant {
   std::vector<std::pair<std::string, std::string>> env;
 };
 
+// ctest-name-safe: alnum + `_` + `-` kept, else hex-escaped so distinct inputs don't collide
+inline std::string ctestSafe(std::string_view s) {
+  return std::string(s) ^ mk_string("", [](char c) {
+           return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-'
+                      ? std::string(1, c)
+                      : fmt::format("_{:02x}", static_cast<unsigned char>(c));
+         });
+}
+
 struct Task {
   Mode mode;
   std::string testFile;
@@ -84,17 +93,9 @@ struct Task {
                        variables | mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; }));
   }
 
-  // ctest-name-safe stable id: alnum + `_` + `-` only
   std::string id() const {
-    auto safe = [](std::string_view s) {
-      return std::string(s) ^ mk_string("", [](char c) {
-               return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-'
-                          ? std::string(1, c)
-                          : fmt::format("_{:02x}", static_cast<unsigned char>(c));
-             });
-    };
-    auto vars = variables | mk_string("", [&](auto &k, auto &v) { return "-" + safe(k) + "_" + safe(v); });
-    return fmt::format("{}-{}-{}{}", modeName(mode), safe(extractTestName(testFile)), safe(caseName), vars);
+    auto vars = variables | mk_string("", [&](auto &k, auto &v) { return "-" + ctestSafe(k) + "_" + ctestSafe(v); });
+    return fmt::format("{}-{}-{}{}", modeName(mode), ctestSafe(extractTestName(testFile)), ctestSafe(caseName), vars);
   }
 };
 
@@ -148,8 +149,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
     if (!rusticlTarget && (kv ^ starts_with("RUSTICL_ENABLE="))) continue;
     putKv(kv);
   }
-  if (const auto v = std::getenv(polyregion::env::PolyinvokeTestLock)) put(polyregion::env::PolyinvokeTestLock, v);
-  else put(polyregion::env::PolyinvokeTestLock, "1");
+  const auto lockEnv = std::getenv(polyregion::env::PolyinvokeTestLock);
+  put(polyregion::env::PolyinvokeTestLock, lockEnv && !(archFor(t, cfg) ^ starts_with("metal")) ? lockEnv : "1");
   if (const auto v = std::getenv("ASAN_OPTIONS")) put("ASAN_OPTIONS", v);
   else
     put("ASAN_OPTIONS", "alloc_dealloc_mismatch=0,detect_leaks=0,protect_shadow_gap=0,verify_asan_link_order=0,strip_env=0"
@@ -502,6 +503,7 @@ struct RunnerOptions {
   bool passthrough = true;
   bool list = false;
   bool listIds = false;
+  bool listShards = false;
   std::string emitFile = {};
   std::string emitPrefix = {};
   std::string emitBinary = {};
@@ -511,14 +513,16 @@ struct RunnerOptions {
   std::string emitDistEnv = {};
 };
 
-inline void emitCtest(const std::vector<Task> &tasks, const std::string &file, const std::string &prefix, const std::string &binary,
-                      const std::string &workdir, const std::string &env) {
-  const auto entries = tasks ^ map([](const Task &t) {
+inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, const std::string &file, const std::string &prefix,
+                      const std::string &binary, const std::string &workdir, const std::string &env) {
+  const auto entries = tasks ^ map([&](const Task &t) {
                          const auto vs =
                              t.variants ^ map([](const RunVariant &v) {
                                return std::pair{v.suffix, v.env ^ mk_string(";", [](auto &k, auto &val) { return k + "=" + val; })};
                              });
-                         return CtestEntry{t.id(), std::string{}, vs};
+                         const auto target = detail::archFor(t, cfg);
+                         const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(target);
+                         return CtestEntry{t.id(), labels, vs};
                        });
   emitCtestFragment(file, prefix, binary, workdir, env, entries);
 }
@@ -538,6 +542,11 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   const rlimit noCore{0, 0};
   setrlimit(RLIMIT_CORE, &noCore);
 #endif
+  if (opts.listShards) {
+    loadTestTargets(cfg.profileDir) ^ map([](auto &t) { return ctestSafe(t); }) ^ distinct() //
+        | for_each([](auto &s) { std::fprintf(stdout, "%s\n", s.c_str()); });
+    return 0;
+  }
   auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
   // single-task compile / run / cleanup, driven by ctest fixtures for shared-compile variant tasks
   if (const auto &single = !opts.compileTask.empty()   ? opts.compileTask
@@ -591,8 +600,8 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return dups.empty() ? 0 : 1;
   }
   if (!opts.emitFile.empty()) {
-    emitCtest(tasks, opts.emitFile, opts.emitPrefix, opts.emitBinary, opts.emitWorkdir, {});
-    if (!opts.emitDistFile.empty()) emitCtest(tasks, opts.emitDistFile, opts.emitPrefix, opts.emitDistBinary, {}, opts.emitDistEnv);
+    emitCtest(tasks, cfg, opts.emitFile, opts.emitPrefix, opts.emitBinary, opts.emitWorkdir, {});
+    if (!opts.emitDistFile.empty()) emitCtest(tasks, cfg, opts.emitDistFile, opts.emitPrefix, opts.emitDistBinary, {}, opts.emitDistEnv);
     return 0;
   }
   if (opts.list) {
@@ -698,6 +707,7 @@ inline int fired_main( //
     bool passthroughOnly = fire::arg({"--passthrough-only", "Skip offload mode"}),
     bool list = fire::arg({"-l", "--list", "Enumerate tasks (human-readable) and exit"}),
     bool listIds = fire::arg({"--list-ids", "Enumerate task ids (one per line) and exit"}),
+    bool listShards = fire::arg({"--list-shards", "Enumerate unique shard labels (one per line) and exit"}),
     fire::optional<std::string> emitCtest = fire::arg({"--emit-ctest", "Write a CTestTestfile fragment to this path and exit"}),
     fire::optional<std::string> emitPrefix = fire::arg({"--emit-prefix", "ctest test-name prefix (with --emit-ctest)"}),
     fire::optional<std::string> emitBinary = fire::arg({"--emit-binary", "Binary ctest invokes (with --emit-ctest)"}),
@@ -705,8 +715,13 @@ inline int fired_main( //
     fire::optional<std::string> emitDistFile = fire::arg({"--emit-dist-ctest", "Also write a dist CTestTestfile fragment here"}),
     fire::optional<std::string> emitDistBinary = fire::arg({"--emit-dist-binary", "Binary for the dist fragment"}),
     fire::optional<std::string> emitDistSubdir = fire::arg({"--emit-dist-subdir", "Dist test-files subdir; builds the dist ENVIRONMENT"})) {
-  RunnerOptions opts{
-      .compileJobs = jobs, .verbose = verbose, .offload = !passthroughOnly, .passthrough = !offloadOnly, .list = list, .listIds = listIds};
+  RunnerOptions opts{.compileJobs = jobs,
+                     .verbose = verbose,
+                     .offload = !passthroughOnly,
+                     .passthrough = !offloadOnly,
+                     .list = list,
+                     .listIds = listIds,
+                     .listShards = listShards};
   if (caseFilter) opts.caseFilters.push_back(caseFilter.value());
   if (runTask) opts.runTask = runTask.value();
   if (compileTask) opts.compileTask = compileTask.value();
