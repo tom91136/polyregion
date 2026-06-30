@@ -321,9 +321,9 @@ Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::
 std::string backend::CSource::mkTpe(const Type::Any &tpe) {
   // metal requires an address space on every pointer, struct fields included
   auto mslPtrPrefix = [&](const TypeSpace::Any &space) {
-    return space.match_total([&](TypeSpace::Global) { return "device"; },                                                    //
-                             [&](TypeSpace::Constant) { return "device"; }, [&](TypeSpace::Local) { return "threadgroup"; }, //
-                             [&](TypeSpace::Private) { return "thread"; }                                                    //
+    return space.match_total([&](TypeSpace::Global) { return "device"; },                                                      //
+                             [&](TypeSpace::Constant) { return "constant"; }, [&](TypeSpace::Local) { return "threadgroup"; }, //
+                             [&](TypeSpace::Private) { return "thread"; }                                                      //
     );
   };
   switch (dialect) {
@@ -429,9 +429,9 @@ std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &na
       dims += fmt::format("[{}]", a->length);
       base = a->comp;
     }
-    const auto q = p->space.match_total([&](TypeSpace::Global) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },     //
-                                        [&](TypeSpace::Constant) { return dialect == Dialect::MSL1_0 ? "device "s : "constant "s; }, //
-                                        [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; },  //
+    const auto q = p->space.match_total([&](TypeSpace::Global) { return dialect == Dialect::MSL1_0 ? "device "s : "global "s; },    //
+                                        [&](TypeSpace::Constant) { return "constant "s; },                                          //
+                                        [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; }, //
                                         [&](TypeSpace::Private) { return dialect == Dialect::MSL1_0 ? "thread "s : "private "s; });
     return fmt::format("{}{} (*{}){}", q, mkTpe(base), name, dims);
   }
