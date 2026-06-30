@@ -175,8 +175,8 @@ cmake -S "%OCELOT%\ocelot" -B "%OCELOT%\ocelot\build" -G Ninja -DCMAKE_BUILD_TYP
   -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_TESTS_CUDA=OFF -DBUILD_EXAMPLE=OFF ^
   -DLLVM_DIR="%WORK%\llvm\lib\cmake\llvm" ^
   -DBoost_DIR="%WORK%\boost-prefix\lib\cmake\Boost-%BOOST_VER%" -DBoost_USE_STATIC_LIBS=ON -DBoost_USE_STATIC_RUNTIME=ON ^
-  -DCMAKE_CXX_FLAGS="/EHsc /DWIN32 /D_WINDOWS /I%WORK%\winflexbison" ^
-  -DCMAKE_C_FLAGS="/DWIN32 /D_WINDOWS /I%WORK%\winflexbison" || (echo OCELOT-CFG-FAIL & exit /b 1)
+  -DCMAKE_CXX_FLAGS="/EHsc /DWIN32 /D_WINDOWS /I%WORK%\winflexbison -ffp-contract=off" ^
+  -DCMAKE_C_FLAGS="/DWIN32 /D_WINDOWS /I%WORK%\winflexbison -ffp-contract=off" || (echo OCELOT-CFG-FAIL & exit /b 1)
 ninja -C "%OCELOT%\ocelot\build" gpuocelot || (echo OCELOT-FAIL & exit /b 1)
 
 set "PATH=%MSVCPATH%"
