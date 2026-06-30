@@ -196,6 +196,11 @@ int main(int argc, const char *argv[]) {
                    }
                    if (const char *t = std::getenv(polyregion::env::PolycppLinkThreads); t && *t)
                      append({fmt::format("-Wl,--threads={}", t)});
+#ifdef _WIN32
+                   // XXX pocl runs kernels on worker threads that inherit the EXE stack reserve
+                   // and Windows' 1 MB default (vs Linux's 8 MB) overflows on the -O0 frames of deeply-nested std::array kernels
+                   append({"-Xlinker", "/STACK:8388608"});
+#endif
                  }
                }
 
