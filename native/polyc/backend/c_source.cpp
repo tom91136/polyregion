@@ -24,7 +24,12 @@ std::string cFloatLiteral(double v, const std::string &suffix) {
 }
 
 std::string escapeCString(const std::string &s) {
-  return s ^ mk_string("", [](char c) { return c == '"' || c == '\\' ? fmt::format("\\{}", c) : std::string(1, c); });
+  return s ^ mk_string("", [](char c) -> std::string {
+           if (c == '"' || c == '\\') return fmt::format("\\{}", c);
+           const auto u = static_cast<unsigned char>(c);
+           if (u < 0x20 || u >= 0x7f) return fmt::format("\\{:03o}", u);
+           return std::string(1, c);
+         });
 }
 } // namespace
 using namespace polyast;
