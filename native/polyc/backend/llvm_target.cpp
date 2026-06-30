@@ -30,11 +30,13 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
       GlobalAS = AddrSpace::Default; // When inspecting Clang's output, they don't explicitly annotate addrspace(1) for globals
       LocalAS = AddrSpace::Workgroup;
       AllocaAS = AddrSpace::Default;
+      ConstantAS = AddrSpace::CrossWorkgroup; // module-level globals must be in a named AS; AS1=.global is used for constant data
       break;
     case LLVMBackend::Target::AMDGCN:
       GlobalAS = AddrSpace::Default;
       LocalAS = AddrSpace::Workgroup;
       AllocaAS = AddrSpace::Private;
+      ConstantAS = AddrSpace::CrossWorkgroup;
       break;
     case LLVMBackend::Target::SPIRV32_Kernel:
     case LLVMBackend::Target::SPIRV64_Kernel:
@@ -66,7 +68,7 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
       [&](const TypeSpace::Global &) { return GlobalAS; },
-      [&](const TypeSpace::Constant &) { return GlobalAS; }, // FIXME no constant AS wired; should map to AMDGPU 4 / SPIR-V UniformConstant
+      [&](const TypeSpace::Constant &) { return ConstantAS; },
       [&](const TypeSpace::Private &) { return privateAS; });
 }
 

@@ -90,7 +90,7 @@ static std::optional<Expr::Any> charGlobalStringConst(fir::GlobalOp g) {
     if (const auto s = llvm::dyn_cast<mlir::StringAttr>(lit.getValue())) bytes = s.str();
   });
   if (!bytes) return std::nullopt;
-  return Expr::Cast(Term::StringConst(*bytes).widen(), Type::Ptr(Type::IntU8(), TypeSpace::Global())).widen();
+  return Expr::Cast(Term::StringConst(*bytes).widen(), Type::Ptr(Type::IntU8(), TypeSpace::Constant())).widen();
 }
 
 const static polyfc::FBoxedNoneMirror FBoxedNoneM;
