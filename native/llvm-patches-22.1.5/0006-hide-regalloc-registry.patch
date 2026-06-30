@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000006 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Sun, 29 Jun 2026 00:00:00 +0000
+Subject: [PATCH] [CodeGen] hide RegisterRegAllocBase::Registry
+
+Template static members have weak external linkage so dyld coalesces
+them to the first loaded definition across the whole process. When a
+second LLVM build loads (e.g. a PoCL or Mesa ICD), its basicRegAlloc
+static initialisers call Registry.Add() on the first LLVM's Registry,
+which already has a listener that registered "basic". The duplicate
+trips the addLiteralOption assertion in CommandLine.h and aborts.
+
+Hidden visibility prevents export; each LLVM keeps its own Registry.
+Inline accessors remain reachable within the same link unit.
+---
+ llvm/include/llvm/CodeGen/RegAllocRegistry.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/llvm/include/llvm/CodeGen/RegAllocRegistry.h b/llvm/include/llvm/CodeGen/RegAllocRegistry.h
+index aaaaaaaaaaaa1..bbbbbbbbbbbbb 100644
+--- a/llvm/include/llvm/CodeGen/RegAllocRegistry.h
++++ b/llvm/include/llvm/CodeGen/RegAllocRegistry.h
+@@ -14,6 +14,7 @@
+
+ #include "llvm/CodeGen/RegAllocCommon.h"
+ #include "llvm/CodeGen/MachinePassRegistry.h"
++#include "llvm/Support/Compiler.h"
+
+ namespace llvm {
+
+@@ -31,7 +32,7 @@ class RegisterRegAllocBase : public MachinePassRegistryNode<FunctionPass *(*)()>
+ public:
+   using FunctionPassCtor = FunctionPass *(*)();
+
+-  static MachinePassRegistry<FunctionPassCtor> Registry;
++  LLVM_ATTRIBUTE_VISIBILITY_HIDDEN static MachinePassRegistry<FunctionPassCtor> Registry;
+
+   RegisterRegAllocBase(const char *N, const char *D, FunctionPassCtor C)
+       : MachinePassRegistryNode(N, D, C) {
+--
+2.43.0
