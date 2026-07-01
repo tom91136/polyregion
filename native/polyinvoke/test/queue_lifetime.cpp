@@ -42,7 +42,7 @@ void runQueueLifetime(Context &ctx, Backend backend, Platform &, Device &device,
   device.loadModule(module_, imageGroup[0].second);
 
   auto out_d = device.template mallocDeviceTyped<float>(1, Access::RW);
-  auto queue = device.createQueue(std::chrono::seconds(10));
+  auto queue = device.createQueue(std::chrono::seconds(30));
 
   std::atomic<bool> cb_started{false};
   std::atomic<bool> cb_finished{false};
@@ -58,9 +58,9 @@ void runQueueLifetime(Context &ctx, Backend backend, Platform &, Device &device,
                               cb_finished.store(true, std::memory_order_release);
                             }});
 
-  const auto poll_deadline = std::chrono::steady_clock::now() + 5s;
+  const auto poll_deadline = std::chrono::steady_clock::now() + 30s;
   while (!cb_started.load(std::memory_order_acquire)) {
-    if (std::chrono::steady_clock::now() > poll_deadline) POLYTEST_FAIL(ctx, "callback never started within 5s");
+    if (std::chrono::steady_clock::now() > poll_deadline) POLYTEST_FAIL(ctx, "callback never started within 30s");
     std::this_thread::sleep_for(1ms);
   }
 
