@@ -47,7 +47,11 @@ if /i "%~1"=="--check"   set "MODE=check"
 if "%MODE%"=="build" (set "OUT=%~1") else (set "OUT=%~2")
 if "%OUT%"=="" set "OUT=%DIR%out"
 
-for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires %VCREQ% -property installationPath`) do set "VS=%%i"
+rem pin the VS2022 (17.x) toolset: v14.5x miscompiles gpuocelot's math, fall back to latest if absent
+"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -products * -requires %VCREQ% -version "[17.0,18.0)" -latest -property installationPath > "%TEMP%\polyemu_vs.txt" 2>nul
+set "VS="
+set /p VS=<"%TEMP%\polyemu_vs.txt"
+if not defined VS for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires %VCREQ% -property installationPath`) do set "VS=%%i"
 if not defined VS (echo no VC-capable Visual Studio found & exit /b 1)
 call "%VS%\VC\Auxiliary\Build\vcvars%VCARCH%.bat" >nul || (echo VCVARS-FAIL & exit /b 1)
 for /f "delims=" %%p in ('where python 2^>nul') do if not defined PY set "PY=%%p"
@@ -175,8 +179,8 @@ cmake -S "%OCELOT%\ocelot" -B "%OCELOT%\ocelot\build" -G Ninja -DCMAKE_BUILD_TYP
   -DBUILD_TOOLS=OFF -DBUILD_TESTS=OFF -DBUILD_TESTS_CUDA=OFF -DBUILD_EXAMPLE=OFF ^
   -DLLVM_DIR="%WORK%\llvm\lib\cmake\llvm" ^
   -DBoost_DIR="%WORK%\boost-prefix\lib\cmake\Boost-%BOOST_VER%" -DBoost_USE_STATIC_LIBS=ON -DBoost_USE_STATIC_RUNTIME=ON ^
-  -DCMAKE_CXX_FLAGS="/EHsc /DWIN32 /D_WINDOWS /I%WORK%\winflexbison -ffp-contract=off" ^
-  -DCMAKE_C_FLAGS="/DWIN32 /D_WINDOWS /I%WORK%\winflexbison -ffp-contract=off" || (echo OCELOT-CFG-FAIL & exit /b 1)
+  -DCMAKE_CXX_FLAGS="/EHsc /DWIN32 /D_WINDOWS /I%WORK%\winflexbison" ^
+  -DCMAKE_C_FLAGS="/DWIN32 /D_WINDOWS /I%WORK%\winflexbison" || (echo OCELOT-CFG-FAIL & exit /b 1)
 ninja -C "%OCELOT%\ocelot\build" gpuocelot || (echo OCELOT-FAIL & exit /b 1)
 
 set "PATH=%MSVCPATH%"
