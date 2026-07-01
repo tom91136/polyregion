@@ -917,7 +917,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           }
         }
         B.SetInsertPoint(loopExit);
-        return BlockKind::Terminal;
+        return BlockKind::Normal;
       },
       [&](const Stmt::Break &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
