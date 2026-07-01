@@ -169,43 +169,42 @@ template <typename T, typename U, typename F> constexpr static auto transform_id
 std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
   POLYINVOKE_TRACE();
   std::vector<std::unique_ptr<Device>> devices;
-  std::vector<vk::raii::PhysicalDevice> physicalDevices;
+  // an unusable ICD (the x86-macOS software rasterisers report VK_ERROR_INCOMPATIBLE_DRIVER, thrown at
+  // enumeration or later at device/allocator creation) yields no devices, so the target skips not aborts
   try {
-    physicalDevices = instance.enumeratePhysicalDevices();
-  } catch (const vk::SystemError &) {
-    return devices;
-  }
-  for (const vk::raii::PhysicalDevice &dev : physicalDevices) {
-    std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
+    for (const vk::raii::PhysicalDevice &dev : instance.enumeratePhysicalDevices()) {
+      std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
 
-    auto computeQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
-      return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eCompute ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
-    });
+      auto computeQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
+        return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eCompute ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
+      });
 
-    auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
-      return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
-    });
+      auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
+        return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
+      });
 
-    // VK_QUEUE_COMPUTE_BIT implies VK_QUEUE_TRANSFER_BIT
-    if (!computeQueueIds.empty()) {
-      // default transfer to the compute queue, then prefer a distinct transfer queue if one exists
-      auto computeQueueId = computeQueueIds[0];
-      auto transferQueueId = computeQueueId;
-      for (auto xferId : transferQueueIds)
-        if (xferId.first != computeQueueId.first) {
-          transferQueueId = xferId;
-          break;
-        }
-      float priority = 1.0f;
-      std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
-      queueCreateInfos.reserve(2);
-      queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId.first, 1, &priority);
-      if (computeQueueId != transferQueueId)
-        queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), transferQueueId.first, 1, &priority);
-      devices.push_back(std::make_unique<VulkanDevice>(instance, computeQueueId, transferQueueId, dev));
+      // VK_QUEUE_COMPUTE_BIT implies VK_QUEUE_TRANSFER_BIT
+      if (!computeQueueIds.empty()) {
+        // default transfer to the compute queue, then prefer a distinct transfer queue if one exists
+        auto computeQueueId = computeQueueIds[0];
+        auto transferQueueId = computeQueueId;
+        for (auto xferId : transferQueueIds)
+          if (xferId.first != computeQueueId.first) {
+            transferQueueId = xferId;
+            break;
+          }
+        float priority = 1.0f;
+        std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+        queueCreateInfos.reserve(2);
+        queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId.first, 1, &priority);
+        if (computeQueueId != transferQueueId)
+          queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), transferQueueId.first, 1, &priority);
+        devices.push_back(std::make_unique<VulkanDevice>(instance, computeQueueId, transferQueueId, dev));
+      }
     }
+  } catch (const vk::SystemError &) {
+    return {};
   }
-
   return devices;
 }
 

@@ -2,7 +2,7 @@
 !CHECK using: ppwi=1,2,64,128
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} -o {output} {input}
 !CHECK do: {output} 938 20 128 3
-!CHECK requires: Energies 885.11 1068.84 721.25 159.94 -12.88 143.16 280.75 179.62 71.16 -34.06 59.75 59.33 1.80 769.89 1077.49 643.11 Checksum 53268
+!CHECK requires: Energies OK Checksum 53268
 
 #ifndef CHECK_PPWI
 #define CHECK_PPWI 1
@@ -139,13 +139,25 @@ contains
 #ifndef CHECK_SUMMARY_ONLY
     write(STDOUT, '(i4, f9.5, f12.5, f12.5, f18.5)') PPWI, minval(timings), maxval(timings), tavg, energies(1)
 #else
-    ! XXX Round at print time so libm/libdevice ULP drift doesn't flip the last displayed digit;
-    ! f0.2 for energies and i0 for checksum leave ~20x margin over observed cross-platform drift.
-    write(STDOUT, '(a)', advance = "no") "Energies"
-    do i = 1, min(16, nposes)
-      write(STDOUT, '(1x, f0.2)', advance = "no") &
-        real(nint(real(energies(i), REAL64) * 100.0_REAL64), REAL64) / 100.0_REAL64
-    end do
+    block
+      real(REAL64), parameter :: reference(16) = [ &
+        885.11_REAL64, 1068.84_REAL64, 721.25_REAL64, 159.94_REAL64, -12.88_REAL64, 143.16_REAL64, &
+        280.75_REAL64, 179.62_REAL64, 71.16_REAL64, -34.06_REAL64, 59.75_REAL64, 59.33_REAL64, &
+        1.80_REAL64, 769.89_REAL64, 1077.49_REAL64, 643.11_REAL64 ]
+      logical :: ok
+      real(REAL64) :: e
+      ok = .true.
+      do i = 1, min(16, nposes)
+        e = real(energies(i), REAL64)
+        if (abs(e - reference(i)) > max(0.1_REAL64, 5.0e-4_REAL64 * abs(reference(i)))) then
+          ok = .false.
+          write(STDOUT, '(a, i0, a, f0.4, a, f0.2)', advance = "no") &
+            "Energies MISMATCH at ", i, ": got ", e, " want ", reference(i)
+          exit
+        end if
+      end do
+      if (ok) write(STDOUT, '(a)', advance = "no") "Energies OK"
+    end block
     block
       real(REAL64) :: checksum
       checksum = 0.0_REAL64
