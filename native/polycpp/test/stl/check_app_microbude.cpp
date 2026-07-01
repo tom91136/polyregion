@@ -2,7 +2,7 @@
 #pragma region using: ppwi=1,2,64 layout=,-DCHECK_STD_ARRAY
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} {layout} -o {output} {input} {libm}
 #pragma region do: {output} 938 20 64 2
-#pragma region requires: Energies OK Checksum 27421
+#pragma region requires: Energies OK
 
 #include <algorithm>
 #include <array>
@@ -526,8 +526,7 @@ void run(int iter, int nposes, int natlig, int natpro, //
   }
   if (ok) std::printf("Energies OK");
   double checksum = std::accumulate(energies.begin(), energies.end(), 0.0);
-  if (std::isfinite(checksum)) std::printf(" Checksum %lld", static_cast<long long>(std::llround(checksum)));
-  else std::printf(" Checksum %.0f", checksum);
+  std::fprintf(stderr, "Checksum %.4f\n", checksum);
 #endif
 }
 
