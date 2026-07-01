@@ -564,8 +564,15 @@ jobs:
 
       - *restore-exec
 
+      - name: Enable core dumps
+        run: |
+          sudo mkdir -p /var/lib/polyregion-cores && sudo chmod 1777 /var/lib/polyregion-cores || true
+          echo '/var/lib/polyregion-cores/core.%e.%p' | sudo tee /proc/sys/kernel/core_pattern || true
+
       - name: Run emulator tests (${{ matrix.shard }})
-        run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
+        run: |
+          ulimit -c unlimited || true
+          just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
 
       - name: Annotate ctest results
         if: always()
@@ -581,6 +588,28 @@ jobs:
           name: emulator-test-results-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
           if-no-files-found: warn
+
+      - name: Collect crash backtraces
+        if: failure()
+        run: |
+          mkdir -p crash-reports
+          shopt -s nullglob
+          cores=(/var/lib/polyregion-cores/core.*)
+          if [ ${#cores[@]} -gt 0 ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true
+            for c in "${cores[@]:0:20}"; do
+              gdb -batch -ex 'thread apply all bt' -c "$c" > "crash-reports/$(basename "$c").txt" 2>&1 || true
+            done
+          fi
+          ls -la crash-reports || true
+
+      - name: Upload crash reports
+        if: ${{ failure() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
 
   check-miniapps:
     needs: [build, build-emulators]

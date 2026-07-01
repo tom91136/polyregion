@@ -613,3 +613,20 @@ jobs:
           name: emulator-test-results-darwin-${{ matrix.arch }}-${{ matrix.shard }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
           if-no-files-found: warn
+
+      - name: Collect crash reports
+        if: failure()
+        run: |
+          sleep 5
+          mkdir -p crash-reports
+          cp -f ~/Library/Logs/DiagnosticReports/*.ips crash-reports/ 2>/dev/null || true
+          cp -f /Library/Logs/DiagnosticReports/*.ips crash-reports/ 2>/dev/null || true
+          ls -la crash-reports || true
+
+      - name: Upload crash reports
+        if: failure()
+        uses: *upload
+        with:
+          name: crash-reports-darwin-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore

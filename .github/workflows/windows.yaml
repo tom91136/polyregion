@@ -483,6 +483,16 @@ jobs:
         run: tar xzf emulators\emulators-out.tar.gz -C emulators
       - *msvc
       - *setup-just
+      - name: Enable crash dumps (WER)
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          try {
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpFolder -Value "$env:RUNNER_TEMP\crashdumps" -PropertyType ExpandString -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
+            New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
+          } catch { Write-Host "WER setup skipped: $_" }
       - name: Run emulator tests (${{ matrix.shard }})
         shell: bash
         run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
@@ -499,3 +509,17 @@ jobs:
           name: emulator-test-results-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
           if-no-files-found: warn
+      - name: Collect crash dumps
+        if: failure()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crash-reports | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
+          Get-ChildItem crash-reports -ErrorAction SilentlyContinue
+      - name: Upload crash reports
+        if: failure()
+        uses: *upload
+        with:
+          name: crash-reports-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
