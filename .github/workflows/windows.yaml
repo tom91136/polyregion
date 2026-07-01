@@ -46,7 +46,7 @@ jobs:
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
 
-  build:
+  build-llvm:
     strategy:
       fail-fast: false
       matrix:
@@ -67,14 +67,11 @@ jobs:
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
-      POLYC_PASS_BUNDLE: dso
-      # Hermes port doesn't compile cleanly with MSVC cl.exe (__builtin_expect missing).
-      # quickjs-ng is portable C, builds on MSVC. Switch JS engine on Windows.
-      POLYC_JS_ENGINE: qjs
     steps:
       - uses: *checkout
 
-      - name: Install LLVM
+      - &install-llvm
+        name: Install LLVM
         # Without clang-cl the LLVM runtimes (compiler-rt builtins) fails because
         # cl.exe cannot parse GCC __attribute__ syntax used in e.g. aarch64/fp_mode.c. The
         # github-hosted runners normally ship LLVM at C:\Program Files\LLVM, but the
@@ -87,10 +84,6 @@ jobs:
             winget install --id LLVM.LLVM --version $env:LLVM_HOST_VERSION --silent --disable-interactivity --accept-source-agreements --accept-package-agreements
           }
           echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
-
-      - *setup-java
-
-      - *setup-sbt
 
       - name: Setup Ninja
         uses: taiki-e/install-action@v2
@@ -127,14 +120,6 @@ jobs:
 
       - *setup-just
 
-      - name: Check environment
-        shell: pwsh
-        run: |
-          Write-Output $env:JAVA_HOME
-          & "$env:JAVA_HOME\bin\java.exe" -version
-          Write-Output $env:PROCESSOR_ARCHITECTURE
-          Write-Output $env:VCPKG_ROOT
-
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
@@ -155,6 +140,87 @@ jobs:
         with:
           path: *llvm-path
           key: *llvm-key
+
+      - name: Pack LLVM dist
+        shell: bash
+        run: tar czf llvm-dist.tar.gz -C native/out polyregion-Release-${{ matrix.arch }}-static-dist
+
+      - name: Upload LLVM
+        if: ${{ !env.ACT }}
+        uses: &upload actions/upload-artifact@v7
+        with:
+          name: polyregion-llvm-windows-${{ matrix.arch }}
+          path: llvm-dist.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+
+  build:
+    needs: build-llvm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs_on: windows-2025-vs2026
+          - arch: arm64
+            runs_on: windows-11-arm
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYC_PASS_BUNDLE: dso
+      # Hermes port doesn't compile cleanly with MSVC cl.exe (__builtin_expect missing).
+      # quickjs-ng is portable C, builds on MSVC. Switch JS engine on Windows.
+      POLYC_JS_ENGINE: qjs
+    steps:
+      - uses: *checkout
+
+      - *install-llvm
+
+      - *setup-java
+
+      - *setup-sbt
+
+      - name: Setup Ninja
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ninja
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - *msvc
+
+      - *setup-just
+
+      - name: Check environment
+        shell: pwsh
+        run: |
+          Write-Output $env:JAVA_HOME
+          & "$env:JAVA_HOME\bin\java.exe" -version
+          Write-Output $env:PROCESSOR_ARCHITECTURE
+          Write-Output $env:VCPKG_ROOT
+
+      - name: Download LLVM
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v8
+        with:
+          name: polyregion-llvm-windows-${{ matrix.arch }}
+          path: .
+
+      - name: Unpack LLVM
+        if: ${{ !env.ACT }}
+        shell: bash
+        run: |
+          mkdir -p native/out
+          tar xzf llvm-dist.tar.gz -C native/out
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
@@ -214,7 +280,7 @@ jobs:
 
       - name: Upload dist
         # v4: nektos/act#6022
-        uses: &upload actions/upload-artifact@v7
+        uses: *upload
         with:
           name: polyregion-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist/**
@@ -517,7 +583,7 @@ jobs:
           Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
           Get-ChildItem crash-reports -ErrorAction SilentlyContinue
       - name: Upload crash reports
-        if: failure()
+        if: ${{ failure() && !env.ACT }}
         uses: *upload
         with:
           name: crash-reports-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release

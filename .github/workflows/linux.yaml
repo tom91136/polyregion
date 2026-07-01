@@ -67,7 +67,7 @@ jobs:
           test -s native/polyc/polypass.js
           echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
 
-  build:
+  build-llvm:
     strategy:
       fail-fast: false
       matrix:
@@ -88,7 +88,6 @@ jobs:
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: ${{ matrix.llvm_parallel_compile_jobs }}
       POLYREGION_LLVM_PARALLEL_LINK_JOBS: ${{ matrix.llvm_parallel_link_jobs }}
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
-      POLYC_PASS_BUNDLE: dso
     steps:
       - &free-disk
         name: Free up disk space
@@ -106,9 +105,117 @@ jobs:
       - name: Max parallelism under act
         if: ${{ env.ACT }}
         run: |
-          echo "POLYREGION_LLVM_PARALLEL_COMPILE_JOBS=" >> "$GITHUB_ENV"
-          echo "POLYREGION_LLVM_PARALLEL_LINK_JOBS=" >> "$GITHUB_ENV"
-          echo "POLYREGION_FLANG_PARALLEL_COMPILE_JOBS=" >> "$GITHUB_ENV"
+          {
+            echo "POLYREGION_LLVM_PARALLEL_COMPILE_JOBS="
+            echo "POLYREGION_LLVM_PARALLEL_LINK_JOBS="
+            echo "POLYREGION_FLANG_PARALLEL_COMPILE_JOBS="
+          } >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang clang-tools lld llvm g++ gfortran libcrypt-dev libltdl-dev zlib1g-dev python3-requests
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - *setup-just
+
+      - name: Restore sysroot cache
+        if: ${{ !env.ACT }}
+        id: restore-sysroot
+        uses: &cache-restore actions/cache/restore@v5
+        with:
+          path: &sysroot-path ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: &sysroot-key sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
+
+      - name: Build sysroot
+        id: build-sysroot
+        if: steps.restore-sysroot.outputs.cache-hit != 'true'
+        env:
+          CONTAINER: docker
+        run: just build-sysroot
+
+      - name: Save sysroot cache
+        if: steps.build-sysroot.outcome == 'success'
+        uses: &cache-save actions/cache/save@v5
+        with:
+          path: *sysroot-path
+          key: *sysroot-key
+
+      - name: Prepare sysroot
+        run: |
+          just prepare-sysroot
+          echo "SYSROOT_PATH=$PWD/sysroot/out/${{ matrix.arch }}" >> "$GITHUB_ENV"
+
+      - name: Restore LLVM cache
+        if: ${{ !env.ACT }}
+        id: restore-llvm
+        uses: *cache-restore
+        with:
+          path: &llvm-path |
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Build LLVM
+        id: build-llvm
+        if: steps.restore-llvm.outputs.cache-hit != 'true'
+        run: just build-llvm
+
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: *cache-save
+        with:
+          path: *llvm-path
+          key: *llvm-key
+
+      - name: Pack LLVM dist
+        run: tar czf llvm-dist.tar.gz -C native/out polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Upload LLVM
+        if: ${{ !env.ACT }}
+        uses: &upload actions/upload-artifact@v7
+        with:
+          name: polyregion-llvm-linux-${{ matrix.arch }}
+          path: llvm-dist.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+
+  build:
+    needs: build-llvm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYC_PASS_BUNDLE: dso
+    steps:
+      - *free-disk
+
+      - uses: *checkout
+
+      - name: Max parallelism under act
+        if: ${{ env.ACT }}
+        run: |
+          {
+            echo "POLYREGION_LLVM_PARALLEL_COMPILE_JOBS="
+            echo "POLYREGION_LLVM_PARALLEL_LINK_JOBS="
+            echo "POLYREGION_FLANG_PARALLEL_COMPILE_JOBS="
+          } >> "$GITHUB_ENV"
 
       - name: Install dependencies
         # clang-tools provides clang-scan-deps (cmake >= 3.28 uses it for C++20 module deps).
@@ -148,10 +255,10 @@ jobs:
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         id: restore-sysroot
-        uses: &cache-restore actions/cache/restore@v5
+        uses: *cache-restore
         with:
-          path: &sysroot-path ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: &sysroot-key sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
+          path: *sysroot-path
+          key: *sysroot-key
 
       - name: Detect existing sysroot tarball (act fast-path)
         if: ${{ env.ACT }}
@@ -168,7 +275,7 @@ jobs:
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
-        uses: &cache-save actions/cache/save@v5
+        uses: *cache-save
         with:
           path: *sysroot-path
           key: *sysroot-key
@@ -178,33 +285,24 @@ jobs:
           just prepare-sysroot
           echo "SYSROOT_PATH=$PWD/sysroot/out/${{ matrix.arch }}" >> "$GITHUB_ENV"
 
-      - name: Restore LLVM cache
+      - name: Download LLVM
         if: ${{ !env.ACT }}
-        id: restore-llvm
-        uses: *cache-restore
+        uses: actions/download-artifact@v8
         with:
-          path: &llvm-path |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
-          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          name: polyregion-llvm-linux-${{ matrix.arch }}
+          path: .
 
-      - name: Detect existing LLVM/device-libs (act fast-path)
+      - name: Unpack LLVM
+        if: ${{ !env.ACT }}
+        run: |
+          mkdir -p native/out
+          tar xzf llvm-dist.tar.gz -C native/out
+
+      - name: Detect existing device-libs (act fast-path)
         if: ${{ env.ACT }}
         id: act-cache-probe
         run: |
-          [ -x native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/bin/clang++ ] && echo "llvm=true" >> "$GITHUB_OUTPUT" || true
           [ -d native/thirdparty/device_libs ] && [ -n "$(ls -A native/thirdparty/device_libs 2>/dev/null)" ] && echo "device-libs=true" >> "$GITHUB_OUTPUT" || true
-
-      - name: Build LLVM
-        id: build-llvm
-        if: steps.restore-llvm.outputs.cache-hit != 'true' && steps.act-cache-probe.outputs.llvm != 'true'
-        run: just build-llvm
-
-      - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
-        uses: *cache-save
-        with:
-          path: *llvm-path
-          key: *llvm-key
 
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
@@ -265,7 +363,7 @@ jobs:
       - name: Upload dist
         if: ${{ !env.ACT }}
         # v4: nektos/act#6022
-        uses: &upload actions/upload-artifact@v7
+        uses: *upload
         with:
           name: polyregion-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
