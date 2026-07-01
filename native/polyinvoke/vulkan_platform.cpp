@@ -169,8 +169,6 @@ template <typename T, typename U, typename F> constexpr static auto transform_id
 std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
   POLYINVOKE_TRACE();
   std::vector<std::unique_ptr<Device>> devices;
-  // an unusable ICD (the x86-macOS software rasterisers report VK_ERROR_INCOMPATIBLE_DRIVER, thrown at
-  // enumeration or later at device/allocator creation) yields no devices, so the target skips not aborts
   try {
     for (const vk::raii::PhysicalDevice &dev : instance.enumeratePhysicalDevices()) {
       std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
