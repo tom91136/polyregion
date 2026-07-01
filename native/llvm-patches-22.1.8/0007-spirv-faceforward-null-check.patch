@@ -1,0 +1,29 @@
+Subject: [SPIRV] null-check getVRegDef in matchSelectToFaceForward
+
+MRI.getVRegDef returns null when a register has no def (e.g. its defining
+instruction was erased by an earlier combine in the same worklist). The
+faceforward combiner dereferenced the result without checking, so a select
+whose fcmp/operands lost their def crashed the SPIR-V backend
+non-deterministically. Bail out of the match instead.
+
+--- a/llvm/lib/Target/SPIRV/SPIRVCombinerHelper.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVCombinerHelper.cpp
+@@ -100,7 +100,7 @@
+
+   // Check if FCMP is a comparison between a dot product and 0.
+   MachineInstr *DotInstr = MRI.getVRegDef(DotReg);
+-  if (DotInstr->getOpcode() != TargetOpcode::G_INTRINSIC ||
++  if (!DotInstr || DotInstr->getOpcode() != TargetOpcode::G_INTRINSIC ||
+       cast<GIntrinsic>(DotInstr)->getIntrinsicID() != Intrinsic::spv_fdot) {
+     Register DotOperand1, DotOperand2;
+     // Check for scalar dot product.
+@@ -131,7 +131,8 @@
+     std::optional<FPValueAndVReg> MulConstant;
+     MachineInstr *TrueInstr = MRI.getVRegDef(TrueReg);
+     MachineInstr *FalseInstr = MRI.getVRegDef(FalseReg);
+-    if (TrueInstr->getOpcode() == TargetOpcode::G_BUILD_VECTOR &&
++    if (TrueInstr && FalseInstr &&
++        TrueInstr->getOpcode() == TargetOpcode::G_BUILD_VECTOR &&
+         FalseInstr->getOpcode() == TargetOpcode::G_BUILD_VECTOR &&
+         TrueInstr->getNumOperands() == FalseInstr->getNumOperands()) {
+       for (unsigned I = 1; I < TrueInstr->getNumOperands(); ++I)
