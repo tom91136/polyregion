@@ -42,8 +42,10 @@ pocl() {
   # LLC_HOST_CPU pinned: pocl can't auto-detect the CPU on some hosts (GHA runners). arm64 macOS is always
   # Apple Silicon so apple-m1 is the safe floor; x86_64 takes the generic x86-64 baseline
   local llc_cpu; llc_cpu="$([ "$(uname -m)" = arm64 ] && echo apple-m1 || echo x86-64)"
+  # static LLVM so pocl's cl::opt doesn't clash with libLLVMpolyregion
+  export LIBRARY_PATH="$PREFIX/lib:$PREFIX/opt/zstd/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
   cmake -S "$WORK/pocl-src" -B "$WORK/build-pocl" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DWITH_LLVM_CONFIG="$LLVM21/bin/llvm-config" -DLLC_HOST_CPU="$llc_cpu" \
+    -DWITH_LLVM_CONFIG="$LLVM21/bin/llvm-config" -DLLC_HOST_CPU="$llc_cpu" -DSTATIC_LLVM=ON \
     -DENABLE_ICD=ON -DENABLE_HOST_CPU_DEVICES=ON -DENABLE_LOADABLE_DRIVERS=OFF \
     -DENABLE_SPIRV=ON -DLLVM_SPIRV="$WORK/xlat-prefix/bin/llvm-spirv" \
     -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX="$WORK/pocl-prefix"
