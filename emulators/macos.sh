@@ -42,8 +42,9 @@ pocl() {
   # LLC_HOST_CPU pinned: pocl can't auto-detect the CPU on some hosts (GHA runners). arm64 macOS is always
   # Apple Silicon so apple-m1 is the safe floor; x86_64 takes the generic x86-64 baseline
   local llc_cpu; llc_cpu="$([ "$(uname -m)" = arm64 ] && echo apple-m1 || echo x86-64)"
-  # static LLVM so pocl's cl::opt doesn't clash with libLLVMpolyregion
-  export LIBRARY_PATH="$PREFIX/lib:$PREFIX/opt/zstd/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  # static+hidden LLVM keeps pocl's copy from colliding with libLLVMpolyregion; cmake-scoped LDFLAGS keeps -L/-lzstd out of pocl's runtime kernel-link
+  printf '%s\n' '*4llvm*' '*LLVM*' '_llvm_*' > "$WORK/llvm-hide.sym"
+  LDFLAGS="-L$PREFIX/lib -Wl,-unexported_symbols_list,$WORK/llvm-hide.sym${LDFLAGS:+ $LDFLAGS}" \
   cmake -S "$WORK/pocl-src" -B "$WORK/build-pocl" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DWITH_LLVM_CONFIG="$LLVM21/bin/llvm-config" -DLLC_HOST_CPU="$llc_cpu" -DSTATIC_LLVM=ON \
     -DENABLE_ICD=ON -DENABLE_HOST_CPU_DEVICES=ON -DENABLE_LOADABLE_DRIVERS=OFF \
@@ -58,6 +59,9 @@ mesa() {
   export LIBRARY_PATH="$PREFIX/lib"
   export PKG_CONFIG_PATH="$PREFIX/opt/expat/lib/pkgconfig:$PREFIX/opt/zlib/lib/pkgconfig"
   rm -rf "$WORK/build-mesa" "$WORK/mesa-prefix"
+  # static+hidden LLVM keeps lavapipe's copy from colliding with libLLVMpolyregion; LDFLAGS scoped to meson so it can't leak into the swiftshader build
+  printf '%s\n' '*4llvm*' '*LLVM*' '_llvm_*' > "$WORK/llvm-hide.sym"
+  LDFLAGS="-Wl,-unexported_symbols_list,$WORK/llvm-hide.sym${LDFLAGS:+ $LDFLAGS}" \
   meson setup "$WORK/mesa" "$WORK/build-mesa" --prefix="$WORK/mesa-prefix" --prefer-static \
     -Dbuildtype=release -Dvulkan-drivers=swrast -Dgallium-drivers=llvmpipe \
     -Dllvm=enabled -Dshared-llvm=disabled \
