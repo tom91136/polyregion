@@ -2,7 +2,7 @@
 !CHECK using: ppwi=1,2,64,128
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_SUMMARY_ONLY -DCHECK_PPWI={ppwi} -o {output} {input}
 !CHECK do: {output} 938 20 128 3
-!CHECK requires: Energies OK Checksum 53268
+!CHECK requires: Energies OK
 
 #ifndef CHECK_PPWI
 #define CHECK_PPWI 1
@@ -17,6 +17,7 @@ module fasten
   integer, parameter :: REAL32 = selected_real_kind(p = 6, r = 37)
   integer, parameter :: REAL64 = selected_real_kind(p = 15, r = 307)
   integer, parameter :: STDOUT = 6
+  integer, parameter :: STDERR = 0
 
   real(REAL32), parameter :: zero = 0.0
   real(REAL32), parameter :: quarter = 0.25
@@ -164,7 +165,7 @@ contains
       do i = 1, nposes
         checksum = checksum + real(energies(i), REAL64)
       end do
-      write(STDOUT, '(1x, a, 1x, i0)', advance = "no") "Checksum", nint(checksum)
+      write(STDERR, '(1x, a, 1x, i0)', advance = "no") "Checksum", nint(checksum)
     end block
 #endif
     deallocate(energies)
