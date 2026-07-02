@@ -275,6 +275,13 @@ def sizeAlignOf(program: p.Program, t: p.Type): (Int, Int) = t match {
   case p.Type.Struct(n, _) =>
     program.defs.find(_.name == n) match {
       case None => (0, 1)
+      // union members overlap: widest member, not the running sum
+      case Some(d) if d.isUnion =>
+        val (maxS, maxA) = d.members.foldLeft((0, 1)) { case ((maxS, maxA), m) =>
+          val (s, a) = sizeAlignOf(program, m.tpe)
+          (math.max(maxS, s), math.max(maxA, a))
+        }
+        ((maxS + maxA - 1) / maxA * maxA, maxA)
       case Some(d) =>
         val (off, maxA) = d.members.foldLeft((0, 1)) { case ((off, maxA), m) =>
           val (s, a) = sizeAlignOf(program, m.tpe)

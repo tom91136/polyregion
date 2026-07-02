@@ -232,7 +232,8 @@ class SynchronisedMemAllocation {
     return writeStruct(hostData, 0, devicePtr, count, l, true, hostReadOnly);
   }
 
-  void readSubObject(char *p, const size_t memberOffsetInBytes) {
+  // orig = host bytes snapshotted before the read-back clobber, to restore a slot left foreign
+  void readSubObject(char *p, const size_t memberOffsetInBytes, const char *orig, const size_t origLen) {
     if (debug)
       std::fprintf(stderr, "[SMA] readSubObject(p=%p, memberOffsetInBytes=%zu)\n", static_cast<const void *>(p), memberOffsetInBytes);
     if (char *memberRemotePtr = readPtrValue(p + memberOffsetInBytes); !memberRemotePtr) {
@@ -243,19 +244,24 @@ class SynchronisedMemAllocation {
       // remote ptr can be interior (std::list last-node prev -> embedded sentinel); add offset, don't snap to base
       const uintptr_t hostPtr = alloc->ptr + offset;
       std::memcpy(p + memberOffsetInBytes, &hostPtr, sizeof(uintptr_t));
-    } else {
-      std::fprintf(stderr, "[SMA] Warning: remote introduced foreign member pointer %p\n", static_cast<void *>(memberRemotePtr));
+    } else if (const char *origVal =
+                   (orig && memberOffsetInBytes + sizeof(uintptr_t) <= origLen) ? readPtrValue(orig + memberOffsetInBytes) : nullptr;
+               origVal && (queryLocal(origVal) || localReflect(origVal).sizeInBytes != 0)) {
+      // read-back left a stale device address where the host had a live pointer; restore it, don't plant a wild ptr
+      std::memcpy(p + memberOffsetInBytes, &origVal, sizeof(uintptr_t));
+    } else if (debug) {
+      std::fprintf(stderr, "[SMA] foreign member pointer %p at offset %zu\n", static_cast<void *>(memberRemotePtr), memberOffsetInBytes);
     }
   }
 
-  void readStruct(char *p, const size_t offsetInBytes, const runtime::TypeLayout *tl) {
+  void readStruct(char *p, const size_t offsetInBytes, const runtime::TypeLayout *tl, const char *orig, const size_t origLen) {
     if (debug)
       std::fprintf(stderr, "[SMA] readStruct(p=%p, offsetInBytes=%zu, t=@%s)\n", static_cast<const void *>(p), offsetInBytes, tl->name);
     for (size_t m = 0; m < tl->memberCount; ++m) {
       const auto member = tl->members[m];
       if (member.sizeInBytes == 0) continue;
-      if (member.ptrIndirection > 0) readSubObject(p, offsetInBytes + member.offsetInBytes);
-      else if (member.type && member.type->memberCount > 0) readStruct(p, offsetInBytes + member.offsetInBytes, member.type);
+      if (member.ptrIndirection > 0) readSubObject(p, offsetInBytes + member.offsetInBytes, orig, origLen);
+      else if (member.type && member.type->memberCount > 0) readStruct(p, offsetInBytes + member.offsetInBytes, member.type, orig, origLen);
     }
   }
 
@@ -360,16 +366,23 @@ public:
         const bool walkable = tl ? !isSet(tl->attrs, runtime::LayoutAttrs::Opaque) : true;
         // snapshot the original outgoing pointers before the read-back overwrites them with device addresses
         std::vector<void *> origPtrs;
-        if (walkable)
+        // snapshot for readSubObject to restore a slot the read-back leaves untranslatable
+        std::vector<char> origBytes;
+        // index from baseAtObjIdx (= alloc byte startByte): local (i - objIdxBegin) * objSize, not global i * objSize
+        if (walkable) {
+          origBytes.assign(baseAtObjIdx, baseAtObjIdx + totalObjBytes);
           for (size_t i = objIdxBegin; i < objIdxEnd; ++i) {
-            if (tl) collectHostPtrs(baseAtObjIdx, i * objSize, tl, origPtrs);
-            else if (const auto ptr = readPtrValue(baseAtObjIdx + i * objSize)) origPtrs.push_back(const_cast<char *>(ptr));
+            const size_t localOff = (i - objIdxBegin) * objSize;
+            if (tl) collectHostPtrs(baseAtObjIdx, localOff, tl, origPtrs);
+            else if (const auto ptr = readPtrValue(baseAtObjIdx + localOff)) origPtrs.push_back(const_cast<char *>(ptr));
           }
+        }
         remoteRead(baseAtObjIdx, alloc->remote.ptr, startByte, totalObjBytes);
         if (walkable)
           for (size_t i = objIdxBegin; i < objIdxEnd; ++i) {
-            if (tl) readStruct(baseAtObjIdx, i * objSize, tl);
-            else readSubObject(baseAtObjIdx, i * objSize);
+            const size_t localOff = (i - objIdxBegin) * objSize;
+            if (tl) readStruct(baseAtObjIdx, localOff, tl, origBytes.data(), totalObjBytes);
+            else readSubObject(baseAtObjIdx, localOff, origBytes.data(), totalObjBytes);
           }
         // follow the original graph too: a kernel that disconnects nodes (reverses a list) leaves them
         // unreachable through the read-back device pointers, but they are still mirrored and must come home
@@ -490,6 +503,8 @@ public:
       const auto [alloc, offset] = *query;
       if (alloc->hostReadOnly) return;
       if (!syncVisited.insert(alloc->remote.ptr).second) return;
+      // interior pointer: raw-copying the enclosing alloc back would clobber its other members (SSO string _M_p)
+      if (offset != 0) return;
       const char *base = static_cast<const char *>(local) - offset;
       remoteRead(const_cast<char *>(base), alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
     }
