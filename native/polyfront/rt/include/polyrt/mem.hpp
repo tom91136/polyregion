@@ -503,8 +503,9 @@ public:
       const auto [alloc, offset] = *query;
       if (alloc->hostReadOnly) return;
       if (!syncVisited.insert(alloc->remote.ptr).second) return;
-      // interior pointer: raw-copying the enclosing alloc back would clobber its other members (SSO string _M_p)
-      if (offset != 0) return;
+      // interior into a structured alloc (an SSO string's _M_p) is restored by the object's own read-back;
+      // raw data (null layout) has none, and MSVC over-aligns big std::vector so its data pointer is interior
+      if (offset != 0 && alloc->layout) return;
       const char *base = static_cast<const char *>(local) - offset;
       remoteRead(const_cast<char *>(base), alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
     }
