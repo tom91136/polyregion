@@ -183,9 +183,9 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
       }
     }
   }
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
   // XXX likewise forward VK_DRIVER_FILES narrowed to the selected device's manifest, else the child falls back
-  // to a system Vulkan driver. Linux-only: macOS/Windows glcompute resolves its driver differently and is green
+  // to a system Vulkan driver, or none at all on clean CI runners
   if (const char *icds = std::getenv("VK_DRIVER_FILES") ? std::getenv("VK_DRIVER_FILES") : std::getenv("VK_ICD_FILENAMES")) {
     const auto a = archFor(t, cfg);
     if (const char *want = a ^ contains_slice("llvmpipe") ? "lvp_icd" : a ^ contains_slice("SwiftShader") ? "swiftshader" : nullptr)
@@ -209,8 +209,9 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
     if (!pathVal.empty()) put("PATH", pathVal);
   }
 #if defined(__APPLE__)
-  // XXX forward DYLD_*; compiled test binaries can't find dist libs otherwise (SIGTRAP)
-  for (const auto *name : {"DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "TMPDIR", "HOME"}) {
+  // XXX forward DYLD_* (compiled test binaries can't find dist libs otherwise -> SIGTRAP) and SDKROOT/LIBRARY_PATH
+  // (pocl links source kernels with clang -> ld needs the SDK for -lSystem)
+  for (const auto *name : {"DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "TMPDIR", "HOME", "SDKROOT", "LIBRARY_PATH"}) {
     if (auto v = std::getenv(name)) put(name, v);
   }
 #elif defined(__linux__)
