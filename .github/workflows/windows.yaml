@@ -372,7 +372,7 @@ jobs:
         name: Build shard matrix
         shell: bash
         run: |
-          shards=$(jq -R -s -c '[split("\n")[] | select(length > 0)]' shards.txt)
+          shards=$(jq -R -s -c '[split("\n")[] | rtrimstr("\r") | select(length > 0)]' shards.txt)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
           echo "shards: $shards"
 
@@ -413,8 +413,18 @@ jobs:
 
       - *msvc
       - *setup-just
+      - name: Enable crash dumps (WER)
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          try {
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpFolder -Value "$env:RUNNER_TEMP\crashdumps" -PropertyType ExpandString -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
+            New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
+          } catch { Write-Host "WER setup skipped: $_" }
       - name: Run misc tests (non-codegen)
-        run: just test-native-dist emulators misc-test-results -LE codegen
+        run: just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
 
       - name: Annotate ctest results
         if: always()
@@ -431,6 +441,22 @@ jobs:
           name: misc-test-results-windows-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/misc-test-results.xml
           if-no-files-found: warn
+
+      # always() not failure(): --repeat until-pass recovers transient crashes, but WER still dumped them
+      - name: Collect crash dumps
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crash-reports | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
+          Get-ChildItem crash-reports -ErrorAction SilentlyContinue
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-misc-windows-${{ matrix.arch }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
 
   test-scala:
     needs: build

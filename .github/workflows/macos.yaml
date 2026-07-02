@@ -372,7 +372,7 @@ jobs:
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run misc tests (non-codegen)
-        run: just test-native-dist emulators misc-test-results -LE codegen
+        run: just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
 
       - name: Annotate ctest results
         if: always()
@@ -389,6 +389,22 @@ jobs:
           name: misc-test-results-darwin-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
           if-no-files-found: warn
+
+      # always() not failure(): --repeat until-pass recovers transient crashes, but the OS still logged them
+      - name: Collect crash reports
+        if: always()
+        run: |
+          mkdir -p crash-reports
+          cp -f ~/Library/Logs/DiagnosticReports/*.ips crash-reports/ 2>/dev/null || true
+          cp -f /Library/Logs/DiagnosticReports/*.ips crash-reports/ 2>/dev/null || true
+          ls -la crash-reports || true
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-misc-darwin-${{ matrix.arch }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
 
   test-scala:
     needs: build

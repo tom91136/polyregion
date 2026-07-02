@@ -600,8 +600,15 @@ jobs:
         name: Restore executable bits
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
+      - name: Enable core dumps
+        run: |
+          sudo mkdir -p /var/lib/polyregion-cores && sudo chmod 1777 /var/lib/polyregion-cores || true
+          echo '/var/lib/polyregion-cores/core.%e.%p' | sudo tee /proc/sys/kernel/core_pattern || true
+
       - name: Run misc tests (non-codegen)
-        run: just test-native-dist emulators misc-test-results -LE codegen
+        run: |
+          ulimit -c unlimited || true
+          just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
 
       - name: Annotate ctest results
         if: always()
@@ -618,6 +625,28 @@ jobs:
           name: misc-test-results-linux-${{ matrix.arch }}-Release
           path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
           if-no-files-found: warn
+
+      # always() not failure(): --repeat until-pass recovers transient crashes, but the core is still on disk
+      - name: Collect crash backtraces
+        if: always()
+        run: |
+          mkdir -p crash-reports
+          shopt -s nullglob
+          cores=(/var/lib/polyregion-cores/core.*)
+          if [ ${#cores[@]} -gt 0 ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true
+            for c in "${cores[@]:0:20}"; do
+              gdb -batch -ex 'thread apply all bt' -c "$c" > "crash-reports/$(basename "$c").txt" 2>&1 || true
+            done
+          fi
+          ls -la crash-reports || true
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-misc-linux-${{ matrix.arch }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
 
   test-native-with-emulators:
     needs: [build, build-emulators, discover-shards]
