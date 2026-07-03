@@ -523,7 +523,8 @@ public:
 
                                     strConst(B0, M, bundle.metadata), //
                                     strConst(B0, M, bundle.mirrorId), //
-                                    nullConst(B0), nullConst(B0)}};
+                                    nullConst(B0), nullConst(B0),     //
+                                    intConst(B0, i8Ty(B0), bundle.asserts ? 1 : 0)}};
     });
 
     Binder binder(B, dco, FReduction, moduleId, region);

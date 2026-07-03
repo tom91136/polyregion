@@ -217,8 +217,8 @@ std::string repr(const Expr::Any &e) {
     }
     if (auto _x = e.get<Expr::SpecOp>()) {
       return [&] {
-        if (_x->op.is<Spec::Assert>()) {
-          return "'assert"s;
+        if (auto _z = _x->op.get<Spec::Assert>()) {
+          return fmt::format("'assert({}, {})", repr(_z->code), repr(_z->message));
         }
         if (_x->op.is<Spec::GpuBarrierGlobal>()) {
           return "'gpuBarrierGlobal"s;

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "6d254f2d57889595f8214cc9da519b5b";
+constexpr auto AdtHash = "365bea66bffcc049526c86dd6167c20d";
 
 namespace {
 
@@ -1191,9 +1191,17 @@ json overload_to_json(const Overload &x_) {
   return json::array({args, rtn});
 }
 
-Spec::Assert Spec::assert_from_json(const json &j_) { return {}; }
+Spec::Assert Spec::assert_from_json(const json &j_) {
+  auto code = Term::any_from_json(j_.at(0));
+  auto message = Term::any_from_json(j_.at(1));
+  return {code, message};
+}
 
-json Spec::assert_to_json(const Spec::Assert &x_) { return json::array({}); }
+json Spec::assert_to_json(const Spec::Assert &x_) {
+  auto code = Term::any_to_json(x_.code);
+  auto message = Term::any_to_json(x_.message);
+  return json::array({code, message});
+}
 
 Spec::GpuBarrierGlobal Spec::gpubarrierglobal_from_json(const json &j_) { return {}; }
 
@@ -5299,11 +5307,16 @@ void overload_to_msgpack(MsgpackWriter &w_, const Overload &x_) {
 }
 
 Spec::Assert Spec::assert_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 0) throw std::runtime_error("Expected Spec::Assert with 0 field(s)");
-  return {};
+  if (n_ != 2) throw std::runtime_error("Expected Spec::Assert with 2 field(s)");
+  auto code = Term::any_from_msgpack(r_);
+  auto message = Term::any_from_msgpack(r_);
+  return {code, message};
 }
 
-void Spec::assert_fields_to_msgpack(MsgpackWriter &w_, const Spec::Assert &x_) {}
+void Spec::assert_fields_to_msgpack(MsgpackWriter &w_, const Spec::Assert &x_) {
+  Term::any_to_msgpack(w_, x_.code);
+  Term::any_to_msgpack(w_, x_.message);
+}
 
 Spec::Assert Spec::assert_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
@@ -5311,7 +5324,7 @@ Spec::Assert Spec::assert_from_msgpack(MsgpackReader &r_) {
 }
 
 void Spec::assert_to_msgpack(MsgpackWriter &w_, const Spec::Assert &x_) {
-  w_.writeArrayHeader(0);
+  w_.writeArrayHeader(2);
   Spec::assert_fields_to_msgpack(w_, x_);
 }
 
@@ -5549,7 +5562,7 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
   } else {
     auto ord_ = r_.readInt32();
     switch (ord_) {
-      case 0: return Spec::assert_fields_from_msgpack(r_, 0);
+      case 0: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 1: return Spec::gpubarrierglobal_fields_from_msgpack(r_, 0);
       case 2: return Spec::gpubarrierlocal_fields_from_msgpack(r_, 0);
       case 3: return Spec::gpubarrierall_fields_from_msgpack(r_, 0);
@@ -5569,7 +5582,12 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
 
 void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
   x_.match_total(
-      [&](const Spec::Assert &y_) -> void { w_.writeInt32(0); }, [&](const Spec::GpuBarrierGlobal &y_) -> void { w_.writeInt32(1); },
+      [&](const Spec::Assert &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(0);
+        Spec::assert_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuBarrierGlobal &y_) -> void { w_.writeInt32(1); },
       [&](const Spec::GpuBarrierLocal &y_) -> void { w_.writeInt32(2); }, [&](const Spec::GpuBarrierAll &y_) -> void { w_.writeInt32(3); },
       [&](const Spec::GpuFenceGlobal &y_) -> void { w_.writeInt32(4); }, [&](const Spec::GpuFenceLocal &y_) -> void { w_.writeInt32(5); },
       [&](const Spec::GpuFenceAll &y_) -> void { w_.writeInt32(6); },

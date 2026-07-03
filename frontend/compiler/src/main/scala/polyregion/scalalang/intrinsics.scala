@@ -56,6 +56,6 @@ object intrinsics {
   def log1p[A](a: A): A    = intrinsic
   def log10[A](a: A): A    = intrinsic
 
-  def assert(): Nothing = intrinsic
+  def assert(code: Int, message: String): Unit = intrinsic
 
 }

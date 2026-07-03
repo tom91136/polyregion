@@ -457,7 +457,8 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
     const bool physical = (arch ^ starts_with("cuda")) || (arch ^ starts_with("hsa")) || (arch ^ starts_with("hip"));
     const auto detBase =
         fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
-    return modes ^ map([&](const auto mode) -> Task {
+    const auto caseModes = tc.offloadOnly ? (modes ^ filter([](auto m) { return m == Mode::Offload; })) : modes;
+    return caseModes ^ map([&](const auto mode) -> Task {
              std::vector<RunVariant> variants;
              if (mode == Mode::Offload && physical)
                variants = {RunVariant{"", {}},                                                   // compiletime (default)

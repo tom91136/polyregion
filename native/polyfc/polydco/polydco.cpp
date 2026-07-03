@@ -4,6 +4,7 @@
 #include <cstring>
 #include <span>
 #include <thread>
+#include <vector>
 
 #include "flang/ISO_Fortran_binding.h"
 
@@ -11,6 +12,8 @@
 
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/enums.h"
+#include "polyrt/assert_buffer.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
 #include "polyrt/sma_runtime.hpp"
@@ -25,6 +28,18 @@ static auto &recordsMutex = *new std::mutex();
 
 using namespace polyregion;
 using polyrt::DebugLevel;
+
+namespace {
+polyrt::AssertSink g_assert;
+} // namespace
+
+POLYREGION_EXPORT extern "C" void __polyregion_fc_assert() {
+  g_assert.record(static_cast<uint32_t>(invoke::AssertCode::Assert), "fortran assert");
+}
+POLYREGION_EXPORT extern "C" void __polyregion_fc_assert_msg(const char *message) {
+  g_assert.record(static_cast<uint32_t>(invoke::AssertCode::Assert), message);
+}
+POLYREGION_EXPORT extern "C" int __polyregion_fc_assert_raised() { return g_assert.raised() ? 1 : 0; }
 
 static polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
@@ -191,7 +206,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
                             const runtime::TypeLayout *layout,                                                        //
                             const std::span<const polydco::FReduction> &reductions,                                   //
                             char *captures, const char *moduleId,                                                     //
-                            const runtime::PreludeFn prelude, const runtime::PostludeFn postlude) {
+                            const runtime::PreludeFn prelude, const runtime::PostludeFn postlude, const bool asserts) {
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
@@ -216,7 +231,9 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   log(DebugLevel::Debug, "<%s:%s:%zu> localMemBytes=%zu", __func__, moduleId, threadsPerBlock, localMemBytes);
 
   using namespace invoke;
-  const auto launch = [&](const ArgBuffer &buffer) {
+  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  const auto launch = [&](ArgBuffer &buffer) {
+    polyrt::appendArgTerminator(buffer);
     polyrt::currentQueue->enqueueInvokeAsync(
         moduleId, conventions::EntryName, buffer, //
         Policy{                                   //
@@ -224,15 +241,18 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
                blocks > 0 ? std::optional{std::pair{Dim3{blocks, 1, 1}, localMemBytes}} : std::nullopt},
         {});
     polyrt::currentQueue->enqueueWaitBlocking();
+    if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
   };
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
   if (mode == polyrt::sma::MirrorMode::Off) {
     if (polyrt::currentDevice->pagingMode() != PagingMode::System)
       polyrt::skipExit("POLYRT_MIRROR=off needs system paging (HMM / XNACK+ / system-USM)");
-    const auto buffer = isReduction
-                            ? ArgBuffer{{Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Scratch, {}}, {Type::Void, {}}}
-                            : ArgBuffer{{Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Void, {}}};
+    ArgBuffer buffer;
+    polyrt::bindAssertError(buffer, asserts, errDev);
+    buffer.append(Type::Ptr, &captures);
+    buffer.append(Type::Ptr, &mpr.devicePartials);
+    if (isReduction) buffer.append(Type::Scratch, nullptr);
     launch(buffer);
     polyrt::currentQueue->enqueueWaitBlocking();
     mpr.releaseAndReduce();
@@ -250,6 +270,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
     // binding 0; the flat byte form (ArenaLower) keeps the capture as binding 0 (the arena base)
     const bool logical = polyrt::sma::arenaViewForm(polyrt::currentDevice->moduleFormat());
     ArgBuffer buffer;
+    polyrt::bindAssertError(buffer, asserts, errDev);
     if (logical) {
       buffer.append(Type::Ptr, &mpr.devicePartials);
       if (isReduction) buffer.append(Type::Scratch, nullptr);
@@ -260,7 +281,6 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
       buffer.append(Type::Ptr, &mpr.devicePartials);
       if (isReduction) buffer.append(Type::Scratch, nullptr);
     }
-    buffer.append(Type::Void, nullptr);
     launch(buffer);
     allocations.genArenaReadback();
     mpr.releaseAndReduce();
@@ -275,14 +295,11 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
       useGenerated ? reinterpret_cast<void *>(preludeResult) : reinterpret_cast<void *>(allocations.syncLocalToRemote(captures, *layout));
   polyrt::sma::dumpAllocationTable(allocations);
 
-  const auto buffer = isReduction ? ArgBuffer{{Type::Ptr, &functorDevicePtr},   //
-                                              {Type::Ptr, &mpr.devicePartials}, //
-                                              {Type::Scratch, {}},              //
-                                              {Type::Void, {}}}                 //
-                                  : ArgBuffer{                                  //
-                                              {Type::Ptr, &functorDevicePtr},
-                                              {Type::Ptr, &mpr.devicePartials},
-                                              {Type::Void, {}}};
+  ArgBuffer buffer;
+  polyrt::bindAssertError(buffer, asserts, errDev);
+  buffer.append(Type::Ptr, &functorDevicePtr);
+  buffer.append(Type::Ptr, &mpr.devicePartials);
+  if (isReduction) buffer.append(Type::Scratch, nullptr);
 
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=0x%jx", __func__, moduleId, threadsPerBlock,
       static_cast<void *>(captures), mpr.devicePartials);
@@ -304,7 +321,8 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
 static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
                                  const runtime::TypeLayout *layout,                                                        //
-                                 const std::span<const polydco::FReduction> &reductions, char *captures, const char *moduleId) {
+                                 const std::span<const polydco::FReduction> &reductions, char *captures, const char *moduleId,
+                                 const bool asserts) {
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
@@ -339,11 +357,17 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   ManagedPartialReduction mpr(reductions, groups);
   mpr.allocatePartialsAsync();
   using namespace invoke;
-  const ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Void, nullptr}};
+  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  ArgBuffer buffer{{Type::IntS64, nullptr}};
+  polyrt::bindAssertError(buffer, asserts, errDev);
+  buffer.append(Type::Ptr, &captures);
+  buffer.append(Type::Ptr, &mpr.devicePartials);
+  polyrt::appendArgTerminator(buffer);
   log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch hostthreaded", __func__, moduleId, tripCount);
   polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{Dim3{groups, 1, 1}},
                                            [&]() { mpr.releaseAndReduce(); });
   polyrt::currentQueue->enqueueWaitBlocking();
+  if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
   if (polyrt::debugLevel() >= DebugLevel::Debug) {
     for (size_t i = 0; i < layout->memberCount; ++i) {
       if (layout->members[i].sizeInBytes == sizeof(void *)) {
@@ -407,7 +431,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
         dispatchHostThreaded(lowerBoundInclusive, upperBoundInclusive, step,
                              &bundle->structs[bundle->interfaceLayoutIdx],     //
                              std::span{reductions, reductionsCount}, captures, //
-                             bundle->moduleName);
+                             bundle->moduleName, bundle->asserts);
         return true;
       }
       break;
@@ -419,7 +443,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
         dispatchManaged(lowerBoundInclusive, upperBoundInclusive, step,
                         &bundle->structs[bundle->interfaceLayoutIdx],     //
                         std::span{reductions, reductionsCount}, captures, //
-                        bundle->moduleName, bundle->prelude, bundle->postlude);
+                        bundle->moduleName, bundle->prelude, bundle->postlude, bundle->asserts);
         return true;
       }
       break;

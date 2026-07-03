@@ -21,7 +21,7 @@ using TimePoint = std::chrono::steady_clock::time_point;
 
 POLYREGION_EXPORT void initialise();
 
-inline constexpr auto DefaultPipelineSpec = "FullOpt";
+inline constexpr auto DefaultPipelineSpec = "FullOpt;StructuredExit";
 
 struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT compiletime::Target target;

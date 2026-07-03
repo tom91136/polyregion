@@ -13,10 +13,11 @@ object EnumCodeGen {
   }
 
   private def cppEnum(variants: List[Variant]): String = {
-    val head      = variants.head
-    val exportTag = if (head.cppExport) "POLYREGION_EXPORT " else ""
-    val body      = variants.map(v => s"  ${v.name} = ${v.value},").mkString("\n")
-    s"""enum class ${exportTag}${head.cppName} : uint8_t {
+    val head       = variants.head
+    val exportTag  = if (head.cppExport) "POLYREGION_EXPORT " else ""
+    val underlying = if (variants.exists(v => v.value < 0 || v.value > 0xff)) "uint32_t" else "uint8_t"
+    val body       = variants.map(v => s"  ${v.name} = ${v.value},").mkString("\n")
+    s"""enum class ${exportTag}${head.cppName} : ${underlying} {
        |$body
        |};""".stripMargin
   }

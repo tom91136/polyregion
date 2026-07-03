@@ -49,6 +49,7 @@ struct KernelBundle {
   std::string metadata;
   std::string hostMirrorBitcode{};
   std::string mirrorId{};
+  bool asserts = false;
 };
 
 struct Options {

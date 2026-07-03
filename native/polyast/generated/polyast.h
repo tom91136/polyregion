@@ -3205,9 +3205,13 @@ protected:
 };
 
 struct POLYREGION_EXPORT Assert : Spec::Base {
+  Term::Any code;
+  Term::Any message;
   constexpr static uint32_t variant_id = 0;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::Assert withCode(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::Assert withMessage(const Term::Any &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, Assert>) {
@@ -3215,6 +3219,8 @@ struct POLYREGION_EXPORT Assert : Spec::Base {
         results_.emplace_back(*x_);
       }
     }
+    code.collect_where<T, U>(results_, f);
+    message.collect_where<T, U>(results_, f);
   }
   template <typename T, typename U>
   [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
@@ -3229,11 +3235,11 @@ struct POLYREGION_EXPORT Assert : Spec::Base {
     if constexpr (std::is_same_v<T, Assert>) {
       return f(*this);
     }
-    return Spec::Assert();
+    return Spec::Assert(code.modify_all<T>(f), message.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::Assert &) const;
-  Assert() noexcept;
+  Assert(Term::Any code, Term::Any message) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };

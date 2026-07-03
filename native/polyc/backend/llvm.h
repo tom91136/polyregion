@@ -153,7 +153,6 @@ struct CodeGen {
   [[nodiscard]] ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg);
   [[nodiscard]] ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs);
   [[nodiscard]] ValPtr invokeMalloc(ValPtr size);
-  [[nodiscard]] ValPtr invokeAbort();
   [[nodiscard]] ValPtr intr0(llvm::Intrinsic::ID id);
   [[nodiscard]] ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg);
   [[nodiscard]] ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &lhs, const AnyTerm &rhs);

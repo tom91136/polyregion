@@ -27,6 +27,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyregion/conventions.h"
+#include "polyregion/enums.h"
 #include "polyregion/llvm_dyn.hpp"
 
 #include "ast.h"
@@ -909,6 +910,16 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             const auto i1 = newVar(Expr::Cast(b1, Type::IntS32()).widen());
             const auto i2 = newVar(Expr::Cast(b2, Type::IntS32()).widen());
             witness(a.getResult(0), Expr::IntrOp(Intr::Sub(i1, i2, Type::IntS32())).widen());
+          } else if (name == "__polyregion_fc_assert" || name == "__polyregion_fc_assert_msg") {
+            static size_t fcAssertId = 0;
+            const Term::Any message =
+                args.empty()
+                    ? Term::StringConst("fortran assert").widen()
+                    : newVar(Expr::Cast(newVar(handleValueAs(args[0])), Type::Ptr(Type::IntS8(), TypeSpace::Global())).widen()).widen();
+            push(Stmt::Var(Named(fmt::format("fc_assert{}", fcAssertId++), Type::Unit0()),
+                           Expr::SpecOp(Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Assert)), message)),
+                           /*isMutable*/ false)
+                     .widen());
           } else poison0(fmt::format("Unimplemented intrinsic in {}", show(a)));
         } else poison0(fmt::format("Unknown callee in {}", show(a)));
       },

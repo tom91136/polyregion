@@ -9,7 +9,7 @@ import polyregion.ast.Traversal.*
 // examples:
 //   intrinsics.gpuGlobalIdx(d)  ->  Spec.GpuGlobalIdx(d)
 //   intrinsics.gpuBarrierAll()  ->  Spec.GpuBarrierAll
-//   intrinsics.assert()         ->  Spec.Assert
+//   intrinsics.assert(c, m)     ->  Spec.Assert(c, m)
 //   intrinsics.sin(x)           ->  Math.Sin(x)
 //   intrinsics.pow(x, y)        ->  Math.Pow(x, y)
 //   intrinsics.min(x, y)        ->  Intr.Min(x, y)
@@ -94,7 +94,7 @@ object Intrinsify extends ProgramPass {
     def spec(x: p.Spec) = p.Expr.SpecOp(x) -> List.empty[p.Stmt]
 
     (op, args) match {
-      case "assert" -> Nil => spec(p.Spec.Assert)
+      case "assert" -> (code :: message :: Nil) => spec(p.Spec.Assert(code, message))
 
       case "gpuGlobalIdx" -> (x :: Nil)  => spec(p.Spec.GpuGlobalIdx(x))
       case "gpuGlobalSize" -> (x :: Nil) => spec(p.Spec.GpuGlobalSize(x))

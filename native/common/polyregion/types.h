@@ -405,6 +405,8 @@ struct KernelBundle {
   const char *mirrorId;
   PreludeFn prelude;
   PostludeFn postlude;
+
+  bool asserts;
 };
 
 static_assert(std::is_standard_layout_v<TypeLayout>);

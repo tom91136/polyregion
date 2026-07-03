@@ -371,7 +371,6 @@ llvm::Function *CodeGen::resolveExtFn(const Type::Any &rtn, const std::string &n
 ValPtr CodeGen::invokeMalloc(ValPtr size) {
   return B.CreateCall(resolveExtFn(Type::Ptr(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
 }
-ValPtr CodeGen::invokeAbort() { return B.CreateCall(resolveExtFn(Type::Nothing(), "abort", {})); }
 
 ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg) { //
   const auto fn = resolveExtFn(rtn, name, {arg.tpe()});
@@ -879,8 +878,10 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         {
           B.SetInsertPoint(loopBody);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.body)
+          for (auto &body : x.body) {
             kind = mkStmt(body, fn, {ctx});
+            if (kind == BlockKind::Terminal) break;
+          }
           if (kind != BlockKind::Terminal) B.CreateBr(loopTest);
         }
         // The loopExit block is a normal continuation point — `loop_test` falls through to it
@@ -908,8 +909,10 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         {
           B.SetInsertPoint(loopBody);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.body)
+          for (auto &body : x.body) {
             kind = mkStmt(body, fn, {ctx});
+            if (kind == BlockKind::Terminal) break;
+          }
           if (kind != BlockKind::Terminal) {
             [[maybe_unused]] auto _0 =
                 mkStmt(Stmt::Mut(inductionSelect, Expr::IntrOp(Intr::Add(inductionTerm, x.step, x.induction.tpe))), fn, {ctx});
@@ -922,12 +925,12 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
       [&](const Stmt::Break &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
         else throw BackendException("orphaned break!");
-        return BlockKind::Normal;
+        return BlockKind::Terminal;
       }, //
       [&](const Stmt::Cont &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->test);
         else throw BackendException("orphaned cont!");
-        return BlockKind::Normal;
+        return BlockKind::Terminal;
       }, //
       [&](const Stmt::Cond &x) -> BlockKind {
         const auto condTrue = llvm::BasicBlock::Create(C.actual, "cond_true", &fn);
@@ -937,15 +940,19 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         {
           B.SetInsertPoint(condTrue);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.trueBr)
+          for (auto &body : x.trueBr) {
             kind = mkStmt(body, fn, whileCtx);
+            if (kind == BlockKind::Terminal) break;
+          }
           if (kind != BlockKind::Terminal) B.CreateBr(condExit);
         }
         {
           B.SetInsertPoint(condFalse);
           auto kind = BlockKind::Normal;
-          for (auto &body : x.falseBr)
+          for (auto &body : x.falseBr) {
             kind = mkStmt(body, fn, whileCtx);
+            if (kind == BlockKind::Terminal) break;
+          }
           if (kind != BlockKind::Terminal) B.CreateBr(condExit);
         }
         if (condExit->getNumUses() > 0) {

@@ -152,6 +152,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   if (mir.error)
     emit(diag, loc, clang::DiagnosticsEngine::Level::Warning, POLYREGION_DIAG_POLYSTL "Host mirroring compile failed [%0]: %1", moduleId,
          *mir.error);
-  return polyfront::KernelBundle{moduleId,    objects,     layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
-                                 mir.bitcode, mir.mirrorId};
+  const bool asserts = !program.template collect_all<polyast::Spec::Assert>().empty();
+  return polyfront::KernelBundle{moduleId,    objects,      layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
+                                 mir.bitcode, mir.mirrorId, asserts};
 }

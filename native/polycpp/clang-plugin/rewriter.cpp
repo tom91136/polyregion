@@ -301,6 +301,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
           /*mirrorId           */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, bundle.mirrorId)),
           /*prelude           */ mkNullPtrLit(C, (*typeOfFieldWithName(KernelBundleTy, "prelude"))->getPointeeType()),
           /*postlude          */ mkNullPtrLit(C, (*typeOfFieldWithName(KernelBundleTy, "postlude"))->getPointeeType()),
+          /*asserts           */ new (C) clang::CXXBoolLiteralExpr(bundle.asserts, C.BoolTy, {}),
       });
 
   // embed the host mirroring BC

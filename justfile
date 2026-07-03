@@ -241,7 +241,8 @@ test-native *args='': build-pass-native
     rm -f "$BUILD"/*/polytest-discover/*.ids
     rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
     find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
-    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
+    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
+        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests
     # force ctest colour on a terminal; auto (off) when piped to a log so it stays greppable
     rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }} || rc=$?
     skips=$(find "$BUILD" -name polytest-skips.log -exec cat {} + 2>/dev/null | wc -l || true)
@@ -288,7 +289,8 @@ test-native-with-emulators *args='':
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
     # XXX ctest bakes target names at discovery; re-list under this profile first.
     rm -f "$BUILD"/*/polytest-discover/*.ids
-    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover
+    ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
+        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
 # Run ctest against a relocated dist (CI download-artifact shape); profile ''|emulators|asan, junit = result-xml basename.

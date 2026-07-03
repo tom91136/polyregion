@@ -43,11 +43,13 @@ object ConventionsCodeGen {
 
   private def extract(using Quotes): List[Entry] = {
     import quotes.reflect.*
-    val conventions = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions")
-    val macros      = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.Macros")
-    val runtimeAbi  = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.RuntimeAbi")
-    val reflect     = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.Reflect")
+    val conventions        = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions")
+    val macros             = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.Macros")
+    val runtimeAbi         = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.RuntimeAbi")
+    val reflect            = Symbol.requiredModule("polyregion.ast.PolyAST.Conventions.Reflect")
+    val assertMessageLimit = PolyAST.Conventions.assertMessageLimit
     constLiterals(conventions).map((n, v) => Entry(n, v, Kind.Const)) ++
+      List(Entry("AssertMessageLimit", assertMessageLimit.toString, Kind.Const)) ++
       constStrings(macros).map((n, v) => Entry(n, v, Kind.Macro)) ++
       constStrings(runtimeAbi).map((n, v) => Entry(n, v, Kind.Abi)) ++
       constStrings(reflect).map((n, v) => Entry(n, v, Kind.Reflect))

@@ -1,6 +1,9 @@
 #include "polystl/polystl.h"
 
+#include <vector>
+
 #include "polyregion/conventions.h"
+#include "polyrt/assert_buffer.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
 #include "polyrt/sma_runtime.hpp"
@@ -58,36 +61,68 @@ POLYREGION_EXPORT extern "C" void polyrt_map_readwrite(void *origin, const ptrdi
 
 POLYREGION_DEFINE_SMA_MIRROR_ABI(allocations);
 
-POLYREGION_EXPORT void polystl::details::dispatchHostThreaded(const size_t global, void *functorData, const char *moduleId) {
+namespace {
+polyrt::AssertSink g_assert;
+
+polystl::details::AssertRecord toRecord(const polyrt::AssertReason &r) { return {r.raised, r.code, r.message, r.truncated}; }
+} // namespace
+
+POLYREGION_EXPORT extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message) { g_assert.record(code, message); }
+
+POLYREGION_EXPORT polystl::details::AssertRecord polystl::details::lastAssert() { return toRecord(g_assert.reason()); }
+
+POLYREGION_EXPORT void polystl::details::dispatchHostThreaded(const size_t global, void *functorData, const char *moduleId,
+                                                              const bool asserts) {
   using namespace invoke;
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch hostthread", __func__, moduleId, global);
-  ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
+  g_assert.reset();
+  std::vector<uint8_t> errorBuf;
+  uintptr_t errDev = 0;
+  if (asserts) {
+    errorBuf.assign(polyrt::assertBufferBytes, 0);
+    errDev = reinterpret_cast<uintptr_t>(errorBuf.data());
+  }
+  ArgBuffer buffer{{Type::IntS64, nullptr}};
+  polyrt::bindAssertError(buffer, asserts, errDev);
+  buffer.append(Type::Ptr, &functorData);
+  polyrt::appendArgTerminator(buffer);
   polyrt::currentQueue->enqueueInvokeAsync(moduleId, conventions::EntryName, buffer, Policy{Dim3{global, 1, 1}}, {});
   polyrt::currentQueue->enqueueWaitBlocking();
+  if (asserts) polyrt::reportAssert(polyrt::decodeAssertBuffer(errorBuf.data()), g_assert, __func__, moduleId);
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
 }
 
 POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, const size_t local, const size_t localMemBytes,
                                                          const runtime::TypeLayout *layout, void *functorData, const char *moduleId,
-                                                         const runtime::PreludeFn prelude, const runtime::PostludeFn postlude) {
+                                                         const runtime::PreludeFn prelude, const runtime::PostludeFn postlude,
+                                                         const bool asserts) {
   using namespace invoke;
 
   log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p bytes, prelude=%p", __func__, moduleId, global, functorData,
       reinterpret_cast<void *>(prelude));
-  const auto launch = [&](const ArgBuffer &buffer) {
+
+  g_assert.reset();
+  uintptr_t errDev = asserts ? polyrt::allocAssertBuffer() : 0;
+  const auto bindError = [&](ArgBuffer &buffer) { polyrt::bindAssertError(buffer, asserts, errDev); };
+  const auto launch = [&](ArgBuffer &buffer) {
+    polyrt::appendArgTerminator(buffer);
     polyrt::currentQueue->enqueueInvokeAsync(
         moduleId, conventions::EntryName, buffer, //
         Policy{Dim3{global, 1, 1}, local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt}, {});
     log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);
     polyrt::currentQueue->enqueueWaitBlocking();
+    if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
   };
 
   const auto mode = polyrt::sma::mirrorModeFor(polyrt::currentDevice->moduleFormat());
   if (mode == polyrt::sma::MirrorMode::Off) {
     if (polyrt::currentDevice->pagingMode() != PagingMode::System)
       polyrt::skipExit("POLYRT_MIRROR=off needs system paging (HMM / XNACK+ / system-USM)");
-    launch(localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorData}, {Type::Void, {}}}
-                             : ArgBuffer{{Type::Ptr, &functorData}, {Type::Void, {}}});
+    ArgBuffer buffer;
+    if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
+    bindError(buffer);
+    buffer.append(Type::Ptr, &functorData);
+    launch(buffer);
     log(DebugLevel::Debug, "<%s:%s:%zu> Done (usm)", __func__, moduleId, global);
     return;
   }
@@ -104,9 +139,9 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     const int arenaViews = polyrt::sma::arenaViewForm(polyrt::currentDevice->moduleFormat()) ? polyrt::sma::arenaViewCount : 1;
     ArgBuffer buffer;
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
+    bindError(buffer);
     for (int i = 0; i < arenaViews; ++i)
       buffer.append(Type::Ptr, &arenaBase);
-    buffer.append(Type::Void, nullptr);
     launch(buffer);
     allocations.genArenaReadback();
     log(DebugLevel::Debug, "<%s:%s:%zu> Done (arena)", __func__, moduleId, global);
@@ -119,8 +154,10 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
 
   auto functorDevicePtr = useGenerated ? reinterpret_cast<void *>(preludeResult)
                                        : reinterpret_cast<void *>(allocations.syncLocalToRemote(functorData, *layout));
-  const auto buffer = localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorDevicePtr}, {Type::Void, {}}}
-                                        : ArgBuffer{{Type::Ptr, &functorDevicePtr}, {Type::Void, {}}};
+  ArgBuffer buffer;
+  if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
+  bindError(buffer);
+  buffer.append(Type::Ptr, &functorDevicePtr);
   launch(buffer);
   // sync device-side writes to captured pointer-targets back before the device alloc is freed
   if (useGenerated && postlude) postlude(functorData, layout->sizeInBytes);

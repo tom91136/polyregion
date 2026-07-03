@@ -517,7 +517,9 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
           }
         };
         return x.op.match_total(
-            [&](const Spec::Assert &v) { return "abort()"s; }, //
+            [&](const Spec::Assert &v) -> std::string {
+              throw BackendException("assert reached codegen; the StructuredExit pass must run before the backend");
+            }, //
             [&](const Spec::GpuBarrierGlobal &v) {
               return gpuIntr({.cl = "barrier(CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});

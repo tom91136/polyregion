@@ -77,7 +77,8 @@ polyfront::KernelBundle polyfc::compileRegion( //
   auto mir = polyfront::compileManagedHostMirror(opts, region.program, kind, moduleId);
   if (mir.error)
     emit(diag, Level::Warning, "%0 " POLYREGION_DIAG_POLYDCO "Host mirroring compile failed [%1]: %2", diagLoc, moduleId, *mir.error);
+  const bool asserts = !region.program.template collect_all<polyast::Spec::Assert>().empty();
   return polyfront::KernelBundle{
-      moduleId,    objects,     region.layouts, /*readOnlyMembers*/ {}, polyast::program_to_json(region.program).dump(),
-      mir.bitcode, mir.mirrorId};
+      moduleId,    objects,      region.layouts, /*readOnlyMembers*/ {}, polyast::program_to_json(region.program).dump(),
+      mir.bitcode, mir.mirrorId, asserts};
 }

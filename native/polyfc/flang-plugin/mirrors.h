@@ -58,7 +58,7 @@ struct KernelObjectMirror final : AggregateMirror<6> {
   std::array<Type, 6> types() const override;
 };
 
-struct KernelBundleMirror final : AggregateMirror<10> {
+struct KernelBundleMirror final : AggregateMirror<11> {
   Field<LLVM::LLVMPointerType, 0> moduleName;
   Field<IntegerType, 1> objectCount;
   Field<LLVM::LLVMPointerType, 2> objects;
@@ -69,9 +69,10 @@ struct KernelBundleMirror final : AggregateMirror<10> {
   Field<LLVM::LLVMPointerType, 7> mirrorId;
   Field<LLVM::LLVMPointerType, 8> prelude;
   Field<LLVM::LLVMPointerType, 9> postlude;
+  Field<IntegerType, 10> asserts;
   explicit KernelBundleMirror(ModuleOp &M);
   const char *typeName() const override;
-  std::array<Type, 10> types() const override;
+  std::array<Type, 11> types() const override;
 };
 
 struct FReductionMirror final : AggregateMirror<3> {

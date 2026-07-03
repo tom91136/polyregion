@@ -35,7 +35,8 @@ object Interpreter {
     private var dtop       = DeviceBase + 8L
     private val allocs     = mutable.TreeMap.empty[Long, Long]
 
-    var deviceMode = false
+    var deviceMode   = false
+    var barrierCount = 0L
 
     def alloc(n: Long): Long = if (deviceMode) allocDevice(n)
     else {
@@ -379,7 +380,10 @@ object Interpreter {
       case _: p.Spec.GpuGroupSize  => V.I(globalSize)
       case _: p.Spec.GpuLocalIdx   => V.I(0)
       case _: p.Spec.GpuLocalSize  => V.I(1)
-      case _                       => V.U
+      case p.Spec.GpuBarrierGlobal | p.Spec.GpuBarrierLocal | p.Spec.GpuBarrierAll =>
+        barrierCount += 1
+        V.U
+      case _ => V.U
     }
 
     private def cast(v: V, from: p.Type, to: p.Type): V =

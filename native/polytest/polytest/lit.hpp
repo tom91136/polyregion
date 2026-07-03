@@ -29,6 +29,7 @@ struct TestCase {
   using Variable = std::pair<std::string, std::vector<std::string>>;
   std::string name;
   std::vector<std::vector<std::pair<std::string, std::string>>> matrices;
+  bool offloadOnly = false;
   std::vector<Run> runs;
 
   static std::vector<TestCase> parseTestCase(std::ifstream &file,          //
@@ -73,6 +74,12 @@ struct TestCase {
       });
     };
 
+    auto parseFlag = [&](const std::string &name) {
+      return !parseNormalised(file, [&](const std::string &line) -> std::optional<bool> {
+                return (line ^ trim()) == name ? std::optional{true} : std::nullopt;
+              }).empty();
+    };
+
     auto parseMatrices = [&]() {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<std::vector<Variable>> {
         return parseRight("using:", line) ^ map([](auto &matrixLine) {
@@ -95,6 +102,7 @@ struct TestCase {
                                 | map([](auto &name, auto &values) { return values ^ map([&](auto &v) { return std::pair{name, v}; }); }) //
                                 | to_vector())                                                                                            //
                                ^ cartesian_product(),
+                   .offloadOnly = parseFlag("offload-only"),
                    .runs = parseRuns()};
              });
     });

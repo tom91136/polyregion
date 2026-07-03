@@ -40,7 +40,7 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         totalObjects++;
         if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
-          polyregion::polystl::details::dispatchHostThreaded(1, &kernel, bundle.moduleName);
+          polyregion::polystl::details::dispatchHostThreaded(1, &kernel, bundle.moduleName, bundle.asserts);
           return result;
         }
       }
@@ -66,7 +66,7 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
         if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
           void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
           polyregion::polystl::details::dispatchManaged(1, 0, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName,
-                                                        bundle.prelude, bundle.postlude);
+                                                        bundle.prelude, bundle.postlude, bundle.asserts);
           return result;
         }
       }
@@ -78,4 +78,25 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
     [&result, &f]() { result = f(); }();
     return result;
   }
+}
+
+template <typename F> //
+void __polyregion_offload_workgroup__(size_t lanes, F f) {
+  static bool offload = !std::getenv(polyregion::env::PolystlNoOffload);
+  if (!offload) {
+    for (size_t i = 0; i < lanes; ++i)
+      f(static_cast<uint32_t>(i));
+    return;
+  }
+  auto kernel = [f]() mutable { f(__polyregion_builtin_gpu_global_idx(0)); };
+  auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+  for (size_t i = 0; i < bundle.objectCount; ++i) {
+    if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
+      void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
+      polyregion::polystl::details::dispatchManaged(lanes, lanes, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr,
+                                                    bundle.moduleName, bundle.prelude, bundle.postlude, bundle.asserts);
+      return;
+    }
+  }
+  polyregion::polyrt::noCompatibleKernelExit("__polyregion_offload_workgroup__");
 }

@@ -132,21 +132,22 @@ object PolyAST {
   object Spec {
     inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
+    inline def AssertSig   = List(Overload(List(Type.IntU32, Type.Ptr(Type.IntS8, Type.Space.Constant)), Type.Unit0))
   }
   enum Spec(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
-    case Assert                   extends Spec(Spec.NullaryUnit, List[Term](), Type.Nothing)
-    case GpuBarrierGlobal         extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuBarrierLocal          extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuBarrierAll            extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuFenceGlobal           extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuFenceLocal            extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuFenceAll              extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
-    case GpuGlobalIdx(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuGlobalSize(dim: Term) extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuGroupIdx(dim: Term)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuGroupSize(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuLocalIdx(dim: Term)   extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
-    case GpuLocalSize(dim: Term)  extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case Assert(code: Term, message: Term) extends Spec(Spec.AssertSig, List(code, message), Type.Unit0)
+    case GpuBarrierGlobal                  extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuBarrierLocal                   extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuBarrierAll                     extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceGlobal                    extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceLocal                     extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuFenceAll                       extends Spec(Spec.NullaryUnit, List[Term](), Type.Unit0)
+    case GpuGlobalIdx(dim: Term)           extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuGlobalSize(dim: Term)          extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuGroupIdx(dim: Term)            extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuGroupSize(dim: Term)           extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuLocalIdx(dim: Term)            extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuLocalSize(dim: Term)           extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
   }
 
   object Intr {
@@ -458,6 +459,9 @@ object PolyAST {
     inline val BaseFieldPrefix         = "#base"
     inline val EmptyStructStorageField = "#empty_struct_storage"
     inline val KernelBundleType        = "KernelBundle"
+
+    def assertMessageLimit: Int = 1024
+
     object Macros {
       inline val PolyreflectTrackAnnotation     = "polyreflect-track"
       inline val PolyreflectRtProtectAnnotation = "polyreflect-rt-protect"
@@ -497,6 +501,19 @@ object PolyAST {
   }
 
   object Enums {
+
+    private def fourCC(a: Char, b: Char, c: Char, d: Char): Int =
+      (a & 0xff) | ((b & 0xff) << 8) | ((c & 0xff) << 16) | ((d & 0xff) << 24)
+
+    enum AssertCode(val value: Int) extends Variant {
+      def namespace = "invoke"
+      def cppExport = true
+      case Error             extends AssertCode(fourCC('E', 'R', 'R', 'O'))
+      case Assert            extends AssertCode(fourCC('A', 'S', 'R', 'T'))
+      case RecursionLimit    extends AssertCode(fourCC('R', 'L', 'I', 'M'))
+      case Unknown(raw: Int) extends AssertCode(raw)
+    }
+
     case class JavaMirror(pkg: String, name: String)
     trait Variant {
       def value: Int
@@ -604,7 +621,8 @@ object PolyAST {
 
     val All: List[Variant] =
       Backend.values.toList ++ Access.values.toList ++ Target.values.toList ++ OptLevel.values.toList ++
-        Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList
+        Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList ++
+        List(AssertCode.Error, AssertCode.Assert, AssertCode.RecursionLimit)
   }
 
   extension (s: Sym) {
@@ -714,7 +732,7 @@ object PolyAST {
       case Expr.Alias(ref) => ref.repr
       case Expr.SpecOp(op) =>
         op match {
-          case Spec.Assert             => "'assert"
+          case Spec.Assert(code, msg)  => s"'assert(${code.repr}, ${msg.repr})"
           case Spec.GpuBarrierGlobal   => "'gpuBarrierGlobal"
           case Spec.GpuBarrierLocal    => "'gpuBarrierLocal"
           case Spec.GpuBarrierAll      => "'gpuBarrierAll"

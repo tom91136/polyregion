@@ -1708,7 +1708,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                                              {"gpu_barrier_all", spec(0, [&] { return Spec::GpuBarrierAll(); })},
                                                              {"gpu_fence_global", spec(0, [&] { return Spec::GpuFenceGlobal(); })},
                                                              {"gpu_fence_local", spec(0, [&] { return Spec::GpuFenceLocal(); })},
-                                                             {"gpu_fence_all", spec(0, [&] { return Spec::GpuFenceAll(); })}};
+                                                             {"gpu_fence_all", spec(0, [&] { return Spec::GpuFenceAll(); })},
+                                                             {"assert", spec(2, [&] { return Spec::Assert(args[0], args[1]); })}};
 
           return specs                               //
                  ^ get_maybe(builtinName)            //

@@ -29,6 +29,8 @@ void __polyregion_builtin_gpu_fence_global(); // NOLINT(*-reserved-identifier)
 void __polyregion_builtin_gpu_fence_local();  // NOLINT(*-reserved-identifier)
 void __polyregion_builtin_gpu_fence_all();    // NOLINT(*-reserved-identifier)
 
+extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message); // NOLINT(*-reserved-identifier)
+
 namespace polyregion::polystl::details {
 
 using polyrt::DebugLevel;
@@ -79,7 +81,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchHostThreaded(b.size(), polyreflectTrackPtr(&kernel), bundle.moduleName);
+        details::dispatchHostThreaded(b.size(), polyreflectTrackPtr(&kernel), bundle.moduleName, bundle.asserts);
         return;
       }
       break;
@@ -114,7 +116,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         const auto grid = (global + blocks - 1) / blocks;
         details::dispatchManaged(grid, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude,
-                                 bundle.postlude);
+                                 bundle.postlude, bundle.asserts);
         return;
       }
       break;
@@ -172,7 +174,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchHostThreaded(groups, polyreflectTrackPtr(&kernel), bundle.moduleName);
+        details::dispatchHostThreaded(groups, polyreflectTrackPtr(&kernel), bundle.moduleName, bundle.asserts);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);
@@ -215,7 +217,8 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         details::dispatchManaged(program_meta::VkWorkgroupSizeXValue, groups, groups * sizeof(T),
-                                 &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude, bundle.postlude);
+                                 &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude, bundle.postlude,
+                                 bundle.asserts);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);

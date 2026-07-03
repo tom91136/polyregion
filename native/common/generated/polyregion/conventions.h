@@ -29,6 +29,7 @@ inline constexpr auto CaptureArg = "#capture";
 inline constexpr auto BaseFieldPrefix = "#base";
 inline constexpr auto EmptyStructStorageField = "#empty_struct_storage";
 inline constexpr auto KernelBundleType = "KernelBundle";
+inline constexpr auto AssertMessageLimit = 1024;
 
 namespace reflect {
 inline constexpr auto MirrorBitcodeGlobal = "polyregion_mirror_bc";

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
+#include <string>
 
 #include "polyinvoke/runtime.h"
 
@@ -28,10 +30,19 @@ POLYREGION_RT_PROTECT const polyregion::runtime::KernelBundle &__polyregion_offl
 }
 namespace polyregion::polystl::details {
 
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void dispatchHostThreaded(size_t global, void *functorData, const char *moduleId);
+struct AssertRecord {
+  bool raised;
+  uint32_t code;
+  std::string message;
+  bool truncated;
+};
+
+POLYREGION_RT_PROTECT POLYREGION_EXPORT AssertRecord lastAssert();
+
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void dispatchHostThreaded(size_t global, void *functorData, const char *moduleId, bool asserts);
 
 // XXX prelude/postlude have no defaults: a call site omitting them would silently degrade to the SMA walk
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void dispatchManaged(size_t global, size_t local, size_t localMemBytes,
                                                              const runtime::TypeLayout *layout, void *functorData, const char *moduleId,
-                                                             runtime::PreludeFn prelude, runtime::PostludeFn postlude);
+                                                             runtime::PreludeFn prelude, runtime::PostludeFn postlude, bool asserts);
 } // namespace polyregion::polystl::details

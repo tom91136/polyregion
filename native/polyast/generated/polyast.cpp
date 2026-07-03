@@ -1189,16 +1189,25 @@ Type::Any Spec::Any::tpe() const { return _v->tpe; }
 bool Spec::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
 bool Spec::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
 
-Spec::Assert::Assert() noexcept : Spec::Base({Overload({}, Type::Unit0())}, {}, Type::Nothing()) {}
+Spec::Assert::Assert(Term::Any code, Term::Any message) noexcept
+    : Spec::Base({Overload({Type::IntU32(), Type::Ptr(Type::IntS8(), TypeSpace::Constant())}, Type::Unit0())}, {code, message},
+                 Type::Unit0()),
+      code(std::move(code)), message(std::move(message)) {}
 uint32_t Spec::Assert::id() const { return variant_id; };
 size_t Spec::Assert::hash_code() const {
   size_t seed = variant_id;
+  seed ^= std::hash<decltype(code)>()(code) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(message)>()(message) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-POLYREGION_EXPORT bool Spec::Assert::operator==(const Spec::Assert &rhs) const { return true; }
+Spec::Assert Spec::Assert::withCode(const Term::Any &v_) const { return Spec::Assert(v_, message); }
+Spec::Assert Spec::Assert::withMessage(const Term::Any &v_) const { return Spec::Assert(code, v_); }
+POLYREGION_EXPORT bool Spec::Assert::operator==(const Spec::Assert &rhs) const {
+  return (this->code == rhs.code) && (this->message == rhs.message);
+}
 POLYREGION_EXPORT bool Spec::Assert::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
-  return true;
+  return this->operator==(static_cast<const Spec::Assert &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::Assert::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Assert>(*this)); }
 Spec::Any Spec::Assert::widen() const { return Any(*this); };

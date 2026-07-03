@@ -42,7 +42,8 @@ object PassRegistry {
     PassDef.singleton(ArenaLower),
     PassDef.singleton(ArenaView),
     PassDef.singleton(RegionRespace),
-    PassDef.configured(Mirror())
+    PassDef.configured(Mirror()),
+    PassDef.singleton(StructuredExit)
   )
 
   private val byName = definitions.map(d => d.name -> d).toMap

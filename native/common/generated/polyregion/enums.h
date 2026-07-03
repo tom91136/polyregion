@@ -25,6 +25,12 @@ enum class Access : uint8_t {
   WO = 3,
 };
 
+enum class POLYREGION_EXPORT AssertCode : uint32_t {
+  Error = 1330795077,
+  Assert = 1414681409,
+  RecursionLimit = 1296649298,
+};
+
 } // namespace polyregion::invoke
 
 namespace polyregion::compiletime {

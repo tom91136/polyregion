@@ -383,15 +383,17 @@ struct Target {
   llvm::Value *unitInBytes;
 };
 
+static llvm::Instruction *laterInsertPoint(llvm::Instruction *a, llvm::Instruction *b, const llvm::DominatorTree &DT) {
+  if (a->getParent() == b->getParent()) return !a->comesBefore(b) ? a : b;
+  if (DT.dominates(a, b)) return b;
+  if (DT.dominates(b, a)) return a;
+  return DT.findNearestCommonDominator(a->getParent(), b->getParent())->getTerminator();
+}
+
 struct CoalescedTarget {
   MemAccess::Kind access;
   llvm::Instruction *insertPoint;
   llvm::Value *origin;
-  CoalescedTarget operator+(const CoalescedTarget &that) const {
-    return CoalescedTarget{.access = MemAccess::combine(access, that.access), //
-                           .insertPoint = !insertPoint->comesBefore(that.insertPoint) ? insertPoint : that.insertPoint,
-                           .origin = origin};
-  }
 };
 
 void callMap(llvm::IRBuilder<> &B, llvm::Module &M, llvm::Value *origin, llvm::Value *sizeInBytes, llvm::Value *unitInBytes,
@@ -528,6 +530,7 @@ void insertMapCalls(llvm::Module &M, //
   }
 
   for (auto &[BB, ts] : targets) {
+    auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*BB->getParent());
     std::vector<Target> independent;
     IntervalMap<CoalescedTarget> coalesced;
     for (auto &t : ts) {
@@ -536,7 +539,11 @@ void insertMapCalls(llvm::Module &M, //
       if (const auto constSize = getConstantInt(t.sizeInBytes, M.getDataLayout()); offset != -1 && constSize) {
         coalesced.insert({offset, constSize->getSExtValue()},
                          CoalescedTarget{.access = t.access, .insertPoint = t.insertPoint, .origin = base},
-                         [](const CoalescedTarget &l, const CoalescedTarget &r) { return l + r; });
+                         [&DT](const CoalescedTarget &l, const CoalescedTarget &r) {
+                           return CoalescedTarget{.access = MemAccess::combine(l.access, r.access),
+                                                  .insertPoint = laterInsertPoint(l.insertPoint, r.insertPoint, DT),
+                                                  .origin = l.origin};
+                         });
       } else independent.emplace_back(t);
     }
 

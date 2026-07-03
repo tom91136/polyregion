@@ -10,8 +10,10 @@ void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const
 ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   const auto noop = [&] { return cg.mkTermVal(Term::Unit0Const()); };
   const auto k = [&](const auto &v, uint64_t n) -> ValPtr { return llvm::ConstantInt::get(cg.resolveType(v.tpe), n); };
-  return expr.op.match_total(                                           //
-      [&](const Spec::Assert &) -> ValPtr { return cg.invokeAbort(); }, //
+  return expr.op.match_total( //
+      [&](const Spec::Assert &) -> ValPtr {
+        throw BackendException("assert reached codegen; the StructuredExit pass must run before the backend");
+      },                                                                //
       [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return noop(); }, //
       [&](const Spec::GpuBarrierLocal &) -> ValPtr { return noop(); },  //
       [&](const Spec::GpuBarrierAll &) -> ValPtr { return noop(); },    //

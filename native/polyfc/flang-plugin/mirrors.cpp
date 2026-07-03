@@ -61,11 +61,11 @@ std::array<Type, 6> KernelObjectMirror::types() const {
 KernelBundleMirror::KernelBundleMirror(ModuleOp &M)
     : AggregateMirror(M), //
       moduleName(M), objectCount(M, 64), objects(M), structCount(M, 64), structs(M), interfaceLayoutIdx(M, 64), metadata(M), mirrorId(M),
-      prelude(M), postlude(M) {
+      prelude(M), postlude(M), asserts(M, 8) {
   validateMirrorSize<runtime::KernelBundle>();
 }
 const char *KernelBundleMirror::typeName() const { return polyregion::conventions::KernelBundleType; }
-std::array<Type, 10> KernelBundleMirror::types() const {
+std::array<Type, 11> KernelBundleMirror::types() const {
   return {moduleName.widen(),         //
           objectCount.widen(),        //
           objects.widen(),            //
@@ -75,7 +75,8 @@ std::array<Type, 10> KernelBundleMirror::types() const {
           metadata.widen(),           //
           mirrorId.widen(),           //
           prelude.widen(),            //
-          postlude.widen()};
+          postlude.widen(),           //
+          asserts.widen()};
 }
 FReductionMirror::FReductionMirror(ModuleOp &M) : AggregateMirror(M), kind(M, 8), type(M, 8), dest(M) {
   validateMirrorSize<polydco::FReduction>();
