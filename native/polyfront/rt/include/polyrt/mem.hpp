@@ -290,6 +290,8 @@ public:
     const runtime::TypeLayout *layout;
     bool localModified;
     bool hostReadOnly = false;
+    // the mirror patched a translated device pointer into this alloc; a raw copy-back would clobber it
+    bool hasDevicePtrs = false;
     RangedAllocation remote;
   };
 
@@ -433,7 +435,11 @@ public:
   void mirrorPatch(const uintptr_t remote, const size_t offsetInBytes, const uintptr_t value) {
     // value==0 is a foreign pointee already at a valid device address; leave the copied original
     if (value == 0) return;
-    if (deviceWriteInBounds(remote, offsetInBytes, sizeof(uintptr_t))) remoteWrite(&value, remote, offsetInBytes, sizeof(uintptr_t));
+    if (deviceWriteInBounds(remote, offsetInBytes, sizeof(uintptr_t))) {
+      remoteWrite(&value, remote, offsetInBytes, sizeof(uintptr_t));
+      if (const auto rl = remoteToLocalPtr.find(remote); rl != remoteToLocalPtr.end())
+        if (const auto la = localToRemoteAlloc.find(rl->second.ptr); la != localToRemoteAlloc.end()) la->second.hasDevicePtrs = true;
+    }
   }
 
   template <typename Q> bool pastEndAliasOfDistinct(const void *local, const Q &query) {
@@ -503,9 +509,10 @@ public:
       const auto [alloc, offset] = *query;
       if (alloc->hostReadOnly) return;
       if (!syncVisited.insert(alloc->remote.ptr).second) return;
-      // interior into a structured alloc (an SSO string's _M_p) is restored by the object's own read-back;
-      // raw data (null layout) has none, and MSVC over-aligns big std::vector so its data pointer is interior
-      if (offset != 0 && alloc->layout) return;
+      // skip an interior pointer into an alloc carrying translated device pointers (a mirrored struct, or one
+      // the compile-time mirror patched - an SSO string's _M_p, or an array of them): a raw copy-back clobbers
+      // them. pure raw data has none - MSVC over-aligns big std::vector, so read its interior data pointer back
+      if (offset != 0 && (alloc->layout || alloc->hasDevicePtrs)) return;
       const char *base = static_cast<const char *>(local) - offset;
       remoteRead(const_cast<char *>(base), alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
     }
