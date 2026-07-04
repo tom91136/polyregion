@@ -222,6 +222,27 @@ index 2b73c68d..17a638a3 100644
  typedef unsigned long long CUdeviceptr;
  #else
  typedef unsigned int CUdeviceptr;
+diff --git a/ocelot/include/ocelot/parser/PTXParser.h b/ocelot/include/ocelot/parser/PTXParser.h
+index 1527b55c..8aae0a49 100644
+--- a/ocelot/include/ocelot/parser/PTXParser.h
++++ b/ocelot/include/ocelot/parser/PTXParser.h
+@@ -124,6 +124,7 @@ namespace parser
+ 					unsigned int alignment;
+ 					ir::PTXOperand operand;
+ 					OperandVector operandVector;
++					unsigned int arrayOperandBase;
+ 					ir::PTXStatement statement;
+ 					FunctionPrototype prototype;
+ 					
+@@ -240,6 +241,8 @@ namespace parser
+ 						long long int value, YYLTYPE& location, 
+ 						bool invert );
+ 					void arrayOperand( YYLTYPE& location );
++					void arrayOperandBegin();
++					void arrayOperandFinish( YYLTYPE& location );
+ 					void returnOperand();
+ 					void guard( const std::string& name, YYLTYPE& one, 
+ 						bool invert );
 diff --git a/ocelot/src/api/OcelotConfiguration.cpp b/ocelot/src/api/OcelotConfiguration.cpp
 index 128b774a..ccaafac9 100644
 --- a/ocelot/src/api/OcelotConfiguration.cpp
@@ -565,7 +586,7 @@ index c502f812..8791a9be 100644
  
  
 diff --git a/ocelot/src/parser/PTXParser.cpp b/ocelot/src/parser/PTXParser.cpp
-index 636237be..bcb7969a 100644
+index 636237be..8867d4b1 100644
 --- a/ocelot/src/parser/PTXParser.cpp
 +++ b/ocelot/src/parser/PTXParser.cpp
 @@ -896,12 +896,19 @@ namespace parser
@@ -593,3 +614,68 @@ index 636237be..bcb7969a 100644
  					InitializerSizeMismatch );
  			}
  		}
+@@ -1646,6 +1653,38 @@ namespace parser
+ 		operand.array.clear();
+ 	}
+ 
++	void PTXParser::State::arrayOperandBegin()
++	{
++		arrayOperandBase = operandVector.size();
++	}
++
++	void PTXParser::State::arrayOperandFinish( YYLTYPE& location )
++	{
++		unsigned int count = operandVector.size() - arrayOperandBase;
++
++		if( count != 1 && count != 2 && count != 4 )
++		{
++			throw_exception( toString( location, *this )
++				<< "Vector operand has " << count
++				<< " elements (must be 1, 2, or 4).", InvalidArray );
++		}
++
++		ir::PTXOperand result;
++		result.addressMode = ir::PTXOperand::Register;
++		result.type        = operandVector[ arrayOperandBase ].operand.type;
++		result.vec         = ( count == 4 ) ? ir::PTXOperand::v4
++			: ( count == 2 ) ? ir::PTXOperand::v2 : ir::PTXOperand::v1;
++
++		for( unsigned int i = arrayOperandBase; i < operandVector.size(); ++i )
++		{
++			result.array.push_back( operandVector[ i ].operand );
++		}
++
++		operandVector.erase( operandVector.begin() + arrayOperandBase,
++			operandVector.end() );
++		operandVector.push_back( result );
++	}
++
+ 	void PTXParser::State::returnOperand()
+ 	{
+ 		++returnOperands;
+diff --git a/ocelot/src/parser/ptxgrammar.yy b/ocelot/src/parser/ptxgrammar.yy
+index 32ab8e38..73158a6f 100644
+--- a/ocelot/src/parser/ptxgrammar.yy
++++ b/ocelot/src/parser/ptxgrammar.yy
+@@ -815,11 +815,19 @@ memoryOperand : constantOperand | addressableOperand | offsetAddressableOperand;
+ branchOperand : labelOperand;
+ 
+ arrayOperand : operand;
+-arrayOperand : '{' identifierList '}'
++arrayOperand : '{' arrayOperandBegin arrayOperandList '}'
+ {
+-	state.arrayOperand( @1 );
++	state.arrayOperandFinish( @1 );
+ };
+ 
++arrayOperandBegin : /* empty */
++{
++	state.arrayOperandBegin();
++};
++
++arrayOperandList : operand
++	| arrayOperandList ',' operand;
++
+ guard : TOKEN_PREDICATE_IDENTIFIER
+ {
+ 	state.guard( $<text>1, @1, false );
