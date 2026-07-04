@@ -27,8 +27,8 @@ object StructuredExit extends ProgramPass {
 
   override def phase: p.PassPhase = p.PassPhase.PostMono
 
-  private val AssertedSym  = "#asserted"
-  private val ErrorSym     = "#error"
+  private val AssertedSym  = p.Conventions.AssertedFlag
+  private val ErrorSym     = p.Conventions.ErrorArg
   private val ErrorPtr     = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)
   private val CodeBytes    = 4 // the [code:u32 little-endian] prefix; matches polyrt::assertCodeBytes
   private val MessageLimit = p.Conventions.assertMessageLimit

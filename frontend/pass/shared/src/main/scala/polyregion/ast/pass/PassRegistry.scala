@@ -2,12 +2,12 @@ package polyregion.ast.pass
 
 import polyregion.ast.{Log, PolyAST as p}
 
-case class FullOpt(level: Int = 3) extends ProgramPass derives PassArgCodec {
+case class FullOpt(level: Int = 3, stackDepth: Int = 1024) extends ProgramPass derives PassArgCodec {
   def apply(program: p.Program, log: Log): p.Program =
     run(program, PassContext(log, PassRunner()))
 
   override def run(program: p.Program, ctx: PassContext): p.Program =
-    FullOpt.children(level).foldLeft(program)((acc, pass) => ctx.run(pass, acc))
+    FullOpt.children(level, stackDepth).foldLeft(program)((acc, pass) => ctx.run(pass, acc))
 }
 
 object FullOpt {
@@ -17,11 +17,17 @@ object FullOpt {
   // XXX Intrinsify runs once to recognise direct `intrinsics.X` calls, then again after
   // FnInline so calls revealed by inlining a prism replacement (e.g. `StdLib.math.abs`
   // body is `intrinsics.abs(x)`) also get folded into Intr/Math nodes.
-  def children(level: Int): Vector[ProgramPass] =
+  def children(level: Int, stackDepth: Int): Vector[ProgramPass] =
     if (level <= 0) Vector.empty
     else if (level == 1) baseline
     else
-      Vector(printPass(Intrinsify), printPass(Specialisation), printPass(FnInline), printPass(Intrinsify)) ++ baseline
+      Vector(
+        printPass(Intrinsify),
+        printPass(Specialisation),
+        printPass(RecursionLower(stackDepth)),
+        printPass(FnInline),
+        printPass(Intrinsify)
+      ) ++ baseline
 }
 
 object PassRegistry {
@@ -31,6 +37,7 @@ object PassRegistry {
     PassDef.singleton(DeadArgElimination),
     PassDef.singleton(DeadStructElimination),
     PassDef.singleton(FnInline),
+    PassDef.configured(RecursionLower()),
     PassDef.singleton(Intrinsify),
     PassDef.singleton(MonoStruct),
     PassDef.configured(Anchor()),

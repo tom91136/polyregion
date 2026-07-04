@@ -217,6 +217,7 @@ struct StdParOptions {
   MemKind mem = MemKind::Reflect;
   LinkKind rt = LinkKind::Static;
   LinkKind jit = LinkKind::Disabled;
+  std::optional<int> stackDepth = {};
 
   static std::variant<std::vector<std::string>, std::optional<StdParOptions>> parse(CliArgs &args) {
     const std::string fStdParFlag = "-fstdpar";
@@ -226,6 +227,7 @@ struct StdParOptions {
     const std::string fStdParMemFlag = "-fstdpar-mem";
     const std::string fStdParRtFlag = "-fstdpar-rt";
     const std::string fStdParJitFlag = "-fstdpar-jit";
+    const std::string fStdParStackFlag = "-fstdpar-stack";
 
     auto fStdPar = false, fStdParDependents = false;
     StdParOptions options;
@@ -259,6 +261,11 @@ struct StdParOptions {
     if (auto jit = args.popValue(fStdParJitFlag)) {
       fStdParDependents = true;
       parseLinkKind(*jit) ^ foreach_total(markError(fStdParJitFlag), [&](const LinkKind &x) { options.jit = x; });
+    }
+    if (auto stack = args.popValue(fStdParStackFlag)) {
+      fStdParDependents = true;
+      if (auto n = parsePositiveInt(*stack)) options.stackDepth = *n;
+      else markError(fStdParStackFlag)("expected a positive integer, got: " + *stack);
     }
 
     if (!fStdPar && fStdParDependents)

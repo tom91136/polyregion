@@ -232,6 +232,26 @@ def vlet(name: String, tpe: p.Type, e: p.Expr): (p.Named, p.Stmt) = {
   val n = p.Named(name, tpe); (n, p.Stmt.Var(n, Some(e), isMutable = false))
 }
 
+def defaultTerm(t: p.Type): p.Term = t match {
+  case Type.Float16     => p.Term.Float16Const(0f)
+  case Type.Float32     => p.Term.Float32Const(0f)
+  case Type.Float64     => p.Term.Float64Const(0d)
+  case Type.IntU8       => p.Term.IntU8Const(0)
+  case Type.IntU16      => p.Term.IntU16Const(0)
+  case Type.IntU32      => p.Term.IntU32Const(0)
+  case Type.IntU64      => p.Term.IntU64Const(0)
+  case Type.IntS8       => p.Term.IntS8Const(0)
+  case Type.IntS16      => p.Term.IntS16Const(0)
+  case Type.IntS32      => p.Term.IntS32Const(0)
+  case Type.IntS64      => p.Term.IntS64Const(0)
+  case Type.Bool1       => p.Term.Bool1Const(false)
+  case Type.Unit0       => p.Term.Unit0Const
+  case p.Type.Ptr(c, s) => p.Term.NullPtrConst(c, s, p.Region.Opaque)
+  case other            => p.Term.Poison(other)
+}
+
+def defaultExpr(t: p.Type): p.Expr = p.Expr.Alias(defaultTerm(t))
+
 def typedCapture(capture: p.Named, ptr: p.Type): (p.Named, p.Stmt) = vlet("typed", ptr, p.Expr.Cast(sel(capture), ptr))
 
 def mapStmtsRec(stmts: List[p.Stmt])(leaf: p.Stmt => List[p.Stmt]): List[p.Stmt] = stmts.flatMap {

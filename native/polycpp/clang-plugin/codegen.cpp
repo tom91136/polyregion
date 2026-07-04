@@ -83,19 +83,25 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
          moduleId, C.getTypeSize(C.getCanonicalTagType(parent)), repr(program));
   }
 
-  auto objects = opts.targets                                                                                //
-                 | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
-                 | collect([&](auto &target, auto &features) {
-                     return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target)) ^
-                            fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
-                                       [&](const std::string &err) -> std::optional<CompileResult> {
-                                         emit(diag, clang::DiagnosticsEngine::Level::Warning,
-                                              POLYREGION_DIAG_POLYSTL "Frontend failed to compile program [%0, target=%1, features=%2]\n%3",
-                                              moduleId, std::string(magic_enum::enum_name(target)), features, err);
-                                         return std::nullopt;
-                                       }) ^
-                            map([&](auto &x) { return std::tuple{target, features, x}; });
-                   }) //
+  const auto compiled =
+      opts.targets                                                                                //
+      | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
+      | collect([&](auto &target, auto &features) {
+          return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target, opts.stackDepth)) ^
+                 fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
+                            [&](const std::string &err) -> std::optional<CompileResult> {
+                              emit(diag, clang::DiagnosticsEngine::Level::Warning,
+                                   POLYREGION_DIAG_POLYSTL "Frontend failed to compile program [%0, target=%1, features=%2]\n%3", moduleId,
+                                   std::string(magic_enum::enum_name(target)), features, err);
+                              return std::nullopt;
+                            }) ^
+                 map([&](auto &x) { return std::tuple{target, features, x}; });
+        }) //
+      | to_vector();
+
+  const bool asserts = compiled ^ exists([](auto &, auto &, auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
+
+  auto objects = compiled //
                  | collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
                      emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
                           POLYREGION_DIAG_POLYSTL "Compilation events for [%0, target=%1, features=%2]\n%3", moduleId,
@@ -152,7 +158,6 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   if (mir.error)
     emit(diag, loc, clang::DiagnosticsEngine::Level::Warning, POLYREGION_DIAG_POLYSTL "Host mirroring compile failed [%0]: %1", moduleId,
          *mir.error);
-  const bool asserts = !program.template collect_all<polyast::Spec::Assert>().empty();
   return polyfront::KernelBundle{moduleId,    objects,      layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
                                  mir.bitcode, mir.mirrorId, asserts};
 }

@@ -935,6 +935,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
           features,
           {cltpEvent, {compiler::nowMs(), compiler::elapsedNs(start), fmt::format("polyast_to_{}_c", dialectName), code, {}}},
           {},
-          ""};
+          "",
+          {}};
 }
 std::vector<StructLayout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs) { return std::vector<StructLayout>(); }

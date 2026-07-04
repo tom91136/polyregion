@@ -196,6 +196,9 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
   auto tpe = select.root.tpe;
   auto root = gen.findStackVar(select.root);
 
+  // an inline Arr local sits behind a ref-ptr slot (see Stmt::Var); load it before indexing (SPIR-V doesn't)
+  if (auto arr = tpe.template get<Type::Arr>(); arr && !C.isSpirv()) root = C.load(B, root, B.getPtrTy(C.addressSpace(arr->space)));
+
   llvm::SmallVector<llvm::Value *, 8> idxs;
   llvm::Type *gepBaseTy = nullptr;
   auto flush = [&]() {
@@ -331,8 +334,8 @@ struct LogicalPointerModel final : VulkanLowering {
 
 } // namespace
 
-static bool isUnsigned(const Type::Any &tpe) { // the only unsigned type in PolyAst
-  return tpe.is<Type::IntU8>() || tpe.is<Type::IntU16>() || tpe.is<Type::IntU32>() || tpe.is<Type::IntU64>();
+static bool isUnsigned(const Type::Any &tpe) { // unsigned types in PolyAst; a bool is 0/1, so it zero-extends
+  return tpe.is<Type::IntU8>() || tpe.is<Type::IntU16>() || tpe.is<Type::IntU32>() || tpe.is<Type::IntU64>() || tpe.is<Type::Bool1>();
 }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
@@ -1215,7 +1218,8 @@ CompileResult LLVMBackend::compileProgram(const Program &program, const compilet
             {},               //
             {ast2IR, astOpt}, //
             {},               //
-            errors ^ mk_string("\n")};
+            errors ^ mk_string("\n"),
+            {}};
   }
 
   auto c = compileModule(options.targetInfo(), opt, /*emitDisassembly*/ true, cg.M, options.emitBitcode);

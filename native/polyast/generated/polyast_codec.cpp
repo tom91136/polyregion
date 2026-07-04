@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "365bea66bffcc049526c86dd6167c20d";
+constexpr auto AdtHash = "aad57f276711052c9bec2115fceaea45";
 
 namespace {
 
@@ -2721,7 +2721,11 @@ CompileResult compileresult_from_json(const json &j_) {
     layouts.emplace_back(structlayout_from_json(v_));
   }
   auto messages = j_.at(4).get<std::string>();
-  return {binary, features, events, layouts, messages};
+  std::vector<Named> entryArgs;
+  for (const auto &v_ : j_.at(5)) {
+    entryArgs.emplace_back(named_from_json(v_));
+  }
+  return {binary, features, events, layouts, messages, entryArgs};
 }
 
 json compileresult_to_json(const CompileResult &x_) {
@@ -2736,7 +2740,11 @@ json compileresult_to_json(const CompileResult &x_) {
     layouts.emplace_back(structlayout_to_json(v_));
   }
   auto messages = x_.messages;
-  return json::array({binary, features, events, layouts, messages});
+  std::vector<json> entryArgs;
+  for (const auto &v_ : x_.entryArgs) {
+    entryArgs.emplace_back(named_to_json(v_));
+  }
+  return json::array({binary, features, events, layouts, messages, entryArgs});
 }
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
@@ -8437,7 +8445,7 @@ void passrunresult_to_msgpack(MsgpackWriter &w_, const PassRunResult &x_) {
 }
 
 CompileResult compileresult_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 5) throw std::runtime_error("Expected CompileResult with 5 field(s)");
+  if (n_ != 6) throw std::runtime_error("Expected CompileResult with 6 field(s)");
   std::optional<std::vector<int8_t>> binary;
   if (!r_.tryReadNil()) {
     std::vector<int8_t> binary_value;
@@ -8479,7 +8487,16 @@ CompileResult compileresult_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
     }
   }
   auto messages = r_.readString();
-  return {binary, features, events, layouts, messages};
+  std::vector<Named> entryArgs;
+  {
+    auto entryArgs_size = r_.readArrayHeader();
+    entryArgs.reserve(entryArgs_size);
+    for (size_t entryArgs_idx = 0; entryArgs_idx < entryArgs_size; ++entryArgs_idx) {
+      auto entryArgs_elem = named_from_msgpack(r_);
+      entryArgs.emplace_back(std::move(entryArgs_elem));
+    }
+  }
+  return {binary, features, events, layouts, messages, entryArgs};
 }
 
 void compileresult_fields_to_msgpack(MsgpackWriter &w_, const CompileResult &x_) {
@@ -8504,6 +8521,10 @@ void compileresult_fields_to_msgpack(MsgpackWriter &w_, const CompileResult &x_)
     structlayout_to_msgpack(w_, v0_);
   }
   w_.writeString(x_.messages);
+  w_.writeArrayHeader(x_.entryArgs.size());
+  for (const auto &v0_ : x_.entryArgs) {
+    named_to_msgpack(w_, v0_);
+  }
 }
 
 CompileResult compileresult_from_msgpack(MsgpackReader &r_) {
@@ -8512,7 +8533,7 @@ CompileResult compileresult_from_msgpack(MsgpackReader &r_) {
 }
 
 void compileresult_to_msgpack(MsgpackWriter &w_, const CompileResult &x_) {
-  w_.writeArrayHeader(5);
+  w_.writeArrayHeader(6);
   compileresult_fields_to_msgpack(w_, x_);
 }
 

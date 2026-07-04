@@ -16,6 +16,7 @@ inline constexpr auto PolycDebugLld = "POLYC_DEBUG_LLD";
 inline constexpr auto PolyfrontExe = "POLYFRONT_EXE";
 inline constexpr auto PolyfrontTargets = "POLYFRONT_TARGETS";
 inline constexpr auto PolyfrontVerbose = "POLYFRONT_VERBOSE";
+inline constexpr auto PolyfrontStackDepth = "POLYFRONT_STACK_DEPTH";
 
 inline constexpr auto PolycppDriver = "POLYCPP_DRIVER";
 inline constexpr auto PolycppLinkThreads = "POLYCPP_LINK_THREADS";

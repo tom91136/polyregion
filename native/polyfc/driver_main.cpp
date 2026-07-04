@@ -98,6 +98,7 @@ int main(int argc, const char *argv[]) {
                    envs.emplace_back(PolyfrontExe, execPath);
                    envs.emplace_back(PolyfrontVerbose, debug ? "1" : "0");
                    envs.emplace_back(PolyfrontTargets, opts->targets);
+                   if (opts->stackDepth) envs.emplace_back(PolyfrontStackDepth, std::to_string(*opts->stackDepth));
                  }
 
                  const auto compileOnly =

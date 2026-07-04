@@ -409,6 +409,8 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
   );
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
+  // use the defining decl: a fwd decl (for mutual recursion) has its own ParmVarDecls, so sig and body disagree
+  if (const auto def = decl->getDefinition()) decl = def;
   const auto l = getLocation(decl->getLocation(), context);
   auto name = fmt::format("{}_{}_{}_{}_{:x}", l.filename, l.line, l.col, decl->getQualifiedNameAsString(), decl->getID());
   if (auto fn = r.functions ^ get_maybe(name)) return {name, *fn};
@@ -456,6 +458,12 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     }
     r.push(Stmt::Return(Expr::IntrOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
   };
+
+  // stub before lowering the body so a recursive call resolves here, not into endless plugin recursion
+  auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args),
+                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnType, Vector<Stmt::Any>{}, FunctionVisibility::Internal(),
+                                       FunctionFpMode::Relaxed(), false, FunctionAffinity::Offload());
+  r.functions.emplace(name, fn);
 
   auto fnBody = r.scoped(
       [&](auto &r) {
@@ -628,10 +636,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
   }
 
-  auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args),
-                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body, FunctionVisibility::Internal(),
-                                       FunctionFpMode::Relaxed(), false, FunctionAffinity::Offload());
-  r.functions.emplace(name, fn);
+  fn->body = body;
   return {name, fn};
 }
 
@@ -1882,7 +1887,10 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         r.push(condStmts0);
         whileLoop(condTerm0.tpe(), condTerm0, stmt->getBody(), nullptr, evalCond);
       },
-      [&](const clang::ReturnStmt *stmt) { r.push(Stmt::Return(conform(r, handleExpr(stmt->getRetValue(), r), r.rtnType))); },
+      [&](const clang::ReturnStmt *stmt) {
+        if (const auto rv = stmt->getRetValue()) r.push(Stmt::Return(conform(r, handleExpr(rv, r), r.rtnType)));
+        else r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+      },
       [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
       [&](const clang::NullStmt *stmt) {},
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)

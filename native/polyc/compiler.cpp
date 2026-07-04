@@ -287,12 +287,13 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   if (options.hostMirroring) {
     auto hostFns = (std::vector<polyast::Function>{effective.entry} ^ concat(effective.functions)) //
                    ^ filter([](auto &f) { return f.affinity.template is<polyast::FunctionAffinity::Host>(); });
-    if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions"};
+    if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions", {}};
     effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
                                  effective.phase, effective.metadata);
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
+  c.entryArgs = effective.entry.args ^ map([](auto &a) { return a.named; });
   c.events ^= concat(preEvents);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;

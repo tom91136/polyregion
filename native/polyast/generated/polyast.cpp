@@ -3405,9 +3405,9 @@ POLYREGION_EXPORT bool PassRunResult::operator==(const PassRunResult &rhs) const
 }
 
 CompileResult::CompileResult(std::optional<std::vector<int8_t>> binary, std::vector<std::string> features, std::vector<CompileEvent> events,
-                             std::vector<StructLayout> layouts, std::string messages) noexcept
+                             std::vector<StructLayout> layouts, std::string messages, std::vector<Named> entryArgs) noexcept
     : binary(std::move(binary)), features(std::move(features)), events(std::move(events)), layouts(std::move(layouts)),
-      messages(std::move(messages)) {}
+      messages(std::move(messages)), entryArgs(std::move(entryArgs)) {}
 size_t CompileResult::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(binary)>()(binary) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -3415,25 +3415,31 @@ size_t CompileResult::hash_code() const {
   seed ^= std::hash<decltype(events)>()(events) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(layouts)>()(layouts) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(messages)>()(messages) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(entryArgs)>()(entryArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 CompileResult CompileResult::withBinary(const std::optional<std::vector<int8_t>> &v_) const {
-  return CompileResult(v_, features, events, layouts, messages);
+  return CompileResult(v_, features, events, layouts, messages, entryArgs);
 }
 CompileResult CompileResult::withFeatures(const std::vector<std::string> &v_) const {
-  return CompileResult(binary, v_, events, layouts, messages);
+  return CompileResult(binary, v_, events, layouts, messages, entryArgs);
 }
 CompileResult CompileResult::withEvents(const std::vector<CompileEvent> &v_) const {
-  return CompileResult(binary, features, v_, layouts, messages);
+  return CompileResult(binary, features, v_, layouts, messages, entryArgs);
 }
 CompileResult CompileResult::withLayouts(const std::vector<StructLayout> &v_) const {
-  return CompileResult(binary, features, events, v_, messages);
+  return CompileResult(binary, features, events, v_, messages, entryArgs);
 }
-CompileResult CompileResult::withMessages(const std::string &v_) const { return CompileResult(binary, features, events, layouts, v_); }
+CompileResult CompileResult::withMessages(const std::string &v_) const {
+  return CompileResult(binary, features, events, layouts, v_, entryArgs);
+}
+CompileResult CompileResult::withEntryArgs(const std::vector<Named> &v_) const {
+  return CompileResult(binary, features, events, layouts, messages, v_);
+}
 POLYREGION_EXPORT bool CompileResult::operator!=(const CompileResult &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileResult::operator==(const CompileResult &rhs) const {
   return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts) &&
-         (messages == rhs.messages);
+         (messages == rhs.messages) && (entryArgs == rhs.entryArgs);
 }
 
 } // namespace polyregion::polyast

@@ -2,6 +2,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
@@ -39,6 +40,9 @@ struct Remapper {
 
   std::vector<polyast::Stmt::Any> stmts;
   std::vector<polyast::Function> functions;
+  // user procedures translated to polyast (recursive callees survive as fir.call -> Invoke); by mangled name
+  std::unordered_map<std::string, polyast::Function> userFuncs;
+  void handleFunc(mlir::func::FuncOp funcOp);
   polyast::Term::Select newVar(const std::variant<polyast::Expr::Any, polyast::Type::Any> &expr);
 
   Remapper(mlir::ModuleOp &M, mlir::DataLayout &L, mlir::Operation *perimeter, const std::vector<polyast::Named> &captureRoot);

@@ -7335,12 +7335,14 @@ struct POLYREGION_EXPORT CompileResult {
   std::vector<CompileEvent> events;
   std::vector<StructLayout> layouts;
   std::string messages;
+  std::vector<Named> entryArgs;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT CompileResult withBinary(const std::optional<std::vector<int8_t>> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileResult withFeatures(const std::vector<std::string> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileResult withEvents(const std::vector<CompileEvent> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileResult withLayouts(const std::vector<StructLayout> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileResult withMessages(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT CompileResult withEntryArgs(const std::vector<Named> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, CompileResult>) {
@@ -7352,6 +7354,9 @@ struct POLYREGION_EXPORT CompileResult {
       (*it).collect_where<T, U>(results_, f);
     }
     for (auto it = layouts.begin(); it != layouts.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = entryArgs.begin(); it != entryArgs.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
   }
@@ -7376,12 +7381,16 @@ struct POLYREGION_EXPORT CompileResult {
     for (auto it = layouts.begin(); it != layouts.end(); ++it) {
       layouts__.emplace_back((*it).modify_all<T>(f));
     }
-    return CompileResult(binary, features, events__, layouts__, messages);
+    std::vector<Named> entryArgs__;
+    for (auto it = entryArgs.begin(); it != entryArgs.end(); ++it) {
+      entryArgs__.emplace_back((*it).modify_all<T>(f));
+    }
+    return CompileResult(binary, features, events__, layouts__, messages, entryArgs__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const CompileResult &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const CompileResult &) const;
   CompileResult(std::optional<std::vector<int8_t>> binary, std::vector<std::string> features, std::vector<CompileEvent> events,
-                std::vector<StructLayout> layouts, std::string messages) noexcept;
+                std::vector<StructLayout> layouts, std::string messages, std::vector<Named> entryArgs) noexcept;
 };
 
 } // namespace polyregion::polyast

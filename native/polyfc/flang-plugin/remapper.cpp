@@ -12,6 +12,7 @@
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Optimizer/Support/Utils.h"
 #include "llvm/Support/Casting.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/Math/IR/Math.h"
@@ -458,6 +459,44 @@ polyfc::FExpr polyfc::Remapper::handleValue(const mlir::Value val, const std::op
 template <typename T> struct Bind {
   template <typename... Args> T operator()(Args &&...args) const { return T(std::forward<Args>(args)...); }
 };
+
+// user procedure -> polyast Function; params by value so a recursive frame owns its args, stubbed for self-calls
+void polyfc::Remapper::handleFunc(mlir::func::FuncOp funcOp) {
+  const auto name = funcOp.getSymName().str();
+  if (userFuncs.count(name)) return;
+
+  auto &block = funcOp.getBody().front();
+  std::vector<Arg> args;
+  size_t pi = 0;
+  for (auto blockArg : block.getArguments()) {
+    const Type::Any vtpe = llvm::isa<fir::ReferenceType>(blockArg.getType())
+                               ? handleType(llvm::cast<fir::ReferenceType>(blockArg.getType()).getEleTy())
+                               : handleType(blockArg.getType());
+    const Named p(fmt::format("_fp{}", pi++), vtpe);
+    args.emplace_back(p, std::optional<SourcePosition>{});
+    // witness the block arg as a value-holding var so the body's declare/load chain yields the by-value param
+    valuesLUT.insert({blockArg, FVar{Term::Select(p, {}, vtpe)}});
+  }
+  const Type::Any rtn = funcOp.getNumResults() > 0 ? handleType(funcOp.getResultTypes()[0]) : Type::Unit0().widen();
+
+  const auto mk = [&](const std::vector<Stmt::Any> &body) -> Function {
+    return Function(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{}, std::vector<Arg>{}, rtn, body,
+                    FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false, FunctionAffinity::Offload());
+  };
+  userFuncs.insert_or_assign(name, mk({}));
+
+  auto saved = std::move(stmts);
+  stmts.clear();
+  for (auto &op : block.without_terminator())
+    handleOp(&op);
+  if (auto ret = llvm::dyn_cast<mlir::func::ReturnOp>(block.getTerminator()); ret && ret.getNumOperands() > 0)
+    stmts.emplace_back(Stmt::Return(handleValueAsScalar(ret.getOperand(0))).widen());
+  else stmts.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())).widen());
+  const auto body = std::move(stmts);
+  stmts = std::move(saved);
+
+  userFuncs.insert_or_assign(name, mk(body));
+}
 
 void polyfc::Remapper::handleOp(mlir::Operation *op) {
   const auto witness = [&](auto x, auto expr) -> void { valuesLUT.insert({x, expr}); };
@@ -920,6 +959,19 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
                            Expr::SpecOp(Spec::Assert(Term::IntU32Const(static_cast<int32_t>(invoke::AssertCode::Assert)), message)),
                            /*isMutable*/ false)
                      .widen());
+          } else if (auto funcOp = M.lookupSymbol<mlir::func::FuncOp>(name); funcOp && !funcOp.isExternal()) {
+            // a recursive user call the rewriter left un-inlined -> translate + Invoke, args by value
+            handleFunc(funcOp);
+            const auto &fn = userFuncs.at(name);
+            std::vector<Term::Any> ivArgs;
+            for (const auto arg : args)
+              ivArgs.emplace_back(newVar(handleValueAsScalar(arg)).widen());
+            const auto invoke = Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs, fn.rtn);
+            if (a.getNumResults() > 0) witness(a.getResult(0), Expr::Alias(newVar(invoke.widen())).widen());
+            else
+              stmts.emplace_back(Stmt::Var(Named(fmt::format("_call_{}", reinterpret_cast<uintptr_t>(a.getOperation())), Type::Unit0()),
+                                           std::optional<Expr::Any>{invoke.widen()}, false)
+                                     .widen());
           } else poison0(fmt::format("Unimplemented intrinsic in {}", show(a)));
         } else poison0(fmt::format("Unknown callee in {}", show(a)));
       },
@@ -1327,7 +1379,8 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                              ? forEach(fnName, Capture, params) //
                              : reduce(fnName, Capture, Reduction, params, svrs);
 
-  const Program program(entry, r.functions,
+  const auto allFns = r.functions | concat(r.userFuncs | values()) | to_vector();
+  const Program program(entry, allFns,
                         r.defs                        //
                             | values()                //
                             | concat(r.syntheticDefs) //

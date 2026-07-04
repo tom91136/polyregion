@@ -390,7 +390,8 @@ object PolyAST {
       features: List[String],
       events: List[CompileEvent],
       layouts: List[StructLayout],
-      messages: String
+      messages: String,
+      entryArgs: List[Named] = Nil
   ) derives MsgPack.Codec
 
   object PolyPassAbi {
@@ -456,6 +457,8 @@ object PolyAST {
     inline val EntryName               = "_main"
     inline val ThisReceiver            = "#this"
     inline val CaptureArg              = "#capture"
+    inline val ErrorArg                = "#error"
+    inline val AssertedFlag            = "#asserted"
     inline val BaseFieldPrefix         = "#base"
     inline val EmptyStructStorageField = "#empty_struct_storage"
     inline val KernelBundleType        = "KernelBundle"

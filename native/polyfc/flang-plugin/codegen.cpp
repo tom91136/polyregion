@@ -16,11 +16,12 @@ polyfront::KernelBundle polyfc::compileRegion( //
     clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts, runtime::PlatformKind kind,
     const std::string &moduleId, const Remapper::DoConcurrentRegion &region) {
   using Level = clang::DiagnosticsEngine::Level;
-  const auto objects =
-      opts.targets                                                                                                            //
-      | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; })                                //
-      | collect([&](auto &target, auto &features) {                                                                           //
-          return polyfront::compileProgram(opts, region.program, target, features, polyfront::passes::arenaPassesFor(target)) //
+  const auto compiled =
+      opts.targets                                                                             //
+      | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; }) //
+      | collect([&](auto &target, auto &features) {                                            //
+          return polyfront::compileProgram(opts, region.program, target, features,
+                                           polyfront::passes::arenaPassesFor(target, opts.stackDepth)) //
                  ^ fold_total([&](const polyast::CompileResult &r) -> std::optional<polyast::CompileResult> { return r; },
                               [&](const std::string &err) -> std::optional<polyast::CompileResult> {
                                 emit(diag, Level::Warning, //
@@ -30,6 +31,12 @@ polyfront::KernelBundle polyfc::compileRegion( //
                               }) //
                  ^ map([&](auto &x) { return std::tuple{target, features, x}; });
         }) //
+      | to_vector();
+
+  const bool asserts = compiled ^ exists([](auto &, auto &, auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
+
+  const auto objects =
+      compiled //
       | collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
           auto targetName = std::string(magic_enum::enum_name(target));
           emit(diag, Level::Remark, "%0 " POLYREGION_DIAG_POLYDCO "Compilation events for [%1, target=%2, features=%3]\n%4", //
@@ -77,7 +84,6 @@ polyfront::KernelBundle polyfc::compileRegion( //
   auto mir = polyfront::compileManagedHostMirror(opts, region.program, kind, moduleId);
   if (mir.error)
     emit(diag, Level::Warning, "%0 " POLYREGION_DIAG_POLYDCO "Host mirroring compile failed [%1]: %2", diagLoc, moduleId, *mir.error);
-  const bool asserts = !region.program.template collect_all<polyast::Spec::Assert>().empty();
   return polyfront::KernelBundle{
       moduleId,    objects,      region.layouts, /*readOnlyMembers*/ {}, polyast::program_to_json(region.program).dump(),
       mir.bitcode, mir.mirrorId, asserts};

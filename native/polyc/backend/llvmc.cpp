@@ -844,11 +844,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       auto linkerElapsed = compiler::elapsedNs(linkerStart);
       events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "", std::vector<polyast::CompileEvent>{});
       if (!result) { // linker failed
-        return {{}, {info.cpu.uArch}, events, {}, "Linker did not complete normally: " + err.value_or("(no message reported)")};
+        return {{}, {info.cpu.uArch}, events, {}, "Linker did not complete normally: " + err.value_or("(no message reported)"), {}};
       } else { // linker succeeded, still report any stdout to as message
         auto features = collectPrecisionFeatures(M);
         features.insert(features.begin(), info.cpu.uArch);
-        return {std::vector<int8_t>(result->begin(), result->end()), features, events, {}, err.value_or("")};
+        return {std::vector<int8_t>(result->begin(), result->end()), features, events, {}, err.value_or(""), {}};
       }
     }
     case llvm::Triple::CUDA: {
@@ -867,7 +867,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", ptxStr, std::vector<polyast::CompileEvent>{});
       auto features = collectPrecisionFeatures(M);
       features.insert(features.begin(), info.cpu.uArch);
-      return {std::vector<int8_t>(ptxStr.begin(), ptxStr.end()), features, events, {}, ""};
+      return {std::vector<int8_t>(ptxStr.begin(), ptxStr.end()), features, events, {}, "", {}};
     }
     default: {
       auto features = info.cpu.features ^ split(",");
@@ -885,7 +885,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         events.emplace_back(compiler::nowMs(), compiler::elapsedNs(start), "llvm_to_bc", objectSize(bc),
                             std::vector<polyast::CompileEvent>{});
         features ^= concat(collectPrecisionFeatures(M));
-        return {std::vector<int8_t>(bc.begin(), bc.end()), features, events, {}, ""};
+        return {std::vector<int8_t>(bc.begin(), bc.end()), features, events, {}, "", {}};
       }
 
       auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
@@ -902,7 +902,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
                             std::vector<polyast::CompileEvent>{});
       }
       features ^= concat(collectPrecisionFeatures(M));
-      return {binary, features, events, {}, ""};
+      return {binary, features, events, {}, "", {}};
     }
   }
 }

@@ -15,6 +15,7 @@
 #include "aspartame/all.hpp"
 #include "nlohmann/json.hpp"
 
+#include "polyregion/conventions.h"
 #include "polyregion/mirror_names.h"
 #include "polyregion/types.h"
 
@@ -33,6 +34,10 @@ template <> struct std::hash<std::pair<polyregion::compiletime::Target, std::str
 namespace polyregion::polyfront {
 
 using namespace aspartame;
+
+inline bool entryNeedsErrorBuffer(const polyast::CompileResult &r) {
+  return r.entryArgs ^ exists([](auto &n) { return n.symbol == conventions::ErrorArg; });
+}
 
 struct KernelObject {
   runtime::ModuleFormat format{};
@@ -58,14 +63,21 @@ struct Options {
   bool verbose = false;
   std::string executable;
   std::vector<Target> targets;
+  std::optional<int> stackDepth = {};
 
-  static std::variant<std::vector<std::string>, Options>
-  parseArgs(std::optional<std::string> maybeExe, std::optional<std::string> maybeVerbose, std::optional<std::string> maybeTargets) {
+  static std::variant<std::vector<std::string>, Options> parseArgs(std::optional<std::string> maybeExe,
+                                                                   std::optional<std::string> maybeVerbose,
+                                                                   std::optional<std::string> maybeTargets,
+                                                                   std::optional<std::string> maybeStackDepth = {}) {
     Options opts;
     std::vector<std::string> errors;
     if (auto verbose = maybeVerbose) opts.verbose = *verbose == "1";
     if (auto exe = maybeExe) opts.executable = *exe;
     else errors.emplace_back("exe argument missing");
+    if (auto depth = maybeStackDepth) {
+      if (auto n = parsePositiveInt(*depth)) opts.stackDepth = *n;
+      else errors.emplace_back("invalid stack depth: " + *depth);
+    }
     if (auto targets = maybeTargets) {
       for (auto &rawEntry : *targets ^ split(';')) {
         const auto bang = rawEntry.find('!');
@@ -94,7 +106,8 @@ struct Options {
                return {};
              });
     };
-    return parseArgs(parseSuffix(PolyfrontExe), parseSuffix(PolyfrontVerbose), parseSuffix(PolyfrontTargets));
+    return parseArgs(parseSuffix(PolyfrontExe), parseSuffix(PolyfrontVerbose), parseSuffix(PolyfrontTargets),
+                     parseSuffix(PolyfrontStackDepth));
   }
 
   static std::variant<std::vector<std::string>, Options> parseArgsFromEnv() {
@@ -102,7 +115,7 @@ struct Options {
       if (auto env = std::getenv(key)) return env;
       else return {};
     };
-    return parseArgs(readEnv(PolyfrontExe), readEnv(PolyfrontVerbose), readEnv(PolyfrontTargets));
+    return parseArgs(readEnv(PolyfrontExe), readEnv(PolyfrontVerbose), readEnv(PolyfrontTargets), readEnv(PolyfrontStackDepth));
   }
 };
 

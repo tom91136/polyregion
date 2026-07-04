@@ -647,6 +647,29 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   // callees fall through and stay un-inlined.
   {
     mlir::SymbolTableCollection symTabs;
+    // a recursive callee can't be flattened by one-level splicing; keep it a fir.call so the remapper Invokes it
+    llvm::DenseMap<mlir::func::FuncOp, llvm::SmallVector<mlir::func::FuncOp>> callGraph;
+    m.walk([&](mlir::func::FuncOp f) {
+      f.walk([&](mlir::CallOpInterface c) {
+        if (auto g = mlir::dyn_cast_or_null<mlir::func::FuncOp>(c.resolveCallableInTable(&symTabs))) callGraph[f].push_back(g);
+      });
+    });
+    const auto reachesSelf = [&](mlir::func::FuncOp start) {
+      llvm::DenseSet<mlir::func::FuncOp> seen;
+      llvm::SmallVector<mlir::func::FuncOp> stack(callGraph[start].begin(), callGraph[start].end());
+      while (!stack.empty()) {
+        auto f = stack.pop_back_val();
+        if (f == start) return true;
+        if (!seen.insert(f).second) continue;
+        for (auto g : callGraph[f])
+          stack.push_back(g);
+      }
+      return false;
+    };
+    llvm::DenseSet<mlir::func::FuncOp> recursive;
+    for (auto &[f, _] : callGraph)
+      if (reachesSelf(f)) recursive.insert(f);
+
     llvm::SmallVector<std::pair<mlir::CallOpInterface, mlir::func::FuncOp>> work;
     m.walk([&](fir::DoConcurrentOp doc) {
       doc.walk([&](mlir::CallOpInterface call) {
@@ -655,6 +678,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       });
     });
     for (auto [call, callee] : work) {
+      if (recursive.count(callee)) continue;
       auto &calleeBody = callee.getBody();
       if (calleeBody.empty() || calleeBody.getBlocks().size() != 1) continue;
       OpBuilder builder(call);
