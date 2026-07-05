@@ -114,7 +114,7 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
   Program p(entry, {}, {capDef}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV_GLCompute, ""};
-  opts.pipelineSpec = "FullOpt;Anchor;ArenaView;VerifyAnchors(strict=true)";
+  opts.pipelineSpec = "FullOpt;PartialEval(canonicaliseAddresses=true);ArenaView;VerifyAnchors(strict=true)";
   auto c = polyregion::compiler::compile(p, opts, OptLevel::O3);
   INFO(repr(c));
   CHECK(c.messages == "");

@@ -122,6 +122,13 @@ extension (e: p.Type) {
     case _                                         => false
   }
 
+  def isFractional: Boolean = e.kind == Type.Kind.Fractional
+
+  def isSigned: Boolean = e match {
+    case p.Type.IntS8 | p.Type.IntS16 | p.Type.IntS32 | p.Type.IntS64 => true
+    case _                                                            => false
+  }
+
   // TODO remove
   def monomorphicName: String = e match {
     case p.Type.Struct(sym, args) =>
@@ -266,6 +273,11 @@ def dropAliasDecls(stmts: List[p.Stmt], aliases: Set[String]): List[p.Stmt] = ma
   case p.Stmt.Var(n, _, _) if aliases(n.symbol) => Nil
   case s                                        => List(s)
 }
+
+// every variable a tree reads as the root of a Select (the liveness / referenced-names seed used by
+// dead-binding and dead-argument elimination)
+def selectRoots[A](a: A)(using Traversal[A, p.Term]): Set[p.Named] =
+  a.collectWhere[p.Term] { case p.Term.Select(root, _, _) => root }.toSet
 
 def constIntValue(t: p.Term): Option[Long] = t match {
   case p.Term.IntS64Const(v) => Some(v)

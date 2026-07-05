@@ -808,9 +808,7 @@ object Compiler {
       List[ProgramPass](
         printPass(Intrinsify),
         printPass(Specialisation),
-        ConstantFold,
-        VarReduce,
-        UnitExprElision,
+        PartialEval(),
         DeadArgElimination
       ).map(p => p(_, optPassLog))
     )(unopt)

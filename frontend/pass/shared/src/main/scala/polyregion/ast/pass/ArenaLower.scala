@@ -225,8 +225,8 @@ object ArenaLower extends ProgramPass {
       case p.Expr.ForeignCall(n, args, rtn)      => p.Expr.ForeignCall(n, args.map(rwTerm), rtn)
       case p.Expr.Invoke(n, ts, recv, args, rtn) => p.Expr.Invoke(n, ts, recv.map(rwTerm), args.map(rwTerm), rtn)
       // an arithmetic/spec op can hold an inline deref operand (e.g. `acc + p->value`); route every term
-      // through the arena. there are no IndexDyn steps here (Anchor does not run before ArenaLower) so a
-      // Select carries no nested term and is visited once
+      // through the arena. there are no IndexDyn steps here (address canonicalisation does not run before
+      // ArenaLower) so a Select carries no nested term and is visited once
       case op: p.Expr.IntrOp => op.modifyAll[p.Term](rwTerm)
       case op: p.Expr.MathOp => op.modifyAll[p.Term](rwTerm)
       case op: p.Expr.SpecOp => op.modifyAll[p.Term](rwTerm)

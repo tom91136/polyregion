@@ -143,7 +143,7 @@ class InterpreterSuite extends munit.FunSuite {
     assertEquals(Interpreter.Vm(program(entry(), List(sq))).call("fsq", List(f32 -> V.D(3.0))), V.D(9.0))
   }
 
-  test("ConstantFold preserves semantics (differential)") {
+  test("PartialEval preserves semantics (differential)") {
     val k = fn(
       "k",
       Nil,
@@ -155,7 +155,7 @@ class InterpreterSuite extends munit.FunSuite {
       )
     )
     val in  = program(entry(), List(k))
-    val out = ConstantFold(in, NoopLog)
+    val out = PartialEval()(in, NoopLog)
     assertEquals(Interpreter.Vm(in).call("k", Nil), Interpreter.Vm(out).call("k", Nil))
     assertEquals(Interpreter.Vm(out).call("k", Nil), V.I(20))
   }

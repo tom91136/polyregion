@@ -12,7 +12,7 @@ case class FullOpt(level: Int = 3, stackDepth: Int = 1024) extends ProgramPass d
 
 object FullOpt {
   private val baseline: Vector[ProgramPass] =
-    Vector(ConstantFold, VarReduce, UnitExprElision, EmptyStorageElision, DeadArgElimination)
+    Vector(PartialEval(), DeadArgElimination)
 
   // XXX Intrinsify runs once to recognise direct `intrinsics.X` calls, then again after
   // FnInline so calls revealed by inlining a prism replacement (e.g. `StdLib.math.abs`
@@ -33,18 +33,14 @@ object FullOpt {
 object PassRegistry {
   val definitions: Vector[PassDef] = Vector(
     PassDef.configured(FullOpt()),
-    PassDef.singleton(ConstantFold),
+    PassDef.configured(PartialEval()),
     PassDef.singleton(DeadArgElimination),
     PassDef.singleton(DeadStructElimination),
     PassDef.singleton(FnInline),
     PassDef.configured(RecursionLower()),
     PassDef.singleton(Intrinsify),
     PassDef.singleton(MonoStruct),
-    PassDef.configured(Anchor()),
     PassDef.singleton(Specialisation),
-    PassDef.singleton(UnitExprElision),
-    PassDef.singleton(EmptyStorageElision),
-    PassDef.singleton(VarReduce),
     PassDef.configured(VerifyAnchors()),
     PassDef.singleton(ArenaLower),
     PassDef.singleton(ArenaView),

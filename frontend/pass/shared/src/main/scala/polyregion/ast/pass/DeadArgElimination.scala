@@ -12,7 +12,7 @@ import polyregion.ast.{PolyAST as p, *, given}
 object DeadArgElimination extends ProgramPass {
 
   private def cleanModuleCaptures(f: p.Function): p.Function = {
-    val roots = f.body.flatMap(_.collectWhere[p.Term] { case p.Term.Select(root, _, _) => root }).toSet
+    val roots = selectRoots(f.body)
     f.copy(moduleCaptures = f.moduleCaptures.filter(arg => roots.contains(arg.named)))
   }
 

@@ -24,9 +24,12 @@ inline std::string deviceArena(std::optional<int> stackDepth = {}) {
   return fullOpt(stackDepth) + ";StructuredExit;ArenaLower;VerifyAnchors(strict=true)";
 }
 // VerifyAnchors(strict) after ArenaView asserts every opaque-origin access resolved to an arena view
-// (logical SPIR-V cannot deref a raw pointer) - a missed deref becomes a compile error, not a device fault
+// (logical SPIR-V cannot deref a raw pointer) - a missed deref becomes a compile error, not a device fault.
+// PartialEval(canonicaliseAddresses=true) is the address-canonicalisation-only mode (no fold/DCE) that
+// root-anchors derived-pointer temps; it runs after StructuredExit so the temps that lowering injects are
+// canonicalised too, without disturbing the assert/#error side-channel writes
 inline std::string deviceArenaLogical(std::optional<int> stackDepth = {}) {
-  return fullOpt(stackDepth) + ";StructuredExit;Anchor;ArenaView;RegionRespace;VerifyAnchors(strict=true)";
+  return fullOpt(stackDepth) + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
 }
 
 inline std::string hostMirror(const std::string &mirrorId) { return fmt::format("Mirror(id={})", mirrorId); }
