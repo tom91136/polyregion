@@ -295,6 +295,24 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(returnedTerm(out), Some(deref))
   }
 
+  test("address of a later-mutated root is not address-folded (p keeps its own slot)") {
+    // a is mutated after its address is taken; folding *p to a anyway would erase the last RefTo to a
+    val a     = named("a", p.Type.IntS32)
+    val pp    = named("p", ptrI32)
+    val deref = p.Term.Select(pp, List(p.PathStep.Deref), p.Type.IntS32)
+    val out = pe(
+      List(
+        p.Stmt.Var(pp, Some(addrOf(selectT(a)))),
+        p.Stmt.Mut(selectT(a), p.Expr.Alias(p.Term.IntS32Const(42))),
+        p.Stmt.Return(p.Expr.Alias(deref))
+      ),
+      rtn = p.Type.IntS32,
+      args = List(arg("a", p.Type.IntS32))
+    )
+    // a is mutated after its address is taken -> excluded -> the deref stays a deref of p
+    assertEquals(returnedTerm(out), Some(deref))
+  }
+
   // --- canonicaliseAddresses mode: whole-value (&lvalue) field-alias canonicalisation ---
 
   private def peThenCanonicalise(body: List[p.Stmt], rtn: p.Type, args: List[p.Arg]): (List[p.Stmt], List[p.Stmt]) = {

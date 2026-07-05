@@ -61,9 +61,11 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       // the function; whole-function so forward substitution into loop/branch bodies stays sound
       val addrTaken = addressTakenNames(f)
       val excluded  = mutatedNames(f) ++ addrTaken
+      // addr-bind only cares about a bare re-aim (`a = ...`); a stepped write-through leaves `a`'s slot stable
+      val reassigned = f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(n, Nil, _), _) => n }.toSet
       // fold; reassociate constants across integer +/* chains; CSE identical register-arithmetic; drop
       // dead bindings. reassoc/CSE emit aliases that the next fold iteration copy-propagates and drops.
-      val folded  = f.copy(body = evalStmts(f.body, St.empty, excluded, log)._1)
+      val folded  = f.copy(body = evalStmts(f.body, St.empty, excluded, reassigned, log)._1)
       val reassoc = folded.copy(body = reassocStmts(folded.body, Map.empty)._1)
       val cse     = reassoc.copy(body = cseStmts(reassoc.body, Map.empty, addrTaken)._1)
       cse.copy(body = dropDeadBindings(cse.body, selectRoots(cse.body)))
@@ -80,12 +82,18 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
 
   // fold-left threading the store; once a statement emits an unconditional terminator the rest of the block
   // is unreachable and dropped
-  private def evalStmts(stmts: List[p.Stmt], st0: St, excluded: Set[p.Named], log: Log): (List[p.Stmt], St) = {
+  private def evalStmts(
+      stmts: List[p.Stmt],
+      st0: St,
+      excluded: Set[p.Named],
+      reassigned: Set[p.Named],
+      log: Log
+  ): (List[p.Stmt], St) = {
     @annotation.tailrec
     def loop(rem: List[p.Stmt], acc: List[p.Stmt], st: St): (List[p.Stmt], St) = rem match {
       case Nil => (acc.reverse, st)
       case s :: rest =>
-        val (out, st1) = evalStmt(s, st, excluded, log)
+        val (out, st1) = evalStmt(s, st, excluded, reassigned, log)
         val acc1       = out reverse_::: acc
         if (out.exists(isTerminator)) (acc1.reverse, st1)
         else loop(rest, acc1, st1)
@@ -99,7 +107,13 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     case _                                             => false
   }
 
-  private def evalStmt(s: p.Stmt, st: St, excluded: Set[p.Named], log: Log): (List[p.Stmt], St) = s match {
+  private def evalStmt(
+      s: p.Stmt,
+      st: St,
+      excluded: Set[p.Named],
+      reassigned: Set[p.Named],
+      log: Log
+  ): (List[p.Stmt], St) = s match {
     case p.Stmt.Var(name, None, mut) => (p.Stmt.Var(name, None, mut) :: Nil, st)
     case p.Stmt.Var(name, Some(e), mut) =>
       val folded = evalExpr(e, st)
@@ -113,7 +127,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
             case p.Expr.Alias(sel: p.Term.Select) if !excluded.contains(sel.root) =>
               log.info(s"copy-bind ${name.repr} = ${sel.repr}")
               st.bindVal(name, sel)
-            case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _) =>
+            case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _) if !reassigned.contains(sel.root) =>
               log.info(s"addr-bind ${name.repr} = &${sel.repr}")
               st.bindAddr(name, sel)
             case _ => st
@@ -142,7 +156,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case p.Term.Bool1Const(false) =>
           log.info("while(false) -> drop")
           (Nil, st)
-        case c2 => (p.Stmt.While(c2, evalStmts(body, st, excluded, log)._1) :: Nil, st)
+        case c2 => (p.Stmt.While(c2, evalStmts(body, st, excluded, reassigned, log)._1) :: Nil, st)
       }
 
     case p.Stmt.ForRange(induction, lb, ub, step, body) =>
@@ -157,7 +171,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       if (empty) {
         log.info(s"for(${induction.repr} = ${lb2.repr}; < ${ub2.repr}; += ${step2.repr}) is empty -> drop")
         (Nil, st)
-      } else (p.Stmt.ForRange(induction, lb2, ub2, step2, evalStmts(body, st, excluded, log)._1) :: Nil, st)
+      } else
+        (p.Stmt.ForRange(induction, lb2, ub2, step2, evalStmts(body, st, excluded, reassigned, log)._1) :: Nil, st)
 
     case p.Stmt.Break => (p.Stmt.Break :: Nil, st)
     case p.Stmt.Cont  => (p.Stmt.Cont :: Nil, st)
@@ -166,13 +181,13 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       resolveTerm(cond, st) match {
         case p.Term.Bool1Const(true) =>
           log.info("if(true) { t } else { f } -> t")
-          evalStmts(t, st, excluded, log)
+          evalStmts(t, st, excluded, reassigned, log)
         case p.Term.Bool1Const(false) =>
           log.info("if(false) { t } else { f } -> f")
-          evalStmts(f, st, excluded, log)
+          evalStmts(f, st, excluded, reassigned, log)
         case c2 =>
-          val tS = evalStmts(t, st, excluded, log)._1
-          val fS = evalStmts(f, st, excluded, log)._1
+          val tS = evalStmts(t, st, excluded, reassigned, log)._1
+          val fS = evalStmts(f, st, excluded, reassigned, log)._1
           // identical branches (e.g. both folded to the same value, or both empty) make the guard dead;
           // the guard is a pure Term so it can be dropped
           if (tS == fS) {
@@ -184,7 +199,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     case p.Stmt.Return(value) => (p.Stmt.Return(evalExpr(value, st)) :: Nil, st)
 
     case p.Stmt.Annotated(inner, pos, c) =>
-      val (xs, st2) = evalStmt(inner, st, excluded, log)
+      val (xs, st2) = evalStmt(inner, st, excluded, reassigned, log)
       (xs.map(p.Stmt.Annotated(_, pos, c)), st2)
   }
 
