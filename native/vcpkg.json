@@ -1,7 +1,7 @@
 {
   "name": "polyregion-native",
   "version-string": "1.0.0",
-  "builtin-baseline": "1b2b49a767995a1974d42cde5ae5a04f03cf06d3",
+  "builtin-baseline": "d87340acc46bdeda386037b38aca30136e667e47",
   "dependencies": [
     {
       "name": "nlohmann-json"

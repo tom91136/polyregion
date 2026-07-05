@@ -7,7 +7,7 @@ native_build := env_var_or_default('POLYREGION_NATIVE_BUILD', '')
 arch         := env_var_or_default('POLYREGION_ARCH', env_var_or_default('ARCH', if os() == "windows" { arch() } else { `uname -m` }))
 build_type   := env_var_or_default('BUILD_TYPE', 'Release')
 container    := env_var_or_default('CONTAINER', 'podman')
-sbt          := 'sbt -no-colors'
+sbt          := 'bash ./sbtx -no-colors'
 
 # `just --set dylib OFF build-llvm` builds a static dist (no libLLVM.so / libMLIR.so / libclang-cpp.so).
 dylib := env_var_or_default('POLYREGION_LLVM_DYLIB', 'ON')
@@ -100,12 +100,12 @@ _format mode sbt_task_a sbt_task_b:
         | grep -zvE '^native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)' \
         | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
-    if command -v sbt >/dev/null 2>&1; then
+    if [ -f frontend/sbtx ]; then
         echo "Scala:   sbt {{ sbt_task_a }} {{ sbt_task_b }}"
         (cd frontend && {{ sbt }} {{ sbt_task_a }} {{ sbt_task_b }}) &
         pid_s=$!
     else
-        echo "sbt not found on PATH - skipping Scala format" >&2
+        echo "frontend/sbtx not found - skipping Scala format" >&2
         pid_s=
     fi
     wait $pid_n; rc_n=$?
