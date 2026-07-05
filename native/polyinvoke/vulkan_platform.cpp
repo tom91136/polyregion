@@ -382,6 +382,8 @@ std::vector<std::string> VulkanDevice::features() {
   if (f.shaderInt16) out.emplace_back("int16");
   if (f2.get<vk::PhysicalDeviceShaderFloat16Int8Features>().shaderFloat16) out.emplace_back("fp16");
   out.emplace_back(fmt::format("paging:{}", magic_enum::enum_name(pagingMode())));
+  // XXX lavapipe's unpredicated SIMD-remainder lanes over-read past buffer/arena ends; pad like the OpenCL path (cl_platform.cpp resolveQuirks)
+  if (lavapipe) out.emplace_back(fmt::format("{}:{}", OverReadPadFeature, 4096));
   return out;
 }
 void VulkanDevice::loadModule(const std::string &name, const std::string &image) {
