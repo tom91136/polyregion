@@ -21,10 +21,11 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
   auto &C = M.getContext();
   // XXX getOrInsertFunction: bodies live in polystl-static / polydco-static.
   auto *i8Ty = llvm::Type::getInt8Ty(C);
-  auto *i64Ty = llvm::Type::getInt64Ty(C);
+  // XXX size arg is size_t; track ptr width, else aarch32 mints i64 into i32 sig
+  auto *sizeTy = llvm::Type::getIntNTy(C, M.getDataLayout().getPointerSizeInBits());
   auto *voidTy = llvm::Type::getVoidTy(C);
   auto *ptrTy = llvm::PointerType::get(C, 0);
-  auto *recordTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i8Ty}, false);
+  auto *recordTy = llvm::FunctionType::get(voidTy, {ptrTy, sizeTy, i8Ty}, false);
   auto *releaseTy = llvm::FunctionType::get(voidTy, {ptrTy, i8Ty}, false);
   auto RecordFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_record", recordTy).getCallee());
   auto ReleaseFn = llvm::cast<llvm::Function>(M.getOrInsertFunction("_rt_release", releaseTy).getCallee());
@@ -89,7 +90,8 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
       llvm::IRBuilder B(AI->getNextNode());
       const auto sizeBytes = AI->getAllocationSize(M.getDataLayout()).value_or(llvm::TypeSize::getFixed(0)).getFixedValue();
       if (sizeBytes == 1) B.CreateMemSet(AI, B.getInt8(0), B.getInt64(1), AI->getAlign());
-      const auto Call = B.CreateCall(RecordFn, {AI, B.getInt64(sizeBytes), B.getInt8(to_integral(rt_reflect::Type::StackAlloc))});
+      const auto Call =
+          B.CreateCall(RecordFn, {AI, llvm::ConstantInt::get(sizeTy, sizeBytes), B.getInt8(to_integral(rt_reflect::Type::StackAlloc))});
       if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
     }
     for (llvm::BasicBlock &BB : F) {

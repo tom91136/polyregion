@@ -7,7 +7,7 @@
 
 #pragma region case: uint64_t
 #pragma region using: capture=&,=,value
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_TYPE_DEF=uint64_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%ld" -DCHECK_CAPTURE={capture} -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_TYPE_DEF=uint64_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%llu" -DCHECK_CAPTURE={capture} -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: 42
 

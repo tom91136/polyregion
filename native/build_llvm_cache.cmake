@@ -1,9 +1,19 @@
+# XXX upstream flang refuses 32-bit targets (flang/CMakeLists.txt:73); MLIR follows
+set(POLYREGION_LLVM_HAS_FLANG TRUE)
+if (DEFINED ENV{POLYREGION_ARCH} AND "$ENV{POLYREGION_ARCH}" STREQUAL "arm")
+    set(POLYREGION_LLVM_HAS_FLANG FALSE)
+endif ()
 
 if (UNIX)
-    # flang-rt's CMakeLists calls enable_language(Fortran), so a Fortran compiler must be on
-    # PATH at LLVM-runtimes-configure time. Linux runners get gfortran via apt, macOS via brew
-    # (gcc formula). Windows MSVC has no native gfortran path, so flang-rt is omitted there.
-    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind openmp)
+    # flang-rt calls enable_language(Fortran); Linux gets gfortran via apt, macOS via brew, MSVC skips.
+    # XXX openmp/kmp_platform.h rejects aarch32 without manual LIBOMP_ARCH; skip
+    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi libunwind)
+    if (POLYREGION_LLVM_HAS_FLANG)
+        list(APPEND RUNTIME_COMPONENTS flang-rt)
+    endif ()
+    if (NOT (DEFINED ENV{POLYREGION_ARCH} AND "$ENV{POLYREGION_ARCH}" STREQUAL "arm"))
+        list(APPEND RUNTIME_COMPONENTS openmp)
+    endif ()
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
     # libcxx/libcxxabi/libunwind need a bootstrapping build because cl.exe is unsupported
@@ -49,19 +59,25 @@ endif ()
 
 set(LLVM_TARGETS_TO_BUILD
         AArch64
+        ARM
+        PowerPC
+        RISCV
         X86
         NVPTX
         AMDGPU
         SPIRV
         CACHE STRING "")
 
-set(LLVM_ENABLE_PROJECTS
-        clang
-        clang-tools-extra
-        lld
-        flang
-        CACHE STRING "")
+set(_polyregion_llvm_projects clang clang-tools-extra lld)
+if (POLYREGION_LLVM_HAS_FLANG)
+    list(APPEND _polyregion_llvm_projects flang)
+endif ()
+set(LLVM_ENABLE_PROJECTS ${_polyregion_llvm_projects} CACHE STRING "")
 set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
+
+# XXX libgcc-10 (Ubuntu 20.04) lacks __extendhfsf2; builtins to compiler-rt, unwind stays libgcc for runtimes-group link
+set(CLANG_DEFAULT_RTLIB compiler-rt CACHE STRING "")
+set(CLANG_DEFAULT_UNWINDLIB libgcc CACHE STRING "")
 
 if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
     set(POLYREGION_LLVM_DYLIB OFF)
@@ -198,8 +214,18 @@ if (APPLE)
 
 endif ()
 
+if (POLYREGION_LLVM_HAS_FLANG)
+    set(_polyregion_flang_components flang-libraries flang-headers flang-cmake-exports flang)
+    set(_polyregion_mlir_components mlir-libraries mlir-headers mlir-cmake-exports)
+    set(_polyregion_mlir_dylib MLIR)
+else ()
+    set(_polyregion_flang_components "")
+    set(_polyregion_mlir_components "")
+    set(_polyregion_mlir_dylib "")
+endif ()
+
 if (POLYREGION_LLVM_DYLIB)
-    set(LLVM_DISTRIBUTION_SHARED_LIBS LLVM MLIR clang-cpp)
+    set(LLVM_DISTRIBUTION_SHARED_LIBS LLVM ${_polyregion_mlir_dylib} clang-cpp)
 else ()
     set(LLVM_DISTRIBUTION_SHARED_LIBS "")
 endif ()
@@ -211,23 +237,17 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
         # For ${PROJECT}Exports.cmake so find_package(...) works
         llvm-libraries
         clang-libraries
-        mlir-libraries
-        flang-libraries
         lld-libraries
 
         # Headers
         llvm-headers
         clang-headers
-        mlir-headers
-        flang-headers
         lld-headers
 
         # CMake configs (LLVMConfig.cmake + LLVMExports.cmake etc., per project)
         cmake-exports
         clang-cmake-exports
         lld-cmake-exports
-        mlir-cmake-exports
-        flang-cmake-exports
 
         # Linker
         lld
@@ -277,4 +297,8 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
         llvm-config
 )
 
-set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} flang CACHE STRING "")
+set(LLVM_DISTRIBUTION_COMPONENTS
+        ${LLVM_DISTRIBUTION_COMPONENTS_BASE}
+        ${_polyregion_flang_components}
+        ${_polyregion_mlir_components}
+        CACHE STRING "")

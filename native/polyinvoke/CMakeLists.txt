@@ -132,6 +132,10 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
             ${LLVM_INCLUDE_DIRS}
             ${RUNTIME_INCLUDE_DIRS})
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS} _POSIX_C_SOURCE=200809L)
+    # XXX vulkan-hpp operator <=> assumes 64-bit handles so force equality-only on aarch32
+    if (CMAKE_SIZEOF_VOID_P LESS 8)
+        target_compile_definitions(${TARGET} PRIVATE VULKAN_HPP_NO_SPACESHIP_OPERATOR)
+    endif ()
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_compile_options(${TARGET} PUBLIC ${RUNTIME_COMPILE_OPTIONS})
     target_link_libraries(${TARGET} PUBLIC polycommon ${POLYINVOKE_LIBS} ${RUNTIME_LINK_LIBS})

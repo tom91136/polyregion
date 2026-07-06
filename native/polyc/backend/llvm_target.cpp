@@ -16,7 +16,9 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(
   switch (options.target) {
     case LLVMBackend::Target::x86_64:
     case LLVMBackend::Target::AArch64:
-    case LLVMBackend::Target::ARM: break;
+    case LLVMBackend::Target::ARM:
+    case LLVMBackend::Target::RISCV64:
+    case LLVMBackend::Target::PPC64LE: break;
     // CPUs default to generic, so nothing to do here.
     // For GPUs, any pointer passed in as args should be annotated global AS.
     //             AMDGPU   |   NVVM
@@ -379,6 +381,8 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     case Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
     case Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
     case Target::ARM: return bindCpuArch(Triple::ArchType::arm);
+    case Target::RISCV64: return bindCpuArch(Triple::ArchType::riscv64);
+    case Target::PPC64LE: return bindCpuArch(Triple::ArchType::ppc64le);
     case Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
     case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
     case Target::SPIRV32_Kernel: return bindSpirv(Spirv32KernelTriple);

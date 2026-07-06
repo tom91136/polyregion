@@ -377,6 +377,10 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     // Any other Ptr-to-Ptr coercion is a no-op under opaque pointers; without this, libstdc++'s
     // `__aligned_membuf<T>::_M_addr()` returning storage as `void*` poisons _M_valptr's deref.
     return Expr::Cast(r.newVar(expr), targetTpe);
+  } else if (const auto rhsKind = rhsTpe.kind(), tgtKind = targetTpe.kind();
+             (rhsKind.is<TypeKind::Integral>() || rhsKind.is<TypeKind::Fractional>()) &&
+             (tgtKind.is<TypeKind::Integral>() || tgtKind.is<TypeKind::Fractional>())) {
+    return Expr::Cast(r.newVar(expr), targetTpe);
   } else {
     return Expr::Alias(Term::Poison(targetTpe));
   }

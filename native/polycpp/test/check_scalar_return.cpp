@@ -5,7 +5,7 @@
 #pragma region requires: 42
 
 #pragma region case: uint64_t
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_TYPE_DEF=uint64_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%ld" -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_TYPE_DEF=uint64_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%llu" -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: 42
 

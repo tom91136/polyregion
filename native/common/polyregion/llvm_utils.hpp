@@ -12,6 +12,8 @@
 #include "llvm/TargetParser/AArch64TargetParser.h"
 #include "llvm/TargetParser/ARMTargetParser.h"
 #include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/PPCTargetParser.h"
+#include "llvm/TargetParser/RISCVTargetParser.h"
 #include "llvm/TargetParser/TargetParser.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/TargetParser/X86TargetParser.h"
@@ -25,6 +27,10 @@ static bool isCPUTargetSupported(const std::string &CPU, //
     case Triple::x86_64: return CPU == "native" || (llvm::X86::parseArchX86(CPU) != llvm::X86::CPUKind::CK_None);
     case Triple::arm: return CPU == "native" || llvm::ARM::parseCPUArch(CPU) != llvm::ARM::ArchKind::INVALID;
     case Triple::aarch64: return CPU == "native" || llvm::AArch64::parseCpu(CPU).has_value();
+    case Triple::riscv32: return CPU == "native" || llvm::RISCV::parseCPU(CPU, /*IsRV64=*/false);
+    case Triple::riscv64: return CPU == "native" || llvm::RISCV::parseCPU(CPU, /*IsRV64=*/true);
+    case Triple::ppc64le:
+    case Triple::ppc64: return CPU == "native" || llvm::PPC::isValidCPU(CPU);
     case Triple::amdgcn: return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
     case Triple::nvptx64: return CPU.rfind("sm_", 0) == 0;
 
@@ -81,6 +87,27 @@ static void collectCPUFeatures(const std::string &CPU,             //
       if (auto a = AArch64::getArchForCpu(CPU); a) {
         AArch64::getExtensionFeatures(a->DefaultExts, extensions);
         normaliseFeature(extensions, drain);
+      }
+      break;
+    }
+    case Triple::riscv32:
+    case Triple::riscv64: {
+      if (!RISCV::parseCPU(CPU, arch == Triple::riscv64)) break;
+      SmallVector<std::string> buffer;
+      RISCV::getFeaturesForCPU(CPU, buffer);
+      for (auto &b : buffer)
+        drain.emplace_back(b);
+      break;
+    }
+    case Triple::ppc64le:
+    case Triple::ppc64: {
+      if (!PPC::isValidCPU(CPU)) break;
+      Triple T;
+      T.setArch(arch);
+      if (auto features = PPC::getPPCDefaultTargetFeatures(T, CPU)) {
+        for (auto &kv : *features) {
+          if (kv.second) drain.emplace_back(kv.first().str());
+        }
       }
       break;
     }

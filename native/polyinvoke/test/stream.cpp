@@ -83,10 +83,12 @@ DeviceRunner streamRunner(Type tpe, std::string suffix, T relTolerance, std::vec
 
 const DeviceSkip skipHasSpirvOrNoFp64 = [](Backend b, Device &d) { return skipHasSpirv(b, d) || skipNoFp64(b, d); };
 const DeviceSkip skipNoSpirvOrNoFp64 = [](Backend b, Device &d) { return skipNoSpirv(b, d) || skipNoFp64(b, d); };
-// FIXME NVIDIA's Vulkan driver (595.71.05) SEGFAULTs inside libnvidia-glcore when a
-// shader module is reused across pipelines with different specialization constant values
-const DeviceSkip skipNvidiaVulkan = [](Backend, Device &d) { return d.features() | contains("nvidia"); };
-const DeviceSkip skipNvidiaVulkanOrNoFp64 = [](Backend b, Device &d) { return skipNvidiaVulkan(b, d) || skipNoFp64(b, d); };
+// XXX NVIDIA (libnvidia-glcore) + PowerVR (libVK_IMG) SEGFAULT reusing shader module across pipelines with differing spec-constants
+const DeviceSkip skipBuggySpecReuseVulkan = [](Backend, Device &d) {
+  const auto &fs = d.features();
+  return (fs | contains("nvidia")) || (fs | contains("powervr"));
+};
+const DeviceSkip skipBuggySpecReuseVulkanOrNoFp64 = [](Backend b, Device &d) { return skipBuggySpecReuseVulkan(b, d) || skipNoFp64(b, d); };
 
 const std::vector<size_t> gpuGroups = {32, 64, 128, 256};
 const std::vector<size_t> cpuGroups = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -113,8 +115,8 @@ std::vector<Task> discoverAll() {
       {"stream-opencl-source-double", generated::opencl_source::stream_double, {Backend::OpenCL}, doubleRunner, skipHasSpirvOrNoFp64},
       {"stream-opencl-spirv-float", generated::opencl_spirv::stream_float, {Backend::OpenCL}, floatRunner, skipNoSpirv},
       {"stream-opencl-spirv-double", generated::opencl_spirv::stream_double, {Backend::OpenCL}, doubleRunner, skipNoSpirvOrNoFp64},
-      {"stream-vulkan-float", generated::vulkan::stream, {Backend::Vulkan}, vulkanFloatRunner, skipNvidiaVulkan},
-      {"stream-vulkan-double", generated::vulkan::stream, {Backend::Vulkan}, vulkanDoubleRunner, skipNvidiaVulkanOrNoFp64},
+      {"stream-vulkan-float", generated::vulkan::stream, {Backend::Vulkan}, vulkanFloatRunner, skipBuggySpecReuseVulkan},
+      {"stream-vulkan-double", generated::vulkan::stream, {Backend::Vulkan}, vulkanDoubleRunner, skipBuggySpecReuseVulkanOrNoFp64},
       {"stream-levelzero-float", generated::opencl_spirv::stream_float, {Backend::LevelZero}, floatRunner},
       {"stream-levelzero-double", generated::opencl_spirv::stream_double, {Backend::LevelZero}, doubleRunner, skipNoFp64},
 #endif

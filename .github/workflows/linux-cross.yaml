@@ -1,0 +1,549 @@
+name: Linux cross builds
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  pass-js:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: &checkout actions/checkout@v6
+
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Build pass bundle (js)
+        run: just build-pass-js
+
+      - name: Verify bundle staged
+        run: |
+          test -s native/polyc/polypass.js
+          echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
+      - name: Upload pass bundle
+        if: ${{ !env.ACT }}
+        uses: &upload actions/upload-artifact@v7
+        with:
+          name: polyregion-pass-js
+          path: native/polyc/polypass.js
+          if-no-files-found: error
+
+  build-llvm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include: &cross-matrix
+          - arch: riscv64
+            runs_on: ubuntu-24.04
+            qemu_arch: riscv64
+            cross_triple: riscv64-linux-gnu
+            sysroot_variant: ubuntu20
+            sysroot_dockerfile: Dockerfile.ubuntu
+          - arch: ppc64le
+            runs_on: ubuntu-24.04
+            qemu_arch: ppc64le
+            cross_triple: powerpc64le-linux-gnu
+            sysroot_variant: al8
+            sysroot_dockerfile: Dockerfile
+          - arch: arm
+            runs_on: ubuntu-24.04
+            qemu_arch: arm
+            cross_triple: arm-linux-gnueabihf
+            sysroot_variant: ubuntu20
+            sysroot_dockerfile: Dockerfile.ubuntu
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "4"
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "2"    # XXX 4x lld @ ~4 GB OOMs 16 GB runner
+      POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "2"
+    steps:
+      - &free-disk
+        name: Free up disk space
+        if: ${{ !env.ACT }}
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-dotnet: 'true'
+
+      - uses: *checkout
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang clang-tools lld qemu-user-static binfmt-support
+
+      - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
+        # tonistiigi/binfmt sets F flag; kernel-preloaded QEMU spans containers/mnt ns
+        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+
+      - *setup-just
+
+      - name: Restore sysroot cache
+        if: ${{ !env.ACT }}
+        id: restore-sysroot
+        uses: &cache-restore actions/cache/restore@v5
+        with:
+          path: &sysroot-path ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
+          key: &sysroot-key sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './justfile') }}
+
+      - name: Build sysroot
+        id: build-sysroot
+        if: steps.restore-sysroot.outputs.cache-hit != 'true'
+        env:
+          CONTAINER: docker
+        run: just build-sysroot
+
+      - name: Save sysroot cache
+        if: steps.build-sysroot.outcome == 'success'
+        uses: &cache-save actions/cache/save@v5
+        with:
+          path: *sysroot-path
+          key: *sysroot-key
+
+      - name: Prepare sysroot
+        run: |
+          just prepare-sysroot
+          SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
+          {
+            echo "CMAKE_SYSROOT=$SYSROOT"
+            echo "SYSROOT_PATH=$SYSROOT"
+            echo "QEMU_LD_PREFIX=$SYSROOT"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore LLVM cache
+        if: ${{ !env.ACT }}
+        id: restore-llvm
+        uses: *cache-restore
+        with:
+          path: &llvm-path |
+            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          key: &llvm-key llvm-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Cross-build LLVM (host clang to target, target flang via QEMU-user)
+        id: build-llvm
+        if: steps.restore-llvm.outputs.cache-hit != 'true'
+        env:
+          POLYREGION_CROSS_CLANG: /usr/bin/clang
+          POLYREGION_CROSS_CLANGXX: /usr/bin/clang++
+        run: just build-llvm
+
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: *cache-save
+        with:
+          path: *llvm-path
+          key: *llvm-key
+
+      - name: Verify LLVM dist
+        run: |
+          just check-dist-deps native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          file native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/bin/flang-22
+
+      - name: Pack LLVM dist
+        run: tar cf llvm-dist.tar -C native/out polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Upload LLVM
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-llvm-linux-${{ matrix.arch }}
+          path: llvm-dist.tar
+          compression-level: 0
+          if-no-files-found: error
+
+  build:
+    needs: [pass-js, build-llvm]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *cross-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: &arch-env
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYC_JS_ENGINE: qjs
+      POLYC_PASS_BUNDLE: js
+    steps:
+      - *free-disk
+
+      - uses: *checkout
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang clang-tools lld qemu-user-static binfmt-support
+
+      - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
+        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+
+      - *setup-just
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Restore sysroot cache
+        if: ${{ !env.ACT }}
+        uses: *cache-restore
+        with:
+          path: *sysroot-path
+          key: *sysroot-key
+
+      - name: Prepare sysroot
+        run: |
+          just prepare-sysroot
+          SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
+          {
+            echo "CMAKE_SYSROOT=$SYSROOT"
+            echo "SYSROOT_PATH=$SYSROOT"
+            echo "QEMU_LD_PREFIX=$SYSROOT"
+          } >> "$GITHUB_ENV"
+
+      - name: Download LLVM
+        if: ${{ !env.ACT }}
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-llvm-linux-${{ matrix.arch }}
+          path: .
+
+      - name: Unpack LLVM
+        if: ${{ !env.ACT }}
+        run: |
+          mkdir -p native/out
+          tar xf llvm-dist.tar -C native/out
+
+      - name: Download pass bundle
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-pass-js
+          path: native/polyc
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - name: Restore vcpkg cache
+        if: ${{ !env.ACT }}
+        id: restore-vcpkg
+        uses: *cache-restore
+        with:
+          path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
+          key: &vcpkg-key vcpkg-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/.env') }}
+
+      - name: Install vcpkg deps
+        id: build-vcpkg
+        if: steps.restore-vcpkg.outputs.cache-hit != 'true'
+        run: just build-vcpkg-deps
+
+      - name: Save vcpkg cache
+        if: steps.build-vcpkg.outcome == 'success'
+        uses: *cache-save
+        with:
+          path: *vcpkg-path
+          key: *vcpkg-key
+
+      - name: Configure polyregion
+        run: just configure
+
+      - name: Build polyregion dist
+        run: just build-dist
+
+      - name: Build test dist
+        run: just build-test-dist
+
+      - name: Check artefact
+        if: always()
+        run: just check-dist-deps native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Upload dist
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
+
+      - name: Upload test dist
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/**
+          if-no-files-found: error
+
+      - name: Stage just
+        run: install -D "$(command -v just)" just-dist/just
+
+      - name: Upload just
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: just-linux-${{ matrix.arch }}
+          path: just-dist/just
+          if-no-files-found: error
+
+  test-native-misc:
+    needs: build
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *cross-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *setup-just
+
+      - &apt-qemu
+        name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake qemu-user-static binfmt-support
+
+      - &binfmt-register
+        name: Register binfmt-misc for ${{ matrix.qemu_arch }}
+        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+
+      - &restore-sysroot-cached
+        name: Restore sysroot cache
+        if: ${{ !env.ACT }}
+        uses: *cache-restore
+        with:
+          path: *sysroot-path
+          key: *sysroot-key
+
+      - &prepare-sysroot-env
+        name: Prepare sysroot
+        run: |
+          just prepare-sysroot
+          SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
+          {
+            echo "SYSROOT_PATH=$SYSROOT"
+            echo "POLYREGION_SYSROOT=$SYSROOT"
+            echo "QEMU_LD_PREFIX=$SYSROOT"
+          } >> "$GITHUB_ENV"
+
+      - name: Download dist
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download test dist
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+
+      - &restore-exec
+        name: Restore executable bits
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+
+      - &enable-core-dumps
+        name: Enable core dumps
+        run: |
+          sudo mkdir -p /var/lib/polyregion-cores && sudo chmod 1777 /var/lib/polyregion-cores || true
+          echo '/var/lib/polyregion-cores/core.%e.%p' | sudo tee /proc/sys/kernel/core_pattern || true
+
+      - name: Run misc tests (non-codegen)
+        run: |
+          ulimit -c unlimited || true
+          just test-native-qemu "" misc-test-results -LE codegen --repeat until-pass:3
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
+          label: ctest-misc-${{ matrix.arch }}
+
+      - name: Upload test results
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: misc-test-results-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/misc-test-results.xml
+          if-no-files-found: warn
+
+      - &collect-cores
+        name: Collect crash backtraces
+        if: always()
+        run: |
+          mkdir -p crash-reports
+          shopt -s nullglob
+          cores=(/var/lib/polyregion-cores/core.*)
+          if [ ${#cores[@]} -gt 0 ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq gdb || true
+            for c in "${cores[@]:0:20}"; do
+              gdb -batch -ex 'thread apply all bt' -c "$c" > "crash-reports/$(basename "$c").txt" 2>&1 || true
+            done
+          fi
+          ls -la crash-reports || true
+
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-misc-linux-${{ matrix.arch }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
+
+  test-native-shard:
+    needs: build
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      # XXX host@native only, opencl/spirv shards need target-arch emulators (not cross-built)
+      matrix:
+        include: *cross-matrix
+        shard: [host_40native_21host_40_2a]
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *setup-just
+      - *apt-qemu
+      - *binfmt-register
+      - *restore-sysroot-cached
+      - *prepare-sysroot-env
+
+      - name: Download dist
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Download test dist
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
+
+      - *restore-exec
+      - *enable-core-dumps
+
+      - name: Run codegen shard (${{ matrix.shard }})
+        run: |
+          ulimit -c unlimited || true
+          just test-native-qemu "" shard-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error --repeat until-pass:3
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ matrix.shard }}.xml
+          label: ctest-shard-${{ matrix.arch }}-${{ matrix.shard }}
+
+      - name: Upload test results
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: shard-test-results-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ matrix.shard }}.xml
+          if-no-files-found: warn
+
+      - *collect-cores
+
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-shard-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
+
+  test-native-miniapps:
+    needs: build
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *cross-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYC_JS_ENGINE: qjs
+      POLYC_PASS_BUNDLE: js
+      MINIAPP_BACKENDS: cpu
+      MINIAPP_JOBS: "4"
+    steps:
+      - uses: *checkout
+      - *setup-just
+      - *apt-qemu
+      - *binfmt-register
+      - *restore-sysroot-cached
+      - *prepare-sysroot-env
+
+      - name: Download dist
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - *restore-exec
+      - *enable-core-dumps
+
+      - name: Install driver wrappers
+        run: ci/qemu_shim.sh "${{ matrix.arch }}" "$PWD/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist" "$SYSROOT_PATH"
+
+      - name: Run miniapps
+        env:
+          POLYPASS_PLUGINS: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib/polypass.js
+          POLYREGION_BITCODE_DIR: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+          POLYREGION_SYSROOT: ${{ env.SYSROOT_PATH }}
+        run: |
+          ulimit -c unlimited || true
+          just check-miniapps
+
+      - *collect-cores
+
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-miniapps-linux-${{ matrix.arch }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore

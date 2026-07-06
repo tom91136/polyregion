@@ -34,6 +34,9 @@ endfunction()
 
 _bucket_lines(_l_lin_x86 "${MANIFEST_LIN_X86}")
 _bucket_lines(_l_lin_arm "${MANIFEST_LIN_ARM}")
+_bucket_lines(_l_lin_arm32 "${MANIFEST_LIN_ARM32}")
+_bucket_lines(_l_lin_riscv64 "${MANIFEST_LIN_RISCV64}")
+_bucket_lines(_l_lin_ppc64le "${MANIFEST_LIN_PPC64LE}")
 _bucket_lines(_l_win_x86 "${MANIFEST_WIN_X86}")
 _bucket_lines(_l_win_arm "${MANIFEST_WIN_ARM}")
 _bucket_lines(_l_mac_x86 "${MANIFEST_MAC_X86}")
@@ -55,6 +58,12 @@ ${_l_mac_x86}
 #else
   #if defined(__aarch64__)
 ${_l_lin_arm}
+  #elif defined(__arm__)
+${_l_lin_arm32}
+  #elif defined(__riscv) && (__riscv_xlen == 64)
+${_l_lin_riscv64}
+  #elif defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+${_l_lin_ppc64le}
   #else
 ${_l_lin_x86}
   #endif

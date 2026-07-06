@@ -1,0 +1,31 @@
+ARG SYSBASE=docker.io/riscv64/ubuntu:20.04
+FROM ${SYSBASE} AS staging
+ARG GCC_MAJOR=10
+ARG EXTRA_PKGS
+
+RUN apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libc6-dev libstdc++-${GCC_MAJOR}-dev libatomic1 libgfortran-${GCC_MAJOR}-dev \
+        linux-libc-dev gcc-${GCC_MAJOR} g++-${GCC_MAJOR} gfortran-${GCC_MAJOR} \
+        symlinks \
+        ${EXTRA_PKGS} \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /mnt/sys-root \
+ && cp -a /usr /mnt/sys-root/usr \
+ && (cd /mnt/sys-root && ln -s usr/lib lib) \
+ && rm -rf \
+        /mnt/sys-root/usr/bin /mnt/sys-root/usr/sbin \
+        /mnt/sys-root/usr/lib/apt /mnt/sys-root/usr/lib/dpkg /mnt/sys-root/usr/lib/systemd \
+        /mnt/sys-root/usr/lib/tmpfiles.d /mnt/sys-root/usr/lib/mime \
+        /mnt/sys-root/usr/share
+
+RUN cp /usr/bin/symlinks /mnt/sys-root/tmp-symlinks \
+ && chroot /mnt/sys-root /tmp-symlinks -c -r / >/dev/null \
+ && rm /mnt/sys-root/tmp-symlinks
+
+RUN chmod -R u+rwX /mnt/sys-root
+
+FROM scratch
+COPY --from=staging /mnt/sys-root/ /
+# XXX Dummy CMD so `create` accepts the image; we only export its filesystem.
+CMD ["/notused"]

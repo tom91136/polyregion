@@ -2,7 +2,15 @@
 
 #include <cmath>
 #include <functional>
-#include <source_location>
+// XXX gcc-10 (Ubuntu 20.04) ships source_location as experimental only
+#if __has_include(<source_location>)
+  #include <source_location>
+#else
+  #include <experimental/source_location>
+namespace std {
+using source_location = std::experimental::source_location;
+}
+#endif
 #include <stdexcept>
 #include <string>
 #include <string_view>

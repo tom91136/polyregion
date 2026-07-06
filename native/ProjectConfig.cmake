@@ -1,5 +1,6 @@
 
 set(LLVM_SRC_VERSION 22.1.8)
+string(REGEX MATCH "^[0-9]+" LLVM_MAJOR "${LLVM_SRC_VERSION}")
 
 set(LLVM_SOURCE_URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
 set(LLVM_SOURCE_SHA256 922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888)

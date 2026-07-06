@@ -27,12 +27,16 @@ set(AMDGPU_ARCHS
         gfx1200 gfx1201)
 set(CPU_ARCHS_X86 x86-64 x86-64-v2 x86-64-v3 x86-64-v4)
 set(CPU_ARCHS_ARM armv8-a)
+set(CPU_ARCHS_ARM32 armv7-a)
+set(CPU_ARCHS_RISCV64 rv64gc)
+set(CPU_ARCHS_PPC64LE pwr8)
 
 set(REPRO_FLAGS
         -no-canonical-prefixes
         -frandom-seed=0
         -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
-        -fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=)
+        -fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
+        -ffreestanding)
 
 
 find_program(KERNELGEN_CLANG clang        HINTS ${LLVM_DIST_DIR}/bin NO_DEFAULT_PATH)
@@ -84,76 +88,88 @@ macro(_emit_flat VARIANT PROGRAM BINS_VAR)
 endmacro()
 
 # --- Vulkan (GLSL -> SPIR-V via glslangValidator) ---
-foreach (GLSL_DIR ${GLSL_SRC_DIRS})
-    get_filename_component(_dir_name ${GLSL_DIR} NAME_WE)
-    string(REGEX REPLACE "^glsl_" "" PROGRAM "${_dir_name}")
-    file(GLOB GLSL_SRC_FILES ${GLSL_DIR}/*.glsl)
-    set(_bins "")
-    foreach (GLSL ${GLSL_SRC_FILES})
-        get_filename_component(_mod ${GLSL} NAME_WE)
-        set(_bin ${ASSETS_BIN_DIR}/vulkan/${PROGRAM}/${_mod}.spv)
-        add_custom_command(
-                OUTPUT ${_bin}
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/vulkan/${PROGRAM}
-                COMMAND ${GLSLANG} --target-env vulkan1.1 ${GLSL} -o ${_bin}
-                DEPENDS ${GLSL}
-                COMMENT "[vulkan] ${GLSL}"
-                VERBATIM)
-        list(APPEND _bins "${_mod}|${_mod}|${_bin}")
+if (GLSLANG)
+    foreach (GLSL_DIR ${GLSL_SRC_DIRS})
+        get_filename_component(_dir_name ${GLSL_DIR} NAME_WE)
+        string(REGEX REPLACE "^glsl_" "" PROGRAM "${_dir_name}")
+        file(GLOB GLSL_SRC_FILES ${GLSL_DIR}/*.glsl)
+        set(_bins "")
+        foreach (GLSL ${GLSL_SRC_FILES})
+            get_filename_component(_mod ${GLSL} NAME_WE)
+            set(_bin ${ASSETS_BIN_DIR}/vulkan/${PROGRAM}/${_mod}.spv)
+            add_custom_command(
+                    OUTPUT ${_bin}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/vulkan/${PROGRAM}
+                    COMMAND ${GLSLANG} --target-env vulkan1.1 ${GLSL} -o ${_bin}
+                    DEPENDS ${GLSL}
+                    COMMENT "[vulkan] ${GLSL}"
+                    VERBATIM)
+            list(APPEND _bins "${_mod}|${_mod}|${_bin}")
+        endforeach ()
+        _emit_flat(vulkan ${PROGRAM} _bins)
     endforeach ()
-    _emit_flat(vulkan ${PROGRAM} _bins)
-endforeach ()
+else ()
+    message(FATAL_ERROR "glslangValidator not found; stopping at vulkan kernel generation")
+endif ()
 
 # --- CUDA (.cl -> PTX text) ---
-foreach (CL ${CL_SRC_FILES})
-    get_filename_component(PROGRAM ${CL} NAME_WE)
-    set(_bins "")
-    foreach (SM ${NV_ARCHS})
-        set(_bin ${ASSETS_BIN_DIR}/cuda/${PROGRAM}_${SM}.ptx)
-        add_custom_command(
-                OUTPUT ${_bin}
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/cuda
-                COMMAND ${KERNELGEN_CLANG} -target nvptx64--nvidiacl -cl-std=CL1.2 -march=${SM} -O3 -g0 ${REPRO_FLAGS}
-                        -Xclang -target-feature -Xclang +ptx80
-                        -xcl ${CL} -Xclang -mlink-builtin-bitcode -Xclang ${NVPTX_BC}
-                        -S -o ${_bin}
-                # XXX clang annotates __local* OpenCL params as ".u64 .ptr .shared .align N",
-                # but the CUDA JIT rejects this with CUDA_ERROR_INVALID_IMAGE. Plain ".u64" works.
-                COMMAND sed -i "s/\\.u64 \\.ptr \\.shared \\.align [0-9]*/.u64/g" ${_bin}
-                DEPENDS ${CL}
-                COMMENT "[cuda/${SM}] ${CL}"
-                VERBATIM)
-        list(APPEND _bins "${SM}|${SM}|${_bin}")
+if (EXISTS ${NVPTX_BC})
+    foreach (CL ${CL_SRC_FILES})
+        get_filename_component(PROGRAM ${CL} NAME_WE)
+        set(_bins "")
+        foreach (SM ${NV_ARCHS})
+            set(_bin ${ASSETS_BIN_DIR}/cuda/${PROGRAM}_${SM}.ptx)
+            add_custom_command(
+                    OUTPUT ${_bin}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/cuda
+                    COMMAND ${KERNELGEN_CLANG} -target nvptx64--nvidiacl -cl-std=CL1.2 -march=${SM} -O3 -g0 ${REPRO_FLAGS}
+                            -Xclang -target-feature -Xclang +ptx80
+                            -xcl ${CL} -Xclang -mlink-builtin-bitcode -Xclang ${NVPTX_BC}
+                            -S -o ${_bin}
+                    # XXX clang annotates __local* OpenCL params as ".u64 .ptr .shared .align N",
+                    # but the CUDA JIT rejects this with CUDA_ERROR_INVALID_IMAGE. Plain ".u64" works.
+                    COMMAND sed -i "s/\\.u64 \\.ptr \\.shared \\.align [0-9]*/.u64/g" ${_bin}
+                    DEPENDS ${CL}
+                    COMMENT "[cuda/${SM}] ${CL}"
+                    VERBATIM)
+            list(APPEND _bins "${SM}|${SM}|${_bin}")
+        endforeach ()
+        _emit_flat(cuda ${PROGRAM} _bins)
     endforeach ()
-    _emit_flat(cuda ${PROGRAM} _bins)
-endforeach ()
+else ()
+    message(FATAL_ERROR "libclc ${NVPTX_BC} not found; stopping at cuda kernel generation")
+endif ()
 
 # --- HSA (.cl -> AMDGPU ELF) ---
-foreach (CL ${CL_SRC_FILES})
-    get_filename_component(PROGRAM ${CL} NAME_WE)
-    set(_bins "")
-    foreach (GFX ${AMDGPU_ARCHS})
-        set(_bin ${ASSETS_BIN_DIR}/hsa/${PROGRAM}_${GFX}.elf)
-        add_custom_command(
-                OUTPUT ${_bin}
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/hsa
-                # XXX libclc's amdgcn-amd-amdhsa.bc uses the COv4 hidden-kernarg layout
-                # (hidden_global_offset_x at +28). COv5+ puts hidden_block_count_y there and
-                # get_global_id() reads the wrong slot under HIP.
-                COMMAND ${KERNELGEN_CLANG} -target amdgcn-amd-amdhsa -nogpulib -cl-std=CL1.2 -mcpu=${GFX} -O3 -g0 ${REPRO_FLAGS}
-                        -mcode-object-version=4
-                        -xcl ${CL} -Xclang -mlink-builtin-bitcode -Xclang ${AMDHSA_BC}
-                        -o ${_bin}
-                # XXX libclc's amdhsa.bc bakes in the system clang's llvm.ident; strip so
-                # the HSACO is independent of whichever toolchain built libclc.
-                COMMAND ${LLVM_OBJCOPY} --remove-section=.comment ${_bin} ${_bin} || ${CMAKE_COMMAND} -E true
-                DEPENDS ${CL}
-                COMMENT "[hsa/${GFX}] ${CL}"
-                VERBATIM)
-        list(APPEND _bins "${GFX}|${GFX}|${_bin}")
+if (EXISTS ${AMDHSA_BC})
+    foreach (CL ${CL_SRC_FILES})
+        get_filename_component(PROGRAM ${CL} NAME_WE)
+        set(_bins "")
+        foreach (GFX ${AMDGPU_ARCHS})
+            set(_bin ${ASSETS_BIN_DIR}/hsa/${PROGRAM}_${GFX}.elf)
+            add_custom_command(
+                    OUTPUT ${_bin}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/hsa
+                    # XXX libclc's amdgcn-amd-amdhsa.bc uses the COv4 hidden-kernarg layout
+                    # (hidden_global_offset_x at +28). COv5+ puts hidden_block_count_y there and
+                    # get_global_id() reads the wrong slot under HIP.
+                    COMMAND ${KERNELGEN_CLANG} -target amdgcn-amd-amdhsa -nogpulib -cl-std=CL1.2 -mcpu=${GFX} -O3 -g0 ${REPRO_FLAGS}
+                            -mcode-object-version=4
+                            -xcl ${CL} -Xclang -mlink-builtin-bitcode -Xclang ${AMDHSA_BC}
+                            -o ${_bin}
+                    # XXX libclc's amdhsa.bc bakes in the system clang's llvm.ident; strip so
+                    # the HSACO is independent of whichever toolchain built libclc.
+                    COMMAND ${LLVM_OBJCOPY} --remove-section=.comment ${_bin} ${_bin} || ${CMAKE_COMMAND} -E true
+                    DEPENDS ${CL}
+                    COMMENT "[hsa/${GFX}] ${CL}"
+                    VERBATIM)
+            list(APPEND _bins "${GFX}|${GFX}|${_bin}")
+        endforeach ()
+        _emit_flat(hsa ${PROGRAM} _bins)
     endforeach ()
-    _emit_flat(hsa ${PROGRAM} _bins)
-endforeach ()
+else ()
+    message(FATAL_ERROR "libclc ${AMDHSA_BC} not found; stopping at hsa kernel generation")
+endif ()
 
 # --- OpenCL_Source (.cl source embedded verbatim) ---
 foreach (CL ${CL_SRC_FILES})
@@ -170,27 +186,31 @@ foreach (CL ${CL_SRC_FILES})
 endforeach ()
 
 # --- OpenCL_SPIRV (.cl -> spirv64 binary, then link to drop Linkage capability) ---
-foreach (CL ${CL_SRC_FILES})
-    get_filename_component(PROGRAM ${CL} NAME_WE)
-    set(_obj ${ASSETS_BIN_DIR}/opencl_spirv/${PROGRAM}.o.spv)
-    set(_bin ${ASSETS_BIN_DIR}/opencl_spirv/${PROGRAM}.spv)
-    add_custom_command(
-            OUTPUT ${_obj}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/opencl_spirv
-            COMMAND ${KERNELGEN_CLANG} -target spirv64v1.0 -cl-std=CL1.2 -O3 -g0 ${REPRO_FLAGS}
-                    -xcl ${CL} -c -o ${_obj}
-            DEPENDS ${CL}
-            COMMENT "[opencl_spirv compile] ${CL}"
-            VERBATIM)
-    add_custom_command(
-            OUTPUT ${_bin}
-            COMMAND ${SPIRV_LINK} ${_obj} -o ${_bin}
-            DEPENDS ${_obj} ${SPIRV_LINK}
-            COMMENT "[opencl_spirv link] ${PROGRAM}"
-            VERBATIM)
-    set(_bins "|_${PROGRAM}|${_bin}")
-    _emit_flat(opencl_spirv ${PROGRAM} _bins)
-endforeach ()
+if (SPIRV_LINK)
+    foreach (CL ${CL_SRC_FILES})
+        get_filename_component(PROGRAM ${CL} NAME_WE)
+        set(_obj ${ASSETS_BIN_DIR}/opencl_spirv/${PROGRAM}.o.spv)
+        set(_bin ${ASSETS_BIN_DIR}/opencl_spirv/${PROGRAM}.spv)
+        add_custom_command(
+                OUTPUT ${_obj}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/opencl_spirv
+                COMMAND ${KERNELGEN_CLANG} -target spirv64v1.0 -cl-std=CL1.2 -O3 -g0 ${REPRO_FLAGS}
+                        -xcl ${CL} -c -o ${_obj}
+                DEPENDS ${CL}
+                COMMENT "[opencl_spirv compile] ${CL}"
+                VERBATIM)
+        add_custom_command(
+                OUTPUT ${_bin}
+                COMMAND ${SPIRV_LINK} ${_obj} -o ${_bin}
+                DEPENDS ${_obj} ${SPIRV_LINK}
+                COMMENT "[opencl_spirv link] ${PROGRAM}"
+                VERBATIM)
+        set(_bins "|_${PROGRAM}|${_bin}")
+        _emit_flat(opencl_spirv ${PROGRAM} _bins)
+    endforeach ()
+else ()
+    message(FATAL_ERROR "spirv-link not found; stopping at opencl_spirv kernel generation")
+endif ()
 
 # --- Metal (.msl source embedded verbatim) ---
 foreach (MSL ${MSL_SRC_FILES})
@@ -217,10 +237,15 @@ function(_cpu_compile_one VARIANT C_SOURCE PROGRAM BUCKET ARCH TRIPLE EXTRA OUT_
     if (TRIPLE MATCHES "windows")
         set(_zero_coff_ts COMMAND sh -c "printf '\\x00\\x00\\x00\\x00' | dd of='${_bin}' bs=1 seek=4 count=4 conv=notrunc status=none")
     endif ()
+    if (TRIPLE MATCHES "powerpc")
+        set(_arch_flag -mcpu=${ARCH})
+    else ()
+        set(_arch_flag -march=${ARCH})
+    endif ()
     add_custom_command(
             OUTPUT ${_bin}
             COMMAND ${CMAKE_COMMAND} -E make_directory ${ASSETS_BIN_DIR}/${VARIANT}
-            COMMAND ${KERNELGEN_CLANG} -target ${TRIPLE} -Os -g0 -std=c11 -march=${ARCH} ${REPRO_FLAGS} ${EXTRA}
+            COMMAND ${KERNELGEN_CLANG} -target ${TRIPLE} -Os -g0 -std=c11 ${_arch_flag} ${REPRO_FLAGS} ${EXTRA}
                     -xc ${C_SOURCE} -o ${_bin}
             COMMAND ${LLVM_OBJCOPY} --remove-section=.comment --remove-section=.note.GNU-stack ${_bin} ${_bin} || ${CMAKE_COMMAND} -E true
             ${_zero_coff_ts}
@@ -267,12 +292,18 @@ macro(_emit_cpu VARIANT PROGRAM)
     file(MAKE_DIRECTORY ${_mf_dir})
     set(_mf_lin_x86 ${_mf_dir}/lin_x86.list)
     set(_mf_lin_arm ${_mf_dir}/lin_arm.list)
+    set(_mf_lin_arm32 ${_mf_dir}/lin_arm32.list)
+    set(_mf_lin_riscv64 ${_mf_dir}/lin_riscv64.list)
+    set(_mf_lin_ppc64le ${_mf_dir}/lin_ppc64le.list)
     set(_mf_win_x86 ${_mf_dir}/win_x86.list)
     set(_mf_win_arm ${_mf_dir}/win_arm.list)
     set(_mf_mac_x86 ${_mf_dir}/mac_x86.list)
     set(_mf_mac_arm ${_mf_dir}/mac_arm.list)
     _write_manifest(${_mf_lin_x86} _ENTRIES_LIN_X86)
     _write_manifest(${_mf_lin_arm} _ENTRIES_LIN_ARM)
+    _write_manifest(${_mf_lin_arm32} _ENTRIES_LIN_ARM32)
+    _write_manifest(${_mf_lin_riscv64} _ENTRIES_LIN_RISCV64)
+    _write_manifest(${_mf_lin_ppc64le} _ENTRIES_LIN_PPC64LE)
     _write_manifest(${_mf_win_x86} _ENTRIES_WIN_X86)
     _write_manifest(${_mf_win_arm} _ENTRIES_WIN_ARM)
     _write_manifest(${_mf_mac_x86} _ENTRIES_MAC_X86)
@@ -286,13 +317,17 @@ macro(_emit_cpu VARIANT PROGRAM)
                 -DPROGRAM_NAME=${PROGRAM}
                 -DMANIFEST_LIN_X86=${_mf_lin_x86}
                 -DMANIFEST_LIN_ARM=${_mf_lin_arm}
+                -DMANIFEST_LIN_ARM32=${_mf_lin_arm32}
+                -DMANIFEST_LIN_RISCV64=${_mf_lin_riscv64}
+                -DMANIFEST_LIN_PPC64LE=${_mf_lin_ppc64le}
                 -DMANIFEST_WIN_X86=${_mf_win_x86}
                 -DMANIFEST_WIN_ARM=${_mf_win_arm}
                 -DMANIFEST_MAC_X86=${_mf_mac_x86}
                 -DMANIFEST_MAC_ARM=${_mf_mac_arm}
                 -P ${EMIT_CPU}
             DEPENDS ${_ALL_CPU_BINS} ${EMIT_CPU} ${TEMPLATE}
-                    ${_mf_lin_x86} ${_mf_lin_arm} ${_mf_win_x86} ${_mf_win_arm} ${_mf_mac_x86} ${_mf_mac_arm}
+                    ${_mf_lin_x86} ${_mf_lin_arm} ${_mf_lin_arm32} ${_mf_lin_riscv64} ${_mf_lin_ppc64le}
+                    ${_mf_win_x86} ${_mf_win_arm} ${_mf_mac_x86} ${_mf_mac_arm}
             COMMENT "[emit ${VARIANT}] ${PROGRAM}"
             VERBATIM)
     list(APPEND ALL_HEADERS ${_hdr})
@@ -304,6 +339,9 @@ foreach (C_SRC ${C_SRC_FILES})
     # RelocatableObject (.o)
     set(_ENTRIES_LIN_X86 "")
     set(_ENTRIES_LIN_ARM "")
+    set(_ENTRIES_LIN_ARM32 "")
+    set(_ENTRIES_LIN_RISCV64 "")
+    set(_ENTRIES_LIN_PPC64LE "")
     set(_ENTRIES_WIN_X86 "")
     set(_ENTRIES_WIN_ARM "")
     set(_ENTRIES_MAC_X86 "")
@@ -325,7 +363,27 @@ foreach (C_SRC ${C_SRC_FILES})
         _cpu_compile_one(cpu_reloc ${C_SRC} ${PROGRAM} reloc_mac_arm ${A} arm64-apple-darwin      "-c"      _e)
         list(APPEND _ENTRIES_MAC_ARM ${_e})
     endforeach ()
-    foreach (_b IN LISTS _ENTRIES_LIN_X86 _ENTRIES_LIN_ARM _ENTRIES_WIN_X86 _ENTRIES_WIN_ARM _ENTRIES_MAC_X86 _ENTRIES_MAC_ARM)
+    foreach (A ${CPU_ARCHS_ARM32})
+        _cpu_compile_one(cpu_reloc ${C_SRC} ${PROGRAM} reloc_lin_arm32 ${A} arm-linux-gnueabihf "-fPIC;-c" _e)
+        list(APPEND _ENTRIES_LIN_ARM32 ${_e})
+    endforeach ()
+    foreach (A ${CPU_ARCHS_RISCV64})
+        _cpu_compile_one(cpu_reloc ${C_SRC} ${PROGRAM} reloc_lin_riscv64 ${A} riscv64-linux-gnu "-fPIC;-c" _e)
+        list(APPEND _ENTRIES_LIN_RISCV64 ${_e})
+    endforeach ()
+    foreach (A ${CPU_ARCHS_PPC64LE})
+        _cpu_compile_one(cpu_reloc ${C_SRC} ${PROGRAM} reloc_lin_ppc64le ${A} powerpc64le-linux-gnu "-fPIC;-c" _e)
+        list(APPEND _ENTRIES_LIN_PPC64LE ${_e})
+    endforeach ()
+    foreach (_b IN LISTS _ENTRIES_LIN_X86
+                         _ENTRIES_LIN_ARM
+                         _ENTRIES_LIN_ARM32
+                         _ENTRIES_LIN_RISCV64
+                         _ENTRIES_LIN_PPC64LE
+                         _ENTRIES_WIN_X86
+                         _ENTRIES_WIN_ARM
+                         _ENTRIES_MAC_X86
+                         _ENTRIES_MAC_ARM)
         string(REPLACE "|" ";" _parts "${_b}")
         list(GET _parts 2 _binpath)
         list(APPEND _ALL_CPU_BINS ${_binpath})
@@ -335,6 +393,9 @@ foreach (C_SRC ${C_SRC_FILES})
     # SharedObject (.so / .dylib / .dll)
     set(_ENTRIES_LIN_X86 "")
     set(_ENTRIES_LIN_ARM "")
+    set(_ENTRIES_LIN_ARM32 "")
+    set(_ENTRIES_LIN_RISCV64 "")
+    set(_ENTRIES_LIN_PPC64LE "")
     set(_ENTRIES_WIN_X86 "")
     set(_ENTRIES_WIN_ARM "")
     set(_ENTRIES_MAC_X86 "")
@@ -359,7 +420,30 @@ foreach (C_SRC ${C_SRC_FILES})
                 "-shared;-fuse-ld=lld;-nostdlib;-Wl,-undefined,dynamic_lookup" _e)
         list(APPEND _ENTRIES_MAC_ARM ${_e})
     endforeach ()
-    foreach (_b IN LISTS _ENTRIES_LIN_X86 _ENTRIES_LIN_ARM _ENTRIES_WIN_X86 _ENTRIES_WIN_ARM _ENTRIES_MAC_X86 _ENTRIES_MAC_ARM)
+    foreach (A ${CPU_ARCHS_ARM32})
+        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_arm32 ${A} arm-linux-gnueabihf
+                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+        list(APPEND _ENTRIES_LIN_ARM32 ${_e})
+    endforeach ()
+    foreach (A ${CPU_ARCHS_RISCV64})
+        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_riscv64 ${A} riscv64-linux-gnu
+                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+        list(APPEND _ENTRIES_LIN_RISCV64 ${_e})
+    endforeach ()
+    foreach (A ${CPU_ARCHS_PPC64LE})
+        _cpu_compile_one(cpu_shared ${C_SRC} ${PROGRAM} shobj_lin_ppc64le ${A} powerpc64le-linux-gnu
+                "-fPIC;-shared;-fuse-ld=lld;-nostdlib" _e)
+        list(APPEND _ENTRIES_LIN_PPC64LE ${_e})
+    endforeach ()
+    foreach (_b IN LISTS _ENTRIES_LIN_X86
+                         _ENTRIES_LIN_ARM
+                         _ENTRIES_LIN_ARM32
+                         _ENTRIES_LIN_RISCV64
+                         _ENTRIES_LIN_PPC64LE
+                         _ENTRIES_WIN_X86
+                         _ENTRIES_WIN_ARM
+                         _ENTRIES_MAC_X86
+                         _ENTRIES_MAC_ARM)
         string(REPLACE "|" ";" _parts "${_b}")
         list(GET _parts 2 _binpath)
         list(APPEND _ALL_CPU_BINS ${_binpath})

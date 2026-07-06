@@ -264,9 +264,10 @@ RelocatableDevice::RelocatableDevice() {
   const llvm::Triple hostTriple(llvm::sys::getDefaultTargetTriple());
   globalPrefix = hostTriple.isOSBinFormatMachO() ? '_' : '\0';
 
-  // RTDyld SIGBUSes on x86_64 macOS after many libm-calling kernels; JITLink covers Mach-O but lacks
-  // COFF/ARM64 + ELF backends on some hosts, so keep RTDyld elsewhere
-  if (hostTriple.isOSBinFormatMachO()) {
+  // XXX RTDyld: SIGBUS on x86_64 macOS after libm kernels; missing R_RISCV_BRANCH (riscv64) and TOC relocs (ppc64le)
+  const auto elfArch = hostTriple.isOSBinFormatELF() ? hostTriple.getArch() : llvm::Triple::UnknownArch;
+  const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::riscv64 || elfArch == llvm::Triple::ppc64le;
+  if (useJITLink) {
     auto mm = llvm::jitlink::InProcessMemoryManager::Create();
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
     jitMemMgr = std::move(*mm);
@@ -306,7 +307,8 @@ RelocatableDevice::~RelocatableDevice() {
 
 std::string RelocatableDevice::name() {
   POLYINVOKE_TRACE();
-  return "RelocatableObjectDevice(llvm::orc::RTDyldObjectLinkingLayer)";
+  return jitMemMgr ? "RelocatableObjectDevice(llvm::orc::ObjectLinkingLayer)"
+                   : "RelocatableObjectDevice(llvm::orc::RTDyldObjectLinkingLayer)";
 }
 
 void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {

@@ -298,6 +298,19 @@ test-native-with-emulators *args='':
         polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
+# Run ctest against a relocated dist under QEMU-user.
+test-native-qemu profile='' junit='qemu-test-results' *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ justfile_directory() }}
+    SYSROOT="{{ sysroot_path }}"
+    DIST="{{ justfile_directory() }}/native/out/polyregion-{{ build_type }}-{{ arch }}-dylib-dist"
+    [ -d "$SYSROOT" ] || { echo "test-native-qemu: no sysroot at $SYSROOT" >&2; exit 1; }
+    ls "$DIST"/bin/clang-[0-9]* >/dev/null 2>&1 || { echo "test-native-qemu: no clang-N in $DIST/bin" >&2; exit 1; }
+    ci/qemu_shim.sh "{{ arch }}" "$DIST" "$SYSROOT"
+    export POLYREGION_SYSROOT="$SYSROOT" QEMU_LD_PREFIX="$SYSROOT"
+    just test-native-dist "{{ profile }}" "{{ junit }}" {{ args }}
+
 # Run ctest against a relocated dist (CI download-artifact shape); profile ''|emulators|asan, junit = result-xml basename.
 test-native-dist profile='' junit='native-test-results' *args='':
     #!/usr/bin/env bash
@@ -315,7 +328,11 @@ test-native-dist profile='' junit='native-test-results' *args='':
     esac
     export PATH="$DIST/bin:$PATH"
     export POLYREGION_BITCODE_DIR="$DIST/lib"
-    export POLYPASS_PLUGINS="$DIST/lib/libpolypass.${dso}"
+    if [ -s "$DIST/lib/libpolypass.${dso}" ]; then
+      export POLYPASS_PLUGINS="$DIST/lib/libpolypass.${dso}"
+    else
+      export POLYPASS_PLUGINS="$DIST/lib/polypass.js"
+    fi
     export POLYTEST_CLANG_DRIVER="$DIST/bin/clang++${exe}"
     export POLYTEST_FLANG_DRIVER="$DIST/bin/flang-new${exe}"
     libpath="$DIST/lib"
@@ -387,6 +404,9 @@ build-vcpkg-deps:
     case "{{ os() }}-{{ arch }}" in
         linux-x86_64|linux-amd64)       TRIPLET=linux-clang-amd64 ;;
         linux-aarch64|linux-arm64)      TRIPLET=linux-clang-aarch64 ;;
+        linux-riscv64)                  TRIPLET=linux-clang-riscv64 ;;
+        linux-arm|linux-armhf)          TRIPLET=linux-clang-arm ;;
+        linux-ppc64le|linux-powerpc64le) TRIPLET=linux-clang-ppc64le ;;
         macos-x86_64|macos-amd64)       TRIPLET=darwin-clang-amd64 ;;
         macos-aarch64|macos-arm64)      TRIPLET=darwin-clang-arm64 ;;
         windows-x86_64|windows-amd64)   TRIPLET=x64-windows-static ;;
@@ -412,6 +432,8 @@ build-vcpkg-deps:
     JS_ENGINE="${POLYC_JS_ENGINE:-$DEFAULT_JS_ENGINE}"
     # Match polyregion's sysroot pin so vcpkg ports compile against the same glibc/libstdc++.
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
+    # XXX vcpkg has no prebuilt binaries for these archs; force system cmake/ninja
+    case "{{ arch }}" in riscv64|arm|ppc64le|s390x|loongarch64) export VCPKG_FORCE_SYSTEM_BINARIES=1 ;; esac
     echo "Installing vcpkg deps (triplet=$TRIPLET, feature=$JS_ENGINE, sysroot=${CMAKE_SYSROOT:-none}) -> $VCPKG_INSTALLED_DIR" >&2
     mkdir -p "$VCPKG_INSTALLED_DIR"
     "$VCPKG_BIN" install \
@@ -431,27 +453,28 @@ _vcpkg-sync-baseline:
         mv native/vcpkg.json.tmp native/vcpkg.json
     fi
 
-# Build the AL8 sysroot (sysroot/Dockerfile) into sysroot/out/<arch> (CONTAINER=docker overrides podman).
+# Build sysroot into sysroot/out/<arch> (CONTAINER=docker overrides podman)
 build-sysroot:
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ justfile_directory() }}/sysroot
     case "{{ arch }}" in
-      x86_64)  rhel=x86_64-redhat-linux;  gnu=x86_64-linux-gnu;  plat=linux/amd64; extra=libquadmath ;;
-      aarch64) rhel=aarch64-redhat-linux; gnu=aarch64-linux-gnu; plat=linux/arm64; extra= ;;
-      *) echo "unsupported arch: {{ arch }} (x86_64/aarch64 only)" >&2; exit 1 ;;
+      x86_64)  base=al8;      dockerfile=Dockerfile;        plat=linux/amd64;   args=(--build-arg RHEL_TRIPLE=x86_64-redhat-linux  --build-arg GNU_TRIPLE=x86_64-linux-gnu       --build-arg EXTRA_PKGS=libquadmath) ;;
+      aarch64) base=al8;      dockerfile=Dockerfile;        plat=linux/arm64;   args=(--build-arg RHEL_TRIPLE=aarch64-redhat-linux --build-arg GNU_TRIPLE=aarch64-linux-gnu) ;;
+      ppc64le) base=al8;      dockerfile=Dockerfile;        plat=linux/ppc64le; args=(--build-arg RHEL_TRIPLE=ppc64le-redhat-linux  --build-arg GNU_TRIPLE=powerpc64le-linux-gnu) ;;
+      riscv64) base=ubuntu20; dockerfile=Dockerfile.ubuntu; plat=linux/riscv64; args=(--build-arg SYSBASE=docker.io/riscv64/ubuntu:20.04 --build-arg GCC_MAJOR=10) ;;
+      arm)     base=ubuntu20; dockerfile=Dockerfile.ubuntu; plat=linux/arm/v7;  args=(--build-arg SYSBASE=docker.io/arm32v7/ubuntu:20.04 --build-arg GCC_MAJOR=10) ;;
+      *) echo "unsupported arch: {{ arch }} (x86_64/aarch64/ppc64le/riscv64/arm)" >&2; exit 1 ;;
     esac
     flags=()  # cross-arch flag only when target != host
     if [ "{{ arch }}" != "$(uname -m)" ]; then
       case "{{ container }}" in podman) flags=(--arch="{{ arch }}");; docker) flags=(--platform="$plat");; esac
     fi
     mkdir -p out
-    img=polyregion-sysroot-al8:{{ arch }}
-    {{ container }} build --pull ${flags[@]+"${flags[@]}"} \
-      --build-arg RHEL_TRIPLE="$rhel" --build-arg GNU_TRIPLE="$gnu" --build-arg EXTRA_PKGS="$extra" \
-      -t "$img" .
+    img=polyregion-sysroot-${base}:{{ arch }}
+    {{ container }} build --pull ${flags[@]+"${flags[@]}"} -f "$dockerfile" ${args[@]+"${args[@]}"} -t "$img" .
     cid=$({{ container }} create "$img")
-    {{ container }} export "$cid" | xz -T0 > "out/sysroot-al8-{{ arch }}.tar.xz"
+    {{ container }} export "$cid" | xz -T0 > "out/sysroot-${base}-{{ arch }}.tar.xz"
     {{ container }} rm "$cid" >/dev/null
     just prepare-sysroot
 
@@ -487,14 +510,16 @@ restore-exec-bits +dirs:
       if [ -d "$d/lib" ]; then find "$d/lib" -type f -name "$so" -exec chmod +x {} +; fi
     done
 
-# Extract a prebuilt AL8 sysroot tarball into sysroot/out/<arch> (CI downloads the tarball, not the tree).
+# Extract a prebuilt sysroot tarball into sysroot/out/<arch> (CI downloads the tarball, not the tree).
 prepare-sysroot:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ repo }}/sysroot"
     rm -rf "out/{{ arch }}"; mkdir -p "out/{{ arch }}"
-    tar xf "out/sysroot-al8-{{ arch }}.tar.xz" -C "out/{{ arch }}"
-    echo "sysroot ready at sysroot/out/{{ arch }}"
+    tarball=$(ls -1 out/sysroot-*-{{ arch }}.tar.xz 2>/dev/null | head -1)
+    [ -n "$tarball" ] || { echo "no sysroot tarball for {{ arch }} in out/" >&2; exit 1; }
+    tar xf "$tarball" -C "out/{{ arch }}"
+    echo "sysroot ready at sysroot/out/{{ arch }} (from $tarball)"
 
 # List a dist's binary dependencies (file+objdump/otool/dumpbin per OS); diagnostic, never fails. arg: dist dir.
 check-dist-deps dist:

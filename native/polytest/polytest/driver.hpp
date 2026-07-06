@@ -161,12 +161,13 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   if (const auto v = std::getenv("UBSAN_OPTIONS")) put("UBSAN_OPTIONS", v);
   else put("UBSAN_OPTIONS", "print_stacktrace=1");
   if (std::getenv(polyregion::env::PolytestDebug)) put(polyregion::env::PolyrtDebug, "2");
-  // child env is replaced wholesale; forward loader-lib + link-thread overrides or they vanish
+  // child env replaced wholesale; forward overrides + QEMU shim inputs or they vanish
   for (const auto *name : {polyregion::env::PolycppLinkThreads, polyregion::env::PolyfcLinkThreads,           //
                            polyregion::env::PolyinvokeDisableSvm, polyregion::env::PolyinvokeDisableBackends, //
                            polyregion::env::PolyrtMirror, polyregion::env::PolyregionPassLog,                 //
                            polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
-                           "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
+                           polyregion::env::PolyregionSysroot,                                                //
+                           "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
   // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls

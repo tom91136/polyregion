@@ -7,7 +7,8 @@ if (DEFINED ENV{CMAKE_SYSROOT} AND NOT "$ENV{CMAKE_SYSROOT}" STREQUAL "/")
     file(GLOB _toolset "${_sysroot}/opt/rh/gcc-toolset-*/root/usr/lib/gcc/*-redhat-linux*/[0-9]*")
     file(GLOB _stock
             "${_sysroot}/usr/lib/gcc/*-redhat-linux*/[0-9]*"
-            "${_sysroot}/usr/lib/gcc/*-linux-gnu/[0-9]*")
+            "${_sysroot}/usr/lib/gcc/*-linux-gnu/[0-9]*"
+            "${_sysroot}/usr/lib/gcc/*-linux-gnueabi*/[0-9]*")
     list(SORT _toolset ORDER DESCENDING)
     list(SORT _stock ORDER DESCENDING)
     foreach (_d ${_toolset} ${_stock})

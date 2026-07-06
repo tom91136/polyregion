@@ -63,6 +63,14 @@ ImageGroup findTestImage(const ImageGroups &archToImage, const invoke::Backend &
     auto archType = llvm::Triple::ArchType::aarch64;
 #elif defined(__arm__) || defined(_M_ARM)
     auto archType = llvm::Triple::ArchType::arm;
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    auto archType = llvm::Triple::ArchType::riscv64;
+#elif defined(__riscv) && (__riscv_xlen == 32)
+    auto archType = llvm::Triple::ArchType::riscv32;
+#elif defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    auto archType = llvm::Triple::ArchType::ppc64le;
+#elif defined(__powerpc64__)
+    auto archType = llvm::Triple::ArchType::ppc64;
 #else
   #error "Unsupported architecture"
 #endif

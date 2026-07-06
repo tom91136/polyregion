@@ -10,6 +10,7 @@ inline constexpr auto PolyregionCacheDir = "POLYREGION_CACHE_DIR";
 inline constexpr auto PolyregionBitcodeDir = "POLYREGION_BITCODE_DIR";
 inline constexpr auto PolyregionTestProfile = "POLYREGION_TEST_PROFILE";
 inline constexpr auto PolyregionTestTargets = "POLYREGION_TEST_TARGETS";
+inline constexpr auto PolyregionSysroot = "POLYREGION_SYSROOT";
 
 inline constexpr auto PolycDebugLld = "POLYC_DEBUG_LLD";
 

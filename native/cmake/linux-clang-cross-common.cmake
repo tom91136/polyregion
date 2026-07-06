@@ -1,0 +1,61 @@
+if (NOT CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "${POLYREGION_HOST_MATCH_REGEX}")
+    set(CMAKE_SYSTEM_NAME Linux)
+    set(CMAKE_SYSTEM_PROCESSOR ${POLYREGION_SYSTEM_PROCESSOR})
+endif ()
+set(CMAKE_C_COMPILER_TARGET ${POLYREGION_TARGET_TRIPLE})
+set(CMAKE_CXX_COMPILER_TARGET ${POLYREGION_TARGET_TRIPLE})
+set(CMAKE_ASM_COMPILER_TARGET ${POLYREGION_TARGET_TRIPLE})
+
+set(CMAKE_C_COMPILER clang)
+set(CMAKE_ASM_COMPILER clang)
+set(CMAKE_CXX_COMPILER clang++)
+
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    set(CMAKE_ASM_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+endif ()
+
+# APPEND rather than set(): LLVM's runtimes sub-build pre-populates *_FLAGS_INIT with
+# -resource-dir=<just-built> so its clang finds the freshly built builtins. A plain set()
+# clobbers that and find_compiler_rt_library falls back to the system clang's resource dir.
+string(APPEND CMAKE_C_FLAGS_INIT   " -fPIC ${POLYREGION_EXTRA_CFLAGS}")
+string(APPEND CMAKE_CXX_FLAGS_INIT " -fPIC ${POLYREGION_EXTRA_CFLAGS}")
+string(APPEND CMAKE_ASM_FLAGS_INIT " -fPIC")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+include("${CMAKE_CURRENT_LIST_DIR}/sysroot_gcc_dir.cmake")
+if (POLYREGION_SYSROOT_GCC_INSTALL_DIR)
+    string(APPEND CMAKE_C_FLAGS_INIT   " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+    string(APPEND CMAKE_CXX_FLAGS_INIT " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+    string(APPEND CMAKE_ASM_FLAGS_INIT " --gcc-install-dir=${POLYREGION_SYSROOT_GCC_INSTALL_DIR}")
+endif ()
+
+# Both _INIT and non-_INIT so try_compile probes that read current-scope pick up lld too;
+# without it the checks fall back to ld.bfd which rejects the target-arch ELF variant.
+foreach (_kind SHARED MODULE EXE)
+    string(APPEND CMAKE_${_kind}_LINKER_FLAGS_INIT " -fuse-ld=lld")
+    string(APPEND CMAKE_${_kind}_LINKER_FLAGS      " -fuse-ld=lld")
+endforeach ()
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+if (DEFINED ENV{CMAKE_SYSROOT} OR CMAKE_SYSROOT)
+    set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+    set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+else ()
+    set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
+    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+    set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+endif ()
+
+set(VCPKG_TARGET_ARCHITECTURE ${POLYREGION_SYSTEM_PROCESSOR})
+set(VCPKG_CRT_LINKAGE dynamic)
+set(VCPKG_LIBRARY_LINKAGE static)
+set(VCPKG_BUILD_TYPE release)
+set(VCPKG_CMAKE_SYSTEM_NAME Linux)
+set(VCPKG_MAKE_BUILD_TRIPLET "--host=${POLYREGION_TARGET_TRIPLE}")
+if (DEFINED ENV{CMAKE_SYSROOT})
+    set(CMAKE_SYSROOT "$ENV{CMAKE_SYSROOT}")
+endif ()

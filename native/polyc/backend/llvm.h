@@ -18,7 +18,10 @@ using namespace polyregion::polyast;
 
 class LLVMBackend final : public Backend {
 public:
-  enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV32_Kernel, SPIRV64_Kernel, SPIRV_GLCompute };
+  enum class Target { x86_64, AArch64, ARM, RISCV64, PPC64LE, NVPTX64, AMDGCN, SPIRV32_Kernel, SPIRV64_Kernel, SPIRV_GLCompute };
+  static constexpr bool isCpuTarget(Target t) {
+    return t == Target::x86_64 || t == Target::AArch64 || t == Target::ARM || t == Target::RISCV64 || t == Target::PPC64LE;
+  }
   struct Options {
     Target target;
     std::string arch;

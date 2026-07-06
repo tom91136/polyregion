@@ -398,8 +398,8 @@ struct CoalescedTarget {
 
 void callMap(llvm::IRBuilder<> &B, llvm::Module &M, llvm::Value *origin, llvm::Value *sizeInBytes, llvm::Value *unitInBytes,
              MemAccess::Kind kind) {
-  const auto mapFnTy = llvm::FunctionType::get(
-      B.getVoidTy(), llvm::ArrayRef<llvm::Type *>{B.getPtrTy(), B.getIntPtrTy(M.getDataLayout()), B.getIntPtrTy(M.getDataLayout())}, false);
+  auto *intPtrTy = B.getIntPtrTy(M.getDataLayout());
+  const auto mapFnTy = llvm::FunctionType::get(B.getVoidTy(), llvm::ArrayRef<llvm::Type *>{B.getPtrTy(), intPtrTy, intPtrTy}, false);
   const auto fn = M.getOrInsertFunction(
       [&]() {
         switch (kind) {
@@ -410,7 +410,8 @@ void callMap(llvm::IRBuilder<> &B, llvm::Module &M, llvm::Value *origin, llvm::V
         }
       }(),
       mapFnTy);
-  B.CreateCall(fn, {origin, sizeInBytes, unitInBytes});
+  // XXX size/unit resolve as i64; narrow to IntPtrTy or aarch32 sig-mismatches at call site
+  B.CreateCall(fn, {origin, B.CreateZExtOrTrunc(sizeInBytes, intPtrTy), B.CreateZExtOrTrunc(unitInBytes, intPtrTy)});
 }
 
 void insertMapCalls(llvm::Module &M, //
@@ -488,10 +489,11 @@ void insertMapCalls(llvm::Module &M, //
           emplaceNonSCEV("SCEVNoExit");
           continue;
         }
+        // XXX EvalTy = scStride width; hard-coded i64 or LLVM's 65-bit APInt default trips getMulExpr
+        auto *scStrideTy = scStride->getType();
         const auto scTripCount = SE.getTripCountFromExitCount(
             /*ExitCount*/ scExitCount,
-            // XXX 64 bit will overflow if trip count is UINT_MAX, LLVM defaults to a 65 bit APInt but that causes mulExpr to fail (!!)
-            /*EvalTy*/ llvm::IntegerType::getIntNTy(M.getContext(), 64),
+            /*EvalTy*/ scStrideTy,
             /*L*/ AddRec->getLoop());
         if (llvm::isa<llvm::SCEVCouldNotCompute>(scTripCount)) {
           emplaceNonSCEV("SCEVNoTrip");
@@ -511,7 +513,9 @@ void insertMapCalls(llvm::Module &M, //
         const auto lb = Expander.expandCodeFor(scLB);
         const auto ub = Expander.expandCodeFor(scUB);
         llvm::IRBuilder<> B(predecessor);
-        const auto ptrDiff = B.CreateSub(B.CreatePtrToInt(ub, B.getInt64Ty()), B.CreatePtrToInt(lb, B.getInt64Ty()));
+        // ptr-diff width = IntPtrTy; SCEVExpander folds via getMulExpr on aarch32
+        auto *diffTy = B.getIntPtrTy(M.getDataLayout());
+        const auto ptrDiff = B.CreateSub(B.CreatePtrToInt(ub, diffTy), B.CreatePtrToInt(lb, diffTy));
         if (verbose)
           llvm::errs() << "[ReflectMemPass]   " << static_cast<char>(access->kind) << " InvariantSCEV@`" << *predecessor << "`"
                        << " origin=`" << *lb << "`"

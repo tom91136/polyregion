@@ -21,6 +21,7 @@ inline std::string normaliseVendor(std::string_view vendor) {
   if (has("apple")) return "apple";
   if (has("arm")) return "arm";
   if (has("qualcomm")) return "qualcomm";
+  if (has("powervr") || has("imagination")) return "powervr";
   return "unknown";
 }
 

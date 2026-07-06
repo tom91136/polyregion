@@ -431,9 +431,24 @@ message(STATUS "Using Clang at ${Clang_DIR}")
 message(STATUS "Using Flang at ${Flang_DIR}")
 message(STATUS "Using MLIR at ${MLIR_DIR}")
 
+# XXX aarch32 glibc readdir defaults to legacy dirent (kernel returns dirent64); match LLVM's _FILE_OFFSET_BITS=64 or filesystem drops entries
+if (CMAKE_SIZEOF_VOID_P LESS 8)
+    add_compile_definitions(_FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
+endif ()
+
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 find_package(Clang REQUIRED PATHS ${Clang_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
+
+# XXX LLVM_DEFINITIONS is space-joined; split for target_compile_definitions/options
+separate_arguments(LLVM_DEFINITIONS NATIVE_COMMAND "${LLVM_DEFINITIONS}")
+
+# XXX aarch32 LLVM dist omits flang/MLIR (upstream refuses 32-bit); polyfc drops out
+set(POLYREGION_HAS_FLANG TRUE)
+if (NOT EXISTS "${Flang_DIR}/FlangConfig.cmake")
+    set(POLYREGION_HAS_FLANG FALSE)
+endif ()
+message(STATUS "POLYREGION_HAS_FLANG = ${POLYREGION_HAS_FLANG}")
 
 # Defaults to whatever LLVM was built with; override via -DPOLYREGION_LLVM_DYLIB=OFF for static linking.
 option(POLYREGION_LLVM_DYLIB "Link polyregion against libLLVM dylib" ${LLVM_LINK_LLVM_DYLIB})
@@ -454,8 +469,10 @@ if (WIN32 AND NOT POLYREGION_FUSED_DRIVER)
 endif ()
 message(STATUS "POLYREGION_FUSED_DRIVER = ${POLYREGION_FUSED_DRIVER}")
 
-find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)
-find_package(Flang REQUIRED PATHS ${Flang_DIR} NO_DEFAULT_PATH)
+if (POLYREGION_HAS_FLANG)
+    find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)
+    find_package(Flang REQUIRED PATHS ${Flang_DIR} NO_DEFAULT_PATH)
+endif ()
 
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -526,18 +543,22 @@ add_subdirectory(polyreflect)
 add_subdirectory(polyld)
 add_subdirectory(polytest)
 add_subdirectory(polycpp)
-add_subdirectory(polyfc)
+if (POLYREGION_HAS_FLANG)
+    add_subdirectory(polyfc)
+endif ()
 add_subdirectory(bindings)
 
-add_custom_target(polyregion-dist
-        DEPENDS
+set(POLYREGION_DIST_TARGETS
         polyc-bin
         polyinfo
         polycpp
-        polyfc
         polyc-JNI
         polyc-JNIshim
         polyinvoke-JNI)
+if (POLYREGION_HAS_FLANG)
+    list(APPEND POLYREGION_DIST_TARGETS polyfc)
+endif ()
+add_custom_target(polyregion-dist DEPENDS ${POLYREGION_DIST_TARGETS})
 
 # ## test_all
 # `cmake --build <build> --target test_all` => ${CMAKE_BINARY_DIR}/test-results.xml.
@@ -547,8 +568,10 @@ set(POLYREGION_TEST_BINARIES
         polyinvoke-tests
         polyrt-tests
         polyreflect-rt-tests
-        polycpp-tests
-        polyfc-tests)
+        polycpp-tests)
+if (POLYREGION_HAS_FLANG)
+    list(APPEND POLYREGION_TEST_BINARIES polyfc-tests)
+endif ()
 
 
 add_custom_target(test_all
@@ -571,8 +594,10 @@ install(TARGETS ${POLYREGION_TEST_BINARIES} RUNTIME DESTINATION bin COMPONENT te
 install(TARGETS polyreflect-rt LIBRARY DESTINATION lib RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(DIRECTORY polycpp/test/ DESTINATION test/polycpp COMPONENT test-dist EXCLUDE_FROM_ALL
         FILES_MATCHING PATTERN "check_*.cpp" PATTERN "*.h")
-install(DIRECTORY polyfc/test/ DESTINATION test/polyfc COMPONENT test-dist EXCLUDE_FROM_ALL
-        FILES_MATCHING PATTERN "check_*.f95")
+if (POLYREGION_HAS_FLANG)
+    install(DIRECTORY polyfc/test/ DESTINATION test/polyfc COMPONENT test-dist EXCLUDE_FROM_ALL
+            FILES_MATCHING PATTERN "check_*.f95")
+endif ()
 install(DIRECTORY test-profiles/ DESTINATION test/profiles COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(FILES "${CMAKE_BINARY_DIR}/test-dist-CTestTestfile.cmake"
         DESTINATION . RENAME CTestTestfile.cmake COMPONENT test-dist EXCLUDE_FROM_ALL)

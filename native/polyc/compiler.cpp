@@ -83,6 +83,8 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
           case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
           case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
           case llvm::Triple::ArchType::arm: return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
+          case llvm::Triple::ArchType::riscv64: return {.target = backend::LLVMBackend::Target::RISCV64, .arch = options.arch};
+          case llvm::Triple::ArchType::ppc64le: return {.target = backend::LLVMBackend::Target::PPC64LE, .arch = options.arch};
           default: throw std::logic_error(fmt::format("Unsupported host triplet: {}", host.str()));
         }
       }

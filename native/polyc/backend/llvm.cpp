@@ -40,7 +40,9 @@ std::unique_ptr<TargetSpecificHandler> TargetSpecificHandler::from(LLVMBackend::
   switch (target) {
     case LLVMBackend::Target::x86_64: [[fallthrough]];
     case LLVMBackend::Target::AArch64: [[fallthrough]];
-    case LLVMBackend::Target::ARM: return std::make_unique<CPUTargetSpecificHandler>();
+    case LLVMBackend::Target::ARM: [[fallthrough]];
+    case LLVMBackend::Target::RISCV64: [[fallthrough]];
+    case LLVMBackend::Target::PPC64LE: return std::make_unique<CPUTargetSpecificHandler>();
     case LLVMBackend::Target::NVPTX64: return std::make_unique<NVPTXTargetSpecificHandler>();
     case LLVMBackend::Target::AMDGCN: return std::make_unique<AMDGPUTargetSpecificHandler>();
     case LLVMBackend::Target::SPIRV32_Kernel: [[fallthrough]];
@@ -531,16 +533,17 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                   [&](auto l, auto r) { return B.CreateSRem(l, r); }, [&](auto l, auto r) { return B.CreateFRem(l, r); });
             },
             [&](const Intr::Min &v) -> ValPtr {
+              // XXX minnum: aarch32 SelectionDAG can't legalize llvm.minimum.f{32,64}
               return binaryNumOp(
                   expr, v.x, v.y, v.tpe, //
                   [&](auto l, auto r) { return B.CreateSelect(B.CreateICmpSLT(l, r), l, r); },
-                  [&](auto l, auto r) { return B.CreateMinimum(l, r); });
+                  [&](auto l, auto r) { return B.CreateMinNum(l, r); });
             },
             [&](const Intr::Max &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.tpe, //
                   [&](auto l, auto r) { return B.CreateSelect(B.CreateICmpSLT(l, r), r, l); },
-                  [&](auto l, auto r) { return B.CreateMaximum(l, r); });
+                  [&](auto l, auto r) { return B.CreateMaxNum(l, r); });
             }, //
             [&](const Intr::BAnd &v) -> ValPtr {
               return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateAnd(l, r); });
@@ -1006,9 +1009,7 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
 
   // CPU HostThreaded kernels receive `tid` as a leading arg from the runtime; GPU launches
   // provide it via intrinsics, so adding `__tid` there would off-by-one the kernel ABI.
-  const auto cpuTarget = cg.C.options.target == LLVMBackend::Target::x86_64 ||  //
-                         cg.C.options.target == LLVMBackend::Target::AArch64 || //
-                         cg.C.options.target == LLVMBackend::Target::ARM;
+  const auto cpuTarget = LLVMBackend::isCpuTarget(cg.C.options.target);
   auto allArgs = fn.moduleCaptures | concat(fn.termCaptures) | concat(fn.args) | to_vector();
   if (fn.receiver) allArgs ^= prepend(*fn.receiver);
   if (fn.isEntry && cpuTarget) allArgs ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));

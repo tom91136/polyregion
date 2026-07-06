@@ -1,0 +1,5 @@
+set(POLYREGION_SYSTEM_PROCESSOR riscv64)
+set(POLYREGION_HOST_MATCH_REGEX "^riscv64$")
+set(POLYREGION_TARGET_TRIPLE    riscv64-linux-gnu)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/linux-clang-cross-common.cmake")
+set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${CMAKE_CURRENT_LIST_FILE}")

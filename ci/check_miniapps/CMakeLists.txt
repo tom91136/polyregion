@@ -108,6 +108,22 @@ set(RUN_BabelStream_cl-llvmpipe -s 33554432 -n 25)
 set(FAIL_BabelStream  "FAILED validation")                 # no PASS banner; fails loudly on bad results
 set(EXTRA_BabelStream "set(STDIMPL INDICES CACHE STRING \"\")")   # the std model needs an explicit impl strategy
 
+# Cross: set specific on target arch, not host
+if (NOT MINIAPP_TARGET_ARCH)
+  set(MINIAPP_TARGET_ARCH "$ENV{POLYREGION_ARCH}")
+endif ()
+if (NOT MINIAPP_TARGET_ARCH)
+  set(MINIAPP_TARGET_ARCH "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+endif ()
+# Cross: skip each app's -march=native
+if (NOT MINIAPP_TARGET_ARCH STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
+  string(APPEND EXTRA_BabelStream "\nset(BUILD_NATIVE OFF CACHE BOOL \"\")")
+  set(EXTRA_TeaLeaf "set(RELEASE_CXX_FLAGS \"-O3;-Wall\" CACHE STRING \"\")")
+endif ()
+if (MINIAPP_TARGET_ARCH STREQUAL riscv64 OR MINIAPP_TARGET_ARCH STREQUAL arm)
+  set(RUN_BabelStream -s 16777216 -n 25) # aarch32 has 3GB user VA, so 128MB arrays
+endif ()
+
 set(APPS "${CMAKE_CURRENT_SOURCE_DIR}/apps")
 foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
   set(src "${APPS}/${app}")
@@ -133,13 +149,19 @@ foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
         "set(USE_TBB ON CACHE BOOL \"\")\n"
         "set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES \"${TBB_SHIM}\" CACHE STRING \"\")\n")
     else ()                                                # polycpp offload backend
+      set(cxxExtra "-fstdpar;-fstdpar-arch=${ARCH_${backend}};-fstdpar-mem=reflect;-fstdpar-rt=dynamic")
       file(WRITE "${init}"
         "set(MODEL ${MODEL_${app}} CACHE STRING \"\")\n"
         "set(CMAKE_CXX_COMPILER \"${POLYCPP_DIST}/bin/polycpp\" CACHE STRING \"\")\n"
-        "set(CXX_EXTRA_FLAGS \"-fstdpar;-fstdpar-arch=${ARCH_${backend}};-fstdpar-mem=reflect;-fstdpar-rt=dynamic\" CACHE STRING \"\")\n")
+        "set(CXX_EXTRA_FLAGS \"${cxxExtra}\" CACHE STRING \"\")\n")
     endif ()
     if (DEFINED EXTRA_${app})                              # per-app extra cache vars (e.g. BabelStream STDIMPL)
       file(APPEND "${init}" "${EXTRA_${app}}\n")
+    endif ()
+    # libstdc++15's pstl-through-TBB rejects iota_view iterators (int128 distance -> deleted __advance);
+    # DATA17 uses plain pointer ranges. polycpp goes through clang and is fine.
+    if (backend STREQUAL cpu-tbb AND app STREQUAL BabelStream AND MINIAPP_TARGET_ARCH STREQUAL riscv64)
+      file(APPEND "${init}" "set(STDIMPL DATA17 CACHE STRING \"\" FORCE)\n")
     endif ()
     execute_process(COMMAND ${CMAKE_COMMAND} -S "${src}" -B "${bdir}" -C "${init}")
     add_test(NAME ${app}-${backend}-build COMMAND ${CMAKE_COMMAND} --build "${bdir}" --parallel)
