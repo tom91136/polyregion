@@ -153,11 +153,16 @@ build-pass-native:
     set -euo pipefail
     {{ msvc_reenter }}
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
-    # Point Scala Native's clang at the bundled dist when LLVM_BIN isn't already set.
+    # Point Scala Native's clang at the plain LLVM build when LLVM_BIN isn't already set; prefer this over a
+    # staged polyregion dist, whose bin/lld-link.exe is polyld-link and injects device-kernel LTO passes that
+    # don't belong on this unrelated DSO.
     if [ -z "${LLVM_BIN:-}" ]; then
         shopt -s nullglob
-        for d in "{{ justfile_directory() }}"/native/out/polyregion-{{ build_type }}-*-dist; do
-            if [ -x "$d/bin/clang" ] || [ -x "$d/bin/clang.exe" ]; then export LLVM_BIN="$d/bin"; break; fi
+        for pat in "{{ justfile_directory() }}"/native/out/llvm-{{ build_type }}-* \
+                   "{{ justfile_directory() }}"/native/out/polyregion-{{ build_type }}-*-dist; do
+            for d in $pat; do
+                if [ -x "$d/bin/clang" ] || [ -x "$d/bin/clang.exe" ]; then export LLVM_BIN="$d/bin"; break 2; fi
+            done
         done
     fi
     cd frontend && {{ sbt }} 'passNative/exportPassDso'

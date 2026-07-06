@@ -365,12 +365,16 @@ object ArenaView extends ProgramPass {
       case p.Stmt.Mut(p.Term.Select(n, Nil, t), e) =>
         if (isArena(n) && isPtr(n.tpe)) List(p.Stmt.Mut(p.Term.Select(i64Var(n), Nil, I64), rwExpr(e)))
         else List(p.Stmt.Mut(p.Term.Select(n, Nil, t), rwExpr(e)))
-      case p.Stmt.Mut(p.Term.Select(n, steps, scalarT), e) if isArena(n) =>
-        storeVal(offsetTo(n, steps), scalarT, bind("st", rwExpr(e)))
       case p.Stmt.Mut(p.Term.Select(n, steps, scalarT), e) =>
-        // local struct field write; a pointer field is now i64
-        val lhsT = if (isPtr(scalarT) && arenaTerm(p.Term.Select(n, steps, scalarT))) I64 else scalarT
-        List(p.Stmt.Mut(p.Term.Select(n, steps.map(rwStep), lhsT), rwExpr(e)))
+        // mirrors rwTerm: a select crossing into arena partway (a stack-local iterator's node pointer
+        // chased into the heap) still needs the byte-offset store, not a plain local field write
+        lvalueOffset(n, steps) match {
+          case Some(off) => storeVal(off, scalarT, bind("st", rwExpr(e)))
+          case None      =>
+            // local struct field write; a pointer field is now i64
+            val lhsT = if (isPtr(scalarT) && arenaTerm(p.Term.Select(n, steps, scalarT))) I64 else scalarT
+            List(p.Stmt.Mut(p.Term.Select(n, steps.map(rwStep), lhsT), rwExpr(e)))
+        }
       case p.Stmt.Update(base @ p.Term.Select(_, _, ptrT), idx, v) =>
         derefOffset(base) match {
           case Some(off0) => storeVal(add(off0, mulBytes(rwTerm(idx), elem(ptrT))), elem(ptrT), rwTerm(v))
