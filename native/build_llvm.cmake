@@ -317,6 +317,35 @@ if (EXISTS "${_flang_rt_install}")
     endif ()
 endif ()
 
+# XXX libcxx/libcxxabi static archives share COMPONENT cxx/cxxabi with the shared lib target;
+# install-distribution skips them too, drive their install scripts directly like flang-rt above.
+foreach (_lib cxx cxxabi)
+    foreach (_install_script
+            "${LLVM_BUILD_DIR}/runtimes/runtimes-bins/lib${_lib}/src/cmake_install.cmake"
+            "${LLVM_BUILD_DIR}/lib${_lib}/src/cmake_install.cmake")
+        if (EXISTS "${_install_script}")
+            execute_process(
+                    COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_COMPONENT= -P "${_install_script}"
+                    RESULT_VARIABLE SUCCESS)
+            if (NOT SUCCESS EQUAL "0")
+                message(FATAL_ERROR "lib${_lib} static archive install did not succeed")
+            endif ()
+        endif ()
+    endforeach ()
+endforeach ()
+
+# XXX compiler-rt's sanitizer archives aren't covered by install-distribution's "runtimes"
+# component either (only builtins is); drive its install script directly, same as above.
+set(_compiler_rt_install "${LLVM_BUILD_DIR}/runtimes/runtimes-bins/compiler-rt/cmake_install.cmake")
+if (EXISTS "${_compiler_rt_install}")
+    execute_process(
+            COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_COMPONENT= -P "${_compiler_rt_install}"
+            RESULT_VARIABLE SUCCESS)
+    if (NOT SUCCESS EQUAL "0")
+        message(FATAL_ERROR "compiler-rt install did not succeed")
+    endif ()
+endif ()
+
 # XXX POLYREGION_FUSED_DRIVER compiles a handful of LLVM driver .cpp files directly into
 # polycpp/polyfc. CI caches only the dist, so on cache hit the unpacked LLVM source is gone
 # and the fused-driver build can't find these. Stage the exact files we need.

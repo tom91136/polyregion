@@ -984,7 +984,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
   const auto tpe = GENERATE(values<Type::Any>({Float, Double}));
   auto p = program({}, {mkMathKernel(tpe)});
   DYNAMIC_SECTION(repr(tpe)) {
-    SECTION("CPU x86_64") { assertCompileTarget(p, {Target::Object_LLVM_x86_64, "skylake"}); }
+    SECTION("CPU host") { assertCompileTarget(p, {Target::Object_LLVM_HOST, "native"}); }
     SECTION("NVPTX64") {
       const auto cpu = GENERATE(
           values<std::string>({"sm_35", "sm_50", "sm_60", "sm_70", "sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120"}));

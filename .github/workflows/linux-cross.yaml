@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -56,21 +56,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # XXX aarch64 is faster than x86 for this
         include: &cross-matrix
           - arch: riscv64
-            runs_on: ubuntu-24.04
+            runs_on: ubuntu-24.04-arm
             qemu_arch: riscv64
             cross_triple: riscv64-linux-gnu
             sysroot_variant: ubuntu20
             sysroot_dockerfile: Dockerfile.ubuntu
           - arch: ppc64le
-            runs_on: ubuntu-24.04
+            runs_on: ubuntu-24.04-arm
             qemu_arch: ppc64le
             cross_triple: powerpc64le-linux-gnu
             sysroot_variant: al8
             sysroot_dockerfile: Dockerfile
           - arch: arm
-            runs_on: ubuntu-24.04
+            runs_on: ubuntu-24.04-arm
             qemu_arch: arm
             cross_triple: arm-linux-gnueabihf
             sysroot_variant: ubuntu20
@@ -79,7 +80,7 @@ jobs:
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
       POLYREGION_LLVM_PARALLEL_COMPILE_JOBS: "4"
-      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "2"    # XXX 4x lld @ ~4 GB OOMs 16 GB runner
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "2"
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: "2"
     steps:
       - &free-disk
@@ -98,7 +99,20 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang clang-tools lld qemu-user-static binfmt-support
+          sudo apt-get install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
+          # XXX stock clang 18 can't build LLVM 22's own libc++/libcxxabi (needs 19+); force-select
+          # 20 via --set, the runner's pre-installed alternatives otherwise outrank a fresh --install.
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20 all
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-20 100
+          sudo update-alternatives --set clang /usr/bin/clang-20
+          sudo update-alternatives --set clang++ /usr/bin/clang++-20
+          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-20
+          clang --version
+          clang++ --version
 
       - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
         # tonistiigi/binfmt sets F flag; kernel-preloaded QEMU spans containers/mnt ns
@@ -141,25 +155,43 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: *cache-restore
+        uses: ./.github/actions/restore-compressed-cache
         with:
-          path: &llvm-path |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          archive: &llvm-archive native/out/llvm-cross-${{ matrix.arch }}-dist.tar.zst
           key: &llvm-key llvm-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Enable zram
+        if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}
+        run: |
+          sudo swapoff -a
+          sudo rm -f /mnt/swapfile
+          sudo apt-get install -y util-linux zram-config "linux-modules-extra-$(uname -r)"
+
+          sudo modprobe zram
+
+          totalmem=$(LC_ALL=C free | grep -e "^Mem:" | sed -e 's/^Mem: *//' -e 's/  *.*//')
+          mem=$((totalmem * 4 * 1024))
+
+          sudo sh -c "echo $mem > /sys/block/zram0/disksize"
+          sudo mkswap /dev/zram0
+          sudo swapon -p 5 /dev/zram0
+          sudo zramctl
 
       - name: Cross-build LLVM (host clang to target, target flang via QEMU-user)
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true'
         env:
-          POLYREGION_CROSS_CLANG: /usr/bin/clang
-          POLYREGION_CROSS_CLANGXX: /usr/bin/clang++
+          POLYREGION_CROSS_CLANG: /usr/bin/clang-20
+          POLYREGION_CROSS_CLANGXX: /usr/bin/clang++-20
         run: just build-llvm
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: *cache-save
+        uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
+          archive: *llvm-archive
           key: *llvm-key
 
       - name: Verify LLVM dist
@@ -198,7 +230,17 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang clang-tools lld qemu-user-static binfmt-support
+          sudo apt-get install -y cmake ninja-build qemu-user-static binfmt-support wget lsb-release software-properties-common gnupg
+          # XXX see build-llvm's Install dependencies step
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20 all
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-20 100
+          sudo update-alternatives --set clang /usr/bin/clang-20
+          sudo update-alternatives --set clang++ /usr/bin/clang++-20
+          sudo update-alternatives --set ld.lld /usr/bin/ld.lld-20
 
       - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
         run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
@@ -240,6 +282,26 @@ jobs:
         run: |
           mkdir -p native/out
           tar xf llvm-dist.tar -C native/out
+
+      - name: Restore device libs cache
+        if: ${{ !env.ACT }}
+        id: restore-device-libs
+        uses: *cache-restore
+        with:
+          path: &devlibs-path ./native/thirdparty/device_libs
+          key: &devlibs-key device-libs-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Build device libs
+        id: build-device-libs
+        if: steps.restore-device-libs.outputs.cache-hit != 'true'
+        run: just build-device-libs
+
+      - name: Save device libs cache
+        if: steps.build-device-libs.outcome == 'success'
+        uses: *cache-save
+        with:
+          path: *devlibs-path
+          key: *devlibs-key
 
       - name: Download pass bundle
         if: ${{ !env.ACT }}
@@ -433,12 +495,19 @@ jobs:
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
-      # XXX host@native only, opencl/spirv shards need target-arch emulators (not cross-built)
       matrix:
+        arch: [riscv64, ppc64le, arm]
+        frontend: [polyfc, other]
+        exclude:
+          - arch: arm
+            frontend: polyfc # XXX upstream flang doesn't support 32-bit targets
         include: *cross-matrix
-        shard: [host_40native_21host_40_2a]
     runs-on: ${{ matrix.runs_on }}
-    env: *arch-env
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYC_JS_ENGINE: qjs
+      POLYC_PASS_BUNDLE: js
+      SHARD: host_40native_21host_40_2a
     steps:
       - uses: *checkout
       - *setup-just
@@ -464,24 +533,30 @@ jobs:
       - *restore-exec
       - *enable-core-dumps
 
-      - name: Run codegen shard (${{ matrix.shard }})
+      - name: Run codegen shard (${{ env.SHARD }}, ${{ matrix.frontend }})
+        env:
+          POLYTEST_REPRO_CHECK: "0" # XXX otherwise it's too slow via QEMU
         run: |
           ulimit -c unlimited || true
-          just test-native-qemu "" shard-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error --repeat until-pass:3
+          if [ "${{ matrix.frontend }}" = "polyfc" ]; then
+            just test-native-qemu "" "shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}" -L "^${{ env.SHARD }}$" -R '^polyfc-' --no-tests=error --repeat until-pass:3
+          else
+            just test-native-qemu "" "shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}" -L "^${{ env.SHARD }}$" -E '^polyfc-' --no-tests=error --repeat until-pass:3
+          fi
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ matrix.shard }}.xml
-          label: ctest-shard-${{ matrix.arch }}-${{ matrix.shard }}
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}.xml
+          label: ctest-shard-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}
 
       - name: Upload test results
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
-          name: shard-test-results-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ matrix.shard }}.xml
+          name: shard-test-results-linux-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/shard-test-results-${{ env.SHARD }}-${{ matrix.frontend }}.xml
           if-no-files-found: warn
 
       - *collect-cores
@@ -490,7 +565,7 @@ jobs:
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
-          name: crash-reports-shard-linux-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          name: crash-reports-shard-linux-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}-Release
           path: crash-reports/
           if-no-files-found: ignore
 

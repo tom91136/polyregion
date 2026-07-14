@@ -4,6 +4,16 @@ if (DEFINED ENV{POLYREGION_ARCH} AND "$ENV{POLYREGION_ARCH}" STREQUAL "arm")
     set(POLYREGION_LLVM_HAS_FLANG FALSE)
 endif ()
 
+# XXX CMAKE_HOST_SYSTEM_PROCESSOR isn't populated yet this early in a -C cache-init script; shell
+# out to uname -m instead to tell cross legs apart for the compiler-rt config below.
+set(POLYREGION_IS_CROSS_TARGET FALSE)
+if (DEFINED ENV{POLYREGION_ARCH})
+    execute_process(COMMAND uname -m OUTPUT_VARIABLE POLYREGION_HOST_ARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (NOT "$ENV{POLYREGION_ARCH}" STREQUAL "${POLYREGION_HOST_ARCH}")
+        set(POLYREGION_IS_CROSS_TARGET TRUE)
+    endif ()
+endif ()
+
 if (UNIX)
     # flang-rt calls enable_language(Fortran); Linux gets gfortran via apt, macOS via brew, MSVC skips.
     # XXX openmp/kmp_platform.h rejects aarch32 without manual LIBOMP_ARCH; skip
@@ -57,18 +67,56 @@ if (UNIX)
     endif ()
 endif ()
 
-set(LLVM_TARGETS_TO_BUILD
-        AArch64
-        ARM
-        PowerPC
-        RISCV
-        X86
-        NVPTX
-        AMDGPU
-        SPIRV
-        CACHE STRING "")
 
-set(_polyregion_llvm_projects clang clang-tools-extra lld)
+set(_polyregion_host_arch "")
+if (DEFINED ENV{POLYREGION_ARCH})
+    set(_polyregion_host_arch "$ENV{POLYREGION_ARCH}")
+endif ()
+if (_polyregion_host_arch STREQUAL "riscv64")
+    set(_polyregion_cpu_target RISCV)
+elseif (_polyregion_host_arch STREQUAL "ppc64le")
+    set(_polyregion_cpu_target PowerPC)
+elseif (_polyregion_host_arch STREQUAL "arm")
+    set(_polyregion_cpu_target ARM)
+elseif (_polyregion_host_arch MATCHES "^(x86_64|amd64|AMD64)$")
+    set(_polyregion_cpu_target X86)
+elseif (_polyregion_host_arch MATCHES "^(aarch64|arm64|ARM64)$")
+    set(_polyregion_cpu_target AArch64)
+endif ()
+
+if (APPLE AND _polyregion_cpu_target)
+    # XXX flang's module_files prebuild fails with "no available targets... triple unknown" when
+    # only one Darwin CPU target is registered; universal/lipo-adjacent tooling expects both.
+    set(LLVM_TARGETS_TO_BUILD
+            AArch64
+            X86
+            NVPTX
+            AMDGPU
+            SPIRV
+            CACHE STRING "")
+elseif (_polyregion_cpu_target)
+    set(LLVM_TARGETS_TO_BUILD
+            ${_polyregion_cpu_target}
+            NVPTX
+            AMDGPU
+            SPIRV
+            CACHE STRING "")
+else ()
+    set(LLVM_TARGETS_TO_BUILD
+            AArch64
+            ARM
+            PowerPC
+            RISCV
+            X86
+            NVPTX
+            AMDGPU
+            SPIRV
+            CACHE STRING "")
+endif ()
+
+# XXX clang-tools-extra (clang-tidy, clangd, clang-query/move/doc, ...) is dev tooling nothing in
+# this repo's own pipeline invokes - clang-format is a plain clang tool, unaffected by omitting it.
+set(_polyregion_llvm_projects clang lld)
 if (POLYREGION_LLVM_HAS_FLANG)
     list(APPEND _polyregion_llvm_projects flang)
 endif ()
@@ -154,27 +202,41 @@ set(FLANG_INCLUDE_DOCS OFF CACHE BOOL "")
 set(LIBOMP_INSTALL_ALIASES OFF CACHE BOOL "")
 set(LIBOMP_OMPD_GDB_SUPPORT OFF CACHE BOOL "")
 #
+if (UNIX)
+    # XXX without these, a fully static link against the bare .a archives ('-fstdpar-rt=static')
+    # fails with undefined std::terminate()/__cxa_* - libc++abi's eh .o files never get merged
+    # into libc++.a otherwise.
+    set(LIBCXX_ENABLE_STATIC_ABI_LIBRARY ON CACHE BOOL "")
+    set(LIBCXX_STATICALLY_LINK_ABI_IN_SHARED_LIBRARY OFF CACHE BOOL "")
+    set(LIBCXX_STATICALLY_LINK_ABI_IN_STATIC_LIBRARY ON CACHE BOOL "")
+
+    set(LIBCXXABI_ENABLE_STATIC_UNWINDER ON CACHE BOOL "")
+    set(LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY OFF CACHE BOOL "")
+    set(LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY ON CACHE BOOL "")
+    set(LIBCXXABI_USE_LLVM_UNWINDER ON CACHE BOOL "")
+endif ()
+
 if (APPLE)
     set(LLVM_ENABLE_LIBCXX ON CACHE BOOL "")
     set(COMPILER_RT_ENABLE_IOS OFF CACHE BOOL "")
     set(COMPILER_RT_ENABLE_TVOS OFF CACHE BOOL "")
     set(COMPILER_RT_ENABLE_WATCHOS OFF CACHE BOOL "")
+    # XXX Xcode mistags the x86_64h compiler-rt slice as plain x86_64; lipo then refuses two
+    # identical-arch inputs in the same fat dylib. Pin to the single arch this leg builds for.
+    if (DEFINED ENV{POLYREGION_ARCH})
+        set(DARWIN_osx_ARCHS "$ENV{POLYREGION_ARCH}" CACHE STRING "")
+    else ()
+        set(DARWIN_osx_ARCHS "${CMAKE_HOST_SYSTEM_PROCESSOR}" CACHE STRING "")
+    endif ()
 elseif (UNIX)
     set(LLVM_ENABLE_LIBCXX OFF CACHE BOOL "")
     # XXX breaks with RTTI errors when building one of the sanitisers
     # set(SANITIZER_CXX_ABI libstd++ CACHE STRING "")
 
-    set(LIBCXX_ENABLE_STATIC_ABI_LIBRARY ON CACHE BOOL "")
-    set(LIBCXX_STATICALLY_LINK_ABI_IN_SHARED_LIBRARY OFF CACHE BOOL "")
-    set(LIBCXX_STATICALLY_LINK_ABI_IN_STATIC_LIBRARY ON CACHE BOOL "")
     set(LIBCXX_USE_COMPILER_RT ON CACHE BOOL "")
     set(LIBCXX_HAS_ATOMIC_LIB OFF CACHE BOOL "")
 
-    set(LIBCXXABI_ENABLE_STATIC_UNWINDER ON CACHE BOOL "")
-    set(LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY OFF CACHE BOOL "")
-    set(LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY ON CACHE BOOL "")
     set(LIBCXXABI_USE_COMPILER_RT ON CACHE BOOL "")
-    set(LIBCXXABI_USE_LLVM_UNWINDER ON CACHE BOOL "")
     set(LIBCXXABI_ADDITIONAL_LIBRARIES "clang_rt.builtins" CACHE STRING "") # fixes missing builtins symbols on aarch64
 
     set(COMPILER_RT_USE_LLVM_UNWINDER ON CACHE BOOL "")
@@ -194,6 +256,10 @@ endif ()
 set(COMPILER_RT_DEFAULT_TARGET_ONLY ON CACHE BOOL "")
 set(COMPILER_RT_BUILD_LIBFUZZER OFF CACHE BOOL "")
 set(COMPILER_RT_SANITIZERS_TO_BUILD "asan;dfsan;msan;hwasan;tsan;cfi" CACHE STRING "")
+if (POLYREGION_IS_CROSS_TARGET)
+    # XXX lit's check-asan/check-ubsan/etc targets fail cmake configure under cross-compilation
+    set(LLVM_INCLUDE_TESTS OFF CACHE BOOL "")
+endif ()
 
 if (APPLE)
     # see https://github.com/Homebrew/homebrew-core/blob/1ffeb486e05622d8eeea0f1bffa3b7d85e6809b1/Formula/l/llvm.rb#L159
@@ -254,12 +320,10 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
 
         # Clang tools
         clang
-        clang-tidy
         clang-resource-headers
         clang-format
         clang-offload-bundler
         clang-tblgen
-        modularize
 
         # Clang shared
         builtins

@@ -362,7 +362,6 @@ else ()
         elseif (NOT MSVC)
             set(COMMON_LINK_OPTIONS
                     ${COMMON_LINK_OPTIONS}
-                    -static-libstdc++
                     LINKER:--gc-sections        # remove unused sections
                     # LINKER:--strip-all        # strip symbols not used for DSO
             )
@@ -382,10 +381,15 @@ else ()
 endif ()
 
 if (UNIX AND NOT APPLE)
-    set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
-            -static-libgcc -static-libstdc++
-            # XXX Hide statically-embedded libstdc++ symbols from the dynsym table
-            LINKER:--exclude-libs=libstdc++.a)
+    set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS} -static-libgcc)
+    # XXX riscv64's sysroot libstdc++.a has eh_frame sections ld.lld's --gc-sections discards as
+    # dead, then errors on stray relocations into them; link libstdc++ dynamically there instead.
+    if (NOT CMAKE_SYSTEM_PROCESSOR STREQUAL riscv64)
+        set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
+                -static-libstdc++
+                # XXX Hide statically-embedded libstdc++ symbols from the dynsym table
+                LINKER:--exclude-libs=libstdc++.a)
+    endif ()
 endif ()
 
 

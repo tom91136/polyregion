@@ -1,0 +1,46 @@
+name: Restore compressed cache
+description: >
+  Restores a tar+zstd cache archive and unpacks it into place on a hit.
+
+inputs:
+  path:
+    description: Directory to materialise on a cache hit.
+    required: true
+  archive:
+    description: Path of the intermediate .tar.zst cache blob.
+    required: true
+  key:
+    required: true
+  restore-keys:
+    required: false
+    default: ""
+
+outputs:
+  cache-hit:
+    description: 'true if an exact match for `key` was restored.'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - id: restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ inputs.archive }}
+        key: ${{ inputs.key }}
+        restore-keys: ${{ inputs.restore-keys }}
+
+    - if: steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      # XXX not every runner ships zstd (e.g. windows-11-arm); sniff the magic bytes so this
+      # doesn't need to know which compressor save-compressed-cache used.
+      run: |
+        archive="${{ inputs.archive }}"
+        dir="${{ inputs.path }}"
+        mkdir -p "$(dirname "$dir")"
+        magic=$(head -c4 "$archive" | od -An -tx1 | tr -d ' \n')
+        if [ "$magic" = "28b52ffd" ]; then
+          zstd -T0 --long=30 -d -c "$archive" | tar -xf - -C "$(dirname "$dir")"
+        else
+          tar -xzf "$archive" -C "$(dirname "$dir")"
+        fi

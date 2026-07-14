@@ -12,6 +12,7 @@
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/BinaryFormat/COFF.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/AbsoluteSymbols.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
@@ -21,12 +22,15 @@
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
 #include "polyinvoke/object_platform.h"
 #include "polyregion/compat.h"
+#include "polyregion/env_keys.h"
 #include "polyregion/llvm_utils.hpp"
 
 // keep last: libffi pollutes the global namespace with macros
@@ -108,6 +112,9 @@ std::vector<std::string> ObjectDevice::features() {
 
   polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(),
                                               llvm::Triple(llvm::sys::getDefaultTargetTriple()).getArch(), features);
+
+  // XXX x87 is never CPUID-probed and collectCPUFeatures may not resolve this host's arch/model
+  features.emplace_back("x87");
 
   features.emplace_back("fp64");
   features.emplace_back("fp16");
@@ -295,6 +302,27 @@ RelocatableDevice::RelocatableDevice() {
   // libm::exportAll (from invoke::init) registers sincosf et al. via sys::DynamicLibrary; this generator picks them up
   if (auto gen = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(globalPrefix)) processJD->addGenerator(std::move(*gen));
   else POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create process symbol generator: %s", toString(gen.takeError()).c_str());
+
+  // XXX __truncsfhf2 etc. aren't linked into this process; give the JIT its own compiler-rt builtins
+  // archive. The running binary may be a test-dist sibling of the main dist, not inside it, so try
+  // POLYREGION_BITCODE_DIR's dist root first, falling back to the running binary's own.
+  llvm::SmallVector<std::string, 2> distRoots;
+  if (const char *bitcodeDir = std::getenv(polyregion::env::PolyregionBitcodeDir); bitcodeDir && *bitcodeDir)
+    distRoots.emplace_back(llvm::sys::path::parent_path(bitcodeDir).str());
+  if (const auto exe = llvm::sys::fs::getMainExecutable(nullptr, reinterpret_cast<void *>(&withGlobalPrefix)); !exe.empty())
+    distRoots.emplace_back(llvm::sys::path::parent_path(llvm::sys::path::parent_path(exe)).str());
+  for (const auto &root : distRoots) {
+    llvm::SmallString<256> builtinsPath(root);
+    llvm::sys::path::append(builtinsPath, "lib", "clang", std::to_string(LLVM_VERSION_MAJOR), "lib");
+    llvm::sys::path::append(builtinsPath, hostTriple.str(), "libclang_rt.builtins.a");
+    if (!llvm::sys::fs::exists(builtinsPath)) continue;
+    if (auto gen = llvm::orc::StaticLibraryDefinitionGenerator::Load(*ol, builtinsPath.c_str())) {
+      processJD->addGenerator(std::move(*gen));
+      break;
+    } else
+      fmt::print(stderr, "[{}] Cannot load compiler-rt builtins at {}: {}\n", RELOBJ_PREFIX, builtinsPath.c_str(),
+                 toString(gen.takeError()));
+  }
 }
 
 RelocatableDevice::~RelocatableDevice() {
@@ -320,7 +348,8 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
     auto jdOrErr = es->createJITDylib(name);
     if (!jdOrErr) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITDylib for %s: %s", name.c_str(), toString(jdOrErr.takeError()).c_str());
     llvm::orc::JITDylib &jd = *jdOrErr;
-    jd.addToLinkOrder(*processJD);
+    // default MatchExportedSymbolsOnly hides archive-materialised symbols (e.g. compiler-rt builtins)
+    jd.addToLinkOrder(*processJD, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
 
     auto wbuf = llvm::WritableMemoryBuffer::getNewUninitMemBuffer(image.size(), name);
     if (!wbuf) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot allocate %zu-byte writable buffer for %s", image.size(), name.c_str());

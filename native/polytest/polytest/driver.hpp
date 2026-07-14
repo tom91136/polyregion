@@ -37,6 +37,16 @@
   #include <sys/resource.h>
 #endif
 
+// XXX on Apple, clang++/flang-new default to the triple they were themselves built with when no
+// --target= is given, which is wrong for a cross-built dist so we pin directly
+#if defined(__APPLE__) && defined(__x86_64__)
+  #define POLYTEST_APPLE_TARGET_FLAG "--target=x86_64-apple-darwin "
+#elif defined(__APPLE__) && defined(__aarch64__)
+  #define POLYTEST_APPLE_TARGET_FLAG "--target=arm64-apple-darwin "
+#else
+  #define POLYTEST_APPLE_TARGET_FLAG ""
+#endif
+
 namespace polyregion::polytest {
 
 using namespace aspartame;
@@ -166,7 +176,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            polyregion::env::PolyinvokeDisableSvm, polyregion::env::PolyinvokeDisableBackends, //
                            polyregion::env::PolyrtMirror, polyregion::env::PolyregionPassLog,                 //
                            polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
-                           polyregion::env::PolyregionSysroot,                                                //
+                           polyregion::env::PolyregionSysroot, polyregion::env::PolyregionBitcodeDir,         //
                            "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");

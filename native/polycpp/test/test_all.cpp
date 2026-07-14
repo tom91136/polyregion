@@ -17,12 +17,13 @@ int main(int argc, const char **argv) {
           .archVar = "polycpp_arch",
           .defaultsVar = "polycpp_defaults",
           .defaultsLabelVar = "opt",
-          .defaultsVariants = {{"O0", "-fno-crash-diagnostics -O0 -g3 -Wall -Wextra -pedantic -std=c++17"},
-                               {"O3", "-fno-crash-diagnostics -O3 -g3 -Wall -Wextra -pedantic -std=c++17"}},
+          .defaultsVariants = {{"O0", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O0 -g3 -Wall -Wextra -pedantic -std=c++17"},
+                               {"O3", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O3 -g3 -Wall -Wextra -pedantic -std=c++17"}},
           .stdpar = {"polycpp_stdpar",
 #ifdef _WIN32
                      "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"
 #else
+                     POLYTEST_APPLE_TARGET_FLAG
                      "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic -v"
 #endif
           },

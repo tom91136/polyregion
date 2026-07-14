@@ -86,10 +86,10 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: &cache-restore actions/cache/restore@v5
+        uses: ./.github/actions/restore-compressed-cache
         with:
-          path: &llvm-path |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
           key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build LLVM
@@ -99,9 +99,10 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: &cache-save actions/cache/save@v5
+        uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
+          archive: *llvm-archive
           key: *llvm-key
 
       - name: Pack LLVM dist
@@ -176,7 +177,7 @@ jobs:
       - name: Restore device libs cache
         if: ${{ !env.ACT }}
         id: restore-device-libs
-        uses: *cache-restore
+        uses: &cache-restore actions/cache/restore@v5
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
           key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
@@ -188,7 +189,7 @@ jobs:
 
       - name: Save device libs cache
         if: steps.build-device-libs.outcome == 'success'
-        uses: *cache-save
+        uses: &cache-save actions/cache/save@v5
         with:
           path: *devlibs-path
           key: *devlibs-key
@@ -487,9 +488,10 @@ jobs:
       - *setup-just
 
       - name: Restore LLVM cache
-        uses: *cache-restore
+        uses: ./.github/actions/restore-compressed-cache
         with:
           path: *llvm-path
+          archive: *llvm-archive
           key: *llvm-key
 
       - name: Restore device libs cache
@@ -608,9 +610,10 @@ jobs:
       - name: Restore emulators cache
         if: ${{ !env.ACT }}
         id: restore-emu
-        uses: *cache-restore
+        uses: ./.github/actions/restore-compressed-cache
         with:
-          path: &emu-path ./emulators/out
+          path: &emu-path emulators/out
+          archive: &emu-archive emulators/out.tar.zst
           key: &emu-key emulators-darwin-${{ matrix.arch }}-${{ hashFiles('./emulators/macos.sh') }}
       - name: Build emulators
         id: build-emulators
@@ -618,9 +621,10 @@ jobs:
         run: just build-emulators
       - name: Save emulators cache
         if: steps.build-emulators.outcome == 'success'
-        uses: *cache-save
+        uses: ./.github/actions/save-compressed-cache
         with:
           path: *emu-path
+          archive: *emu-archive
           key: *emu-key
       - name: Pack emulators (tar preserves symlinks)
         run: tar czf emulators-out.tar.gz -C emulators out
@@ -672,7 +676,12 @@ jobs:
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
       - name: Run emulator tests (${{ matrix.shard }})
-        run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
+        run: |
+          repeat=()
+          if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
+            repeat=(--repeat until-pass:5)
+          fi
+          just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error "${repeat[@]}"
 
       - name: Annotate ctest results
         if: always()

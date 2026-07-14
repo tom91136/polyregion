@@ -38,8 +38,14 @@ endif ()
 
 function(add_dist_check name driver source)
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}${EXE_SUFFIX})
+    # XXX cross-built drivers don't reliably default to their own dist's target arch on Darwin; pin
+    # explicitly with --target= (flang-new rejects the Darwin -arch shorthand).
+    set(target_flags)
+    if (APPLE)
+        set(target_flags --target=${POLYREGION_ARCH}-apple-darwin)
+    endif ()
     add_test(NAME ${name}-build
-            COMMAND ${BIN}/${driver}${EXE_SUFFIX} ${ARGN} ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${out})
+            COMMAND ${BIN}/${driver}${EXE_SUFFIX} ${ARGN} ${target_flags} ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${out})
     add_test(NAME ${name}-run COMMAND ${out})
     set_tests_properties(${name}-run PROPERTIES DEPENDS ${name}-build)
     add_test(NAME ${name}-deps

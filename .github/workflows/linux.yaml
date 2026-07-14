@@ -75,7 +75,7 @@ jobs:
           - arch: x86_64
             runs_on: ubuntu-24.04
             llvm_parallel_compile_jobs: "4"
-            llvm_parallel_link_jobs: "4"
+            llvm_parallel_link_jobs: "2"    # XXX 4x lld @ ~4 GB OOMs
             flang_parallel_compile_jobs: "2"
           - arch: aarch64
             runs_on: ubuntu-24.04-arm
@@ -159,11 +159,28 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: *cache-restore
+        uses: ./.github/actions/restore-compressed-cache
         with:
-          path: &llvm-path |
-            ./native/out/polyregion-Release-${{ matrix.arch }}-*-dist
+          path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
           key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Enable zram
+        if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}
+        run: |
+          sudo swapoff -a
+          sudo rm -f /mnt/swapfile
+          sudo apt-get install -y util-linux zram-config "linux-modules-extra-$(uname -r)"
+
+          sudo modprobe zram
+
+          totalmem=$(LC_ALL=C free | grep -e "^Mem:" | sed -e 's/^Mem: *//' -e 's/  *.*//')
+          mem=$((totalmem * 4 * 1024))
+
+          sudo sh -c "echo $mem > /sys/block/zram0/disksize"
+          sudo mkswap /dev/zram0
+          sudo swapon -p 5 /dev/zram0
+          sudo zramctl
 
       - name: Build LLVM
         id: build-llvm
@@ -172,9 +189,10 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: *cache-save
+        uses: ./.github/actions/save-compressed-cache
         with:
           path: *llvm-path
+          archive: *llvm-archive
           key: *llvm-key
 
       - name: Pack LLVM dist
@@ -434,9 +452,10 @@ jobs:
       - name: Restore emulators cache
         if: ${{ !env.ACT }}
         id: restore-emu
-        uses: *cache-restore
+        uses: ./.github/actions/restore-compressed-cache
         with:
-          path: &emu-path ./emulators/out
+          path: &emu-path emulators/out
+          archive: &emu-archive emulators/out.tar.zst
           key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
 
       - name: Detect existing emulators (act fast-path)
@@ -454,9 +473,10 @@ jobs:
 
       - name: Save emulators cache
         if: steps.build-emulators.outcome == 'success'
-        uses: *cache-save
+        uses: ./.github/actions/save-compressed-cache
         with:
           path: *emu-path
+          archive: *emu-archive
           key: *emu-key
 
       - name: Pack emulators (tar preserves symlinks)
@@ -884,9 +904,10 @@ jobs:
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
-        uses: *cache-restore
+        uses: ./.github/actions/restore-compressed-cache
         with:
           path: *llvm-path
+          archive: *llvm-archive
           key: *llvm-key
 
       - name: Restore device libs cache

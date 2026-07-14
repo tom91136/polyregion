@@ -1,0 +1,34 @@
+name: Save compressed cache
+description: >
+  Packs a directory into a tar+zstd archive at a stronger level+window than actions/cache's
+  hardcoded default, then saves it. Pairs with restore-compressed-cache.
+
+inputs:
+  path:
+    description: Directory to pack and cache.
+    required: true
+  archive:
+    description: Path to write the intermediate .tar.zst cache blob.
+    required: true
+  key:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      # XXX not every runner ships zstd (e.g. windows-11-arm); fall back to gzip.
+      run: |
+        dir="${{ inputs.path }}"
+        archive="${{ inputs.archive }}"
+        mkdir -p "$(dirname "$archive")"
+        if command -v zstd >/dev/null 2>&1; then
+          tar --posix -cf - -C "$(dirname "$dir")" "$(basename "$dir")" | zstd -T0 --long=30 -12 -o "$archive" -f
+        else
+          tar --posix -czf "$archive" -C "$(dirname "$dir")" "$(basename "$dir")"
+        fi
+
+    - uses: actions/cache/save@v5
+      with:
+        path: ${{ inputs.archive }}
+        key: ${{ inputs.key }}

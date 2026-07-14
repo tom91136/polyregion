@@ -80,9 +80,14 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
   // XXX This is cached because host CPU can never change (hopefully!) at runtime.
   static std::optional<llvmc::CpuInfo> hostCpuInfo = {};
   if (!hostCpuInfo) {
+    auto hostFeatures = llvm::sys::getHostCPUFeatures();
+    // XXX QEMU riscv_hwprobe emulation can report 'v' without the zve* bits it implies
+    bool hasV = hostFeatures.lookup("v");
     llvm::SubtargetFeatures Features;
-    for (auto &F : llvm::sys::getHostCPUFeatures())
+    for (auto &F : hostFeatures) {
+      if (hasV && !F.second && F.first().starts_with("zve")) continue;
       Features.AddFeature(F.first(), F.second);
+    }
     hostCpuInfo = {.uArch = llvm::sys::getHostCPUName().str(), .features = Features.getString()};
   }
   assert(hostCpuInfo && "Host CPU info not valid");
