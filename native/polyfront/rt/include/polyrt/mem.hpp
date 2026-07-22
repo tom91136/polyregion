@@ -37,6 +37,8 @@ class SynchronisedMemAllocation {
   RemoteWrite remoteWrite;
   RemoteRelease remoteRelease;
   bool debug;
+  // Cached allocations are refreshed once per H2D traversal; aliases and cycles reuse that refresh.
+  std::unordered_set<uintptr_t> localSyncVisited{};
 
   template <typename T> static T readAt(const char *base) {
     T v{};
@@ -209,10 +211,11 @@ class SynchronisedMemAllocation {
       if (stale) {
         disassociate(hostData);
         if (debug) std::fprintf(stderr, "[SMA]   stale base hit (cached %ld < required %ld), re-mirroring\n", cachedSize, requiredSize);
-      } else if (!alloc->localModified) {
+      } else if (!localSyncVisited.insert(alloc->remote.ptr).second && !alloc->localModified) {
         if (debug) std::fprintf(stderr, "[SMA]   hit (0x%jx = %4ld + %4ld)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
         return alloc->remote.ptr + offsetInBytes;
       } else {
+        alloc->localModified = false;
         const auto &effLayout = alloc->layout ? *alloc->layout : l;
         const bool ro = hostReadOnly || alloc->hostReadOnly;
         return ptrIndirections > 1 ? writeIndirect(hostData, alloc->remote.ptr, ptrIndirections, count, effLayout, ro)
@@ -220,12 +223,14 @@ class SynchronisedMemAllocation {
       }
     }
     if (ptrIndirections > 1) {
-      return writeIndirect(hostData, createDeviceAllocation(hostData, sizeof(uintptr_t) * count, nullptr, hostReadOnly), ptrIndirections,
-                           count, l, hostReadOnly);
+      const auto devicePtr = createDeviceAllocation(hostData, sizeof(uintptr_t) * count, nullptr, hostReadOnly);
+      localSyncVisited.insert(devicePtr);
+      return writeIndirect(hostData, devicePtr, ptrIndirections, count, l, hostReadOnly);
     }
     const size_t typeSizeTotal = l.sizeInBytes * count;
     const size_t allocSize = std::max(typeSizeTotal, hostAllocSizeInBytes);
     const auto devicePtr = createDeviceAllocation(hostData, allocSize, &l, hostReadOnly);
+    localSyncVisited.insert(devicePtr);
     // Trailing bytes outside the polyc type (list node payload, vtable slots, etc.) are copied
     // verbatim; writeStruct then walks the known-typed prefix to mirror pointer fields.
     if (allocSize > typeSizeTotal) remoteWrite(hostData + typeSizeTotal, devicePtr, typeSizeTotal, allocSize - typeSizeTotal);
@@ -311,6 +316,7 @@ public:
         debug(debug) {}
 
   [[nodiscard]] uintptr_t syncLocalToRemote(const void *p, const runtime::TypeLayout &s) {
+    localSyncVisited.clear();
     return mirrorToRemote(static_cast<const char *>(p), 1, 1, s);
   }
 
@@ -421,7 +427,9 @@ public:
   }
 
   uintptr_t mirrorAlloc(const void *local, const size_t sizeInBytes, const bool hostReadOnly) {
+    localSyncVisited.clear();
     const uintptr_t remote = createDeviceAllocation(static_cast<const char *>(local), sizeInBytes, nullptr, hostReadOnly);
+    localSyncVisited.insert(remote);
     remoteWrite(local, remote, 0, sizeInBytes);
     return remote;
   }
@@ -456,13 +464,22 @@ public:
     const bool cacheHit = query && !pastEndAliasOfDistinct(local, query);
     const size_t sz = meta.sizeInBytes == 0 ? 0 : staleFloor(meta.sizeInBytes, minSize);
     if (cacheHit) {
-      if (sz <= query->first->remote.sizeInBytes) return std::pair{query->first->remote.ptr, query->second};
+      if (sz <= query->first->remote.sizeInBytes) {
+        auto *alloc = query->first;
+        if (localSyncVisited.insert(alloc->remote.ptr).second || alloc->localModified) {
+          const auto *base = static_cast<const char *>(local) - query->second;
+          remoteWrite(base, alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
+          alloc->localModified = false;
+        }
+        return std::pair{alloc->remote.ptr, query->second};
+      }
       disassociate(local);
     }
     if (sz == 0) return std::nullopt;
     const size_t off = meta.sizeInBytes == 0 ? 0 : meta.offsetInBytes;
     const char *base = static_cast<const char *>(local) - off;
     const uintptr_t baseRemote = createDeviceAllocation(base, sz, nullptr, meta.hostReadOnly);
+    localSyncVisited.insert(baseRemote);
     remoteWrite(base, baseRemote, 0, sz);
     return std::pair{baseRemote, off};
   }

@@ -93,6 +93,7 @@ const static TypeLayout int64Type = NamedType(int64_t);
 
 struct Fixture {
   std::unordered_map<uintptr_t, size_t> localAllocations, remoteAllocations;
+  size_t remoteWrites = 0;
 
   using QueryPtr = std::function<polyregion::polyrt::PtrQuery(const void *)>;
   using AllocateRemote = std::function<uintptr_t(size_t)>;
@@ -123,7 +124,8 @@ struct Fixture {
             [](void *dst, uintptr_t src, size_t srcOffset, size_t size) {
               return std::memcpy(dst, reinterpret_cast<char *>(src) + srcOffset, size);
             }, //
-            [](const void *src, uintptr_t dst, size_t dstOffset, size_t size) {
+            [&](const void *src, uintptr_t dst, size_t dstOffset, size_t size) {
+              remoteWrites++;
               return std::memcpy(reinterpret_cast<char *>(dst) + dstOffset, src, size);
             }, //
             [](uintptr_t remotePtr) { std::free(reinterpret_cast<void *>(remotePtr)); }, false) {}
@@ -152,6 +154,57 @@ struct Fixture {
       std::free(reinterpret_cast<void *>(k));
   }
 };
+
+TEST_CASE("generated mirror refreshes cached allocations between launches") {
+  Fixture fixture;
+  auto x = fixture.mallocLocal<int32_t>();
+  *x = 41;
+
+  struct Capture {
+    int32_t *x;
+  } capture{x};
+
+  fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+  auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(x));
+  CHECK(fixture.remoteWrites == 2);
+  (*remote)++;
+  fixture.allocation.unmirrorVisitClear();
+  fixture.allocation.unmirrorReadAlloc(x);
+  CHECK(*x == 42);
+  fixture.allocation.disassociate(&capture, false);
+
+  *x = 6;
+  fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+  CHECK(reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(x)) == remote);
+  CHECK(*remote == 6);
+  CHECK(fixture.remoteWrites == 4);
+  CHECK(reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(x)) == remote);
+  CHECK(fixture.remoteWrites == 4);
+}
+
+TEST_CASE("runtime mirror refreshes cached allocations between launches") {
+  struct Capture {
+    int32_t *x;
+  };
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, x, &int32Type));
+
+  Fixture fixture;
+  auto x = fixture.mallocLocal<int32_t>();
+  *x = 41;
+  Capture capture{x};
+
+  auto remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+  auto remote = remoteCapture->x;
+  (*remote)++;
+  fixture.remoteToLocal(&capture);
+  CHECK(*x == 42);
+  fixture.allocation.disassociate(&capture, false);
+
+  *x = 6;
+  remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+  CHECK(remoteCapture->x == remote);
+  CHECK(*remote == 6);
+}
 
 TEST_CASE("ptr-indirect-2-star") {
   struct Foo {
