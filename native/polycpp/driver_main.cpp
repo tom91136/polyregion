@@ -106,6 +106,8 @@ int main(int argc, const char *argv[]) {
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontTargets, opts->targets)});
                    if (opts->stackDepth)
                      append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontStackDepth, *opts->stackDepth)});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang",
+                           fmt::format("{}={}", PolyfrontJit, opts->jit != StdParOptions::LinkKind::Disabled ? "1" : "0")});
                  }
 
                  const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
@@ -190,6 +192,9 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
+                   const auto compilerLibPath = clangPath.empty() ? joinPath(execParentPath, "..", "lib")
+                                                                  : joinPath(llvm::sys::path::parent_path(clangPath), "..", "lib");
+                   append(jitCompilerLinkFlags(opts->jit, polycppLibPath, compilerLibPath, /*needsCxxRuntime*/ false));
                    // XXX on macOS static libc++ so the interposer sees its internal allocations; last so it resolves
                    // against the user + polystl objects
                    if (opts->mem == StdParOptions::MemKind::Reflect) {

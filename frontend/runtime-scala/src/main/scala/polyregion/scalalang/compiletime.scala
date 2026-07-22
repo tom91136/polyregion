@@ -125,37 +125,56 @@ object compiletime {
   }
 
   inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
-    // ${ generate0[C]('queue, 'f, 'cb) }
-    ${ generate0[C]('queue, 'f, 'cb) }
+    ${ generate0[C]('queue, 'f, 'cb, false) }
+  inline def offloadJit0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
+    ${ generate0[C]('queue, 'f, 'cb, true) }
   private def generate0[C: Type](using
       q: Quotes
-  )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]]) = checked(for {
+  )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]], jit: Boolean) = checked(for {
     cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(1, 1, 1) }, cb)
+    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(1, 1, 1) }, cb, jit)
   } yield expr)
 
   inline def offload1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb) }
+  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, false) }
+  inline def offloadJit1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
+      inline f: Any
+  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb, true) }
   private def generate1[C: Type](using
       q: Quotes
-  )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]]) = checked(for {
-    cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb)
-  } yield expr)
+  )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]], jit: Boolean) = checked(
+    for {
+      cs   <- reifyConfigFromTpe[C]()
+      expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb, jit)
+    } yield expr
+  )
 
   inline def offload2[C](
       inline queue: rt.Device.Queue,
       inline rangeX: Range,
       inline rangeY: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb) }
+  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, false) }
+  inline def offloadJit2[C](
+      inline queue: rt.Device.Queue,
+      inline rangeX: Range,
+      inline rangeY: Range,
+      inline cb: Callback[Unit]
+  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb, true) }
   private def generate2[C: Type](using
       q: Quotes
-  )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], rangeY: Expr[Range], cb: Expr[Callback[Unit]]) =
+  )(
+      queue: Expr[rt.Device.Queue],
+      f: Expr[Any],
+      rangeX: Expr[Range],
+      rangeY: Expr[Range],
+      cb: Expr[Callback[Unit]],
+      jit: Boolean
+  ) =
     checked(for {
       cs   <- reifyConfigFromTpe[C]()
-      expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb)
+      expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb, jit)
     } yield expr)
 
   inline def offload3[C](
@@ -164,7 +183,14 @@ object compiletime {
       inline rangeY: Range,
       inline rangeZ: Range,
       inline cb: Callback[Unit]
-  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb) }
+  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, false) }
+  inline def offloadJit3[C](
+      inline queue: rt.Device.Queue,
+      inline rangeX: Range,
+      inline rangeY: Range,
+      inline rangeZ: Range,
+      inline cb: Callback[Unit]
+  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb, true) }
   private def generate3[C: Type](using
       q: Quotes
   )(
@@ -173,10 +199,11 @@ object compiletime {
       rangeX: Expr[Range],
       rangeY: Expr[Range],
       rangeZ: Expr[Range],
-      cb: Expr[Callback[Unit]]
+      cb: Expr[Callback[Unit]],
+      jit: Boolean
   ) = checked(for {
     cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb)
+    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb, jit)
   } yield expr)
 
   private val ProgramCounter = AtomicLong(0)
@@ -185,7 +212,8 @@ object compiletime {
       queue: Expr[rt.Device.Queue],
       f: Expr[Any],
       dim: Expr[rt.Dim3],
-      cb: Expr[Callback[Unit]]
+      cb: Expr[Callback[Unit]],
+      jit: Boolean = false
   ) = {
     val log = RenderedLog("")
     val result = for {
@@ -220,11 +248,22 @@ object compiletime {
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.polyASTVersioned(prog)))
       compiler = ct.Compiler.create()
 
-      compilations <- configs.traverse(c =>
-        Either
-          .catchNonFatal(compiler.compile(serialisedAst, true, ct.Options.of(c.target, c.arch), c.opt.value))
-          .map(c -> _)
-      )
+      compilations <-
+        if (jit) Nil.success
+        else
+          configs.traverse(c =>
+            Either
+              .catchNonFatal(compiler.compile(serialisedAst, true, ct.Options.of(c.target, c.arch), c.opt.value))
+              .map(c -> _)
+          )
+      perConfigLayouts <-
+        if (jit)
+          Either.catchNonFatal(MsgPack.encode(CodeGen.polyASTVersioned(prog.defs))).flatMap { structDefsAst =>
+            configs.traverse(c =>
+              Either.catchNonFatal(c -> compiler.layoutOf(structDefsAst, ct.Options.of(c.target, c.arch)))
+            )
+          }
+        else compilations.map((c, comp) => c -> comp.layouts).success
 
     } yield {
 
@@ -254,6 +293,35 @@ object compiletime {
 
       debug(s"Prog defs: ${prog.defs}")
 
+      val modulesExpr: Expr[Array[(String, Set[String], Array[Byte])]] =
+        if (jit) {
+          val serialisedAstExpr = Expr(serialisedAst)
+          val jitConfigs = Expr(configs.map { config =>
+            (s"${config.arch}@${config.opt}(${config.target})", config.target.name, config.arch, config.opt.value)
+          })
+          '{
+            val jitCompiler = ct.Compiler.create()
+            val ast         = $serialisedAstExpr
+            $jitConfigs.map { case (name, targetName, arch, opt) =>
+              val comp = jitCompiler.compile(ast, false, ct.Options.of(ct.Target.valueOf(targetName), arch), opt)
+              (name, comp.features.toSet, comp.program)
+            }.toArray
+          }
+        } else
+          '{
+            Array[(String, Set[String], Array[Byte])](${
+              Varargs(compilations.map { (config, compilation) =>
+                Expr(
+                  (
+                    s"${config.arch}@${config.opt}(${config.target})",
+                    Set(compilation.features: _*),
+                    compilation.program
+                  )
+                )
+              })
+            }: _*)
+          }
+
       val code = '{
 
         val cb_ : Callback[Unit] = $cb
@@ -262,14 +330,7 @@ object compiletime {
         val miss      = ArrayBuffer[(String, Set[String])]()
         val available = Set($queue.device.features(): _*)
 
-        lazy val modules = Array[(String, Set[String], Array[Byte])](${
-          Varargs(compilations.map { (config, compilation) =>
-            Expr(
-              (s"${config.arch}@${config.opt}(${config.target})", Set(compilation.features: _*), compilation.program)
-            )
-
-          })
-        }: _*)
+        lazy val modules = $modulesExpr
 
         var found = -1
         var i     = 0
@@ -315,8 +376,8 @@ object compiletime {
 
             q.Match(
               'found.asTerm,
-              compilations.zipWithIndex.map { case ((config, compilation), i) =>
-                val layouts0 = compilation.layouts.map(l => p.Sym(l.name) -> l).toMap
+              perConfigLayouts.zipWithIndex.map { case ((config, configLayouts), i) =>
+                val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
                 val lut     = prog.defs.map(s => s.name -> s).toMap
                 val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap

@@ -46,16 +46,22 @@ struct TypeLayoutMirror final : AggregateMirror<6> {
   std::array<Type, 6> types() const override;
 };
 
-struct KernelObjectMirror final : AggregateMirror<6> {
+struct KernelObjectMirror final : AggregateMirror<12> {
   Field<IntegerType, 0> kind;
-  Field<IntegerType, 1> structCount;
+  Field<IntegerType, 1> format;
   Field<IntegerType, 2> featureCount;
   Field<LLVM::LLVMPointerType, 3> features;
   Field<IntegerType, 4> imageLength;
   Field<LLVM::LLVMPointerType, 5> image;
+  Field<IntegerType, 6> target;
+  Field<LLVM::LLVMPointerType, 7> arch;
+  Field<LLVM::LLVMPointerType, 8> pipelineSpec;
+  Field<IntegerType, 9> opt;
+  Field<IntegerType, 10> programLength;
+  Field<LLVM::LLVMPointerType, 11> program;
   explicit KernelObjectMirror(ModuleOp &M);
   const char *typeName() const override;
-  std::array<Type, 6> types() const override;
+  std::array<Type, 12> types() const override;
 };
 
 struct KernelBundleMirror final : AggregateMirror<11> {

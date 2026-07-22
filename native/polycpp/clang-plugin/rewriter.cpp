@@ -127,6 +127,8 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   const auto KernelObjectTy = typeOfFieldWithName(KernelBundleTy, "objects") ^ map([](auto &t) { return t->getPointeeType(); });
   const auto PlatformKindTy = typeOfFieldWithName(*KernelObjectTy, "kind");
   const auto ModuleFormatTy = typeOfFieldWithName(*KernelObjectTy, "format");
+  const auto TargetTy = typeOfFieldWithName(*KernelObjectTy, "target");
+  const auto OptLevelTy = typeOfFieldWithName(*KernelObjectTy, "opt");
   const auto TypeLayoutTy = typeOfFieldWithName(KernelBundleTy, "structs") ^ map([](auto &t) { return t->getPointeeType(); });
   const auto AggregateMemberTy = typeOfFieldWithName(*TypeLayoutTy, "members") ^ map([](auto &t) { return t->getPointeeType(); });
   const auto TypeLayoutMembersField = fieldWithName(*TypeLayoutTy, "members");
@@ -152,6 +154,16 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
       }) //
       | to_vector();
 
+  Opt<clang::VarDecl *> kernelProgramDecl;
+  if (!bundle.program.empty()) {
+    kernelProgramDecl = mkStaticVarDecl(C, c.calleeDecl, "__ko_program_data", //
+                                        mkConstArrTy(C, C.UnsignedCharTy, bundle.program.size()),
+                                        bundle.program | map([&](const unsigned char x) -> clang::Expr * {
+                                          return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
+                                                                                 mkIntLit(C, C.IntTy, x), nullptr, clang::VK_PRValue, {});
+                                        }) | to_vector());
+  }
+
   auto kernelObjectArrayDecl = mkStaticVarDecl(
       C, c.calleeDecl,                                         //
       "__ko_data",                                             //
@@ -176,6 +188,21 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                       /*imageLength  */ mkIntLit(C, C.getSizeType(), ko.moduleImage.size()),
                       /*image        */
                       mkArrayToPtrDecay(C, C.getPointerType(C.UnsignedCharTy.withConst()), mkDeclRef(C, kernelImageDecls[idx])),
+                      /*target       */
+                      S.ImpCastExprToType(mkIntLit(C, C.IntTy, static_cast<std::underlying_type_t<decltype(ko.target)>>(ko.target)),
+                                          *TargetTy, clang::CastKind::CK_IntegralCast)
+                          .get(),
+                      /*arch         */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, ko.arch)),
+                      /*pipelineSpec */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, ko.pipelineSpec)),
+                      /*opt          */
+                      S.ImpCastExprToType(mkIntLit(C, C.IntTy, static_cast<int>(polyregion::compiletime::OptLevel::O3)), *OptLevelTy,
+                                          clang::CastKind::CK_IntegralCast)
+                          .get(),
+                      /*programLength*/ mkIntLit(C, C.getSizeType(), bundle.program.size()),
+                      /*program      */
+                      bundle.program.empty() ? static_cast<clang::Expr *>(mkNullPtrLit(C, C.UnsignedCharTy.withConst()))
+                                             : static_cast<clang::Expr *>(mkArrayToPtrDecay(
+                                                   C, C.getPointerType(C.UnsignedCharTy.withConst()), mkDeclRef(C, *kernelProgramDecl))),
                   });
             }) //
           | to_vector());
@@ -318,8 +345,11 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
     hostBcDecl = d;
   }
 
+  // program data must precede __ko_data, whose initialiser takes its address
   Vector<clang::Stmt *> newStmts =                                                                                //
-      kernelImageDecls                                                                                            //
+      (kernelProgramDecl | to_vector())                                                                           //
+      | concat(hostBcDecl | to_vector())                                                                          //
+      | concat(kernelImageDecls)                                                                                  //
       | concat(primitiveTypeLayoutsDecls | values())                                                              //
       | append(structTypeLayoutArrayDecl)                                                                         //
       | concat(aggregateMemberArrayDecls | values())                                                              //
@@ -330,7 +360,6 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
       | concat(assignTypeLayoutMembers)                                                                           //
       | append(clang::ReturnStmt::Create(C, {}, mkDeclRef(C, kernelBundleDecl), {}))                              //
       | to_vector();
-  if (hostBcDecl) newStmts.insert(newStmts.begin(), new (C) clang::DeclStmt(clang::DeclGroupRef(*hostBcDecl), {}, {}));
 
   c.calleeDecl->setBody(clang::CompoundStmt::Create(C, newStmts, {}, {}, {}));
 }

@@ -385,6 +385,13 @@ struct KernelObject {
   const char **features;
   size_t imageLength;
   const unsigned char *image;
+  // Deferred JIT payload when imageLength == 0.
+  compiletime::Target target;
+  const char *arch;
+  const char *pipelineSpec; // null selects the default
+  compiletime::OptLevel opt;
+  size_t programLength;
+  const unsigned char *program;
 };
 
 using PreludeFn = uintptr_t (*)(void *capture, size_t sizeInBytes);

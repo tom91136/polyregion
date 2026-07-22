@@ -22,12 +22,13 @@ set(LIB_SOURCES
         polypass_locate.cpp
         js_cache.cpp
         compiler.cpp
+        polyc_jit.cpp
 )
 
 add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_polyc.cpp)
 
-add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/js_runner.cpp test/vendor_bitcode.cpp)
+add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/jit.cpp test/js_runner.cpp test/vendor_bitcode.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin driver_main.cpp)
 
@@ -143,6 +144,82 @@ polyregion_apply_common_options(polyc-benchmarks EXTRA_LINK ${POLYC_LINK_HERMES_
 polyregion_apply_common_options(polyc-driver)
 polyregion_apply_common_options(polyc-bin EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 polyregion_apply_common_options(polyc EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+
+# JIT compiler DSO; reuse shared LLVM to avoid multiple LLVM instances.
+add_library(polyc-shared SHARED polyc_shared_stub.cpp)
+set_target_properties(polyc-shared PROPERTIES OUTPUT_NAME polyc LINKER_LANGUAGE CXX)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/generated/polyc_jit-exports.txt" _polyc_jit_exports)
+if (WIN32)
+    # Avoid colliding with polyc.lib.
+    set_target_properties(polyc-shared PROPERTIES ARCHIVE_OUTPUT_NAME polyc-jit)
+    set(_polyc_jit_def "${CMAKE_CURRENT_BINARY_DIR}/polyc_jit.def")
+    file(WRITE "${_polyc_jit_def}" "EXPORTS\n")
+    foreach (_symbol ${_polyc_jit_exports})
+        file(APPEND "${_polyc_jit_def}" "  ${_symbol}\n")
+    endforeach ()
+    target_sources(polyc-shared PRIVATE "${_polyc_jit_def}")
+endif ()
+target_link_libraries(polyc-shared PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,polyc>")
+polyregion_apply_common_options(polyc-shared EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+if (UNIX AND NOT APPLE)
+    # Limit exports to the JIT C ABI.
+    set(_polyc_jit_map "${CMAKE_CURRENT_BINARY_DIR}/polyc_jit.map")
+    file(WRITE "${_polyc_jit_map}" "{\n  global:\n")
+    foreach (_symbol ${_polyc_jit_exports})
+        file(APPEND "${_polyc_jit_map}" "    ${_symbol};\n")
+    endforeach ()
+    file(APPEND "${_polyc_jit_map}" "  local:\n    *;\n};\n")
+    target_link_options(polyc-shared PRIVATE LINKER:--version-script,${_polyc_jit_map})
+    set_target_properties(polyc-shared PROPERTIES LINK_DEPENDS "${_polyc_jit_map}")
+endif ()
+
+# Relocatable static compiler archive; LLVM remains shared in dylib builds.
+function(polyregion_collect_static_targets out_var root)
+    set(_seen "")
+    set(_targets "")
+    set(_stack ${root})
+    while (_stack)
+        list(POP_FRONT _stack _cur)
+        if (_cur IN_LIST _seen)
+            continue()
+        endif ()
+        list(APPEND _seen ${_cur})
+        if (NOT TARGET ${_cur})
+            continue()
+        endif ()
+        get_target_property(_type ${_cur} TYPE)
+        if (_type STREQUAL "STATIC_LIBRARY")
+            list(APPEND _targets ${_cur})
+        endif ()
+        foreach (_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+            get_target_property(_deps ${_cur} ${_prop})
+            if (_deps)
+                foreach (_d ${_deps})
+                    # Traverse LINK_ONLY dependencies; skip other generator expressions.
+                    if (_d MATCHES "^\\$<LINK_ONLY:(.+)>$")
+                        set(_d "${CMAKE_MATCH_1}")
+                    endif ()
+                    if (NOT _d MATCHES "\\$<")
+                        list(APPEND _stack ${_d})
+                    endif ()
+                endforeach ()
+            endif ()
+        endforeach ()
+    endwhile ()
+    set(${out_var} ${_targets} PARENT_SCOPE)
+endfunction()
+
+polyregion_collect_static_targets(POLYC_JIT_STATIC_TARGETS polyc)
+# LLVM's dylib-mode interface hides static LLD's zlib dependency.
+if (TARGET ZLIB::ZLIB)
+    list(APPEND POLYC_JIT_STATIC_TARGETS ZLIB::ZLIB)
+endif ()
+merge_static_libs(polyc-jit-static ${POLYC_JIT_STATIC_TARGETS})
+# Dist LLD lacks zlib; remove compressed DWARF from archive members.
+if (CMAKE_STRIP)
+    add_custom_command(TARGET polyc-jit-static POST_BUILD
+            COMMAND "${CMAKE_STRIP}" -S "$<TARGET_FILE:polyc-jit-static>")
+endif ()
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
 if (WIN32)

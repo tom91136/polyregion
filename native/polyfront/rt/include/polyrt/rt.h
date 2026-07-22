@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "polyinvoke/runtime.h"
 
@@ -42,7 +43,9 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void ensureRoSegmentsRecorded();
 [[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void skipExit(const char *reason);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT DebugLevel debugLevel();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT POLYREGION_PRINTF_FORMAT(2, 3) void log(DebugLevel level, const char *fmt, ...);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *moduleName, const KernelObject &object);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *moduleName, const KernelObject &object,
+                                                              const void *capture = nullptr, const TypeLayout *interfaceLayout = nullptr,
+                                                              std::string *loadedModuleName = nullptr);
 } // namespace polyregion::polyrt
 
 #undef POLYREGION_PRINTF_FORMAT

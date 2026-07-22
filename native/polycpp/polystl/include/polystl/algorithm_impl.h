@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <string>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -80,8 +81,11 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
         return;
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchHostThreaded(b.size(), polyreflectTrackPtr(&kernel), bundle.moduleName, bundle.asserts);
+        std::string loadedModule;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel,
+                                      bundle.structCount ? &bundle.structs[bundle.interfaceLayoutIdx] : nullptr, &loadedModule))
+          continue;
+        details::dispatchHostThreaded(b.size(), polyreflectTrackPtr(&kernel), loadedModule.c_str(), bundle.asserts);
         return;
       }
       break;
@@ -113,10 +117,13 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
       void *kernelPtr = polyreflectTrackPtr(&kernel);
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
+        std::string loadedModule;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel,
+                                      bundle.structCount ? &bundle.structs[bundle.interfaceLayoutIdx] : nullptr, &loadedModule))
+          continue;
         const auto grid = (global + blocks - 1) / blocks;
-        details::dispatchManaged(grid, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude,
-                                 bundle.postlude, bundle.asserts);
+        details::dispatchManaged(grid, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, loadedModule.c_str(),
+                                 bundle.prelude, bundle.postlude, bundle.asserts);
         return;
       }
       break;
@@ -173,8 +180,11 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
         return acc;
       }
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        details::dispatchHostThreaded(groups, polyreflectTrackPtr(&kernel), bundle.moduleName, bundle.asserts);
+        std::string loadedModule;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel,
+                                      bundle.structCount ? &bundle.structs[bundle.interfaceLayoutIdx] : nullptr, &loadedModule))
+          continue;
+        details::dispatchHostThreaded(groups, polyreflectTrackPtr(&kernel), loadedModule.c_str(), bundle.asserts);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);
@@ -215,10 +225,13 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       }
       void *kernelPtr = polyreflectTrackPtr(&kernel);
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
+        std::string loadedModule;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel,
+                                      bundle.structCount ? &bundle.structs[bundle.interfaceLayoutIdx] : nullptr, &loadedModule))
+          continue;
         details::dispatchManaged(program_meta::VkWorkgroupSizeXValue, groups, groups * sizeof(T),
-                                 &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName, bundle.prelude, bundle.postlude,
-                                 bundle.asserts);
+                                 &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, loadedModule.c_str(), bundle.prelude,
+                                 bundle.postlude, bundle.asserts);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);

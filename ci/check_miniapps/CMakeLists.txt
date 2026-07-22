@@ -149,11 +149,14 @@ foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
         "set(USE_TBB ON CACHE BOOL \"\")\n"
         "set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES \"${TBB_SHIM}\" CACHE STRING \"\")\n")
     else ()                                                # polycpp offload backend
-      set(cxxExtra "-fstdpar;-fstdpar-arch=${ARCH_${backend}};-fstdpar-mem=reflect;-fstdpar-rt=dynamic")
+      set(JIT_FLAG "")                                     # -DMINIAPP_JIT=ON compiles kernels at runtime
+      if (MINIAPP_JIT)
+        set(JIT_FLAG ";-fstdpar-jit=dynamic")
+      endif ()
       file(WRITE "${init}"
         "set(MODEL ${MODEL_${app}} CACHE STRING \"\")\n"
         "set(CMAKE_CXX_COMPILER \"${POLYCPP_DIST}/bin/polycpp\" CACHE STRING \"\")\n"
-        "set(CXX_EXTRA_FLAGS \"${cxxExtra}\" CACHE STRING \"\")\n")
+        "set(CXX_EXTRA_FLAGS \"-fstdpar;-fstdpar-arch=${ARCH_${backend}};-fstdpar-mem=reflect;-fstdpar-rt=dynamic${JIT_FLAG}\" CACHE STRING \"\")\n")
     endif ()
     if (DEFINED EXTRA_${app})                              # per-app extra cache vars (e.g. BabelStream STDIMPL)
       file(APPEND "${init}" "${EXTRA_${app}}\n")

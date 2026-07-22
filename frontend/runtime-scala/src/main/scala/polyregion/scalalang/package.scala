@@ -19,34 +19,73 @@ class Platform[F[_], T <: Target](r: rt.Platform, f: Suspend[F]) {
   inline def devices: Vector[Device[F, T]] = r.devices.map(d => Device[F, T](d, f)).toVector
 }
 
-trait JitOps[F[_], O](d: rt.Device.Queue, f: Suspend[F]) {
+trait JitOps[F[_], O](d: rt.Device.Queue, suspend: Suspend[F]) {
 
-  inline def task[A](using inline o: O)(f: => A): F[A] = ???
+  inline def task[C <: O, A](inline f: => A): F[A] = suspend { cb =>
+    val result = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
+    polyregion.scalalang.compiletime.offloadJit0[C](
+      d,
+      {
+        case Left(e) => cb(Left(e))
+        case Right(()) =>
+          try cb(Right(result(0)))
+          catch { case e: Throwable => cb(Left(e)) }
+      }
+    ) { result(0) = f; () }
+  }
 
-  inline def foreach(inline x: Range)
-  /*             */ (using inline o: O)
-  /*             */ (inline f: Int => Unit): F[Unit] = ???
-  inline def foreach(inline x: Range, inline y: Range)
-  /*             */ (using inline o: O)
-  /*             */ (inline f: (Int, Int) => Unit): this.type = ???
-  inline def foreach(inline x: Range, inline y: Range, inline z: Range)
-  /*             */ (using inline o: O)
-  /*             */ (inline f: (Int, Int, Int) => Unit): this.type = ???
+  inline def foreach[C <: O](inline x: Range)
+  /*                     */ (inline f: Int => Unit): F[Unit] = suspend { cb =>
+    val startX = x.start
+    val stepX  = x.step
+    polyregion.scalalang.compiletime.offloadJit1[C](d, x, cb) {
+      f(Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdx(0)))
+      ()
+    }
+  }
 
-  inline def reduce[A](inline x: Range)
-  /*               */ (using inline o: O)
-  /*               */ (inline f: Int => A)
-  /*               */ (inline g: (A, A) => A): F[A] = ???
+  inline def foreach[C <: O](inline x: Range, inline y: Range)
+  /*                     */ (inline f: (Int, Int) => Unit): F[Unit] = suspend { cb =>
+    val startX = x.start
+    val stepX  = x.step
+    val startY = y.start
+    val stepY  = y.step
+    polyregion.scalalang.compiletime.offloadJit2[C](d, x, y, cb) {
+      f(
+        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdx(0)),
+        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdx(1))
+      )
+      ()
+    }
+  }
 
-  inline def reduce[A](inline x: Range, inline y: Range)
-  /*               */ (using inline o: O)
-  /*               */ (inline f: (Int, Int) => A)
-  /*               */ (inline g: (A, A) => A): F[A] = ???
+  inline def foreach[C <: O](inline x: Range, inline y: Range, inline z: Range)
+  /*                     */ (inline f: (Int, Int, Int) => Unit): F[Unit] = suspend { cb =>
+    val startX = x.start
+    val stepX  = x.step
+    val startY = y.start
+    val stepY  = y.step
+    val startZ = z.start
+    val stepZ  = z.step
+    polyregion.scalalang.compiletime.offloadJit3[C](d, x, y, z, cb) {
+      f(
+        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdx(0)),
+        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdx(1)),
+        Support.linearise(startZ, stepZ)(polyregion.scalalang.intrinsics.gpuGlobalIdx(2))
+      )
+      ()
+    }
+  }
 
-  inline def reduce[A](inline x: Range, inline y: Range, inline z: Range)
-  /*               */ (using inline o: O)
-  /*               */ (inline f: (Int, Int, Int) => A)
-  /*               */ (inline g: (A, A) => A): F[A] = ???
+  inline def reduce[C <: O, A](inline x: Range)
+  /*                       */ (inline f: Int => A)
+  /*                       */ (inline g: (A, A) => A): F[A] = ???
+  inline def reduce[C <: O, A](inline x: Range, inline y: Range)
+  /*                       */ (inline f: (Int, Int) => A)
+  /*                       */ (inline g: (A, A) => A): F[A] = ???
+  inline def reduce[C <: O, A](inline x: Range, inline y: Range, inline z: Range)
+  /*                       */ (inline f: (Int, Int, Int) => A)
+  /*                       */ (inline g: (A, A) => A): F[A] = ???
 }
 
 trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {

@@ -453,6 +453,48 @@ object PolyAST {
     }
   }
 
+  object PolyJitAbi {
+
+    inline val Version = 2
+    inline val Prefix  = "polyc_jit_"
+
+    object Status {
+      inline val Ok     = 0
+      inline val Failed = 1
+    }
+    def docs(d: String): Nothing = ???
+
+    // Runtime capture constant keyed by #this field path and Type.repr.
+    case class SpecConst(field: String, repr: String, data: Array[Byte])
+
+    object Compile {
+      def apply(
+          program: Array[Byte],
+          target: Int,
+          arch: String,
+          pipelineSpec: String,
+          opt: Int,
+          specialise: List[SpecConst]
+      ): Array[Byte] =
+        docs(
+          "Compile a msgpack Program. Free the result with " + Free.Name + "."
+        )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object LastError {
+      def apply(): String = docs(
+        "NUL-terminated diagnostic for the most recent non-Ok status; valid until the next " + Compile.Name + " call, NULL when none."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object Free {
+      def apply(ptr: Any): Unit           = docs("Release a buffer returned by " + Compile.Name + ".")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+  }
+
   object Conventions {
     inline val EntryName               = "_main"
     inline val ThisReceiver            = "#this"

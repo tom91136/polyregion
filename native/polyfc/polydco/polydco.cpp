@@ -427,11 +427,14 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
     case runtime::PlatformKind::HostThreaded: {
       for (size_t i = 0; i < bundle->objectCount; ++i) {
         attempts++;
-        if (!polyrt::loadKernelObject(bundle->moduleName, bundle->objects[i])) continue;
+        std::string loadedModule;
+        if (!polyrt::loadKernelObject(bundle->moduleName, bundle->objects[i], captures, &bundle->structs[bundle->interfaceLayoutIdx],
+                                      &loadedModule))
+          continue;
         dispatchHostThreaded(lowerBoundInclusive, upperBoundInclusive, step,
                              &bundle->structs[bundle->interfaceLayoutIdx],     //
                              std::span{reductions, reductionsCount}, captures, //
-                             bundle->moduleName, bundle->asserts);
+                             loadedModule.c_str(), bundle->asserts);
         return true;
       }
       break;
@@ -439,11 +442,14 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
     case runtime::PlatformKind::Managed: {
       for (size_t i = 0; i < bundle->objectCount; ++i) {
         attempts++;
-        if (!polyrt::loadKernelObject(bundle->moduleName, bundle->objects[i])) continue;
+        std::string loadedModule;
+        if (!polyrt::loadKernelObject(bundle->moduleName, bundle->objects[i], captures, &bundle->structs[bundle->interfaceLayoutIdx],
+                                      &loadedModule))
+          continue;
         dispatchManaged(lowerBoundInclusive, upperBoundInclusive, step,
                         &bundle->structs[bundle->interfaceLayoutIdx],     //
                         std::span{reductions, reductionsCount}, captures, //
-                        bundle->moduleName, bundle->prelude, bundle->postlude, bundle->asserts);
+                        loadedModule.c_str(), bundle->prelude, bundle->postlude, bundle->asserts);
         return true;
       }
       break;

@@ -2,6 +2,9 @@ add_subdirectory(rt)
 
 add_library(polyfront-options INTERFACE)
 target_link_libraries(polyfront-options INTERFACE Aspartame PolyAST polycommon LLVMSupport)
+if (POLYREGION_LLVM_DYLIB)
+    target_compile_definitions(polyfront-options INTERFACE POLYREGION_JIT_LLVM_DYLIB=1)
+endif ()
 target_sources(polyfront-options
         PRIVATE
         PUBLIC FILE_SET HEADERS
@@ -12,5 +15,4 @@ target_sources(polyfront-options
         polyfront/options_backend.hpp
         polyfront/options_frontend.hpp
 )
-
 

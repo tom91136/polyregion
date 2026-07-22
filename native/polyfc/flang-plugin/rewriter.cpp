@@ -498,15 +498,22 @@ public:
     });
 
     auto globalKOs = KernelObject.global(M, [&](OpBuilder &B0) {
+      const auto program = bundle.program.empty() ? nullConst(B0) : strConst(B0, M, bundle.program, false);
       return bundle.objects ^ map([&](auto &o) {
                auto features = CharStar.global(
                    M, [&](OpBuilder &B1) { return o.features ^ map([&](auto &f) { return std::array{strConst(B1, M, f)}; }); });
-               return KernelObjectMirror::Init{intConst(B0, i8Ty(B0), value_of(o.kind)),      //
-                                               intConst(B0, i8Ty(B0), value_of(o.format)),    //
-                                               intConst(B0, i64Ty(B0), o.features.size()),    //
-                                               features.gep(B0),                              //
-                                               intConst(B0, i64Ty(B0), o.moduleImage.size()), //
-                                               strConst(B0, M, o.moduleImage, false)};
+               return KernelObjectMirror::Init{intConst(B0, i8Ty(B0), value_of(o.kind)),                    //
+                                               intConst(B0, i8Ty(B0), value_of(o.format)),                  //
+                                               intConst(B0, i64Ty(B0), o.features.size()),                  //
+                                               features.gep(B0),                                            //
+                                               intConst(B0, i64Ty(B0), o.moduleImage.size()),               //
+                                               strConst(B0, M, o.moduleImage, false),                       //
+                                               intConst(B0, i8Ty(B0), value_of(o.target)),                  //
+                                               strConst(B0, M, o.arch),                                     //
+                                               strConst(B0, M, o.pipelineSpec),                             //
+                                               intConst(B0, i8Ty(B0), value_of(compiletime::OptLevel::O3)), //
+                                               intConst(B0, i64Ty(B0), bundle.program.size()),              //
+                                               program};
              });
     });
 

@@ -16,6 +16,35 @@ polyfront::KernelBundle polyfc::compileRegion( //
     clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts, runtime::PlatformKind kind,
     const std::string &moduleId, const Remapper::DoConcurrentRegion &region) {
   using Level = clang::DiagnosticsEngine::Level;
+  if (opts.jit) {
+    auto jitObjects =
+        opts.targets                                                                             //
+        | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; }) //
+        | collect([&](auto &target, auto &arch) -> std::optional<polyfront::KernelObject> {
+            auto format = runtime::moduleFormatOf(target);
+            if (!format) return std::nullopt;
+            const auto pp = polyfront::passes::arenaPassesFor(target, opts.stackDepth);
+            polyfront::KernelObject ko;
+            ko.format = *format;
+            ko.kind = *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed;
+            ko.target = target;
+            ko.arch = arch;
+            ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
+            return ko;
+          }) //
+        | to_vector();
+    const auto packed = polyast::hashed_program_to_msgpack(region.program);
+    const bool jitAsserts = !region.program.template collect_all<polyast::Spec::Assert>().empty();
+    return polyfront::KernelBundle{moduleId,
+                                   jitObjects,
+                                   region.layouts,
+                                   {},
+                                   polyast::program_to_json(region.program).dump(),
+                                   {},
+                                   {},
+                                   jitAsserts,
+                                   std::string(packed.begin(), packed.end())};
+  }
   const auto compiled =
       opts.targets                                                                             //
       | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; }) //

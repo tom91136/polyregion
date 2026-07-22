@@ -8,7 +8,36 @@
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 
+#include "jit_policy.hpp"
+
 using namespace polyregion::runtime;
+
+TEST_CASE("adaptive JIT specialises hot values after loading generic code") {
+  polyregion::polyrt::AdaptiveJitPolicy policy(3, 2);
+  CHECK_FALSE(policy.select("kernel", 1).specialise);
+  CHECK_FALSE(policy.select("kernel", 1).specialise);
+  const auto admitted = policy.select("kernel", 1);
+  CHECK(admitted.specialise);
+  CHECK(admitted.admitted);
+  CHECK(policy.select("kernel", 1).specialise);
+  CHECK(policy.variantCount("kernel") == 1);
+}
+
+TEST_CASE("adaptive JIT caps variants and observations") {
+  polyregion::polyrt::AdaptiveJitPolicy policy(2, 2, 3);
+  CHECK_FALSE(policy.select("kernel", 1).specialise);
+  CHECK(policy.select("kernel", 1).specialise);
+  CHECK_FALSE(policy.select("kernel", 2).specialise);
+  CHECK(policy.select("kernel", 2).specialise);
+  CHECK_FALSE(policy.select("kernel", 3).specialise);
+  CHECK_FALSE(policy.select("kernel", 3).specialise);
+  CHECK(policy.variantCount("kernel") == 2);
+
+  polyregion::polyrt::AdaptiveJitPolicy observations(8, 2, 3);
+  for (uint64_t key = 0; key < 20; ++key)
+    CHECK_FALSE(observations.select("kernel", key).specialise);
+  CHECK(observations.observationCount("kernel") == 3);
+}
 
 template <typename T> constexpr size_t indirections() {
   if constexpr (std::is_pointer_v<T>) return 1 + indirections<std::remove_pointer_t<T>>();

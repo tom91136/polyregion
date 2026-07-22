@@ -83,6 +83,38 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
          moduleId, C.getTypeSize(C.getCanonicalTagType(parent)), repr(program));
   }
 
+  if (opts.jit) {
+    auto jitObjects = opts.targets                                                                                //
+                      | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
+                      | collect([&](auto &target, auto &arch) -> std::optional<polyfront::KernelObject> {
+                          auto format = runtime::moduleFormatOf(target);
+                          if (!format) return std::nullopt;
+                          const auto pp = polyfront::passes::arenaPassesFor(target, opts.stackDepth);
+                          polyfront::KernelObject ko;
+                          ko.format = *format;
+                          ko.kind = runtime::targetPlatformKind(target);
+                          ko.target = target;
+                          ko.arch = arch;
+                          ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
+                          return ko;
+                        }) //
+                      | to_vector();
+    const auto packed = polyast::hashed_program_to_msgpack(program);
+    if (opts.verbose)
+      emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "JIT deferred [%0]: %1 target(s), program %2 bytes",
+           moduleId, std::to_string(jitObjects.size()), std::to_string(packed.size()));
+    const bool jitAsserts = !program.template collect_all<polyast::Spec::Assert>().empty();
+    return polyfront::KernelBundle{moduleId,
+                                   jitObjects,
+                                   layouts,
+                                   remapper.readOnlyMembers,
+                                   program_to_json(program).dump(),
+                                   {},
+                                   {},
+                                   jitAsserts,
+                                   std::string(packed.begin(), packed.end())};
+  }
+
   const auto compiled =
       opts.targets                                                                                //
       | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //

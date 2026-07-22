@@ -46,17 +46,24 @@ std::array<Type, 6> TypeLayoutMirror::types() const {
           members.widen()};
 }
 KernelObjectMirror::KernelObjectMirror(ModuleOp &M)
-    : AggregateMirror(M), kind(M, 8), structCount(M, 8), featureCount(M, 64), features(M), imageLength(M, 64), image(M) {
+    : AggregateMirror(M), kind(M, 8), format(M, 8), featureCount(M, 64), features(M), imageLength(M, 64), image(M), target(M, 8), arch(M),
+      pipelineSpec(M), opt(M, 8), programLength(M, 64), program(M) {
   validateMirrorSize<runtime::KernelObject>();
 }
 const char *KernelObjectMirror::typeName() const { return "KernelObject"; }
-std::array<Type, 6> KernelObjectMirror::types() const {
-  return {kind.widen(),         //
-          structCount.widen(),  //
-          featureCount.widen(), //
-          features.widen(),     //
-          imageLength.widen(),  //
-          image.widen()};
+std::array<Type, 12> KernelObjectMirror::types() const {
+  return {kind.widen(),          //
+          format.widen(),        //
+          featureCount.widen(),  //
+          features.widen(),      //
+          imageLength.widen(),   //
+          image.widen(),         //
+          target.widen(),        //
+          arch.widen(),          //
+          pipelineSpec.widen(),  //
+          opt.widen(),           //
+          programLength.widen(), //
+          program.widen()};
 }
 KernelBundleMirror::KernelBundleMirror(ModuleOp &M)
     : AggregateMirror(M), //

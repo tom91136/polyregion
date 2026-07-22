@@ -34,7 +34,8 @@ add_custom_target(polycpp-header-resource ${header_commands})
 
 # =========================== Generate header resource target ===========================
 if (POLYREGION_FUSED_DRIVER)
-    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR} polyreflect-rt polystl-static polystl)
+    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR}
+            polyreflect-rt polystl-static polystl polyc-shared polyc-jit-static)
     # Fused mem=reflect uses polyld-link (polyreflect statically linked); install as the
     # platform's lld name (lld-link.exe on Windows, ld.lld on POSIX) next to polycpp so
     # `-fuse-ld=lld` resolves to it (clang's LTO check rejects anything not named lld).
@@ -46,7 +47,8 @@ if (POLYREGION_FUSED_DRIVER)
     add_custom_target(polycpp-polyld-resource
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polyld-link>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LLD_NAME}")
 else ()
-    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR} polycpp-clang-plugin polyreflect-plugin polyreflect-rt polystl-static polystl)
+    polyregion_copy_lib_targets(polycpp-lib-resource polycpp ${POLYCPP_LIB_DIR}
+            polycpp-clang-plugin polyreflect-plugin polyreflect-rt polystl-static polystl polyc-shared polyc-jit-static)
 endif ()
 # =======================================================================================
 
@@ -199,6 +201,13 @@ install(TARGETS polystl polystl-static polyreflect-rt
         ARCHIVE DESTINATION lib/polycpp/lib
         RUNTIME DESTINATION lib/polycpp/lib
         FILE_SET HEADERS DESTINATION lib/polycpp/include)
+install(TARGETS polyc-jit-static ARCHIVE DESTINATION lib/polycpp/lib)
+if (WIN32)
+    install(FILES "$<TARGET_FILE:polyc-shared>" DESTINATION bin)
+    install(FILES "$<TARGET_LINKER_FILE:polyc-shared>" DESTINATION lib/polycpp/lib)
+else ()
+    install(FILES "$<TARGET_FILE:polyc-shared>" DESTINATION lib/polycpp/lib)
+endif ()
 if (WIN32)
     install(FILES "$<TARGET_FILE:polyreflect-rt>" DESTINATION bin)
 endif ()

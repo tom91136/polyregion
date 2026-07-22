@@ -156,6 +156,11 @@ struct Driver {
   static std::vector<std::string> dynamicOriginLinkFlags(const std::string &libsPath, const std::string &libName) {
 #ifdef _WIN32
     return {fmt::format("{}/{}.lib", libsPath, libName)};
+#elif defined(__APPLE__)
+    return {fmt::format("-L{}", libsPath),          //
+            fmt::format("-l{}", libName),           //
+            fmt::format("-Wl,-rpath,{}", libsPath), //
+            "-Wl,-rpath,@loader_path"};
 #else
     return {fmt::format("-L{}", libsPath),          //
             fmt::format("-l{}", libName),           //
@@ -275,6 +280,55 @@ struct StdParOptions {
     else return errors;
   }
 };
+
+// Retain the JIT ABI and expose static symbols to runtime lookup.
+inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit, const std::string &libsPath,
+                                                     const std::string &llvmLibPath, bool needsCxxRuntime) {
+  std::vector<std::string> out;
+  const auto anchor = [] {
+#if defined(_WIN32)
+    return std::vector<std::string>{"-Xlinker", "/INCLUDE:polyc_jit_compile"};
+#elif defined(__APPLE__)
+    return std::vector<std::string>{"-Wl,-u,_polyc_jit_compile"};
+#else
+    return std::vector<std::string>{"-Wl,-u,polyc_jit_compile"};
+#endif
+  };
+  switch (jit) {
+    case StdParOptions::LinkKind::Dynamic: {
+      out ^= concat(anchor());
+#if defined(_WIN32)
+      out ^= concat(Driver::dynamicOriginLinkFlags(libsPath, "polyc-jit"));
+#else
+      out ^= concat(Driver::dynamicOriginLinkFlags(libsPath, "polyc"));
+#endif
+      break;
+    }
+    case StdParOptions::LinkKind::Static: {
+      out ^= concat(anchor());
+#if defined(_WIN32)
+      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} |
+                    flat_map([](auto s) { return std::vector<std::string>{"-Xlinker", fmt::format("/EXPORT:{}", s)}; }));
+#elif defined(__APPLE__)
+      out ^= concat(std::vector{"_polyc_jit_compile", "_polyc_jit_last_error", "_polyc_jit_free"} |
+                    map([](auto s) { return fmt::format("-Wl,-exported_symbol,{}", s); }));
+#else
+      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} |
+                    map([](auto s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
+#endif
+      out ^= append(joinPath(libsPath, staticLibraryName("polyc-jit-static")));
+#if defined(POLYREGION_JIT_LLVM_DYLIB)
+      out ^= concat(Driver::dynamicOriginLinkFlags(llvmLibPath, "LLVMpolyregion"));
+#else
+      (void)llvmLibPath;
+#endif
+      if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lstdc++", "-lm"});
+      break;
+    }
+    case StdParOptions::LinkKind::Disabled: break;
+  }
+  return out;
+}
 
 inline std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading, const char separator) {
   std::vector<std::string> xs;

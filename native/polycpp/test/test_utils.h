@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 #include "polyregion/env_keys.h"
@@ -39,8 +40,10 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
 
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         totalObjects++;
-        if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
-          polyregion::polystl::details::dispatchHostThreaded(1, &kernel, bundle.moduleName, bundle.asserts);
+        std::string loadedModule;
+        if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel, &bundle.structs[bundle.interfaceLayoutIdx],
+                                                 &loadedModule)) {
+          polyregion::polystl::details::dispatchHostThreaded(1, &kernel, loadedModule.c_str(), bundle.asserts);
           return result;
         }
       }
@@ -63,10 +66,12 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
 
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         totalObjects++;
-        if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
+        std::string loadedModule;
+        if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel, &bundle.structs[bundle.interfaceLayoutIdx],
+                                                 &loadedModule)) {
           void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
-          polyregion::polystl::details::dispatchManaged(1, 0, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName,
-                                                        bundle.prelude, bundle.postlude, bundle.asserts);
+          polyregion::polystl::details::dispatchManaged(1, 0, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr,
+                                                        loadedModule.c_str(), bundle.prelude, bundle.postlude, bundle.asserts);
           return result;
         }
       }
@@ -91,10 +96,12 @@ void __polyregion_offload_workgroup__(size_t lanes, F f) {
   auto kernel = [f]() mutable { f(__polyregion_builtin_gpu_global_idx(0)); };
   auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
   for (size_t i = 0; i < bundle.objectCount; ++i) {
-    if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) {
+    std::string loadedModule;
+    if (polyregion::polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i], &kernel, &bundle.structs[bundle.interfaceLayoutIdx],
+                                             &loadedModule)) {
       void *kernelPtr = polyregion::polystl::details::polyreflectTrackPtr(&kernel);
       polyregion::polystl::details::dispatchManaged(lanes, lanes, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr,
-                                                    bundle.moduleName, bundle.prelude, bundle.postlude, bundle.asserts);
+                                                    loadedModule.c_str(), bundle.prelude, bundle.postlude, bundle.asserts);
       return;
     }
   }

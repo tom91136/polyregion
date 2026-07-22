@@ -99,6 +99,7 @@ int main(int argc, const char *argv[]) {
                    envs.emplace_back(PolyfrontVerbose, debug ? "1" : "0");
                    envs.emplace_back(PolyfrontTargets, opts->targets);
                    if (opts->stackDepth) envs.emplace_back(PolyfrontStackDepth, std::to_string(*opts->stackDepth));
+                   envs.emplace_back(PolyfrontJit, opts->jit != StdParOptions::LinkKind::Disabled ? "1" : "0");
                  }
 
                  const auto compileOnly =
@@ -169,6 +170,9 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
+                   const auto compilerLibPath = flangPath.empty() ? joinPath(execParentPath, "..", "lib")
+                                                                  : joinPath(llvm::sys::path::parent_path(flangPath), "..", "lib");
+                   append(jitCompilerLinkFlags(opts->jit, polyfcLibPath, compilerLibPath, /*needsCxxRuntime*/ true));
                    if (const char *t = std::getenv(polyregion::env::PolyfcLinkThreads); t && *t)
                      append({fmt::format("-Wl,--threads={}", t)});
                  }

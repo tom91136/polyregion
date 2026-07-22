@@ -44,6 +44,9 @@ struct KernelObject {
   runtime::PlatformKind kind{};
   std::vector<std::string> features{};
   std::string moduleImage{};
+  compiletime::Target target{};
+  std::string arch{};
+  std::string pipelineSpec{};
 };
 
 struct KernelBundle {
@@ -55,23 +58,25 @@ struct KernelBundle {
   std::string hostMirrorBitcode{};
   std::string mirrorId{};
   bool asserts = false;
+  std::string program{};
 };
 
 struct Options {
   using Target = std::pair<compiletime::Target, std::string>;
 
   bool verbose = false;
+  bool jit = false;
   std::string executable;
   std::vector<Target> targets;
   std::optional<int> stackDepth = {};
 
-  static std::variant<std::vector<std::string>, Options> parseArgs(std::optional<std::string> maybeExe,
-                                                                   std::optional<std::string> maybeVerbose,
-                                                                   std::optional<std::string> maybeTargets,
-                                                                   std::optional<std::string> maybeStackDepth = {}) {
+  static std::variant<std::vector<std::string>, Options>
+  parseArgs(std::optional<std::string> maybeExe, std::optional<std::string> maybeVerbose, std::optional<std::string> maybeTargets,
+            std::optional<std::string> maybeStackDepth = {}, std::optional<std::string> maybeJit = {}) {
     Options opts;
     std::vector<std::string> errors;
     if (auto verbose = maybeVerbose) opts.verbose = *verbose == "1";
+    if (auto jit = maybeJit) opts.jit = *jit == "1";
     if (auto exe = maybeExe) opts.executable = *exe;
     else errors.emplace_back("exe argument missing");
     if (auto depth = maybeStackDepth) {
@@ -107,7 +112,7 @@ struct Options {
              });
     };
     return parseArgs(parseSuffix(PolyfrontExe), parseSuffix(PolyfrontVerbose), parseSuffix(PolyfrontTargets),
-                     parseSuffix(PolyfrontStackDepth));
+                     parseSuffix(PolyfrontStackDepth), parseSuffix(PolyfrontJit));
   }
 
   static std::variant<std::vector<std::string>, Options> parseArgsFromEnv() {
@@ -115,7 +120,8 @@ struct Options {
       if (auto env = std::getenv(key)) return env;
       else return {};
     };
-    return parseArgs(readEnv(PolyfrontExe), readEnv(PolyfrontVerbose), readEnv(PolyfrontTargets), readEnv(PolyfrontStackDepth));
+    return parseArgs(readEnv(PolyfrontExe), readEnv(PolyfrontVerbose), readEnv(PolyfrontTargets), readEnv(PolyfrontStackDepth),
+                     readEnv(PolyfrontJit));
   }
 };
 

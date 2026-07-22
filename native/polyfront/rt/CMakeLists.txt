@@ -1,4 +1,4 @@
-add_library(polyrt-obj OBJECT)
+add_library(polyrt-obj OBJECT jit_policy.hpp)
 target_sources(polyrt-obj
         PRIVATE polyrt.cpp
         PUBLIC FILE_SET HEADERS

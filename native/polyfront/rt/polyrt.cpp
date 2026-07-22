@@ -1,6 +1,10 @@
 #include <algorithm>
+#include <charconv>
+#include <chrono>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <unordered_set>
 #include <vector>
@@ -17,13 +21,18 @@
 #endif
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/device_lock.h"
 #include "polyregion/concurrency_utils.hpp"
+#include "polyregion/dl.h"
 #include "polyregion/env_keys.h"
+#include "polyregion/polyc_jit_symbols.h"
 #include "polyregion/types.h"
 #include "polyrt/rt.h"
+
+#include "jit_policy.hpp"
 
 // XXX __RT_IMPL defines polyreflect-rt singletons in this TU so SMA's localReflect can resolve
 // captured pointers. On Windows the HashMap allocator routes through HeapAlloc (rt_protected.hpp)
@@ -318,7 +327,150 @@ void polyregion::polyrt::log(const DebugLevel level, const char *fmt, ...) {
   va_end(args);
 }
 
-bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object) {
+struct JitAbi {
+  polyregion::polyc_jit::abi::CompileFn compile = nullptr;
+  polyregion::polyc_jit::abi::LastErrorFn lastError = nullptr;
+  polyregion::polyc_jit::abi::FreeFn free = nullptr;
+};
+
+// Prefer linked symbols; fall back to POLYRT_JIT_LIB or the platform default.
+static const JitAbi &resolveJitAbi() {
+  static JitAbi abi = []() -> JitAbi {
+    namespace a = polyregion::polyc_jit::abi;
+    const auto from = [](polyregion_dl_handle h) {
+      return JitAbi{reinterpret_cast<a::CompileFn>(polyregion_dl_find(h, a::Compile)),
+                    reinterpret_cast<a::LastErrorFn>(polyregion_dl_find(h, a::LastError)),
+                    reinterpret_cast<a::FreeFn>(polyregion_dl_find(h, a::Free))};
+    };
+#if defined(_WIN32)
+    if (auto r = from(GetModuleHandleW(nullptr)); r.compile && r.free) return r;
+#else
+    if (auto r = from(RTLD_DEFAULT); r.compile && r.free) return r;
+#endif
+#if defined(_WIN32)
+    constexpr auto defaultJitLib = "polyc.dll";
+#elif defined(__APPLE__)
+    constexpr auto defaultJitLib = "libpolyc.dylib";
+#else
+    constexpr auto defaultJitLib = "libpolyc.so";
+#endif
+    return std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib} |
+           collect_first([&](const char *name) -> std::optional<JitAbi> {
+             if (!name || !name[0]) return std::nullopt;
+             if (auto h = polyregion_dl_open(name))
+               if (auto r = from(h); r.compile && r.free) return r;
+             return std::nullopt;
+           }) |
+           get_or_else(JitAbi{});
+  }();
+  return abi;
+}
+
+// Specialise read-only scalar leaves; data borrows the capture.
+static void collectSpecScalars(const unsigned char *base, const polyregion::runtime::TypeLayout *layout, const std::string &prefix,
+                               int depth, std::deque<std::string> &names, std::vector<polyc_jit_spec_const_t> &out) {
+  if (!base || !layout || depth > 4) return;
+  view(layout->members, layout->memberCount ? layout->members + layout->memberCount : layout->members) | for_each([&](const auto &m) {
+    if (!m.type) return;
+    const auto name = prefix.empty() ? std::string(m.name) : prefix + "." + m.name;
+    if (m.ptrIndirection == 0) {
+      if (polyregion::runtime::isSet(m.type->attrs, polyregion::runtime::LayoutAttrs::Primitive)) {
+        if (m.readOnly && m.sizeInBytes > 0 && m.sizeInBytes <= 8) {
+          names.push_back(name);
+          out.push_back({names.back().c_str(), m.type->name, base + m.offsetInBytes, m.sizeInBytes});
+        }
+      } else if (m.type->memberCount > 0) collectSpecScalars(base + m.offsetInBytes, m.type, name, depth + 1, names, out);
+    } else if (m.ptrIndirection == 1 && m.type->memberCount > 0)
+      collectSpecScalars(*reinterpret_cast<const unsigned char *const *>(base + m.offsetInBytes), m.type, name, depth + 1, names, out);
+  });
+}
+
+struct SpecConsts {
+  std::deque<std::string> names; // stable storage borrowed by values[].field
+  std::vector<polyc_jit_spec_const_t> values;
+};
+
+static SpecConsts collectSpecConsts(const void *capture, const polyregion::runtime::TypeLayout *layout) {
+  SpecConsts out;
+  collectSpecScalars(static_cast<const unsigned char *>(capture), layout, {}, 0, out.names, out.values);
+  return out;
+}
+
+static uint64_t hashSpecs(const std::vector<polyc_jit_spec_const_t> &specs) {
+  const auto add = [](uint64_t h, const void *p, size_t n) {
+    const auto *begin = static_cast<const unsigned char *>(p);
+    return view(begin, n ? begin + n : begin) |
+           fold_left(h, [](const uint64_t acc, const unsigned char x) { return (acc ^ x) * 1099511628211ull; });
+  };
+  return specs | fold_left(uint64_t{1469598103934665603ull}, [&](uint64_t h, const auto &s) {
+           const auto fieldLen = std::strlen(s.field);
+           const auto reprLen = std::strlen(s.repr);
+           h = add(h, &fieldLen, sizeof(fieldLen));
+           h = add(h, s.field, fieldLen);
+           h = add(h, &reprLen, sizeof(reprLen));
+           h = add(h, s.repr, reprLen);
+           h = add(h, &s.dataLen, sizeof(s.dataLen));
+           return add(h, s.data, s.dataLen);
+         });
+}
+
+static bool envEnabled(const char *key) {
+  const char *value = std::getenv(key);
+  if (!value || !value[0]) return false;
+  const std::string_view v(value);
+  return v != "0" && v != "off" && v != "false";
+}
+
+static size_t envSize(const char *key, const size_t fallback) {
+  const char *value = std::getenv(key);
+  if (!value || !value[0]) return fallback;
+  size_t result = 0;
+  const auto [end, error] = std::from_chars(value, value + std::strlen(value), result);
+  return error == std::errc{} && !*end ? result : fallback;
+}
+
+static polyregion::polyrt::AdaptiveJitPolicy &jitPolicy() {
+  static auto *policy = new polyregion::polyrt::AdaptiveJitPolicy(envSize(polyregion::env::PolyrtJitSpecialiseHot, 3),
+                                                                  envSize(polyregion::env::PolyrtJitSpecialiseLimit, 8));
+  return *policy;
+}
+
+static std::mutex &jitPolicyMutex() {
+  static auto *mutex = new std::mutex();
+  return *mutex;
+}
+
+static bool jitCompileObject(const char *moduleName, const polyregion::runtime::KernelObject &object,
+                             const std::vector<polyc_jit_spec_const_t> &specialise, std::string &out) {
+  const auto &abi = resolveJitAbi();
+  if (!abi.compile || !abi.free) {
+    polyregion::polyrt::log(DebugLevel::None, "JIT program for `%s` but no compiler available; link with -fstdpar-jit or set %s",
+                            moduleName, polyregion::env::PolyrtJitLib);
+    return false;
+  }
+  uint8_t *image = nullptr;
+  size_t imageLen = 0;
+  const auto start = std::chrono::steady_clock::now();
+  const auto rc = abi.compile(object.program, object.programLength, static_cast<uint32_t>(object.target), object.arch, object.pipelineSpec,
+                              static_cast<uint32_t>(object.opt), specialise.empty() ? nullptr : specialise.data(), specialise.size(),
+                              &image, &imageLen);
+  if (rc != POLYC_JIT_OK || !image) {
+    const char *msg = abi.lastError ? abi.lastError() : nullptr;
+    polyregion::polyrt::log(DebugLevel::None, "JIT compile failed for `%s`: %s", moduleName, msg ? msg : "(no message)");
+    if (image && abi.free) abi.free(image);
+    return false;
+  }
+  out.assign(reinterpret_cast<const char *>(image), imageLen);
+  abi.free(image);
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+  polyregion::polyrt::log(DebugLevel::Debug, "JIT compiled `%s` for %s [%s] (%zu const) in %lldms -> %zu bytes", moduleName,
+                          magic_enum::enum_name(object.target).data(), object.arch ? object.arch : "", specialise.size(),
+                          static_cast<long long>(ms), imageLen);
+  return true;
+}
+
+bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object, const void *capture,
+                                          const TypeLayout *interfaceLayout, std::string *loadedModuleName) {
   initialise();
   if (!currentPlatform || !currentDevice || !currentQueue) {
     log(DebugLevel::Info, "No device/queue in %s", __func__);
@@ -348,16 +500,49 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
     }
   }
 
-  if (!currentDevice->moduleLoaded(moduleName)) {
+  SpecConsts specStorage;
+  std::string effectiveModuleName(moduleName);
+  if (object.programLength > 0 && object.program && envEnabled(polyregion::env::PolyrtJitSpecialise)) {
+    specStorage = collectSpecConsts(capture, interfaceLayout);
+    if (!specStorage.values.empty()) {
+      const uint64_t specKey = hashSpecs(specStorage.values);
+      const auto policyKey = fmt::format("{}|{}|{}|{}|{}", moduleName, currentDevice->name(), magic_enum::enum_name(object.target),
+                                         object.arch ? object.arch : "", object.pipelineSpec ? object.pipelineSpec : "");
+      polyregion::polyrt::JitPolicyChoice choice{};
+      {
+        std::lock_guard lock(jitPolicyMutex());
+        choice = jitPolicy().select(policyKey, specKey);
+      }
+      if (choice.specialise) {
+        effectiveModuleName += fmt::format("@jit-{:016x}", specKey);
+        if (choice.admitted)
+          log(DebugLevel::Debug, "JIT admitted hot specialization `%s` as `%s`", moduleName, effectiveModuleName.c_str());
+      } else {
+        specStorage.values.clear();
+      }
+    }
+  }
+  if (loadedModuleName) *loadedModuleName = effectiveModuleName;
+
+  if (!currentDevice->moduleLoaded(effectiveModuleName)) {
+    std::string image;
+    if (object.imageLength > 0 && object.image) {
+      image.assign(reinterpret_cast<const char *>(object.image), object.imageLength);
+    } else if (object.programLength > 0 && object.program) {
+      if (!jitCompileObject(effectiveModuleName.c_str(), object, specStorage.values, image)) return false;
+    } else {
+      log(DebugLevel::Debug, "Object for `%s` carries neither a prebuilt image nor a JIT program", moduleName);
+      return false;
+    }
     if (auto dumpDir = std::getenv(polyregion::env::PolyrtDumpKernel)) {
       static int counter = 0;
       auto path = std::string(dumpDir) + "/kernel_" + std::to_string(counter++) + ".o";
       if (FILE *f = std::fopen(path.c_str(), "wb")) {
-        std::fwrite(object.image, 1, object.imageLength, f);
+        std::fwrite(image.data(), 1, image.size(), f);
         std::fclose(f);
       }
     }
-    currentDevice->loadModule(moduleName, std::string(object.image, object.image + object.imageLength));
+    currentDevice->loadModule(effectiveModuleName, image);
   }
   return true;
 }
