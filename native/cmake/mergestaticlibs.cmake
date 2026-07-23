@@ -53,13 +53,10 @@ function(merge_static_libs outlib)
 
     # Now the easy part for MSVC and for MAC
     if (MSVC)
-        # Pass libfiles directly to STATIC_LIBRARY_FLAGS so lib.exe receives them as extra
-        # inputs (the per-config libfiles_${CONFIG_TYPE} variable is never collected).
-        set(flags "")
-        foreach (lib ${libfiles})
-            set(flags "${flags} \"${lib}\"")
-        endforeach ()
-        set_target_properties(${outlib} PROPERTIES STATIC_LIBRARY_FLAGS "${flags}")
+        # STATIC_LIBRARY_FLAGS does not evaluate generator expressions and leaves raw
+        # $<TARGET_FILE:...> text in Ninja files. STATIC_LIBRARY_OPTIONS is list-valued,
+        # generator-expression aware, and passes the input archives to lib.exe directly.
+        set_target_properties(${outlib} PROPERTIES STATIC_LIBRARY_OPTIONS "${libfiles}")
     elseif (APPLE)
         add_custom_command(TARGET ${outlib} POST_BUILD
                 COMMAND /usr/bin/libtool -static -o "$<TARGET_FILE:${outlib}>" ${libfiles} "$<TARGET_FILE:${outlib}>"

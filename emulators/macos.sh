@@ -47,6 +47,7 @@ pocl() {
   LDFLAGS="-L$PREFIX/lib -Wl,-unexported_symbols_list,$WORK/llvm-hide.sym${LDFLAGS:+ $LDFLAGS}" \
   cmake -S "$WORK/pocl-src" -B "$WORK/build-pocl" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DWITH_LLVM_CONFIG="$LLVM21/bin/llvm-config" -DLLC_HOST_CPU="$llc_cpu" -DSTATIC_LLVM=ON \
+    -DHAVE_WARN_INCOMPATIBLE_POINTER_TYPES=OFF \
     -DENABLE_ICD=ON -DENABLE_HOST_CPU_DEVICES=ON -DENABLE_LOADABLE_DRIVERS=OFF \
     -DENABLE_SPIRV=ON -DLLVM_SPIRV="$WORK/xlat-prefix/bin/llvm-spirv" \
     -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX="$WORK/pocl-prefix"

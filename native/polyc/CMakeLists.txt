@@ -160,7 +160,7 @@ if (WIN32)
     target_sources(polyc-shared PRIVATE "${_polyc_jit_def}")
 endif ()
 target_link_libraries(polyc-shared PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,polyc>")
-polyregion_apply_common_options(polyc-shared EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
+polyregion_apply_common_options(polyc-shared DYNAMIC_CXX_RUNTIME EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 if (UNIX AND NOT APPLE)
     # Limit exports to the JIT C ABI.
     set(_polyc_jit_map "${CMAKE_CURRENT_BINARY_DIR}/polyc_jit.map")
@@ -216,9 +216,9 @@ if (TARGET ZLIB::ZLIB)
 endif ()
 merge_static_libs(polyc-jit-static ${POLYC_JIT_STATIC_TARGETS})
 # Dist LLD lacks zlib; remove compressed DWARF from archive members.
-if (CMAKE_STRIP)
+if (EXISTS "${LLVM_TOOLS_BINARY_DIR}/llvm-strip")
     add_custom_command(TARGET polyc-jit-static POST_BUILD
-            COMMAND "${CMAKE_STRIP}" -S "$<TARGET_FILE:polyc-jit-static>")
+            COMMAND "${LLVM_TOOLS_BINARY_DIR}/llvm-strip" -S "$<TARGET_FILE:polyc-jit-static>")
 endif ()
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)

@@ -323,6 +323,11 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
       (void)llvmLibPath;
 #endif
       if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lstdc++", "-lm"});
+#if defined(POLYREGION_ASAN_BUILD) && !defined(_WIN32)
+      // The static compiler archive is built from the sanitizer-instrumented native objects;
+      // its client link must therefore provide the same ASan/UBSan shared runtimes.
+      out ^= concat(std::vector<std::string>{"-fsanitize=address,undefined", "-fno-sanitize=vptr", "-shared-libsan", "-frtlib-add-rpath"});
+#endif
       break;
     }
     case StdParOptions::LinkKind::Disabled: break;
