@@ -197,6 +197,9 @@ rem feeds it GNU flags (-fPIC/-march) invalid for the *-pc-windows-msvc target
 cmake -S "%WORK%\swiftshader" -B "%WORK%\swiftshader\build-ss" -G Ninja -DCMAKE_BUILD_TYPE=Release %MT_CMAKE% ^
   -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" ^
   -DSWIFTSHADER_BUILD_TESTS=OFF -DSWIFTSHADER_WARNINGS_AS_ERRORS=OFF || (echo SS-CFG-FAIL & exit /b 1)
+rem cmcldeps/rc has repeatedly hung when Ninja leaves this tiny resource edge until after the 1,199
+rem parallel C++ edges. Build it first in isolation; the main build then only compiles and links code.
+ninja -C "%WORK%\swiftshader\build-ss" "src\Vulkan\CMakeFiles\vk_swiftshader.dir\Vulkan.rc.res" || (echo SS-RC-FAIL & exit /b 1)
 cmake --build "%WORK%\swiftshader\build-ss" --target vk_swiftshader || (echo SS-FAIL & exit /b 1)
 
 :collect

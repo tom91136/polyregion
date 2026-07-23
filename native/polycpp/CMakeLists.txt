@@ -162,7 +162,9 @@ target_link_libraries(polycpp PRIVATE
 # XXX /Zi emits a separate PDB so release polycpp crash dumps stay symbolicated.
 if (MSVC)
     target_compile_options(polycpp PRIVATE /Zi)
-    target_link_options(polycpp PRIVATE /DEBUG)
+    # The fused frontend runs deeply nested Clang/Aspartame rewrites in-process;
+    # Windows' 1 MiB default stack overflows even for the dist-check translation unit.
+    target_link_options(polycpp PRIVATE /DEBUG /STACK:8388608)
 endif ()
 target_link_libraries(polycpp-tests PRIVATE
         polytest

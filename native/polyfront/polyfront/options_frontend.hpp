@@ -317,6 +317,14 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
                     map([](auto s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
 #endif
       out ^= append(joinPath(libsPath, staticLibraryName("polyc-jit-static")));
+#if defined(__APPLE__)
+      if (needsCxxRuntime) {
+        // The LLVM dist also contains its build-time libc++ dylib, whose ABI
+        // dependencies are not part of the PolyFC distribution. Prefer the SDK
+        // runtime before adding llvmLibPath to the linker search path below.
+        out ^= concat(std::vector<std::string>{"-L/usr/lib"});
+      }
+#endif
 #if defined(POLYREGION_JIT_LLVM_DYLIB)
       out ^= concat(Driver::dynamicOriginLinkFlags(llvmLibPath, "LLVMpolyregion"));
 #else

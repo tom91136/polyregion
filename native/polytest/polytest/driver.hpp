@@ -177,6 +177,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            polyregion::env::PolyrtMirror, polyregion::env::PolyregionPassLog,                 //
                            polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
                            polyregion::env::PolyregionSysroot, polyregion::env::PolyregionBitcodeDir,         //
+                           polyregion::env::PolypassPlugins,                                                  //
                            "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");

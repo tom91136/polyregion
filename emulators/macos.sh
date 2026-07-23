@@ -25,10 +25,9 @@ deps() {
   [ "${#missing[@]}" -eq 0 ] || "$BREW" install "${missing[@]}"
   "$BREW" list --versions llvm >/dev/null 2>&1 || "$BREW" install llvm
   if ! "$BREW" list --versions llvm@21 >/dev/null 2>&1; then
-    # Versioned LLVM need not be globally linked: pocl uses its opt prefix explicitly.
-    "$BREW" unlink llvm >/dev/null 2>&1 || true
-    "$BREW" unlink llvm@20 >/dev/null 2>&1 || true
-    "$BREW" install llvm@21
+    # pocl uses the versioned opt prefix explicitly, so suppress Homebrew's
+    # inapplicable global-link warning (which becomes a GHA annotation).
+    "$BREW" install --quiet llvm@21
   fi
   mkdir -p "$WORK"
   [ -x "$WORK/venv/bin/python" ] || "$PREFIX/bin/python3" -m venv "$WORK/venv"
