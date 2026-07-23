@@ -54,9 +54,16 @@ function(merge_static_libs outlib)
     # Now the easy part for MSVC and for MAC
     if (MSVC)
         # STATIC_LIBRARY_FLAGS does not evaluate generator expressions and leaves raw
-        # $<TARGET_FILE:...> text in Ninja files. STATIC_LIBRARY_OPTIONS is list-valued,
-        # generator-expression aware, and passes the input archives to lib.exe directly.
-        set_target_properties(${outlib} PROPERTIES STATIC_LIBRARY_OPTIONS "${libfiles}")
+        # $<TARGET_FILE:...> text in Ninja files. Generate our own response file so those
+        # expressions are resolved without putting every input archive on cmd.exe's short
+        # command line.
+        set(libfiles_rsp "")
+        foreach (libfile ${libfiles})
+            string(APPEND libfiles_rsp "\"${libfile}\"\n")
+        endforeach ()
+        set(libfiles_rsp_path "${CMAKE_CURRENT_BINARY_DIR}/${outlib}-inputs-$<CONFIG>.rsp")
+        file(GENERATE OUTPUT "${libfiles_rsp_path}" CONTENT "${libfiles_rsp}")
+        set_target_properties(${outlib} PROPERTIES STATIC_LIBRARY_OPTIONS "@${libfiles_rsp_path}")
     elseif (APPLE)
         add_custom_command(TARGET ${outlib} POST_BUILD
                 COMMAND /usr/bin/libtool -static -o "$<TARGET_FILE:${outlib}>" ${libfiles} "$<TARGET_FILE:${outlib}>"
