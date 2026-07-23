@@ -68,7 +68,7 @@ static polyrt::SynchronisedMemAllocation allocations(
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_record(void *ptr, const size_t size) {
   std::unique_lock lock(recordsMutex);
-  log(DebugLevel::Debug, "polydco_record(%p, %ld)", ptr, size);
+  log(DebugLevel::Debug, "polydco_record(%p, %zu)", ptr, size);
   ptrRecords[reinterpret_cast<uintptr_t>(ptr)] = size;
 }
 
@@ -301,7 +301,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   buffer.append(Type::Ptr, &mpr.devicePartials);
   if (isReduction) buffer.append(Type::Scratch, nullptr);
 
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=0x%jx", __func__, moduleId, threadsPerBlock,
+  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=0x%" PRIxPTR, __func__, moduleId, threadsPerBlock,
       static_cast<void *>(captures), mpr.devicePartials);
   launch(buffer);
 
@@ -417,7 +417,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
     }
 
     for (size_t i = 0; i < reductionsCount; ++i) {
-      fprintf(stderr, "Reduction[%ld] = {%s, %s -> %p}\n", i, magic_enum::enum_name(reductions[i].type).data(),
+      fprintf(stderr, "Reduction[%zu] = {%s, %s -> %p}\n", i, magic_enum::enum_name(reductions[i].type).data(),
               polydco::FReduction::to_string(reductions[i].kind).data(), static_cast<void *>(reductions[i].dest));
     }
   }

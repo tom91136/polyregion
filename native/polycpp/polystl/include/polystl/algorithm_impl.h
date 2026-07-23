@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cinttypes>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -51,7 +52,7 @@ struct __PolyreflectTrackPtr {
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   polyrt::initialise();
   auto N = std::thread::hardware_concurrency();
-  log(DebugLevel::Debug, "<%s, %ld> Dispatch", __func__, global);
+  log(DebugLevel::Debug, "<%s, %" PRId64 "> Dispatch", __func__, global);
 
   if (!polyrt::currentPlatform) {
     if (!polyrt::hostFallback()) {
@@ -246,7 +247,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
     polyrt::noCompatibleKernelExit("parallel_reduce");
     return init;
   }
-  log(DebugLevel::Debug, "<%s, %ld> Host fallback", __func__, global);
+  log(DebugLevel::Debug, "<%s, %" PRId64 "> Host fallback", __func__, global);
 
   T acc = init;
   for (int64_t globalIdx = 0; globalIdx < global; ++globalIdx) {

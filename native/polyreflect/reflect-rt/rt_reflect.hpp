@@ -213,7 +213,7 @@ public:
     if (const auto *rec = queryUnsafe(ptr, false)) {
       if (trace)
         safe_fprintf(trace,
-                     "  {\"name\":\"0x%lx (%ld)\",\"cat\":\"%s\",\"ph\":\"X\","
+                     "  {\"name\":\"0x%" PRIxPTR " (%zu)\",\"cat\":\"%s\",\"ph\":\"X\","
                      "\"ts\":%" PRId64 ",\"dur\":%" PRId64 ",\"pid\":0,\"tid\":0},\n",
                      rec->info.base, rec->info.size, to_string(rec->info.type),
                      duration_cast<microseconds>(rec->point.time_since_epoch()).count(),

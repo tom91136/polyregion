@@ -655,7 +655,7 @@ POLYREGION_EXPORT extern "C" void *polyrt_record_aligned_alloc(const size_t alig
   return p;
 }
 
-POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new(const size_t size) {
+POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new(const size_t size) noexcept(false) {
   void *p = __RT_ALTERNATIVE(malloc)(size);
   if (!p) {
 #if __cpp_exceptions == 199711

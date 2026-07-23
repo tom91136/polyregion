@@ -175,7 +175,7 @@ bool HipDevice::moduleLoaded(const std::string &name) {
 uintptr_t HipDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   hipDeviceptr_t ptr = {};
   CHECKED(hipMalloc(&ptr, size));
   return reinterpret_cast<uintptr_t>(ptr);
@@ -188,7 +188,7 @@ void HipDevice::freeDevice(uintptr_t ptr) {
 std::optional<void *> HipDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   hipDeviceptr_t ptr = {};
   CHECKED(hipMallocManaged(&ptr, size, hipMemAttachGlobal));
   return reinterpret_cast<void *>(ptr);

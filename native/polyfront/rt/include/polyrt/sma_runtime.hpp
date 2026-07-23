@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -50,14 +51,14 @@ POLYREGION_RT_PROTECT inline MirrorMode mirrorModeFor(const invoke::ModuleFormat
 POLYREGION_RT_PROTECT inline auto stdRemoteAlloc() {
   return [](const size_t size) -> uintptr_t {
     const auto p = currentDevice->mallocDevice(size, invoke::Access::RW);
-    log(DebugLevel::Debug, "                               Remote 0x%jx = malloc(%ld)", p, size);
+    log(DebugLevel::Debug, "                               Remote 0x%" PRIxPTR " = malloc(%zu)", p, size);
     return p;
   };
 }
 
 POLYREGION_RT_PROTECT inline auto stdRemoteRead() {
   return [](void *dst, const uintptr_t src, const size_t srcOffset, const size_t size) {
-    log(DebugLevel::Debug, "Local %p <|[%4ld]- Remote [%p + %4ld]", dst, size, reinterpret_cast<void *>(src), srcOffset);
+    log(DebugLevel::Debug, "Local %p <|[%4zu]- Remote [%p + %4zu]", dst, size, reinterpret_cast<void *>(src), srcOffset);
     currentQueue->enqueueDeviceToHostAsync(src, srcOffset, dst, size, {});
     currentQueue->enqueueWaitBlocking();
   };
@@ -65,7 +66,7 @@ POLYREGION_RT_PROTECT inline auto stdRemoteRead() {
 
 POLYREGION_RT_PROTECT inline auto stdRemoteWrite() {
   return [](const void *src, const uintptr_t dst, const size_t dstOffset, const size_t size) {
-    log(DebugLevel::Debug, "Local %p -[%4ld]|> Remote [%p + %4ld]", src, size, reinterpret_cast<void *>(dst), dstOffset);
+    log(DebugLevel::Debug, "Local %p -[%4zu]|> Remote [%p + %4zu]", src, size, reinterpret_cast<void *>(dst), dstOffset);
     currentQueue->enqueueHostToDeviceAsync(src, dst, dstOffset, size, {});
     currentQueue->enqueueWaitBlocking();
   };
@@ -73,7 +74,7 @@ POLYREGION_RT_PROTECT inline auto stdRemoteWrite() {
 
 POLYREGION_RT_PROTECT inline auto stdRemoteRelease() {
   return [](const uintptr_t remotePtr) {
-    log(DebugLevel::Debug, "                               Remote free(0x%jx)", remotePtr);
+    log(DebugLevel::Debug, "                               Remote free(0x%" PRIxPTR ")", remotePtr);
     currentDevice->freeDevice(remotePtr);
   };
 }
@@ -94,10 +95,10 @@ POLYREGION_RT_PROTECT inline void dumpMemoryWithLayout(const runtime::TypeLayout
 
 template <typename SMA> POLYREGION_RT_PROTECT inline void dumpAllocationTable(SMA &sma) {
   if (debugLevel() < DebugLevel::Debug) return;
-  log(DebugLevel::Debug, "[Allocations (%lu)]", sma.localToRemoteAlloc.size());
+  log(DebugLevel::Debug, "[Allocations (%zu)]", sma.localToRemoteAlloc.size());
   for (auto [k, v] : sma.localToRemoteAlloc) {
     const auto &l = sma.remoteToLocalPtr[v.remote.ptr];
-    log(DebugLevel::Debug, "\t[Local(0x%jx, %4ld) -> Remote(0x%jx, %4ld) %10s]", //
+    log(DebugLevel::Debug, "\t[Local(0x%" PRIxPTR ", %4zu) -> Remote(0x%" PRIxPTR ", %4zu) %10s]", //
         k, l.sizeInBytes, v.remote.ptr, v.remote.sizeInBytes, v.layout ? v.layout->name : "???");
   }
 }
@@ -112,7 +113,7 @@ template <typename SMA> POLYREGION_RT_PROTECT inline void dumpAllocations(SMA &s
 
 template <typename SMA>
 POLYREGION_RT_PROTECT inline void mapRead(SMA &sma, void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  log(DebugLevel::Debug, "polyrt_map_read(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
+  log(DebugLevel::Debug, "polyrt_map_read(%p, %td, %zu)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
   sma.genArenaMapRead(origin);
   sma.syncRemoteToLocal(origin, sizeInBytes);
@@ -121,7 +122,7 @@ POLYREGION_RT_PROTECT inline void mapRead(SMA &sma, void *origin, const ptrdiff_
 
 template <typename SMA>
 POLYREGION_RT_PROTECT inline void mapWrite(SMA &sma, void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  log(DebugLevel::Debug, "polyrt_map_write(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
+  log(DebugLevel::Debug, "polyrt_map_write(%p, %td, %zu)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
   sma.genArenaMapWrite(origin);
   sma.invalidateLocal(origin);
@@ -129,7 +130,7 @@ POLYREGION_RT_PROTECT inline void mapWrite(SMA &sma, void *origin, const ptrdiff
 
 template <typename SMA>
 POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
-  log(DebugLevel::Debug, "polyrt_map_readwrite(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
+  log(DebugLevel::Debug, "polyrt_map_readwrite(%p, %td, %zu)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
   sma.genArenaMapRead(origin);
   sma.syncRemoteToLocal(origin);

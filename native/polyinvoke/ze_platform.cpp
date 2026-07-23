@@ -230,7 +230,7 @@ bool ZeDevice::moduleLoaded(const std::string &name) {
 uintptr_t ZeDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   ze_device_mem_alloc_desc_t desc{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, nullptr, 0, 0};
   void *ptr = nullptr;
   CHECKED(zeMemAllocDevice(*context, &desc, size, /*alignment*/ 0, device, &ptr));
@@ -244,7 +244,7 @@ void ZeDevice::freeDevice(uintptr_t ptr) {
 std::optional<void *> ZeDevice::mallocShared(size_t size, Access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   ze_device_mem_alloc_desc_t deviceDesc{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, nullptr, 0, 0};
   ze_host_mem_alloc_desc_t hostDesc{ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC, nullptr, 0};
   void *ptr = nullptr;

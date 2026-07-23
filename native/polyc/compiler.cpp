@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <mutex>
 #include <unordered_map>
 
 #include "llvm/ADT/SmallString.h"
@@ -42,8 +41,11 @@ int64_t compiler::nowMs() {
 }
 
 void compiler::initialise() {
-  static std::once_flag flag;
-  std::call_once(flag, []() { backend::llvmc::initialise(); });
+  static const bool initialised = [] {
+    backend::llvmc::initialise();
+    return true;
+  }();
+  (void)initialised;
 }
 
 static const uint8_t *bytesBegin(const polyast::Bytes &bytes) { return reinterpret_cast<const uint8_t *>(bytes.data()); }
@@ -151,9 +153,8 @@ struct PluginRegistry {
 };
 
 PluginRegistry &sharedPlugins() {
-  static PluginRegistry reg;
-  static std::once_flag loaded;
-  std::call_once(loaded, [] {
+  static PluginRegistry reg = [] {
+    PluginRegistry result;
     std::string err;
     auto refs = polypass::resolvePlugins(err);
     if (!err.empty()) throw std::logic_error(fmt::format("polyc: {}", err));
@@ -163,19 +164,20 @@ PluginRegistry &sharedPlugins() {
                                                : std::unique_ptr<polypass::PassRunner>(std::make_unique<polypass::DsoPassRunner>(ref.path));
       if (auto rerr = runner->load(); !rerr.empty())
         throw std::logic_error(fmt::format("polyc: failed to load PolyPass plugin {}: {}", ref.path, rerr));
-      const size_t idx = reg.plugins.size();
+      const size_t idx = result.plugins.size();
       for (const auto &name : runner->passNames()) {
-        if (auto it = reg.ownerByPass.find(name); it != reg.ownerByPass.end()) {
+        if (auto it = result.ownerByPass.find(name); it != result.ownerByPass.end()) {
           fmt::print(stderr, "polyc: pass '{}' from {} overrides earlier definition from {}\n", name, runner->tag(),
-                     reg.plugins[it->second]->tag());
+                     result.plugins[it->second]->tag());
           it->second = idx;
         } else {
-          reg.ownerByPass.emplace(name, idx);
+          result.ownerByPass.emplace(name, idx);
         }
       }
-      reg.plugins.push_back(std::move(runner));
+      result.plugins.push_back(std::move(runner));
     }
-  });
+    return result;
+  }();
   return reg;
 }
 

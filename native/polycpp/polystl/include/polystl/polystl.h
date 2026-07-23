@@ -25,7 +25,7 @@ POLYREGION_RT_PROTECT const polyregion::runtime::KernelBundle &__polyregion_offl
   // Default body: returns an empty bundle so callers (e.g. polystl::details::parallel_for)
   // skip kernel dispatch and fall through to the host path. The polycpp clang plugin replaces
   // this body in offload-enabled builds (POLYCPP_NO_REWRITE not set).
-  static const polyregion::runtime::KernelBundle empty{"", 0, nullptr, 0, nullptr, 0, "", nullptr, nullptr, nullptr};
+  static const polyregion::runtime::KernelBundle empty{"", 0, nullptr, 0, nullptr, 0, "", nullptr, nullptr, nullptr, false};
   return empty;
 }
 namespace polyregion::polystl::details {

@@ -313,7 +313,7 @@ struct TypeLayout {
     if (topLevel) std::fprintf(fd, "[%*zu]    ╭── ", 3, sizeInBytes);
     else std::fprintf(fd, "╭── [%*zu] ", 3, sizeInBytes);
 
-    std::fprintf(fd, "`%s` (alignment=%ld, members=%ld, attrs={", name, alignmentInBytes, memberCount);
+    std::fprintf(fd, "`%s` (alignment=%zu, members=%zu, attrs={", name, alignmentInBytes, memberCount);
     if (isSet(attrs, LayoutAttrs::Opaque)) std::fprintf(fd, "Opaque ");
     if (isSet(attrs, LayoutAttrs::SelfOpaque)) std::fprintf(fd, "SelfOpaque ");
     if (isSet(attrs, LayoutAttrs::Primitive)) std::fprintf(fd, "Primitive ");
@@ -338,7 +338,7 @@ struct TypeLayout {
         for (size_t s = 0; s < m.ptrIndirection; ++s)
           std::fprintf(fd, "*");
 
-        std::fprintf(fd, " (%ld bytes) ", m.sizeInBytes);
+        std::fprintf(fd, " (%zu bytes) ", m.sizeInBytes);
         if (show && m.type) {
           const size_t currentColumn = 8 + 3 + 1 +                                      // "+%3zu~%-3zu │"
                                        level +                                          // "│"

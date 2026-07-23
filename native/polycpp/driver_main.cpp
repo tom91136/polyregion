@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 
 #include "llvm/Support/FileSystem.h"
@@ -75,7 +76,16 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) { remaining ^= concat(xs); };
+               auto append = [&](const std::vector<std::string> &xs) {
+                 for (const auto &x : xs) {
+#if defined(__APPLE__)
+                   // Runtime, libc++, and JIT dependencies can share install
+                   // locations; ld64.lld warns for repeated identical rpaths.
+                   if (x.starts_with("-Wl,-rpath,") && std::find(remaining.begin(), remaining.end(), x) != remaining.end()) continue;
+#endif
+                   remaining.push_back(x);
+                 }
+               };
 
                if (opts) {
                  remaining ^= concat(mkDelimitedEnvPaths(polyregion::env::PolystlInclude, "-isystem", llvm::sys::EnvPathSeparator));

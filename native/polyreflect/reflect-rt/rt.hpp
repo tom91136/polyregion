@@ -7,7 +7,7 @@
 
   #include <cstddef>
 
-extern "C" void *polyrt_record_operator_new(std::size_t);
+extern "C" void *polyrt_record_operator_new(std::size_t) noexcept(false);
 extern "C" void polyrt_record_operator_delete(void *);
 extern "C" void polyrt_record_operator_delete_sized(void *, std::size_t);
 

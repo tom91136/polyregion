@@ -180,10 +180,7 @@ Term::Select polyfc::Remapper::newVar(const std::variant<Expr::Any, Type::Any> &
 
 Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool captureBoundary) {
 
-  auto handleSeq = [&](fir::SequenceType t) -> Type::Any {
-    const auto dynamic = t.hasDynamicExtents() || t.hasUnknownShape();
-    return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global());
-  };
+  auto handleSeq = [&](fir::SequenceType t) -> Type::Any { return Type::Ptr(handleType(t.getEleTy()), TypeSpace::Global()); };
 
   auto handleBox = [&](const fir::BoxType t) -> std::pair<Type::Any, FType> {
     if (fir::isBoxNone(t)) {

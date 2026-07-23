@@ -132,7 +132,7 @@ public:
 };
 
 namespace details {
-using LoadedModule = std::tuple<std::string, polyregion_dl_handle, std::unordered_map<std::string, void *>>;
+using LoadedModule = std::tuple<std::string, polyregion_dl_handle, std::unordered_map<std::string, uint64_t>>;
 using DynamicModules = std::unordered_map<std::string, LoadedModule>;
 } // namespace details
 class POLYREGION_EXPORT SharedPlatform final : public Platform {

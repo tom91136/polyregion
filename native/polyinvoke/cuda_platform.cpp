@@ -181,7 +181,7 @@ bool CudaDevice::moduleLoaded(const std::string &name) {
 uintptr_t CudaDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   CUdeviceptr ptr = {};
   CHECKED(cuMemAlloc(&ptr, size));
   return ptr;
@@ -194,7 +194,7 @@ void CudaDevice::freeDevice(uintptr_t ptr) {
 std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
   context.touch();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
 #ifdef _WIN32
   // XXX WDDM: cuMemAllocManaged + sync is not sufficient for safe CPU read-back (pages fault
   // with STATUS_IN_PAGE_ERROR). Use pinned host memory which is permanently mapped on both

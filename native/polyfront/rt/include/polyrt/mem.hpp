@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cinttypes>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -102,8 +103,8 @@ class SynchronisedMemAllocation {
                       const size_t pointeeMinBytes, const bool readOnly, const auto effectiveSizeToCount) {
     if (debug)
       std::fprintf(stderr,
-                   "[SMA] writeSubObject(hostData=%p, memberOffsetInBytes=%zu, indirection=%zu, devicePtr=0x%jx, t=@%s (sizeInBytes=%zd, "
-                   "members=%zd))\n", //
+                   "[SMA] writeSubObject(hostData=%p, memberOffsetInBytes=%zu, indirection=%zu, devicePtr=0x%" PRIxPTR
+                   ", t=@%s (sizeInBytes=%zu, members=%zu))\n", //
                    static_cast<const void *>(hostData), memberOffsetInBytes, indirection, devicePtr, tl.name, tl.sizeInBytes,
                    tl.memberCount);
     if (char *memberLocalPtr = readPtrValue(hostData + memberOffsetInBytes); !memberLocalPtr) {
@@ -113,14 +114,14 @@ class SynchronisedMemAllocation {
                resolvedSizeInBytes != 0) {
       const size_t sizeInBytes = std::max(resolvedSizeInBytes, pointeeMinBytes);
       if (debug)
-        std::fprintf(stderr, "[SMA]   localResolve<%p>(%p) = {size=%ld}\n", //
+        std::fprintf(stderr, "[SMA]   localResolve<%p>(%p) = {size=%zu}\n", //
                      (void *)resolvePtrSizeInBytes, static_cast<void *>(memberLocalPtr), sizeInBytes);
       const uintptr_t memberRemotePtr =
           mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(sizeInBytes), tl, sizeInBytes, readOnly);
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else if (const PtrQuery meta = localReflect(memberLocalPtr); meta.sizeInBytes != 0) {
       if (debug)
-        std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%ld, offset=%ld}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
+        std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%zu, offset=%zu}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
                      meta.offsetInBytes); //
       // XXX Anchor at the allocation base so past-end pointers (offset == size) still map; passing
       // the past-end pointer as host data would request a zero-byte device alloc and fail.
@@ -154,7 +155,8 @@ class SynchronisedMemAllocation {
   uintptr_t writeIndirect(const char *hostData, const uintptr_t devicePtr, const size_t ptrIndirections, const size_t count,
                           const runtime::TypeLayout &tl, const bool readOnly = false) {
     if (debug)
-      std::fprintf(stderr, "[SMA] writeIndirect(hostData=%p, count=%ld,devicePtr=0x%jx, t=@ %s, ptrIndirections=%ld)\n", //
+      std::fprintf(stderr,
+                   "[SMA] writeIndirect(hostData=%p, count=%zu,devicePtr=0x%" PRIxPTR ", t=@ %s, ptrIndirections=%zu)\n", //
                    static_cast<const void *>(hostData), count, devicePtr, tl.name, ptrIndirections);
     for (size_t idx = 0; idx < count; ++idx) {
       const size_t componentSize = ptrIndirections - 1 == 1 ? tl.sizeInBytes : sizeof(uintptr_t);
@@ -168,8 +170,8 @@ class SynchronisedMemAllocation {
                         const runtime::TypeLayout &tl, const bool writeBody, const bool readOnly = false) {
     if (debug)
       std::fprintf(stderr,
-                   "[SMA] writeStruct(hostData=%p, offsetInBytes=%zu, count=%ld,devicePtr=%jx, t=@%s (sizeInBytes=%zd, members=%zd), "
-                   "writeBody=%d)\n", //
+                   "[SMA] writeStruct(hostData=%p, offsetInBytes=%zu, count=%zu,devicePtr=%" PRIxPTR
+                   ", t=@%s (sizeInBytes=%zu, members=%zu), writeBody=%d)\n", //
                    static_cast<const void *>(hostData), offsetInBytes, count, devicePtr, tl.name, tl.sizeInBytes, tl.memberCount,
                    writeBody);
     if (writeBody) remoteWrite(hostData + offsetInBytes, devicePtr, offsetInBytes, tl.sizeInBytes * count);
@@ -210,9 +212,10 @@ class SynchronisedMemAllocation {
       const bool stale = eligible && cachedSize < requiredSize;
       if (stale) {
         disassociate(hostData);
-        if (debug) std::fprintf(stderr, "[SMA]   stale base hit (cached %ld < required %ld), re-mirroring\n", cachedSize, requiredSize);
+        if (debug) std::fprintf(stderr, "[SMA]   stale base hit (cached %zu < required %zu), re-mirroring\n", cachedSize, requiredSize);
       } else if (!localSyncVisited.insert(alloc->remote.ptr).second && !alloc->localModified) {
-        if (debug) std::fprintf(stderr, "[SMA]   hit (0x%jx = %4ld + %4ld)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
+        if (debug)
+          std::fprintf(stderr, "[SMA]   hit (0x%" PRIxPTR " = %4zu + %4zu)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
         return alloc->remote.ptr + offsetInBytes;
       } else {
         alloc->localModified = false;
@@ -352,7 +355,7 @@ public:
       const bool topLevel = syncVisited.empty();
       if (!syncVisited.insert(alloc->remote.ptr).second) return alloc->remote.ptr + offsetInBytes;
       if (debug)
-        std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%jx, sizeInByte=%ld, offsetInBytes=%ld, t=@%s)\n", p,
+        std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%" PRIxPTR ", sizeInByte=%zu, offsetInBytes=%zu, t=@%s)\n", p,
                      alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes, alloc->layout ? alloc->layout->name : "???");
       // inclusive copy: an object is copied if its range intersects the request range
       const runtime::TypeLayout *tl = alloc->layout;
@@ -407,8 +410,8 @@ public:
     if (const auto query = queryLocalIt(p)) {
       const auto [it, offsetInBytes] = *query;
       if (debug)
-        std::fprintf(stderr, "[SMA] disassociate(host=0x%jx, remote=%jx, size=%ld, releaseRemote=%d)\n", it->first, it->second.remote.ptr,
-                     it->second.remote.sizeInBytes, releaseRemote);
+        std::fprintf(stderr, "[SMA] disassociate(host=0x%" PRIxPTR ", remote=%" PRIxPTR ", size=%zu, releaseRemote=%d)\n", it->first,
+                     it->second.remote.ptr, it->second.remote.sizeInBytes, releaseRemote);
       if (releaseRemote) remoteRelease(it->second.remote.ptr);
       remoteToLocalPtr.erase(it->second.remote.ptr);
       localToRemoteAlloc.erase(it);
@@ -419,8 +422,8 @@ public:
     const auto it = localToRemoteAlloc.find(reinterpret_cast<uintptr_t>(p));
     if (it == localToRemoteAlloc.end()) return;
     if (debug)
-      std::fprintf(stderr, "[SMA] disassociateExact(host=0x%jx, remote=%jx, size=%ld)\n", it->first, it->second.remote.ptr,
-                   it->second.remote.sizeInBytes);
+      std::fprintf(stderr, "[SMA] disassociateExact(host=0x%" PRIxPTR ", remote=%" PRIxPTR ", size=%zu)\n", it->first,
+                   it->second.remote.ptr, it->second.remote.sizeInBytes);
     if (releaseRemote) remoteRelease(it->second.remote.ptr);
     remoteToLocalPtr.erase(it->second.remote.ptr);
     localToRemoteAlloc.erase(it);

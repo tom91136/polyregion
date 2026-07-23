@@ -904,8 +904,8 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         const auto inductionSelect = Term::Select(x.induction, {}, x.induction.tpe);
         const auto inductionTerm = Term::Any(inductionSelect);
-        auto _alloc = mkStmt(Stmt::Var(x.induction, std::optional<Expr::Any>{}, /*isMutable*/ true), fn, whileCtx);
-        auto _ = mkStmt(Stmt::Mut(inductionSelect, Expr::Alias(x.lbIncl)), fn, whileCtx);
+        static_cast<void>(mkStmt(Stmt::Var(x.induction, std::optional<Expr::Any>{}, /*isMutable*/ true), fn, whileCtx));
+        static_cast<void>(mkStmt(Stmt::Mut(inductionSelect, Expr::Alias(x.lbIncl)), fn, whileCtx));
         WhileCtx ctx{.exit = loopExit, .test = loopTest};
         B.CreateBr(loopTest);
         {

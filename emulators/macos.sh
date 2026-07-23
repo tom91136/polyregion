@@ -17,8 +17,19 @@ export HOMEBREW_NO_AUTO_UPDATE=1
 export PATH="$PREFIX/bin:$PREFIX/opt/bison/bin:$PREFIX/opt/flex/bin:$PREFIX/opt/llvm/bin:$WORK/venv/bin:$PATH"
 
 deps() {
-  "$BREW" install meson ninja bison flex glslang vulkan-loader vulkan-headers \
-    opencl-headers llvm llvm@21 hwloc spirv-tools expat zstd
+  if "$BREW" tap | grep -qx 'aws/tap'; then "$BREW" untap aws/tap; fi
+  local dep missing=()
+  for dep in meson ninja bison flex glslang vulkan-loader vulkan-headers opencl-headers hwloc spirv-tools expat zstd; do
+    "$BREW" list --versions "$dep" >/dev/null 2>&1 || missing+=("$dep")
+  done
+  [ "${#missing[@]}" -eq 0 ] || "$BREW" install "${missing[@]}"
+  "$BREW" list --versions llvm >/dev/null 2>&1 || "$BREW" install llvm
+  if ! "$BREW" list --versions llvm@21 >/dev/null 2>&1; then
+    # Versioned LLVM need not be globally linked: pocl uses its opt prefix explicitly.
+    "$BREW" unlink llvm >/dev/null 2>&1 || true
+    "$BREW" unlink llvm@20 >/dev/null 2>&1 || true
+    "$BREW" install llvm@21
+  fi
   mkdir -p "$WORK"
   [ -x "$WORK/venv/bin/python" ] || "$PREFIX/bin/python3" -m venv "$WORK/venv"
   "$WORK/venv/bin/pip" install -q --upgrade pip

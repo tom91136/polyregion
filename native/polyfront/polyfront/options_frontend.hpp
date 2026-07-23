@@ -322,11 +322,46 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
 #else
       (void)llvmLibPath;
 #endif
+#if defined(__APPLE__)
+      if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lc++"});
+#elif !defined(_WIN32)
       if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lstdc++", "-lm"});
+#endif
+#if defined(__linux__)
+      // A merged archive cannot carry CMake's non-archive link dependencies. Keep
+      // these after it for older glibc/sysroots where pthread, dl and rt are separate.
+      out ^= concat(std::vector<std::string>{"-pthread", "-ldl", "-lrt"});
+#endif
 #if defined(POLYREGION_ASAN_BUILD) && !defined(_WIN32)
       // The static compiler archive is built from the sanitizer-instrumented native objects;
       // its client link must therefore provide the same ASan/UBSan shared runtimes.
-      out ^= concat(std::vector<std::string>{"-fsanitize=address,undefined", "-fno-sanitize=vptr", "-shared-libsan", "-frtlib-add-rpath"});
+      if (needsCxxRuntime) {
+        // Flang does not accept Clang's -fsanitize/-shared-libsan driver flags.
+        // Link the shipped shared runtime explicitly; the ASan test runner also
+        // preloads this same DSO so its interceptors are installed first.
+        std::error_code ec;
+        const auto root = joinPath(llvmLibPath, "clang");
+  #if defined(__APPLE__)
+        constexpr auto runtimeName = "libclang_rt.asan_osx_dynamic.dylib";
+  #else
+        constexpr auto runtimeName = "libclang_rt.asan.so";
+  #endif
+        for (llvm::sys::fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+          const auto runtime = it->path();
+          if (llvm::sys::path::filename(runtime) != runtimeName) continue;
+          const auto runtimeDir = llvm::sys::path::parent_path(runtime).str();
+  #if defined(__APPLE__)
+          out ^= concat(std::vector<std::string>{runtime, fmt::format("-Wl,-rpath,{}", runtimeDir)});
+  #else
+          out ^= concat(std::vector<std::string>{"-Wl,--push-state,--no-as-needed", runtime, "-Wl,--pop-state",
+                                                 fmt::format("-Wl,-rpath,{}", runtimeDir)});
+  #endif
+          break;
+        }
+      } else {
+        out ^=
+            concat(std::vector<std::string>{"-fsanitize=address,undefined", "-fno-sanitize=vptr", "-shared-libsan", "-frtlib-add-rpath"});
+      }
 #endif
       break;
     }

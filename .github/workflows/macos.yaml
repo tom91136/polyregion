@@ -67,6 +67,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet llvm lld cmake ninja zlib gcc
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
@@ -137,6 +138,7 @@ jobs:
       - name: Install dependencies
         # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
         run: |
+          if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet llvm lld cmake ninja zlib gcc sbt
           echo "JAVA_HOME=$(/usr/libexec/java_home)" >> "$GITHUB_ENV"
           echo "$(brew --prefix llvm)/bin"          >> "$GITHUB_PATH"
@@ -290,7 +292,9 @@ jobs:
 
       - &brew-cmake
         name: Install dependencies
-        run: brew install --quiet cmake
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
+          brew install --quiet cmake
 
       - *setup-just
 
@@ -471,6 +475,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet cmake ninja zlib
           echo "JAVA_HOME=$(/usr/libexec/java_home)" >> "$GITHUB_ENV"
 

@@ -2,6 +2,7 @@
 
 #include "catch2/catch_all.hpp"
 
+#include "polyregion/enums.h"
 #include "polyregion/polyc_jit.h"
 
 #include "ast.h"

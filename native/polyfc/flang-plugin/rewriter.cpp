@@ -828,7 +828,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       auto div = mlir::arith::DivSIOp::create(B, loc, diff, stepV).getResult();
       numIters = mlir::arith::AddIOp::create(B, loc, div, idxOne).getResult();
       shapeVal = fir::ShapeOp::create(B, loc, mlir::ValueRange{numIters}).getResult();
-      for (auto [rvIdx, rv] : llvm::enumerate(reduceVarsSnapshot)) {
+      for (auto rv : reduceVarsSnapshot) {
         auto refTy = mlir::cast<fir::ReferenceType>(rv.getType());
         auto refEleTy = refTy.getEleTy();
         // XXX For allocatables, scratch holds scalar T (FIR rejects array<box<heap<T>>>) and we
@@ -840,7 +840,6 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
             scalarTy = heapTy.getEleTy();
             isAllocatable = true;
           }
-        const auto op = rvIdx < reduceOps.size() ? reduceOps[rvIdx] : fir::ReduceOperationEnum::Add;
         auto arrTy = fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, scalarTy);
         auto boxArrTy = fir::BoxType::get(arrTy);
         auto scratchHeap =

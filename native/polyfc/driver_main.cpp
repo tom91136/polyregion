@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 
 #include "llvm/Config/llvm-config.h"
@@ -74,7 +75,16 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) { remaining.insert(remaining.end(), xs.begin(), xs.end()); };
+               auto append = [&](const std::vector<std::string> &xs) {
+                 for (const auto &x : xs) {
+#if defined(__APPLE__)
+                   // Runtime, libc++, and JIT dependencies can share install
+                   // locations; ld64.lld warns for repeated identical rpaths.
+                   if (x.starts_with("-Wl,-rpath,") && std::find(remaining.begin(), remaining.end(), x) != remaining.end()) continue;
+#endif
+                   remaining.push_back(x);
+                 }
+               };
 
                std::vector<std::pair<const char *, std::string>> envs;
 
@@ -117,7 +127,9 @@ int main(int argc, const char *argv[]) {
                      append({"-Xlinker", fmt::format("/mllvm:-{}={}", FlagVerbose, debug ? "1" : "0"), //
                              "-Xlinker", fmt::format("/mllvm:-{}={}", FlagLate, latePasses)});
 #else
-                     append(Driver::enableLLDAndLTO(args));
+                     // Flang diagnoses thin LTO as work-in-progress; full LTO is
+                     // supported and still gives the late link pass one module.
+                     append(Driver::enableLLDAndLTO(args, "full"));
                      append(Driver::lldPassPluginFlags(polyreflectPlugin, {fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"), //
                                                                            fmt::format("-{}={}", FlagLate, latePasses)}));
 #endif

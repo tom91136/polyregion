@@ -40,7 +40,7 @@ static std::unordered_map<polyregion_dl_handle, std::size_t> dlRefcount;
   Natives::unregisterMethods(env);
 
   if (!files.empty()) {
-    if (debug) fprintf(stdout, "Registered files: %ld\n", files.size());
+    if (debug) fprintf(stdout, "Registered files: %zu\n", files.size());
     auto File = polyregion::generated::File::of(env);
     for (auto &f : files) {
       File.wrap(env, f).delete_(env);
@@ -71,7 +71,7 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
       firstLoad = dlRefcount[dylib]++ == 0;
     }
     if (firstLoad) {
-      if (void *f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
+      if (auto f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
         reinterpret_cast<jint (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
       }
     }
@@ -93,7 +93,7 @@ void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
     }
   }
   if (lastRelease) {
-    if (void *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
+    if (auto f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
       reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
     }
   }

@@ -1,6 +1,7 @@
 #include "polyinvoke/vulkan_platform.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <cstring>
 #include <unordered_map>
 #include <utility>
@@ -431,7 +432,7 @@ void VulkanDevice::freeDevice(uintptr_t ptr) {
   if (auto obj = memoryObjects.query(ptr); obj) {
     vmaDestroyBuffer(allocator, VkBuffer((*obj)->buffer), (*obj)->allocation);
     memoryObjects.erase(ptr);
-  } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
+  } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
 }
 
 std::optional<void *> VulkanDevice::mallocShared(size_t size, Access access) {
@@ -451,7 +452,7 @@ std::unique_ptr<DeviceQueue> VulkanDevice::createQueue(const std::chrono::durati
                                              [this](auto &&ptr) {
                                                if (auto mem = memoryObjects.query(ptr); mem) {
                                                  return *mem;
-                                               } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
+                                               } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
                                              } //
   );
 }
@@ -603,7 +604,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *(enqueued->fence));
     callbackQueue.push([this, &fn, cb, key = key]() {
       if (auto enqueued_ = enqueuedStore.find(key); enqueued_) {
-        auto result = ctx.waitForFences({*(*enqueued_)->fence}, true, uint64_t(-1));
+        static_cast<void>(ctx.waitForFences({*(*enqueued_)->fence}, true, uint64_t(-1)));
         fn.cmdBuffer.reset();
         fn.cmdPool.reset();
         enqueuedStore.erase(key);
@@ -616,7 +617,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   } else {
     auto fence = ctx.createFence(vk::FenceCreateInfo());
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *fence);
-    auto r = ctx.waitForFences({*fence}, true, uint64_t(-1));
+    static_cast<void>(ctx.waitForFences({*fence}, true, uint64_t(-1)));
     fn.cmdPool.reset();
     if (argObj) {
       vmaDestroyBuffer(allocator, VkBuffer(argObj->buffer), argObj->allocation);

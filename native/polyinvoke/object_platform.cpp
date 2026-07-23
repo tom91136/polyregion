@@ -537,12 +537,12 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   auto &[image, handle, symbolTable] = moduleIt->second;
 
-  void *address = nullptr;
+  uint64_t address = 0;
   if (const auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
   else {
-    address = polyregion_dl_find(handle, symbol.c_str());
+    address = reinterpret_cast<uintptr_t>(polyregion_dl_find(handle, symbol.c_str()));
     if (!address) {
-      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zd bytes): %s", symbol.c_str(), moduleName.c_str(),
+      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zu bytes): %s", symbol.c_str(), moduleName.c_str(),
                        image.size(), polyregion_dl_error());
     }
     symbolTable.emplace_hint(it, symbol, address);
@@ -558,7 +558,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;
-        ffiInvoke(SHOBJ_PREFIX, reinterpret_cast<uint64_t>(address), types, argPtrs);
+        ffiInvoke(SHOBJ_PREFIX, address, types, argPtrs);
       });
   POLYINVOKE_TRACE();
 }

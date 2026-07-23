@@ -1,5 +1,6 @@
 #include "polyinvoke/cl_platform.h"
 
+#include <cinttypes>
 #include <cstring>
 #include <thread>
 
@@ -507,7 +508,7 @@ void ClDevice::freeDevice(uintptr_t ptr) {
   if (auto mem = memoryObjects.query(ptr); mem) {
     CHECKED(clReleaseMemObject(*mem));
     memoryObjects.erase(ptr);
-  } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
+  } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
 }
 std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
@@ -532,7 +533,7 @@ std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<i
       [this](auto &&ptr) {
         if (auto mem = memoryObjects.query(ptr); mem) {
           return *mem;
-        } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
+        } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
       },
       svm, svmTracker);
 }
@@ -610,7 +611,7 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
 void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   cl_event event = {};
-  if (!src) POLYINVOKE_FATAL(PREFIX, "Source pointer is NULL, destination=%lu", dst);
+  if (!src) POLYINVOKE_FATAL(PREFIX, "Source pointer is NULL, destination=%" PRIuPTR, dst);
   if (size == 0) return enqueueCallback(cb, {});
   if (svm) {
     unmapAllSvmForDevice();
@@ -624,7 +625,7 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
 void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   cl_event event = {};
-  if (!dst) POLYINVOKE_FATAL(PREFIX, "Destination pointer is NULL, source=%lu", src);
+  if (!dst) POLYINVOKE_FATAL(PREFIX, "Destination pointer is NULL, source=%" PRIuPTR, src);
   // XXX zero-byte is a no-op; ReadBuffer/SVMMemcpy reject size 0 with CL_INVALID_VALUE (an -O3 reflect can size a result to 0)
   if (size == 0) return enqueueCallback(cb, {});
   if (svm) {

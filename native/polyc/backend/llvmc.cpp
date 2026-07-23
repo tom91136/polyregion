@@ -81,6 +81,18 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
   static std::optional<llvmc::CpuInfo> hostCpuInfo = {};
   if (!hostCpuInfo) {
     auto hostFeatures = llvm::sys::getHostCPUFeatures();
+#if defined(__riscv)
+    // QEMU's riscv_hwprobe emulation can omit floating-point extensions even
+    // though the running process ABI requires them. The binary could not
+    // execute correctly without these ABI-mandated features, so restore them
+    // from the compiler's RISC-V ABI macros.
+  #if defined(__riscv_float_abi_double)
+    hostFeatures["f"] = true;
+    hostFeatures["d"] = true;
+  #elif defined(__riscv_float_abi_single)
+    hostFeatures["f"] = true;
+  #endif
+#endif
     // XXX QEMU riscv_hwprobe emulation can report 'v' without the zve* bits it implies
     bool hasV = hostFeatures.lookup("v");
     llvm::SubtargetFeatures Features;

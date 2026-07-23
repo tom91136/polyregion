@@ -1,5 +1,6 @@
 #include "polyinvoke/metal_platform.h"
 
+#include <cinttypes>
 #include <cstring>
 
 #include "fmt/format.h"
@@ -156,7 +157,7 @@ void MetalDevice::freeDevice(uintptr_t ptr) {
   if (auto mem = memoryObjects.query(ptr); mem) {
     (*mem)->release();
     memoryObjects.erase(ptr);
-  } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
+  } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
 }
 std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
@@ -174,7 +175,7 @@ std::unique_ptr<DeviceQueue> MetalDevice::createQueue(const std::chrono::duratio
       store, NOT_NIL(device->newCommandQueue(), "command queue"),
       [this](uintptr_t ptr) {
         if (auto mem = memoryObjects.query(ptr); mem) return *mem;
-        POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
+        POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
       },
       [this]() { return memoryObjects.snapshot(); }, unified);
 }

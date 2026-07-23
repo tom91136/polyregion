@@ -178,7 +178,8 @@ if (MSVC)
             /bigobj
             /nologo
 
-            /Zc:preprocessor # XXX IMPORTANT: Clang forwards __VA_ARGS__ in macros and need this to work
+            # MSVC needs conforming __VA_ARGS__; clang-cl already has it and warns that this switch is unused.
+            "$<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>"
             /Zc:__cplusplus  # flang headers gate on __cplusplus >= 201703L
             /utf-8           # fmt 12.x's unicode support fails to compile without UTF-8 source encoding
             # Disabled warnings.
@@ -226,6 +227,11 @@ if (MSVC)
             # WinBase.h that we don't have control over.
             -wd5105 # Suppress macro expansion producing 'defined' has undefined behavior
 
+            # Generated codec/header helpers are intentionally TU-local and not all are selected.
+            "$<$<CXX_COMPILER_ID:Clang>:-Wno-unused-function>"
+            # LLVM/MLIR headers still use C++20-deprecated implicit this captures.
+            "$<$<CXX_COMPILER_ID:Clang>:-Wno-deprecated-this-capture>"
+
             # Ideally, we'd like this warning to be enabled, but even MSVC 2019 doesn't
             # support the 'aligned' attribute in the way that clang sources requires (for
             # any code that uses the LLVM_ALIGNAS macro), so this is must be disabled to
@@ -246,6 +252,8 @@ if (MSVC)
             _CRT_NONSTDC_NO_WARNINGS
             _SCL_SECURE_NO_DEPRECATE
             _SCL_SECURE_NO_WARNINGS
+            # LLVM's APFloat helpers instantiate std::complex with non-floating element types.
+            _SILENCE_NONFLOATING_COMPLEX_DEPRECATION_WARNING
     )
     add_compile_definitions(
             UNICODE
@@ -260,6 +268,15 @@ if (MSVC)
     # enum_name<> degrades to empty strings instead of failing to compile.
     add_compile_definitions(MAGIC_ENUM_NO_CHECK_REFLECTED_ENUM=1)
 else ()
+
+    set(POLYREGION_C2Y_WARNING_OPTION)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-Werror=unknown-warning-option -Wc2y-extensions" POLYREGION_HAS_W_C2Y_EXTENSIONS)
+        if (POLYREGION_HAS_W_C2Y_EXTENSIONS)
+            set(POLYREGION_C2Y_WARNING_OPTION -Wno-c2y-extensions)
+        endif ()
+    endif ()
 
     set(COMMON_RELEASE_OPTIONS)
     set(COMMON_COMPILE_OPTIONS
@@ -281,7 +298,7 @@ else ()
             # libstdc++ __find_if's `#pragma GCC unroll 4` is a forced transform clang can't honour.
             "$<$<CXX_COMPILER_ID:Clang>:-Wno-pass-failed>"
             # Catch2 test macros expand __COUNTER__, which -pedantic flags as a C2y extension; no first-party use
-            "$<$<CXX_COMPILER_ID:Clang>:-Wno-c2y-extensions>"
+            ${POLYREGION_C2Y_WARNING_OPTION}
     )
 endif ()
 
@@ -317,6 +334,7 @@ else ()
     # Setup link options
     if (APPLE)
         # LLD support for macOS is not there yet, flags are for ld64.
+        list(APPEND COMMON_LINK_OPTIONS LINKER:-no_warn_duplicate_libraries)
         set(STRICT_LINK_OPTIONS) # ld64 defaults to error on undefined on missing symbols, so nothing to do
         set(PLUGIN_LINK_OPTIONS LINKER:-undefined,dynamic_lookup)
     elseif (MSVC)

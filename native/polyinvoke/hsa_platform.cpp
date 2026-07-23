@@ -364,7 +364,7 @@ bool HsaDevice::moduleLoaded(const std::string &name) {
 }
 uintptr_t HsaDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   void *data;
   CHECKED("Allocate AMD memory pool", hsa_amd_memory_pool_allocate(deviceGlobalRegion, size, 0, &data));
   return reinterpret_cast<uintptr_t>(data);
@@ -375,7 +375,7 @@ void HsaDevice::freeDevice(uintptr_t ptr) {
 }
 std::optional<void *> HsaDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
-  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %ld", size);
+  if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   void *data;
   CHECKED("Allocate AMD memory pool", hsa_amd_memory_pool_allocate(deviceGlobalRegion, size, 0, &data));
   return data;
@@ -473,7 +473,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   auto [fn, argOffsets] = device.store.resolveFunction(moduleName, symbol, types);
 
   if (argOffsets.size() < types.size() - 1) {
-    POLYINVOKE_FATAL(PREFIX, "Symbol `%s` expects at least %ld arguments (excluding launch metadata), %ld given", symbol.c_str(),
+    POLYINVOKE_FATAL(PREFIX, "Symbol `%s` expects at least %zu arguments (excluding launch metadata), %zu given", symbol.c_str(),
                      argOffsets.size(), types.size());
   }
 
@@ -510,7 +510,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   // Last arg is the return, void assertion should have been done before this.
   for (size_t i = 0; i < args.size() - 1; ++i) {
     if (argOffsets[i] >= kernargSegmentSize) {
-      POLYINVOKE_FATAL(PREFIX, "Argument size out of bound, kernel expects %u bytes, argument %ld leads to overflow", kernargSegmentSize,
+      POLYINVOKE_FATAL(PREFIX, "Argument size out of bound, kernel expects %u bytes, argument %zu leads to overflow", kernargSegmentSize,
                        i);
     }
     if (types[i] == Type::Void) POLYINVOKE_FATAL(PREFIX, "Illegal argument type: %s", magic_enum::enum_name(types[i]).data());

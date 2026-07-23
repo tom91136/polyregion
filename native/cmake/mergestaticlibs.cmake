@@ -66,7 +66,8 @@ function(merge_static_libs outlib)
         set_target_properties(${outlib} PROPERTIES STATIC_LIBRARY_OPTIONS "@${libfiles_rsp_path}")
     elseif (APPLE)
         add_custom_command(TARGET ${outlib} POST_BUILD
-                COMMAND /usr/bin/libtool -static -o "$<TARGET_FILE:${outlib}>" ${libfiles} "$<TARGET_FILE:${outlib}>"
+                COMMAND /usr/bin/libtool -static -no_warning_for_no_symbols -o "$<TARGET_FILE:${outlib}>" ${libfiles}
+                        "$<TARGET_FILE:${outlib}>"
         )
     else () # general UNIX - need to "ar -x" and then "ar -ru"
         foreach (libtarget ${libs})

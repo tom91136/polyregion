@@ -122,7 +122,6 @@ constexpr uint32_t WorkgroupMemory = 0x100;
 constexpr uint32_t CrossWorkgroupMemory = 0x200;
 } // namespace SpvMemSem
 namespace SpvScope {
-constexpr uint32_t Device = 1;
 constexpr uint32_t Workgroup = 2;
 } // namespace SpvScope
 
