@@ -93,6 +93,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                           polyfront::KernelObject ko;
                           ko.format = *format;
                           ko.kind = runtime::targetPlatformKind(target);
+                          ko.features = polyfront::passes::jitFeaturesFor(target);
                           ko.target = target;
                           ko.arch = arch;
                           ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};

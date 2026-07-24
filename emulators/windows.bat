@@ -191,15 +191,15 @@ git -C "%WORK%\swiftshader" checkout -q %SWIFTSHADER_REF% || (echo SS-CHECKOUT-F
 rem Windows reports CMAKE_SYSTEM_PROCESSOR=ARM64 (uppercase); SwiftShader's case-sensitive arch regex
 rem misses it, defaults ARCH=x86_64 and builds X86 LLVM the AArch64 Reactor JIT can't link - widen it
 powershell -NoProfile -Command "$f='%WORK%\swiftshader\CMakeLists.txt'; (Get-Content -Raw $f) -replace 'MATCHES \"arm\" OR CMAKE_SYSTEM_PROCESSOR MATCHES \"aarch\"', 'MATCHES \"[Aa][Rr][Mm]\" OR CMAKE_SYSTEM_PROCESSOR MATCHES \"[Aa][Aa][Rr][Cc][Hh]\"' | Set-Content -NoNewline $f" || (echo SS-PATCH-FAIL & exit /b 1)
+rem The version-info resource is not used at runtime, and cmcldeps/rc hung for six hours on the
+rem hosted Windows image. Omit that one source instead of letting metadata block the emulator DLL.
+powershell -NoProfile -Command "$f='%WORK%\swiftshader\src\Vulkan\CMakeLists.txt'; $s=Get-Content -Raw $f; $p='(?m)^\s*Vulkan\.rc\r?\n'; if ($s -notmatch $p) { throw 'Vulkan.rc source not found' }; $s -replace $p, '' | Set-Content -NoNewline $f" || (echo SS-RC-PATCH-FAIL & exit /b 1)
 rmdir /s /q "%WORK%\swiftshader\build-ss" 2>nul
 rem force cl (MSVC): else SwiftShader's vendored-LLVM-10 build picks the from-source clang++ on PATH and
 rem feeds it GNU flags (-fPIC/-march) invalid for the *-pc-windows-msvc target
 cmake -S "%WORK%\swiftshader" -B "%WORK%\swiftshader\build-ss" -G Ninja -DCMAKE_BUILD_TYPE=Release %MT_CMAKE% ^
   -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" ^
   -DSWIFTSHADER_BUILD_TESTS=OFF -DSWIFTSHADER_WARNINGS_AS_ERRORS=OFF || (echo SS-CFG-FAIL & exit /b 1)
-rem cmcldeps/rc has repeatedly hung when Ninja leaves this tiny resource edge until after the 1,199
-rem parallel C++ edges. Build it first in isolation; the main build then only compiles and links code.
-ninja -C "%WORK%\swiftshader\build-ss" "src\Vulkan\CMakeFiles\vk_swiftshader.dir\Vulkan.rc.res" || (echo SS-RC-FAIL & exit /b 1)
 cmake --build "%WORK%\swiftshader\build-ss" --target vk_swiftshader || (echo SS-FAIL & exit /b 1)
 
 :collect

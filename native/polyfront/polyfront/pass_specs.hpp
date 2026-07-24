@@ -47,4 +47,13 @@ inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target
   }
 }
 
+inline std::vector<std::string> jitFeaturesFor(const compiletime::Target &target) {
+  switch (target) {
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: return {"int64"};
+    default: return {};
+  }
+}
+
 } // namespace polyregion::polyfront::passes
