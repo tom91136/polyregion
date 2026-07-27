@@ -1652,7 +1652,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         }
       },
       [&](const clang::CXXMemberCallExpr *expr) -> Expr::Any { // instance.method(...)
-        const auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
+        const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
+        if (!calleeFn) raise(fmt::format("Member call with no resolvable callee: {}", pretty_string(expr, context)));
+        const auto [name, fn] = handleCall(calleeFn, r);
         const auto receiver = r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
 
         if (fn->args.size() != expr->getNumArgs() + 1) {
@@ -1677,7 +1679,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CXXOperatorCallExpr *expr) -> Expr::Any {
-        const auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
+        const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
+        if (!calleeFn) raise(fmt::format("Operator call with no resolvable callee: {}", pretty_string(expr, context)));
+        const auto [name, fn] = handleCall(calleeFn, r);
 
         if (fn->args.size() != expr->getNumArgs())
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
@@ -1704,7 +1708,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::CallExpr *expr) { //  method(...)
         const static std::string builtinPrefix = "__polyregion_builtin_";
-        const auto target = expr->getCalleeDecl()->getAsFunction();
+        if (llvm::isa<clang::CXXPseudoDestructorExpr>(expr->getCallee()->IgnoreParenImpCasts()))
+          return Expr::Any(Expr::Alias(Term::Unit0Const()));
+        const auto target = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
+        if (!target) raise(fmt::format("Call with no resolvable callee: {}", pretty_string(expr, context)));
         const auto qualifiedName = target->getQualifiedNameAsString();
         if ((qualifiedName == "std::addressof" || qualifiedName == "std::__addressof" || qualifiedName == "__builtin_addressof") &&
             expr->getNumArgs() == 1) {
@@ -1913,16 +1920,12 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         else r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
       },
       [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
-      [&](const clang::NullStmt *stmt) {},
+      [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
         auto _ = r.newVar(handleExpr(stmt, r));
       },
       [&](const clang::Stmt *stmt) {
-        llvm::outs() << "Failed to handle stmt\n";
-        llvm::outs() << ">AST\n";
-        stmt->dumpColor();
-        llvm::outs() << ">Pretty\n";
-        stmt->dumpPretty(context);
-        llvm::outs() << "\n";
+        raise(fmt::format("Unhandled stmt {} at {}", stmt->getStmtClassName(),
+                          stmt->getBeginLoc().printToString(context.getSourceManager())));
       });
 }

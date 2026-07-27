@@ -95,6 +95,7 @@ struct Task {
   std::string caseName;
   std::vector<std::pair<std::string, std::string>> variables;
   std::string output;
+  std::optional<std::string> compileFailure;
   std::vector<TestCase::Run> runs; // templates already expanded against (variables + defaults + stdpar + input + output)
   std::vector<RunVariant> variants;
 
@@ -369,7 +370,7 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
   TaskOutcome o;
   std::string reproReason;
-  if (exit == 0)
+  if (exit == 0 && !task.compileFailure)
     if (const char *e = std::getenv(polyregion::env::PolytestReproCheck); !(e && e[0] == '0')) {
       const auto &cmd = task.runs[0].command;
       const auto toks = cmd ^ split(' ');
@@ -395,13 +396,18 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
     }
   absorbStep(o, std::move(r));
   o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-  if (exit == 77) o.failReason = "polyrt: no compatible target during compile (exit 77)", o.status = TaskStatus::Skip;
+  if (task.compileFailure) {
+    if (exit == 0) o.failReason = "compile unexpectedly succeeded", o.status = TaskStatus::Fail;
+    else if (o.stderrCapture.find(*task.compileFailure) == std::string::npos)
+      o.failReason = fmt::format("compile failed without expected diagnostic '{}'", *task.compileFailure), o.status = TaskStatus::Fail;
+  } else if (exit == 77) o.failReason = "polyrt: no compatible target during compile (exit 77)", o.status = TaskStatus::Skip;
   else if (exit != 0) o.failReason = fmt::format("compile failed (exit {})", exit), o.status = TaskStatus::Fail;
   else if (!reproReason.empty()) o.failReason = reproReason, o.status = TaskStatus::Fail;
   return o;
 }
 
 inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
+  if (task.compileFailure) return {};
   TaskOutcome o;
   const auto start = std::chrono::steady_clock::now();
   for (std::size_t i = 1; i < task.runs.size(); ++i) {
@@ -479,7 +485,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
              const auto output = fmt::format("{}_{}", variants.empty() ? baseOutput : detBase, modeName(mode));
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
              auto runs = tc.runs ^ map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; });
-             return {mode, file, tc.name, varsWithLabel, output, std::move(runs), std::move(variants)};
+             return {mode, file, tc.name, varsWithLabel, output, tc.compileFailure, std::move(runs), std::move(variants)};
            });
   };
 
