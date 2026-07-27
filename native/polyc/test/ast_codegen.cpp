@@ -110,7 +110,7 @@ Expr::Any generateConstValue(const Tpe::Any &t) {
       [&](const Type::Var &) -> Expr::Any { return unsupported(); }, [&](const Type::Exec &) -> Expr::Any { return unsupported(); });
 }
 
-template <typename P> static void assertCompile(const P &p) {
+template <typename P> static auto assertCompile(const P &p) {
   CAPTURE(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
   CAPTURE(repr(c));
@@ -122,6 +122,7 @@ template <typename P> static void assertCompile(const P &p) {
   }
   //  FAIL("debug");
   //  INFO(c);
+  return c;
 }
 
 TEST_CASE("json round-trip", "[ast]") {
@@ -862,6 +863,34 @@ TEST_CASE("cast expr", "[compiler]") {
                      {FunctionVisibility::Exported()});
 
   assertCompile(program({}, {fn}));
+}
+
+TEST_CASE("cast aggregate value to pointer aliases its storage", "[compiler]") {
+  compiler::initialise();
+
+  const Named x("x", SInt);
+  const Named y("y", SInt);
+  const StructDef pairDef(Sym({"Pair"}), {}, {x, y}, {}, false);
+  const Type::Struct pairTpe(Sym({"Pair"}), {});
+  const auto intPtrTpe = Ptr(SInt);
+
+  const Function fn = mkFn("foo", {}, SInt,
+                           {
+                               Var(Named("pair", pairTpe), {}, false),
+                               MutT(Select({Named("pair", pairTpe)}, x), Term::IntS32Const(1)),
+                               MutT(Select({Named("pair", pairTpe)}, y), Term::IntS32Const(2)),
+                               Var(Named("storage", intPtrTpe), Cast(Select({}, Named("pair", pairTpe)), intPtrTpe), false),
+                               Update(Select({}, Named("storage", intPtrTpe)), Term::IntS32Const(1), Term::IntS32Const(42)),
+                               Return(Expr::Alias(Select({Named("pair", pairTpe)}, y))),
+                           },
+                           {FunctionVisibility::Exported()});
+
+  const auto result = assertCompile(program({pairDef}, {fn}));
+  const auto ir =
+      std::find_if(result.events.begin(), result.events.end(), [](const auto &event) { return event.name == "ast_to_llvm_ir"; });
+  REQUIRE(ir != result.events.end());
+  CHECK_THAT(ir->data, ContainsSubstring("store ptr %pair_stack_ptr, ptr %storage_stack_ptr"));
+  CHECK_THAT(ir->data, ContainsSubstring("store i32 42, ptr %storage_update_ptr"));
 }
 
 TEST_CASE("cast fp to int expr", "[compiler]") {

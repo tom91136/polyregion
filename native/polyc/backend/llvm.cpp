@@ -637,6 +637,14 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           return from;
         }
 
+        // Reinterpret aggregates through their storage, materialising a slot when needed.
+        if (x.from.tpe().kind().is<TypeKind::Ref>() && x.as.is<Type::Ptr>()) {
+          if (const auto sel = x.from.template get<Term::Select>()) return mkSelectPtr(*sel);
+          const auto slot = C.allocaAS(B, fromTpe, C.AllocaAS, key + "_aggregate_ptr");
+          B.CreateStore(from, slot);
+          return slot;
+        }
+
         // Casts to/from a None-kind type (Nothing/Unit0/Exec) are no-ops: void-shaped types carry no value.
         if (x.from.tpe().kind().is<TypeKind::None>() || x.as.kind().is<TypeKind::None>()) {
           return from;
