@@ -176,6 +176,20 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
   }
 }
 
+// Clang leaves implicit union copy/move bodies empty; copy their canonical storage explicitly.
+static void copyUnionStorage(Remapper::RemapContext &r, const Named &dst, const Named &src, const Named &storage) {
+  const auto lhs = select(r, {dst}, storage);
+  const auto rhs = select(r, {src}, storage);
+  if (const auto arr = storage.tpe.get<Type::Arr>()) {
+    for (int32_t i = 0; i < arr->length; ++i) {
+      const auto idx = Term::IntU64Const(i);
+      r.push(Stmt::Update(lhs, idx, r.newVar(Expr::Index(rhs, idx, arr->comp))));
+    }
+  } else {
+    r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
+  }
+}
+
 Vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f,      //
                                                  const Opt<bool> &scopeCtorChain,                   //
                                                  const Opt<Type::Any> &scopeRtnType,                //
@@ -587,6 +601,10 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       }
                     } else raise("Unknown initializer type!");
                   }
+                  if (parent && parent->isUnion && !parent->members.empty() && args.size() == 1 && ctor->isDefaulted() &&
+                      (ctor->isCopyConstructor() || ctor->isMoveConstructor())) {
+                    copyUnionStorage(r, receiver->named, args[0].named, parent->members.front());
+                  }
                   handleStmt(decl->getBody(), r);
                   r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
                 } else raise("receiver is not a struct type!");
@@ -598,13 +616,12 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                 auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
                 // Defaulted assignment has an empty body for empty structs (only the placeholder byte) and for
                 // unions (Clang elides the member-wise copy), so copy the canonical storage member explicitly.
-                const auto storage = r.emptyStruct(*parent)                        ? Opt<Named>{EmptyStructMarker}
-                                     : parent->isUnion && !parent->members.empty() ? Opt<Named>{parent->members.front()}
-                                                                                   : Opt<Named>{};
-                if (storage) {
-                  auto thisRef = select(r, {Named(This, thisPtr)}, *storage);
-                  auto rhsRef = select(r, {args[0].named}, *storage);
+                if (r.emptyStruct(*parent)) {
+                  auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
+                  auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
                   r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
+                } else if (parent->isUnion && !parent->members.empty()) {
+                  copyUnionStorage(r, Named(This, thisPtr), args[0].named, parent->members.front());
                 }
               }
               handleStmt(decl->getBody(), r);
