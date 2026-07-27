@@ -139,10 +139,29 @@ llvm::Value *VulkanLowering::scalarValueOf(const Term::Select &select) {
   return cg.C.load(cg.B, ptr, ty);
 }
 
+void VulkanLowering::physicalFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, llvm::Type *tpe,
+                                       std::vector<llvm::Value *> idxs) {
+  if (auto *s = llvm::dyn_cast<llvm::StructType>(tpe)) {
+    for (unsigned i = 0; i < s->getNumElements(); ++i)
+      physicalFieldCopy(dst, src, rootTy, s->getElementType(i), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
+  } else if (auto *a = llvm::dyn_cast<llvm::ArrayType>(tpe)) {
+    for (uint64_t i = 0; i < a->getNumElements(); ++i)
+      physicalFieldCopy(dst, src, rootTy, a->getElementType(), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
+  } else {
+    auto *dstP = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkcopy_dst");
+    auto *srcP = cg.B.CreateInBoundsGEP(rootTy, src, idxs, "vkcopy_src");
+    const auto _ = cg.C.store(cg.B, cg.C.load(cg.B, srcP, tpe), dstP);
+  }
+}
+
 void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, const AnyType &tpe,
                                      std::vector<llvm::Value *> idxs) {
   if (auto s = tpe.template get<Type::Struct>()) {
     const auto &info = cg.structTypes.at(repr(s->name));
+    if (info.def.isUnion) {
+      physicalFieldCopy(dst, src, rootTy, info.tpe, std::move(idxs));
+      return;
+    }
     info.def.members | zip_with_index<size_t>() | for_each([&](auto &m, auto i) {
       structFieldCopy(dst, src, rootTy, m.tpe, idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
     });

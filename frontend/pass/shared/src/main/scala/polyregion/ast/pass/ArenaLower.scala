@@ -196,7 +196,7 @@ object ArenaLower extends ProgramPass {
       case p.Expr.Alias(t)   => p.Expr.Alias(rwTerm(t))
       case p.Expr.Cast(t, a) => p.Expr.Cast(rwTerm(t), a)
       case p.Expr.Index(b, i, comp) =>
-        if (offsetVal(b))
+        if (isPtr(b.tpe) && offsetVal(b))
           p.Expr.Index(sel(arenaBase(rwTerm(b), p.Type.Ptr(comp, pointeeSpace(b.tpe)))), rwTerm(i), comp)
         else p.Expr.Index(rwTerm(b), rwTerm(i), comp)
       // address-of through an arena offset pointer (`&p[i]`) remains an offset token. emitting a real
@@ -238,7 +238,7 @@ object ArenaLower extends ProgramPass {
       case p.Stmt.Var(n, None, m)    => p.Stmt.Var(offsetNamed(n), None, m)
       case p.Stmt.Mut(t, e)          => p.Stmt.Mut(rwTerm(t).asInstanceOf[p.Term.Select], rwExpr(e))
       case p.Stmt.Update(lhs, i, v) =>
-        if (offsetVal(lhs))
+        if (isPtr(lhs.tpe) && offsetVal(lhs))
           p.Stmt.Update(sel(arenaBase(rwTerm(lhs), lhs.tpe)), rwTerm(i), rwTerm(v))
         else p.Stmt.Update(rwTerm(lhs).asInstanceOf[p.Term.Select], rwTerm(i), rwTerm(v))
       case p.Stmt.Return(e) => p.Stmt.Return(rwExpr(e))

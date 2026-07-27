@@ -69,6 +69,41 @@ class ArenaLowerSuite extends munit.FunSuite {
     })
   }
 
+  test("direct index of arena-rooted inline array remains a rooted array access") {
+    val capSym    = sym("Cap")
+    val bufferSym = sym("Buffer")
+    val dataTpe   = p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Global)
+    val bufferTpe = p.Type.Struct(bufferSym, Nil)
+    val capTpe    = p.Type.Struct(capSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val bufferPtr = named("buffer", p.Type.Ptr(bufferTpe, p.Type.Space.Global))
+    val ch        = named("ch", p.Type.IntS32)
+    val capDef    = p.StructDef(capSym, Nil, List(named("buffer", bufferTpe)), Nil)
+    val bufferDef = p.StructDef(bufferSym, Nil, List(named("slots", dataTpe), named("head")), Nil, isUnion = true)
+    val buffer    = p.Term.Select(cap, List(p.PathStep.Field("buffer")), bufferTpe)
+    val slots     = p.Term.Select(bufferPtr, List(p.PathStep.Field("slots")), dataTpe)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(
+          bufferPtr,
+          Some(p.Expr.RefTo(buffer, None, bufferTpe, p.Type.Space.Global, p.Region.Rooted(cap))),
+          isMutable = false
+        ),
+        p.Stmt.Var(ch, Some(p.Expr.Index(slots, p.Term.IntS64Const(2), p.Type.IntS32)), isMutable = false),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef, bufferDef)), NoopLog).entry
+
+    assert(out.body.collectFirst { case p.Stmt.Var(`ch`, Some(e), _) => e }.exists {
+      case p.Expr.Index(p.Term.Select(root, List(p.PathStep.Field("slots")), `dataTpe`), _, p.Type.IntS32) =>
+        root.symbol.startsWith("#ab")
+      case _ => false
+    })
+  }
+
   test("address of arena offset pointer element remains an arena offset") {
     val capSym = sym("Cap")
     val ptrTpe = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)
