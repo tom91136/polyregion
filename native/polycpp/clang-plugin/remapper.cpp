@@ -1948,9 +1948,6 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             }
 
             if (const auto decomp = llvm::dyn_cast<clang::DecompositionDecl>(var)) {
-              if (name.tpe.is<Type::Arr>())
-                raise(fmt::format("Unsupported by-value array structured binding at {} (bind by reference instead)",
-                                  decomp->getBeginLoc().printToString(context.getSourceManager())));
               for (const auto binding : decomp->bindings())
                 if (const auto holding = binding->getHoldingVar()) {
                   const auto holdingName = Named(declName(holding), annotateLocalSpace(holding, r));

@@ -14,9 +14,9 @@
 #pragma region requires: 33
 
 #pragma region case: array-value
-#pragma region offload-only
-#pragma region compile-fails: Unsupported by-value array structured binding at
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_BINDING=4 -o {output} {input}
+#pragma region do: X=3 {output}
+#pragma region requires: 33
 
 #pragma region case: ref-writeback
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_BINDING=5 -o {output} {input}
