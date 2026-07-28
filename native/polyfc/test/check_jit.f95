@@ -2,7 +2,7 @@
 !CHECK using: jit=static,dynamic
 !CHECK using: type=integer,real
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_TYPE={type} -fstdpar-jit={jit} -o {output} {input}
-!CHECK do: POLYRT_JIT_CACHE=off POLYRT_JIT_SPECIALISE=1 POLYRT_JIT_SPECIALISE_HOT=1 {output}
+!CHECK do: POLYREGION_CACHE_DIR=off POLYRT_JIT_SPECIALISE=1 POLYRT_JIT_SPECIALISE_HOT=1 {output}
 !CHECK requires: 42.0 7.0
 
 #ifndef CHECK_TYPE

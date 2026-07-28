@@ -49,7 +49,6 @@ inline constexpr auto PolyrtArenaPersist = "POLYRT_ARENA_PERSIST";
 inline constexpr auto PolyrtArenaEager = "POLYRT_ARENA_EAGER";
 inline constexpr auto PolyrtPlatform = "POLYRT_PLATFORM";
 inline constexpr auto PolyrtJitLib = "POLYRT_JIT_LIB";
-inline constexpr auto PolyrtJitCache = "POLYRT_JIT_CACHE";
 inline constexpr auto PolyrtJitSpecialise = "POLYRT_JIT_SPECIALISE";
 inline constexpr auto PolyrtJitSpecialiseHot = "POLYRT_JIT_SPECIALISE_HOT";
 inline constexpr auto PolyrtJitSpecialiseLimit = "POLYRT_JIT_SPECIALISE_LIMIT";

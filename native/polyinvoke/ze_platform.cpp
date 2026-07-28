@@ -5,6 +5,8 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyinvoke/module_cache.h"
+
 #include "dl_util.h"
 
 using namespace polyregion::invoke;
@@ -96,6 +98,19 @@ std::string queryDeviceName(ze_device_handle_t device) {
   return std::string(props.name, ::strnlen(props.name, sizeof(props.name)));
 }
 
+std::string moduleIdentity(ze_driver_handle_t driver, ze_device_handle_t device) {
+  ze_driver_properties_t driverProps{};
+  driverProps.stype = ZE_STRUCTURE_TYPE_DRIVER_PROPERTIES;
+  ze_device_properties_t deviceProps{};
+  deviceProps.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  if (zeDriverGetProperties(driver, &driverProps) != ZE_RESULT_SUCCESS || zeDeviceGetProperties(device, &deviceProps) != ZE_RESULT_SUCCESS)
+    return {};
+  auto identity = fmt::format("{}|", driverProps.driverVersion);
+  identity.append(reinterpret_cast<const char *>(driverProps.uuid.id), sizeof(driverProps.uuid.id));
+  identity.append(reinterpret_cast<const char *>(deviceProps.uuid.id), sizeof(deviceProps.uuid.id));
+  return identity;
+}
+
 } // namespace
 
 ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
@@ -109,28 +124,37 @@ ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
           [this](auto &&image) {
             POLYINVOKE_TRACE();
             context.touch();
-            ze_module_desc_t desc{ZE_STRUCTURE_TYPE_MODULE_DESC,
-                                  nullptr,
-                                  ZE_MODULE_FORMAT_IL_SPIRV,
-                                  image.size(),
-                                  reinterpret_cast<const uint8_t *>(image.data()),
-                                  nullptr,
-                                  nullptr};
-            ze_module_handle_t module = {};
-            ze_module_build_log_handle_t buildLog = {};
-            if (const auto r = zeModuleCreate(*context, this->device, &desc, &module, &buildLog); r != ZE_RESULT_SUCCESS) {
-              size_t logSize = 0;
-              std::string log;
-              if (buildLog && zeModuleBuildLogGetString(buildLog, &logSize, nullptr) == ZE_RESULT_SUCCESS && logSize > 0) {
-                log.resize(logSize);
-                zeModuleBuildLogGetString(buildLog, &logSize, log.data());
-                // zeModuleBuildLogGetString writes the trailing NUL inside logSize.
-                if (!log.empty() && log.back() == '\0') log.pop_back();
+            const auto create = [&](ze_module_format_t format, const uint8_t *data, size_t size, bool fatal) {
+              ze_module_desc_t desc{ZE_STRUCTURE_TYPE_MODULE_DESC, nullptr, format, size, data, nullptr, nullptr};
+              ze_module_handle_t module = {};
+              ze_module_build_log_handle_t buildLog = {};
+              if (const auto r = zeModuleCreate(*context, this->device, &desc, &module, &buildLog); r != ZE_RESULT_SUCCESS) {
+                size_t logSize = 0;
+                std::string log;
+                if (buildLog && zeModuleBuildLogGetString(buildLog, &logSize, nullptr) == ZE_RESULT_SUCCESS && logSize > 0) {
+                  log.resize(logSize);
+                  zeModuleBuildLogGetString(buildLog, &logSize, log.data());
+                  if (!log.empty() && log.back() == '\0') log.pop_back();
+                }
+                if (buildLog) zeModuleBuildLogDestroy(buildLog);
+                if (fatal) POLYINVOKE_FATAL(PREFIX, "zeModuleCreate failed (0x%08X): %s", r, log.c_str());
+                return ze_module_handle_t{};
               }
               if (buildLog) zeModuleBuildLogDestroy(buildLog);
-              POLYINVOKE_FATAL(PREFIX, "zeModuleCreate failed (0x%08X): %s", r, log.c_str());
+              return module;
+            };
+            const auto cachePath = detail::moduleCachePath("level-zero", moduleIdentity(this->driver, this->device), image);
+            if (const auto binary = cache::read(cachePath); !binary.empty()) {
+              if (auto module = create(ZE_MODULE_FORMAT_NATIVE, binary.data(), binary.size(), /*fatal=*/false)) return module;
+              cache::evict(cachePath);
             }
-            if (buildLog) zeModuleBuildLogDestroy(buildLog);
+            auto module = create(ZE_MODULE_FORMAT_IL_SPIRV, reinterpret_cast<const uint8_t *>(image.data()), image.size(), /*fatal=*/true);
+            size_t binarySize = 0;
+            if (zeModuleGetNativeBinary(module, &binarySize, nullptr) == ZE_RESULT_SUCCESS && binarySize) {
+              std::vector<uint8_t> binary(binarySize);
+              if (zeModuleGetNativeBinary(module, &binarySize, binary.data()) == ZE_RESULT_SUCCESS)
+                cache::write(cachePath, binary.data(), binary.size());
+            }
             return module;
           },
           [](auto &&module, auto &&name, auto &&) {

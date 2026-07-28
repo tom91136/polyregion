@@ -9,6 +9,7 @@
 #include "spirv/unified1/OpenCL.std.h"
 #include "spirv/unified1/spirv.hpp"
 
+#include "polyinvoke/module_cache.h"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 
@@ -138,6 +139,11 @@ constexpr cl_bitfield CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ = 1 << 0;
 constexpr cl_bitfield CL_DEVICE_SVM_FINE_GRAIN_BUFFER_ = 1 << 1;
 constexpr cl_bitfield CL_MEM_SVM_FINE_GRAIN_BUFFER_ = 1 << 10;
 constexpr cl_uint CL_KERNEL_EXEC_INFO_SVM_PTRS_ = 0x11B6;
+
+std::string programIdentity(cl_device_id device, const std::string &deviceName, const std::string &compilerArgs) {
+  return fmt::format("{}|{}|{}|{}|{}", deviceName, queryDeviceInfo(device, CL_DEVICE_VENDOR), queryDeviceInfo(device, CL_DEVICE_VERSION),
+                     queryDeviceInfo(device, CL_DRIVER_VERSION), compilerArgs);
+}
 
 bool deviceSupportsIL(cl_device_id device) {
   size_t size = 0;
@@ -314,29 +320,50 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
           PREFIX,
           [this](auto &&image) {
             POLYINVOKE_TRACE();
-            auto imageData = image.data();
-            auto imageLen = image.size();
-            cl_program program;
-            if (this->format == ModuleFormat::SPIRV_Kernel) {
-              const std::string spv = this->quirks.nativeTrig ? patchSpirvNativeTrig(imageData, imageLen) : std::string{};
-              const char *il = this->quirks.nativeTrig ? spv.data() : imageData;
-              program = OUT_CHECKED(this->ilCreateFn(*context, il, this->quirks.nativeTrig ? spv.size() : imageLen, OUT_ERR));
-            } else {
-              program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
-            }
             // XXX llvmpipe libclc crashes its JIT on precise sin/cos/tan range-reduction; route POLY_* trig to
             // native_ for that device only -- source via this #ifdef, SPIR-V via patchSpirvNativeTrig above
             const std::string compilerArgs =
                 (this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "";
-            cl_int result = clBuildProgram(program, 1, &*this->device, compilerArgs.data(), nullptr, nullptr);
-            if (result != CL_SUCCESS) {
-              size_t len;
-              CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
-              std::string buildLog(len, '\0');
-              CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
-              auto compilerMessage = std::string(clewErrorString(result));
-              POLYINVOKE_FATAL(PREFIX, "Program failed to compile with: %s\nDiagnostics:\n%s\n===Program source===:\n%s\n", //
-                               compilerMessage.c_str(), buildLog.c_str(), image.c_str());
+            const auto build = [&](cl_program p) { return clBuildProgram(p, 1, &*this->device, compilerArgs.c_str(), nullptr, nullptr); };
+            const auto cachePath = detail::moduleCachePath("opencl", programIdentity(*this->device, this->deviceName, compilerArgs), image);
+            cl_program program = {};
+            if (const auto binary = cache::read(cachePath); !binary.empty()) {
+              const size_t binaryLen = binary.size();
+              const unsigned char *binaryData = binary.data();
+              cl_int binaryStatus = CL_SUCCESS, createStatus = CL_SUCCESS;
+              program = clCreateProgramWithBinary(*context, 1, &*this->device, &binaryLen, &binaryData, &binaryStatus, &createStatus);
+              if (!program || createStatus != CL_SUCCESS || binaryStatus != CL_SUCCESS || build(program) != CL_SUCCESS) {
+                if (program) CHECKED(clReleaseProgram(program));
+                program = {};
+                cache::evict(cachePath);
+              }
+            }
+            if (!program) {
+              auto imageData = image.data();
+              auto imageLen = image.size();
+              if (this->format == ModuleFormat::SPIRV_Kernel) {
+                const std::string spv = this->quirks.nativeTrig ? patchSpirvNativeTrig(imageData, imageLen) : std::string{};
+                const char *il = this->quirks.nativeTrig ? spv.data() : imageData;
+                program = OUT_CHECKED(this->ilCreateFn(*context, il, this->quirks.nativeTrig ? spv.size() : imageLen, OUT_ERR));
+              } else {
+                program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
+              }
+              if (const cl_int result = build(program); result != CL_SUCCESS) {
+                size_t len;
+                CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
+                std::string buildLog(len, '\0');
+                CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
+                auto compilerMessage = std::string(clewErrorString(result));
+                POLYINVOKE_FATAL(PREFIX, "Program failed to compile with: %s\nDiagnostics:\n%s\n===Program source===:\n%s\n", //
+                                 compilerMessage.c_str(), buildLog.c_str(), image.c_str());
+              }
+              size_t binaryLen = 0;
+              if (clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(binaryLen), &binaryLen, nullptr) == CL_SUCCESS && binaryLen) {
+                std::vector<unsigned char> binary(binaryLen);
+                unsigned char *binaries[] = {binary.data()};
+                if (clGetProgramInfo(program, CL_PROGRAM_BINARIES, sizeof(binaries), binaries, nullptr) == CL_SUCCESS)
+                  cache::write(cachePath, binary.data(), binary.size());
+              }
             }
             POLYINVOKE_TRACE();
             return program;

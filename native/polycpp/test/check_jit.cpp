@@ -2,7 +2,7 @@
 #pragma region using: jit=static,dynamic
 #pragma region using: type=int,float
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_TYPE={type} -fstdpar-jit={jit} -o {output} {input}
-#pragma region do: POLYRT_JIT_CACHE=off POLYRT_JIT_SPECIALISE=1 POLYRT_JIT_SPECIALISE_HOT=1 {output}
+#pragma region do: POLYREGION_CACHE_DIR=off POLYRT_JIT_SPECIALISE=1 POLYRT_JIT_SPECIALISE_HOT=1 {output}
 #pragma region requires: 42.0 7.0
 
 #include <cstdio>

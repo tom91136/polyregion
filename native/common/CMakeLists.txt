@@ -11,6 +11,7 @@ target_sources(polycommon
         polyregion/export.h
         polyregion/dl.h
         polyregion/env.h
+        polyregion/cache.hpp
         polyregion/env_keys.h
         polyregion/error.h
         polyregion/llvm_utils.hpp

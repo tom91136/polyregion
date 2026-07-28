@@ -9,19 +9,11 @@
 #include <unordered_map>
 #include <vector>
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallString.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/xxhash.h"
-
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
+#include "polyregion/cache.hpp"
 #include "polyregion/conventions.h"
-#include "polyregion/env_keys.h"
-#include "polyregion/io.hpp"
 
 #include "compiler.h"
 #include "polyast_codec.h"
@@ -32,15 +24,12 @@ using namespace aspartame;
 
 namespace {
 
-namespace fs = llvm::sys::fs;
-namespace path = llvm::sys::path;
-
 thread_local std::string lastError;
 
 template <typename T> auto ptrView(const T *p, const size_t n) { return view(p, n ? p + n : p); }
 
-std::string cacheKey(const uint8_t *program, size_t programLen, uint8_t target, const char *arch, const char *pipelineSpec, uint8_t opt,
-                     const polyc_jit_spec_const_t *specs, size_t nSpecs) {
+std::string cachePath(const uint8_t *program, size_t programLen, uint8_t target, const char *arch, const char *pipelineSpec, uint8_t opt,
+                      const polyc_jit_spec_const_t *specs, size_t nSpecs) {
   const auto meta = ptrView(specs, nSpecs) |
                     fold_left(fmt::format("polyc-jit-v2|{}|{}|{}|{}", target, opt, arch ? arch : "", pipelineSpec ? pipelineSpec : ""),
                               [](std::string acc, const auto &spec) {
@@ -48,45 +37,13 @@ std::string cacheKey(const uint8_t *program, size_t programLen, uint8_t target, 
                                     .append(fmt::format("|{}={}:", spec.field, spec.repr))
                                     .append(reinterpret_cast<const char *>(spec.data), spec.dataLen);
                               });
-  const auto hp = llvm::xxh3_128bits(llvm::ArrayRef<uint8_t>(program, programLen));
-  return fmt::format("{:016x}{:016x}{:016x}", llvm::xxh3_64bits(meta), hp.high64, hp.low64);
+  return cache::path("jit", {meta, std::string_view(reinterpret_cast<const char *>(program), programLen)}, ".o");
 }
 
-// POLYRT_JIT_CACHE overrides the default; empty, "0", or "off" disables it.
-std::string cacheDir() {
-  if (const char *d = std::getenv(env::PolyrtJitCache)) {
-    const std::string v(d);
-    return (v.empty() || v == "0" || v == "off") ? std::string{} : v;
-  }
-  llvm::SmallString<256> dir;
-  if (!path::cache_directory(dir)) path::system_temp_directory(/*ErasedOnReboot=*/true, dir);
-  path::append(dir, "polyregion", "jit");
-  return dir.str().str();
-}
-
-unsigned char *readAll(const std::string &p, size_t *len) {
-  if (!fs::exists(p)) return nullptr;
-  const auto buf = read_struct<uint8_t>(p);
-  auto *out = static_cast<unsigned char *>(std::malloc(buf.size() ? buf.size() : 1));
-  if (!out) return nullptr;
-  std::memcpy(out, buf.data(), buf.size());
-  *len = buf.size();
+unsigned char *mallocCopy(const void *data, const size_t size) {
+  auto *out = static_cast<unsigned char *>(std::malloc(size ? size : 1));
+  if (out) std::memcpy(out, data, size);
   return out;
-}
-
-void writeAtomic(const std::string &dir, const std::string &finalPath, const void *data, size_t len) {
-  if (fs::create_directories(dir)) return;
-  llvm::SmallString<256> model(finalPath);
-  model.append(".tmp-%%%%%%");
-  auto tmp = fs::TempFile::create(model);
-  if (!tmp) return llvm::consumeError(tmp.takeError());
-  {
-    llvm::raw_fd_ostream out(tmp->FD, /*shouldClose=*/false);
-    out.write(static_cast<const char *>(data), len);
-    out.flush();
-    if (out.has_error()) return llvm::consumeError(tmp->discard());
-  }
-  if (auto err = tmp->keep(finalPath)) llvm::consumeError(std::move(err));
 }
 
 polyc_jit_status_t deliver(unsigned char *buf, size_t len, uint8_t **out, size_t *outLen) {
@@ -147,15 +104,10 @@ extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t p
     return POLYC_JIT_FAILED;
   }
   try {
-    const std::string dir = cacheDir();
-    std::string path;
-    if (!dir.empty()) {
-      path = dir + "/" +
-             cacheKey(program, programLen, static_cast<uint8_t>(target), arch, pipelineSpec, static_cast<uint8_t>(opt), specialise,
-                      specialiseLen) +
-             ".o";
-      if (size_t n; unsigned char *cached = readAll(path, &n)) return deliver(cached, n, out, outLen);
-    }
+    const std::string path = cachePath(program, programLen, static_cast<uint8_t>(target), arch, pipelineSpec, static_cast<uint8_t>(opt),
+                                       specialise, specialiseLen);
+    if (const auto cached = cache::read(path); !cached.empty())
+      if (auto *o = mallocCopy(cached.data(), cached.size())) return deliver(o, cached.size(), out, outLen);
 
     compiler::initialise();
     compiler::Options options{
@@ -179,14 +131,13 @@ extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t p
       return POLYC_JIT_FAILED;
     }
     const auto &bin = *result.binary;
-    if (!dir.empty()) writeAtomic(dir, path, bin.data(), bin.size());
+    cache::write(path, reinterpret_cast<const uint8_t *>(bin.data()), bin.size());
 
-    auto *o = static_cast<unsigned char *>(std::malloc(bin.size() ? bin.size() : 1));
+    auto *o = mallocCopy(bin.data(), bin.size());
     if (!o) {
       lastError = "polyc_jit_compile: out of memory";
       return POLYC_JIT_FAILED;
     }
-    std::memcpy(o, bin.data(), bin.size());
     return deliver(o, bin.size(), out, outLen);
   } catch (const std::exception &e) {
     lastError = std::string("polyc_jit_compile: ") + e.what();
