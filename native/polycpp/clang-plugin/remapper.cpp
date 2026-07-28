@@ -1830,6 +1830,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   }
 }
 
+[[nodiscard]] static bool escapesToOuterLoop(const clang::Stmt *stmt) {
+  if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::WhileStmt, clang::DoStmt>(stmt)) return false;
+  if (llvm::isa<clang::ContinueStmt>(stmt)) return true;
+  for (const auto child : stmt->children())
+    if (escapesToOuterLoop(child)) return true;
+  return false;
+}
+
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
 
@@ -1954,6 +1962,46 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         else r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
       },
       [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
+      [&](const clang::SwitchStmt *stmt) {
+        const auto loc = [&](const clang::Stmt *s) { return s->getBeginLoc().printToString(context.getSourceManager()); };
+        if (escapesToOuterLoop(stmt->getBody()))
+          raise(fmt::format("Unsupported continue targeting an enclosing loop from a switch at {}", loc(stmt)));
+        if (auto init = stmt->getInit()) handleStmt(init, r);
+        handleStmt(stmt->getConditionVariableDeclStmt(), r);
+        const auto cond = r.newVar(handleExpr(stmt->getCond(), r));
+        Map<const clang::Stmt *, Term::Any> matches;
+        Opt<Term::Any> anyMatch;
+        for (auto sc = stmt->getSwitchCaseList(); sc; sc = sc->getNextSwitchCase())
+          if (const auto cs = llvm::dyn_cast<clang::CaseStmt>(sc)) {
+            if (cs->getRHS()) raise(fmt::format("Unsupported case range at {}", loc(cs)));
+            const auto m = r.newVar(Expr::IntrOp(Intr::LogicEq(cond, r.newVar(conform(r, handleExpr(cs->getLHS(), r), cond.tpe())))));
+            matches.emplace(cs, m);
+            anyMatch = anyMatch ? r.newVar(Expr::IntrOp(Intr::LogicOr(*anyMatch, m))) : m;
+          }
+        const auto started = r.newName(Type::Bool1());
+        const auto startedSel = select(r, {}, started);
+        const Stmt::Any setStarted = Stmt::Mut(startedSel, Expr::Alias(Term::Bool1Const(true)));
+        const Term::Any noMatch = anyMatch ? r.newVar(Expr::IntrOp(Intr::LogicNot(*anyMatch))) : Term::Bool1Const(true);
+        std::function<void(const clang::Stmt *, RemapContext &)> emit = [&](const clang::Stmt *s, RemapContext &rc) {
+          if (const auto cs = llvm::dyn_cast<clang::CaseStmt>(s)) {
+            rc.push(Stmt::Cond(matches.at(cs), {setStarted}, {}));
+            emit(cs->getSubStmt(), rc);
+          } else if (const auto ds = llvm::dyn_cast<clang::DefaultStmt>(s)) {
+            rc.push(Stmt::Cond(noMatch, {setStarted}, {}));
+            emit(ds->getSubStmt(), rc);
+          } else rc.push(Stmt::Cond(startedSel, rc.scoped([&](auto &r_) { handleStmt(s, r_); }), {}));
+        };
+        const auto onceSel = select(r, {}, r.newName(Type::Bool1()));
+        r.push(Stmt::Var(onceSel.root, Expr::Alias(Term::Bool1Const(true)), /*isMutable*/ true));
+        r.push(Stmt::While(onceSel, r.scoped([&](auto &r_) {
+          r_.push(Stmt::Var(started, Expr::Alias(Term::Bool1Const(false)), /*isMutable*/ true));
+          if (const auto body = llvm::dyn_cast<clang::CompoundStmt>(stmt->getBody())) {
+            for (const auto child : body->body())
+              emit(child, r_);
+          } else emit(stmt->getBody(), r_);
+          r_.push(Stmt::Mut(onceSel, Expr::Alias(Term::Bool1Const(false))));
+        })));
+      },
       [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
         auto _ = r.newVar(handleExpr(stmt, r));
