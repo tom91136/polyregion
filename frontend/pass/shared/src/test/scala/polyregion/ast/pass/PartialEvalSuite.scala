@@ -261,6 +261,63 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(returnedTerm(out), Some(selectT(x)))
   }
 
+  private def elemAddrOf(t: p.Term, comp: p.Type, space: p.Type.Space): p.Expr =
+    p.Expr.RefTo(t, Some(p.Term.IntS32Const(0)), comp, space, p.Region.Opaque)
+
+  private def declExpr(body: List[p.Stmt], n: p.Named): Option[p.Expr] =
+    body.collectFirst { case p.Stmt.Var(m, Some(e), _) if m == n => e }
+
+  test("index-zero address of a pointer: &p[0] folds to p") {
+    val pp = named("p", ptrI32)
+    val q  = named("q", ptrI32)
+    val out = pe(
+      List(
+        p.Stmt.Var(q, Some(elemAddrOf(selectT(pp), p.Type.IntS32, p.Type.Space.Global))),
+        p.Stmt.Return(p.Expr.Alias(selectT(q)))
+      ),
+      rtn = ptrI32,
+      args = List(arg("p", ptrI32))
+    )
+    assertEquals(returnedTerm(out), Some(selectT(pp)))
+  }
+
+  test("index-zero address of an array is a decay, not folded") {
+    val a   = named("a", p.Type.Arr(p.Type.IntS32, 8, p.Type.Space.Global))
+    val q   = named("q", ptrI32)
+    val ref = elemAddrOf(selectT(a), p.Type.IntS32, p.Type.Space.Global)
+    val out = pe(
+      List(p.Stmt.Var(q, Some(ref)), p.Stmt.Return(p.Expr.Alias(selectT(q)))),
+      rtn = ptrI32,
+      args = List(arg("a", p.Type.Arr(p.Type.IntS32, 8, p.Type.Space.Global)))
+    )
+    assertEquals(declExpr(out, q), Some(ref))
+  }
+
+  test("index-zero address into another space is a cast, not folded") {
+    val pp  = named("p", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local))
+    val q   = named("q", ptrI32)
+    val ref = elemAddrOf(selectT(pp), p.Type.IntS32, p.Type.Space.Global)
+    val out = pe(
+      List(p.Stmt.Var(q, Some(ref)), p.Stmt.Return(p.Expr.Alias(selectT(q)))),
+      rtn = ptrI32,
+      args = List(arg("p", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)))
+    )
+    assertEquals(declExpr(out, q), Some(ref))
+  }
+
+  test("index-zero address with another pointee type is a cast, not folded") {
+    val ptrI64 = p.Type.Ptr(p.Type.IntS64, p.Type.Space.Global)
+    val pp     = named("p", ptrI64)
+    val q      = named("q", ptrI32)
+    val ref    = elemAddrOf(selectT(pp), p.Type.IntS32, p.Type.Space.Global)
+    val out = pe(
+      List(p.Stmt.Var(q, Some(ref)), p.Stmt.Return(p.Expr.Alias(selectT(q)))),
+      rtn = ptrI32,
+      args = List(arg("p", ptrI64))
+    )
+    assertEquals(declExpr(out, q), Some(ref))
+  }
+
   test("deref of &(a.f) folds to a.f, and the dead address-of decl is dropped") {
     val a     = named("a", p.Type.IntS32)
     val pp    = named("p", ptrI32)

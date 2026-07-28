@@ -17,6 +17,7 @@ import polyregion.ast.Traversal.*
 //   b = a + 1; c = b + 2          ->  c = a + 3                // reassociate, dead b dropped
 //   a = x*y; b = x*y; a + b       ->  a = x*y; a + a           // CSE (b aliased to a, dropped)
 //   p = &x; *p                    ->  x                        // address/deref fold, dead &x dropped
+//   q = &p[0]                     ->  q = p                    // pointer identity (same pointee and space)
 //   x + 0 / x * 1 / x ^ x         ->  x / x / 0                // algebraic identities
 //   if (true) { t } else { f }    ->  t                        // static branch; taken env escapes
 //   if (c) { r } else { r }       ->  r                        // identical branches collapse (c is pure)
@@ -230,7 +231,11 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case _ => p.Expr.Index(lhs2, idx2, comp)
       }
     case p.Expr.RefTo(lhs, idx, comp, sp, r) =>
-      p.Expr.RefTo(resolveTerm(lhs, st), idx.map(resolveTerm(_, st)), comp, sp, r)
+      val lhs2 = resolveTerm(lhs, st)
+      val idx2 = idx.map(resolveTerm(_, st))
+      // Preserve array decay and pointer casts.
+      if (idx2.exists(isZeroConst) && lhs2.tpe == p.Type.Ptr(comp, sp)) p.Expr.Alias(lhs2)
+      else p.Expr.RefTo(lhs2, idx2, comp, sp, r)
     case p.Expr.Alloc(comp, size, sp, r) => p.Expr.Alloc(comp, resolveTerm(size, st), sp, r)
     case p.Expr.Invoke(n, ts, recv, args, rtn) =>
       p.Expr.Invoke(n, ts, recv.map(resolveTerm(_, st)), args.map(resolveTerm(_, st)), rtn)
