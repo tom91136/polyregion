@@ -1379,6 +1379,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {
         const auto decl = expr->getDecl();
+        if (const auto binding = llvm::dyn_cast<clang::BindingDecl>(decl)) return handleExpr(binding->getBinding(), r);
         const auto actual = handleType(expr->getType(), r);
         const auto refDeclName = declName(decl);
 
@@ -1924,6 +1925,17 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               const bool isMutable = !var->getType().isConstQualified();
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, isMutable));
             }
+
+            if (const auto decomp = llvm::dyn_cast<clang::DecompositionDecl>(var)) {
+              if (name.tpe.is<Type::Arr>())
+                raise(fmt::format("Unsupported by-value array structured binding at {} (bind by reference instead)",
+                                  decomp->getBeginLoc().printToString(context.getSourceManager())));
+              for (const auto binding : decomp->bindings())
+                if (const auto holding = binding->getHoldingVar()) {
+                  const auto holdingName = Named(declName(holding), annotateLocalSpace(holding, r));
+                  r.push(Stmt::Var(holdingName, conform(r, handleExpr(holding->getInit(), r), holdingName.tpe), /*isMutable*/ true));
+                }
+            }
           }
         }
       },
@@ -2003,6 +2015,14 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         })));
       },
       [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
+      [&](const clang::CXXTryStmt *stmt) {
+        raise(fmt::format("Unsupported try/catch at {} (offload regions cannot throw or unwind)",
+                          stmt->getBeginLoc().printToString(context.getSourceManager())));
+      },
+      [&](const clang::GCCAsmStmt *stmt) {
+        raise(fmt::format("Unsupported inline asm at {}: {}", stmt->getBeginLoc().printToString(context.getSourceManager()),
+                          stmt->getAsmString()));
+      },
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
         auto _ = r.newVar(handleExpr(stmt, r));
       },
