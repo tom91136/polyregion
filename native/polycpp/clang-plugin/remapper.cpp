@@ -176,18 +176,35 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
   }
 }
 
+[[nodiscard]] static Expr::Any zeroInitialise(Remapper::RemapContext &r, const Type::Any &tpe) {
+  if (const auto structTpe = tpe.get<Type::Struct>()) {
+    const auto allocated = r.newVar(tpe);
+    defaultInitialiseStruct(r, *structTpe, allocated);
+    return Expr::Alias(select(r, {}, allocated));
+  }
+  if (const auto arrTpe = tpe.get<Type::Arr>()) {
+    const auto allocated = r.newVar(tpe);
+    const auto slots = select(r, {}, allocated);
+    for (int32_t i = 0; i < arrTpe->length; ++i)
+      r.push(Stmt::Update(slots, Term::IntU64Const(i), r.newVar(zeroInitialise(r, arrTpe->comp))));
+    return Expr::Alias(slots);
+  }
+  return defaultValue(tpe);
+}
+
+static void copyArray(Remapper::RemapContext &r, const Term::Select &dst, const Term::Any &src, const Type::Arr &tpe) {
+  for (int32_t i = 0; i < tpe.length; ++i) {
+    const auto idx = Term::IntU64Const(i);
+    r.push(Stmt::Update(dst, idx, r.newVar(Expr::Index(src, idx, tpe.comp))));
+  }
+}
+
 // Clang leaves implicit union copy/move bodies empty; copy their canonical storage explicitly.
 static void copyUnionStorage(Remapper::RemapContext &r, const Named &dst, const Named &src, const Named &storage) {
   const auto lhs = select(r, {dst}, storage);
   const auto rhs = select(r, {src}, storage);
-  if (const auto arr = storage.tpe.get<Type::Arr>()) {
-    for (int32_t i = 0; i < arr->length; ++i) {
-      const auto idx = Term::IntU64Const(i);
-      r.push(Stmt::Update(lhs, idx, r.newVar(Expr::Index(rhs, idx, arr->comp))));
-    }
-  } else {
-    r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
-  }
+  if (const auto arr = storage.tpe.get<Type::Arr>()) copyArray(r, lhs, rhs, *arr);
+  else r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
 }
 
 Vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f,      //
@@ -560,8 +577,9 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       auto tpe = handleType(init->getAnyMember()->getType(), r);
                       auto memberName = repr(structTpe->name) + "::" + init->getMember()->getNameAsString();
                       auto member = select(r, {receiver->named}, Named(memberName, tpe));
-                      auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
-                      r.push(Stmt::Mut(member, rhs));
+                      if (const auto arr = tpe.template get<Type::Arr>())
+                        copyArray(r, member, r.newVar(handleExpr(init->getInit(), r)), *arr);
+                      else r.push(Stmt::Mut(member, conform(r, handleExpr(init->getInit(), r), tpe)));
                     } else if (init->isBaseInitializer()) {
 
                       auto baseTpe = handleType(init->getInit()->getType(), r);
@@ -1119,6 +1137,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     return lhs;
   };
 
+  auto initArray = [&](const Term::Select &slots, const Type::Arr &tpe, const clang::InitListExpr *expr) {
+    for (int32_t i = 0; i < tpe.length; ++i) {
+      const auto value = static_cast<unsigned>(i) < expr->getNumInits() //
+                             ? conform(r, handleExpr(expr->getInit(i), r), tpe.comp)
+                             : zeroInitialise(r, tpe.comp);
+      r.push(Stmt::Update(slots, Term::IntU64Const(i), r.newVar(value)));
+    }
+  };
+
   auto result = llvm_shared::visitDyn<Expr::Any>( //
       root->IgnoreParens(),                       //
       [&](const clang::ConstantExpr *expr) -> Expr::Any {
@@ -1167,16 +1194,30 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               if (llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
               const auto ftpe = handleType(field->getType(), r);
               const auto member = select(r, {allocated}, Named(repr(structTpe->name) + "::" + field->getNameAsString(), ftpe));
+              if (const auto arrTpe = ftpe.get<Type::Arr>()) {
+                if (const auto elems = llvm::dyn_cast<clang::InitListExpr>(init)) {
+                  initArray(member, *arrTpe, elems);
+                  continue;
+                }
+              }
               r.push(Stmt::Mut(member, conform(r, handleExpr(init, r), ftpe)));
             }
           }
           return Expr::Alias(select(r, {}, allocated));
+        }
+        if (const auto arrTpe = tpe.get<Type::Arr>()) {
+          const auto allocated = r.newVar(tpe);
+          const auto slots = select(r, {}, allocated);
+          initArray(slots, *arrTpe, expr);
+          return Expr::Alias(slots);
         }
         if (expr->getNumInits() == 0) return integralConstOfType(tpe, 0);
         if (expr->getNumInits() == 1) return conform(r, handleExpr(expr->getInit(0), r), tpe);
         failExpr();
         return Expr::Alias(Term::Poison(tpe));
       },
+      [&](const clang::ImplicitValueInitExpr *expr) -> Expr::Any { return zeroInitialise(r, handleType(expr->getType(), r)); },
+      [&](const clang::ArrayInitLoopExpr *expr) -> Expr::Any { return handleExpr(expr->getCommonExpr()->getSourceExpr(), r); },
       [&](const clang::UnaryExprOrTypeTraitExpr *expr) -> Expr::Any {
         const auto tpe = handleType(expr->getType(), r);
         if (clang::Expr::EvalResult eval; expr->EvaluateAsInt(eval, context))
@@ -1834,35 +1875,28 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             auto name = Named(declName(var), annotateLocalSpace(var, r));
 
-            if (auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit())) {
-              if (auto structTpe = name.tpe.get<Type::Struct>(); structTpe) {
-                r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
-                defaultInitialiseStruct(r, *structTpe, name);
-                if (initList->getNumInits() != 0) {
-                  // Note: explicit aggregate-init not supported; leaving struct zero-initialised.
+            auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
+            if (initList && !name.tpe.is<Type::Struct>()) {
+              auto initExpr = createInit(var->getType(), name.tpe);
+              r.push(Stmt::Var(name, initExpr, /*isMutable*/ true));
+              if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
+                for (size_t i = 0; i < initList->getNumInits(); ++i) {
+                  auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                  auto val = r.newVar(handleExpr(initList->getInit(i), r));
+                  r.push(Stmt::Update(select(r, {}, name), idx, val));
+                }
+                auto compTpe = handleType(cArr->getElementType(), r);
+                for (size_t i = initList->getNumInits(); i < cArr->getSize().getLimitedValue(); ++i) {
+                  auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                  auto z = r.newVar(integralConstOfType(compTpe, 0));
+                  r.push(Stmt::Update(select(r, {}, name), idx, z));
                 }
               } else {
-                auto initExpr = createInit(var->getType(), name.tpe);
-                r.push(Stmt::Var(name, initExpr, /*isMutable*/ true));
-                if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
-                  for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                    auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
-                    auto val = r.newVar(handleExpr(initList->getInit(i), r));
-                    r.push(Stmt::Update(select(r, {}, name), idx, val));
-                  }
-                  auto compTpe = handleType(cArr->getElementType(), r);
-                  for (size_t i = initList->getNumInits(); i < cArr->getSize().getLimitedValue(); ++i) {
-                    auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
-                    auto z = r.newVar(integralConstOfType(compTpe, 0));
-                    r.push(Stmt::Update(select(r, {}, name), idx, z));
-                  }
-                } else {
-                  if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
-                  for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                    auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
-                    auto val = r.newVar(handleExpr(initList->getInit(i), r));
-                    r.push(Stmt::Update(select(r, {}, name), idx, val));
-                  }
+                if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
+                for (size_t i = 0; i < initList->getNumInits(); ++i) {
+                  auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
+                  auto val = r.newVar(handleExpr(initList->getInit(i), r));
+                  r.push(Stmt::Update(select(r, {}, name), idx, val));
                 }
               }
             } else if (var->hasInit()) {
