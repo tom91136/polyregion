@@ -493,6 +493,50 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(foldedU64(op), interpU64(op))
   }
 
+  private def foldedU64Bool(op: p.Expr): Boolean = {
+    val v = named("v", p.Type.Bool1)
+    returnedTerm(pe(List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v)))), p.Type.Bool1)) match {
+      case Some(p.Term.Bool1Const(x)) => x
+      case other                      => fail(s"not folded to a bool const: $other")
+    }
+  }
+  private def interpU64Bool(op: p.Expr): Boolean = {
+    val v = named("v", p.Type.Bool1)
+    val prog = program(
+      entry(body = List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v))))).copy(rtn = p.Type.Bool1)
+    )
+    new Interpreter.Vm(prog).call(p.Conventions.EntryName, Nil) match {
+      case Interpreter.V.I(x) => x != 0
+      case other              => fail(s"interpreter returned non-int: $other")
+    }
+  }
+
+  test("unsigned IntU64 Min and Max fold with unsigned semantics, matching the Interpreter") {
+    val hi  = 0x8000000000000000L // as unsigned: 2^63; as signed: negative
+    val min = p.Expr.IntrOp(p.Intr.Min(p.Term.IntU64Const(hi), p.Term.IntU64Const(1L), p.Type.IntU64))
+    val max = p.Expr.IntrOp(p.Intr.Max(p.Term.IntU64Const(hi), p.Term.IntU64Const(1L), p.Type.IntU64))
+    assertEquals(foldedU64(min), 1L) // signed min would pick hi
+    assertEquals(foldedU64(max), hi) // signed max would pick 1
+    assertEquals(foldedU64(min), interpU64(min))
+    assertEquals(foldedU64(max), interpU64(max))
+  }
+
+  test("unsigned IntU64 ordered comparisons fold with unsigned semantics, matching the Interpreter") {
+    val hi = 0x8000000000000000L
+    for {
+      (name, op, expected) <- List(
+        ("lt", p.Intr.LogicLt(p.Term.IntU64Const(hi), p.Term.IntU64Const(1L)), false),
+        ("lte", p.Intr.LogicLte(p.Term.IntU64Const(hi), p.Term.IntU64Const(1L)), false),
+        ("gt", p.Intr.LogicGt(p.Term.IntU64Const(hi), p.Term.IntU64Const(1L)), true),
+        ("gte", p.Intr.LogicGte(p.Term.IntU64Const(hi), p.Term.IntU64Const(1L)), true)
+      )
+    } {
+      val e = p.Expr.IntrOp(op)
+      assertEquals(foldedU64Bool(e), expected, name)
+      assertEquals(foldedU64Bool(e), interpU64Bool(e), name)
+    }
+  }
+
   // --- algebraic + boolean identities (safe strength reductions on a dynamic operand) ---
 
   private def simplifyOf(op: p.Expr, rtn: p.Type, args: List[p.Arg]): Option[p.Term] = {

@@ -92,6 +92,10 @@ object Fold {
       r <- intTerm(t, f(a, b))
     } yield r
 
+  // asLong zero-extends the narrow unsigned types, so only u64 can carry a value the signed compare misreads
+  private def cmpLong(t: p.Type)(a: Long, b: Long): Int =
+    if (t.isSigned) java.lang.Long.compare(a, b) else java.lang.Long.compareUnsigned(a, b)
+
   private def foldCmp(x: p.Term, y: p.Term)(longF: (Long, Long) => Boolean)(
       doubleF: (Double, Double) => Boolean
   ): Option[p.Term] =
@@ -122,8 +126,10 @@ object Fold {
       foldDivLike(x, y, t)((a, b) => if (t.isSigned) a / b else java.lang.Long.divideUnsigned(a, b))(_ / _)
     case p.Intr.Rem(x, y, t) =>
       foldDivLike(x, y, t)((a, b) => if (t.isSigned) a % b else java.lang.Long.remainderUnsigned(a, b))(_ % _)
-    case p.Intr.Min(x, y, t) => foldBinNumeric(x, y, t)(math.min(_, _))(math.min(_, _))
-    case p.Intr.Max(x, y, t) => foldBinNumeric(x, y, t)(math.max(_, _))(math.max(_, _))
+    case p.Intr.Min(x, y, t) =>
+      foldBinNumeric(x, y, t)((a, b) => if (cmpLong(t)(a, b) <= 0) a else b)(math.min(_, _))
+    case p.Intr.Max(x, y, t) =>
+      foldBinNumeric(x, y, t)((a, b) => if (cmpLong(t)(a, b) >= 0) a else b)(math.max(_, _))
 
     case p.Intr.BAnd(x, y, t) => foldBits(x, y, t)(_ & _)
     case p.Intr.BOr(x, y, t)  => foldBits(x, y, t)(_ | _)
@@ -139,10 +145,10 @@ object Fold {
     case p.Intr.LogicEq(x, y) => foldCmp(x, y)(_ == _)(_ == _).orElse(boolEq(x, y))
     case p.Intr.LogicNeq(x, y) =>
       foldCmp(x, y)(_ != _)(_ != _).orElse(boolEq(x, y).map(b => p.Term.Bool1Const(!b.value)))
-    case p.Intr.LogicLt(x, y)  => foldCmp(x, y)(_ < _)(_ < _)
-    case p.Intr.LogicLte(x, y) => foldCmp(x, y)(_ <= _)(_ <= _)
-    case p.Intr.LogicGt(x, y)  => foldCmp(x, y)(_ > _)(_ > _)
-    case p.Intr.LogicGte(x, y) => foldCmp(x, y)(_ >= _)(_ >= _)
+    case p.Intr.LogicLt(x, y)  => foldCmp(x, y)(cmpLong(x.tpe)(_, _) < 0)(_ < _)
+    case p.Intr.LogicLte(x, y) => foldCmp(x, y)(cmpLong(x.tpe)(_, _) <= 0)(_ <= _)
+    case p.Intr.LogicGt(x, y)  => foldCmp(x, y)(cmpLong(x.tpe)(_, _) > 0)(_ > _)
+    case p.Intr.LogicGte(x, y) => foldCmp(x, y)(cmpLong(x.tpe)(_, _) >= 0)(_ >= _)
   }
 
   def tryFoldCast(from: p.Term, as: p.Type): Option[p.Term] =

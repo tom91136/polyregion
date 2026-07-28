@@ -144,6 +144,8 @@ object Interpreter {
     private def isSigned(t: p.Type) = t match {
       case p.Type.IntS8 | p.Type.IntS16 | p.Type.IntS32 | p.Type.IntS64 => true; case _ => false
     }
+    private def cmpI(t: p.Type)(a: Long, b: Long): Int =
+      if (isSigned(t)) java.lang.Long.compare(a, b) else java.lang.Long.compareUnsigned(a, b)
     private def asI(v: V): Long   = v match { case V.I(x) => x; case V.D(d) => d.toLong; case V.U => 0 }
     private def asD(v: V): Double = v match { case V.D(d) => d; case V.I(x) => x.toDouble; case V.U => 0 }
 
@@ -313,8 +315,10 @@ object Interpreter {
         binN(a, b, r, fr)((x, y) => if (isSigned(r)) x / y else java.lang.Long.divideUnsigned(x, y))(_ / _)
       case p.Intr.Rem(a, b, r) =>
         binN(a, b, r, fr)((x, y) => if (isSigned(r)) x % y else java.lang.Long.remainderUnsigned(x, y))(_ % _)
-      case p.Intr.Min(a, b, r)  => binN(a, b, r, fr)((x, y) => math.min(x, y))((x, y) => math.min(x, y))
-      case p.Intr.Max(a, b, r)  => binN(a, b, r, fr)((x, y) => math.max(x, y))((x, y) => math.max(x, y))
+      case p.Intr.Min(a, b, r) =>
+        binN(a, b, r, fr)((x, y) => if (cmpI(r)(x, y) <= 0) x else y)((x, y) => math.min(x, y))
+      case p.Intr.Max(a, b, r) =>
+        binN(a, b, r, fr)((x, y) => if (cmpI(r)(x, y) >= 0) x else y)((x, y) => math.max(x, y))
       case p.Intr.BAnd(a, b, r) => V.I(narrow(asI(evalT(a, fr)) & asI(evalT(b, fr)), r))
       case p.Intr.BOr(a, b, r)  => V.I(narrow(asI(evalT(a, fr)) | asI(evalT(b, fr)), r))
       case p.Intr.BXor(a, b, r) => V.I(narrow(asI(evalT(a, fr)) ^ asI(evalT(b, fr)), r))
@@ -335,10 +339,10 @@ object Interpreter {
       case p.Intr.LogicOr(a, b)  => V.I(if (asI(evalT(a, fr)) != 0 || asI(evalT(b, fr)) != 0) 1 else 0)
       case p.Intr.LogicEq(a, b)  => cmp(a, b, fr)(_ == _)(_ == _)
       case p.Intr.LogicNeq(a, b) => cmp(a, b, fr)(_ != _)(_ != _)
-      case p.Intr.LogicLt(a, b)  => cmp(a, b, fr)(_ < _)(_ < _)
-      case p.Intr.LogicLte(a, b) => cmp(a, b, fr)(_ <= _)(_ <= _)
-      case p.Intr.LogicGt(a, b)  => cmp(a, b, fr)(_ > _)(_ > _)
-      case p.Intr.LogicGte(a, b) => cmp(a, b, fr)(_ >= _)(_ >= _)
+      case p.Intr.LogicLt(a, b)  => cmp(a, b, fr)(cmpI(a.tpe)(_, _) < 0)(_ < _)
+      case p.Intr.LogicLte(a, b) => cmp(a, b, fr)(cmpI(a.tpe)(_, _) <= 0)(_ <= _)
+      case p.Intr.LogicGt(a, b)  => cmp(a, b, fr)(cmpI(a.tpe)(_, _) > 0)(_ > _)
+      case p.Intr.LogicGte(a, b) => cmp(a, b, fr)(cmpI(a.tpe)(_, _) >= 0)(_ >= _)
     }
 
     private def mathOp(op: p.Math, fr: Frame): V = {
