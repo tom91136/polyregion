@@ -681,6 +681,89 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(mulCount(out), 2, out.map(_.repr).mkString("\n"))
   }
 
+  test("CSE does not reuse across a pointer store that may alias an address-taken operand") {
+    val x   = named("x", p.Type.IntS32); val y = named("y", p.Type.IntS32)
+    val ptr = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val buf = named("buf", ptr)
+    val px  = named("px", ptr)
+    val a   = named("a", p.Type.IntS32); val b = named("b", p.Type.IntS32); val s = named("s", p.Type.IntS32)
+    val mul = p.Expr.IntrOp(p.Intr.Mul(selectT(x), selectT(y), p.Type.IntS32))
+    val out = pe(
+      List(
+        // x's address escapes into px, so the store through buf below may write x
+        p.Stmt.Var(px, Some(p.Expr.RefTo(selectT(x), None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
+        p.Stmt.Var(a, Some(mul)),
+        p.Stmt.Update(selectT(buf), p.Term.IntS32Const(0), p.Term.IntS32Const(7)),
+        p.Stmt.Var(b, Some(mul)),
+        p.Stmt.Var(s, Some(p.Expr.IntrOp(p.Intr.Add(selectT(a), selectT(b), p.Type.IntS32)))),
+        p.Stmt.Update(selectT(buf), p.Term.IntS32Const(1), selectT(s)),
+        p.Stmt.Return(p.Expr.Alias(selectT(px)))
+      ),
+      ptr,
+      List(i32("x"), i32("y"), p.Arg(buf))
+    )
+    assertEquals(mulCount(out), 2, out.map(_.repr).mkString("\n"))
+  }
+
+  test("CSE does not reuse across a call that may write an address-taken operand") {
+    val x   = named("x", p.Type.IntS32); val y = named("y", p.Type.IntS32)
+    val px  = named("px", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global))
+    val c   = named("c", p.Type.Unit0)
+    val a   = named("a", p.Type.IntS32); val b = named("b", p.Type.IntS32); val s = named("s", p.Type.IntS32)
+    val mul = p.Expr.IntrOp(p.Intr.Mul(selectT(x), selectT(y), p.Type.IntS32))
+    val out = pe(
+      List(
+        p.Stmt.Var(px, Some(p.Expr.RefTo(selectT(x), None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
+        p.Stmt.Var(a, Some(mul)),
+        p.Stmt.Var(c, Some(p.Expr.Invoke(sym("f"), Nil, None, List(selectT(px)), p.Type.Unit0))),
+        p.Stmt.Var(b, Some(mul)),
+        p.Stmt.Var(s, Some(p.Expr.IntrOp(p.Intr.Add(selectT(a), selectT(b), p.Type.IntS32)))),
+        p.Stmt.Return(p.Expr.Alias(selectT(s)))
+      ),
+      p.Type.IntS32,
+      List(i32("x"), i32("y"))
+    )
+    assertEquals(mulCount(out), 2, out.map(_.repr).mkString("\n"))
+  }
+
+  // n distinct pure muls, each consumed by an accumulator store whose root is not an operand of any
+  // available expression; invalidation that scans the whole available set goes quadratic here
+  test("CSE invalidation stays linear on a long straight-line block") {
+    val x   = named("x", p.Type.IntS32)
+    val acc = named("acc", p.Type.IntS32)
+    val body = p.Stmt.Var(acc, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true) ::
+      (0 until 32000).toList.flatMap { i =>
+        val t = named(s"t$i", p.Type.IntS32)
+        List(
+          p.Stmt.Var(t, Some(p.Expr.IntrOp(p.Intr.Mul(selectT(x), p.Term.IntS32Const(i + 1), p.Type.IntS32)))),
+          p.Stmt.Mut(selectT(acc), p.Expr.IntrOp(p.Intr.Add(selectT(acc), selectT(t), p.Type.IntS32)))
+        )
+      } ::: List(p.Stmt.Return(p.Expr.Alias(selectT(acc))))
+    val t0 = System.nanoTime()
+    assert(pe(body, p.Type.IntS32, List(i32("x"))).nonEmpty)
+    val elapsed = (System.nanoTime() - t0) / 1000000
+    assert(elapsed < 8000, s"${elapsed}ms for 32000 statements")
+  }
+
+  test("CSE reuses across a call when no operand address escapes") {
+    val x   = named("x", p.Type.IntS32); val y = named("y", p.Type.IntS32)
+    val c   = named("c", p.Type.Unit0)
+    val a   = named("a", p.Type.IntS32); val b = named("b", p.Type.IntS32); val s = named("s", p.Type.IntS32)
+    val mul = p.Expr.IntrOp(p.Intr.Mul(selectT(x), selectT(y), p.Type.IntS32))
+    val out = pe(
+      List(
+        p.Stmt.Var(a, Some(mul)),
+        p.Stmt.Var(c, Some(p.Expr.Invoke(sym("f"), Nil, None, Nil, p.Type.Unit0))),
+        p.Stmt.Var(b, Some(mul)),
+        p.Stmt.Var(s, Some(p.Expr.IntrOp(p.Intr.Add(selectT(a), selectT(b), p.Type.IntS32)))),
+        p.Stmt.Return(p.Expr.Alias(selectT(s)))
+      ),
+      p.Type.IntS32,
+      List(i32("x"), i32("y"))
+    )
+    assertEquals(mulCount(out), 1, out.map(_.repr).mkString("\n"))
+  }
+
   // --- memory-read operands are excluded from CSE and reassoc (phase-independent soundness) ---
 
   test("CSE does not dedup an expression that reads memory") {

@@ -68,7 +68,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       // dead bindings. reassoc/CSE emit aliases that the next fold iteration copy-propagates and drops.
       val folded  = f.copy(body = evalStmts(f.body, St.empty, excluded, reassigned, log)._1)
       val reassoc = folded.copy(body = reassocStmts(folded.body, Map.empty)._1)
-      val cse     = reassoc.copy(body = cseStmts(reassoc.body, Map.empty, addrTaken)._1)
+      val cse     = reassoc.copy(body = cseStmts(reassoc.body, Avail.empty, addrTaken)._1)
       cse.copy(body = dropDeadBindings(cse.body, selectRoots(cse.body)))
     }
     log.info(s"PartialEval stable after $n passes")
@@ -354,9 +354,39 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   // reads). the available-expression map is threaded straight-line; a later Var with a structurally-equal
   // RHS aliases the earlier binding (the next fold iteration copy-propagates and drops it). an entry is
   // dropped when a store or call could change one of its operands (its root is reassigned, or a
-  // pointer-store/call could alias an address-taken operand); control-flow bodies start fresh. each entry
-  // caches its operand roots so invalidation is a set test rather than a re-traversal of the expression
-  private type Avail = Map[p.Expr, (p.Named, Set[p.Named])]
+  // pointer-store/call could alias an address-taken operand); control-flow bodies start fresh. `rev` indexes
+  // each operand root to its entries and `fragile` buckets the entries over an address-taken root, so a kill
+  // costs the entries it affects rather than a scan of the whole available set
+  private final case class Avail(
+      fwd: Map[p.Expr, (p.Named, Set[p.Named])],
+      rev: Map[p.Named, Set[p.Expr]],
+      fragile: Set[p.Expr]
+  ) {
+    def get(e: p.Expr): Option[(p.Named, Set[p.Named])] = fwd.get(e)
+    def add(e: p.Expr, n: p.Named, roots: Set[p.Named], addrTaken: Set[p.Named]): Avail =
+      Avail(
+        fwd + (e -> (n, roots)),
+        roots.foldLeft(rev)((m, r) => m.updated(r, m.getOrElse(r, Set.empty) + e)),
+        if (roots.exists(addrTaken)) fragile + e else fragile
+      )
+    def kill(root: Option[p.Named], aliased: Boolean): Avail = {
+      val a = root.fold(this)(r => remove(rev.getOrElse(r, Set.empty)))
+      if (aliased) a.remove(a.fragile) else a
+    }
+    private def remove(dead: Set[p.Expr]): Avail =
+      if (dead.isEmpty) this
+      else {
+        val rev2 = dead.foldLeft(rev) { (m, e) =>
+          fwd(e)._2.foldLeft(m) { (mm, r) =>
+            val s = mm.getOrElse(r, Set.empty) - e
+            if (s.isEmpty) mm - r else mm.updated(r, s)
+          }
+        }
+        Avail(fwd -- dead, rev2, fragile -- dead)
+      }
+  }
+  private object Avail { val empty: Avail = Avail(Map.empty, Map.empty, Set.empty) }
+
   private def cseStmts(stmts: List[p.Stmt], avail0: Avail, addrTaken: Set[p.Named]): (List[p.Stmt], Avail) = {
     val (rev, av) = stmts.foldLeft((List.empty[p.Stmt], avail0)) { case ((acc, avail), s) =>
       val (s2, avail2) = cseStmt(s, avail, addrTaken)
@@ -368,20 +398,20 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   private def cseStmt(s: p.Stmt, avail: Avail, addrTaken: Set[p.Named]): (p.Stmt, Avail) =
     s match {
       case p.Stmt.Cond(c, t, f) =>
-        (p.Stmt.Cond(c, cseStmts(t, Map.empty, addrTaken)._1, cseStmts(f, Map.empty, addrTaken)._1), Map.empty)
-      case p.Stmt.While(c, b) => (p.Stmt.While(c, cseStmts(b, Map.empty, addrTaken)._1), Map.empty)
+        (p.Stmt.Cond(c, cseStmts(t, Avail.empty, addrTaken)._1, cseStmts(f, Avail.empty, addrTaken)._1), Avail.empty)
+      case p.Stmt.While(c, b) => (p.Stmt.While(c, cseStmts(b, Avail.empty, addrTaken)._1), Avail.empty)
       case p.Stmt.ForRange(i, lb, ub, st, b) =>
-        (p.Stmt.ForRange(i, lb, ub, st, cseStmts(b, Map.empty, addrTaken)._1), Map.empty)
+        (p.Stmt.ForRange(i, lb, ub, st, cseStmts(b, Avail.empty, addrTaken)._1), Avail.empty)
       case p.Stmt.Annotated(inner, pos, c) =>
         val (i2, av) = cseStmt(inner, avail, addrTaken); (p.Stmt.Annotated(i2, pos, c), av)
       case p.Stmt.Var(n, Some(e), false) if cseEligible(e) =>
         avail.get(e) match {
           case Some((m, _)) => (p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(m, Nil, n.tpe))), false), avail)
-          case None         => (s, avail + (e -> (n, selectRoots(e))))
+          case None         => (s, avail.add(e, n, selectRoots(e), addrTaken))
         }
       case _ =>
-        val kill = killedRoots(s, addrTaken)
-        (s, if (kill.isEmpty) avail else avail.filterNot { case (_, (_, roots)) => roots.exists(kill) })
+        val (root, aliased) = cseKill(s)
+        (s, avail.kill(root, aliased))
     }
 
   private def cseEligible(e: p.Expr): Boolean = (e match {
@@ -406,19 +436,18 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     case _                                            => false
   }
 
-  // roots whose value a statement may change: a Mut/Update target, plus every address-taken root when the
-  // statement stores through a pointer (Update) or calls out (which can write aliased memory)
-  private def killedRoots(s: p.Stmt, addrTaken: Set[p.Named]): Set[p.Named] = s match {
-    case p.Stmt.Mut(p.Term.Select(root, steps, _), e) =>
-      Set(root) ++ (if (steps.isEmpty) Set.empty else addrTaken) ++ callKills(e, addrTaken)
-    case p.Stmt.Update(p.Term.Select(root, _, _), _, _) => Set(root) ++ addrTaken
-    case p.Stmt.Var(_, Some(e), _)                      => callKills(e, addrTaken)
-    case p.Stmt.Return(e)                               => callKills(e, addrTaken)
-    case _                                              => Set.empty
+  // the root a statement reassigns, plus whether it also clobbers aliased memory - a pointer store (stepped
+  // Mut/Update) or an outbound call can write through an escaped address
+  private def cseKill(s: p.Stmt): (Option[p.Named], Boolean) = s match {
+    case p.Stmt.Mut(p.Term.Select(root, steps, _), e)   => (Some(root), steps.nonEmpty || isCall(e))
+    case p.Stmt.Update(p.Term.Select(root, _, _), _, _) => (Some(root), true)
+    case p.Stmt.Var(_, Some(e), _)                      => (None, isCall(e))
+    case p.Stmt.Return(e)                               => (None, isCall(e))
+    case _                                              => (None, false)
   }
-  private def callKills(e: p.Expr, addrTaken: Set[p.Named]): Set[p.Named] = e match {
-    case _: p.Expr.Invoke | _: p.Expr.ForeignCall => addrTaken
-    case _                                        => Set.empty
+  private def isCall(e: p.Expr): Boolean = e match {
+    case _: p.Expr.Invoke | _: p.Expr.ForeignCall => true
+    case _                                        => false
   }
 
   // ---- address canonicalisation (canonicaliseAddresses=true): root-anchor derived-pointer temps back to
