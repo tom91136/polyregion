@@ -525,24 +525,26 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const Intr::Div &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.tpe, //
-                  [&](auto l, auto r) { return B.CreateSDiv(l, r); }, [&](auto l, auto r) { return B.CreateFDiv(l, r); });
+                  [&](auto l, auto r) { return isUnsigned(v.tpe) ? B.CreateUDiv(l, r) : B.CreateSDiv(l, r); },
+                  [&](auto l, auto r) { return B.CreateFDiv(l, r); });
             },
             [&](const Intr::Rem &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.tpe, //
-                  [&](auto l, auto r) { return B.CreateSRem(l, r); }, [&](auto l, auto r) { return B.CreateFRem(l, r); });
+                  [&](auto l, auto r) { return isUnsigned(v.tpe) ? B.CreateURem(l, r) : B.CreateSRem(l, r); },
+                  [&](auto l, auto r) { return B.CreateFRem(l, r); });
             },
             [&](const Intr::Min &v) -> ValPtr {
               // XXX minnum: aarch32 SelectionDAG can't legalize llvm.minimum.f{32,64}
               return binaryNumOp(
                   expr, v.x, v.y, v.tpe, //
-                  [&](auto l, auto r) { return B.CreateSelect(B.CreateICmpSLT(l, r), l, r); },
+                  [&](auto l, auto r) { return B.CreateSelect(isUnsigned(v.tpe) ? B.CreateICmpULT(l, r) : B.CreateICmpSLT(l, r), l, r); },
                   [&](auto l, auto r) { return B.CreateMinNum(l, r); });
             },
             [&](const Intr::Max &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.tpe, //
-                  [&](auto l, auto r) { return B.CreateSelect(B.CreateICmpSLT(l, r), r, l); },
+                  [&](auto l, auto r) { return B.CreateSelect(isUnsigned(v.tpe) ? B.CreateICmpULT(l, r) : B.CreateICmpSLT(l, r), r, l); },
                   [&](auto l, auto r) { return B.CreateMaxNum(l, r); });
             }, //
             [&](const Intr::BAnd &v) -> ValPtr {
@@ -558,7 +560,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateShl(l, r); });
             },
             [&](const Intr::BSR &v) -> ValPtr {
-              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateAShr(l, r); });
+              return binaryExpr(expr, v.x, v.y, v.tpe,
+                                [&](auto l, auto r) { return isUnsigned(v.tpe) ? B.CreateLShr(l, r) : B.CreateAShr(l, r); });
             },
             [&](const Intr::BZSR &v) -> ValPtr {
               return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateLShr(l, r); });
@@ -578,26 +581,26 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const Intr::LogicLte &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
-                  [&](auto l, auto r) { return B.CreateICmpSLE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLE(l, r); });
+                  [&](auto l, auto r) { return isUnsigned(v.x.tpe()) ? B.CreateICmpULE(l, r) : B.CreateICmpSLE(l, r); },
+                  [&](auto l, auto r) { return B.CreateFCmpOLE(l, r); });
             },
             [&](const Intr::LogicGte &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
-                  [&](auto l, auto r) { return B.CreateICmpSGE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); });
+                  [&](auto l, auto r) { return isUnsigned(v.x.tpe()) ? B.CreateICmpUGE(l, r) : B.CreateICmpSGE(l, r); },
+                  [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); });
             },
             [&](const Intr::LogicLt &v) -> ValPtr {
-              // Signed less-than: matches LogicLte/LogicGte/LogicGt which all use signed
-              // comparison. ICmpULT here would treat negative ints as huge unsigned values
-              // (e.g. `-1 < 10` reads as `0xFFFFFFFF < 10 == false`), breaking any kernel
-              // loop whose induction variable goes negative.
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
-                  [&](auto l, auto r) { return B.CreateICmpSLT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); });
+                  [&](auto l, auto r) { return isUnsigned(v.x.tpe()) ? B.CreateICmpULT(l, r) : B.CreateICmpSLT(l, r); },
+                  [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); });
             },
             [&](const Intr::LogicGt &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
-                  [&](auto l, auto r) { return B.CreateICmpSGT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); });
+                  [&](auto l, auto r) { return isUnsigned(v.x.tpe()) ? B.CreateICmpUGT(l, r) : B.CreateICmpSGT(l, r); },
+                  [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); });
             });
       },
 

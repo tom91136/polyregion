@@ -176,6 +176,84 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   CHECK(source.find("uint8_t tail;") != std::string::npos);
 }
 
+TEST_CASE("integer comparisons follow operand signedness", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named ua("ua", Type::IntU32()), ub("ub", Type::IntU32());
+  const Named sa("sa", Type::IntS32()), sb("sb", Type::IntS32());
+  Function entry = mkFn("kernel", {Arg(ua, {}), Arg(ub, {}), Arg(sa, {}), Arg(sb, {})}, Type::Unit0(),
+                        {
+                            let("ult") = IntrOp(LogicLt(selectNamed(ua), selectNamed(ub))),
+                            let("ule") = IntrOp(LogicLte(selectNamed(ua), selectNamed(ub))),
+                            let("ugt") = IntrOp(LogicGt(selectNamed(ua), selectNamed(ub))),
+                            let("uge") = IntrOp(LogicGte(selectNamed(ua), selectNamed(ub))),
+                            let("slt") = IntrOp(LogicLt(selectNamed(sa), selectNamed(sb))),
+                            let("sle") = IntrOp(LogicLte(selectNamed(sa), selectNamed(sb))),
+                            let("sgt") = IntrOp(LogicGt(selectNamed(sa), selectNamed(sb))),
+                            let("sge") = IntrOp(LogicGte(selectNamed(sa), selectNamed(sb))),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
+  REQUIRE(event != c.events.end());
+  const auto &ir = event->data;
+  for (const auto *predicate : {"icmp ult", "icmp ule", "icmp ugt", "icmp uge", //
+                                "icmp slt", "icmp sle", "icmp sgt", "icmp sge"}) {
+    INFO(predicate);
+    CHECK(ir.find(predicate) != std::string::npos);
+  }
+}
+
+TEST_CASE("integer division, remainder, min, max and shift follow operand signedness", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named ua("ua", Type::IntU32()), ub("ub", Type::IntU32());
+  const Named sa("sa", Type::IntS32()), sb("sb", Type::IntS32());
+  Function entry = mkFn("kernel", {Arg(ua, {}), Arg(ub, {}), Arg(sa, {}), Arg(sb, {})}, Type::Unit0(),
+                        {
+                            let("udiv") = IntrOp(Div(selectNamed(ua), selectNamed(ub), Type::IntU32())),
+                            let("urem") = IntrOp(Rem(selectNamed(ua), selectNamed(ub), Type::IntU32())),
+                            let("umin") = IntrOp(Min(selectNamed(ua), selectNamed(ub), Type::IntU32())),
+                            let("umax") = IntrOp(Max(selectNamed(ua), selectNamed(ub), Type::IntU32())),
+                            let("ushr") = IntrOp(BSR(selectNamed(ua), selectNamed(ub), Type::IntU32())),
+                            let("sdiv") = IntrOp(Div(selectNamed(sa), selectNamed(sb), Type::IntS32())),
+                            let("srem") = IntrOp(Rem(selectNamed(sa), selectNamed(sb), Type::IntS32())),
+                            let("smin") = IntrOp(Min(selectNamed(sa), selectNamed(sb), Type::IntS32())),
+                            let("smax") = IntrOp(Max(selectNamed(sa), selectNamed(sb), Type::IntS32())),
+                            let("sshr") = IntrOp(BSR(selectNamed(sa), selectNamed(sb), Type::IntS32())),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
+  REQUIRE(event != c.events.end());
+  const auto &ir = event->data;
+  for (const auto *op : {"udiv i32", "urem i32", "icmp ult", "lshr i32", //
+                         "sdiv i32", "srem i32", "icmp slt", "ashr i32"}) {
+    INFO(op);
+    CHECK(ir.find(op) != std::string::npos);
+  }
+}
+
 TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
