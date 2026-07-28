@@ -122,6 +122,38 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
   CHECK(std::find(c.features.begin(), c.features.end(), "fp16") == c.features.end());
 }
 
+TEST_CASE("by-value array initialisation copies contents on by-pointer targets", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto arrTpe = Type::Arr(Type::IntS32(), 3, TypeSpace::Global());
+  const Named src("src", arrTpe);
+  const Named dst("dst", arrTpe);
+  const Named readBack("readBack", Type::IntS32());
+
+  std::vector<Stmt::Any> body{
+      Stmt::Var(src, std::optional<Expr::Any>{}, true).widen(),
+      Stmt::Update(Select({}, src), Term::IntS32Const(0).widen(), Term::IntS32Const(7).widen()).widen(),
+      Stmt::Var(dst, Expr::Alias(Select({}, src).widen()).widen(), false).widen(),
+      Stmt::Var(readBack, Expr::Index(Select({}, dst).widen(), Term::IntS32Const(0).widen(), Type::IntS32()).widen(), false).widen(),
+      Stmt::Update(Select({}, src), Term::IntS32Const(1).widen(), selectNamed(readBack).widen()).widen(),
+      Stmt::Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+  };
+  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(), body, FunctionVisibility::Exported(),
+                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV64_Kernel, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+
+  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
+  REQUIRE(event != c.events.end());
+  CHECK(event->data.find("llvm.memcpy") != std::string::npos);
+}
+
 TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer space", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

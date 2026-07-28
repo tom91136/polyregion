@@ -830,7 +830,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           stackVarPtrs.insert_or_assign(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if (x.expr) {
             auto rhs = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
-            if (structByPtr() && x.name.tpe.template is<Type::Struct>()) {
+            if (structByPtr() && (x.name.tpe.template is<Type::Struct>() || x.name.tpe.template is<Type::Arr>())) {
               copyStruct(stackPtr, rhs, x.name.tpe);
             } else {
               if (tpe->isPointerTy() && rhs->getType()->isPointerTy() && rhs->getType() != tpe) rhs = B.CreateAddrSpaceCast(rhs, tpe);
