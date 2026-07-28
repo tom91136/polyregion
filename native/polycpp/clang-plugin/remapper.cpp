@@ -884,6 +884,8 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
     const auto l = getLocation(tpe->getDecl()->getLocation(), context);
     std::string nested = fmt::format("{}:{}:{}", l.filename, l.line, l.col);
     for (const clang::DeclContext *dc = tpe->getDecl()->getDeclContext(); dc; dc = dc->getParent()) {
+      if (const auto fd = llvm::dyn_cast<clang::FunctionDecl>(dc); fd && fd->getTemplateSpecializationArgs())
+        nested += fmt::format("#{:x}", fd->getID());
       if (const auto enc = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(dc)) return specName(enc) + "::" + nested;
       if (const auto rd = llvm::dyn_cast<clang::RecordDecl>(dc); rd && !rd->getName().empty())
         nested = rd->getNameAsString() + "::" + nested;
@@ -1649,6 +1651,25 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         }
 
         return Expr::Alias(Term::IntS64Const(0));
+      },
+      [&](const clang::LambdaExpr *expr) -> Expr::Any {
+        const auto tpe = handleType(expr->getType(), r);
+        const auto structTpe = tpe.get<Type::Struct>();
+        if (!structTpe) raise("Lambda closure resulted in a non-struct type: " + repr(tpe));
+        const auto instance = r.newVar(tpe);
+        defaultInitialiseStruct(r, *structTpe, instance);
+        const auto def = r.findStruct(repr(structTpe->name), "lambda captures");
+        for (auto &[capture, init] : expr->getLambdaClass()->captures() | zip(expr->capture_inits()) | to_vector()) {
+          const auto var = capture.getCapturedVar();
+          if (!var) continue;
+          const auto name = var->getName().str();
+          const auto field = def->members | find([&](auto &m) { return m.symbol == name; });
+          if (!field) continue;
+          const auto member = select(r, {instance}, *field);
+          if (const auto arr = field->tpe.get<Type::Arr>()) copyArray(r, member, r.newVar(handleExpr(init, r)), *arr);
+          else r.push(Stmt::Mut(member, conform(r, handleExpr(init, r), field->tpe)));
+        }
+        return Expr::Alias(select(r, {}, instance));
       },
       [&](const clang::CXXConstructExpr *expr) {
         const auto [name, fn] = handleCall(expr->getConstructor(), r);
