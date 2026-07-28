@@ -37,9 +37,13 @@ import polyregion.ast.Traversal.*
 final case class PartialEval(canonicaliseAddresses: Boolean = false) extends ProgramPass derives PassArgCodec {
 
   // vals: name -> constant literal or aliased lvalue Select; addrs: pointer name -> the lvalue it addresses
-  private final case class St(vals: Map[p.Named, p.Term], addrs: Map[p.Named, p.Term.Select]) {
-    def bindVal(n: p.Named, t: p.Term): St         = St(vals + (n -> t), addrs)
-    def bindAddr(n: p.Named, s: p.Term.Select): St = St(vals, addrs + (n -> s))
+  private final case class St(
+      vals: Map[p.Named, p.Term],
+      addrs: Map[p.Named, p.Term.Select],
+      casts: Map[p.Named, (p.Term.Select, p.StructDef, p.StructDef)] = Map.empty
+  ) {
+    def bindVal(n: p.Named, t: p.Term): St         = copy(vals = vals + (n -> t))
+    def bindAddr(n: p.Named, s: p.Term.Select): St = copy(addrs = addrs + (n -> s))
   }
   private object St { val empty: St = St(Map.empty, Map.empty) }
 
@@ -50,13 +54,15 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       val total            = ec + fcs.sum
       if (total > 0) log.info(s"canonicalised $total derived-pointer temp(s) to root-anchored accesses")
       program.copy(entry = entry, functions = functions)
-    } else
+    } else {
+      val defs = program.defs.map(d => d.name -> d).toMap
       program.copy(
-        entry = foldFn(program.entry, log.subLog(s"PartialEval on ${program.entry.name}")),
-        functions = program.functions.map(f => foldFn(f, log.subLog(s"PartialEval on ${f.name}")))
+        entry = foldFn(program.entry, defs, log.subLog(s"PartialEval on ${program.entry.name}")),
+        functions = program.functions.map(f => foldFn(f, defs, log.subLog(s"PartialEval on ${f.name}")))
       )
+    }
 
-  private def foldFn(f: p.Function, log: Log): p.Function = {
+  private def foldFn(f: p.Function, defs: Map[p.Sym, p.StructDef], log: Log): p.Function = {
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       // a name is unsafe to substitute if it is ever reassigned (Mut) or address-taken (RefTo) anywhere in
       // the function; whole-function so forward substitution into loop/branch bodies stays sound
@@ -66,7 +72,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       val reassigned = f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(n, Nil, _), _) => n }.toSet
       // fold; reassociate constants across integer +/* chains; CSE identical register-arithmetic; drop
       // dead bindings. reassoc/CSE emit aliases that the next fold iteration copy-propagates and drops.
-      val folded  = f.copy(body = evalStmts(f.body, St.empty, excluded, reassigned, log)._1)
+      val st0     = St.empty.copy(casts = castAliases(f, defs, reassigned))
+      val folded  = f.copy(body = evalStmts(f.body, st0, excluded, reassigned, log)._1)
       val reassoc = folded.copy(body = reassocStmts(folded.body, Map.empty)._1)
       val cse     = reassoc.copy(body = cseStmts(reassoc.body, Avail.empty, addrTaken)._1)
       cse.copy(body = dropDeadBindings(cse.body, selectRoots(cse.body)))
@@ -77,6 +84,41 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
 
   private def mutatedNames(f: p.Function): Set[p.Named] =
     f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
+
+  // an immutable struct-to-struct reinterpret aliases the source storage; the substitution is a whole-function
+  // property, so it is scanned once rather than threaded as a binding
+  private def castAliases(
+      f: p.Function,
+      defs: Map[p.Sym, p.StructDef],
+      reassigned: Set[p.Named]
+  ): Map[p.Named, (p.Term.Select, p.StructDef, p.StructDef)] =
+    f.collectAll[p.Stmt]
+      .flatMap {
+        case p.Stmt.Var(n, Some(p.Expr.Cast(from: p.Term.Select, p.Type.Struct(to, _))), false)
+            if !reassigned.contains(from.root) =>
+          (from.tpe, defs.get(to)) match {
+            case (p.Type.Struct(fr, _), Some(toDef)) => defs.get(fr).map(fromDef => n -> (from, fromDef, toDef))
+            case _                                   => None
+          }
+        case _ => None
+      }
+      .toMap
+
+  // the reinterpreted field is the source member at the same ordinal, but only when everything ahead of it
+  // matches: identical preceding member types pin the offset, and a union or an extra base shifts it
+  private def resolveCast(root: p.Named, steps: List[p.PathStep], tpe: p.Type, st: St): Option[p.Term] =
+    (steps, st.casts.get(root)) match {
+      case (p.PathStep.Field(f) :: rest, Some((src, fromDef, toDef))) =>
+        val i = toDef.members.indexWhere(_.symbol == f)
+        Option.when(
+          i >= 0 && i < fromDef.members.size &&
+            !fromDef.isUnion && !toDef.isUnion &&
+            fromDef.parents == toDef.parents &&
+            fromDef.members.take(i).map(_.tpe) == toDef.members.take(i).map(_.tpe) &&
+            fromDef.members(i).tpe == toDef.members(i).tpe
+        )(p.Term.Select(src.root, src.steps ::: p.PathStep.Field(fromDef.members(i).symbol) :: rest, tpe))
+      case _ => None
+    }
 
   private def addressTakenNames(f: p.Function): Set[p.Named] =
     f.collectAll[p.Expr].collect { case p.Expr.RefTo(p.Term.Select(name, _, _), _, _, _, _) => name }.toSet
@@ -119,16 +161,18 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     case p.Stmt.Var(name, Some(e), mut) =>
       val folded = evalExpr(e, st)
       val st2 =
-        if (mut || excluded.contains(name)) st
+        if (mut) st
         else
           folded match {
-            case p.Expr.Alias(c) if Fold.isConstTerm(c) =>
+            case p.Expr.Alias(c) if !excluded.contains(name) && Fold.isConstTerm(c) =>
               log.info(s"const-bind ${name.repr} = ${c.repr}")
               st.bindVal(name, c)
-            case p.Expr.Alias(sel: p.Term.Select) if !excluded.contains(sel.root) =>
+            case p.Expr.Alias(sel: p.Term.Select) if !excluded.contains(name) && !excluded.contains(sel.root) =>
               log.info(s"copy-bind ${name.repr} = ${sel.repr}")
               st.bindVal(name, sel)
-            case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _) if !reassigned.contains(sel.root) =>
+            // a write through the pointer leaves its slot stable, so only a bare re-aim invalidates the bind
+            case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _)
+                if !reassigned.contains(name) && !reassigned.contains(sel.root) =>
               log.info(s"addr-bind ${name.repr} = &${sel.repr}")
               st.bindAddr(name, sel)
             case _ => st
@@ -254,7 +298,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case _ =>
           (steps, st.addrs.get(root)) match {
             case (p.PathStep.Deref :: rest, Some(a)) => p.Term.Select(a.root, a.steps ::: rest, tpe)
-            case _                                   => t
+            case (rest @ ((_: p.PathStep.Field) :: _), Some(a)) if Provenance.isPtr(root.tpe) =>
+              p.Term.Select(a.root, a.steps ::: rest, tpe)
+            case _ => resolveCast(root, steps, tpe, st).getOrElse(t)
           }
       }
     case other => other
