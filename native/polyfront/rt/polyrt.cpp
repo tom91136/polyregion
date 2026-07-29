@@ -6,7 +6,8 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
-#include <unordered_set>
+#include <optional>
+#include <unordered_map>
 #include <vector>
 
 #if !defined(_WIN32) && !defined(__APPLE__)
@@ -549,28 +550,35 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
 
 // XXX InterposePass routes every free/delete here, but not every pointer was allocated by us
 // (pre-init static ctors, foreign runtimes, untouched TUs). Track our own allocations so
-// foreign pointers fall through instead of being passed to the backend free.
+// foreign pointers fall through instead of being passed to the backend free. A device whose
+// mallocShared returns nullopt falls back to the host heap, so the owning allocator is recorded
+// alongside the pointer.
 //
 // XXX Intentionally leaked: the SMA destructor at shutdown re-enters this allocator via delete
 // callbacks; function-local statics would already be destroyed.
-static std::mutex &usmAllocSetMutex() {
+enum class UsmOwner : uint8_t { Host, Shared };
+static std::mutex &usmAllocMutex() {
   static auto *m = new std::mutex();
   return *m;
 }
-static std::unordered_set<void *> &usmAllocSet() {
-  static auto *s = new std::unordered_set<void *>();
+static std::unordered_map<void *, UsmOwner> &usmAllocOwners() {
+  static auto *s = new std::unordered_map<void *, UsmOwner>();
   return *s;
 }
 
 static void *sharedAllocTracked(const size_t size, const polyregion::rt_reflect::Type recordType) {
   void *p = nullptr;
+  auto owner = UsmOwner::Host;
   if (polyregion::polyrt::currentDevice) {
-    if (const auto shared = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) p = *shared;
+    if (const auto shared = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) {
+      p = *shared;
+      owner = UsmOwner::Shared;
+    }
   }
   if (!p) p = std::malloc(size);
   if (p) {
-    std::lock_guard<std::mutex> g(usmAllocSetMutex());
-    usmAllocSet().insert(p);
+    std::lock_guard<std::mutex> g(usmAllocMutex());
+    usmAllocOwners().insert_or_assign(p, owner);
     // Recording lets SMA's localReflect size the pointer when walking captured fields;
     // safe because polyreflect-rt's allocator bypasses InterposePass.
     polyregion::rt_reflect::_rt_record(p, size, recordType);
@@ -580,22 +588,17 @@ static void *sharedAllocTracked(const size_t size, const polyregion::rt_reflect:
 
 static void sharedFreeTracked(void *p, const polyregion::rt_reflect::Type releaseType) {
   if (!p) return;
-  bool tracked = false;
+  std::optional<UsmOwner> owner;
   {
-    std::lock_guard<std::mutex> g(usmAllocSetMutex());
-    tracked = usmAllocSet().erase(p) > 0;
+    std::lock_guard<std::mutex> g(usmAllocMutex());
+    if (auto node = usmAllocOwners().extract(p)) owner = node.mapped();
   }
   polyregion::rt_reflect::_rt_release(p, releaseType);
-  if (tracked && polyregion::polyrt::currentDevice) {
-    polyregion::polyrt::currentDevice->freeShared(p);
-    return;
-  }
-  if (tracked) {
-    std::free(p);
-    return;
-  }
-  // Untracked: free spliced by InterposePass but the alloc was foreign (pre-init, foreign CRT,
-  // uninstrumented TU). Leak rather than risk freeing on the wrong heap.
+  // An untracked pointer is a free spliced by InterposePass over a foreign alloc (pre-init, foreign
+  // CRT, uninstrumented TU); a shared one outliving its device has no deallocator left. Leak either
+  // rather than risk freeing on the wrong heap.
+  if (owner == UsmOwner::Host) std::free(p);
+  else if (owner == UsmOwner::Shared && polyregion::polyrt::currentDevice) polyregion::polyrt::currentDevice->freeShared(p);
 }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {

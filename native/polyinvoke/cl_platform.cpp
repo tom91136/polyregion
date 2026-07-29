@@ -233,6 +233,7 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
     if (!ilFn)
       ilFn = reinterpret_cast<details::ClCreateProgramWithIL_fn>(
           clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithILKHR"));
+    if (!ilFn) ilFn = reinterpret_cast<details::ClCreateProgramWithIL_fn>(clCreateProgramWithIL);
     for (auto &device : devices) {
       auto svm = resolveSVM(device, platformName);
       clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm, platformName));

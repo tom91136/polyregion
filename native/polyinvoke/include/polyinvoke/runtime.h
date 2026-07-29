@@ -185,7 +185,7 @@ public:
 
 template <typename K, typename V> class CountedStore {
   std::shared_mutex mutex;
-  std::atomic<K> counter;
+  std::atomic<K> counter{1};
   std::unordered_map<K, V> allocations;
 
 public:

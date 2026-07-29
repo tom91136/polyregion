@@ -5,12 +5,79 @@
 #include "fmt/args.h"
 #include <catch2/catch_test_macros.hpp>
 
+#include "polyinvoke/object_platform.h"
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
+#include "polyrt/rt.h"
 
 #include "jit_policy.hpp"
 
+using namespace polyregion::invoke;
 using namespace polyregion::runtime;
+
+namespace {
+
+struct StubDevice final : object::ObjectDevice {
+  bool shared;
+  size_t sharedAllocs = 0, sharedFrees = 0;
+
+  explicit StubDevice(const bool shared) : shared(shared) {}
+  std::string name() override { return "stub"; }
+  bool sharedAddressSpace() override { return shared; }
+  void loadModule(const std::string &, const std::string &) override {}
+  bool moduleLoaded(const std::string &) override { return false; }
+  std::optional<void *> mallocShared(size_t size, Access access) override {
+    if (!shared) return {};
+    sharedAllocs++;
+    return ObjectDevice::mallocShared(size, access);
+  }
+  void freeShared(void *ptr) override {
+    sharedFrees++;
+    ObjectDevice::freeShared(ptr);
+  }
+  std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &) override { return {}; }
+};
+
+struct WithStubDevice {
+  std::unique_ptr<Device> previous;
+  StubDevice *stub;
+
+  explicit WithStubDevice(const bool shared) {
+    polyregion::polyrt::initialise();
+    previous = std::move(polyregion::polyrt::currentDevice);
+    auto owned = std::make_unique<StubDevice>(shared);
+    stub = owned.get();
+    polyregion::polyrt::currentDevice = std::move(owned);
+  }
+  ~WithStubDevice() { polyregion::polyrt::currentDevice = std::move(previous); }
+};
+
+} // namespace
+
+TEST_CASE("usm free returns a host fallback allocation to the host heap") {
+  WithStubDevice device(false);
+  auto *p = polyrt_usm_malloc(64);
+  REQUIRE(p);
+  polyrt_usm_free(p);
+  CHECK(device.stub->sharedFrees == 0);
+}
+
+TEST_CASE("usm free returns a shared allocation to the device") {
+  WithStubDevice device(true);
+  auto *p = polyrt_usm_malloc(64);
+  REQUIRE(p);
+  polyrt_usm_free(p);
+  CHECK(device.stub->sharedAllocs == 1);
+  CHECK(device.stub->sharedFrees == 1);
+}
+
+TEST_CASE("usm free leaves a foreign pointer alone") {
+  WithStubDevice device(true);
+  auto *p = std::malloc(64);
+  polyrt_usm_free(p);
+  CHECK(device.stub->sharedFrees == 0);
+  std::free(p);
+}
 
 TEST_CASE("adaptive JIT specialises hot values after loading generic code") {
   polyregion::polyrt::AdaptiveJitPolicy policy(3, 2);
