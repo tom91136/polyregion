@@ -27,6 +27,27 @@ static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any r
                   std::move(fpMode), isEntry, FunctionAffinity::Offload());
 }
 
+template <typename C> static const std::string &llvmIrOf(const C &c) {
+  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
+  REQUIRE(event != c.events.end());
+  return event->data;
+}
+
+static Program arenaOffsetCastProgram() {
+  using namespace polyregion::polyast::dsl;
+  const Named off("off", Type::IntU64());
+  const auto ptrTpe = Type::Ptr(Type::IntS8(), TypeSpace::Global());
+  const Named ptr("p", ptrTpe);
+  Function entry = mkFn("kernel", {}, Type::Unit0(),
+                        {
+                            Var(off, Expr::Alias(Term::IntU64Const(16).widen()).widen(), false).widen(),
+                            Var(ptr, Expr::Cast(selectNamed(off).widen(), ptrTpe).widen(), false).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  return Program(entry, {}, {}, PassPhase::Initial(), {});
+}
+
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
@@ -156,20 +177,8 @@ TEST_CASE("by-value array initialisation copies contents on by-pointer targets",
 
 TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer space", "[backend]") {
   polyregion::compiler::initialise();
-  using namespace polyregion::polyast::dsl;
 
-  const Named off("off", Type::IntU64());
-  const auto ptrTpe = Type::Ptr(Type::IntS8(), TypeSpace::Global());
-  const Named ptr("p", ptrTpe);
-  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
-                 {
-                     Var(off, Expr::Alias(Term::IntU64Const(16).widen()).widen(), false).widen(),
-                     Var(ptr, Expr::Cast(selectNamed(off).widen(), ptrTpe).widen(), false).widen(),
-                     Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
-                 },
-                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
-  Program p(entry, {}, {}, PassPhase::Initial(), {});
-
+  const Program p = arenaOffsetCastProgram();
   polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
   opts.pipelineSpec = "FullOpt(level=0)";
   auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
@@ -315,4 +324,134 @@ TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[ba
   }
 
   CHECK((*module)->getFunction("__polyregion_mirror_prelude") != nullptr);
+}
+
+TEST_CASE("struct size and member offset agree on the target layout", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto sTpe = Type::Struct(Sym({"S"}), {});
+  const StructDef sDef(Sym({"S"}), {}, {Named("a", Type::IntS8()), Named("b", Type::IntS64())}, {}, false);
+  Function entry = mkFn("kernel", {}, Type::Unit0(),
+                        {
+                            let("size") = Expr::SizeOf(sTpe.widen()),
+                            let("offset") = Expr::OffsetOf(sTpe.widen(), "b"),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {sDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  const auto &ir = llvmIrOf(c);
+  CHECK(ir.find("store i64 16") != std::string::npos);
+  CHECK(ir.find("store i64 8") != std::string::npos);
+}
+
+TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global());
+  const Named base("p", ptrTpe);
+  const Named ref("pp", Type::Ptr(ptrTpe.widen(), TypeSpace::Global()));
+  Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {
+               Var(base, std::optional<Expr::Any>{}, true).widen(),
+               Var(ref, Expr::RefTo(selectNamed(base).widen(), {}, ptrTpe.widen(), TypeSpace::Global(), Region::Opaque()).widen(), false)
+                   .widen(),
+               ret(),
+           },
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  CHECK(llvmIrOf(c).find("load ptr") == std::string::npos);
+}
+
+TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto capTpe = Type::Struct(Sym({"Cap"}), {});
+  const Named nField("n", Type::IntS32());
+  const StructDef capDef(Sym({"Cap"}), {}, {nField}, {}, false);
+  const Named capture("#capture", Type::Ptr(capTpe.widen(), TypeSpace::Global()));
+  const Named done("done", Type::Bool1());
+
+  Function entry = mkFn(
+      "kernel", {Arg(capture, {})}, Type::Unit0(),
+      {
+          Stmt::While(Term::Bool1Const(true).widen(),
+                      {
+                          Var(done, Expr::IntrOp(LogicEq(Select({capture}, nField), Term::IntS32Const(0).widen())).widen(), false).widen(),
+                          Stmt::Cond(selectNamed(done).widen(), {Stmt::Break().widen()}, {}).widen(),
+                      })
+              .widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {capDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV_GLCompute, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  CHECK(llvmIrOf(c).find("br i1 true") == std::string::npos);
+}
+
+TEST_CASE("integral to pointer casts lower to inttoptr", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const Program p = arenaOffsetCastProgram();
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  CHECK(llvmIrOf(c).find("inttoptr") != std::string::npos);
+}
+
+TEST_CASE("taking the address of a constant materialises an entry block slot", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named ref("p", Type::Ptr(Type::IntU32(), TypeSpace::Private()));
+  Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {
+          Var(ref, Expr::RefTo(Term::IntU32Const(1).widen(), {}, Type::IntU32(), TypeSpace::Private(), Region::Opaque()).widen(), false)
+              .widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  const auto &ir = llvmIrOf(c);
+  CHECK(ir.find("alloca i32") != std::string::npos);
+  CHECK(ir.find("store i32 1") != std::string::npos);
 }

@@ -57,6 +57,7 @@ enum AddrSpace : unsigned { Default = 0, CrossWorkgroup = 1, Workgroup = 3, Gene
 struct TargetedContext {
   using AS = unsigned int;
   LLVMBackend::Options options;
+  llvm::DataLayout dataLayout;
   llvm::LLVMContext actual;
   AS AllocaAS = 0, GlobalAS = 0, LocalAS = 0, GenericAS = 0, ConstantAS = 0;
   // SPIR-V Kernel mode: gates type-lowering workarounds (no zero-length array types in struct bodies).

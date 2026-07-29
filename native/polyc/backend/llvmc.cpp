@@ -119,13 +119,8 @@ const llvm::Target *llvmc::targetFromTriple(const llvm::Triple &triple) {
 llvm::DataLayout llvmc::TargetInfo::resolveDataLayout() const {
   if (layout) return *layout;
   if (target) {
-    return target
-        ->createTargetMachine( //
-            triple,            //
-            cpu.uArch,         //
-            cpu.features,      //
-            {}, {})
-        ->createDataLayout();
+    const std::unique_ptr<llvm::TargetMachine> tm(target->createTargetMachine(triple, cpu.uArch, cpu.features, {}, {}));
+    return tm->createDataLayout();
   } else {
     throw std::logic_error(triple.str() + " does not have a known layout or a registered LLVM target.");
   }

@@ -12,7 +12,8 @@ using namespace polyregion::polyast;
 using namespace polyregion::backend;
 using namespace polyregion::backend::details;
 
-TargetedContext::TargetedContext(const LLVMBackend::Options &options) : options(options) {
+TargetedContext::TargetedContext(const LLVMBackend::Options &options)
+    : options(options), dataLayout(options.targetInfo().resolveDataLayout()) {
   switch (options.target) {
     case LLVMBackend::Target::x86_64:
     case LLVMBackend::Target::AArch64:
@@ -186,7 +187,6 @@ StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::s
   const auto types = def.members ^ map([&](auto &m) { return resolveType(m.tpe, structs); });
   const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to_vector()) ^ to<Map>();
   const auto tpe = llvm::StructType::create(actual, types, repr(def.name));
-  const auto dataLayout = options.targetInfo().resolveDataLayout();
   const auto structLayout = dataLayout.getStructLayout(tpe);
   const StructLayout layout(/*name*/ repr(def.name),
                             /*sizeInBytes*/ structLayout->getSizeInBytes(),
@@ -253,7 +253,6 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // outer struct and reads inline fields directly. The previous design used functionBoundary=true
   // (8-byte pointer slots) to defend against empty-struct fields computing to 0 bytes; we keep that
   // defence narrowly by giving empty structs a single placeholder byte.
-  const auto dataLayout = options.targetInfo().resolveDataLayout();
   const auto typeReadyForUnionStorage = [&](const Type::Any &tpe) {
     std::function<bool(const Type::Any &)> sized = [&](const Type::Any &t) {
       if (auto s = t.template get<Type::Struct>()) return !opaqueTypes.at(repr(s->name))->isOpaque();

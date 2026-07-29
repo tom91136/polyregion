@@ -114,6 +114,8 @@ ValPtr physicalRefToVal(CodeGen &gen, const Expr::RefTo &x, const std::string &k
   auto &M = gen.M;
   if (auto lhs = x.lhs.template get<Term::Select>()) {
     if (auto arrTpe = lhs->tpe.template get<Type::Ptr>(); arrTpe) {
+      // `&p` on a pointer variable is the slot address, not `&p[0]`
+      if (!x.idx && x.comp == lhs->tpe) return gen.mkSelectPtr(*lhs);
       auto offset = x.idx ? gen.i64SExt(gen.mkTermVal(*x.idx)) : llvm::ConstantInt::get(C.i64Ty(), 0, true);
       if (auto innerArr = arrTpe->comp.get<Type::Arr>()) {
         auto arrLlvmTy = gen.resolveType(*innerArr);
@@ -139,7 +141,13 @@ ValPtr physicalRefToVal(CodeGen &gen, const Expr::RefTo &x, const std::string &k
         throw BackendException::semantic("Cannot take reference of an select with unit type in " + to_string(x));
       return gen.mkSelectPtr(*lhs);
     }
-  } else throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
+  } else {
+    if (x.idx) throw BackendException::semantic("Cannot take reference of a constant with index in " + to_string(x));
+    const auto val = gen.mkTermVal(x.lhs);
+    const auto slot = C.allocaAS(B, val->getType(), C.AllocaAS, key + "_const_ref");
+    const auto _ = C.store(B, val, slot);
+    return slot;
+  }
 }
 
 void physicalStoreUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) {
@@ -340,11 +348,18 @@ static bool isUnsigned(const Type::Any &tpe) { // unsigned types in PolyAst; a b
   return tpe.is<Type::IntU8>() || tpe.is<Type::IntU16>() || tpe.is<Type::IntU32>() || tpe.is<Type::IntU64>() || tpe.is<Type::Bool1>();
 }
 
+// a CondBr on a constant leaves the untaken successor unreachable; the SPIR-V structurizer cannot resolve one
+static void condBr(llvm::IRBuilder<> &B, ValPtr cond, llvm::BasicBlock *whenTrue, llvm::BasicBlock *whenFalse) {
+  if (const auto c = llvm::dyn_cast<llvm::ConstantInt>(cond)) B.CreateBr(c->isOne() ? whenTrue : whenFalse);
+  else B.CreateCondBr(cond, whenTrue, whenFalse);
+}
+
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
 CodeGen::CodeGen(const LLVMBackend::Options &options, const std::string &moduleName)
     : C(options), targetHandler(TargetSpecificHandler::from(options.target)), B(C.actual), M(moduleName, C.actual) {
+  M.setDataLayout(C.dataLayout);
   if (C.isVulkan()) ptrModel = std::make_unique<LogicalPointerModel>(*this);
   else ptrModel = std::make_unique<PhysicalPointerModel>();
 }
@@ -653,9 +668,12 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           return from;
         }
 
-        // Disallowed on Logical SPIR-V; permitted elsewhere.
+        // Both disallowed on Logical SPIR-V; permitted elsewhere.
         if (x.from.tpe().is<Type::Ptr>() && x.as.kind().is<TypeKind::Integral>()) {
           return B.CreatePtrToInt(from, toTpe);
+        }
+        if (x.from.tpe().kind().is<TypeKind::Integral>() && x.as.is<Type::Ptr>()) {
+          return B.CreateIntToPtr(from, toTpe);
         }
 
         auto fromKind = x.from.tpe().kind().match_total( //
@@ -889,8 +907,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         B.CreateBr(loopTest);
         {
           B.SetInsertPoint(loopTest);
-          const auto continue_ = mkTermVal(x.cond);
-          B.CreateCondBr(continue_, loopBody, loopExit);
+          condBr(B, mkTermVal(x.cond), loopBody, loopExit);
         }
         {
           B.SetInsertPoint(loopBody);
@@ -921,7 +938,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         B.CreateBr(loopTest);
         {
           B.SetInsertPoint(loopTest);
-          B.CreateCondBr(mkExprVal(Expr::IntrOp(Intr::LogicLt(inductionTerm, x.ubExcl))), loopBody, loopExit);
+          condBr(B, mkExprVal(Expr::IntrOp(Intr::LogicLt(inductionTerm, x.ubExcl))), loopBody, loopExit);
         }
         {
           B.SetInsertPoint(loopBody);
@@ -953,7 +970,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto condTrue = llvm::BasicBlock::Create(C.actual, "cond_true", &fn);
         const auto condFalse = llvm::BasicBlock::Create(C.actual, "cond_false", &fn);
         const auto condExit = llvm::BasicBlock::Create(C.actual, "cond_exit", &fn);
-        B.CreateCondBr(mkTermVal(x.cond, "cond"), condTrue, condFalse);
+        condBr(B, mkTermVal(x.cond, "cond"), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           auto kind = BlockKind::Normal;
