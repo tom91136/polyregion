@@ -997,7 +997,10 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
           case clang::BuiltinType::Double: return Type::Float64();
           case clang::BuiltinType::Bool: return Type::Bool1();
           case clang::BuiltinType::Void: return Type::Unit0();
-          default: llvm::outs() << "Unhandled builtin type:" << dump_to_string(*tpe, context); return Type::Nothing();
+          case clang::BuiltinType::NullPtr: return Type::Ptr(Type::IntS8(), TypeSpace::Global());
+          default:
+            raise(fmt::format("Unsupported builtin type {} (no polyAST type of matching width and semantics)",
+                              clang::QualType(tpe, 0).getAsString()));
         }
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType(), r)); }, // T*
@@ -1014,15 +1017,13 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
         auto inner = handleType(tpe->getPointeeType(), r);
         if (inner.is<Type::Ptr>()) return inner;
         return refTpe(inner);
-      },                                                                                                        // T
+      }, // T
+      [&](const clang::FunctionType *tpe) -> Type::Any { return Type::Nothing(); },
       [&](const clang::EnumType *tpe) -> Type::Any { return handleType(tpe->getDecl()->getIntegerType(), r); }, // enum -> underlying int
       [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}); } // struct T { ... }
   );
-  if (!result) {
-    llvm::outs() << "Unhandled type:\n";
-    desugared->dump();
-    return Type::Nothing();
-  } else return *result;
+  if (!result) raise(fmt::format("Unsupported type {} ({})", desugared.getAsString(), desugared->getTypeClassName()));
+  else return *result;
 }
 
 Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
@@ -1296,11 +1297,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               auto base = r.newVar(sourceExpr);
               auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
               return Expr::Index(base, idx, targetTpe);
-            } else {
-              llvm::outs() << "Unhandled L->R cast:" << stmt->getCastKindName() << "\n";
-              stmt->dumpColor();
+            } else if (const auto src = sourceExpr.tpe().get<Type::Ptr>(), dst = targetTpe.get<Type::Ptr>();
+                       src && dst && src->comp == dst->comp) {
               return sourceExpr;
-            }
+            } else
+              raise(fmt::format("Unsupported {} at {} ({} does not load as {})", stmt->getCastKindName(),
+                                stmt->getBeginLoc().printToString(context.getSourceManager()), repr(sourceExpr.tpe()), repr(targetTpe)));
           case clang::CK_ConstructorConversion: // this just calls the ctor, so we return the subexpr as-as
             return sourceExpr;
           // Derived-to-base navigation. For pointer → pointer (`Derived*` → `Base*`), polyc's
