@@ -158,12 +158,12 @@ object Intrinsify extends ProgramPass {
 
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
     val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
-      case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
+      case inv @ p.Expr.Invoke(p.Type.FnRef(sym), tpeArgs, Some(recv), args, rtn) =>
         (sym.fqn, recv, args) match {
           case (
                 "polyregion" :: "scalalang" :: "intrinsics$" :: op :: Nil,
                 p.Term.Select(
-                  p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil), _)),
+                  p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil), _), _),
                   _,
                   _
                 ),
@@ -293,7 +293,7 @@ object Intrinsify extends ProgramPass {
 
   private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = {
     val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
-      case inv @ p.Expr.Invoke(sym, tpeArgs, Some(_), args, rtn) =>
+      case inv @ p.Expr.Invoke(p.Type.FnRef(sym), tpeArgs, Some(_), args, rtn) =>
         (sym.fqn, args) match {
 
           case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.IntS32 =>

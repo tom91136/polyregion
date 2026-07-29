@@ -76,7 +76,8 @@ std::optional<runtime::Type> runtimeType(const polyast::Type::Any &tpe) {
       [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; }, //
       [&](const polyast::Type::Arr &) -> R { return runtime::Type::Ptr; }, //
       [&](const polyast::Type::Var &) -> R { return {}; },                 //
-      [&](const polyast::Type::Exec &) -> R { return {}; }                 //
+      [&](const polyast::Type::Exec &) -> R { return {}; },                //
+      [&](const polyast::Type::FnRef &) -> R { return {}; }                //
   );
 }
 

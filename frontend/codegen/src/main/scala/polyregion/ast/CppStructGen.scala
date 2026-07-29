@@ -11,7 +11,7 @@ import polyregion.ast.CppStructGen.ToCppTerm.Value
 import java.nio.file.{Files, Paths, StandardOpenOption}
 import scala.annotation.{tailrec, targetName}
 import scala.collection.immutable.LazyList.cons
-import scala.compiletime.{constValue, erasedValue, error, summonInline}
+import scala.compiletime.{constValue, erasedValue, error, summonFrom, summonInline}
 import scala.deriving.*
 import polyregion.ast.CppStructGen.CppType.Kind
 
@@ -232,9 +232,13 @@ private[polyregion] object CppStructGen {
         case xs  => s" noexcept : ${xs.csv} {}"
       }
 
-      val ctorArgExpr  = ctorArgs.map((n, t) => s"${t.ref(qualified = true)} $n").csv
-      val ctorAttrExpr = ctorAttrs.map(_.repr).sym("", " ", " ")
-      val ctorStmt = s"$ctorAttrExpr${clsName(qualified = false)}($ctorArgExpr)${ctorChain match {
+      def ctorArg(n: String, t: CppType, default: Boolean) =
+        s"${t.ref(qualified = true)} $n${if (default) " = {}" else ""}"
+      val ctorArgExpr     = ctorArgs.map((n, t) => ctorArg(n, t, default = false)).csv
+      val ctorAttrExpr    = ctorAttrs.map(_.repr).sym("", " ", " ")
+      val defaultFrom     = ctorArgs.lastIndexWhere((_, t) => !t.isDefaultable) + 1
+      val ctorArgDeclExpr = ctorArgs.zipWithIndex.map { case ((n, t), i) => ctorArg(n, t, i >= defaultFrom) }.csv
+      val ctorStmt = s"$ctorAttrExpr${clsName(qualified = false)}($ctorArgDeclExpr)${ctorChain match {
           case Nil => ";"
           case _   => " noexcept;";
         }}"
@@ -349,8 +353,9 @@ private[polyregion] object CppStructGen {
               s"POLYREGION_EXPORT bool $name::operator!=(const $name& rhs) const { return !(*this == rhs); }" ::
                 s"POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
                 (members match {
-                  case Nil => "  return true;" :: Nil
-                  case xs  => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
+                  case _ if tpe.noIdentity => "  return true;" :: Nil
+                  case Nil                 => "  return true;" :: Nil
+                  case xs => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
                 }) ::: "}" :: Nil
             )
         }
@@ -398,9 +403,11 @@ private[polyregion] object CppStructGen {
             s"[[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;" :: Nil,
             s"size_t ${clsName(qualified = true)}::hash_code() const { " ::
               "  size_t seed = 0;" ::
-              members.map((n, t) =>
-                s"  seed ^= std::hash<decltype($n)>()($n) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
-              ) :::
+              (if (tpe.noIdentity) Nil
+               else
+                 members.map((n, t) =>
+                   s"  seed ^= std::hash<decltype($n)>()($n) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
+                 )) :::
               "  return seed;" ::
               "}" :: Nil
           )
@@ -706,9 +713,13 @@ private[polyregion] object CppStructGen {
       eachOp: Option[(String, String => List[String]) => List[String]] = None,
       mapOp: Option[(String, String, String => String) => List[String]] = None,
       include: List[String] = Nil,
-      ctors: List[CppType] = Nil
+      ctors: List[CppType] = Nil,
+      noIdentity: Boolean = false
   ) {
     def ns(name: String) = s"${namespace.sym("", "::", "::")}${name}"
+    def isOptional       = namespace == List("std") && name == "optional"
+    // both carry an empty value and neither contributes to identity, so a trailing run of them can default
+    def isDefaultable = isOptional || noIdentity
     // def qualified        = ns(name)
 
     def applied(qualified: Boolean): String = ctors match {
@@ -877,6 +888,7 @@ private[polyregion] object CppStructGen {
     inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] = ToCppTypeImpl { () =>
       val (ns, kind) = compiletime.mirrorMeta[m.MirroredMonoType]
       val name       = constValue[m.MirroredLabel]
+      val noId       = summonFrom { case _: (T <:< PolyAST.NoIdentity) => true; case _ => false }
       inline m match {
         case s: Mirror.SumOf[T] =>
           CppType(
@@ -884,7 +896,8 @@ private[polyregion] object CppStructGen {
             name,
             movable = true,
             constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
-            kind = CppType.Kind(kind)
+            kind = CppType.Kind(kind),
+            noIdentity = noId
           )
         case p: Mirror.ProductOf[T] =>
           CppType(
@@ -892,7 +905,8 @@ private[polyregion] object CppStructGen {
             name,
             movable = true,
             constexpr = false, // forAll[p.MirroredElemTypes](_.constexpr),
-            kind = CppType.Kind(kind)
+            kind = CppType.Kind(kind),
+            noIdentity = noId
           )
         case x => error(s"Unhandled derive: $x")
       }

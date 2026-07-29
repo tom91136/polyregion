@@ -25,7 +25,7 @@ class FnInlineSuite extends munit.FunSuite {
       rtn = p.Type.IntS32,
       body = List(p.Stmt.Return(select(xArg.named)))
     )
-    val invokeExpr = p.Expr.Invoke(helper.name, Nil, None, List(p.Term.IntS32Const(7)), p.Type.IntS32)
+    val invokeExpr = p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, List(p.Term.IntS32Const(7)), p.Type.IntS32)
     val e = entry(body = List(p.Stmt.Var(named("r"), Some(invokeExpr)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
 
     val out = FnInline(program(e, List(helper)), NoopLog)

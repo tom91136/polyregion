@@ -175,9 +175,9 @@ object Pickler {
           }
         }
       (sdef, repr.widenTermRefByName) :: sdef.members.flatMap {
-        case p.Named(member, p.Type.Struct(name, _))           => descend(name, member)
-        case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _), _)) => descendArrayElement(name)
-        case _                                                 => Nil
+        case p.Named(member, p.Type.Struct(name, _), _)           => descend(name, member)
+        case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _), _), _) => descendArrayElement(name)
+        case _                                                    => Nil
       }
     }
     go(sdef, repr, Set()).toMap

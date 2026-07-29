@@ -729,7 +729,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                                  return !arg.tpe().template is<Type::Unit0>() //
                                         && !arg.tpe().template is<Type::Nothing>();
                                });
-        const auto sig = Signature(x.name, /*tpeVars*/ {}, /*receiver*/ {}, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }),
+        const auto sig = Signature(calleeName(x), /*tpeVars*/ {}, /*receiver*/ {}, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }),
                                    /*moduleCaptures*/ {}, /*termCaptures*/ {}, x.rtn);
         return functions ^ get_maybe(sig) ^
                fold(

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "aad57f276711052c9bec2115fceaea45";
+constexpr auto AdtHash = "e3328c3a2bac53f71f5993878a49b661";
 
 namespace {
 
@@ -400,16 +400,32 @@ json sourceposition_to_json(const SourcePosition &x_) {
   return json::array({file, line, col});
 }
 
+Origin origin_from_json(const json &j_) {
+  auto pos = j_.at(0).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j_.at(0)));
+  auto source = j_.at(1).is_null() ? std::nullopt : std::make_optional(j_.at(1).get<std::string>());
+  auto inlinedFrom = j_.at(2).is_null() ? std::nullopt : std::make_optional(sym_from_json(j_.at(2)));
+  return {pos, source, inlinedFrom};
+}
+
+json origin_to_json(const Origin &x_) {
+  auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json();
+  auto source = x_.source ? json(*x_.source) : json();
+  auto inlinedFrom = x_.inlinedFrom ? sym_to_json(*x_.inlinedFrom) : json();
+  return json::array({pos, source, inlinedFrom});
+}
+
 Named named_from_json(const json &j_) {
   auto symbol = j_.at(0).get<std::string>();
   auto tpe = Type::any_from_json(j_.at(1));
-  return {symbol, tpe};
+  auto origin = origin_from_json(j_.at(2));
+  return {symbol, tpe, origin};
 }
 
 json named_to_json(const Named &x_) {
   auto symbol = x_.symbol;
   auto tpe = Type::any_to_json(x_.tpe);
-  return json::array({symbol, tpe});
+  auto origin = origin_to_json(x_.origin);
+  return json::array({symbol, tpe, origin});
 }
 
 TypeKind::None TypeKind::none_from_json(const json &j_) { return {}; }
@@ -612,6 +628,16 @@ json Type::exec_to_json(const Type::Exec &x_) {
   return json::array({tpeVars, args, rtn});
 }
 
+Type::FnRef Type::fnref_from_json(const json &j_) {
+  auto name = sym_from_json(j_.at(0));
+  return Type::FnRef(name);
+}
+
+json Type::fnref_to_json(const Type::FnRef &x_) {
+  auto name = sym_to_json(x_.name);
+  return json::array({name});
+}
+
 Type::Any Type::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -635,6 +661,7 @@ Type::Any Type::any_from_json(const json &j_) {
     case 16: return Type::arr_from_json(t_);
     case 17: return Type::var_from_json(t_);
     case 18: return Type::exec_from_json(t_);
+    case 19: return Type::fnref_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -658,7 +685,8 @@ json Type::any_to_json(const Type::Any &x_) {
                         [](const Type::Ptr &y_) -> json { return {15, Type::ptr_to_json(y_)}; },
                         [](const Type::Arr &y_) -> json { return {16, Type::arr_to_json(y_)}; },
                         [](const Type::Var &y_) -> json { return {17, Type::var_to_json(y_)}; },
-                        [](const Type::Exec &y_) -> json { return {18, Type::exec_to_json(y_)}; });
+                        [](const Type::Exec &y_) -> json { return {18, Type::exec_to_json(y_)}; },
+                        [](const Type::FnRef &y_) -> json { return {19, Type::fnref_to_json(y_)}; });
 }
 
 PathStep::Field PathStep::field_from_json(const json &j_) {
@@ -1067,7 +1095,7 @@ json Expr::alloc_to_json(const Expr::Alloc &x_) {
 }
 
 Expr::Invoke Expr::invoke_from_json(const json &j_) {
-  auto name = sym_from_json(j_.at(0));
+  auto callee = Type::any_from_json(j_.at(0));
   std::vector<Type::Any> tpeArgs;
   for (const auto &v_ : j_.at(1)) {
     tpeArgs.emplace_back(Type::any_from_json(v_));
@@ -1078,11 +1106,11 @@ Expr::Invoke Expr::invoke_from_json(const json &j_) {
     args.emplace_back(Term::any_from_json(v_));
   }
   auto rtn = Type::any_from_json(j_.at(4));
-  return {name, tpeArgs, receiver, args, rtn};
+  return {callee, tpeArgs, receiver, args, rtn};
 }
 
 json Expr::invoke_to_json(const Expr::Invoke &x_) {
-  auto name = sym_to_json(x_.name);
+  auto callee = Type::any_to_json(x_.callee);
   std::vector<json> tpeArgs;
   for (const auto &v_ : x_.tpeArgs) {
     tpeArgs.emplace_back(Type::any_to_json(v_));
@@ -1093,7 +1121,7 @@ json Expr::invoke_to_json(const Expr::Invoke &x_) {
     args.emplace_back(Term::any_to_json(v_));
   }
   auto rtn = Type::any_to_json(x_.rtn);
-  return json::array({name, tpeArgs, receiver, args, rtn});
+  return json::array({callee, tpeArgs, receiver, args, rtn});
 }
 
 Expr::ForeignCall Expr::foreigncall_from_json(const json &j_) {
@@ -3282,6 +3310,10 @@ Type::Exec exec_fields_from_msgpack(MsgpackReader &, size_t);
 void exec_fields_to_msgpack(MsgpackWriter &, const Type::Exec &);
 Type::Exec exec_from_msgpack(MsgpackReader &);
 void exec_to_msgpack(MsgpackWriter &, const Type::Exec &);
+Type::FnRef fnref_fields_from_msgpack(MsgpackReader &, size_t);
+void fnref_fields_to_msgpack(MsgpackWriter &, const Type::FnRef &);
+Type::FnRef fnref_from_msgpack(MsgpackReader &);
+void fnref_to_msgpack(MsgpackWriter &, const Type::FnRef &);
 Type::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Type::Any &);
 } // namespace Type
@@ -3365,6 +3397,10 @@ SourcePosition sourceposition_fields_from_msgpack(MsgpackReader &, size_t);
 void sourceposition_fields_to_msgpack(MsgpackWriter &, const SourcePosition &);
 SourcePosition sourceposition_from_msgpack(MsgpackReader &);
 void sourceposition_to_msgpack(MsgpackWriter &, const SourcePosition &);
+Origin origin_fields_from_msgpack(MsgpackReader &, size_t);
+void origin_fields_to_msgpack(MsgpackWriter &, const Origin &);
+Origin origin_from_msgpack(MsgpackReader &);
+void origin_to_msgpack(MsgpackWriter &, const Origin &);
 Named named_fields_from_msgpack(MsgpackReader &, size_t);
 void named_fields_to_msgpack(MsgpackWriter &, const Named &);
 Named named_from_msgpack(MsgpackReader &);
@@ -3533,16 +3569,66 @@ void sourceposition_to_msgpack(MsgpackWriter &w_, const SourcePosition &x_) {
   sourceposition_fields_to_msgpack(w_, x_);
 }
 
+Origin origin_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Origin with 3 field(s)");
+  std::optional<SourcePosition> pos;
+  if (!r_.tryReadNil()) {
+    auto pos_value = sourceposition_from_msgpack(r_);
+    pos = std::move(pos_value);
+  }
+  std::optional<std::string> source;
+  if (!r_.tryReadNil()) {
+    auto source_value = r_.readString();
+    source = std::move(source_value);
+  }
+  std::optional<Sym> inlinedFrom;
+  if (!r_.tryReadNil()) {
+    auto inlinedFrom_value = sym_from_msgpack(r_);
+    inlinedFrom = std::move(inlinedFrom_value);
+  }
+  return {pos, source, inlinedFrom};
+}
+
+void origin_fields_to_msgpack(MsgpackWriter &w_, const Origin &x_) {
+  if (x_.pos) {
+    sourceposition_to_msgpack(w_, (*x_.pos));
+  } else {
+    w_.writeNil();
+  }
+  if (x_.source) {
+    w_.writeString((*x_.source));
+  } else {
+    w_.writeNil();
+  }
+  if (x_.inlinedFrom) {
+    sym_to_msgpack(w_, (*x_.inlinedFrom));
+  } else {
+    w_.writeNil();
+  }
+}
+
+Origin origin_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return origin_fields_from_msgpack(r_, n_);
+}
+
+void origin_to_msgpack(MsgpackWriter &w_, const Origin &x_) {
+  w_.writeArrayHeader(3);
+  origin_fields_to_msgpack(w_, x_);
+}
+
 Named named_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Named with 2 field(s)");
+  if (n_ != 3) throw std::runtime_error("Expected Named with 3 field(s)");
   auto symbol = r_.readString();
   auto tpe = Type::any_from_msgpack(r_);
-  return {symbol, tpe};
+  auto origin = origin_from_msgpack(r_);
+  return {symbol, tpe, origin};
 }
 
 void named_fields_to_msgpack(MsgpackWriter &w_, const Named &x_) {
   w_.writeString(x_.symbol);
   Type::any_to_msgpack(w_, x_.tpe);
+  origin_to_msgpack(w_, x_.origin);
 }
 
 Named named_from_msgpack(MsgpackReader &r_) {
@@ -3551,7 +3637,7 @@ Named named_from_msgpack(MsgpackReader &r_) {
 }
 
 void named_to_msgpack(MsgpackWriter &w_, const Named &x_) {
-  w_.writeArrayHeader(2);
+  w_.writeArrayHeader(3);
   named_fields_to_msgpack(w_, x_);
 }
 
@@ -4132,6 +4218,24 @@ void Type::exec_to_msgpack(MsgpackWriter &w_, const Type::Exec &x_) {
   Type::exec_fields_to_msgpack(w_, x_);
 }
 
+Type::FnRef Type::fnref_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Type::FnRef with 1 field(s)");
+  auto name = sym_from_msgpack(r_);
+  return Type::FnRef(name);
+}
+
+void Type::fnref_fields_to_msgpack(MsgpackWriter &w_, const Type::FnRef &x_) { sym_to_msgpack(w_, x_.name); }
+
+Type::FnRef Type::fnref_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Type::fnref_fields_from_msgpack(r_, n_);
+}
+
+void Type::fnref_to_msgpack(MsgpackWriter &w_, const Type::FnRef &x_) {
+  w_.writeArrayHeader(1);
+  Type::fnref_fields_to_msgpack(w_, x_);
+}
+
 Type::Any Type::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -4157,6 +4261,7 @@ Type::Any Type::any_from_msgpack(MsgpackReader &r_) {
       case 16: return Type::arr_fields_from_msgpack(r_, n_ - 1);
       case 17: return Type::var_fields_from_msgpack(r_, n_ - 1);
       case 18: return Type::exec_fields_from_msgpack(r_, n_ - 1);
+      case 19: return Type::fnref_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -4181,6 +4286,7 @@ Type::Any Type::any_from_msgpack(MsgpackReader &r_) {
       case 16: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 17: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 18: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 19: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -4218,6 +4324,11 @@ void Type::any_to_msgpack(MsgpackWriter &w_, const Type::Any &x_) {
                    w_.writeArrayHeader(4);
                    w_.writeInt32(18);
                    Type::exec_fields_to_msgpack(w_, y_);
+                 },
+                 [&](const Type::FnRef &y_) -> void {
+                   w_.writeArrayHeader(2);
+                   w_.writeInt32(19);
+                   Type::fnref_fields_to_msgpack(w_, y_);
                  });
 }
 
@@ -5046,7 +5157,7 @@ void Expr::alloc_to_msgpack(MsgpackWriter &w_, const Expr::Alloc &x_) {
 
 Expr::Invoke Expr::invoke_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 5) throw std::runtime_error("Expected Expr::Invoke with 5 field(s)");
-  auto name = sym_from_msgpack(r_);
+  auto callee = Type::any_from_msgpack(r_);
   std::vector<Type::Any> tpeArgs;
   {
     auto tpeArgs_size = r_.readArrayHeader();
@@ -5071,11 +5182,11 @@ Expr::Invoke Expr::invoke_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
     }
   }
   auto rtn = Type::any_from_msgpack(r_);
-  return {name, tpeArgs, receiver, args, rtn};
+  return {callee, tpeArgs, receiver, args, rtn};
 }
 
 void Expr::invoke_fields_to_msgpack(MsgpackWriter &w_, const Expr::Invoke &x_) {
-  sym_to_msgpack(w_, x_.name);
+  Type::any_to_msgpack(w_, x_.callee);
   w_.writeArrayHeader(x_.tpeArgs.size());
   for (const auto &v0_ : x_.tpeArgs) {
     Type::any_to_msgpack(w_, v0_);

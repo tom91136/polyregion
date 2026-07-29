@@ -58,7 +58,8 @@ const static std::string Empty = "#empty";
       [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
       [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
       [&](const Type::Var &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },               //
-      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }               //
+      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },              //
+      [&](const Type::FnRef &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }              //
   );
 }
 
@@ -275,7 +276,8 @@ Expr::Any Remapper::integralConstOfType(const Type::Any &tpe, const uint64_t val
       [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },               //
       [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },               //
       [&](const Type::Var &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },               //
-      [&](const Type::Exec &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); }               //
+      [&](const Type::Exec &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },              //
+      [&](const Type::FnRef &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); }              //
   );
 }
 
@@ -446,7 +448,8 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },                                  //
       [&](const Type::Arr &x) -> std::string { return typeName(x.comp) + "[" + std::to_string(x.length) + "]"; }, //
       [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; },                                //
-      [&](const Type::Exec &) -> std::string { return "/*exec*/"; }                                               //
+      [&](const Type::Exec &) -> std::string { return "/*exec*/"; },                                              //
+      [&](const Type::FnRef &x) -> std::string { return "&" + repr(x.name); }                                     //
   );
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -630,8 +633,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                                           return r.newVar(conform(r, Expr::Alias(select(r, {}, a.named)), baseFn->args[i + 1].named.tpe));
                                         }) //
                                       | to_vector();
-                                  auto _ = r.newVar(
-                                      Expr::Invoke(Sym({baseName}), {}, {}, Vector<Term::Any>{thisArg} ^ concat(fwd), Type::Unit0()));
+                                  auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({baseName})), {}, {},
+                                                                 Vector<Term::Any>{thisArg} ^ concat(fwd), Type::Unit0()));
                                 }
                               } else if (baseStruct) {
                                 auto _ = r.newVar(handleExpr(init->getInit(), r));
@@ -1216,7 +1219,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 [&](const Type::Ptr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },             //
                 [&](const Type::Arr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },             //
                 [&](const Type::Var &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },             //
-                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); }             //
+                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },            //
+                [&](const Type::FnRef &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); }            //
             );
       },
       [&](const clang::MaterializeTemporaryExpr *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
@@ -1742,7 +1746,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                           }) //
                         | to_vector();
           auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
-          auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+          auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
                                          std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
           return instance;
         } else if (ctorTpe.template is<Type::Arr>()) {
@@ -1777,7 +1781,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         auto recvTerm = r.newVar(conform(r, ref(receiver), *actualReceiverTpe));
-        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
+        return Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CXXOperatorCallExpr *expr) -> Expr::Any {
@@ -1805,7 +1809,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                        });
         const auto recvTpe = actualReceiverTpe ? *actualReceiverTpe : fn->args[0].named.tpe;
         auto recvTerm = r.newVar(conform(r, ref(receiver), recvTpe));
-        return Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
+        return Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
@@ -1867,7 +1871,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                             return r.newVar(conform(r, handleExpr(arg, r), fn->args[i].named.tpe));
                           }) //
                         | to_vector();
-          return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
+          return Expr::Any(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
                                         handleType(expr->getCallReturnType(context), r)));
         }
       },

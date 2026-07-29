@@ -17,7 +17,7 @@ object Specialisation extends ProgramPass {
 
   def monomorphicName(ivk: p.Expr.Invoke): p.Sym = {
     val monomorphicToken = ivk.tpeArgs.map(_.monomorphicName).mkString("_")
-    ivk.name.fqn match {
+    ivk.calleeName.fqn match {
       case xs :+ x => p.Sym(xs :+ monomorphicToken :+ x)
       case xs      => p.Sym(monomorphicToken :: xs)
     }
@@ -34,9 +34,9 @@ object Specialisation extends ProgramPass {
     .foldLeft(done) { case (acc, ivk) =>
       val newName = monomorphicName(ivk)
       if (done.contains(newName)) acc
-      else if (!fnLUT.contains(ivk.name)) acc
+      else if (!fnLUT.contains(ivk.calleeName)) acc
       else {
-        val fnImpl = fnLUT(ivk.name)
+        val fnImpl = fnLUT(ivk.calleeName)
         val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs.take(fnImpl.tpeVars.size)).toMap
         val specialisedFnImpl = fnImpl
           .copy(name = newName, tpeVars = Nil)
@@ -66,7 +66,7 @@ object Specialisation extends ProgramPass {
     def doReplace(f: p.Function) = f.modifyAll[p.Expr] {
       case ivk: p.Expr.Invoke =>
         if (ivk.tpeArgs.isEmpty) ivk
-        else ivk.copy(name = monomorphicName(ivk), tpeArgs = Nil)
+        else ivk.copy(callee = p.Type.FnRef(monomorphicName(ivk)), tpeArgs = Nil)
       case x => x
     }
 

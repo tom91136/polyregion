@@ -14,7 +14,7 @@ class IntrinsifySuite extends munit.FunSuite {
   private val intrinsicsRecv = selectT(named("intrinsics$", intrinsicsTpe))
 
   private def call(op: String, args: List[p.Term], rtn: p.Type): p.Expr.Invoke =
-    p.Expr.Invoke(sym("polyregion", "scalalang", "intrinsics$", op), Nil, Some(intrinsicsRecv), args, rtn)
+    p.Expr.Invoke(p.Type.FnRef(sym("polyregion", "scalalang", "intrinsics$", op)), Nil, Some(intrinsicsRecv), args, rtn)
 
   test("intrinsics.sin(x) lowers to a MathOp(Sin)") {
     val xArg = arg("x", p.Type.Float32)

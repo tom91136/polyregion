@@ -144,6 +144,9 @@ std::string repr(const Type::Any &t) {
       return fmt::format("<{}>({}) => {}", (_x->tpeVars | mk_string(","s)),
                          (_x->args | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)), repr(_x->rtn));
     }
+    if (auto _x = t.get<Type::FnRef>()) {
+      return fmt::format("&{}", repr(_x->name));
+    }
 
     throw std::logic_error(fmt::format("Unhandled match case for t (of type Type::Any) at {}:{})", __FILE__, __LINE__));
   }();
@@ -438,7 +441,7 @@ std::string repr(const Expr::Any &e) {
     if (auto _x = e.get<Expr::Invoke>()) {
       return fmt::format("{}{}<{}>({}): {}",
                          _x->receiver ^ map([&](const Term::Any &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s),
-                         repr(_x->name), (_x->tpeArgs | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)),
+                         repr(_x->callee), (_x->tpeArgs | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)),
                          (_x->args | map([&](const Term::Any &_v7_0) { return repr(_v7_0); }) | mk_string(", "s)), repr(_x->rtn));
     }
     if (auto _x = e.get<Expr::ForeignCall>()) {

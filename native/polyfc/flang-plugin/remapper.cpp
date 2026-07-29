@@ -139,7 +139,8 @@ mlir::Type polyfc::Remapper::resolveType(const Type::Any &tpe) {
       [&](const Type::Ptr &x) -> mlir::Type { return mlir::LLVM::LLVMPointerType::get(C); },                           //
       [&](const Type::Arr &x) -> mlir::Type { return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), x.length); }, //
       [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); },             //
-      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }            //
+      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); },           //
+      [&](const Type::FnRef &x) -> mlir::Type { raise(fmt::format("Type::FnRef unsupported: {}", repr(x))); }          //
   );
 }
 
@@ -963,7 +964,8 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             std::vector<Term::Any> ivArgs;
             for (const auto arg : args)
               ivArgs.emplace_back(newVar(handleValueAsScalar(arg)).widen());
-            const auto invoke = Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs, fn.rtn);
+            const auto invoke =
+                Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs, fn.rtn);
             if (a.getNumResults() > 0) witness(a.getResult(0), Expr::Alias(newVar(invoke.widen())).widen());
             else
               stmts.emplace_back(Stmt::Var(Named(fmt::format("_call_{}", reinterpret_cast<uintptr_t>(a.getOperation())), Type::Unit0()),

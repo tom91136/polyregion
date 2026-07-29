@@ -43,9 +43,9 @@ object Compiler {
     sigs
       .collect {
         case sig
-            if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
-              sig.tpeVars.size == target.tpeArgs.size && // then we check type arity
-              sig.args.size == target.args.size          // then finally term arity
+            if sig.name.last == target.calleeName.last && // match name first, most methods are eliminated here
+              sig.tpeVars.size == target.tpeArgs.size &&  // then we check type arity
+              sig.args.size == target.args.size           // then finally term arity
             =>
           val appliedTypes = // we then apply any type variables to form an applied signature
             sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
@@ -85,7 +85,7 @@ object Compiler {
             for {
               // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
               _ <-
-                if (ivks.map(_.name).size != 1)
+                if (ivks.map(_.callee).size != 1)
                   s"Cannot collapse multiple invocations (${ivks.map(_.repr)}), term compiler may have miscompiled".fail
                 else ().success
               target: p.Expr.Invoke = ivks.head
@@ -114,7 +114,7 @@ object Compiler {
                     val symFullName    = p.Sym(sym.fullName)
                     val primaryMatches = matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList
                     val symNameMatch =
-                      if (primaryMatches.nonEmpty || symFullName == target.name) Nil
+                      if (primaryMatches.nonEmpty || symFullName == target.calleeName) Nil
                       else
                         fnLut.keys
                           .filter(s =>
@@ -191,7 +191,7 @@ object Compiler {
                             )
                           // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
                         } yield (
-                          fn.copy(name = target.name) :: xs,
+                          fn.copy(name = target.calleeName) :: xs,
                           depss,
                           clsDeps ++ clsDepss,
                           moduleSymDepss
@@ -393,15 +393,14 @@ object Compiler {
 
       mappedFn = fn.modifyAll[p.Type](replaceTpe(_))
       mappedFnDeps = deps.functions.map((defdef, ivks) =>
-        defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
-          p.Expr.Invoke(
-            name,
-            tpeArgs.map(replaceTpe(_)),
-            receiver.map(replaceTpeForTerm(_)),
-            args.map(replaceTpeForTerm(_)),
-            replaceTpe(rtn)
-          ): p.Expr.Invoke
-        }
+        defdef -> ivks.map(ivk =>
+          ivk.copy(
+            tpeArgs = ivk.tpeArgs.map(replaceTpe(_)),
+            receiver = ivk.receiver.map(replaceTpeForTerm(_)),
+            args = ivk.args.map(replaceTpeForTerm(_)),
+            rtn = replaceTpe(ivk.rtn)
+          )
+        )
       )
 
       _ = log.info("Type replacements", typeLut.map((a, b) => s"${a.repr} => ${b.repr}").toList.sorted*)
@@ -721,15 +720,15 @@ object Compiler {
       def patchInvoke(ivk: p.Expr.Invoke, prelude: scala.collection.mutable.ListBuffer[p.Stmt]): p.Expr.Invoke =
         ivk.receiver.map(_.tpe) match {
           case Some(s: p.Type.Struct) =>
-            dispatchTable.get((ivk.name, s)) match {
+            dispatchTable.get((ivk.calleeName, s)) match {
               case Some((concreteName, classStruct)) =>
                 ivk.receiver match {
                   case Some(r) =>
                     val tmp = freshName(classStruct)
                     prelude += p.Stmt.Var(tmp, Some(p.Expr.Cast(r, classStruct)), isMutable = false)
                     val tmpSel: p.Term.Select = p.Term.Select(tmp, Nil, classStruct)
-                    ivk.copy(name = concreteName, receiver = Some(tmpSel))
-                  case None => ivk.copy(name = concreteName)
+                    ivk.copy(callee = p.Type.FnRef(concreteName), receiver = Some(tmpSel))
+                  case None => ivk.copy(callee = p.Type.FnRef(concreteName))
                 }
               case None => ivk
             }
@@ -827,7 +826,7 @@ object Compiler {
       // we collect callees once up front rather than re-walking every body each iteration.
       def computeTransitiveModuleCaps(): Map[p.Sym, List[p.Arg]] = {
         val callGraph: Map[p.Sym, List[p.Sym]] =
-          fnByName.view.mapValues(_.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.name }).toMap
+          fnByName.view.mapValues(_.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.calleeName }).toMap
         var current: Map[p.Sym, List[p.Arg]] = fnByName.view.mapValues(_.moduleCaptures).toMap
         var changed                          = true
         while (changed) {
@@ -867,7 +866,7 @@ object Compiler {
       def patchFn(fn: p.Function): p.Function = {
         val ownCapByTpe: Map[p.Type, p.Named] =
           (fn.moduleCaptures ++ fn.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
-        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = updatedFnByName.get(ivk.name) match {
+        def patchIvk(ivk: p.Expr.Invoke): p.Expr.Invoke = updatedFnByName.get(ivk.calleeName) match {
           case None => ivk
           case Some(c) =>
             val expected = c.args.size + c.moduleCaptures.size + c.termCaptures.size

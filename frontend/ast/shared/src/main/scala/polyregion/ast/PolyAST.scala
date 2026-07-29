@@ -6,6 +6,11 @@ import polyregion.ast.PolyAST.Type.Kind
 
 object PolyAST {
 
+  trait NoIdentity {
+    override def equals(that: Any): Boolean = that != null && that.getClass == this.getClass
+    override def hashCode(): Int            = getClass.hashCode
+  }
+
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
     infix def :+(s: String): Sym = Sym(fqn :+ s)
     infix def ~(s: Sym): Sym     = Sym(fqn ++ s.fqn)
@@ -26,7 +31,15 @@ object PolyAST {
   }
 
   case class SourcePosition(file: String, line: Int, col: Option[Int]) derives MsgPack.Codec
-  case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
+
+  case class Origin(
+      pos: Option[SourcePosition] = None,
+      source: Option[String] = None,
+      inlinedFrom: Option[Sym] = None
+  ) extends NoIdentity
+      derives MsgPack.Codec
+
+  case class Named(symbol: String, tpe: Type, origin: Origin = Origin()) derives MsgPack.Codec
 
   enum Type(val kind: Type.Kind) derives MsgPack.Codec {
     case Float16 extends Type(Type.Kind.Fractional)
@@ -53,6 +66,7 @@ object PolyAST {
 
     case Var(name: String)                                        extends Type(Type.Kind.None)
     case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
+    case FnRef(name: Sym)                                         extends Type(Type.Kind.None)
   }
 
   enum Region derives MsgPack.Codec {
@@ -102,7 +116,7 @@ object PolyAST {
         extends Expr(Type.Ptr(comp, space))
     case Alloc(comp: Type, size: Term, space: Type.Space, region: Region) extends Expr(Type.Ptr(comp, space))
     case Invoke(
-        name: Sym,
+        callee: Type,
         tpeArgs: List[Type],
         receiver: Option[Term],
         args: List[Term],
@@ -739,6 +753,7 @@ object PolyAST {
       case Type.Var(name)                => s"#$name"
       case Type.Exec(tpeVars, args, rtn) =>
         s"<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
+      case Type.FnRef(name) => s"&${name.repr}"
     }
   }
 
@@ -855,8 +870,8 @@ object PolyAST {
       case Expr.RefTo(lhs, idx, comp, space, region) =>
         s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}${region.repr}](${idx.map(_.repr).getOrElse("")})"
       case Expr.Alloc(comp, size, space, region) => s"alloc[${comp.repr}, ${space.repr}${region.repr}](${size.repr})"
-      case Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
-        s"${receiver.map(r => s"${r.repr}.").getOrElse("")}${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
+      case Expr.Invoke(callee, tpeArgs, receiver, args, rtn) =>
+        s"${receiver.map(r => s"${r.repr}.").getOrElse("")}${callee.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
             .map(_.repr)
             .mkString(", ")}): ${rtn.repr}"
       case Expr.ForeignCall(name, args, rtn) => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"

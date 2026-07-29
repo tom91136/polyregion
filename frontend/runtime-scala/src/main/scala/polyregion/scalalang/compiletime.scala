@@ -227,12 +227,12 @@ object compiletime {
 
       // Match up the struct types from the capture args so that we know how to copy the structs during argument pickling.
       capturesWithStructDefs <- captures.traverse {
-        case (n @ p.Named(_, p.Type.Struct(name, _)), term) =>
+        case (n @ p.Named(_, p.Type.Struct(name, _), _), term) =>
           prog0.defs
             .find(_.name == name)
             .failIfEmpty(s"Missing structure def from capture args ${n.repr}")
             .map(d => (n, Some(d), term))
-        case (n @ p.Named(_, tpe), term) => (n, None, term).success
+        case (n @ p.Named(_, tpe, _), term) => (n, None, term).success
       }
 
       prog: p.Program = prog0.copy(entry =

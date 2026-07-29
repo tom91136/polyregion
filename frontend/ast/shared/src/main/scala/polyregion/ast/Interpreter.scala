@@ -236,8 +236,8 @@ object Interpreter {
         val b = idx match { case Some(_) => base(lhs, fr); case None => addressOf(lhs, fr) }
         V.I(idx.fold(b)(k => b + asI(evalT(k, fr)) * sizeOf(comp)))
       case p.Expr.Alloc(comp, size, _, _) => V.I(alloc(sizeOf(comp) * asI(evalT(size, fr))))
-      case p.Expr.Invoke(name, _, recv, args, _) =>
-        call(name, recv.toList.map(t => t.tpe -> evalT(t, fr)) ::: args.map(t => t.tpe -> evalT(t, fr)))
+      case ivk @ p.Expr.Invoke(_, _, recv, args, _) =>
+        call(ivk.calleeName, recv.toList.map(t => t.tpe -> evalT(t, fr)) ::: args.map(t => t.tpe -> evalT(t, fr)))
       case p.Expr.ForeignCall(name, args, rtn) => foreign(name, args.map(t => t.tpe -> evalT(t, fr)), rtn)
       case p.Expr.OffsetOf(st, field)          => V.I(offsetOf(structSym(st), field))
       case p.Expr.SizeOf(t)                    => V.I(sizeOf(t))

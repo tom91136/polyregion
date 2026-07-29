@@ -67,7 +67,8 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
             [&](const Type::Ptr &p) -> std::string { return thunk(p.comp, thunk) + "*"; },                                  //
             [&](const Type::Arr &a) -> std::string { return thunk(a.comp, thunk) + "[" + std::to_string(a.length) + "]"; }, //
             [&](const Type::Var &v) -> std::string { throw std::logic_error("Type::Var should be erased"); },               //
-            [&](const Type::Exec &e) -> std::string { throw std::logic_error("Type::Exec should be erased"); }              //
+            [&](const Type::Exec &e) -> std::string { throw std::logic_error("Type::Exec should be erased"); },             //
+            [&](const Type::FnRef &f) -> std::string { throw std::logic_error("Type::FnRef should be erased"); }            //
         );
       };
       return impl(tpe, impl);

@@ -26,7 +26,7 @@ static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any r
 }
 
 static Expr::Invoke mkInvoke(const std::string &name, std::vector<Term::Any> args, Type::Any rtn) {
-  return Expr::Invoke(Sym({name}), {}, {}, std::move(args), std::move(rtn));
+  return Expr::Invoke(Type::FnRef(Sym({name})), {}, {}, std::move(args), std::move(rtn));
 }
 
 // Stmt::Mut takes Expr::Any. The DSL helper auto-wraps a Term in Expr::Alias.
@@ -53,7 +53,8 @@ static Term::Any generateConstTerm(const Tpe::Any &t) {
       [&](const Type::Ptr &) -> Term::Any { return unsupported(); },            //
       [&](const Type::Arr &) -> Term::Any { return unsupported(); },            //
       [&](const Type::Var &) -> Term::Any { return unsupported(); },            //
-      [&](const Type::Exec &) -> Term::Any { return unsupported(); });
+      [&](const Type::Exec &) -> Term::Any { return unsupported(); },           //
+      [&](const Type::FnRef &) -> Term::Any { return unsupported(); });
 }
 
 static std::vector<Tpe::Any> PrimitiveTypesNoUnit = {
@@ -107,7 +108,8 @@ Expr::Any generateConstValue(const Tpe::Any &t) {
       [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },
       [&](const Type::Nothing &) -> Expr::Any { return unsupported(); }, [&](const Type::Struct &) -> Expr::Any { return unsupported(); },
       [&](const Type::Ptr &) -> Expr::Any { return unsupported(); }, [&](const Type::Arr &) -> Expr::Any { return unsupported(); },
-      [&](const Type::Var &) -> Expr::Any { return unsupported(); }, [&](const Type::Exec &) -> Expr::Any { return unsupported(); });
+      [&](const Type::Var &) -> Expr::Any { return unsupported(); }, [&](const Type::Exec &) -> Expr::Any { return unsupported(); },
+      [&](const Type::FnRef &) -> Expr::Any { return unsupported(); });
 }
 
 template <typename P> static auto assertCompile(const P &p) {

@@ -150,6 +150,7 @@ extension (e: p.Type) {
     case p.Type.Unit0                    => "Unitv"
     case p.Type.Nothing                  => "Nothing"
     case p.Type.Var(name)                => s"#$name"
+    case p.Type.FnRef(name)              => s"&${name.fqn.mkString("_")}"
     case p.Type.Exec(tpeArgs, args, rtn) => ???
   }
 }
@@ -180,11 +181,21 @@ extension (fn: p.Function) {
   }
 }
 
+extension (ivk: p.Expr.Invoke) {
+  def calleeSym: Option[p.Sym] = ivk.callee match {
+    case p.Type.FnRef(s) => Some(s)
+    case _               => None
+  }
+  def calleeName: p.Sym =
+    calleeSym.getOrElse(throw IllegalStateException(s"callee is not a concrete function: ${ivk.callee}"))
+}
+
 private def typeReprOf(t: p.Type): String = t match {
   case p.Type.Struct(name, args) => s"${name.fqn.mkString(".")}<${args.map(typeReprOf).mkString(",")}>"
   case p.Type.Ptr(c, s)          => s"${typeReprOf(c)}*$s"
   case p.Type.Arr(c, l, s)       => s"${typeReprOf(c)}[$l]$s"
   case p.Type.Var(name)          => s"#$name"
+  case p.Type.FnRef(name)        => s"&${name.fqn.mkString(".")}"
   case p.Type.Exec(tv, args, rtn) =>
     s"<${tv.mkString(",")}>(${args.map(typeReprOf).mkString(",")}) => ${typeReprOf(rtn)}"
   case p.Type.Float16 => "F16"
@@ -299,5 +310,6 @@ def scalarBytesOr8(t: p.Type): Int = scalarBytes(t).getOrElse(8L).toInt
 
 def captureRoot(entry: p.Function): Option[(p.Named, p.Type.Struct)] =
   (entry.receiver.toList ::: entry.args).map(_.named).collectFirst {
-    case n @ p.Named(p.Conventions.ThisReceiver | p.Conventions.CaptureArg, p.Type.Ptr(s: p.Type.Struct, _)) => (n, s)
+    case n @ p.Named(p.Conventions.ThisReceiver | p.Conventions.CaptureArg, p.Type.Ptr(s: p.Type.Struct, _), _) =>
+      (n, s)
   }

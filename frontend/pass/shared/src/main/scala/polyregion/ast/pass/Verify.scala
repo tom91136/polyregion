@@ -180,7 +180,7 @@ object Verify {
           case (a, b) if isNumeric(a) && isNumeric(b) => c0
           case (a, b) => c0 ~ s"Cannot cast unrelated type ${a.repr} to ${b.repr}: ${e.repr}"
         }
-      case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+      case p.Expr.Invoke(_, _, receiver, args, _) =>
         val c0 = receiver.map(validateTerm(c, _)).getOrElse(c)
         args.foldLeft(c0)(validateTerm(_, _))
       case p.Expr.ForeignCall(_, args, _) => args.foldLeft(c)(validateTerm(_, _))
@@ -266,7 +266,7 @@ object Verify {
       if (!verifyFunction) Nil
       else
         f.collectWhere[p.Expr] { case ivk: p.Expr.Invoke =>
-          allFnLUT.get(ivk.name) match {
+          ivk.calleeSym.flatMap(allFnLUT.get) match {
             case None | Some(Nil) => s"Callsite `${ivk.repr}` invokes an undefined function" :: Nil
             case Some(candidates) =>
               val matching = candidates.find { f =>
@@ -281,7 +281,7 @@ object Verify {
                 case Some(_) => Nil
                 case None =>
                   val sigs = candidates.map(c => s"  - ${c.signature.repr}").mkString("\n")
-                  s"Callsite `${ivk.repr}` does not match any overload of `${ivk.name.repr}`:\n$sigs" :: Nil
+                  s"Callsite `${ivk.repr}` does not match any overload of `${ivk.callee.repr}`:\n$sigs" :: Nil
               }
           }
         }.flatten

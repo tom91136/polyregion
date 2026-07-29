@@ -27,7 +27,7 @@ class SpecialisationSuite extends munit.FunSuite {
       tpeVars = List("T")
     )
     val callSite =
-      p.Expr.Invoke(generic.name, List(p.Type.IntS32), None, List(p.Term.IntS32Const(1)), p.Type.IntS32)
+      p.Expr.Invoke(p.Type.FnRef(generic.name), List(p.Type.IntS32), None, List(p.Term.IntS32Const(1)), p.Type.IntS32)
     val e   = entry(body = List(p.Stmt.Var(named("r"), Some(callSite)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
     val out = Specialisation(program(e, List(generic)), NoopLog)
 

@@ -26,13 +26,13 @@ class RecursionLowerSuite extends munit.FunSuite {
   private def hasOverflowGuard(out: p.Program): Boolean =
     out.functions.exists(_.body.collectWhere[p.Expr] { case p.Expr.SpecOp(_: p.Spec.Assert) => () }.nonEmpty)
   private def call(name: String, args: List[p.Term], rtn: p.Type = i32) =
-    p.Expr.Invoke(sym(name), Nil, None, args, rtn)
+    p.Expr.Invoke(p.Type.FnRef(sym(name)), Nil, None, args, rtn)
   private def i(v: Int): p.Term = p.Term.IntS32Const(v)
   private def alias(t: p.Term)  = p.Expr.Alias(t)
   private def boolc(b: Boolean) = p.Term.Bool1Const(b)
 
   private def selfCalls(f: p.Function): Int =
-    f.body.collectWhere[p.Expr] { case ivk: p.Expr.Invoke if ivk.name == f.name => () }.size
+    f.body.collectWhere[p.Expr] { case ivk: p.Expr.Invoke if ivk.calleeName == f.name => () }.size
 
   // fib(n) = n<2 ? n : fib(n-1)+fib(n-2), in the ANF shape the frontend emits
   private def fib: p.Function =

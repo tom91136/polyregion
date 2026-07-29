@@ -29,17 +29,34 @@ POLYREGION_EXPORT bool SourcePosition::operator==(const SourcePosition &rhs) con
   return (file == rhs.file) && (line == rhs.line) && (col == rhs.col);
 }
 
-Named::Named(std::string symbol, Type::Any tpe) noexcept : symbol(std::move(symbol)), tpe(std::move(tpe)) {}
+Origin::Origin(std::optional<SourcePosition> pos, std::optional<std::string> source, std::optional<Sym> inlinedFrom) noexcept
+    : pos(std::move(pos)), source(std::move(source)), inlinedFrom(std::move(inlinedFrom)) {}
+size_t Origin::hash_code() const {
+  size_t seed = 0;
+  return seed;
+}
+Origin Origin::withPos(const std::optional<SourcePosition> &v_) const { return Origin(v_, source, inlinedFrom); }
+Origin Origin::withSource(const std::optional<std::string> &v_) const { return Origin(pos, v_, inlinedFrom); }
+Origin Origin::withInlinedFrom(const std::optional<Sym> &v_) const { return Origin(pos, source, v_); }
+POLYREGION_EXPORT bool Origin::operator!=(const Origin &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool Origin::operator==(const Origin &rhs) const { return true; }
+
+Named::Named(std::string symbol, Type::Any tpe, Origin origin) noexcept
+    : symbol(std::move(symbol)), tpe(std::move(tpe)), origin(std::move(origin)) {}
 size_t Named::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(symbol)>()(symbol) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(origin)>()(origin) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Named Named::withSymbol(const std::string &v_) const { return Named(v_, tpe); }
-Named Named::withTpe(const Type::Any &v_) const { return Named(symbol, v_); }
+Named Named::withSymbol(const std::string &v_) const { return Named(v_, tpe, origin); }
+Named Named::withTpe(const Type::Any &v_) const { return Named(symbol, v_, origin); }
+Named Named::withOrigin(const Origin &v_) const { return Named(symbol, tpe, v_); }
 POLYREGION_EXPORT bool Named::operator!=(const Named &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool Named::operator==(const Named &rhs) const { return (symbol == rhs.symbol) && (tpe == rhs.tpe); }
+POLYREGION_EXPORT bool Named::operator==(const Named &rhs) const {
+  return (symbol == rhs.symbol) && (tpe == rhs.tpe) && (origin == rhs.origin);
+}
 
 TypeKind::Base::Base() = default;
 uint32_t TypeKind::Any::id() const { return _v->id(); }
@@ -490,6 +507,22 @@ POLYREGION_EXPORT bool Type::Exec::operator==(const Base &rhs_) const {
 }
 Type::Exec::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exec>(*this)); }
 Type::Any Type::Exec::widen() const { return Any(*this); };
+
+Type::FnRef::FnRef(Sym name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
+uint32_t Type::FnRef::id() const { return variant_id; };
+size_t Type::FnRef::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Type::FnRef Type::FnRef::withName(const Sym &v_) const { return Type::FnRef(v_); }
+POLYREGION_EXPORT bool Type::FnRef::operator==(const Type::FnRef &rhs) const { return (this->name == rhs.name); }
+POLYREGION_EXPORT bool Type::FnRef::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Type::FnRef &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Type::FnRef::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<FnRef>(*this)); }
+Type::Any Type::FnRef::widen() const { return Any(*this); };
 
 PathStep::Base::Base() = default;
 uint32_t PathStep::Any::id() const { return _v->id(); }
@@ -1070,27 +1103,27 @@ POLYREGION_EXPORT bool Expr::Alloc::operator==(const Base &rhs_) const {
 Expr::Alloc::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alloc>(*this)); }
 Expr::Any Expr::Alloc::widen() const { return Any(*this); };
 
-Expr::Invoke::Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args,
+Expr::Invoke::Invoke(Type::Any callee, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args,
                      Type::Any rtn) noexcept
-    : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)),
+    : Expr::Base(rtn), callee(std::move(callee)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)),
       rtn(std::move(rtn)) {}
 uint32_t Expr::Invoke::id() const { return variant_id; };
 size_t Expr::Invoke::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(callee)>()(callee) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Expr::Invoke Expr::Invoke::withName(const Sym &v_) const { return Expr::Invoke(v_, tpeArgs, receiver, args, rtn); }
-Expr::Invoke Expr::Invoke::withTpeArgs(const std::vector<Type::Any> &v_) const { return Expr::Invoke(name, v_, receiver, args, rtn); }
-Expr::Invoke Expr::Invoke::withReceiver(const std::optional<Term::Any> &v_) const { return Expr::Invoke(name, tpeArgs, v_, args, rtn); }
-Expr::Invoke Expr::Invoke::withArgs(const std::vector<Term::Any> &v_) const { return Expr::Invoke(name, tpeArgs, receiver, v_, rtn); }
-Expr::Invoke Expr::Invoke::withRtn(const Type::Any &v_) const { return Expr::Invoke(name, tpeArgs, receiver, args, v_); }
+Expr::Invoke Expr::Invoke::withCallee(const Type::Any &v_) const { return Expr::Invoke(v_, tpeArgs, receiver, args, rtn); }
+Expr::Invoke Expr::Invoke::withTpeArgs(const std::vector<Type::Any> &v_) const { return Expr::Invoke(callee, v_, receiver, args, rtn); }
+Expr::Invoke Expr::Invoke::withReceiver(const std::optional<Term::Any> &v_) const { return Expr::Invoke(callee, tpeArgs, v_, args, rtn); }
+Expr::Invoke Expr::Invoke::withArgs(const std::vector<Term::Any> &v_) const { return Expr::Invoke(callee, tpeArgs, receiver, v_, rtn); }
+Expr::Invoke Expr::Invoke::withRtn(const Type::Any &v_) const { return Expr::Invoke(callee, tpeArgs, receiver, args, v_); }
 POLYREGION_EXPORT bool Expr::Invoke::operator==(const Expr::Invoke &rhs) const {
-  return (this->name == rhs.name) &&
+  return (this->callee == rhs.callee) &&
          std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
          ((!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver)) &&
          std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
@@ -3448,6 +3481,9 @@ std::size_t std::hash<polyregion::polyast::Sym>::operator()(const polyregion::po
 std::size_t std::hash<polyregion::polyast::SourcePosition>::operator()(const polyregion::polyast::SourcePosition &x) const noexcept {
   return x.hash_code();
 }
+std::size_t std::hash<polyregion::polyast::Origin>::operator()(const polyregion::polyast::Origin &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Named>::operator()(const polyregion::polyast::Named &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::TypeKind::Any>::operator()(const polyregion::polyast::TypeKind::Any &x) const noexcept {
   return x.hash_code();
@@ -3541,6 +3577,9 @@ std::size_t std::hash<polyregion::polyast::Type::Var>::operator()(const polyregi
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Type::Exec>::operator()(const polyregion::polyast::Type::Exec &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Type::FnRef>::operator()(const polyregion::polyast::Type::FnRef &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::PathStep::Any>::operator()(const polyregion::polyast::PathStep::Any &x) const noexcept {

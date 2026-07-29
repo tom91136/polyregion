@@ -89,6 +89,16 @@ Opt<Type::Any> polyast::extractComponent(const Type::Any &t) {
   return t;
 }
 
+Opt<Sym> polyast::calleeSym(const Expr::Invoke &ivk) {
+  if (auto f = ivk.callee.get<Type::FnRef>()) return std::move(f->name);
+  return {};
+}
+
+Sym polyast::calleeName(const Expr::Invoke &ivk) {
+  if (auto s = calleeSym(ivk)) return std::move(*s);
+  throw std::logic_error("callee is not a concrete function: " + repr(ivk.callee));
+}
+
 Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
   return t.match_total([&](const Type::Float16 &) -> Opt<size_t> { return 16 / 8; }, //
                        [&](const Type::Float32 &) -> Opt<size_t> { return 32 / 8; }, //
@@ -112,7 +122,8 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
                        [&](const Type::Ptr &) -> Opt<size_t> { return {}; },    //
                        [&](const Type::Arr &) -> Opt<size_t> { return {}; },    //
                        [&](const Type::Var &) -> Opt<size_t> { return {}; },    //
-                       [&](const Type::Exec &) -> Opt<size_t> { return {}; });
+                       [&](const Type::Exec &) -> Opt<size_t> { return {}; },   //
+                       [&](const Type::FnRef &) -> Opt<size_t> { return {}; });
 }
 
 Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table) {
@@ -194,7 +205,8 @@ Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
       [&](const Type::Ptr &t) -> Term::Any { return unsupported(t, x); },    //
       [&](const Type::Arr &t) -> Term::Any { return unsupported(t, x); },    //
       [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },    //
-      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }    //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); },   //
+      [&](const Type::FnRef &t) -> Term::Any { return unsupported(t, x); }   //
   );
 }
 

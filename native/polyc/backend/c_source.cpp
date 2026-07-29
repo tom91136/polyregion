@@ -231,7 +231,7 @@ struct CLAddressSpaceTracePass {
     auto fns = p.functions ^ filter([](const Function &f) { return !f.isEntry; }) ^ map(remap);
 
     auto sigOf = [](const Expr::Invoke &inv) {
-      return Signature(inv.name, /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](auto &e) { return e.tpe(); }),
+      return Signature(calleeName(inv), /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](auto &e) { return e.tpe(); }),
                        /*moduleCaptures*/ {}, /*termCaptures*/ {}, inv.rtn);
     };
 
@@ -281,7 +281,7 @@ struct CLAddressSpaceTracePass {
     auto spaces = [&](auto &a) { return a.template collect_all<TypeSpace::Any>(); };
     const auto renameInvokes = [&](const Function &f) {
       return f.template modify_all<Expr::Invoke>(
-          [&](auto &inv) { return inv.withName(spaceSpecialisedName(inv.name, inv.args ^ flat_map(spaces))); });
+          [&](auto &inv) { return inv.withCallee(Type::FnRef(spaceSpecialisedName(calleeName(inv), inv.args ^ flat_map(spaces)))); });
     };
     const auto spaceSpecialisedFns =     //
         functionTable                    //
@@ -372,7 +372,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              },                                                                                  //
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
-                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); });
+                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
+                             [&](const Type::FnRef &x) -> std::string { throw std::logic_error("Type::FnRef should be erased"); });
     case Dialect::OpenCL1_1:
       return tpe.match_total([&](const Type::Float16 &) { return "half"s; },   //
                              [&](const Type::Float32 &) { return "float"s; },  //
@@ -410,7 +411,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              // an array carries no own address-space qualifier; it lives in its container's space
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
-                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); });
+                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
+                             [&](const Type::FnRef &x) -> std::string { throw std::logic_error("Type::FnRef should be erased"); });
   }
 }
 
@@ -632,7 +634,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       },
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
       [&](const Expr::Invoke &x) {
-        return fmt::format("{}({})", normalise(x.name), x.args ^ mk_string(", ", [&](auto &arg) { return mkTerm(arg); }));
+        return fmt::format("{}({})", normalise(calleeName(x)), x.args ^ mk_string(", ", [&](auto &arg) { return mkTerm(arg); }));
       }, //
       [&](const Expr::Index &x) { return fmt::format("{}[{}]", mkTerm(x.lhs), mkTerm(x.idx)); },
       [&](const Expr::RefTo &x) {

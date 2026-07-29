@@ -158,7 +158,8 @@ object FnInline extends ProgramPass {
   private def resolveOverload(ivk: p.Expr.Invoke, program: p.Program): p.Function = {
     def flatParams(f: p.Function): List[p.Type] =
       f.moduleCaptures.map(_.named.tpe) ++ f.termCaptures.map(_.named.tpe) ++ f.args.map(_.named.tpe)
-    val candidates = program.functions.distinct.filter(f => f.name == ivk.name && flatParams(f).size == ivk.args.size)
+    val candidates =
+      program.functions.distinct.filter(f => f.name == ivk.calleeName && flatParams(f).size == ivk.args.size)
     candidates.filter { f =>
       val varToTpeLut = f.tpeVars.zip(ivk.tpeArgs).toMap
       val sig = f.signature.modifyAll[p.Type](_.mapLeaf {

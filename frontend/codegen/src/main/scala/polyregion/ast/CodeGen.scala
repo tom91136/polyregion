@@ -126,6 +126,7 @@ private[polyregion] object CodeGen {
     val structs =
       deriveStruct[Sym]()
         :: deriveStruct[SourcePosition]()
+        :: deriveStruct[Origin]()
         :: deriveStruct[Named]()
         :: deriveStruct[Type.Kind]()
         :: deriveStruct[Type.Space]()

@@ -85,6 +85,7 @@ object PolyAstToExpr {
         '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(space) }) }
       case p.Type.Arr(component, length, space) =>
         '{ p.Type.Arr(${ Expr(component) }, ${ Expr(length) }, ${ Expr(space) }) }
+      case p.Type.FnRef(name)              => '{ p.Type.FnRef(${ Expr(name) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
     }

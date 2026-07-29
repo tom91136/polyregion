@@ -37,6 +37,9 @@ Opt<Type::Any> extractComponent(const Type::Any &t);
 
 Opt<size_t> primitiveSize(const Type::Any &t);
 
+Opt<Sym> calleeSym(const Expr::Invoke &ivk);
+Sym calleeName(const Expr::Invoke &ivk);
+
 std::pair<size_t, Opt<size_t>> countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table);
 
 bool isSelfOpaque(const Type::Any &tpe);
@@ -132,7 +135,8 @@ template <typename F> Term::Any numeric(const Type::Any &tpe, F tagged) {
       [&](const Type::Ptr &t) -> Term::Any { return unsupported(t); },    //
       [&](const Type::Arr &t) -> Term::Any { return unsupported(t); },    //
       [&](const Type::Var &t) -> Term::Any { return unsupported(t); },    //
-      [&](const Type::Exec &t) -> Term::Any { return unsupported(t); }    //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(t); },   //
+      [&](const Type::FnRef &t) -> Term::Any { return unsupported(t); }   //
   );
 }
 

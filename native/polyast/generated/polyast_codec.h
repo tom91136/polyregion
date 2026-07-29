@@ -297,6 +297,8 @@ namespace Type {
 [[nodiscard]] POLYREGION_EXPORT json var_to_json(const Type::Var &);
 [[nodiscard]] POLYREGION_EXPORT Type::Exec exec_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json exec_to_json(const Type::Exec &);
+[[nodiscard]] POLYREGION_EXPORT Type::FnRef fnref_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json fnref_to_json(const Type::FnRef &);
 [[nodiscard]] POLYREGION_EXPORT Type::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Type::Any &);
 } // namespace Type
@@ -342,6 +344,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json sym_to_json(const Sym &);
 [[nodiscard]] POLYREGION_EXPORT SourcePosition sourceposition_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json sourceposition_to_json(const SourcePosition &);
+[[nodiscard]] POLYREGION_EXPORT Origin origin_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json origin_to_json(const Origin &);
 [[nodiscard]] POLYREGION_EXPORT Named named_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json named_to_json(const Named &);
 [[nodiscard]] POLYREGION_EXPORT Overload overload_from_json(const json &);

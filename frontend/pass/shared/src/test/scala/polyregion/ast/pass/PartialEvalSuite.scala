@@ -143,7 +143,7 @@ class PartialEvalSuite extends munit.FunSuite {
 
   test("keep a dead binding whose initialiser has effects (Invoke)") {
     val u   = named("u", p.Type.Unit0)
-    val ivk = p.Expr.Invoke(sym("f"), Nil, None, Nil, p.Type.Unit0)
+    val ivk = p.Expr.Invoke(p.Type.FnRef(sym("f")), Nil, None, Nil, p.Type.Unit0)
     val out = pe(
       List(p.Stmt.Var(u, Some(ivk)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))
     )
@@ -595,7 +595,7 @@ class PartialEvalSuite extends munit.FunSuite {
   // --- unreachable code after a terminator ---
 
   test("code after a Return is dropped, even a side-effecting call") {
-    val ivk = p.Expr.Invoke(sym("f"), Nil, None, Nil, p.Type.Unit0)
+    val ivk = p.Expr.Invoke(p.Type.FnRef(sym("f")), Nil, None, Nil, p.Type.Unit0)
     val out = pe(
       List(
         p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(1))),
@@ -759,7 +759,7 @@ class PartialEvalSuite extends munit.FunSuite {
       List(
         p.Stmt.Var(px, Some(p.Expr.RefTo(selectT(x), None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
         p.Stmt.Var(a, Some(mul)),
-        p.Stmt.Var(c, Some(p.Expr.Invoke(sym("f"), Nil, None, List(selectT(px)), p.Type.Unit0))),
+        p.Stmt.Var(c, Some(p.Expr.Invoke(p.Type.FnRef(sym("f")), Nil, None, List(selectT(px)), p.Type.Unit0))),
         p.Stmt.Var(b, Some(mul)),
         p.Stmt.Var(s, Some(p.Expr.IntrOp(p.Intr.Add(selectT(a), selectT(b), p.Type.IntS32)))),
         p.Stmt.Return(p.Expr.Alias(selectT(s)))
@@ -797,7 +797,7 @@ class PartialEvalSuite extends munit.FunSuite {
     val out = pe(
       List(
         p.Stmt.Var(a, Some(mul)),
-        p.Stmt.Var(c, Some(p.Expr.Invoke(sym("f"), Nil, None, Nil, p.Type.Unit0))),
+        p.Stmt.Var(c, Some(p.Expr.Invoke(p.Type.FnRef(sym("f")), Nil, None, Nil, p.Type.Unit0))),
         p.Stmt.Var(b, Some(mul)),
         p.Stmt.Var(s, Some(p.Expr.IntrOp(p.Intr.Add(selectT(a), selectT(b), p.Type.IntS32)))),
         p.Stmt.Return(p.Expr.Alias(selectT(s)))

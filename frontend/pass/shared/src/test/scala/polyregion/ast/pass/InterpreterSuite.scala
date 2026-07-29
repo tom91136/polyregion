@@ -638,7 +638,13 @@ class InterpreterSuite extends munit.FunSuite {
       )
     )
     def invoke(x: Int, y: Int) =
-      p.Expr.Invoke(p.Sym(List("mymax")), Nil, None, List(p.Term.IntS32Const(x), p.Term.IntS32Const(y)), i32)
+      p.Expr.Invoke(
+        p.Type.FnRef(p.Sym(List("mymax"))),
+        Nil,
+        None,
+        List(p.Term.IntS32Const(x), p.Term.IntS32Const(y)),
+        i32
+      )
     val res = named("res", i32p)
     val body = List(
       vlet(named("hi", i32), invoke(3, 7)),

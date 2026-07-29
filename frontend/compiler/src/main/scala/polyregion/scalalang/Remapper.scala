@@ -261,7 +261,7 @@ object Remapper {
 
         // termCaptures filled by Compiler.patchFn after this pass.
         val ivk: p.Expr.Invoke = p.Expr.Invoke(
-          p.Sym(sym.fullName),
+          p.Type.FnRef(p.Sym(sym.fullName)),
           receiverTpeArgs ::: tpeArgs,
           receiver.map(asTerm),
           args.map(asTerm),

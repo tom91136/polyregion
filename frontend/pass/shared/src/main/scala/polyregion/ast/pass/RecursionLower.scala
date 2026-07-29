@@ -55,7 +55,9 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     val byName = program.functions.map(f => f.name -> f).toMap
     val edges = program.functions
       .map(f =>
-        f.name -> f.body.collectWhere[p.Expr] { case i: p.Expr.Invoke if byName.contains(i.name) => i.name }.distinct
+        f.name -> f.body
+          .collectWhere[p.Expr] { case i: p.Expr.Invoke if byName.contains(i.calleeName) => i.calleeName }
+          .distinct
       )
       .toMap
     // a recursive cluster is an SCC of size > 1 (mutual) or a singleton with a self-edge (direct self-call)
@@ -152,8 +154,8 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
           case x                                   => x
         }
         .modifyAll[p.Expr] {
-          case ivk: p.Expr.Invoke if idxOf.contains(ivk.name) =>
-            p.Expr.Invoke(sccName, Nil, None, mergedArgs(idxOf(ivk.name), ivk.args), rtn)
+          case ivk: p.Expr.Invoke if idxOf.contains(ivk.calleeName) =>
+            p.Expr.Invoke(p.Type.FnRef(sccName), Nil, None, mergedArgs(idxOf(ivk.calleeName), ivk.args), rtn)
           case x => x
         }
     }
@@ -189,19 +191,19 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
       val args  = mergedArgs(i, m.args.map(a => sel(a.named)))
       val temps = args.map(a => p.Named(fresh("_scc_w"), a.tpe))
       val binds = temps.zip(args).map((t, a) => p.Stmt.Var(t, Some(alias(a)), isMutable = true))
-      m.copy(body = binds :+ p.Stmt.Return(p.Expr.Invoke(sccName, Nil, None, temps.map(sel), rtn)))
+      m.copy(body = binds :+ p.Stmt.Return(p.Expr.Invoke(p.Type.FnRef(sccName), Nil, None, temps.map(sel), rtn)))
     }
     (merged, wrappers)
   }
 
   private def containsSelfCall(f: p.Function, stmts: List[p.Stmt]): Boolean =
-    stmts.collectWhere[p.Expr] { case ivk: p.Expr.Invoke if ivk.name == f.name => () }.nonEmpty
+    stmts.collectWhere[p.Expr] { case ivk: p.Expr.Invoke if ivk.calleeName == f.name => () }.nonEmpty
 
   // a function is tail-recursive when every self-call is a direct `return f(...)` and no return sits inside
   // a loop (the simple loop rewrite escapes only via the maintained while-condition, not from a nested loop)
   private def isTailRecursive(f: p.Function): Boolean = {
-    val allSelf  = f.body.collectWhere[p.Expr] { case i: p.Expr.Invoke if i.name == f.name => i }
-    val tailSelf = f.body.collectWhere[p.Stmt] { case p.Stmt.Return(i: p.Expr.Invoke) if i.name == f.name => i }
+    val allSelf  = f.body.collectWhere[p.Expr] { case i: p.Expr.Invoke if i.calleeName == f.name => i }
+    val tailSelf = f.body.collectWhere[p.Stmt] { case p.Stmt.Return(i: p.Expr.Invoke) if i.calleeName == f.name => i }
     allSelf.nonEmpty && allSelf.sizeIs == tailSelf.size && !returnInLoop(f.body)
   }
 
@@ -239,7 +241,7 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     val body = f.body.map(_.modifyAll[p.Term](relocal))
 
     def repl(s: p.Stmt): List[p.Stmt] = s match {
-      case p.Stmt.Return(i: p.Expr.Invoke) if i.name == f.name =>
+      case p.Stmt.Return(i: p.Expr.Invoke) if i.calleeName == f.name =>
         require(i.args.sizeIs == locals.size, s"RecursionLower: tail arity mismatch in ${f.name.repr}")
         val temps = i.args.map(a => p.Named(fresh("#tco_arg"), a.tpe))
         temps.zip(i.args).map((t, a) => p.Stmt.Var(t, Some(alias(a)), isMutable = false)) ++
@@ -268,7 +270,7 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     var nextId                              = 0
     def freshId(): Int                      = { val i = nextId; nextId += 1; i }
     def emit(id: Int, b: Block): Unit       = blocks += (id -> b)
-    def isSelf(ivk: p.Expr.Invoke): Boolean = ivk.name == f.name
+    def isSelf(ivk: p.Expr.Invoke): Boolean = ivk.calleeName == f.name
 
     // pop sentinel: a frame that fell off the end (void fall-through) just pops
     val popId = freshId()

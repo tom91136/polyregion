@@ -180,7 +180,8 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
         return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
       }, //
       [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },
-      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); });
+      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); },
+      [&](const Type::FnRef &x) -> llvm::Type * { throw BackendException("Type::FnRef should be erased before LLVM lowering"); });
 }
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
