@@ -295,17 +295,26 @@ struct CLAddressSpaceTracePass {
   }
 };
 
-static std::string normalise(const std::string &s) {
+std::string backend::CSource::normalise(const std::string &s) const {
+  // a member named `long4` would otherwise make `x.long4__x` parse as an illegal vector swizzle
+  static const Set<std::string> reserved = [] {
+    Set<std::string> ws = {"global", "local", "kernel", "constant", "private"};
+    for (const auto *base : {"char", "uchar", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "half"})
+      for (const auto *width : {"2", "3", "4", "8", "16"})
+        ws.emplace(std::string(base) + width);
+    return ws;
+  }();
+  static const Set<std::string> mslReserved = {"device", "threadgroup", "thread"};
   // allowlist non-identifier chars to `_`: a stray `=` from `operator=` parses as an OpenCL assignment
-  return (s ^ map([](const char c) {
-            return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') ? c : '_';
-          }))                                //
-         ^ replace_all("global", "_global")  //
-         ^ replace_all("local", "_local")    //
-         ^ replace_all("kernel", "_kernel"); //
+  auto out = s ^ map([](const char c) {
+               return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') ? c : '_';
+             });
+  // escape whole identifiers only: a symbol merely containing `kernel` must stay verbatim to match the launch lookup
+  if (reserved.contains(out) || (dialect == Dialect::MSL1_0 && mslReserved.contains(out))) out = "_" + out;
+  return out;
 }
 
-static std::string normalise(const Sym &s) { return normalise(repr(s)); }
+std::string backend::CSource::normalise(const Sym &s) const { return normalise(repr(s)); }
 
 Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::string &fieldName) const {
   if (auto s = owner.get<Type::Struct>()) {
@@ -828,11 +837,20 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         return std::pair{normalise(def.name), def.members ^ map([&](auto &m) { return std::pair{normalise(m.symbol), m.tpe}; })};
       }) ^
       to<Map>();
-  const Set<Sym> zeroSizeStructs =
+  Set<Sym> zeroSizeStructs =
       program.defs ^ filter([](auto &def) { return def.members.empty(); }) ^ map([](auto &def) { return def.name; }) ^ to<Set>();
-  auto realStorageMember = [&](const Named &m) {
-    return !(m.tpe.template get<Type::Struct>() ^ exists([&](auto &s) { return zeroSizeStructs.contains(s.name); }));
+  auto zeroSizeMember = [&](const Named &m) {
+    return m.tpe.template get<Type::Struct>() ^ exists([&](auto &s) { return zeroSizeStructs.contains(s.name); });
   };
+  // metal rejects an all-zero-size body as a `[[buffer]]` pointee; OpenCL-C tolerates the empty member
+  if (dialect == Dialect::MSL1_0)
+    for (bool changed = true; changed;) {
+      const auto seen = zeroSizeStructs.size();
+      for (const auto &def : program.defs)
+        if (def.members ^ forall(zeroSizeMember)) zeroSizeStructs.emplace(def.name);
+      changed = zeroSizeStructs.size() != seen;
+    }
+  auto realStorageMember = [&](const Named &m) { return !zeroSizeMember(m); };
 
   // only by-value members create a definition-order dependency; pointer members resolve via the forward decl
   auto structsAndDeps = program.defs ^ map([&](auto &def) {
