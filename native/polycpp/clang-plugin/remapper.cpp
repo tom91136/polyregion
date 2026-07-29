@@ -334,6 +334,12 @@ std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
   return decl->getDeclName().getAsString();
 }
 
+[[nodiscard]] static std::string fieldDeclName(const clang::FieldDecl *field) {
+  // two unnamed anonymous struct/union members in one record would otherwise collide on the empty symbol
+  if (field->isAnonymousStructOrUnion()) return fmt::format("#anon_{}", field->getFieldIndex());
+  return field->getName().str();
+}
+
 static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
   auto rhsTpe = expr.tpe();
 
@@ -574,9 +580,26 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                 if (const auto structTpe = instancePtr->comp.get<Type::Struct>()) {
                   for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
                     if (init->isAnyMemberInitializer()) {
-                      auto tpe = handleType(init->getAnyMember()->getType(), r);
-                      auto memberName = repr(structTpe->name) + "::" + init->getMember()->getNameAsString();
-                      auto member = select(r, {receiver->named}, Named(memberName, tpe));
+                      auto fieldNamed = [&](const clang::FieldDecl *field) {
+                        const auto owner = handleType(context.getCanonicalTagType(field->getParent()), r).template get<Type::Struct>();
+                        if (!owner) raise("Field owner is not a struct: " + field->getNameAsString());
+                        return Named(fmt::format("{}::{}", repr(owner->name), fieldDeclName(field)), handleType(field->getType(), r));
+                      };
+                      // an anonymous struct/union member initialises indirectly, so the leaf is reached through every
+                      // enclosing anonymous record rather than named on the ctor's own struct
+                      const auto chain = [&]() -> Vector<const clang::FieldDecl *> {
+                        if (const auto direct = init->getMember()) return {direct};
+                        return init->getIndirectMember()->chain() //
+                               | collect([](auto *d) -> Opt<const clang::FieldDecl *> {
+                                   if (const auto f = llvm::dyn_cast<clang::FieldDecl>(d)) return f;
+                                   return {};
+                                 }) //
+                               | to_vector();
+                      }();
+                      const auto leaf = fieldNamed(chain.back());
+                      const auto tpe = leaf.tpe;
+                      const auto prefix = chain | take(chain.size() - 1) | map(fieldNamed) | prepend(receiver->named) | to_vector();
+                      auto member = select(r, prefix, leaf);
                       if (const auto arr = tpe.template get<Type::Arr>())
                         copyArray(r, member, r.newVar(handleExpr(init->getInit(), r)), *arr);
                       else r.push(Stmt::Mut(member, conform(r, handleExpr(init->getInit(), r), tpe)));
@@ -617,6 +640,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                             true, rtnType, parent, true);
                         r.push(chainedCtorStmts);
                       }
+                    } else if (init->isDelegatingInitializer()) {
+                      r.push(r.scoped([&](auto &r) { auto _ = r.newVar(handleExpr(init->getInit(), r)); }, true, rtnType, parent, true));
                     } else raise("Unknown initializer type!");
                   }
                   if (parent && parent->isUnion && !parent->members.empty() && args.size() == 1 && ctor->isDefaulted() &&
@@ -692,6 +717,16 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   // shared_ptr's contents in place.
   auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
   r.structs.emplace(name, stub);
+
+  // a forward-declared record stays opaque: only pointers to it are legal and bases()/layout would read garbage. the
+  // member-less layout is still registered, otherwise a `Fwd*` member carries a null TypeLayout that the reflect
+  // runtime dereferences when mirroring a non-null pointee
+  const auto def = decl->getDefinition();
+  if (!def) {
+    r.layouts.emplace(name, std::make_shared<StructLayout>(name, 1, 1, Vector<StructLayoutMember>{}));
+    return stub;
+  }
+  decl = def;
 
   auto resolveStruct = [&](const Vector<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
                            const Vector<StructLayoutMember> &members) {
@@ -778,7 +813,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     Vector<StructLayoutMember> all;
     Map<std::string, size_t> bitfieldStorageIndices;
     for (auto *field : decl->fields()) {
-      const auto fieldName = fmt::format("{}::{}", name, field->getName().str());
+      const auto fieldName = fmt::format("{}::{}", name, fieldDeclName(field));
       if (!field->isBitField()) {
         if (field->isZeroSize(context)) {
           const auto e = emptyStruct();
@@ -815,6 +850,10 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   };
 
   if (const auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
+    if (cxxRecord->getNumVBases() != 0)
+      raise(fmt::format("Unsupported virtual base in {} at {} (a shared base subobject has no place in the flattened record layout)", name,
+                        decl->getLocation().printToString(context.getSourceManager())));
+
     auto resolveBases = [&](auto &&bases) {
       return bases | collect([&](auto &cls) -> Opt<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> {
                if (auto baseRecordTpe = llvm::dyn_cast<clang::RecordType>(cls.getType().getDesugaredType(context))) {
@@ -830,7 +869,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
              to_vector();
     };
 
-    const auto parents = resolveBases(cxxRecord->bases()) ^ concat(resolveBases(cxxRecord->vbases()));
+    const auto parents = resolveBases(cxxRecord->bases());
 
     if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields());
     else {
@@ -1061,7 +1100,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     };
 
     auto sourceNamed = [&](const clang::FieldDecl *field) {
-      return Named(fmt::format("{}::{}", fieldOwnerName(field), field->getName().str()), handleType(field->getType(), r));
+      return Named(fmt::format("{}::{}", fieldOwnerName(field), fieldDeclName(field)), handleType(field->getType(), r));
     };
 
     auto storageNamed = [&](const clang::FieldDecl *field) {
@@ -1195,7 +1234,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               const auto *init = expr->getInit(i++);
               if (llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
               const auto ftpe = handleType(field->getType(), r);
-              const auto member = select(r, {allocated}, Named(repr(structTpe->name) + "::" + field->getNameAsString(), ftpe));
+              const auto member = select(r, {allocated}, Named(repr(structTpe->name) + "::" + fieldDeclName(field), ftpe));
               if (const auto arrTpe = ftpe.get<Type::Arr>()) {
                 if (const auto elems = llvm::dyn_cast<clang::InitListExpr>(init)) {
                   initArray(member, *arrTpe, elems);
