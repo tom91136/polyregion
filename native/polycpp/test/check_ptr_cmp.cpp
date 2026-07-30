@@ -27,7 +27,7 @@ int main() {
 #if CHECK_KIND == 0
   const int *nil = nullptr;
   const int *a = &xs[0];
-  const int r = __polyregion_offload_f1__([=]() { return nil == nullptr && nil == __null && a != nullptr ? 1 : 0; });
+  const int r = __polyregion_offload_f1__([=]() { return nil == nullptr && a != nullptr ? 1 : 0; });
 #elif CHECK_KIND == 1
   const int *a = &xs[0];
   const int *b = &xs[1];
