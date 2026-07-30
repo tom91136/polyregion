@@ -62,7 +62,11 @@ int main() {
   const int r = __polyregion_offload_f1__([=]() { return int(); });
 #elif CHECK_KIND == 3
   const int r = __polyregion_offload_f1__([=]() {
+  #ifdef _MSC_VER
+    const int *p = nullptr;
+  #else
     const int *p = __null;
+  #endif
     return p ? 0 : 1;
   });
 #elif CHECK_KIND == 4
