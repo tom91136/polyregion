@@ -1263,6 +1263,36 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return Expr::Alias(Term::Poison(tpe));
       },
       [&](const clang::ImplicitValueInitExpr *expr) -> Expr::Any { return zeroInitialise(r, handleType(expr->getType(), r)); },
+      // `T()` for a scalar, same value-init as the implicit form above
+      [&](const clang::CXXScalarValueInitExpr *expr) -> Expr::Any { return zeroInitialise(r, handleType(expr->getType(), r)); },
+      // both wrap the expression the callee/field was declared with, so lower that
+      [&](const clang::CXXDefaultArgExpr *expr) -> Expr::Any { return handleExpr(expr->getExpr(), r); },
+      [&](const clang::CXXDefaultInitExpr *expr) -> Expr::Any { return handleExpr(expr->getExpr(), r); },
+      // `__null` is a null pointer constant of integral type; the enclosing cast turns it into a pointer
+      [&](const clang::GNUNullExpr *expr) -> Expr::Any { return integralConstOfType(handleType(expr->getType(), r), 0); },
+      [&](const clang::SizeOfPackExpr *expr) -> Expr::Any {
+        const auto tpe = handleType(expr->getType(), r);
+        if (expr->isValueDependent())
+          raise(fmt::format("Unsupported sizeof... at {} (pack length is not yet known)",
+                            expr->getBeginLoc().printToString(context.getSourceManager())));
+        return integralConstOfType(tpe, expr->getPackLength());
+      },
+      [&](const clang::SourceLocExpr *expr) -> Expr::Any {
+        const auto tpe = handleType(expr->getType(), r);
+        if (clang::Expr::EvalResult eval; expr->EvaluateAsInt(eval, context))
+          return integralConstOfType(tpe, eval.Val.getInt().getZExtValue());
+        // __builtin_FILE/FUNCTION yield a string, which has no device-side counterpart
+        raise(fmt::format("Unsupported {} at {} (only the integral source-location builtins lower)", expr->getBuiltinStr(),
+                          expr->getBeginLoc().printToString(context.getSourceManager())));
+      },
+      [&](const clang::CXXThrowExpr *expr) -> Expr::Any {
+        raise(fmt::format("Unsupported throw at {} (offload regions cannot throw or unwind)",
+                          expr->getBeginLoc().printToString(context.getSourceManager())));
+      },
+      [&](const clang::CXXDeleteExpr *expr) -> Expr::Any {
+        raise(fmt::format("Unsupported delete at {} (offload regions cannot release host allocations)",
+                          expr->getBeginLoc().printToString(context.getSourceManager())));
+      },
       [&](const clang::ArrayInitLoopExpr *expr) -> Expr::Any { return handleExpr(expr->getCommonExpr()->getSourceExpr(), r); },
       [&](const clang::UnaryExprOrTypeTraitExpr *expr) -> Expr::Any {
         const auto tpe = handleType(expr->getType(), r);
