@@ -1026,6 +1026,21 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   else return *result;
 }
 
+[[nodiscard]] static bool destroysWithoutEffect(const clang::CXXRecordDecl *rd) {
+  if (!rd) return true;
+  if (rd->hasTrivialDestructor()) return true;
+  const auto dtor = rd->getDestructor();
+  if (!dtor) return false;
+  const auto body = llvm::dyn_cast_if_present<clang::CompoundStmt>(dtor->getBody());
+  if (!body || !body->body_empty()) return false;
+  // base and member dtors run outside the body, so an empty body on its own proves nothing
+  for (const auto &base : rd->bases())
+    if (!destroysWithoutEffect(base.getType()->getAsCXXRecordDecl())) return false;
+  for (const auto *field : rd->fields())
+    if (!destroysWithoutEffect(field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl())) return false;
+  return true;
+}
+
 Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
   auto failExpr = [&]() -> Expr::Any {
@@ -1226,6 +1241,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::MaterializeTemporaryExpr *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
       [&](const clang::ExprWithCleanups *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
+      // dropping the binding drops the destructor call, so only pass through when destruction is a no-op
+      [&](const clang::CXXBindTemporaryExpr *expr) -> Expr::Any {
+        if (!destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl()))
+          raise(fmt::format("Unsupported temporary of type {} at {} (dropping it would drop its destructor's effects)",
+                            expr->getType().getAsString(), expr->getBeginLoc().printToString(context.getSourceManager())));
+        return handleExpr(expr->getSubExpr(), r);
+      },
       // scalar/pointer brace-init: T{} is zero, T{x} is x (member inits like `_M_len{__len}` in libstdc++)
       [&](const clang::InitListExpr *expr) -> Expr::Any {
         const auto tpe = handleType(expr->getType(), r);
@@ -1262,6 +1284,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         failExpr();
         return Expr::Alias(Term::Poison(tpe));
       },
+      // a `std::initializer_list<T>` views a backing array the frontend materialises as the sub-expression; member roles
+      // come from their types, never names, as libstdc++/libc++ hold begin+length where MSVC holds begin+end
       [&](const clang::ImplicitValueInitExpr *expr) -> Expr::Any { return zeroInitialise(r, handleType(expr->getType(), r)); },
       // `T()` for a scalar, same value-init as the implicit form above
       [&](const clang::CXXScalarValueInitExpr *expr) -> Expr::Any { return zeroInitialise(r, handleType(expr->getType(), r)); },
@@ -1426,6 +1450,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return integralConstOfType(handleType(stmt->getType(), r), stmt->getValue());
       },
       [&](const clang::StringLiteral *stmt) -> Expr::Any { return Expr::Alias(Term::StringConst(stmt->getString().str())); },
+      // `__func__` carries its expansion as a StringLiteral; unexpanded (dependent) forms have none
+      [&](const clang::PredefinedExpr *stmt) -> Expr::Any {
+        const auto name = stmt->getFunctionName();
+        return name ? handleExpr(name, r) : failExpr();
+      },
       [&](const clang::FloatingLiteral *stmt) -> Expr::Any {
         const auto apFloat = stmt->getValue();
         if (auto builtin = llvm::dyn_cast<clang::BuiltinType>(stmt->getType().getDesugaredType(context))) {
@@ -1633,6 +1662,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           return *drV;
         };
 
+        // pointer relations compare addresses, not pointees; the compare intrinsics need an integral, unsigned for address order
+        const auto addrRel = lhs.tpe().is<Type::Ptr>() || rhs.tpe().is<Type::Ptr>();
+        auto rl = [&]() -> Term::Any { return addrRel ? r.newVar(Expr::Cast(lhs, Type::IntU64())) : dl(); };
+        auto rr = [&]() -> Term::Any { return addrRel ? r.newVar(Expr::Cast(rhs, Type::IntU64())) : dr(); };
+
         const auto compTpe = clang::isa<clang::CompoundAssignOperator>(expr)
                                  ? handleType(clang::cast<clang::CompoundAssignOperator>(expr)->getComputationResultType(), r)
                                  : tpe_;
@@ -1683,12 +1717,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_Shl: return Expr::IntrOp(Intr::BSL(dl(), dr(), tpe_));
           case clang::BO_Shr: return Expr::IntrOp(Intr::BSR(dl(), dr(), tpe_));
           case clang::BO_Cmp: return failExpr(); // TODO spaceship?
-          case clang::BO_LT: return Expr::IntrOp(Intr::LogicLt(dl(), dr()));
-          case clang::BO_GT: return Expr::IntrOp(Intr::LogicGt(dl(), dr()));
-          case clang::BO_LE: return Expr::IntrOp(Intr::LogicLte(dl(), dr()));
-          case clang::BO_GE: return Expr::IntrOp(Intr::LogicGte(dl(), dr()));
-          case clang::BO_EQ: return Expr::IntrOp(Intr::LogicEq(dl(), dr()));
-          case clang::BO_NE: return Expr::IntrOp(Intr::LogicNeq(dl(), dr()));
+          case clang::BO_LT: return Expr::IntrOp(Intr::LogicLt(rl(), rr()));
+          case clang::BO_GT: return Expr::IntrOp(Intr::LogicGt(rl(), rr()));
+          case clang::BO_LE: return Expr::IntrOp(Intr::LogicLte(rl(), rr()));
+          case clang::BO_GE: return Expr::IntrOp(Intr::LogicGte(rl(), rr()));
+          case clang::BO_EQ: return Expr::IntrOp(Intr::LogicEq(rl(), rr()));
+          case clang::BO_NE: return Expr::IntrOp(Intr::LogicNeq(rl(), rr()));
           case clang::BO_And: return Expr::IntrOp(Intr::BAnd(dl(), dr(), tpe_));
           case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(dl(), dr(), tpe_));
           case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl(), dr(), tpe_));
