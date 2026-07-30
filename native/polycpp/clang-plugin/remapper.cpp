@@ -1449,7 +1449,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::CharacterLiteral *stmt) -> Expr::Any {
         return integralConstOfType(handleType(stmt->getType(), r), stmt->getValue());
       },
-      [&](const clang::StringLiteral *stmt) -> Expr::Any { return Expr::Alias(Term::StringConst(stmt->getString().str())); },
+      [&](const clang::StringLiteral *stmt) -> Expr::Any {
+        // StringConst is pinned to IntS8 but plain `char` is unsigned on arm/ppc/s390x
+        const auto comp = handleType(context.getBaseElementType(stmt->getType()), r);
+        return conform(r, Expr::Alias(Term::StringConst(stmt->getString().str())), Type::Ptr(comp, TypeSpace::Constant()));
+      },
       // `__func__` carries its expansion as a StringLiteral; unexpanded (dependent) forms have none
       [&](const clang::PredefinedExpr *stmt) -> Expr::Any {
         const auto name = stmt->getFunctionName();
