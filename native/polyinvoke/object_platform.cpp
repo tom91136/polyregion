@@ -271,9 +271,11 @@ RelocatableDevice::RelocatableDevice() {
   const llvm::Triple hostTriple(llvm::sys::getDefaultTargetTriple());
   globalPrefix = hostTriple.isOSBinFormatMachO() ? '_' : '\0';
 
-  // XXX RTDyld: SIGBUS on x86_64 macOS after libm kernels; missing R_RISCV_BRANCH (riscv64) and TOC relocs (ppc64le)
+  // XXX RTDyld: SIGBUS on x86_64 macOS after libm kernels; missing R_RISCV_BRANCH (riscv64), TOC relocs (ppc64le)
+  // and R_ARM_REL32 (arm), which PIC uses for every string literal reference
   const auto elfArch = hostTriple.isOSBinFormatELF() ? hostTriple.getArch() : llvm::Triple::UnknownArch;
-  const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::riscv64 || elfArch == llvm::Triple::ppc64le;
+  const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::riscv64 || elfArch == llvm::Triple::ppc64le ||
+                          elfArch == llvm::Triple::arm || elfArch == llvm::Triple::thumb;
   if (useJITLink) {
     auto mm = llvm::jitlink::InProcessMemoryManager::Create();
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
