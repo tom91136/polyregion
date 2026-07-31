@@ -2010,7 +2010,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 }
 
 [[nodiscard]] static bool escapesToOuterLoop(const clang::Stmt *stmt) {
-  if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::WhileStmt, clang::DoStmt>(stmt)) return false;
+  if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::CXXForRangeStmt, clang::WhileStmt, clang::DoStmt>(stmt)) return false;
   if (llvm::isa<clang::ContinueStmt>(stmt)) return true;
   for (const auto child : stmt->children())
     if (escapesToOuterLoop(child)) return true;
@@ -2020,18 +2020,32 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
 
-  const auto whileLoop = [&](const Type::Any &condTpe, const Term::Any &initCond, const clang::Stmt *bodyStmt, const clang::Expr *incExpr,
-                             auto evalCond) {
+  const auto whileLoop = [&](const clang::Expr *cond, const clang::Stmt *preBodyStmt, const clang::Stmt *bodyStmt,
+                             const clang::Expr *incExpr, const Opt<Term::Any> &seed = {}) {
+    const auto evalCond = [&](auto &r2) -> Term::Any {
+      return r2.newVar(cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true))));
+    };
+    const auto initCond = seed ? *seed : [&] {
+      auto [condTerm0, condStmts0] = r.scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
+      r.push(condStmts0);
+      return condTerm0;
+    }();
+    const auto condTpe = initCond.tpe();
     const auto loopCondName = r.newName(condTpe).symbol + "_loop_cond";
+    const std::function<void(RemapContext &)> emitTail = [&](RemapContext &rc) {
+      if (incExpr) {
+        auto _ = rc.newVar(handleExpr(incExpr, rc));
+      }
+      auto [condTermN, condStmtsN] = rc.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
+      rc.push(condStmtsN);
+      rc.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
+    };
     auto body = r.scoped(
         [&](auto &rb) {
+          rb.loopTails.push_back(emitTail);
+          handleStmt(preBodyStmt, rb);
           handleStmt(bodyStmt, rb);
-          if (incExpr) {
-            auto _ = rb.newVar(handleExpr(incExpr, rb));
-          }
-          auto [condTermN, condStmtsN] = rb.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
-          rb.push(condStmtsN);
-          rb.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
+          emitTail(rb);
         },
         {}, {}, {}, true);
     r.push(Stmt::Var(Named(loopCondName, condTpe), Expr::Alias(initCond), /*isMutable*/ true));
@@ -2124,31 +2138,31 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::ForStmt *stmt) {
         // for (<init>; <cond>; <inc>) B  ==>  <init>; cond = <cond>; while(cond) { B; <inc>; cond = <cond>; }
-        if (auto init = stmt->getInit()) handleStmt(init, r);
-        const auto cond = stmt->getCond();
-        const auto evalCond = [&](auto &r2) -> Term::Any {
-          return r2.newVar(cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true))));
-        };
-        auto [condTerm0, condStmts0] = r.scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
-        r.push(condStmts0);
-        whileLoop(condTerm0.tpe(), condTerm0, stmt->getBody(), stmt->getInc(), evalCond);
+        handleStmt(stmt->getInit(), r);
+        whileLoop(stmt->getCond(), nullptr, stmt->getBody(), stmt->getInc());
+      },
+      [&](const clang::CXXForRangeStmt *stmt) {
+        // for (T v : R) B  ==>  __r = R; __b = begin; __e = end; while(__b != __e) { T v = *__b; B; ++__b; }
+        handleStmt(stmt->getInit(), r);
+        handleStmt(stmt->getRangeStmt(), r);
+        handleStmt(stmt->getBeginStmt(), r);
+        handleStmt(stmt->getEndStmt(), r);
+        whileLoop(stmt->getCond(), stmt->getLoopVarStmt(), stmt->getBody(), stmt->getInc());
       },
       [&](const clang::DoStmt *stmt) {
         // do { B } while(C)  ==>  cond = true; while(cond) { B; cond = C; }  (body runs at least once)
-        whileLoop(Type::Bool1(), Term::Bool1Const(true), stmt->getBody(), nullptr,
-                  [&](auto &r2) -> Term::Any { return r2.newVar(handleExpr(stmt->getCond(), r2)); });
+        whileLoop(stmt->getCond(), nullptr, stmt->getBody(), nullptr, Term::Bool1Const(true));
       },
-      [&](const clang::WhileStmt *stmt) {
-        const auto evalCond = [&](auto &r2) -> Term::Any { return r2.newVar(handleExpr(stmt->getCond(), r2)); };
-        auto [condTerm0, condStmts0] = r.scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
-        r.push(condStmts0);
-        whileLoop(condTerm0.tpe(), condTerm0, stmt->getBody(), nullptr, evalCond);
-      },
+      [&](const clang::WhileStmt *stmt) { whileLoop(stmt->getCond(), nullptr, stmt->getBody(), nullptr); },
       [&](const clang::ReturnStmt *stmt) {
         if (const auto rv = stmt->getRetValue()) r.push(Stmt::Return(conform(r, handleExpr(rv, r), r.rtnType)));
         else r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
       },
-      [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
+      [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); },
+      [&](const clang::ContinueStmt *stmt) {
+        if (!r.loopTails.empty()) r.loopTails.back()(r);
+        r.push(Stmt::Cont());
+      },
       [&](const clang::SwitchStmt *stmt) {
         const auto loc = [&](const clang::Stmt *s) { return s->getBeginLoc().printToString(context.getSourceManager()); };
         if (escapesToOuterLoop(stmt->getBody()))

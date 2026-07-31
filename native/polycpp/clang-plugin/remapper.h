@@ -37,6 +37,7 @@ struct Remapper {
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
     Map<std::string, BitFieldInfo> bitFields{};
+    Vector<std::function<void(RemapContext &)>> loopTails{};
 
     template <typename T>
     [[nodiscard]] Pair<T, Vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
@@ -54,7 +55,8 @@ struct Remapper {
                      structs,
                      layouts,
                      parents,
-                     bitFields};
+                     bitFields,
+                     loopTails};
       auto result = f(r);
       if (persistCounter) {
         counter = r.counter;
