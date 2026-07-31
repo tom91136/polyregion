@@ -911,7 +911,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       | map([&](const std::string &value) {                                              //
           const auto name = fmt::format("_polyregion_str_{}", stringConstNames.size());
           stringConstNames.emplace(value, name);
-          return fmt::format("{}char {}[] = \"{}\";", constQual, name, escapeCString(value));
+          // MSL is C++ so char and int8_t do not convert
+          return fmt::format("{}{} {}[] = \"{}\";", constQual, mkTpe(Type::IntS8()), name, escapeCString(value));
         }) //
       | to_vector();
 
