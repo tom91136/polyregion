@@ -1305,7 +1305,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto tpe = handleType(expr->getType(), r);
         if (clang::Expr::EvalResult eval; expr->EvaluateAsInt(eval, context))
           return integralConstOfType(tpe, eval.Val.getInt().getZExtValue());
-        // __builtin_FILE/FUNCTION yield a string, which has no device-side counterpart
+        // unlike PredefinedExpr, the string-valued builtins carry no StringLiteral to hand off to
         raise(fmt::format("Unsupported {} at {} (only the integral source-location builtins lower)", expr->getBuiltinStr(),
                           expr->getBeginLoc().printToString(context.getSourceManager())));
       },
@@ -1336,10 +1336,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_FloatingCast:
           case clang::CK_IntegralCast:
           case clang::CK_IntegralToFloating:
-          case clang::CK_FloatingToIntegral:
-            if (stmt->getConversionFunction()) {
-            }
-            return Expr::Cast(r.newVar(sourceExpr), handleType(stmt->getType(), r));
+          case clang::CK_FloatingToIntegral: return Expr::Cast(r.newVar(sourceExpr), targetTpe);
 
           case clang::CK_ArrayToPointerDecay: //
           case clang::CK_NoOp:                //
@@ -1357,8 +1354,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             } else
               raise(fmt::format("Unsupported {} at {} ({} does not load as {})", stmt->getCastKindName(),
                                 stmt->getBeginLoc().printToString(context.getSourceManager()), repr(sourceExpr.tpe()), repr(targetTpe)));
-          case clang::CK_ConstructorConversion: // this just calls the ctor, so we return the subexpr as-as
-            return sourceExpr;
+          // these just call the ctor/conversion operator, so we return the subexpr as-is
+          case clang::CK_ConstructorConversion:
+          case clang::CK_UserDefinedConversion: return sourceExpr;
           // Derived-to-base navigation. For pointer → pointer (`Derived*` → `Base*`), polyc's
           // bitcast is sufficient *if* the base happens to be at offset 0 (which it is whenever
           // the primary base is non-empty or all preceding bases are EBO'd). For struct →
@@ -1434,7 +1432,35 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_NullToPointer:
             if (const auto p = targetTpe.get<Type::Ptr>()) return Expr::Alias(Term::NullPtrConst(p->comp, p->space, Region::Opaque()));
             return sourceExpr;
-          default: return sourceExpr;
+          // a function ref lowers to Nothing; pass it on so the indirect call site raises instead of the decay
+          case clang::CK_FunctionToPointerDecay: return sourceExpr;
+          // bit_cast/reinterpret_cast<T&> reinterpret the source storage, so pun the pointer instead of
+          // converting the value; the lvalue form stays a Ptr for the enclosing load to index
+          case clang::CK_LValueBitCast:
+          case clang::CK_LValueToRValueBitCast: {
+            const auto srcPtr = sourceExpr.tpe().get<Type::Ptr>();
+            const auto storageTpe = srcPtr ? srcPtr->comp : sourceExpr.tpe();
+            const auto scalar = [](const Type::Any &tpe) {
+              const auto k = tpe.kind();
+              return k.is<TypeKind::Integral>() || k.is<TypeKind::Fractional>();
+            };
+            if (!scalar(storageTpe) || !scalar(targetTpe))
+              raise(fmt::format("Unsupported cast {} at {} ({} does not reinterpret as {})", stmt->getCastKindName(),
+                                stmt->getBeginLoc().printToString(context.getSourceManager()), repr(storageTpe), repr(targetTpe)));
+            auto source = r.newVar(sourceExpr);
+            if (!srcPtr && !source.get<Term::Select>()) { // a literal source has no storage to pun, so give it a slot
+              const auto slot = select(r, {}, r.newVar(storageTpe));
+              r.push(Stmt::Mut(slot, Expr::Alias(source)));
+              source = slot.widen();
+            }
+            const auto storage = r.newVar(ref(source));
+            const auto punned = r.newVar(Expr::Cast(storage, Type::Ptr(targetTpe, srcPtr ? srcPtr->space : TypeSpace::Global())));
+            if (stmt->getCastKind() == clang::CK_LValueBitCast) return Expr::Alias(punned);
+            return deref(punned);
+          }
+          default:
+            raise(fmt::format("Unsupported cast {} at {} (no lowering from {} to {})", stmt->getCastKindName(),
+                              stmt->getBeginLoc().printToString(context.getSourceManager()), repr(sourceExpr.tpe()), repr(targetTpe)));
         }
       },
       [&](const clang::IntegerLiteral *stmt) -> Expr::Any {
@@ -1590,8 +1616,23 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto lhs = r.newVar(handleExpr(expr->getSubExpr(), r));
         const auto exprTpe = handleType(expr->getType(), r);
 
+        // pointer inc/dec rebases the pointer; the scalar path below would step the pointee instead
+        auto ptrStep = [&](const int64_t delta, const bool snapshot) -> std::optional<Term::Any> {
+          const auto ptrTpe = lhs.tpe().get<Type::Ptr>();
+          if (!ptrTpe || !exprTpe.is<Type::Ptr>()) return {};
+          Term::Any stepped = lhs;
+          if (snapshot) {
+            const auto oldName = r.newName(exprTpe);
+            r.push(Stmt::Var(oldName, Expr::Alias(lhs), /*isMutable*/ false));
+            stepped = select(r, {}, oldName).widen();
+          }
+          assign(lhs, r.newVar(Expr::RefTo(termToSel(lhs), Term::IntS64Const(delta), ptrTpe->comp, ptrTpe->space, Region::Opaque())));
+          return stepped;
+        };
+
         switch (expr->getOpcode()) {
           case clang::UO_PostInc: {
+            if (const auto stepped = ptrStep(1, /*snapshot*/ true)) return Expr::Alias(*stepped);
             auto one = r.newVar(integralConstOfType(exprTpe, 1));
             // snapshot into its own binding; newVar would alias the lvalue in-place and read the bumped value
             const auto oldName = r.newName(exprTpe);
@@ -1602,6 +1643,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             return Expr::Alias(derefL);
           }
           case clang::UO_PostDec: {
+            if (const auto stepped = ptrStep(-1, /*snapshot*/ true)) return Expr::Alias(*stepped);
             auto one = r.newVar(integralConstOfType(exprTpe, 1));
             const auto oldName = r.newName(exprTpe);
             r.push(Stmt::Var(oldName, deref(lhs), /*isMutable*/ false));
@@ -1611,12 +1653,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             return Expr::Alias(derefL);
           }
           case clang::UO_PreInc: {
+            if (const auto stepped = ptrStep(1, /*snapshot*/ false)) return Expr::Alias(*stepped);
             auto one = r.newVar(integralConstOfType(exprTpe, 1));
             auto derefL = r.newVar(deref(lhs));
             auto bumped = r.newVar(Expr::IntrOp(Intr::Add(derefL, one, exprTpe)));
             return Expr::Alias(assign(lhs, bumped));
           }
           case clang::UO_PreDec: {
+            if (const auto stepped = ptrStep(-1, /*snapshot*/ false)) return Expr::Alias(*stepped);
             auto one = r.newVar(integralConstOfType(exprTpe, 1));
             auto derefL = r.newVar(deref(lhs));
             auto bumped = r.newVar(Expr::IntrOp(Intr::Sub(derefL, one, exprTpe)));

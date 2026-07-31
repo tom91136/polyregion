@@ -18,8 +18,9 @@ int increment(int value) { return value + 1; }
 int main() {
   int result = __polyregion_offload_f1__([=]() {
 #if CHECK_CALL == 1
+    int (*decayed)(int) = increment; // decays through the cast, unlike the address-of below
     auto fn = &increment;
-    return fn(41);
+    return fn(41) + decayed(1);
 #elif CHECK_CALL == 2
     using Scalar = int;
     int value = 42;
