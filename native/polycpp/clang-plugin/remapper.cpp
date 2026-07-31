@@ -1735,15 +1735,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         switch (expr->getOpcode()) {
           case clang::BO_Add: // Handle Ptr arithmetics for +
-            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
-              return Expr::RefTo(termToSel(lhs), rhs, lhsPtr->comp, TypeSpace::Global(), Region::Opaque());
+            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(), rtnPtr = tpe_.get<Type::Ptr>(); lhsPtr && rtnPtr) {
+              return Expr::RefTo(termToSel(lhs), rhs, rtnPtr->comp, TypeSpace::Global(), Region::Opaque());
             } else {
               return Expr::IntrOp(Intr::Add(dl(), dr(), tpe_));
             }
           case clang::BO_Sub: // Handle Ptr arithmetics for -
-            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
+            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(), rtnPtr = tpe_.get<Type::Ptr>(); lhsPtr && rtnPtr) {
               auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
-              return Expr::RefTo(termToSel(lhs), negativeIdx, lhsPtr->comp, TypeSpace::Global(), Region::Opaque());
+              return Expr::RefTo(termToSel(lhs), negativeIdx, rtnPtr->comp, TypeSpace::Global(), Region::Opaque());
             } else if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && rhs.tpe().is<Type::Ptr>()) {
               const auto i64 = Type::IntS64();
               auto lhsInt = r.newVar(Expr::Cast(lhs, i64));
