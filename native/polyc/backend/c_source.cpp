@@ -691,34 +691,50 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
 }
 
 // C/OpenCL forbid whole-array assignment; copy element-wise (a nested loop per array level)
-static std::string mkArrayCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) {
+std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const {
   if (auto a = tpe.template get<Type::Arr>()) {
     const auto i = fmt::format("_ac{}", depth);
     return fmt::format("for (int {} = 0; {} < {}; {}++) {{ {} }}", i, i, a->length, i,
-                       mkArrayCopy(fmt::format("{}[{}]", lhs, i), fmt::format("{}[{}]", rhs, i), a->comp, depth + 1));
+                       mkValueCopy(fmt::format("{}[{}]", lhs, i), fmt::format("{}[{}]", rhs, i), a->comp, depth + 1));
+  }
+  // XXX rusticl zeroes a whole-struct read of a private var in a loop, so copy scalar leaves:
+  // XXX   S s; s.off = x; for (...) { S t = s; }  ->  t.off reads back 0
+  if (auto s = tpe.template get<Type::Struct>(); s && dialect == Dialect::OpenCL1_1) {
+    const auto name = normalise(s->name);
+    // a populated union stays whole; naming its members would not preserve the active one
+    if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !unionDefNames.contains(name)))
+      return it->second ^ map([&](auto &m) {
+               return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
+             }) ^
+             // a zero-size member has no storage in the emitted body, so it must not be named
+             filter([](auto &copy) { return !copy.empty(); }) ^ mk_string(" ");
   }
   return fmt::format("{} = {};", lhs, rhs);
 }
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
+  // member-wise reads repeat side effects, so a struct only decomposes for a plain lvalue source
+  const auto memberwise = [&](const Type::Any &tpe, const bool lvalueSource) {
+    return tpe.is<Type::Arr>() || (dialect == Dialect::OpenCL1_1 && tpe.is<Type::Struct>() && lvalueSource);
+  };
   return stmt.match_total( //
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
         // hoisted to the kernel's outermost scope by mkFn; drop the nested decl
         if (!x.expr && isLocalArr(x.name.tpe)) return ""s;
-        if (x.expr && x.name.tpe.is<Type::Arr>())
+        if (x.expr && memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
           return fmt::format("{}; {}", mkDecl(x.name.tpe, normalise(x.name.symbol)),
-                             mkArrayCopy(normalise(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
+                             mkValueCopy(normalise(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
         return fmt::format("{}{};", mkDecl(x.name.tpe, normalise(x.name.symbol)), x.expr ? " = " + mkExpr(*x.expr) : "");
       },
       [&](const Stmt::Mut &x) {
         if (x.name.tpe.template is<Type::Unit0>()) return fmt::format("{};", mkExpr(x.expr));
-        if (x.name.tpe.template is<Type::Arr>()) return mkArrayCopy(mkTerm(x.name), mkExpr(x.expr), x.name.tpe, 0);
+        if (memberwise(x.name.tpe, x.expr.template is<Expr::Alias>())) return mkValueCopy(mkTerm(x.name), mkExpr(x.expr), x.name.tpe, 0);
         return fmt::format("{} = {};", mkTerm(x.name), mkExpr(x.expr));
       },
       [&](const Stmt::Update &x) {
-        if (x.value.tpe().template is<Type::Arr>())
-          return mkArrayCopy(fmt::format("{}[{}]", mkTerm(x.lhs), mkTerm(x.idx)), mkTerm(x.value), x.value.tpe(), 0);
+        if (memberwise(x.value.tpe(), true)) // a Term source is always a plain lvalue
+          return mkValueCopy(fmt::format("{}[{}]", mkTerm(x.lhs), mkTerm(x.idx)), mkTerm(x.value), x.value.tpe(), 0);
         return fmt::format("{}[{}] = {};", mkTerm(x.lhs), mkTerm(x.idx), mkTerm(x.value));
       },
       [&](const Stmt::While &x) {
@@ -839,6 +855,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         return std::pair{normalise(def.name), def.members ^ map([&](auto &m) { return std::pair{normalise(m.symbol), m.tpe}; })};
       }) ^
       to<Map>();
+  unionDefNames = program.defs ^ filter([](auto &def) { return def.isUnion; }) ^ //
+                  map([&](auto &def) { return normalise(def.name); }) ^ to<Set>();
   Set<Sym> zeroSizeStructs =
       program.defs ^ filter([](auto &def) { return def.members.empty(); }) ^ map([](auto &def) { return def.name; }) ^ to<Set>();
   auto zeroSizeMember = [&](const Named &m) {

@@ -22,10 +22,12 @@ public:
 private:
   Dialect dialect;
   Map<std::string, std::vector<std::pair<std::string, Type::Any>>> structDefsByName;
+  Set<std::string> unionDefNames;
   Map<std::string, std::string> stringConstNames;
   std::string normalise(const std::string &s) const;
   std::string normalise(const Sym &s) const;
   Type::Any resolveFieldType(const Type::Any &owner, const std::string &fieldName) const;
+  std::string mkValueCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const;
   std::string mkTpe(const Type::Any &tpe);
   std::string mkDecl(const Type::Any &tpe, const std::string &name);
   std::string mkTerm(const Term::Any &term);
