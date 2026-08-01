@@ -2113,16 +2113,16 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           }
           const auto broke = wrapBreaks ? Opt<Term::Select>{select(rb, {}, rb.newName(Type::Bool1()))} : Opt<Term::Select>{};
           if (broke) rb.push(Stmt::Var(broke->root, Expr::Alias(Term::Bool1Const(false)), /*isMutable*/ true));
-          const auto once = select(rb, {}, rb.newName(Type::Bool1()));
-          rb.push(Stmt::Var(once.root, Expr::Alias(Term::Bool1Const(true)), /*isMutable*/ true));
-          rb.push(Stmt::While(once, rb.scoped([&](auto &rw) {
+          // XXX the single-trip wrapper holds a constant condition and exits on every path by break; Metal
+          //  miscompiles the same loop when the condition is a mutable flag
+          rb.push(Stmt::While(Term::Bool1Const(true), rb.scoped([&](auto &rw) {
             rw.onContinue.push_back([](RemapContext &rc) { rc.push(Stmt::Break()); });
             rw.onBreak.push_back([broke](RemapContext &rc) {
               if (broke) rc.push(Stmt::Mut(*broke, Expr::Alias(Term::Bool1Const(true))));
               rc.push(Stmt::Break());
             });
             handleStmt(bodyStmt, rw);
-            rw.push(Stmt::Mut(once, Expr::Alias(Term::Bool1Const(false))));
+            rw.push(Stmt::Break());
           })));
           if (broke) rb.push(Stmt::Cond(*broke, {Stmt::Break()}, rb.scoped(emitTail)));
           else emitTail(rb);
