@@ -68,9 +68,11 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
   // SPIR-V Kernel keeps private in the Function AS: widening to Generic makes IGC's SIMD vectoriser
   // read private arrays as shared, not per-lane
   const auto privateAS = spirvKernel ? AllocaAS : (GenericAS != 0 ? GenericAS : GlobalAS);
-  return s.match_total(                                  //
-      [&](const TypeSpace::Local &) { return LocalAS; }, //
-      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Constant &) { return ConstantAS; },
+  const auto globalAS = spirvKernel ? GenericAS : GlobalAS;
+  return s.match_total(                                        //
+      [&](const TypeSpace::Local &) { return LocalAS; },       //
+      [&](const TypeSpace::Global &) { return globalAS; },     //
+      [&](const TypeSpace::Constant &) { return ConstantAS; }, //
       [&](const TypeSpace::Private &) { return privateAS; });
 }
 
