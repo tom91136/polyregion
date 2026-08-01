@@ -2021,11 +2021,20 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   return last.is<Stmt::Return>() || last.is<Stmt::Break>() || last.is<Stmt::Cont>();
 }
 
-[[nodiscard]] static bool escapesToOuterLoop(const clang::Stmt *stmt) {
+[[nodiscard]] static bool continuesEnclosingLoop(const clang::Stmt *stmt) {
   if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::CXXForRangeStmt, clang::WhileStmt, clang::DoStmt>(stmt)) return false;
   if (llvm::isa<clang::ContinueStmt>(stmt)) return true;
   for (const auto child : stmt->children())
-    if (escapesToOuterLoop(child)) return true;
+    if (continuesEnclosingLoop(child)) return true;
+  return false;
+}
+
+[[nodiscard]] static bool breaksEnclosingLoop(const clang::Stmt *stmt) {
+  if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::CXXForRangeStmt, clang::WhileStmt, clang::DoStmt, clang::SwitchStmt>(stmt))
+    return false;
+  if (llvm::isa<clang::BreakStmt>(stmt)) return true;
+  for (const auto child : stmt->children())
+    if (breaksEnclosingLoop(child)) return true;
   return false;
 }
 
@@ -2053,11 +2062,25 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
     rc.cleanupsSuspended = suspended;
   };
 
-  const auto whileLoop = [&](const clang::Expr *cond, const clang::Stmt *preBodyStmt, const clang::Stmt *bodyStmt,
-                             const clang::Expr *incExpr, const Opt<Term::Any> &seed = {}) {
-    const auto evalCond = [&](auto &r2) -> Term::Any {
-      return r2.newVar(cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true))));
+  const auto arrayRangeOf = [&](const clang::CXXForRangeStmt *stmt, RemapContext &rc) -> Opt<std::tuple<Named, Named, int64_t>> {
+    const auto singleVar = [](const clang::DeclStmt *ds) -> const clang::VarDecl * {
+      return ds && ds->isSingleDecl() ? llvm::dyn_cast<clang::VarDecl>(ds->getSingleDecl()) : nullptr;
     };
+    const auto rangeVar = singleVar(stmt->getRangeStmt()), beginVar = singleVar(stmt->getBeginStmt());
+    if (!rangeVar || !beginVar || !context.getAsConstantArrayType(rangeVar->getType().getNonReferenceType())) return {};
+    const auto rangeName = Named(declName(rangeVar), handleType(rangeVar->getType(), rc));
+    const auto beginName = Named(declName(beginVar), handleType(beginVar->getType(), rc));
+    const auto rangePtr = rangeName.tpe.get<Type::Ptr>(), beginPtr = beginName.tpe.get<Type::Ptr>();
+    if (!rangePtr || !beginPtr || rangePtr->space != beginPtr->space) return {};
+    const auto arr = rangePtr->comp.get<Type::Arr>();
+    if (!arr || arr->comp != beginPtr->comp) return {};
+    return std::tuple{rangeName, beginName, static_cast<int64_t>(arr->length)};
+  };
+
+  using LoopHook = std::function<void(RemapContext &)>;
+  const auto whileLoopWith = [&](const std::function<Expr::Any(RemapContext &)> &condExpr, const LoopHook &preBody,
+                                 const clang::Stmt *bodyStmt, const LoopHook &inc, const Opt<Term::Any> &seed = {}) {
+    const auto evalCond = [&](auto &r2) -> Term::Any { return r2.newVar(condExpr(r2)); };
     const auto initCond = seed ? *seed : [&] {
       auto [condTerm0, condStmts0] = r.scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
       r.push(condStmts0);
@@ -2066,24 +2089,57 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
     const auto condTpe = initCond.tpe();
     const auto loopCondName = r.newName(condTpe).symbol + "_loop_cond";
     const std::function<void(RemapContext &)> emitTail = [&](RemapContext &rc) {
-      if (incExpr) {
-        auto _ = rc.newVar(handleExpr(incExpr, rc));
-      }
+      inc(rc);
       auto [condTermN, condStmtsN] = rc.template scoped<Term::Any>([&](auto &r2) -> Term::Any { return evalCond(r2); });
       rc.push(condStmtsN);
       rc.push(Stmt::Mut(Term::Select(Named(loopCondName, condTermN.tpe()), {}, condTermN.tpe()), Expr::Alias(condTermN)));
     };
+    // a tail per `continue` is a second backedge; LLVM splits the loop and SPIR-V then mis-names the continue target
+    const bool wrapBody = continuesEnclosingLoop(bodyStmt);
+    const bool wrapBreaks = wrapBody && breaksEnclosingLoop(bodyStmt);
     auto body = r.scoped(
         [&](auto &rb) {
           rb.loopFrame = rb.cleanups.size();
-          rb.loopTails.push_back(emitTail);
-          handleHeaderStmt(preBodyStmt, rb);
-          handleStmt(bodyStmt, rb);
-          emitTail(rb);
+          preBody(rb);
+          if (!wrapBody) {
+            rb.onContinue.push_back([&](RemapContext &rc) {
+              emitTail(rc);
+              rc.push(Stmt::Cont());
+            });
+            rb.onBreak.push_back([](RemapContext &rc) { rc.push(Stmt::Break()); });
+            handleStmt(bodyStmt, rb);
+            emitTail(rb);
+            return;
+          }
+          const auto broke = wrapBreaks ? Opt<Term::Select>{select(rb, {}, rb.newName(Type::Bool1()))} : Opt<Term::Select>{};
+          if (broke) rb.push(Stmt::Var(broke->root, Expr::Alias(Term::Bool1Const(false)), /*isMutable*/ true));
+          const auto once = select(rb, {}, rb.newName(Type::Bool1()));
+          rb.push(Stmt::Var(once.root, Expr::Alias(Term::Bool1Const(true)), /*isMutable*/ true));
+          rb.push(Stmt::While(once, rb.scoped([&](auto &rw) {
+            rw.onContinue.push_back([](RemapContext &rc) { rc.push(Stmt::Break()); });
+            rw.onBreak.push_back([broke](RemapContext &rc) {
+              if (broke) rc.push(Stmt::Mut(*broke, Expr::Alias(Term::Bool1Const(true))));
+              rc.push(Stmt::Break());
+            });
+            handleStmt(bodyStmt, rw);
+            rw.push(Stmt::Mut(once, Expr::Alias(Term::Bool1Const(false))));
+          })));
+          if (broke) rb.push(Stmt::Cond(*broke, {Stmt::Break()}, rb.scoped(emitTail)));
+          else emitTail(rb);
         },
         {}, {}, {}, true);
     r.push(Stmt::Var(Named(loopCondName, condTpe), Expr::Alias(initCond), /*isMutable*/ true));
     r.push(Stmt::While(Term::Select(Named(loopCondName, condTpe), {}, condTpe), body));
+  };
+
+  const auto whileLoop = [&](const clang::Expr *cond, const clang::Stmt *preBodyStmt, const clang::Stmt *bodyStmt,
+                             const clang::Expr *incExpr, const Opt<Term::Any> &seed = {}) {
+    whileLoopWith([&](RemapContext &r2) { return cond ? handleExpr(cond, r2) : Expr::Any(Expr::Alias(Term::Bool1Const(true))); },
+                  [&](RemapContext &rb) { handleHeaderStmt(preBodyStmt, rb); }, bodyStmt,
+                  [&](RemapContext &rc) {
+                    if (incExpr) auto _ = rc.newVar(handleExpr(incExpr, rc));
+                  },
+                  seed);
   };
 
   llvm_shared::visitDyn0(
@@ -2195,6 +2251,29 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         // for (T v : R) B  ==>  __r = R; __b = begin; __e = end; while(__b != __e) { T v = *__b; B; ++__b; }
         handleHeaderStmt(stmt->getInit(), r);
         handleHeaderStmt(stmt->getRangeStmt(), r);
+        // index-stepped: a loop-carried pointer needs OpPtrAccessChain, which Vulkan lacks without VariablePointers
+        if (const auto range = arrayRangeOf(stmt, r)) {
+          const auto rangeName = std::get<0>(*range), beginName = std::get<1>(*range);
+          const auto length = std::get<2>(*range);
+          const auto elem = *beginName.tpe.get<Type::Ptr>();
+          const auto idxName = Named(r.newName(Type::IntS64()).symbol + "_range_idx", Type::IntS64());
+          r.push(Stmt::Var(idxName, Expr::Alias(Term::IntS64Const(0)), /*isMutable*/ true));
+          const auto idxTerm = [&](RemapContext &rc) { return select(rc, {}, idxName).widen(); };
+          whileLoopWith([&](RemapContext &r2) { return Expr::Any(Expr::IntrOp(Intr::LogicNeq(idxTerm(r2), Term::IntS64Const(length)))); },
+                        [&](RemapContext &rb) {
+                          rb.push(Stmt::Var(beginName,
+                                            Expr::Any(Expr::RefTo(select(rb, {}, rangeName).widen(), idxTerm(rb), elem.comp, elem.space,
+                                                                  Region::Opaque())),
+                                            /*isMutable*/ false));
+                          handleHeaderStmt(stmt->getLoopVarStmt(), rb);
+                        },
+                        stmt->getBody(),
+                        [&](RemapContext &rc) {
+                          rc.push(Stmt::Mut(Term::Select(idxName, {}, Type::IntS64()),
+                                            Expr::IntrOp(Intr::Add(idxTerm(rc), Term::IntS64Const(1), Type::IntS64()))));
+                        });
+          return;
+        }
         handleHeaderStmt(stmt->getBeginStmt(), r);
         handleHeaderStmt(stmt->getEndStmt(), r);
         whileLoop(stmt->getCond(), stmt->getLoopVarStmt(), stmt->getBody(), stmt->getInc());
@@ -2222,17 +2301,18 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::BreakStmt *stmt) {
         unwind(r.loopFrame);
-        r.push(Stmt::Break());
+        if (!r.onBreak.empty()) r.onBreak.back()(r);
+        else r.push(Stmt::Break());
       },
       [&](const clang::ContinueStmt *stmt) {
         // the iteration's locals die before the latch runs, matching the order a real `continue` observes
         unwind(r.loopFrame);
-        if (!r.loopTails.empty()) r.loopTails.back()(r);
-        r.push(Stmt::Cont());
+        if (!r.onContinue.empty()) r.onContinue.back()(r);
+        else r.push(Stmt::Cont());
       },
       [&](const clang::SwitchStmt *stmt) {
         const auto loc = [&](const clang::Stmt *s) { return s->getBeginLoc().printToString(context.getSourceManager()); };
-        if (escapesToOuterLoop(stmt->getBody()))
+        if (continuesEnclosingLoop(stmt->getBody()))
           raise(fmt::format("Unsupported continue targeting an enclosing loop from a switch at {}", loc(stmt)));
         handleHeaderStmt(stmt->getInit(), r);
         handleHeaderStmt(stmt->getConditionVariableDeclStmt(), r);
@@ -2265,6 +2345,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           // a case's statements are lowered one per Cond block, so a declaration there has no frame to hang off
           r_.loopFrame = r_.cleanups.size();
           r_.cleanupsSuspended = true;
+          r_.onBreak.push_back([](RemapContext &rc) { rc.push(Stmt::Break()); });
           r_.push(Stmt::Var(started, Expr::Alias(Term::Bool1Const(false)), /*isMutable*/ true));
           if (const auto body = llvm::dyn_cast<clang::CompoundStmt>(stmt->getBody())) {
             for (const auto child : body->body())

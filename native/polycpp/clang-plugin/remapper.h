@@ -41,7 +41,8 @@ struct Remapper {
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
     Map<std::string, BitFieldInfo> bitFields{};
-    Vector<std::function<void(RemapContext &)>> loopTails{};
+    Vector<std::function<void(RemapContext &)>> onContinue{};
+    Vector<std::function<void(RemapContext &)>> onBreak{};
     Vector<Vector<Cleanup>> cleanups{};
     size_t loopFrame{};
     bool cleanupsSuspended = false;
@@ -63,7 +64,8 @@ struct Remapper {
                      layouts,
                      parents,
                      bitFields,
-                     loopTails,
+                     onContinue,
+                     onBreak,
                      persistCounter ? cleanups : Vector<Vector<Cleanup>>{},
                      persistCounter ? loopFrame : 0,
                      persistCounter && cleanupsSuspended};
