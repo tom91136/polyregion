@@ -1026,6 +1026,17 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   else return *result;
 }
 
+[[nodiscard]] static bool destroysWithoutEffect(const clang::CXXRecordDecl *rd);
+
+// base and member dtors run outside the body, so only the record's own body is left to reproduce
+[[nodiscard]] static bool destroysByBodyAlone(const clang::CXXRecordDecl *rd) {
+  for (const auto &base : rd->bases())
+    if (!destroysWithoutEffect(base.getType()->getAsCXXRecordDecl())) return false;
+  for (const auto *field : rd->fields())
+    if (!destroysWithoutEffect(field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl())) return false;
+  return true;
+}
+
 [[nodiscard]] static bool destroysWithoutEffect(const clang::CXXRecordDecl *rd) {
   if (!rd) return true;
   if (rd->hasTrivialDestructor()) return true;
@@ -1033,12 +1044,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   if (!dtor) return false;
   const auto body = llvm::dyn_cast_if_present<clang::CompoundStmt>(dtor->getBody());
   if (!body || !body->body_empty()) return false;
-  // base and member dtors run outside the body, so an empty body on its own proves nothing
-  for (const auto &base : rd->bases())
-    if (!destroysWithoutEffect(base.getType()->getAsCXXRecordDecl())) return false;
-  for (const auto *field : rd->fields())
-    if (!destroysWithoutEffect(field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl())) return false;
-  return true;
+  return destroysByBodyAlone(rd);
 }
 
 Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
@@ -2009,6 +2015,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   }
 }
 
+[[nodiscard]] static bool terminated(const Vector<Stmt::Any> &stmts) {
+  if (stmts.empty()) return false;
+  const auto &last = stmts.back();
+  return last.is<Stmt::Return>() || last.is<Stmt::Break>() || last.is<Stmt::Cont>();
+}
+
 [[nodiscard]] static bool escapesToOuterLoop(const clang::Stmt *stmt) {
   if (!stmt || llvm::isa<clang::Expr, clang::ForStmt, clang::CXXForRangeStmt, clang::WhileStmt, clang::DoStmt>(stmt)) return false;
   if (llvm::isa<clang::ContinueStmt>(stmt)) return true;
@@ -2019,6 +2031,27 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
+
+  // `downTo` is inclusive: an exit edge destroys every frame it leaves, innermost first
+  const auto unwind = [&](const size_t downTo) {
+    for (auto frame = r.cleanups.size(); frame-- > downTo;)
+      for (auto i = r.cleanups[frame].size(); i-- > 0;) {
+        const auto &[dtor, instance] = r.cleanups[frame][i];
+        const auto [name, fn] = handleCall(dtor, r);
+        const auto self = r.newVar(conform(r, Expr::Alias(select(r, {}, instance)), fn->args.front().named.tpe));
+        auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                                       std::vector<Term::Any>{self}, Type::Unit0()));
+      }
+  };
+
+  // a loop/if/switch header declares into the enclosing frame, which would destroy too late; refuse instead
+  const auto handleHeaderStmt = [&](const clang::Stmt *header, RemapContext &rc) {
+    if (!header) return;
+    const auto suspended = rc.cleanupsSuspended;
+    rc.cleanupsSuspended = true;
+    handleStmt(header, rc);
+    rc.cleanupsSuspended = suspended;
+  };
 
   const auto whileLoop = [&](const clang::Expr *cond, const clang::Stmt *preBodyStmt, const clang::Stmt *bodyStmt,
                              const clang::Expr *incExpr, const Opt<Term::Any> &seed = {}) {
@@ -2042,8 +2075,9 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
     };
     auto body = r.scoped(
         [&](auto &rb) {
+          rb.loopFrame = rb.cleanups.size();
           rb.loopTails.push_back(emitTail);
-          handleStmt(preBodyStmt, rb);
+          handleHeaderStmt(preBodyStmt, rb);
           handleStmt(bodyStmt, rb);
           emitTail(rb);
         },
@@ -2055,8 +2089,11 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   llvm_shared::visitDyn0(
       root, //
       [&](const clang::CompoundStmt *stmt) {
+        r.cleanups.emplace_back();
         for (auto s : stmt->body())
           handleStmt(s, r);
+        if (!terminated(r.stmts)) unwind(r.cleanups.size() - 1);
+        r.cleanups.pop_back();
       },
       [&](const clang::DeclStmt *stmt) {
         for (auto decl : stmt->decls()) {
@@ -2075,6 +2112,19 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
 
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             auto name = Named(declName(var), annotateLocalSpace(var, r));
+
+            if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl(); rd && !destroysWithoutEffect(rd)) {
+              const auto reject = [&](const std::string &why) {
+                raise(fmt::format("Unsupported local {} of type {} at {} ({}, so its destructor's effects would be lost)", declName(var),
+                                  var->getType().getAsString(), var->getLocation().printToString(context.getSourceManager()), why));
+              };
+              if (!var->isLocalVarDecl() || var->isStaticLocal()) reject("its lifetime is not the enclosing scope");
+              if (r.cleanupsSuspended || r.cleanups.empty()) reject("it is not declared directly in a block");
+              if (var->getType()->isArrayType()) reject("it is an array");
+              if (!destroysByBodyAlone(rd)) reject("a base or member of it also destroys with effects");
+              if (!rd->getDestructor()) reject("its destructor is not resolvable");
+              r.cleanups.back().emplace_back(Cleanup{rd->getDestructor(), name});
+            }
 
             auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
             if (initList && !name.tpe.is<Type::Struct>()) {
@@ -2129,8 +2179,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         }
       },
       [&](const clang::IfStmt *stmt) {
-        if (stmt->hasInitStorage()) handleStmt(stmt->getInit(), r);
-        if (stmt->hasVarStorage()) handleStmt(stmt->getConditionVariableDeclStmt(), r);
+        if (stmt->hasInitStorage()) handleHeaderStmt(stmt->getInit(), r);
+        if (stmt->hasVarStorage()) handleHeaderStmt(stmt->getConditionVariableDeclStmt(), r);
         auto condTerm = r.newVar(handleExpr(stmt->getCond(), r));
         r.push(Stmt::Cond(condTerm, //
                           r.scoped([&](auto &r_) { handleStmt(stmt->getThen(), r_); }, {}, {}, {}, true),
@@ -2138,15 +2188,15 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::ForStmt *stmt) {
         // for (<init>; <cond>; <inc>) B  ==>  <init>; cond = <cond>; while(cond) { B; <inc>; cond = <cond>; }
-        handleStmt(stmt->getInit(), r);
+        handleHeaderStmt(stmt->getInit(), r);
         whileLoop(stmt->getCond(), nullptr, stmt->getBody(), stmt->getInc());
       },
       [&](const clang::CXXForRangeStmt *stmt) {
         // for (T v : R) B  ==>  __r = R; __b = begin; __e = end; while(__b != __e) { T v = *__b; B; ++__b; }
-        handleStmt(stmt->getInit(), r);
-        handleStmt(stmt->getRangeStmt(), r);
-        handleStmt(stmt->getBeginStmt(), r);
-        handleStmt(stmt->getEndStmt(), r);
+        handleHeaderStmt(stmt->getInit(), r);
+        handleHeaderStmt(stmt->getRangeStmt(), r);
+        handleHeaderStmt(stmt->getBeginStmt(), r);
+        handleHeaderStmt(stmt->getEndStmt(), r);
         whileLoop(stmt->getCond(), stmt->getLoopVarStmt(), stmt->getBody(), stmt->getInc());
       },
       [&](const clang::DoStmt *stmt) {
@@ -2155,11 +2205,28 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::WhileStmt *stmt) { whileLoop(stmt->getCond(), nullptr, stmt->getBody(), nullptr); },
       [&](const clang::ReturnStmt *stmt) {
-        if (const auto rv = stmt->getRetValue()) r.push(Stmt::Return(conform(r, handleExpr(rv, r), r.rtnType)));
-        else r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+        const auto rv = stmt->getRetValue();
+        const auto value = rv ? conform(r, handleExpr(rv, r), r.rtnType) : Expr::Any(Expr::Alias(Term::Unit0Const()));
+        // the result is read before any local dies; skipping the temp when nothing is destroyed also keeps
+        // `_v<N>` numbering unchanged for every region without cleanups
+        const auto tpe = value.tpe();
+        const auto bind =
+            !tpe.is<Type::Unit0>() && !tpe.is<Type::Nothing>() && (r.cleanups ^ exists([](auto &frame) { return !frame.empty(); }));
+        const auto bound = !bind ? value : [&] {
+          const auto v = Stmt::Var(r.newName(tpe), value, /*isMutable*/ false);
+          r.push(v);
+          return Expr::Any(Expr::Alias(select(r, {}, v.name).widen()));
+        }();
+        unwind(0);
+        r.push(Stmt::Return(bound));
       },
-      [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); },
+      [&](const clang::BreakStmt *stmt) {
+        unwind(r.loopFrame);
+        r.push(Stmt::Break());
+      },
       [&](const clang::ContinueStmt *stmt) {
+        // the iteration's locals die before the latch runs, matching the order a real `continue` observes
+        unwind(r.loopFrame);
         if (!r.loopTails.empty()) r.loopTails.back()(r);
         r.push(Stmt::Cont());
       },
@@ -2167,8 +2234,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         const auto loc = [&](const clang::Stmt *s) { return s->getBeginLoc().printToString(context.getSourceManager()); };
         if (escapesToOuterLoop(stmt->getBody()))
           raise(fmt::format("Unsupported continue targeting an enclosing loop from a switch at {}", loc(stmt)));
-        if (auto init = stmt->getInit()) handleStmt(init, r);
-        handleStmt(stmt->getConditionVariableDeclStmt(), r);
+        handleHeaderStmt(stmt->getInit(), r);
+        handleHeaderStmt(stmt->getConditionVariableDeclStmt(), r);
         const auto cond = r.newVar(handleExpr(stmt->getCond(), r));
         Map<const clang::Stmt *, Term::Any> matches;
         Opt<Term::Any> anyMatch;
@@ -2195,6 +2262,9 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         const auto onceSel = select(r, {}, r.newName(Type::Bool1()));
         r.push(Stmt::Var(onceSel.root, Expr::Alias(Term::Bool1Const(true)), /*isMutable*/ true));
         r.push(Stmt::While(onceSel, r.scoped([&](auto &r_) {
+          // a case's statements are lowered one per Cond block, so a declaration there has no frame to hang off
+          r_.loopFrame = r_.cleanups.size();
+          r_.cleanupsSuspended = true;
           r_.push(Stmt::Var(started, Expr::Alias(Term::Bool1Const(false)), /*isMutable*/ true));
           if (const auto body = llvm::dyn_cast<clang::CompoundStmt>(stmt->getBody())) {
             for (const auto child : body->body())

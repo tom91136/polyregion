@@ -26,6 +26,10 @@ struct Remapper {
     uint64_t bitOffset;
     uint64_t bitWidth;
   };
+  struct Cleanup {
+    const clang::CXXDestructorDecl *dtor;
+    Named instance;
+  };
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
     bool ctorChain = false;
@@ -38,6 +42,9 @@ struct Remapper {
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
     Map<std::string, BitFieldInfo> bitFields{};
     Vector<std::function<void(RemapContext &)>> loopTails{};
+    Vector<Vector<Cleanup>> cleanups{};
+    size_t loopFrame{};
+    bool cleanupsSuspended = false;
 
     template <typename T>
     [[nodiscard]] Pair<T, Vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
@@ -56,7 +63,10 @@ struct Remapper {
                      layouts,
                      parents,
                      bitFields,
-                     loopTails};
+                     loopTails,
+                     persistCounter ? cleanups : Vector<Vector<Cleanup>>{},
+                     persistCounter ? loopFrame : 0,
+                     persistCounter && cleanupsSuspended};
       auto result = f(r);
       if (persistCounter) {
         counter = r.counter;
@@ -70,7 +80,7 @@ struct Remapper {
     }
     // persistCounter=true keeps `_v<N>` temporaries unique across sibling scopes within one
     // function -- polyc's flat stackVarPtrs LUT rejects same-name re-declarations of differing
-    // types. Function-level scopes pass false to reset.
+    // types. Function-level scopes pass false to reset, which also drops the caller's cleanups.
     [[nodiscard]] Vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
                                            const Opt<bool> &scopeCtorChain = {},                   //
                                            const Opt<Type::Any> &scopeRtnType = {},                //
