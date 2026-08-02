@@ -6,6 +6,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Sema/Lookup.h"
@@ -17,6 +18,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
+#include "polyfront/library_emit.hpp"
 #include "polyregion/conventions.h"
 
 #include "ast.h"
@@ -367,8 +369,28 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
 OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts)
     : clang::ASTConsumer(), CI(CI), opts(opts) {}
 
+namespace {
+struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
+  std::vector<const clang::FunctionDecl *> exports;
+  bool VisitFunctionDecl(clang::FunctionDecl *fd) {
+    if (fd->doesThisDeclarationHaveABody() && hasAnnotation(fd, polyfront::LibraryExportAnnotation)) exports.push_back(fd);
+    return true;
+  }
+};
+} // namespace
+
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   auto &D = CI.getDiagnostics();
+  if (!opts.emitLibraryPath.empty()) {
+    ExportCollector collector;
+    collector.TraverseDecl(C.getTranslationUnitDecl());
+    if (collector.exports.empty())
+      emit(D, clang::DiagnosticsEngine::Warning,
+           POLYREGION_DIAG_POLYSTL "-fstdpar-emit-library set but no [[clang::annotate(\"%0\")]] functions found",
+           polyfront::LibraryExportAnnotation);
+    compileLibrary(opts, C, D, collector.exports, opts.emitLibraryPath);
+    return;
+  }
   for (auto r : outlinePolyregionOffload(C))
     r ^ foreach_total(
             [&](const Failure &f) { //

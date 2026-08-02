@@ -68,6 +68,14 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                          ""),
                bool hostMirroring = //
                fire::arg({"--host-mirroring", "Compile only the generated Host-affinity functions and emit LLVM bitcode"}),
+               bool emitAst = //
+               fire::arg({"--emit-ast", "Skip the backend and write the post-pass program as MessagePack polyAST"}),
+               std::string exportName = //
+               fire::arg({"--export", "With --emit-ast, narrow the export seed to this symbol so a pruning pass keeps only its "
+                                      "closure; absent leaves every export seeded"},
+                         ""),
+               bool listExports = //
+               fire::arg({"--list-exports", "Print the exported symbol names, one per line, and exit"}),
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
@@ -97,20 +105,58 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                    return polyast::hashed_program_from_msgpack(bytes.data(), bytes.data() + bytes.size());
                  }();
 
+                 const auto exportsOf = [](const polyast::Program &p) {
+                   return p.functions ^ collect([](auto &f) {
+                            return f.visibility.template is<polyast::FunctionVisibility::Exported>() ? std::optional{repr(f.name)}
+                                                                                                     : std::nullopt;
+                          });
+                 };
+
+                 if (listExports) {
+                   for (auto &name : exportsOf(program) ^ sort())
+                     fmt::print("{}\n", name);
+                   return EXIT_SUCCESS;
+                 }
+
+                 const auto writeOut = [&](const auto &bytes, std::ios_base::openmode mode) {
+                   if (out == "-") {
+                     std::freopen(nullptr, "wb", stdout);
+                     std::fwrite(bytes.data(), sizeof(std::byte), bytes.size(), stdout);
+                   } else {
+                     std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | mode);
+                     outStream.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+                   }
+                 };
+
+                 if (emitAst) {
+                   if (!exportName.empty()) {
+                     const auto known = exportsOf(program);
+                     if (!(known ^ contains(exportName))) {
+                       fmt::print(stderr, "[POLYC] Unknown export `{}`; the program exports: {}\n", exportName, known ^ mk_string(", "));
+                       return EXIT_FAILURE;
+                     }
+                     for (auto &f : program.functions)
+                       if (f.visibility.is<polyast::FunctionVisibility::Exported>() && repr(f.name) != exportName)
+                         f.visibility = polyast::FunctionVisibility::Internal();
+                   }
+                   // an empty spec means no passes here, not the compile default: FullOpt on an entry-less library
+                   // prunes it to nothing
+                   const auto shaken = passes.empty() ? program : compiler::runPipeline(program, passes);
+                   const auto astBytes = polyast::hashed_program_to_msgpack(shaken);
+                   writeOut(astBytes, std::ios_base::trunc);
+                   if (verbose)
+                     fmt::print(stderr, "[POLYC] Wrote polyAST {} ({} functions, {} structs, {} bytes)\n", out, shaken.functions.size(),
+                                shaken.defs.size(), astBytes.size());
+                   return EXIT_SUCCESS;
+                 }
+
                  compiler::initialise();
                  fmt::print(stderr, "[POLYC] Compiling program:\n=================\n{}\n=================\n", repr(program));
 
                  auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes, hostMirroring}, opt);
                  if (verbose) fmt::print(stderr, "{}\n", repr(compilation));
                  if (!compilation.messages.empty()) fmt::print(stderr, "{}\n", compilation.messages);
-                 auto resultBytes = compileresult_to_msgpack(compilation);
-                 if (out == "-") {
-                   std::freopen(nullptr, "wb", stdout);
-                   std::fwrite(resultBytes.data(), resultBytes.size(), sizeof(std::byte), stdout);
-                 } else {
-                   std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
-                   outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
-                 }
+                 writeOut(compileresult_to_msgpack(compilation), std::ios_base::app);
                } catch (const std::exception &e) {
                  fmt::print(stderr, "[POLYC] {}\n", e.what());
                  return EXIT_FAILURE;

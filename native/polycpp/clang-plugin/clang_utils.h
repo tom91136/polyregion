@@ -35,6 +35,8 @@ struct Location {
 Location getLocation(const clang::SourceLocation &e, clang::ASTContext &c);
 Location getLocation(const clang::Expr &e, clang::ASTContext &c);
 
+bool hasAnnotation(const clang::Decl *decl, llvm::StringRef annotation);
+
 clang::DeclRefExpr *mkDeclRef(const clang::ASTContext &C, clang::VarDecl *lhs);
 clang::QualType mkConstArrTy(const clang::ASTContext &C, clang::QualType componentTpe, size_t size);
 clang::StringLiteral *mkStrLit(const clang::ASTContext &C, const std::string &str);

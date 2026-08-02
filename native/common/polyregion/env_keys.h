@@ -19,6 +19,7 @@ inline constexpr auto PolyfrontExe = "POLYFRONT_EXE";
 inline constexpr auto PolyfrontTargets = "POLYFRONT_TARGETS";
 inline constexpr auto PolyfrontVerbose = "POLYFRONT_VERBOSE";
 inline constexpr auto PolyfrontStackDepth = "POLYFRONT_STACK_DEPTH";
+inline constexpr auto PolyfrontEmitLibrary = "POLYFRONT_EMIT_LIBRARY";
 inline constexpr auto PolyfrontJit = "POLYFRONT_JIT";
 
 inline constexpr auto PolycppDriver = "POLYCPP_DRIVER";

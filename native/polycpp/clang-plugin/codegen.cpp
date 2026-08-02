@@ -7,6 +7,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
+#include "polyfront/library_emit.hpp"
 #include "polyfront/pass_specs.hpp"
 #include "polyregion/conventions.h"
 #include "polyregion/env_keys.h"
@@ -193,4 +194,43 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
          *mir.error);
   return polyfront::KernelBundle{moduleId,    objects,      layouts, remapper.readOnlyMembers, program_to_json(program).dump(),
                                  mir.bitcode, mir.mirrorId, asserts};
+}
+
+void polystl::compileLibrary(const polyfront::Options &opts,                          //
+                             clang::ASTContext &C,                                    //
+                             clang::DiagnosticsEngine &diag,                          //
+                             const std::vector<const clang::FunctionDecl *> &exports, //
+                             const std::string &outPath) {
+  Remapper remapper(C);
+  remapper.emitLibraryMode = true;
+  Remapper::RemapContext r;
+
+  for (const auto *decl : exports) {
+    auto [name, fn] = remapper.handleCall(decl, r);
+    fn->visibility = FunctionVisibility::Exported();
+    std::string qn;
+    {
+      llvm::raw_string_ostream os(qn);
+      decl->getNameForDiagnostic(os, C.getPrintingPolicy(), /*Qualified*/ true);
+    }
+    fn->name = Sym({qn});
+    if (opts.verbose)
+      emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Exporting library symbol: %0",
+           name);
+  }
+
+  const auto program = polyfront::libraryProgram(r.functions | values() | map([](auto &x) { return std::move(*x); }) | to_vector(),
+                                                 r.structs | values() | map([](auto &x) { return std::move(*x); }) | to_vector());
+
+  polyfront::writeProgramMsgpack(program, outPath) ^
+      foreach_total(
+          [&](const std::error_code &ec) {
+            emit(diag, clang::DiagnosticsEngine::Level::Error, POLYREGION_DIAG_POLYSTL "Cannot open library output %0: %1", outPath,
+                 ec.message());
+          },
+          [&](const size_t bytes) {
+            emit(diag, clang::DiagnosticsEngine::Level::Remark,
+                 POLYREGION_DIAG_POLYSTL "Wrote polyAST library %0 (%1 symbols, %2 functions, %3 bytes)", outPath,
+                 std::to_string(exports.size()), std::to_string(program.functions.size()), std::to_string(bytes));
+          });
 }

@@ -13,6 +13,7 @@ constexpr auto PolyfrontVerbose = env::PolyfrontVerbose;
 constexpr auto PolyfrontTargets = env::PolyfrontTargets;
 constexpr auto PolyfrontStackDepth = env::PolyfrontStackDepth;
 constexpr auto PolyfrontJit = env::PolyfrontJit;
+constexpr auto PolyfrontEmitLibrary = env::PolyfrontEmitLibrary;
 
 inline std::optional<int> parsePositiveInt(std::string_view s) {
   int n = 0;

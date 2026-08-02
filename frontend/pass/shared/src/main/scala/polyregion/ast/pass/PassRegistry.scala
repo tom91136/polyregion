@@ -35,6 +35,7 @@ object PassRegistry {
     PassDef.configured(FullOpt()),
     PassDef.configured(PartialEval()),
     PassDef.singleton(DeadArgElimination),
+    PassDef.singleton(DeadFunctionElimination),
     PassDef.singleton(DeadStructElimination),
     PassDef.singleton(FnInline),
     PassDef.configured(RecursionLower()),

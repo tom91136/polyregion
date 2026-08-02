@@ -69,14 +69,17 @@ struct Options {
   std::string executable;
   std::vector<Target> targets;
   std::optional<int> stackDepth = {};
+  std::string emitLibraryPath;
 
   static std::variant<std::vector<std::string>, Options>
   parseArgs(std::optional<std::string> maybeExe, std::optional<std::string> maybeVerbose, std::optional<std::string> maybeTargets,
-            std::optional<std::string> maybeStackDepth = {}, std::optional<std::string> maybeJit = {}) {
+            std::optional<std::string> maybeStackDepth = {}, std::optional<std::string> maybeJit = {},
+            std::optional<std::string> maybeEmitLibrary = {}) {
     Options opts;
     std::vector<std::string> errors;
     if (auto verbose = maybeVerbose) opts.verbose = *verbose == "1";
     if (auto jit = maybeJit) opts.jit = *jit == "1";
+    if (auto emit = maybeEmitLibrary) opts.emitLibraryPath = *emit;
     if (auto exe = maybeExe) opts.executable = *exe;
     else errors.emplace_back("exe argument missing");
     if (auto depth = maybeStackDepth) {
@@ -112,7 +115,7 @@ struct Options {
              });
     };
     return parseArgs(parseSuffix(PolyfrontExe), parseSuffix(PolyfrontVerbose), parseSuffix(PolyfrontTargets),
-                     parseSuffix(PolyfrontStackDepth), parseSuffix(PolyfrontJit));
+                     parseSuffix(PolyfrontStackDepth), parseSuffix(PolyfrontJit), parseSuffix(PolyfrontEmitLibrary));
   }
 
   static std::variant<std::vector<std::string>, Options> parseArgsFromEnv() {
@@ -121,7 +124,7 @@ struct Options {
       else return {};
     };
     return parseArgs(readEnv(PolyfrontExe), readEnv(PolyfrontVerbose), readEnv(PolyfrontTargets), readEnv(PolyfrontStackDepth),
-                     readEnv(PolyfrontJit));
+                     readEnv(PolyfrontJit), readEnv(PolyfrontEmitLibrary));
   }
 };
 

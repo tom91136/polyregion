@@ -19,4 +19,10 @@ polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
                                       const clang::CXXMethodDecl &functor, //
                                       const clang::SourceLocation &loc,    //
                                       runtime::PlatformKind kind);
+
+void compileLibrary(const polyfront::Options &opts,                          //
+                    clang::ASTContext &C,                                    //
+                    clang::DiagnosticsEngine &diag,                          //
+                    const std::vector<const clang::FunctionDecl *> &exports, //
+                    const std::string &outPath);
 } // namespace polyregion::polystl

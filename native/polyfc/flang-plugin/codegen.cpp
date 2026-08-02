@@ -1,8 +1,12 @@
 #include "codegen.h"
 
+#include "flang/Optimizer/Dialect/FIROpsSupport.h"
+
 #include "aspartame/all.hpp"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyfront/diag.hpp"
+#include "polyfront/library_emit.hpp"
 #include "polyfront/pass_specs.hpp"
 #include "polyregion/env_keys.h"
 
@@ -10,6 +14,7 @@
 #include "utils.h"
 
 using namespace polyregion;
+using namespace polyregion::polyast;
 using namespace aspartame;
 
 polyfront::KernelBundle polyfc::compileRegion( //
@@ -117,4 +122,40 @@ polyfront::KernelBundle polyfc::compileRegion( //
   return polyfront::KernelBundle{
       moduleId,    objects,      region.layouts, /*readOnlyMembers*/ {}, polyast::program_to_json(region.program).dump(),
       mir.bitcode, mir.mirrorId, asserts};
+}
+
+void polyfc::compileLibrary(clang::DiagnosticsEngine &diag, const polyfront::Options &opts, mlir::ModuleOp &m, mlir::DataLayout &L,
+                            const std::string &outPath) {
+  using Level = clang::DiagnosticsEngine::Level;
+
+  std::vector<mlir::func::FuncOp> exports;
+  m.walk([&](mlir::func::FuncOp f) {
+    if (!f.isExternal() && fir::hasBindcAttr(f.getOperation())) exports.push_back(f);
+  });
+  if (exports.empty()) emit(diag, Level::Warning, POLYREGION_DIAG_POLYDCO "-fstdpar-emit-library set but no bind(c) procedures found");
+
+  Remapper r(m, L, m.getOperation(), {});
+  size_t exported = 0;
+  for (auto f : exports) {
+    r.handleFunc(f);
+    const auto name = f.getSymName().str();
+    if (const auto it = r.userFuncs.find(name); it != r.userFuncs.end()) {
+      it->second.visibility = FunctionVisibility::Exported();
+      exported++;
+      if (opts.verbose) emit(diag, Level::Remark, POLYREGION_DIAG_POLYDCO "Exporting library symbol: %0", name);
+    }
+  }
+
+  const auto program = polyfront::libraryProgram(r.functions | concat(r.userFuncs | values()) | to_vector(),
+                                                 r.defs | values() | concat(r.syntheticDefs) | to_vector());
+
+  polyfront::writeProgramMsgpack(program, outPath) ^
+      foreach_total(
+          [&](const std::error_code &ec) {
+            emit(diag, Level::Error, POLYREGION_DIAG_POLYDCO "Cannot open library output %0: %1", outPath, ec.message());
+          },
+          [&](const size_t bytes) {
+            emit(diag, Level::Remark, POLYREGION_DIAG_POLYDCO "Wrote polyAST library %0 (%1 symbols, %2 functions, %3 bytes)", outPath,
+                 std::to_string(exported), std::to_string(program.functions.size()), std::to_string(bytes));
+          });
 }

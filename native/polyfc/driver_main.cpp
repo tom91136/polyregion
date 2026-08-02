@@ -110,6 +110,7 @@ int main(int argc, const char *argv[]) {
                    envs.emplace_back(PolyfrontTargets, opts->targets);
                    if (opts->stackDepth) envs.emplace_back(PolyfrontStackDepth, std::to_string(*opts->stackDepth));
                    envs.emplace_back(PolyfrontJit, opts->jit != StdParOptions::LinkKind::Disabled ? "1" : "0");
+                   if (!opts->emitLibrary.empty()) envs.emplace_back(PolyfrontEmitLibrary, opts->emitLibrary);
                  }
 
                  const auto compileOnly =

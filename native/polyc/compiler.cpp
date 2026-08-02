@@ -188,7 +188,8 @@ std::string bareName(const std::string &step) {
 
 } // namespace
 
-static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view spec) {
+static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view rawSpec) {
+  const std::string_view spec = rawSpec.empty() ? std::string_view{compiler::DefaultPipelineSpec} : rawSpec;
   const auto rootEpoch = compiler::nowMs();
   const auto rootStart = compiler::nowMono();
   auto timed = [](auto &&name, auto &&data, auto &&f) {
@@ -249,6 +250,10 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
                                                                                  std::string(spec), std::move(items)));
 }
 
+polyast::Program compiler::runPipeline(const polyast::Program &program, const std::string &spec) {
+  return runPipelineChain(program, spec).program;
+}
+
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
   initialise();
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
@@ -281,9 +286,7 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   std::vector<polyast::CompileEvent> preEvents;
   auto effective = program;
   {
-    const std::string_view spec =
-        options.pipelineSpec.empty() ? std::string_view{DefaultPipelineSpec} : std::string_view{options.pipelineSpec};
-    auto passRun = runPipelineChain(effective, spec);
+    auto passRun = runPipelineChain(effective, options.pipelineSpec);
     effective = std::move(passRun.program);
     preEvents.emplace_back(std::move(passRun.event));
   }

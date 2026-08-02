@@ -118,6 +118,8 @@ int main(int argc, const char *argv[]) {
                      append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontStackDepth, *opts->stackDepth)});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang",
                            fmt::format("{}={}", PolyfrontJit, opts->jit != StdParOptions::LinkKind::Disabled ? "1" : "0")});
+                   if (!opts->emitLibrary.empty())
+                     append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontEmitLibrary, opts->emitLibrary)});
                  }
 
                  const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^

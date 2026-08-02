@@ -853,9 +853,15 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   };
 
   if (const auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
-    if (cxxRecord->getNumVBases() != 0)
-      raise(fmt::format("Unsupported virtual base in {} at {} (a shared base subobject has no place in the flattened record layout)", name,
-                        decl->getLocation().printToString(context.getSourceManager())));
+    if (cxxRecord->getNumVBases() != 0) {
+      if (!emitLibraryMode)
+        raise(fmt::format("Unsupported virtual base in {} at {} (a shared base subobject has no place in the flattened record layout)",
+                          name, decl->getLocation().printToString(context.getSourceManager())));
+      const auto sizeInBytes = context.getTypeSizeInChars(context.getCanonicalTagType(decl)).getQuantity();
+      const auto blob =
+          Named(fmt::format("{}::#opaque", name), Type::Arr(Type::IntU8(), static_cast<int32_t>(sizeInBytes), TypeSpace::Global()));
+      return resolveStruct({}, {StructLayoutMember(blob, 0, static_cast<int64_t>(sizeInBytes))});
+    }
 
     auto resolveBases = [&](auto &&bases) {
       return bases | collect([&](auto &cls) -> Opt<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> {
@@ -945,11 +951,7 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
 }
 
 Type::Any Remapper::annotateLocalSpace(const clang::ValueDecl *decl, RemapContext &r) const {
-  const auto local = decl->attrs() | exists([](const clang::Attr *a) {
-                       if (auto annotated = llvm::dyn_cast<clang::AnnotateAttr>(a); annotated)
-                         return annotated->getAnnotation() == POLYREGION_LOCAL_ANNOTATION;
-                       return false;
-                     });
+  const auto local = hasAnnotation(decl, POLYREGION_LOCAL_ANNOTATION);
   auto tpe = handleType(decl->getType(), r);
   if (!local) return tpe;
   return tpe.get<Type::Ptr>() ^
@@ -1249,7 +1251,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::ExprWithCleanups *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
       // dropping the binding drops the destructor call, so only pass through when destruction is a no-op
       [&](const clang::CXXBindTemporaryExpr *expr) -> Expr::Any {
-        if (!destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl()))
+        if (!emitLibraryMode && !destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl()))
           raise(fmt::format("Unsupported temporary of type {} at {} (dropping it would drop its destructor's effects)",
                             expr->getType().getAsString(), expr->getBeginLoc().printToString(context.getSourceManager())));
         return handleExpr(expr->getSubExpr(), r);
@@ -1316,6 +1318,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                           expr->getBeginLoc().printToString(context.getSourceManager())));
       },
       [&](const clang::CXXThrowExpr *expr) -> Expr::Any {
+        if (emitLibraryMode) return Expr::Alias(Term::Unit0Const());
         raise(fmt::format("Unsupported throw at {} (offload regions cannot throw or unwind)",
                           expr->getBeginLoc().printToString(context.getSourceManager())));
       },
@@ -2169,7 +2172,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             auto name = Named(declName(var), annotateLocalSpace(var, r));
 
-            if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl(); rd && !destroysWithoutEffect(rd)) {
+            if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
+                rd && !emitLibraryMode && !destroysWithoutEffect(rd)) {
               const auto reject = [&](const std::string &why) {
                 raise(fmt::format("Unsupported local {} of type {} at {} ({}, so its destructor's effects would be lost)", declName(var),
                                   var->getType().getAsString(), var->getLocation().printToString(context.getSourceManager()), why));
@@ -2356,6 +2360,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
       [&](const clang::CXXTryStmt *stmt) {
+        if (emitLibraryMode) return handleStmt(stmt->getTryBlock(), r);
         raise(fmt::format("Unsupported try/catch at {} (offload regions cannot throw or unwind)",
                           stmt->getBeginLoc().printToString(context.getSourceManager())));
       },

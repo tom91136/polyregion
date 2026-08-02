@@ -40,6 +40,13 @@ std::string dump_to_string(const clang::Expr *decl, const clang::ASTContext &c) 
   return s;
 }
 
+bool hasAnnotation(const clang::Decl *decl, const llvm::StringRef annotation) {
+  return decl->attrs() | aspartame::exists([&](const clang::Attr *a) {
+           const auto *ann = llvm::dyn_cast<clang::AnnotateAttr>(a);
+           return ann && ann->getAnnotation() == annotation;
+         });
+}
+
 clang::DeclRefExpr *mkDeclRef(const clang::ASTContext &C, clang::VarDecl *lhs) {
   return clang::DeclRefExpr::Create(C, {}, {}, lhs, false, clang::SourceLocation{}, lhs->getType(), clang::ExprValueKind::VK_LValue);
 }

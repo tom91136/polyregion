@@ -18,4 +18,10 @@ polyfront::KernelBundle compileRegion(clang::DiagnosticsEngine &diag, //
                                       runtime::PlatformKind kind,     //
                                       const std::string &moduleId,    //
                                       const Remapper::DoConcurrentRegion &region);
+
+void compileLibrary(clang::DiagnosticsEngine &diag, //
+                    const polyfront::Options &opts, //
+                    mlir::ModuleOp &m,              //
+                    mlir::DataLayout &L,            //
+                    const std::string &outPath);
 } // namespace polyregion::polyfc

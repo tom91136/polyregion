@@ -1101,6 +1101,12 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
                         errors ^ for_each([&](auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
                       });
 
+  if (!opts.emitLibraryPath.empty()) {
+    DataLayout L(m);
+    compileLibrary(diag, opts, m, L, opts.emitLibraryPath);
+    return;
+  }
+
   doRewrite(m);
   OpBuilder B(m);
   Rewriter rewriter(m);

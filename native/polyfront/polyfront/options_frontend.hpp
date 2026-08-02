@@ -223,6 +223,7 @@ struct StdParOptions {
   LinkKind rt = LinkKind::Static;
   LinkKind jit = LinkKind::Disabled;
   std::optional<int> stackDepth = {};
+  std::string emitLibrary{};
 
   static std::variant<std::vector<std::string>, std::optional<StdParOptions>> parse(CliArgs &args) {
     const std::string fStdParFlag = "-fstdpar";
@@ -233,6 +234,7 @@ struct StdParOptions {
     const std::string fStdParRtFlag = "-fstdpar-rt";
     const std::string fStdParJitFlag = "-fstdpar-jit";
     const std::string fStdParStackFlag = "-fstdpar-stack";
+    const std::string fStdParEmitLibraryFlag = "-fstdpar-emit-library";
 
     auto fStdPar = false, fStdParDependents = false;
     StdParOptions options;
@@ -271,6 +273,10 @@ struct StdParOptions {
       fStdParDependents = true;
       if (auto n = parsePositiveInt(*stack)) options.stackDepth = *n;
       else markError(fStdParStackFlag)("expected a positive integer, got: " + *stack);
+    }
+    if (auto emit = args.popValue(fStdParEmitLibraryFlag)) {
+      fStdParDependents = true;
+      options.emitLibrary = *emit;
     }
 
     if (!fStdPar && fStdParDependents)
