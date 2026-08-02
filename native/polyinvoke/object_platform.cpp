@@ -110,8 +110,8 @@ std::vector<std::string> ObjectDevice::features() {
     if (F.second) features.push_back(F.first().str());
   }
 
-  polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(),
-                                              llvm::Triple(llvm::sys::getDefaultTargetTriple()).getArch(), features);
+  polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(), llvm::Triple(llvm::sys::getProcessTriple()).getArch(),
+                                              features);
 
   // XXX x87 is never CPUID-probed and collectCPUFeatures may not resolve this host's arch/model
   features.emplace_back("x87");
@@ -268,7 +268,7 @@ RelocatableDevice::RelocatableDevice() {
   if (!epc) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create executor process control: %s", toString(epc.takeError()).c_str());
   es = std::make_unique<llvm::orc::ExecutionSession>(std::move(*epc));
 
-  const llvm::Triple hostTriple(llvm::sys::getDefaultTargetTriple());
+  const llvm::Triple hostTriple(llvm::sys::getProcessTriple());
   globalPrefix = hostTriple.isOSBinFormatMachO() ? '_' : '\0';
 
   // XXX RTDyld: SIGBUS on x86_64 macOS after libm kernels; missing R_RISCV_BRANCH (riscv64), TOC relocs (ppc64le)
