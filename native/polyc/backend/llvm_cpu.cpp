@@ -33,8 +33,7 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
       [&](const Math::Abs &v) -> ValPtr {
         return cg.unaryNumOp(
             expr, v.x, v.tpe, //
-            [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); },
-            [&](auto) { return cg.intr1(llvm::Intrinsic::fabs, v.tpe, v.x); });
+            [&](auto) { return cg.intrAbs(v.tpe, v.x); }, [&](auto) { return cg.intr1(llvm::Intrinsic::fabs, v.tpe, v.x); });
       },
       [&](const Math::Sin &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::sin, v.tpe, v.x); }, //
       [&](const Math::Cos &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::cos, v.tpe, v.x); }, //

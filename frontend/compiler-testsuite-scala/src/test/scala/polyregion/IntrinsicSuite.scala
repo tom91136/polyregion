@@ -57,7 +57,17 @@ class IntrinsicSuite extends BaseSuite {
 
     // TODO parameterise these
 
-    testExpr[Double](math.abs(b))    // I, L, F, D
+    testExpr[Double](math.abs(b)) // I, L, F, D
+    {
+      val i    = -7
+      val iMin = Int.MinValue
+      val l    = -7L
+      val lMin = Long.MinValue
+      testExpr[Int](math.abs(i))
+      testExpr[Int](math.abs(iMin))
+      testExpr[Long](math.abs(l))
+      testExpr[Long](math.abs(lMin))
+    }
     testExpr[Double](math.min(a, b)) // I, L, F, D
     testExpr[Double](math.max(a, b)) // I, L, F, D
     testExpr[Double](math.signum(b)) // I, L, F, D

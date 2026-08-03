@@ -160,6 +160,7 @@ struct CodeGen {
   [[nodiscard]] ValPtr intr0(llvm::Intrinsic::ID id);
   [[nodiscard]] ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg);
   [[nodiscard]] ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &lhs, const AnyTerm &rhs);
+  [[nodiscard]] ValPtr intrAbs(const AnyType &overload, const AnyTerm &arg);
 
   [[nodiscard]] ValPtr findStackVar(const Named &named);
   [[nodiscard]] ValPtr mkSelectPtr(const Term::Select &select);
@@ -188,7 +189,7 @@ ValPtr mkExternMathVal(CodeGen &cg, const Expr::MathOp &expr, //
       [&](const Math::Abs &v) -> ValPtr { //
         return cg.unaryNumOp(
             expr, v.x, v.tpe,                                                                    //
-            [&](auto) { return cg.intr1(llvm::Intrinsic::abs, v.tpe, v.x); },                    //
+            [&](auto) { return cg.intrAbs(v.tpe, v.x); },                                        //
             [&](auto) { return absFractional(v.tpe, v.x); });                                    //
       },                                                                                         //
       [&](const Math::Sin &v) -> ValPtr { return unary("sin", v.tpe, v.x); },                    //

@@ -532,6 +532,62 @@ TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its a
   CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), ContainsSubstring("store i32 305"));
 }
 
+static Program absToCaptureProgram(const Type::Any &tpe, const Term::Any &input) {
+  using namespace polyregion::polyast::dsl;
+
+  const Named r("r", tpe);
+  const StructDef outDef(Sym({"Out"}), {}, {r}, {}, false);
+  const auto outTpe = Type::Struct(Sym({"Out"}), {});
+  const Named capture("#capture", Type::Ptr(outTpe.widen(), TypeSpace::Global()));
+  const Named x("x", tpe);
+
+  Function entry = mkFn("kernel", {Arg(capture, {})}, Unit,
+                        {
+                            Var(x, Expr::Alias(input).widen(), true).widen(),
+                            let("a") = MathOp(Math::Abs(selectNamed(x).widen(), tpe)),
+                            Mut(Select({capture}, r), Expr::Alias("a"_(tpe)).widen()).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  return Program(entry, {}, {outDef}, PassPhase::Initial(), {});
+}
+
+TEST_CASE("integral abs emits llvm.abs with its is_int_min_poison operand", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+  using Catch::Matchers::ContainsSubstring;
+
+  struct Case {
+    const char *label;
+    Type::Any tpe;
+    Term::Any input;
+    const char *intrinsic;
+    const char *folded;
+  };
+  const auto cases = std::vector<Case>{
+      {"s32", SInt.widen(), Term::IntS32Const(-7).widen(), "@llvm.abs.i32", "store i32 7"},
+      {"s64", Long.widen(), Term::IntS64Const(-7).widen(), "@llvm.abs.i64", "store i64 7"},
+      {"s32-min", SInt.widen(), Term::IntS32Const(INT32_MIN).widen(), "@llvm.abs.i32", "store i32 -2147483648"},
+      {"s64-min", Long.widen(), Term::IntS64Const(INT64_MIN).widen(), "@llvm.abs.i64", "store i64 -9223372036854775808"},
+  };
+
+  for (const auto &[label, tpe, input, intrinsic, folded] : cases) {
+    INFO(label);
+    const Program p = absToCaptureProgram(tpe, input);
+    polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+    opts.pipelineSpec = "FullOpt(level=0)";
+    auto compiled = polyregion::compiler::compile(p, opts, OptLevel::O3);
+    INFO(repr(compiled));
+    CHECK(compiled.messages == "");
+    REQUIRE(compiled.binary != std::nullopt);
+
+    const auto &ir = llvmIrOf(compiled);
+    CHECK_THAT(ir, ContainsSubstring(intrinsic));
+    CHECK_THAT(ir, ContainsSubstring(std::string(intrinsic) + "(") && ContainsSubstring("i1 false)"));
+    CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), ContainsSubstring(folded));
+  }
+}
+
 TEST_CASE("a widening struct-to-struct cast is rejected", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

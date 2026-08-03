@@ -419,6 +419,11 @@ ValPtr CodeGen::intr1(const llvm::Intrinsic::ID id, const AnyType &overload, con
   const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, mkTermVal(arg));
 }
+ValPtr CodeGen::intrAbs(const AnyType &overload, const AnyTerm &arg) { //
+  // llvm.abs.iN takes an is_int_min_poison flag; false because abs(MIN_VALUE) == MIN_VALUE in both langs.
+  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, llvm::Intrinsic::abs, resolveType(overload));
+  return B.CreateCall(callee, {mkTermVal(arg), B.getFalse()});
+}
 ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
                       const AnyTerm &lhs, const AnyTerm &rhs) {              //
   const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
