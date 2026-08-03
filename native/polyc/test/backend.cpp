@@ -27,11 +27,13 @@ static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any r
                   std::move(fpMode), isEntry, FunctionAffinity::Offload());
 }
 
-template <typename C> static const std::string &llvmIrOf(const C &c) {
-  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
+template <typename C> static const std::string &eventDataOf(const C &c, const std::string &name) {
+  const auto event = std::find_if(c.events.begin(), c.events.end(), [&](auto &e) { return e.name == name; });
   REQUIRE(event != c.events.end());
   return event->data;
 }
+
+template <typename C> static const std::string &llvmIrOf(const C &c) { return eventDataOf(c, "ast_to_llvm_ir"); }
 
 static Program arenaOffsetCastProgram() {
   using namespace polyregion::polyast::dsl;
@@ -480,4 +482,82 @@ TEST_CASE("taking the address of a constant materialises an entry block slot", "
   const auto &ir = llvmIrOf(c);
   CHECK(ir.find("alloca i32") != std::string::npos);
   CHECK(ir.find("store i32 1") != std::string::npos);
+}
+
+TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its address", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named a("a", SInt), b("b", SInt), c("c", SInt);
+  const Named x("x", SInt), y("y", SInt);
+  const Named r("r", SInt);
+  const auto srcTpe = Type::Struct(Sym({"Src"}), {});
+  const auto dstTpe = Type::Struct(Sym({"Dst"}), {});
+  const auto outTpe = Type::Struct(Sym({"Out"}), {});
+  const StructDef srcDef(Sym({"Src"}), {}, {a, b, c}, {}, false);
+  const StructDef dstDef(Sym({"Dst"}), {}, {x, y}, {}, false);
+  const StructDef outDef(Sym({"Out"}), {}, {r}, {}, false);
+
+  const Named capture("#capture", Type::Ptr(outTpe.widen(), TypeSpace::Global()));
+  const Named src("src", srcTpe.widen());
+  const Named dst("dst", dstTpe.widen());
+
+  // 305 is unique to reading x then y: swapping gives 503, shifting a slot gives 507.
+  Function entry = mkFn("kernel", {Arg(capture, {})}, Unit,
+                        {
+                            Var(src, std::optional<Expr::Any>{}, true).widen(),
+                            Mut(Select({src}, a), Expr::Alias(Term::IntS32Const(3).widen()).widen()).widen(),
+                            Mut(Select({src}, b), Expr::Alias(Term::IntS32Const(5).widen()).widen()).widen(),
+                            Mut(Select({src}, c), Expr::Alias(Term::IntS32Const(7).widen()).widen()).widen(),
+                            Var(dst, Expr::Cast(selectNamed(src).widen(), dstTpe.widen()).widen(), false).widen(),
+                            let("scaled") = IntrOp(Mul(Select({dst}, x).widen(), 100_(SInt), SInt)),
+                            let("mixed") = IntrOp(Add("scaled"_(SInt), Select({dst}, y).widen(), SInt)),
+                            Mut(Select({capture}, r), Expr::Alias("mixed"_(SInt)).widen()).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {srcDef, dstDef, outDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto compiled = polyregion::compiler::compile(p, opts, OptLevel::O3);
+  INFO(repr(compiled));
+  CHECK(compiled.messages == "");
+  REQUIRE(compiled.binary != std::nullopt);
+
+  using Catch::Matchers::ContainsSubstring;
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, ContainsSubstring("load %Dst, ptr %src_stack_ptr"));
+  CHECK_THAT(ir, !ContainsSubstring("store ptr %src_stack_ptr, ptr %dst_stack_ptr"));
+  CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), ContainsSubstring("store i32 305"));
+}
+
+TEST_CASE("a widening struct-to-struct cast is rejected", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named a("a", SInt);
+  const Named x("x", SInt), y("y", SInt);
+  const auto srcTpe = Type::Struct(Sym({"Src"}), {});
+  const auto dstTpe = Type::Struct(Sym({"Dst"}), {});
+  const StructDef srcDef(Sym({"Src"}), {}, {a}, {}, false);
+  const StructDef dstDef(Sym({"Dst"}), {}, {x, y}, {}, false);
+
+  const Named src("src", srcTpe.widen());
+  const Named dst("dst", dstTpe.widen());
+
+  Function entry = mkFn("kernel", {}, Unit,
+                        {
+                            Var(src, std::optional<Expr::Any>{}, true).widen(),
+                            Mut(Select({src}, a), Expr::Alias(Term::IntS32Const(3).widen()).widen()).widen(),
+                            Var(dst, Expr::Cast(selectNamed(src).widen(), dstTpe.widen()).widen(), false).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {srcDef, dstDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(p, opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("would read past the source allocation"));
 }

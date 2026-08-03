@@ -644,15 +644,23 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           }
         }
 
-        // Struct-to-struct casts (e.g. dispatch upcast `Monoid -> anon$1`): both sides are
-        // opaque pointers at the boundary, so we just pass the pointer through.
         if (x.from.tpe().is<Type::Struct>() && x.as.is<Type::Struct>()) {
-          // The expression is materialised as a select-pointer (the struct's stack address);
-          // grab that instead of the loaded struct value.
-          if (const auto sel = x.from.template get<Term::Select>()) {
-            return mkSelectPtr(*sel);
+          const auto &dl = M.getDataLayout();
+          const auto fromSize = dl.getTypeAllocSize(fromTpe).getFixedValue();
+          const auto toSize = dl.getTypeAllocSize(toTpe).getFixedValue();
+          if (toSize > fromSize) {
+            throw BackendException::semantic("cast from " + to_string(x.from.tpe()) + " (" + std::to_string(fromSize) +
+                                             " bytes) to the larger " + to_string(x.as) + " (" + std::to_string(toSize) +
+                                             " bytes) would read past the source allocation");
           }
-          return from;
+          if (const auto sel = x.from.template get<Term::Select>()) {
+            const auto ptr = mkSelectPtr(*sel);
+            return structByPtr() ? ptr : C.load(B, ptr, toTpe);
+          }
+          if (structByPtr()) return from;
+          const auto slot = C.allocaAS(B, fromTpe, C.AllocaAS, key + "_struct_cast");
+          B.CreateStore(from, slot);
+          return C.load(B, slot, toTpe);
         }
 
         // Reinterpret aggregates through their storage, materialising a slot when needed.

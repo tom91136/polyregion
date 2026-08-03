@@ -20,6 +20,7 @@ object Toggles {
   final inline val LengthSuite           = true
   final inline val LogicSuite            = true
   final inline val MathSuite             = true
+  final inline val StructCastSuite       = true
   final inline val StructSuite           = true
   final inline val ValueReturnSuite      = true
 
