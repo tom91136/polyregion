@@ -287,6 +287,8 @@ jobs:
     runs-on: ${{ matrix.runs_on }}
     env: &arch-env
       POLYREGION_ARCH: ${{ matrix.arch }}
+      # we may or may not get a paravirtualised Metal device
+      POLYRT_STRICT_SELECT: "0"
     steps:
       - uses: *checkout
 
@@ -651,6 +653,7 @@ jobs:
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYRT_STRICT_SELECT: "0"
     steps:
       - uses: *checkout
       - *setup-just

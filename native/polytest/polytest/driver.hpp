@@ -149,7 +149,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   put(cfg.driverEnvVar, cfg.driverPath);
   put(polyregion::env::PolyrtPlatform, archFor(t, cfg));
   put(polyregion::env::PolyrtHostFallback, "0");
-  put(polyregion::env::PolyrtStrictSelect, "1");
+  if (const auto v = std::getenv(polyregion::env::PolyrtStrictSelect); v && v[0]) put(polyregion::env::PolyrtStrictSelect, v);
+  else put(polyregion::env::PolyrtStrictSelect, "1");
   // XXX NVIDIA's shader disk cache (~/.cache/nvidia/GLCache) bloats to 100k+ files across a sweep and the
   // driver stat-scans it on every init (~20s spin); one-shot test kernels gain nothing, so disable it
   put("__GL_SHADER_DISK_CACHE", "0");
