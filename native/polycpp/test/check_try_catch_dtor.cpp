@@ -18,6 +18,16 @@
 #pragma region do: {output}
 #pragma region requires: 111 111
 
+#pragma region case: composite-local-dtor
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=4 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 321321 321321
+
+#pragma region case: array-local-dtor
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=5 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 321321 321321
+
 #ifndef CHECK_KIND
   #define CHECK_KIND 0
 #endif
@@ -30,6 +40,18 @@ struct Trace {
   int *sink;
   int id;
   ~Trace() { sink[0] = sink[0] * 10 + id; }
+};
+struct TraceBase {
+  int *sink;
+  ~TraceBase() { sink[0] = sink[0] * 10 + 1; }
+};
+struct TraceMember {
+  int *sink;
+  ~TraceMember() { sink[0] = sink[0] * 10 + 2; }
+};
+struct CompositeTrace : TraceBase {
+  TraceMember member;
+  ~CompositeTrace() { sink[0] = sink[0] * 10 + 3; }
 };
 
 int main() {
@@ -76,6 +98,32 @@ int main() {
       }
     } catch (int e) {
       (void)e;
+    }
+    return sink[0];
+  });
+#elif CHECK_KIND == 4
+  const int r = __polyregion_offload_f1__([=]() {
+    {
+      CompositeTrace value{{sink}, {sink}};
+      (void)value;
+    }
+    try {
+      CompositeTrace value{{sink}, {sink}};
+      if (sink[1] == 0) throw 0;
+    } catch (int) {
+    }
+    return sink[0];
+  });
+#elif CHECK_KIND == 5
+  const int r = __polyregion_offload_f1__([=]() {
+    {
+      Trace values[3] = {{sink, 1}, {sink, 2}, {sink, 3}};
+      (void)values;
+    }
+    try {
+      Trace values[3] = {{sink, 1}, {sink, 2}, {sink, 3}};
+      if (sink[1] == 0) throw 0;
+    } catch (int) {
     }
     return sink[0];
   });

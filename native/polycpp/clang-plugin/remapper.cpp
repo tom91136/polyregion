@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/CXXInheritance.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/RecordLayout.h"
@@ -65,14 +66,21 @@ const static std::string Empty = "#empty";
 
 [[nodiscard]] static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
                                       const std::function<bool(const StructDef &)> &predicate, Vector<std::shared_ptr<StructDef>> &chain) {
+
   const auto parents = r.parents ^ get_maybe(repr(derived.name));
   if (!parents) return false;
-  for (const auto &parent : *parents) {
-    chain.emplace_back(parent);
-    if (predicate(*parent) || walkParents(r, Type::Struct(parent->name, {}), predicate, chain)) return true;
-    chain.pop_back();
+
+  if (const auto directBases = *parents ^ filter([&](auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
+    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name, {}), predicate, chain); });
+  } else if (directBases.size() != 1) {
+    // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
+    raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
+                      directBases ^ mk_string(", ", [](auto &s) { return repr(s->name); }), repr(derived),
+                      chain ^ mk_string("->", [](auto &s) { return repr(s->name); })));
+  } else {
+    chain.emplace_back(directBases[0]);
+    return true;
   }
-  return false;
 }
 
 [[nodiscard]] static Named baseMember(const StructDef &s) {
@@ -191,6 +199,96 @@ static void copyArray(Remapper::RemapContext &r, const Term::Select &dst, const 
     const auto idx = Term::IntU64Const(i);
     r.push(Stmt::Update(dst, idx, r.newVar(Expr::Index(src, idx, tpe.comp))));
   }
+}
+
+static Type::Arr exceptionMessageType() {
+  return Type::Arr(Type::IntS8(), polyregion::conventions::AssertMessageLimit, TypeSpace::Private());
+}
+
+static Expr::Any exceptionMessagePointer(const Named &message) {
+  if (const auto arr = message.tpe.get<Type::Arr>())
+    return Expr::RefTo(Term::Select(message, {}, message.tpe), Term::IntU64Const(0), arr->comp, arr->space, Region::Rooted(message));
+  return Expr::Alias(Term::Select(message, {}, message.tpe));
+}
+
+static Opt<Term::Any> findCharacterPointer(Remapper::RemapContext &r, const Term::Any &value, Set<std::string> seen = {}) {
+  const auto direct = value.tpe().get<Type::Ptr>();
+  if (direct && (direct->comp.is<Type::IntS8>() || direct->comp.is<Type::IntU8>())) return value;
+  const auto structTpe =
+      value.tpe().get<Type::Struct>() ^ or_else([&] { return direct ? direct->comp.get<Type::Struct>() : Opt<Type::Struct>{}; });
+  if (!structTpe) return {};
+  const auto name = repr(structTpe->name);
+  if (seen ^ contains(name)) return {};
+  seen.insert(name);
+  const auto def = r.findStruct(name, "standard exception string message");
+  for (const auto &member : def->members) {
+    auto base = value.get<Term::Select>();
+    if (!base) base = r.newVar(Expr::Alias(value)).get<Term::Select>();
+    if (!base) raise(fmt::format("Cannot inspect standard exception string storage {}", repr(value.tpe())));
+    auto steps = base->steps;
+    steps.emplace_back(PathStep::Field(member.symbol));
+    const auto selected = Term::Select(base->root, steps, member.tpe).widen();
+    if (const auto found = findCharacterPointer(r, selected, seen)) return found;
+  }
+  return {};
+}
+
+static bool supportedStdStringLayout(const clang::CXXRecordDecl *record) {
+  if (!record) return false;
+  for (const auto *field : record->fields())
+    if (field->getName() == "_M_dataplus") return true;
+  return false;
+}
+
+static void copyExceptionMessageInto(Remapper::RemapContext &r, const Term::Any &source, const Named &message) {
+  const auto slots = Term::Select(message, {}, message.tpe);
+  if (const auto literal = source.get<Term::StringConst>()) {
+    const auto limit = static_cast<size_t>(polyregion::conventions::AssertMessageLimit - 1);
+    const auto size = std::min(literal->value.size(), limit);
+    for (size_t i = 0; i < size; ++i)
+      r.push(Stmt::Update(slots, Term::IntU64Const(i), Term::IntS8Const(static_cast<int8_t>(literal->value[i]))));
+    r.push(Stmt::Update(slots, Term::IntU64Const(size), Term::IntS8Const(0)));
+    return;
+  }
+  const auto index = r.newName(Type::IntU32());
+  const auto ch = r.newName(Type::IntS8());
+  const auto atNul = r.newName(Type::Bool1());
+  const auto at = Term::Select(index, {}, index.tpe);
+  const auto value = Term::Select(ch, {}, ch.tpe);
+  const auto body = Vector<Stmt::Any>{Stmt::Var(ch, Expr::Index(source, at, Type::IntS8()), false), Stmt::Update(slots, at, value),
+                                      Stmt::Var(atNul, Expr::IntrOp(Intr::LogicEq(value, Term::IntS8Const(0))), false),
+                                      Stmt::Cond(Term::Select(atNul, {}, atNul.tpe), {Stmt::Break()}, {})};
+  r.push(Stmt::ForRange(index, Term::IntU32Const(0), Term::IntU32Const(polyregion::conventions::AssertMessageLimit - 1),
+                        Term::IntU32Const(1), body));
+  r.push(Stmt::Update(slots, Term::IntU32Const(polyregion::conventions::AssertMessageLimit - 1), Term::IntS8Const(0)));
+}
+
+static void copyExceptionMessageInto(Remapper::RemapContext &r, const Term::Any &source, const Term::Any &count, const Named &message) {
+  const auto slots = Term::Select(message, {}, message.tpe);
+  const auto limit = Term::IntU32Const(polyregion::conventions::AssertMessageLimit - 1);
+  const auto size = r.newName(Type::IntU32());
+  r.push(Stmt::Var(size, Expr::IntrOp(Intr::Min(r.newVar(Expr::Cast(count, Type::IntU32())), limit, Type::IntU32())), false));
+  const auto index = r.newName(Type::IntU32());
+  const auto ch = r.newName(Type::IntS8());
+  const auto at = Term::Select(index, {}, index.tpe);
+  r.push(Stmt::ForRange(
+      index, Term::IntU32Const(0), Term::Select(size, {}, size.tpe), Term::IntU32Const(1),
+      {Stmt::Var(ch, Expr::Index(source, at, Type::IntS8()), false), Stmt::Update(slots, at, Term::Select(ch, {}, ch.tpe))}));
+  r.push(Stmt::Update(slots, Term::Select(size, {}, size.tpe), Term::IntS8Const(0)));
+}
+
+static Named copyExceptionMessage(Remapper::RemapContext &r, const Term::Any &source, const std::string &symbol = {}) {
+  const auto message = symbol.empty() ? r.newName(exceptionMessageType()) : Named(symbol, exceptionMessageType());
+  r.push(Stmt::Var(message, {}, true));
+  copyExceptionMessageInto(r, source, message);
+  return message;
+}
+
+static Named copyExceptionMessage(Remapper::RemapContext &r, const Term::Any &source, const Term::Any &count) {
+  const auto message = r.newName(exceptionMessageType());
+  r.push(Stmt::Var(message, {}, true));
+  copyExceptionMessageInto(r, source, count, message);
+  return message;
 }
 
 // Clang leaves implicit union copy/move bodies empty; copy their canonical storage explicitly.
@@ -1011,7 +1109,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
           case clang::BuiltinType::Double: return Type::Float64();
           case clang::BuiltinType::Bool: return Type::Bool1();
           case clang::BuiltinType::Void: return Type::Unit0();
-          case clang::BuiltinType::NullPtr: return Type::Ptr(Type::IntS8(), TypeSpace::Global());
+          case clang::BuiltinType::NullPtr: return Type::Ptr(Type::Nothing(), TypeSpace::Constant());
           default:
             raise(fmt::format("Unsupported builtin type {} (no polyAST type of matching width and semantics)",
                               clang::QualType(tpe, 0).getAsString()));
@@ -1065,9 +1163,220 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   return rd && (!rd->isTriviallyCopyable() || !rd->hasTrivialDestructor());
 }
 
-[[nodiscard]] static std::string exceptionTypeName(clang::QualType type) {
+[[nodiscard]] static bool derivesStdException(const clang::CXXRecordDecl *record) {
+  if (!record) return false;
+  record = record->getDefinition() ? record->getDefinition() : record;
+  if (record->getQualifiedNameAsString() == "std::exception") return true;
+  return record->bases() |
+         exists([](const clang::CXXBaseSpecifier &base) { return derivesStdException(base.getType()->getAsCXXRecordDecl()); });
+}
+
+[[nodiscard]] static bool isStdExceptionRecord(const clang::CXXRecordDecl *record) {
+  return record && record->getQualifiedNameAsString().starts_with("std::") && derivesStdException(record);
+}
+
+[[nodiscard]] static bool charPointer(const clang::Expr *expr) {
+  const auto tpe = expr->getType();
+  if (const auto ptr = tpe->getAs<clang::PointerType>()) return ptr->getPointeeType()->isCharType();
+  if (const auto arr = tpe->getAsArrayTypeUnsafe()) return arr->getElementType()->isCharType();
+  return false;
+}
+
+[[nodiscard]] static bool stdExceptionNamed(const clang::CXXRecordDecl *record, const std::string_view name) {
+  return isStdExceptionRecord(record) && record->getName() == llvm::StringRef(name.data(), name.size());
+}
+
+[[nodiscard]] static bool stdRecordNamed(const clang::CXXRecordDecl *record, const std::string_view name) {
+  return record && record->getName() == llvm::StringRef(name.data(), name.size()) &&
+         record->getQualifiedNameAsString().starts_with("std::");
+}
+
+[[nodiscard]] static bool derivesStdExceptionNamed(const clang::CXXRecordDecl *record, const std::string_view name) {
+  if (!record) return false;
+  if (stdExceptionNamed(record, name)) return true;
+  return record->bases() |
+         exists([&](const clang::CXXBaseSpecifier &base) { return derivesStdExceptionNamed(base.getType()->getAsCXXRecordDecl(), name); });
+}
+
+[[nodiscard]] static bool recordDerivesFrom(const clang::CXXRecordDecl *record, const clang::CXXRecordDecl *base) {
+  if (!record || !base) return false;
+  if (record->getCanonicalDecl() == base->getCanonicalDecl()) return true;
+  return record->bases() |
+         exists([&](const clang::CXXBaseSpecifier &x) { return recordDerivesFrom(x.getType()->getAsCXXRecordDecl(), base); });
+}
+
+[[nodiscard]] static bool catchesRecord(const clang::CXXCatchStmt *handler, const clang::CXXRecordDecl *record) {
+  const auto decl = handler->getExceptionDecl();
+  if (!decl) return true;
+  const auto caught = decl->getType().getNonReferenceType()->getAsCXXRecordDecl();
+  return caught && recordDerivesFrom(record, caught);
+}
+
+[[nodiscard]] static const clang::Expr *transparentExceptionExpr(const clang::Stmt *stmt);
+
+[[nodiscard]] static bool carriesComposedStdExceptionWhat(const clang::Expr *expr, Set<const clang::VarDecl *> &seen) {
+  while (const auto next = transparentExceptionExpr(expr))
+    expr = next;
+  const auto record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
+  if (derivesStdExceptionNamed(record, "system_error")) return true;
+  if (const auto ref = llvm::dyn_cast<clang::DeclRefExpr>(expr))
+    if (const auto var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl()); var && var->hasInit() && seen.insert(var).second)
+      return carriesComposedStdExceptionWhat(var->getInit(), seen);
+  if (const auto conditional = llvm::dyn_cast<clang::AbstractConditionalOperator>(expr))
+    return carriesComposedStdExceptionWhat(conditional->getTrueExpr(), seen) ||
+           carriesComposedStdExceptionWhat(conditional->getFalseExpr(), seen);
+  if (const auto construct = llvm::dyn_cast<clang::CXXConstructExpr>(expr))
+    for (const auto arg : construct->arguments())
+      if (derivesStdException(arg->getType().getNonReferenceType()->getAsCXXRecordDecl()) && carriesComposedStdExceptionWhat(arg, seen))
+        return true;
+  return false;
+}
+
+using ComposedStdExceptions = Set<const clang::CXXRecordDecl *>;
+
+static void mergeComposedStdExceptions(ComposedStdExceptions &into, const ComposedStdExceptions &from) {
+  into.insert(from.begin(), from.end());
+}
+
+[[nodiscard]] static ComposedStdExceptions mayThrowComposedStdExceptions(const clang::Stmt *stmt, const ComposedStdExceptions &rethrows,
+                                                                         Set<const clang::FunctionDecl *> &recursion) {
+  if (!stmt) return {};
+  ComposedStdExceptions result;
+  if (const auto thrown = llvm::dyn_cast<clang::CXXThrowExpr>(stmt)) {
+    const auto value = thrown->getSubExpr();
+    if (!value) return rethrows;
+    Set<const clang::VarDecl *> seen;
+    if (carriesComposedStdExceptionWhat(value, seen))
+      if (const auto record = value->getType().getNonReferenceType()->getAsCXXRecordDecl()) result.insert(record);
+  }
+  if (const auto tried = llvm::dyn_cast<clang::CXXTryStmt>(stmt)) {
+    auto pending = mayThrowComposedStdExceptions(tried->getTryBlock(), rethrows, recursion);
+    for (unsigned i = 0; i < tried->getNumHandlers(); ++i) {
+      const auto handler = tried->getHandler(i);
+      ComposedStdExceptions received;
+      for (auto it = pending.begin(); it != pending.end();) {
+        if (catchesRecord(handler, *it)) {
+          received.insert(*it);
+          it = pending.erase(it);
+        } else ++it;
+      }
+      mergeComposedStdExceptions(result, mayThrowComposedStdExceptions(handler->getHandlerBlock(), received, recursion));
+    }
+    mergeComposedStdExceptions(result, pending);
+    return result;
+  }
+  if (const auto call = llvm::dyn_cast<clang::CallExpr>(stmt)) {
+    const auto callee = call->getDirectCallee();
+    if (callee && callee->hasBody() && recursion.insert(callee).second) {
+      mergeComposedStdExceptions(result, mayThrowComposedStdExceptions(callee->getBody(), {}, recursion));
+      recursion.erase(callee);
+    }
+  }
+  for (const auto child : stmt->children())
+    mergeComposedStdExceptions(result, mayThrowComposedStdExceptions(child, rethrows, recursion));
+  return result;
+}
+
+[[nodiscard]] static ComposedStdExceptions mayThrowComposedStdExceptions(const clang::Stmt *stmt) {
+  Set<const clang::FunctionDecl *> recursion;
+  return mayThrowComposedStdExceptions(stmt, {}, recursion);
+}
+
+[[nodiscard]] static bool hasExceptionCode(const clang::CXXRecordDecl *record) {
+  return stdExceptionNamed(record, "regex_error") || stdExceptionNamed(record, "future_error") ||
+         derivesStdExceptionNamed(record, "system_error");
+}
+
+[[nodiscard]] static bool overridesStdExceptionWhat(const clang::CXXRecordDecl *record) {
+  if (!record || isStdExceptionRecord(record)) return false;
+  if (record->methods() |
+      exists([](const clang::CXXMethodDecl *method) { return method->getName() == "what" && method->size_overridden_methods() != 0; }))
+    return true;
+  return record->bases() |
+         exists([](const clang::CXXBaseSpecifier &base) { return overridesStdExceptionWhat(base.getType()->getAsCXXRecordDecl()); });
+}
+
+[[nodiscard]] static bool hasOnlyInheritedStdExceptionState(const clang::CXXRecordDecl *record) {
+  return record && record->field_empty() && record->getNumBases() == 1 && record->getNumVBases() == 0 &&
+         isStdExceptionRecord(record->bases_begin()->getType()->getAsCXXRecordDecl());
+}
+
+[[nodiscard]] static bool hasDefaultStdExceptionBase(const clang::CXXRecordDecl *record) {
+  return record && record->getNumBases() == 1 && record->getNumVBases() == 0 &&
+         stdExceptionNamed(record->bases_begin()->getType()->getAsCXXRecordDecl(), "exception");
+}
+
+[[nodiscard]] static std::string exceptionMetadataKey(const clang::Stmt *stmt) {
+  return fmt::format("#exception_expr_{:x}", reinterpret_cast<uintptr_t>(stmt));
+}
+
+[[nodiscard]] static const clang::Expr *transparentExceptionExpr(const clang::Stmt *stmt) {
+  if (const auto x = llvm::dyn_cast<clang::ParenExpr>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::ImplicitCastExpr>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::CXXDefaultArgExpr>(stmt)) return x->getExpr();
+  if (const auto x = llvm::dyn_cast<clang::CXXDefaultInitExpr>(stmt)) return x->getExpr();
+  if (const auto x = llvm::dyn_cast<clang::ConstantExpr>(stmt)) return x->getSubExpr();
+  if (const auto x = llvm::dyn_cast<clang::OpaqueValueExpr>(stmt)) return x->getSourceExpr();
+  return nullptr;
+}
+
+[[nodiscard]] static bool identityExceptionWrapper(const clang::CallExpr *call) {
+  const auto callee = call ? call->getDirectCallee() : nullptr;
+  if (!callee || call->getNumArgs() != 1) return false;
+  const auto id = static_cast<clang::Builtin::ID>(callee->getBuiltinID());
+  return id == clang::Builtin::BImove || id == clang::Builtin::BIforward;
+}
+
+[[nodiscard]] static Opt<Named> findExceptionMetadata(const clang::Stmt *stmt, const Map<std::string, Named> &metadata) {
+  while (stmt) {
+    if (const auto it = metadata.find(exceptionMetadataKey(stmt)); it != metadata.end()) return it->second;
+    if (const auto ref = llvm::dyn_cast<clang::DeclRefExpr>(stmt))
+      if (const auto var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl()))
+        if (const auto it = metadata.find(declName(var)); it != metadata.end()) return it->second;
+    if (const auto call = llvm::dyn_cast<clang::CallExpr>(stmt); identityExceptionWrapper(call)) {
+      stmt = call->getArg(0);
+      continue;
+    }
+    stmt = transparentExceptionExpr(stmt);
+  }
+  return {};
+}
+
+[[nodiscard]] static bool returnsErrorCode(const clang::CXXMethodDecl *method) {
+  return method && method->getNameAsString() == "code" &&
+         (stdExceptionNamed(method->getParent(), "future_error") || stdExceptionNamed(method->getParent(), "system_error"));
+}
+
+[[nodiscard]] static const clang::CallExpr *unsupportedExceptionMetadataCall(const clang::Expr *expr) {
+  while (const auto next = transparentExceptionExpr(expr))
+    expr = next;
+  const auto call = llvm::dyn_cast<clang::CallExpr>(expr);
+  if (!call) return nullptr;
+  const auto callee = call->getDirectCallee();
+  if (identityExceptionWrapper(call)) return nullptr;
+  if (callee && callee->getQualifiedNameAsString() == "std::make_error_code") return nullptr;
+  if (returnsErrorCode(llvm::dyn_cast_or_null<clang::CXXMethodDecl>(callee))) return nullptr;
+  return call;
+}
+
+[[nodiscard]] static const clang::Expr *throwValue(const clang::Expr *expr) {
+  while (true) {
+    if (const auto x = llvm::dyn_cast<clang::ParenExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expr)) expr = x->getSubExpr();
+    else return expr;
+  }
+}
+
+[[nodiscard]] static std::string exceptionSourceName(clang::QualType type) {
   const auto canonical = type.getNonReferenceType().getCanonicalType().getUnqualifiedType();
-  if (const auto pointer = canonical->getAs<clang::PointerType>()) return exceptionTypeName(pointer->getPointeeType()) + " *";
+  if (const auto pointer = canonical->getAs<clang::PointerType>()) return exceptionSourceName(pointer->getPointeeType()) + " *";
   if (const auto *tag = canonical->getAsTagDecl()) {
     const auto name = tag->getQualifiedNameAsString();
     if (!name.empty()) return name;
@@ -1075,30 +1384,14 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   return canonical.getAsString();
 }
 
-[[nodiscard]] static bool catchMatches(const Remapper::RemapContext &r, const Type::Any &thrown, const Opt<Type::Any> &handler) {
-  if (!handler || *handler == thrown) return true;
-  const auto derived = thrown.get<Type::Struct>();
-  const auto base = handler->get<Type::Struct>();
-  if (!derived || !base) return false;
-  Vector<std::shared_ptr<StructDef>> chain;
-  return walkParents(r, *derived, [&](const auto &parent) { return parent.name == base->name; }, chain);
-}
-
-[[nodiscard]] static bool nearestCatchIsExact(const Remapper::RemapContext &r, const Type::Any &thrown) {
-  for (auto frame = r.catchFrames.rbegin(); frame != r.catchFrames.rend(); ++frame)
-    for (const auto &handler : *frame)
-      if (catchMatches(r, thrown, handler)) return handler && *handler == thrown;
-  return false;
-}
-
-[[nodiscard]] static const clang::Expr *throwValue(const clang::Expr *expr) {
-  while (true) {
-    if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(expr)) expr = x->getSubExpr();
-    else if (const auto x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expr)) expr = x->getSubExpr();
-    else return expr;
+[[nodiscard]] static bool hasCvQualifiedPointee(clang::QualType type) {
+  auto current = type.getNonReferenceType().getCanonicalType().getUnqualifiedType();
+  while (const auto pointer = current->getAs<clang::PointerType>()) {
+    const auto pointee = pointer->getPointeeType().getCanonicalType();
+    if (pointee.isConstQualified() || pointee.isVolatileQualified()) return true;
+    current = pointee.getUnqualifiedType();
   }
+  return false;
 }
 
 Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
@@ -1127,6 +1420,56 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       return Expr::RefTo(termToSel(term), {}, term.tpe(), TypeSpace::Global(), Region::Opaque());
     }
     return Expr::Alias(term);
+  };
+
+  auto sourceRecord = [](const clang::Expr *expr) {
+    while (const auto next = transparentExceptionExpr(expr))
+      expr = next;
+    return expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
+  };
+
+  auto lowerTrackedAssignment = [&](const clang::Expr *call, const clang::Expr *receiverExpr, const clang::Expr *sourceExpr,
+                                    const clang::CXXMethodDecl *method, clang::QualType returnType) -> Opt<Expr::Any> {
+    const auto owner = method->getParent();
+    const bool errorCode = stdRecordNamed(owner, "error_code");
+    if (!errorCode && !derivesStdException(owner)) return {};
+    if (!errorCode && !isStdExceptionRecord(owner) && (!hasOnlyInheritedStdExceptionState(owner) || method->isUserProvided()))
+      raise(fmt::format("Unsupported custom standard-derived exception assignment: {}", pretty_string(call, context)));
+
+    const auto receiver = r.newVar(handleExpr(receiverExpr, r));
+    (void)r.newVar(handleExpr(sourceExpr, r));
+    if (errorCode) {
+      const auto target = findExceptionMetadata(receiverExpr, r.exceptionCodes);
+      const auto source = findExceptionMetadata(sourceExpr, r.exceptionCodes);
+      if (!target || !source)
+        raise(fmt::format("Unsupported std::error_code assignment without object metadata: {}", pretty_string(call, context)));
+      r.push(Stmt::Mut(select(r, {}, *target), Expr::Alias(select(r, {}, *source))));
+      r.exceptionCodes.emplace(exceptionMetadataKey(call), *target);
+    } else {
+      const auto targetWhat = findExceptionMetadata(receiverExpr, r.exceptionWhats);
+      if (!targetWhat)
+        raise(fmt::format("Unsupported standard exception assignment without object metadata: {}", pretty_string(call, context)));
+      if (stdExceptionNamed(owner, "exception")) {
+        copyExceptionMessageInto(r, Term::StringConst("std::exception"), *targetWhat);
+        r.incompleteExceptionWhats.erase(targetWhat->symbol);
+      } else {
+        const auto sourceWhat = findExceptionMetadata(sourceExpr, r.exceptionWhats);
+        if (!sourceWhat)
+          raise(fmt::format("Unsupported standard exception assignment without object metadata: {}", pretty_string(call, context)));
+        copyExceptionMessageInto(r, r.newVar(exceptionMessagePointer(*sourceWhat)), *targetWhat);
+        if (r.incompleteExceptionWhats.contains(sourceWhat->symbol)) r.incompleteExceptionWhats.insert(targetWhat->symbol);
+        else r.incompleteExceptionWhats.erase(targetWhat->symbol);
+      }
+      r.exceptionWhats.emplace(exceptionMetadataKey(call), *targetWhat);
+      if (const auto targetCode = findExceptionMetadata(receiverExpr, r.exceptionCodes)) {
+        const auto sourceCode = findExceptionMetadata(sourceExpr, r.exceptionCodes);
+        if (!sourceCode)
+          raise(fmt::format("Unsupported standard exception code assignment without object metadata: {}", pretty_string(call, context)));
+        r.push(Stmt::Mut(select(r, {}, *targetCode), Expr::Alias(select(r, {}, *sourceCode))));
+        r.exceptionCodes.emplace(exceptionMetadataKey(call), *targetCode);
+      }
+    }
+    return conform(r, Expr::Alias(receiver), handleType(returnType, r));
   };
 
   auto extractBitField = [&r](const Term::Select &storageSelect, const Remapper::BitFieldInfo &info) -> Expr::Any {
@@ -1385,27 +1728,42 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto loc = expr->getBeginLoc().printToString(context.getSourceManager());
         const auto sub = expr->getSubExpr();
         if (!sub) {
-          if (!r.activeCatch) raise(fmt::format("Unsupported rethrow at {} (it is not inside a typed handler)", loc));
-          if (!r.activeCatch->canRethrow)
-            raise(fmt::format("Unsupported rethrow of non-trivial {} at {} (sharing one exception object's lifetime "
-                              "across nested handlers is not representable yet)",
-                              r.activeCatch->tpeName, loc));
-          const auto value = r.newVar(conform(r, Expr::Alias(select(r, {}, r.activeCatch->binder)), r.activeCatch->valueTpe));
+          if (!r.inCatch) raise(fmt::format("Unsupported rethrow at {} (it is not inside a handler)", loc));
           unwindCleanups(r, r.tryFrame);
-          r.push(Stmt::Raise(value, ExceptionKind(r.activeCatch->valueTpe, r.activeCatch->tpeName), {}));
+          r.push(Stmt::Rethrow());
           return Expr::Alias(Term::Unit0Const());
         }
+        if (hasCvQualifiedPointee(sub->getType())) raise(fmt::format("Unsupported cv-qualified pointer exception at {}", loc));
         const auto thrown = sub->getType().getNonReferenceType().getUnqualifiedType();
+        if (thrown->isFunctionPointerType())
+          raise(fmt::format("Unsupported function pointer exception at {} (function addresses are not representable in PolyAST)", loc));
         const auto thrownTpe = handleType(thrown, r);
-        if (needsManagedException(thrown->getAsCXXRecordDecl()) && !nearestCatchIsExact(r, thrownTpe))
-          raise(fmt::format("Unsupported non-trivial exception payload {} at {} (its nearest matching handler must "
-                            "have the exact type; catch-all, base catches, escaping payloads, and cross-function "
-                            "propagation cannot preserve its dynamic destruction yet)",
-                            thrown.getAsString(), loc));
+        const auto source = throwValue(sub);
         // The handler owns a directly-thrown prvalue. Bypass Clang's source-scope lifetime wrappers.
-        const auto value = r.newVar(conform(r, handleExpr(throwValue(sub), r), thrownTpe));
+        const auto value = r.newVar(conform(r, handleExpr(source, r), thrownTpe));
+        const auto record = thrown->getAsCXXRecordDecl();
+        if (derivesStdException(record)) {
+          const auto stored = findExceptionMetadata(source, r.exceptionWhats);
+          if (!stored) raise(fmt::format("Unsupported thrown standard exception without metadata: {}", pretty_string(source, context)));
+          if (!derivesStdExceptionNamed(record, "system_error") && r.incompleteExceptionWhats.contains(stored->symbol))
+            raise("Unsupported composed standard exception throw after slicing or assignment");
+          const auto message = r.newVar(exceptionMessagePointer(*stored));
+          r.push(Stmt::Mut(Term::Select(Named(polyregion::conventions::ExceptionWhat, message.tpe()), {}, message.tpe()),
+                           Expr::Alias(message)));
+        }
+        const auto hasCode = hasExceptionCode(record);
+        const auto storedCode = hasCode ? findExceptionMetadata(source, r.exceptionCodes) : Opt<Named>{};
+        if (hasCode && !storedCode)
+          raise(fmt::format("Unsupported thrown standard exception code without metadata: {}", pretty_string(source, context)));
+        const auto code = storedCode ? select(r, {}, *storedCode).widen() : Term::IntS32Const(0).widen();
+        r.push(
+            Stmt::Mut(Term::Select(Named(polyregion::conventions::ExceptionCode, Type::IntS32()), {}, Type::IntS32()), Expr::Alias(code)));
+        const auto cleanup = r.scoped([&](RemapContext &rc) {
+          const auto root = Named(polyregion::conventions::ExceptionValue, thrownTpe);
+          destroyRecord(rc, thrown->getAsCXXRecordDecl(), Term::Select(root, {}, thrownTpe));
+        });
         unwindCleanups(r, r.tryFrame);
-        r.push(Stmt::Raise(value, ExceptionKind(thrownTpe, exceptionTypeName(thrown)), {}));
+        r.push(Stmt::Raise(value, ExceptionKind(thrownTpe, exceptionSourceName(thrown)), cleanup));
         return Expr::Alias(Term::Unit0Const());
       },
       [&](const clang::CXXDeleteExpr *expr) -> Expr::Any {
@@ -1565,7 +1923,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       // bare `nullptr`; the enclosing CK_NullToPointer cast retypes it to the target pointee
       [&](const clang::CXXNullPtrLiteralExpr *) -> Expr::Any {
-        return Expr::Alias(Term::NullPtrConst(Type::IntS8(), TypeSpace::Global(), Region::Opaque()));
+        return Expr::Alias(Term::NullPtrConst(Type::Nothing(), TypeSpace::Constant(), Region::Opaque()));
       },
       [&](const clang::CharacterLiteral *stmt) -> Expr::Any {
         return integralConstOfType(handleType(stmt->getType(), r), stmt->getValue());
@@ -1592,25 +1950,57 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return Expr::Alias(Term::IntS64Const(0));
       },
       [&](const clang::AbstractConditionalOperator *expr) -> Expr::Any { // covers a?b:c and a?:c
-        const auto lhs = select(r, {}, r.newVar(handleType(expr->getType(), r)));
+        const auto record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
+        if (record && expr->isGLValue()) raise("Unsupported record lvalue conditional");
+        const auto valueTpe = handleType(expr->getType(), r);
+        const auto lhs = select(r, {}, r.newVar(valueTpe));
+        const auto conditionalWhat = derivesStdException(record)
+                                         ? Opt<Named>{copyExceptionMessage(r, Term::StringConst(expr->getType().getAsString()))}
+                                         : Opt<Named>{};
+        if (conditionalWhat) {
+          r.exceptionWhats.emplace(exceptionMetadataKey(expr), *conditionalWhat);
+        }
+        const auto conditionalCode =
+            hasExceptionCode(record) || stdRecordNamed(record, "error_code") ? Opt<Named>{r.newName(Type::IntS32())} : Opt<Named>{};
+        if (conditionalCode) {
+          r.push(Stmt::Var(*conditionalCode, Expr::Alias(Term::IntS32Const(0)), /*isMutable*/ true));
+          r.exceptionCodes.emplace(exceptionMetadataKey(expr), *conditionalCode);
+        }
         // XXX a scalar lvalue conditional yields ref arms (`T*`) but the result slot is value `T` (e.g.
         // std::max's `cond ? b : a`) so deref the arms
         const auto k = lhs.tpe.kind();
         const bool scalarResult = k.is<TypeKind::Integral>() || k.is<TypeKind::Fractional>();
-        auto arm = [&](RemapContext &r_, const Expr::Any &e) -> Expr::Any {
+        auto arm = [&](RemapContext &r_, const clang::Expr *source) -> Expr::Any {
+          const auto e = handleExpr(source, r_);
+          if (conditionalWhat) {
+            const auto what = findExceptionMetadata(source, r_.exceptionWhats);
+            if (!what)
+              raise(fmt::format("Unsupported conditional standard exception without message metadata: {}", pretty_string(source, context)));
+            copyExceptionMessageInto(r_, r_.newVar(exceptionMessagePointer(*what)), *conditionalWhat);
+            if (derivesStdExceptionNamed(sourceRecord(source), "system_error") || r_.incompleteExceptionWhats.contains(what->symbol))
+              r_.incompleteExceptionWhats.insert(conditionalWhat->symbol);
+          }
+          if (conditionalCode) {
+            const auto code = findExceptionMetadata(source, r_.exceptionCodes);
+            if (!code)
+              raise(fmt::format("Unsupported conditional standard exception without code metadata: {}", pretty_string(source, context)));
+            r_.push(Stmt::Mut(select(r_, {}, *conditionalCode), Expr::Alias(select(r_, {}, *code))));
+          }
           const auto ap = e.tpe().get<Type::Ptr>();
           if (scalarResult && ap && ap->comp == lhs.tpe) return conform(r_, e, lhs.tpe);
           return e;
         };
         auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
         r.push(Stmt::Cond(condTerm, //
-                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, handleExpr(expr->getTrueExpr(), r_)))); }),
-                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, handleExpr(expr->getFalseExpr(), r_)))); })));
+                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getTrueExpr()))); }),
+                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getFalseExpr()))); })));
         return Expr::Alias(lhs);
       },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {
         const auto decl = expr->getDecl();
         if (const auto binding = llvm::dyn_cast<clang::BindingDecl>(decl)) return handleExpr(binding->getBinding(), r);
+        if (llvm::isa<clang::FunctionDecl>(decl))
+          return Expr::Alias(Term::NullPtrConst(Type::Nothing(), TypeSpace::Global(), Region::Opaque()));
         const auto actual = handleType(expr->getType(), r);
         const auto refDeclName = declName(decl);
 
@@ -1924,8 +2314,132 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return Expr::Alias(select(r, {}, instance));
       },
       [&](const clang::CXXConstructExpr *expr) {
-        const auto [name, fn] = handleCall(expr->getConstructor(), r);
         const auto ctorTpe = handleType(expr->getType(), r);
+        const auto record = expr->getType()->getAsCXXRecordDecl();
+        const auto customStdException = derivesStdException(record) && !isStdExceptionRecord(record);
+        const auto inheritedStdState =
+            customStdException && expr->getConstructor()->isInheritingConstructor() && hasOnlyInheritedStdExceptionState(record);
+        const auto defaultStdBase =
+            customStdException && !expr->getConstructor()->isInheritingConstructor() && hasDefaultStdExceptionBase(record);
+        if (customStdException && (overridesStdExceptionWhat(record) || (!inheritedStdState && !defaultStdBase)))
+          raise(fmt::format("Unsupported custom standard-derived exception construction: {}", pretty_string(expr, context)));
+
+        if (stdRecordNamed(record, "error_code")) {
+          const auto tpe = ctorTpe.get<Type::Struct>();
+          if (!tpe) raise("std::error_code constructor resulted in a non-struct type: " + repr(ctorTpe));
+          const auto allocated = r.newVar(ctorTpe);
+          defaultInitialiseStruct(r, *tpe, allocated);
+          Opt<Term::Any> value;
+          for (const auto *arg : expr->arguments()) {
+            if (stdRecordNamed(arg->getType().getNonReferenceType()->getAsCXXRecordDecl(), "error_code"))
+              if (const auto *call = unsupportedExceptionMetadataCall(arg))
+                raise(fmt::format("Unsupported std::error_code construction without metadata: {}", pretty_string(call, context)));
+            const auto evaluated = r.newVar(handleExpr(arg, r));
+            if (arg->getType()->isIntegralOrEnumerationType()) value = evaluated;
+            else if (stdRecordNamed(arg->getType().getNonReferenceType()->getAsCXXRecordDecl(), "error_code")) {
+              const auto state = findExceptionMetadata(arg, r.exceptionCodes);
+              if (!state) raise(fmt::format("Unsupported std::error_code construction without metadata: {}", pretty_string(arg, context)));
+              value = select(r, {}, *state).widen();
+            }
+          }
+          const auto code = r.newName(Type::IntS32());
+          const auto init = value ? conform(r, Expr::Alias(*value), Type::IntS32()) : Expr::Any(Expr::Alias(Term::IntS32Const(0)));
+          r.push(Stmt::Var(code, init, /*isMutable*/ true));
+          r.exceptionCodes.emplace(exceptionMetadataKey(expr), code);
+          return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global(), Region::Opaque()).widen();
+        }
+
+        if (isStdExceptionRecord(record) || inheritedStdState) {
+          const auto tpe = ctorTpe.get<Type::Struct>();
+          if (!tpe) raise("Standard exception constructor resulted in a non-struct type: " + repr(ctorTpe));
+          const auto allocated = r.newVar(ctorTpe);
+          defaultInitialiseStruct(r, *tpe, allocated);
+          auto lowerStringMessage = [&](const clang::Expr *arg) -> Term::Any {
+            const clang::Expr *core = arg;
+            while (const auto next = transparentExceptionExpr(core))
+              core = next;
+            if (const auto ctor = llvm::dyn_cast<clang::CXXConstructExpr>(core)) {
+              Opt<Term::Any> text;
+              Opt<Term::Any> count;
+              for (const auto *part : ctor->arguments()) {
+                if (llvm::isa<clang::CXXDefaultArgExpr>(part)) continue;
+                if (!text && charPointer(part)) text = r.newVar(handleExpr(part, r));
+                else if (text && !count && part->getType()->isIntegralOrEnumerationType()) count = r.newVar(handleExpr(part, r));
+                else raise(fmt::format("Unsupported std::string exception message construction: {}", pretty_string(arg, context)));
+              }
+              if (text) {
+                const auto stored = count ? copyExceptionMessage(r, *text, *count) : copyExceptionMessage(r, *text);
+                return r.newVar(exceptionMessagePointer(stored));
+              }
+            }
+            const auto *stringRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
+            if (!supportedStdStringLayout(stringRecord))
+              raise(fmt::format("Unsupported std::string exception message layout: {}", pretty_string(arg, context)));
+            const auto value = r.newVar(handleExpr(arg, r));
+            if (const auto text = findCharacterPointer(r, value)) return *text;
+            raise(fmt::format("Unsupported std::string exception message layout: {}", pretty_string(arg, context)));
+          };
+
+          Vector<Term::Any> evaluated;
+          evaluated.reserve(expr->getNumArgs());
+          for (const auto *arg : expr->arguments()) {
+            const auto argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
+            if (derivesStdException(argRecord) || stdRecordNamed(argRecord, "error_code"))
+              if (const auto *call = unsupportedExceptionMetadataCall(arg))
+                raise(
+                    fmt::format("Unsupported standard exception constructor argument without metadata: {}", pretty_string(call, context)));
+            evaluated.push_back(stdRecordNamed(argRecord, "basic_string") ? lowerStringMessage(arg) : r.newVar(handleExpr(arg, r)));
+          }
+
+          Opt<Term::Any> message;
+          Opt<Term::Any> codeValue;
+          bool incompleteMessage = false;
+          for (size_t i = 0; i < expr->getNumArgs(); ++i) {
+            const auto *arg = expr->getArg(i);
+            const auto argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
+            if (derivesStdException(argRecord)) {
+              if (stdExceptionNamed(record, "exception")) {
+                message = Term::StringConst("std::exception");
+              } else {
+                const auto stored = findExceptionMetadata(arg, r.exceptionWhats);
+                if (!stored)
+                  raise(
+                      fmt::format("Unsupported standard exception constructor argument without metadata: {}", pretty_string(arg, context)));
+                message = r.newVar(exceptionMessagePointer(*stored));
+                if (r.incompleteExceptionWhats.contains(stored->symbol)) incompleteMessage = true;
+              }
+              if (!codeValue && hasExceptionCode(argRecord)) {
+                const auto storedCode = findExceptionMetadata(arg, r.exceptionCodes);
+                if (!storedCode)
+                  raise(
+                      fmt::format("Unsupported standard exception constructor argument without metadata: {}", pretty_string(arg, context)));
+                codeValue = select(r, {}, *storedCode).widen();
+              }
+            } else if (!message && (charPointer(arg) || stdRecordNamed(argRecord, "basic_string"))) message = evaluated[i];
+            else if (!codeValue && hasExceptionCode(record) && arg->getType()->isIntegralOrEnumerationType()) codeValue = evaluated[i];
+            else if (!codeValue && stdRecordNamed(argRecord, "error_code")) {
+              const auto stored = findExceptionMetadata(arg, r.exceptionCodes);
+              if (!stored)
+                raise(fmt::format("Unsupported standard exception constructor argument without metadata: {}", pretty_string(arg, context)));
+              codeValue = select(r, {}, *stored).widen();
+            }
+          }
+          const auto storedMessage = copyExceptionMessage(r, message.value_or(Term::StringConst(expr->getType().getAsString()).widen()));
+          r.exceptionWhats.emplace(exceptionMetadataKey(expr), storedMessage);
+          if (!stdExceptionNamed(record, "exception") && (incompleteMessage || derivesStdExceptionNamed(record, "system_error")))
+            r.incompleteExceptionWhats.insert(storedMessage.symbol);
+
+          if (hasExceptionCode(record)) {
+            const auto code = r.newName(Type::IntS32());
+            const auto codeInit =
+                codeValue ? conform(r, Expr::Alias(*codeValue), Type::IntS32()) : Expr::Any(Expr::Alias(Term::IntS32Const(0)));
+            r.push(Stmt::Var(code, codeInit, /*isMutable*/ true));
+            r.exceptionCodes.emplace(exceptionMetadataKey(expr), code);
+          }
+          return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global(), Region::Opaque()).widen();
+        }
+
+        const auto [name, fn] = handleCall(expr->getConstructor(), r);
 
         if (fn->args.size() - 1 != expr->getNumArgs()) // -1 for implicit this as arg 0
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size() - 1) + " but was " + std::to_string(expr->getNumArgs()));
@@ -1957,6 +2471,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
           auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
                                          std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
+          if (defaultStdBase) {
+            const auto stored = copyExceptionMessage(r, Term::StringConst("std::exception"));
+            r.exceptionWhats.emplace(exceptionMetadataKey(expr), stored);
+          }
           return instance;
         } else if (ctorTpe.template is<Type::Arr>()) {
           // XXX std::array<T,N> lowers to Type::Arr; default/value ctor is a no-op, allocate and let assignments init.
@@ -1969,6 +2487,55 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::CXXMemberCallExpr *expr) -> Expr::Any { // instance.method(...)
         const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (!calleeFn) raise(fmt::format("Member call with no resolvable callee: {}", pretty_string(expr, context)));
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+            method && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator()) && expr->getNumArgs() == 1)
+          if (const auto lowered = lowerTrackedAssignment(expr, expr->getImplicitObjectArgument(), expr->getArg(0), method,
+                                                          expr->getCallReturnType(context)))
+            return *lowered;
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+            method && stdExceptionNamed(method->getParent(), "filesystem_error") &&
+            (method->getNameAsString() == "path1" || method->getNameAsString() == "path2"))
+          raise(fmt::format("Unsupported std::filesystem_error::{} exception observer", method->getNameAsString()));
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+            method && stdRecordNamed(method->getParent(), "error_code") && method->getNameAsString() != "value")
+          raise(fmt::format("Unsupported std::error_code::{} exception observer (only value() is represented)", method->getNameAsString()));
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+            method && method->getNameAsString() == "what" && isStdExceptionRecord(method->getParent())) {
+          (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
+          if (const auto member = llvm::dyn_cast<clang::MemberExpr>(expr->getCallee()->IgnoreParenImpCasts());
+              member && !member->performsVirtualDispatch(context.getLangOpts()) && stdExceptionNamed(method->getParent(), "exception")) {
+            const auto what = copyExceptionMessage(r, Term::StringConst("std::exception"));
+            return exceptionMessagePointer(what);
+          }
+          const auto what = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionWhats);
+          if (derivesStdExceptionNamed(sourceRecord(expr->getImplicitObjectArgument()), "system_error") ||
+              (what && r.incompleteExceptionWhats.contains(what->symbol)))
+            raise("Unsupported composed standard exception what() (error category and path state are not represented)");
+          if (what) return exceptionMessagePointer(*what);
+          raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
+        }
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+            method && method->getNameAsString() == "code" && stdExceptionNamed(method->getParent(), "regex_error")) {
+          (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
+          if (const auto code = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionCodes))
+            return Expr::Alias(select(r, {}, *code));
+          raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
+        }
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn); returnsErrorCode(method)) {
+          (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
+          const auto state = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionCodes);
+          if (!state)
+            raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
+          r.exceptionCodes.emplace(exceptionMetadataKey(expr), *state);
+          return zeroInitialise(r, handleType(expr->getType(), r));
+        }
+        if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+            method && method->getNameAsString() == "value" && stdRecordNamed(method->getParent(), "error_code")) {
+          (void)r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
+          if (const auto state = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionCodes))
+            return Expr::Alias(select(r, {}, *state));
+          raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
+        }
         const auto [name, fn] = handleCall(calleeFn, r);
         const auto receiver = r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
 
@@ -1996,6 +2563,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::CXXOperatorCallExpr *expr) -> Expr::Any {
         const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (!calleeFn) raise(fmt::format("Operator call with no resolvable callee: {}", pretty_string(expr, context)));
+        const auto operatorMethod = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
+        if (expr->getOperator() == clang::OO_Equal && expr->getNumArgs() == 2 && operatorMethod)
+          if (const auto lowered =
+                  lowerTrackedAssignment(expr, expr->getArg(0), expr->getArg(1), operatorMethod, expr->getCallReturnType(context)))
+            return *lowered;
         const auto [name, fn] = handleCall(calleeFn, r);
 
         if (fn->args.size() != expr->getNumArgs())
@@ -2021,13 +2593,24 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
       },
-      [&](const clang::CallExpr *expr) { //  method(...)
+      [&](const clang::CallExpr *expr) -> Expr::Any { //  method(...)
         const static std::string builtinPrefix = "__polyregion_builtin_";
         if (llvm::isa<clang::CXXPseudoDestructorExpr>(expr->getCallee()->IgnoreParenImpCasts()))
           return Expr::Any(Expr::Alias(Term::Unit0Const()));
         const auto target = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (!target) raise(fmt::format("Call with no resolvable callee: {}", pretty_string(expr, context)));
         const auto qualifiedName = target->getQualifiedNameAsString();
+        const auto category = Map<std::string, uint64_t>{
+            {"std::generic_category", 1}, {"std::system_category", 2}, {"std::iostream_category", 3}, {"std::future_category", 4}};
+        if (const auto it = category.find(qualifiedName); it != category.end())
+          return Expr::Any(Expr::Cast(Term::IntU64Const(it->second), handleType(expr->getType(), r)));
+        if (qualifiedName == "std::make_error_code" && expr->getNumArgs() == 1) {
+          const auto value = r.newVar(conform(r, handleExpr(expr->getArg(0), r), Type::IntS32()));
+          const auto code = r.newName(Type::IntS32());
+          r.push(Stmt::Var(code, Expr::Alias(value), /*isMutable*/ true));
+          r.exceptionCodes.emplace(exceptionMetadataKey(expr), code);
+          return zeroInitialise(r, handleType(expr->getType(), r));
+        }
         if ((qualifiedName == "std::addressof" || qualifiedName == "std::__addressof" || qualifiedName == "__builtin_addressof") &&
             expr->getNumArgs() == 1) {
           return ref(r.newVar(handleExpr(expr->getArg(0), r)));
@@ -2107,7 +2690,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 [[nodiscard]] static bool terminated(const Vector<Stmt::Any> &stmts) {
   if (stmts.empty()) return false;
   const auto &last = stmts.back();
-  return last.is<Stmt::Return>() || last.is<Stmt::Break>() || last.is<Stmt::Cont>() || last.is<Stmt::Raise>();
+  return last.is<Stmt::Return>() || last.is<Stmt::Break>() || last.is<Stmt::Cont>() || last.is<Stmt::Raise>() || last.is<Stmt::Rethrow>();
 }
 
 [[nodiscard]] static bool continuesEnclosingLoop(const clang::Stmt *stmt) {
@@ -2127,15 +2710,69 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   return false;
 }
 
+[[nodiscard]] static bool hasAbruptCatchExit(const clang::Stmt *stmt) {
+  if (!stmt || llvm::isa<clang::LambdaExpr>(stmt)) return false;
+  if (llvm::isa<clang::ReturnStmt, clang::CXXThrowExpr>(stmt)) return true;
+  for (const auto *child : stmt->children())
+    if (hasAbruptCatchExit(child)) return true;
+  return false;
+}
+
+[[nodiscard]] static bool mayExitArrayInitialiser(const clang::Stmt *stmt) {
+  if (!stmt || llvm::isa<clang::LambdaExpr>(stmt)) return false;
+  if (llvm::isa<clang::CallExpr, clang::CXXConstructExpr, clang::CXXThrowExpr>(stmt)) return true;
+  for (const auto *child : stmt->children())
+    if (mayExitArrayInitialiser(child)) return true;
+  return false;
+}
+
 void Remapper::unwindCleanups(Remapper::RemapContext &r, const size_t downTo) {
   for (auto frame = r.cleanups.size(); frame-- > downTo;)
     for (auto i = r.cleanups[frame].size(); i-- > 0;) {
-      const auto &[dtor, instance] = r.cleanups[frame][i];
-      const auto [name, fn] = handleCall(dtor, r);
-      const auto self = r.newVar(conform(r, Expr::Alias(select(r, {}, instance)), fn->args.front().named.tpe));
-      auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                                     std::vector<Term::Any>{self}, Type::Unit0()));
+      const auto &[type, instance] = r.cleanups[frame][i];
+      destroyValue(r, type, select(r, {}, instance));
     }
+}
+
+void Remapper::destroyValue(RemapContext &r, const clang::QualType type, const Term::Select &instance) {
+  if (const auto array = context.getAsConstantArrayType(type)) {
+    for (uint64_t element = array->getSize().getZExtValue(); element-- > 0;) {
+      auto steps = instance.steps;
+      steps.emplace_back(PathStep::Index(static_cast<int32_t>(element)));
+      const auto elementType = array->getElementType();
+      destroyValue(r, elementType, Term::Select(instance.root, steps, handleType(elementType, r)));
+    }
+    return;
+  }
+  destroyRecord(r, type->getAsCXXRecordDecl(), instance);
+}
+
+void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record, const Term::Select &instance) {
+  if (!record || record->hasTrivialDestructor() || isStdExceptionRecord(record)) return;
+  if (const auto dtor = record->getDestructor(); dtor && dtor->getBody()) {
+    const auto [name, fn] = handleCall(dtor, r);
+    const auto self = r.newVar(conform(r, Expr::Alias(instance), fn->args.front().named.tpe));
+    (void)r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), {}, {}, {self}, Type::Unit0()));
+  }
+  if (record->isUnion()) return;
+  const Vector<const clang::FieldDecl *> fields(record->field_begin(), record->field_end());
+  for (const auto *field : fields | reverse()) {
+    const auto memberRecord = field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
+    if (!memberRecord || memberRecord->hasTrivialDestructor()) continue;
+    auto steps = instance.steps;
+    const auto owner = handleRecord(record, r);
+    steps.emplace_back(PathStep::Field(fmt::format("{}::{}", repr(owner->name), fieldDeclName(field))));
+    destroyValue(r, field->getType(), Term::Select(instance.root, steps, handleType(field->getType(), r)));
+  }
+  for (auto base = record->bases_end(); base != record->bases_begin();) {
+    --base;
+    const auto baseRecord = base->getType()->getAsCXXRecordDecl();
+    if (!baseRecord || baseRecord->hasTrivialDestructor()) continue;
+    const auto baseDef = handleRecord(baseRecord, r);
+    auto steps = instance.steps;
+    steps.emplace_back(PathStep::Field(baseMember(*baseDef).symbol));
+    destroyRecord(r, baseRecord, Term::Select(instance.root, steps, Type::Struct(baseDef->name, {})));
+  }
 }
 
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
@@ -2256,19 +2893,30 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
 
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             auto name = Named(declName(var), annotateLocalSpace(var, r));
+            Opt<Cleanup> cleanup;
 
             if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
-                rd && !emitLibraryMode && !destroysWithoutEffect(rd)) {
+                rd && !emitLibraryMode && !isStdExceptionRecord(rd) && !destroysWithoutEffect(rd)) {
               const auto reject = [&](const std::string &why) {
                 raise(fmt::format("Unsupported local {} of type {} at {} ({}, so its destructor's effects would be lost)", declName(var),
                                   var->getType().getAsString(), var->getLocation().printToString(context.getSourceManager()), why));
               };
               if (!var->isLocalVarDecl() || var->isStaticLocal()) reject("its lifetime is not the enclosing scope");
               if (r.cleanupsSuspended || r.cleanups.empty()) reject("it is not declared directly in a block");
-              if (var->getType()->isArrayType()) reject("it is an array");
-              if (!destroysByBodyAlone(rd)) reject("a base or member of it also destroys with effects");
-              if (!rd->getDestructor()) reject("its destructor is not resolvable");
-              r.cleanups.back().emplace_back(Cleanup{rd->getDestructor(), name});
+              const auto dtor = rd->getDestructor();
+              if (!dtor) reject("its destructor is not resolvable");
+              if (dtor->isUserProvided() && !dtor->getBody()) reject("its destructor body is unavailable");
+              if (rd->isLambda()) reject("captured-object destruction is not represented by ordinary record fields");
+              if (var->getType()->isArrayType()) {
+                const auto array = context.getAsConstantArrayType(var->getType());
+                if (!array) reject("it is not a fixed-size array");
+                if (array->getElementType()->isArrayType()) reject("multidimensional destruction is not yet supported");
+                const auto init = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
+                if (!rd->isAggregate() || !init || init->hasArrayFiller() || init->getNumInits() != array->getSize().getZExtValue())
+                  reject("only fully initialised arrays of aggregate elements are supported");
+                if (mayExitArrayInitialiser(init)) reject("element initialisation may exit before the array cleanup is active");
+              }
+              cleanup = Cleanup{var->getType(), name};
             }
 
             auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
@@ -2313,6 +2961,52 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, isMutable));
             }
 
+            if (const auto rd = var->getType().getNonReferenceType()->getAsCXXRecordDecl(); derivesStdException(rd)) {
+              const auto source = var->getInit();
+              const auto storedWhat = findExceptionMetadata(source, r.exceptionWhats);
+              if (source && !storedWhat)
+                raise(fmt::format("Unsupported standard exception value without metadata: {}", pretty_string(source, context)));
+              if (var->getType()->isReferenceType()) {
+                if (storedWhat) r.exceptionWhats.emplace(name.symbol, *storedWhat);
+                if (hasExceptionCode(rd)) {
+                  const auto storedCode = findExceptionMetadata(source, r.exceptionCodes);
+                  if (!storedCode)
+                    raise(fmt::format("Unsupported standard exception value without metadata: {}", pretty_string(source, context)));
+                  r.exceptionCodes.emplace(name.symbol, *storedCode);
+                }
+              } else {
+                const auto message =
+                    storedWhat ? r.newVar(exceptionMessagePointer(*storedWhat)) : Term::StringConst(var->getType().getAsString()).widen();
+                const auto what = copyExceptionMessage(r, message, name.symbol + polyregion::conventions::ExceptionWhatSuffix);
+                r.exceptionWhats.emplace(name.symbol, what);
+                if (storedWhat && r.incompleteExceptionWhats.contains(storedWhat->symbol)) r.incompleteExceptionWhats.insert(what.symbol);
+
+                if (hasExceptionCode(rd)) {
+                  const auto storedCode = findExceptionMetadata(source, r.exceptionCodes);
+                  const auto code = Named(name.symbol + polyregion::conventions::ExceptionCodeSuffix, Type::IntS32());
+                  const auto codeInit =
+                      storedCode ? Expr::Any(Expr::Alias(select(r, {}, *storedCode))) : Expr::Any(Expr::Alias(Term::IntS32Const(0)));
+                  r.push(Stmt::Var(code, codeInit, /*isMutable*/ true));
+                  r.exceptionCodes.emplace(name.symbol, code);
+                }
+              }
+            }
+
+            if (const auto rd = var->getType().getNonReferenceType()->getAsCXXRecordDecl(); stdRecordNamed(rd, "error_code")) {
+              const auto source = var->getInit();
+              const auto storedCode = findExceptionMetadata(source, r.exceptionCodes);
+              if (source && !storedCode)
+                raise(fmt::format("Unsupported std::error_code value without metadata: {}", pretty_string(source, context)));
+              if (storedCode) {
+                if (var->getType()->isReferenceType()) r.exceptionCodes.emplace(name.symbol, *storedCode);
+                else {
+                  const auto code = Named(name.symbol + polyregion::conventions::ExceptionCodeSuffix, Type::IntS32());
+                  r.push(Stmt::Var(code, Expr::Alias(select(r, {}, *storedCode)), /*isMutable*/ true));
+                  r.exceptionCodes.emplace(name.symbol, code);
+                }
+              }
+            }
+
             if (const auto decomp = llvm::dyn_cast<clang::DecompositionDecl>(var)) {
               for (const auto binding : decomp->bindings())
                 if (const auto holding = binding->getHoldingVar()) {
@@ -2320,6 +3014,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
                   r.push(Stmt::Var(holdingName, conform(r, handleExpr(holding->getInit(), r), holdingName.tpe), /*isMutable*/ true));
                 }
             }
+            if (cleanup) r.cleanups.back().emplace_back(*cleanup);
           }
         }
       },
@@ -2446,60 +3141,69 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
       [&](const clang::CXXTryStmt *stmt) {
         if (emitLibraryMode) return handleStmt(stmt->getTryBlock(), r);
-        Vector<Opt<Type::Any>> catchFrame;
-        catchFrame.reserve(stmt->getNumHandlers());
-        for (unsigned i = 0; i < stmt->getNumHandlers(); ++i) {
-          const auto decl = stmt->getHandler(i)->getExceptionDecl();
-          catchFrame.emplace_back(decl ? Opt<Type::Any>{handleType(decl->getType().getNonReferenceType().getUnqualifiedType(), r)}
-                                       : Opt<Type::Any>{});
-        }
+        auto composedWhats = mayThrowComposedStdExceptions(stmt->getTryBlock());
         auto body = r.scoped([&](RemapContext &rb) {
           rb.tryFrame = rb.cleanups.size();
-          rb.catchFrames.emplace_back(catchFrame);
           handleStmt(stmt->getTryBlock(), rb);
         });
         // a handler body sits outside its own try, so a raise from it targets the enclosing tryFrame
         Vector<Handler> handlers;
         for (unsigned i = 0; i < stmt->getNumHandlers(); ++i) {
           const auto handler = stmt->getHandler(i);
+          bool handlerComposedWhat = false;
+          for (auto it = composedWhats.begin(); it != composedWhats.end();) {
+            if (catchesRecord(handler, *it)) {
+              handlerComposedWhat = true;
+              it = composedWhats.erase(it);
+            } else ++it;
+          }
           const auto decl = handler->getExceptionDecl();
-          Opt<Type::Any> tpe;
+          Opt<ExceptionKind> caughtKind;
           Opt<Named> binder;
-          const clang::CXXDestructorDecl *exceptionDtor = nullptr;
-          bool canRethrow = false;
+          const clang::CXXRecordDecl *valueRecord = nullptr;
           std::string caughtName;
           if (decl) {
+            if (hasCvQualifiedPointee(decl->getType())) {
+              const auto loc = handler->getBeginLoc().printToString(context.getSourceManager());
+              raise(fmt::format("Unsupported cv-qualified pointer exception at {}", loc));
+            }
             const auto caught = decl->getType().getNonReferenceType().getUnqualifiedType();
-            tpe = handleType(caught, r);
-            caughtName = exceptionTypeName(caught);
+            const auto tpe = handleType(caught, r);
+            caughtName = caught.getAsString();
+            caughtKind = ExceptionKind(tpe, exceptionSourceName(caught));
             const auto binderTpe = handleType(decl->getType(), r);
             binder = decl->getName().empty() ? r.newName(binderTpe) : Named(declName(decl), binderTpe);
             if (const auto rd = caught->getAsCXXRecordDecl(); needsManagedException(rd)) {
               const auto loc = handler->getBeginLoc().printToString(context.getSourceManager());
-              if (!decl->getType()->isReferenceType())
-                raise(
-                    fmt::format("Unsupported non-trivial catch-by-value {} at {} (its copy constructor does not lower)", caughtName, loc));
-              if (!destroysByBodyAlone(rd) || !rd->getDestructor())
-                raise(fmt::format("Unsupported non-trivial caught object {} at {} (a base/member destructor has effects "
-                                  "or its destructor is unresolved)",
-                                  caughtName, loc));
-              exceptionDtor = rd->getDestructor();
-            } else canRethrow = true;
+              if (!decl->getType()->isReferenceType()) {
+                if (!rd->hasTrivialCopyConstructor())
+                  raise(fmt::format("Unsupported non-trivial catch-by-value {} at {} (its copy constructor does not lower)", caughtName,
+                                    loc));
+                if (hasAbruptCatchExit(handler->getHandlerBlock()) || breaksEnclosingLoop(handler->getHandlerBlock()) ||
+                    continuesEnclosingLoop(handler->getHandlerBlock()))
+                  raise(fmt::format("Unsupported catch-by-value {} at {} (an abrupt handler exit cannot preserve destruction order)",
+                                    caughtName, loc));
+                valueRecord = rd;
+              }
+            }
           }
-          const auto caughtKind = tpe ? Opt<ExceptionKind>{ExceptionKind(*tpe, caughtName)} : Opt<ExceptionKind>{};
-          handlers.emplace_back(caughtKind, binder, r.scoped([&](RemapContext &rh) {
-            rh.activeCatch = {};
-            if (binder) rh.activeCatch = ActiveCatch{*binder, *tpe, caughtName, canRethrow};
-            if (exceptionDtor) {
-              rh.cleanups.emplace_back();
-              rh.cleanups.back().emplace_back(Cleanup{exceptionDtor, *binder});
+          auto handlerBody = r.scoped([&](RemapContext &rh) {
+            rh.inCatch = true;
+            if (decl && binder && derivesStdException(decl->getType().getNonReferenceType()->getAsCXXRecordDecl())) {
+              const auto what =
+                  Named(binder->symbol + polyregion::conventions::ExceptionWhatSuffix, Type::Ptr(Type::IntS8(), TypeSpace::Private()));
+              rh.exceptionWhats.emplace(declName(decl), what);
+              rh.exceptionCodes.emplace(declName(decl),
+                                        Named(binder->symbol + polyregion::conventions::ExceptionCodeSuffix, Type::IntS32()));
+              if (handlerComposedWhat) rh.incompleteExceptionWhats.insert(what.symbol);
             }
             handleStmt(handler->getHandlerBlock(), rh);
-            if (exceptionDtor) {
-              if (!terminated(rh.stmts)) unwindCleanups(rh, rh.cleanups.size() - 1);
-              rh.cleanups.pop_back();
-            }
-          }));
+          });
+          if (valueRecord && binder) {
+            auto cleanup = r.scoped([&](RemapContext &rh) { destroyRecord(rh, valueRecord, Term::Select(*binder, {}, binder->tpe)); });
+            handlerBody = {Stmt::Try(handlerBody, {}, cleanup)};
+          }
+          handlers.emplace_back(caughtKind, binder, handlerBody);
         }
         r.push(Stmt::Try(body, handlers, {}));
       },

@@ -180,7 +180,9 @@ check-header:
     #!/usr/bin/env bash
     set -u
     pat='^[[:space:]]*#[[:space:]]*include[[:space:]]*<(filesystem|regex|codecvt|iostream|sstream|ostream|iomanip)>'
-    hits=$(git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' '*.h.in' '*.hpp.in' | xargs -0 grep -nE "$pat" 2>/dev/null)
+    hits=$(git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' '*.h.in' '*.hpp.in' \
+        ':(exclude)native/polycpp/test/check_try_catch_std_exceptions.cpp' \
+        ':(exclude)native/polycpp/test/check_try_catch_unsupported.cpp' | xargs -0 grep -nE "$pat" 2>/dev/null)
     [ -z "$hits" ] || { echo "banned headers (use fmt/LLVM alternatives):"; echo "$hits"; exit 1; }
 
 _actionlint:

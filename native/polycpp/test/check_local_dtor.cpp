@@ -30,8 +30,9 @@
 
 #pragma region case: member-dtor-effects
 #pragma region offload-only
-#pragma region compile-fails: of type Outer
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=6 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 0 42
 
 #include <cstdio>
 

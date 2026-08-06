@@ -39,8 +39,9 @@
 
 #pragma region case: local-dtor-strict
 #pragma region offload-only
-#pragma region compile-fails: it is an array
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=4 -DCHECK_OFFLOAD -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 2
 
 #pragma region case: try
 #pragma region offload-only
@@ -124,7 +125,9 @@ int main() {
     if (sink[0] < 0) throw 1;
     return sink[0];
   #elif CHECK_KIND == 4
-    Effect e[2]{{sink}, {sink}};
+    {
+      Effect e[2]{{sink}, {sink}};
+    }
     return sink[0];
   #elif CHECK_KIND == 5
     try {

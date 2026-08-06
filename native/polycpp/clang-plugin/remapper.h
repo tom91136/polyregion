@@ -28,14 +28,8 @@ struct Remapper {
     uint64_t bitWidth;
   };
   struct Cleanup {
-    const clang::CXXDestructorDecl *dtor;
+    clang::QualType type;
     Named instance;
-  };
-  struct ActiveCatch {
-    Named binder;
-    Type::Any valueTpe;
-    std::string tpeName;
-    bool canRethrow;
   };
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
@@ -48,14 +42,16 @@ struct Remapper {
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
     Map<std::string, BitFieldInfo> bitFields{};
+    Map<std::string, Named> exceptionWhats{};
+    Map<std::string, Named> exceptionCodes{};
+    Set<std::string> incompleteExceptionWhats{};
     Vector<std::function<void(RemapContext &)>> onContinue{};
     Vector<std::function<void(RemapContext &)>> onBreak{};
     Vector<Vector<Cleanup>> cleanups{};
     size_t loopFrame{};
     // A raise unwinds to the innermost enclosing try, or the whole function when none exists.
     size_t tryFrame{};
-    Opt<ActiveCatch> activeCatch{};
-    Vector<Vector<Opt<Type::Any>>> catchFrames{};
+    bool inCatch = false;
     bool cleanupsSuspended = false;
 
     template <typename T>
@@ -71,16 +67,19 @@ struct Remapper {
       r.stmts.clear();
       if (!persistFunctionState) {
         r.counter = 0;
+        r.exceptionWhats.clear();
+        r.exceptionCodes.clear();
+        r.incompleteExceptionWhats.clear();
         r.cleanups.clear();
         r.loopFrame = 0;
         r.tryFrame = 0;
-        r.activeCatch.reset();
-        r.catchFrames.clear();
+        r.inCatch = false;
         r.cleanupsSuspended = false;
       }
       auto result = f(r);
       if (persistFunctionState) {
         counter = r.counter;
+        incompleteExceptionWhats.insert(r.incompleteExceptionWhats.begin(), r.incompleteExceptionWhats.end());
       }
       functions = r.functions;
       structs = r.structs;
@@ -122,6 +121,8 @@ struct Remapper {
   void handleStmt(const clang::Stmt *root, RemapContext &expr);
   // `downTo` is inclusive: an exit edge destroys every frame it leaves, innermost first
   void unwindCleanups(RemapContext &r, size_t downTo);
+  void destroyValue(RemapContext &r, clang::QualType type, const Term::Select &instance);
+  void destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record, const Term::Select &instance);
 };
 
 } // namespace polyregion::polystl
