@@ -34,6 +34,81 @@ class RecursionLowerSuite extends munit.FunSuite {
   private def selfCalls(f: p.Function): Int =
     f.body.collectWhere[p.Expr] { case ivk: p.Expr.Invoke if ivk.calleeName == f.name => () }.size
 
+  test("try/catch inside a recursive function lowers before stack conversion") {
+    val recursive = fn(
+      "recursive",
+      List(arg("n", i32)),
+      i32,
+      List(
+        p.Stmt.Try(
+          List(
+            vlet("done", eq(selectT("n", i32), i(0)), bool),
+            p.Stmt.Cond(selectT("done", bool), List(raise(i(3), "int")), Nil),
+            vlet("n1", sub(selectT("n", i32), i(1))),
+            vlet("r", call("recursive", List(selectT("n1", i32)))),
+            ret(selectT("r", i32))
+          ),
+          List(handler(Some(i32), Some(named("e", i32)), List(ret(selectT("e", i32))), Some("int"))),
+          Nil
+        )
+      )
+    )
+    val in      = program(entry(), List(recursive))
+    val out     = RecursionLower()(in, NoopLog)
+    val lowered = out.functions.find(_.name == sym("recursive")).get
+    assertEquals(selfCalls(lowered), 0)
+    assert(lowered.collectFirst_[p.Stmt] { case _: p.Stmt.Try => () }.isEmpty)
+    for (n <- 0 to 4)
+      assertEquals(
+        Interpreter.Vm(out).call("recursive", List(i32 -> V.I(n))),
+        Interpreter.Vm(in).call("recursive", List(i32 -> V.I(n)))
+      )
+  }
+
+  test("raise cleanup survives recursive stack conversion") {
+    val ptr = p.Type.Ptr(i32, p.Type.Space.Global)
+    val recursive = fn(
+      "recursive_cleanup",
+      List(arg("n", i32), arg("out", ptr)),
+      i32,
+      List(
+        p.Stmt.Try(
+          List(
+            vlet("done", eq(selectT("n", i32), i(0)), bool),
+            p.Stmt.Cond(
+              selectT("done", bool),
+              List(
+                raise(
+                  i(3),
+                  "int",
+                  List(p.Stmt.Update(selectT("out", ptr), i(0), i(7)))
+                )
+              ),
+              Nil
+            ),
+            vlet("n1", sub(selectT("n", i32), i(1))),
+            vlet("r", call("recursive_cleanup", List(selectT("n1", i32), selectT("out", ptr)))),
+            ret(selectT("r", i32))
+          ),
+          List(handler(Some(i32), Some(named("e", i32)), List(ret(selectT("e", i32))), Some("int"))),
+          Nil
+        )
+      )
+    )
+    val in  = program(entry(), List(recursive))
+    val out = RecursionLower()(in, NoopLog)
+
+    def run(program: p.Program): (V, V) = {
+      val vm      = Interpreter.Vm(program)
+      val address = vm.alloc(4L)
+      val result  = vm.call("recursive_cleanup", List(i32 -> V.I(4), ptr -> V.I(address)))
+      result -> vm.load(address, i32)
+    }
+
+    assertEquals(run(out), run(in))
+    assertEquals(run(out), V.I(3) -> V.I(7))
+  }
+
   // fib(n) = n<2 ? n : fib(n-1)+fib(n-2), in the ANF shape the frontend emits
   private def fib: p.Function =
     fn(

@@ -139,6 +139,8 @@ private[polyregion] object CodeGen {
         :: deriveStruct[Spec]()
         :: deriveStruct[Intr]()
         :: deriveStruct[Math]()
+        :: deriveStruct[ExceptionKind]()
+        :: deriveStruct[Handler]()
         :: deriveStruct[Stmt]()
         :: deriveStruct[Signature]()
         :: deriveStruct[InvokeSignature]()

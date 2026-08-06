@@ -668,4 +668,428 @@ class InterpreterSuite extends munit.FunSuite {
     assertEquals(run(out), 16L)
   }
 
+  test("try catches and binds an aggregate value") {
+    val errorSym = sym("Error")
+    val errorT   = p.Type.Struct(errorSym, Nil)
+    val errorDef = p.StructDef(errorSym, Nil, List(named("code", i32)), Nil)
+    val value    = named("value", errorT)
+    val caught   = named("caught", errorT)
+    val code     = p.Term.Select(caught, List(p.PathStep.Field("code")), i32)
+    val f = fn(
+      "catchAggregate",
+      rtn = i32,
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Mut(
+          p.Term.Select(value, List(p.PathStep.Field("code")), i32),
+          p.Expr.Alias(p.Term.IntS32Const(17))
+        ),
+        p.Stmt.Try(
+          List(raise(selectT(value), "Error")),
+          List(handler(Some(errorT), Some(caught), List(ret(alias(code))), Some("Error"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    assertEquals(Interpreter.Vm(program(entry(), List(f), List(errorDef))).call(f.name, Nil), V.I(17))
+  }
+
+  test("try catches a derived aggregate by an unambiguous base and projects the binder") {
+    val baseSym                 = sym("BaseError")
+    val derivedSym              = sym("DerivedError")
+    val baseT: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedT: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val baseField               = s"${p.Conventions.BaseFieldPrefix}_${baseSym.repr}"
+    val baseDef                 = p.StructDef(baseSym, Nil, List(named("code", i32)), Nil)
+    val derivedDef              = p.StructDef(derivedSym, Nil, List(named(baseField, baseT)), List(baseT))
+    val value                   = named("value", derivedT)
+    val caught                  = named("caught", baseT)
+    val code                    = p.Term.Select(caught, List(p.PathStep.Field("code")), i32)
+    val f = fn(
+      "catchBase",
+      rtn = i32,
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Mut(
+          p.Term.Select(value, List(p.PathStep.Field(baseField), p.PathStep.Field("code")), i32),
+          p.Expr.Alias(p.Term.IntS32Const(23))
+        ),
+        p.Stmt.Try(
+          List(raise(selectT(value), "DerivedError")),
+          List(handler(Some(baseT), Some(caught), List(ret(alias(code))), Some("BaseError"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    val prog = program(entry(), List(f), List(baseDef, derivedDef))
+    assertEquals(Interpreter.Vm(prog).call(f.name, Nil), V.I(23))
+  }
+
+  test("try catches an aggregate through an EBO-elided base chain") {
+    val storageSym              = sym("#empty")
+    val baseSym                 = sym("EmptyBase")
+    val midSym                  = sym("EmptyMid")
+    val derivedSym              = sym("EmptyDerived")
+    val storageT: p.Type.Struct = p.Type.Struct(storageSym, Nil)
+    val baseT: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val midT: p.Type.Struct     = p.Type.Struct(midSym, Nil)
+    val derivedT: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val marker                  = named(p.Conventions.EmptyStructStorageField, p.Type.IntU8)
+    val midField                = s"${p.Conventions.BaseFieldPrefix}_${midSym.repr}"
+    val defs = List(
+      p.StructDef(storageSym, Nil, List(marker), Nil),
+      p.StructDef(baseSym, Nil, List(marker), Nil),
+      p.StructDef(midSym, Nil, List(marker), List(baseT)),
+      p.StructDef(derivedSym, Nil, List(named(midField, storageT), named("code", i32)), List(midT, baseT))
+    )
+    val value = named("value", derivedT)
+    val f = fn(
+      "catchEmptyBase",
+      rtn = i32,
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Try(
+          List(raise(selectT(value), "EmptyDerived")),
+          List(handler(Some(baseT), None, List(ret(alias(p.Term.IntS32Const(9)))), Some("EmptyBase"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    assertEquals(Interpreter.Vm(program(entry(), List(f), defs)).call(f.name, Nil), V.I(9))
+  }
+
+  test("a raised value cleanup runs once after the final handler") {
+    val outT                  = p.Type.Ptr(i32, g)
+    val errorSym              = sym("CleanupError")
+    val errorT                = p.Type.Struct(errorSym, Nil)
+    val errorDef              = p.StructDef(errorSym, Nil, List(named("out", outT)), Nil)
+    val value                 = named("value", errorT)
+    val out                   = named("out", outT)
+    val current               = named("current", i32)
+    val next                  = named("next", i32)
+    val exception             = named(p.Conventions.ExceptionValue, errorT)
+    val target: p.Term.Select = p.Term.Select(exception, List(p.PathStep.Field("out")), outT)
+    val cleanup = List(
+      p.Stmt.Var(current, Some(p.Expr.Index(target, p.Term.IntS32Const(0), i32))),
+      p.Stmt.Var(next, Some(add(selectT(current), p.Term.IntS32Const(1)))),
+      p.Stmt.Update(target, p.Term.IntS32Const(0), selectT(next))
+    )
+    val f = fn(
+      "cleanupOnce",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Mut(p.Term.Select(value, List(p.PathStep.Field("out")), outT), alias(selectT(out))),
+        p.Stmt.Try(
+          List(raise(selectT(value), "CleanupError", cleanup)),
+          List(handler(Some(errorT), None, List(p.Stmt.Rethrow), Some("CleanupError"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    val outer = fn(
+      "cleanupOuter",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(
+            p.Stmt
+              .Var(named("ignored", i32), Some(p.Expr.Invoke(p.Type.FnRef(f.name), Nil, None, List(selectT(out)), i32)))
+          ),
+          List(handler(Some(errorT), None, Nil, Some("CleanupError"))),
+          Nil
+        ),
+        ret(p.Expr.Index(selectT(out), p.Term.IntS32Const(0), i32))
+      )
+    )
+    val vm   = Interpreter.Vm(program(entry(), List(f, outer), List(errorDef)))
+    val cell = vm.allocOf(i32)
+    vm.store(cell, V.I(0), i32)
+    assertEquals(vm.call(outer.name, List(outT -> V.I(cell))), V.I(1))
+  }
+
+  test("replacement raises destroy the original before the replacement") {
+    val outT = p.Type.Ptr(i32, g)
+    val out  = named("out", outT)
+    def append(digit: Int, suffix: String): List[p.Stmt] = {
+      val current = named(s"current$suffix", i32)
+      val shifted = named(s"shifted$suffix", i32)
+      val next    = named(s"next$suffix", i32)
+      List(
+        p.Stmt.Var(current, Some(p.Expr.Index(selectT(out), p.Term.IntS32Const(0), i32))),
+        p.Stmt.Var(shifted, Some(mul(selectT(current), p.Term.IntS32Const(10)))),
+        p.Stmt.Var(next, Some(add(selectT(shifted), p.Term.IntS32Const(digit)))),
+        p.Stmt.Update(selectT(out), p.Term.IntS32Const(0), selectT(next))
+      )
+    }
+    val inner = p.Stmt.Try(
+      List(raise(p.Term.IntS32Const(1), "int", append(1, "Original"))),
+      List(
+        handler(
+          Some(i32),
+          None,
+          List(raise(p.Term.IntS64Const(2), "long", append(2, "Replacement"))),
+          Some("int")
+        )
+      ),
+      Nil
+    )
+    val f = fn(
+      "cleanupReplacement",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(List(inner), List(handler(Some(p.Type.IntS64), None, Nil, Some("long"))), Nil),
+        ret(p.Expr.Index(selectT(out), p.Term.IntS32Const(0), i32))
+      )
+    )
+    val vm   = Interpreter.Vm(program(entry(), List(f)))
+    val cell = vm.allocOf(i32)
+    vm.store(cell, V.I(0), i32)
+    assertEquals(vm.call(f.name, List(outT -> V.I(cell))), V.I(12))
+  }
+
+  test("an unhandled raised value runs its cleanup before leaving the interpreter") {
+    val outT = p.Type.Ptr(i32, g)
+    val out  = named("out", outT)
+    val cleanup = List(
+      p.Stmt.Update(selectT(out), p.Term.IntS32Const(0), p.Term.IntS32Const(1))
+    )
+    val f = fn(
+      "cleanupUnhandled",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(raise(p.Term.IntS32Const(1), "int", cleanup))
+    )
+    val vm   = Interpreter.Vm(program(entry(), List(f)))
+    val cell = vm.allocOf(i32)
+    vm.store(cell, V.I(0), i32)
+    var escaped = false
+    try vm.call(f.name, List(outT -> V.I(cell)))
+    catch { case _: scala.util.control.ControlThrowable => escaped = true }
+    assert(escaped)
+    assertEquals(vm.load(cell, i32), V.I(1))
+  }
+
+  test("a throwing finalizer cleans the pending exception before its replacement") {
+    val outT = p.Type.Ptr(i32, g)
+    val out  = named("out", outT)
+    def append(digit: Int, suffix: String): List[p.Stmt] = {
+      val current = named(s"current$suffix", i32)
+      val shifted = named(s"shifted$suffix", i32)
+      val next    = named(s"next$suffix", i32)
+      List(
+        p.Stmt.Var(current, Some(p.Expr.Index(selectT(out), p.Term.IntS32Const(0), i32))),
+        p.Stmt.Var(shifted, Some(mul(selectT(current), p.Term.IntS32Const(10)))),
+        p.Stmt.Var(next, Some(add(selectT(shifted), p.Term.IntS32Const(digit)))),
+        p.Stmt.Update(selectT(out), p.Term.IntS32Const(0), selectT(next))
+      )
+    }
+    val f = fn(
+      "cleanupFinalizerReplacement",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(raise(p.Term.IntS32Const(1), "int", append(1, "Original"))),
+          List(handler(Some(p.Type.IntS64), None, Nil, Some("long"))),
+          List(raise(p.Term.IntS64Const(2), "long", append(2, "Replacement")))
+        )
+      )
+    )
+    val vm   = Interpreter.Vm(program(entry(), List(f)))
+    val cell = vm.allocOf(i32)
+    vm.store(cell, V.I(0), i32)
+    var escaped = false
+    try vm.call(f.name, List(outT -> V.I(cell)))
+    catch { case _: scala.util.control.ControlThrowable => escaped = true }
+    assert(escaped)
+    assertEquals(vm.load(cell, i32), V.I(12))
+  }
+
+  test("an abrupt finalizer cleans the pending exception") {
+    val outT = p.Type.Ptr(i32, g)
+    val out  = named("out", outT)
+    val cleanup = List(
+      p.Stmt.Update(selectT(out), p.Term.IntS32Const(0), p.Term.IntS32Const(1))
+    )
+    val returnFromFinally = fn(
+      "returnFromFinally",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(raise(p.Term.IntS32Const(1), "int", cleanup)),
+          Nil,
+          List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(7))))
+        )
+      )
+    )
+    val breakFromFinally = fn(
+      "breakFromFinally",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.While(
+          p.Term.Bool1Const(true),
+          List(
+            p.Stmt.Try(
+              List(raise(p.Term.IntS32Const(1), "int", cleanup)),
+              Nil,
+              List(p.Stmt.Break)
+            )
+          )
+        ),
+        ret(p.Expr.Index(selectT(out), p.Term.IntS32Const(0), i32))
+      )
+    )
+    val more = named("more", p.Type.Bool1)
+    val continueFromFinally = fn(
+      "continueFromFinally",
+      args = List(p.Arg(out)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Var(more, Some(p.Expr.Alias(p.Term.Bool1Const(true))), isMutable = true),
+        p.Stmt.While(
+          selectT(more),
+          List(
+            p.Stmt.Try(
+              List(raise(p.Term.IntS32Const(1), "int", cleanup)),
+              Nil,
+              List(
+                p.Stmt.Mut(selectT(more), p.Expr.Alias(p.Term.Bool1Const(false))),
+                p.Stmt.Cont
+              )
+            )
+          )
+        ),
+        ret(p.Expr.Index(selectT(out), p.Term.IntS32Const(0), i32))
+      )
+    )
+    val vm = Interpreter.Vm(program(entry(), List(returnFromFinally, breakFromFinally, continueFromFinally)))
+    def run(function: p.Function): (V, V) = {
+      val cell = vm.allocOf(i32)
+      vm.store(cell, V.I(0), i32)
+      vm.call(function.name, List(outT -> V.I(cell))) -> vm.load(cell, i32)
+    }
+    assertEquals(run(returnFromFinally), V.I(7)   -> V.I(1))
+    assertEquals(run(breakFromFinally), V.I(1)    -> V.I(1))
+    assertEquals(run(continueFromFinally), V.I(1) -> V.I(1))
+  }
+
+  test("pointer handlers apply public base adjustment") {
+    val baseSym                 = sym("PointerBase")
+    val derivedSym              = sym("PointerDerived")
+    val baseT: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedT: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val basePtr                 = p.Type.Ptr(baseT, g)
+    val derivedPtr              = p.Type.Ptr(derivedT, g)
+    val baseField               = s"${p.Conventions.BaseFieldPrefix}_${baseSym.repr}"
+    val defs = List(
+      p.StructDef(baseSym, Nil, List(named("code", i32)), Nil),
+      p.StructDef(derivedSym, Nil, List(named("prefix", i32), named(baseField, baseT)), List(baseT))
+    )
+    val value   = named("value", derivedT)
+    val pointer = named("pointer", derivedPtr)
+    val caught  = named("caught", basePtr)
+    val code    = p.Term.Select(caught, List(p.PathStep.Deref, p.PathStep.Field("code")), i32)
+    val f = fn(
+      "catchPointerBase",
+      rtn = i32,
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Mut(
+          p.Term.Select(value, List(p.PathStep.Field(baseField), p.PathStep.Field("code")), i32),
+          alias(p.Term.IntS32Const(41))
+        ),
+        p.Stmt.Var(
+          pointer,
+          Some(p.Expr.RefTo(selectT(value), None, derivedT, g, p.Region.Rooted(value)))
+        ),
+        p.Stmt.Try(
+          List(raise(selectT(pointer), "PointerDerived *")),
+          List(handler(Some(basePtr), Some(caught), List(ret(alias(code))), Some("PointerBase *"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    assertEquals(Interpreter.Vm(program(entry(), List(f), defs)).call(f.name, Nil), V.I(41))
+  }
+
+  test("pointer handlers match void and null pointer conversions") {
+    val intPtr  = p.Type.Ptr(i32, g)
+    val voidPtr = p.Type.Ptr(p.Type.Unit0, g)
+    val value   = named("value", intPtr)
+    val asVoid = fn(
+      "catchVoidPointer",
+      args = List(p.Arg(value)),
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(raise(selectT(value), "int *")),
+          List(handler(Some(voidPtr), None, List(ret(alias(p.Term.IntS32Const(11)))), Some("void *"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    val nullPointer = p.Term.NullPtrConst(p.Type.Nothing, p.Type.Space.Constant, p.Region.Opaque)
+    val intPtrPtr   = p.Type.Ptr(intPtr, g)
+    val asNull = fn(
+      "catchNullPointer",
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(raise(nullPointer, "std::nullptr_t")),
+          List(handler(Some(intPtr), None, List(ret(alias(p.Term.IntS32Const(13)))), Some("int *"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    val asNestedNull = fn(
+      "catchNestedNullPointer",
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(raise(nullPointer, "std::nullptr_t")),
+          List(handler(Some(intPtrPtr), None, List(ret(alias(p.Term.IntS32Const(17)))), Some("int * *"))),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    val vm   = Interpreter.Vm(program(entry(), List(asVoid, asNull, asNestedNull)))
+    val cell = vm.allocOf(i32)
+    assertEquals(vm.call(asVoid.name, List(intPtr -> V.I(cell))), V.I(11))
+    assertEquals(vm.call(asNull.name, Nil), V.I(13))
+    assertEquals(vm.call(asNestedNull.name, Nil), V.I(17))
+  }
+
+  test("exact handlers distinguish source types sharing one storage type") {
+    val f = fn(
+      "catchNominal",
+      rtn = i32,
+      body = List(
+        p.Stmt.Try(
+          List(raise(p.Term.IntS64Const(1), "long")),
+          List(
+            handler(Some(p.Type.IntS64), None, List(ret(alias(p.Term.IntS32Const(1)))), Some("long long")),
+            handler(Some(p.Type.IntS64), None, List(ret(alias(p.Term.IntS32Const(2)))), Some("long"))
+          ),
+          Nil
+        ),
+        ret(alias(p.Term.IntS32Const(0)))
+      )
+    )
+    assertEquals(Interpreter.Vm(program(entry(), List(f))).call(f.name, Nil), V.I(2))
+  }
+
 }

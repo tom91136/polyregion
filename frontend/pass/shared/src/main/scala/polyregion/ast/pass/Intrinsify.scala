@@ -43,8 +43,9 @@ object Intrinsify extends ProgramPass {
   }
 
   private def intrinsifyOne(f: p.Function, log: Log): p.Function = {
-    val (xs, instanceInvokes) = f.body.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
-    val (ys, moduleInvokes)   = xs.zipWithIndex.foldMapM(intrinsifyModuleApply(_, _))
+    val counter               = new java.util.concurrent.atomic.AtomicInteger()
+    val (xs, instanceInvokes) = f.body.foldMapM(intrinsifyInstanceApply(_, counter))
+    val (ys, moduleInvokes)   = xs.foldMapM(intrinsifyModuleApply(_, counter))
     log.info(s"${f.signatureRepr}: ", (instanceInvokes ++ moduleInvokes).map(_.repr)*)
     f.copy(body = ys)
   }
@@ -156,7 +157,48 @@ object Intrinsify extends ProgramPass {
 
   }
 
-  private def intrinsifyInstanceApply(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
+  private def intrinsifyNested(
+      s: p.Stmt,
+      rewrite: p.Stmt => (List[p.Stmt], List[p.Expr.Invoke])
+  ): Option[(List[p.Stmt], List[p.Expr.Invoke])] = {
+    def go(body: List[p.Stmt]) = body.foldMapM(rewrite)
+    s match {
+      case p.Stmt.While(cond, body) =>
+        val (b, invokes) = go(body)
+        Some((List(p.Stmt.While(cond, b)), invokes))
+      case p.Stmt.Cond(cond, t, f) =>
+        val (tb, ti) = go(t)
+        val (fb, fi) = go(f)
+        Some((List(p.Stmt.Cond(cond, tb, fb)), ti ++ fi))
+      case p.Stmt.ForRange(i, lb, ub, step, body) =>
+        val (b, invokes) = go(body)
+        Some((List(p.Stmt.ForRange(i, lb, ub, step, b)), invokes))
+      case p.Stmt.Try(body, handlers, fin) =>
+        val (b, bi) = go(body)
+        val (hs, hi) = handlers.foldMap { h =>
+          val (hb, invokes) = go(h.body)
+          (List(h.copy(body = hb)), invokes)
+        }
+        val (f, fi) = go(fin)
+        Some((List(p.Stmt.Try(b, hs, f)), bi ++ hi ++ fi))
+      case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+        val (lowered, invokes) = go(cleanup)
+        Some((List(p.Stmt.Raise(value, exceptionKind, lowered)), invokes))
+      case p.Stmt.Annotated(inner, pos, comment) =>
+        val (b, invokes) = go(List(inner))
+        Some((b.map(p.Stmt.Annotated(_, pos, comment)), invokes))
+      case _ => None
+    }
+  }
+
+  private def intrinsifyInstanceApply(
+      s: p.Stmt,
+      counter: java.util.concurrent.atomic.AtomicInteger
+  ): (List[p.Stmt], List[p.Expr.Invoke]) =
+    intrinsifyNested(s, intrinsifyInstanceApply(_, counter))
+      .getOrElse(intrinsifyInstanceApply0(s, counter.getAndIncrement()))
+
+  private def intrinsifyInstanceApply0(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
     val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
       case inv @ p.Expr.Invoke(p.Type.FnRef(sym), tpeArgs, Some(recv), args, rtn) =>
         (sym.fqn, recv, args) match {
@@ -291,7 +333,14 @@ object Intrinsify extends ProgramPass {
     (stmts :+ stmt, ivks)
   }
 
-  private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = {
+  private def intrinsifyModuleApply(
+      s: p.Stmt,
+      counter: java.util.concurrent.atomic.AtomicInteger
+  ): (List[p.Stmt], List[p.Expr.Invoke]) =
+    intrinsifyNested(s, intrinsifyModuleApply(_, counter))
+      .getOrElse(intrinsifyModuleApply0(s, counter.getAndIncrement()))
+
+  private def intrinsifyModuleApply0(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
     val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
       case inv @ p.Expr.Invoke(p.Type.FnRef(sym), tpeArgs, Some(_), args, rtn) =>
         (sym.fqn, args) match {

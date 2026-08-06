@@ -228,6 +228,23 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
       }
       throw BackendException("Deref step on non-pointer type " + to_string(tpe) + fail());
     }
+    if (auto idx = step.template get<PathStep::Index>()) {
+      auto arr = tpe.template get<Type::Arr>();
+      if (!arr) throw BackendException("Index step on non-array type " + to_string(tpe) + fail());
+      auto *idxV = llvm::ConstantInt::get(C.i64Ty(), idx->idx);
+      if (oneGep) {
+        if (idxs.empty()) {
+          gepBaseTy = gen.resolveType(tpe);
+          idxs.push_back(llvm::ConstantInt::get(C.i32Ty(), 0));
+        }
+        idxs.push_back(idxV);
+      } else {
+        root = B.CreateInBoundsGEP(gen.resolveType(tpe), root, {llvm::ConstantInt::get(C.i32Ty(), 0), idxV},
+                                   qualified(select) + "_select_ptr");
+      }
+      tpe = arr->comp;
+      continue;
+    }
     // runtime index into an inline array element; folds into the one access chain
     if (auto dyn = step.template get<PathStep::IndexDyn>()) {
       auto *idxV = gen.i64SExt(gen.mkTermVal(dyn->idx));
@@ -304,13 +321,15 @@ struct PhysicalPointerModel final : PointerModel {
   void copyAggregate(CodeGen &gen, ValPtr dst, ValPtr src, const AnyType &tpe) override {
     if (auto s = tpe.get<Type::Struct>()) {
       const auto &info = gen.structTypes.at(repr(s->name));
-      gen.B.CreateMemCpy(dst, llvm::MaybeAlign(info.layout.alignment), src, llvm::MaybeAlign(info.layout.alignment),
-                         info.layout.sizeInBytes);
+      if (info.layout.sizeInBytes != 0)
+        gen.B.CreateMemCpy(dst, llvm::MaybeAlign(info.layout.alignment), src, llvm::MaybeAlign(info.layout.alignment),
+                           info.layout.sizeInBytes);
     } else { // by-value array (e.g. std::array's _M_elems)
       auto *ty = gen.resolveType(tpe);
       const auto &dl = gen.M.getDataLayout();
       const auto al = dl.getABITypeAlign(ty);
-      gen.B.CreateMemCpy(dst, al, src, al, dl.getTypeAllocSize(ty));
+      const auto size = dl.getTypeAllocSize(ty);
+      if (!size.isZero()) gen.B.CreateMemCpy(dst, al, src, al, size);
     }
   }
   ValPtr indexVal(CodeGen &gen, const Expr::Index &index, const std::string &key) override { return physicalIndexVal(gen, index, key); }
@@ -589,11 +608,15 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const Intr::LogicAnd &v) -> ValPtr { return B.CreateLogicalAnd(mkTermVal(v.x), mkTermVal(v.y)); }, //
             [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkTermVal(v.x), mkTermVal(v.y)); },   //
             [&](const Intr::LogicEq &v) -> ValPtr {
+              if (v.x.tpe().is<Type::Ptr>())
+                return binaryExpr(expr, v.x, v.y, v.x.tpe(), [&](auto l, auto r) { return B.CreateICmpEQ(l, r); });
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpEQ(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOEQ(l, r); });
             },
             [&](const Intr::LogicNeq &v) -> ValPtr {
+              if (v.x.tpe().is<Type::Ptr>())
+                return binaryExpr(expr, v.x, v.y, v.x.tpe(), [&](auto l, auto r) { return B.CreateICmpNE(l, r); });
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpNE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpONE(l, r); });
@@ -1039,7 +1062,10 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         }
         return BlockKind::Terminal;
       },
-      [&](const Stmt::Annotated &x) -> BlockKind { return mkStmt(x.inner, fn, whileCtx); });
+      [&](const Stmt::Annotated &x) -> BlockKind { return mkStmt(x.inner, fn, whileCtx); },
+      [&](const Stmt::Try &) -> BlockKind { throw BackendException("Stmt::Try should be erased"); },
+      [&](const Stmt::Raise &) -> BlockKind { throw BackendException("Stmt::Raise should be erased"); },
+      [&](const Stmt::Rethrow &) -> BlockKind { throw BackendException("Stmt::Rethrow should be erased"); });
 }
 
 // SPIR-V: struct-by-value returns get coerced to a single i32 by the pre-legaliser. Convert

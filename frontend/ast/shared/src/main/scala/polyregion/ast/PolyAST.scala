@@ -127,6 +127,40 @@ object PolyAST {
     case SizeOf(forTpe: Type)                                   extends Expr(Type.IntU64)
   }
 
+  case class ExceptionKind(tpe: Type, sourceName: String) derives MsgPack.Codec {
+    def catches(raised: ExceptionKind)(convertible: (Type, Type) => Boolean): Boolean =
+      if (tpe == raised.tpe) sourceName == raised.sourceName
+      else
+        (tpe, raised.tpe) match {
+          case (_: Type.Ptr, Type.Ptr(Type.Nothing, Type.Space.Constant)) => true
+          case (caught: Type.Ptr, _: Type.Ptr)                            => convertible(raised.tpe, caught)
+          case _                                                          => convertible(raised.tpe, tpe)
+        }
+  }
+
+  case class Handler(
+      caught: Option[ExceptionKind], // `caught` of None is a catch-all and `binder` of None discards the raised value
+      binder: Option[Named],
+      body: List[Stmt]
+  ) derives MsgPack.Codec
+
+  object Handler {
+    def validationErrors(handler: Handler): List[String] = {
+      val binder = (handler.caught, handler.binder) match {
+        case (None, Some(_)) => List("catch-all handler cannot bind a value")
+        case (Some(caught), Some(value)) if !(value.tpe == caught.tpe || (value.tpe match {
+              case Type.Ptr(component, _) => component == caught.tpe
+              case _                      => false
+            })) =>
+          List(s"handler binder type ${value.tpe.repr} does not match caught type ${caught.tpe.repr}")
+        case _ => Nil
+      }
+      val identity =
+        handler.caught.toList.flatMap(x => Option.when(x.sourceName.trim.isEmpty)("handler source identity is empty"))
+      binder ::: identity
+    }
+  }
+
   enum Stmt derives MsgPack.Codec {
     case Var(name: Named, expr: Option[Expr], isMutable: Boolean = false)
     case Mut(name: Term.Select, expr: Expr)
@@ -139,6 +173,9 @@ object PolyAST {
     case Cond(cond: Term, trueBr: List[Stmt], falseBr: List[Stmt])
     case Return(value: Expr)
     case Annotated(inner: Stmt, pos: Option[SourcePosition] = None, comment: Option[String] = None)
+    case Try(body: List[Stmt], handlers: List[Handler], fin: List[Stmt])
+    case Raise(value: Term, exceptionKind: ExceptionKind, cleanup: List[Stmt] = Nil)
+    case Rethrow
   }
 
   case class Overload(args: List[Type], rtn: Type) derives MsgPack.Codec
@@ -515,6 +552,11 @@ object PolyAST {
     inline val CaptureArg              = "#capture"
     inline val ErrorArg                = "#error"
     inline val AssertedFlag            = "#asserted"
+    inline val ExceptionValue          = "#exception"
+    inline val ExceptionWhat           = "#exception_what"
+    inline val ExceptionCode           = "#exception_code"
+    inline val ExceptionWhatSuffix     = "#what"
+    inline val ExceptionCodeSuffix     = "#code"
     inline val BaseFieldPrefix         = "#base"
     inline val EmptyStructStorageField = "#empty_struct_storage"
     inline val KernelBundleType        = "KernelBundle"
@@ -570,6 +612,7 @@ object PolyAST {
       case Error             extends AssertCode(fourCC('E', 'R', 'R', 'O'))
       case Assert            extends AssertCode(fourCC('A', 'S', 'R', 'T'))
       case RecursionLimit    extends AssertCode(fourCC('R', 'L', 'I', 'M'))
+      case Exception         extends AssertCode(fourCC('E', 'X', 'C', 'P'))
       case Unknown(raw: Int) extends AssertCode(raw)
     }
 
@@ -681,7 +724,7 @@ object PolyAST {
     val All: List[Variant] =
       Backend.values.toList ++ Access.values.toList ++ Target.values.toList ++ OptLevel.values.toList ++
         Type.values.toList ++ PlatformKind.values.toList ++ ModuleFormat.values.toList ++
-        List(AssertCode.Error, AssertCode.Assert, AssertCode.RecursionLimit)
+        List(AssertCode.Error, AssertCode.Assert, AssertCode.RecursionLimit, AssertCode.Exception)
   }
 
   extension (s: Sym) {
@@ -904,7 +947,24 @@ object PolyAST {
           }"
       case Stmt.Annotated(inner, pos, comment) =>
         s"${inner.repr}${pos.map(p => s" /* ${p.repr} */").getOrElse("")}${comment.map(c => s" /* $c */").getOrElse("")}"
+      case Stmt.Raise(value, exceptionKind, _) => s"raise ${value.repr} /* ${exceptionKind.sourceName} */"
+      case Stmt.Rethrow                        => "rethrow"
+      case Stmt.Try(body, handlers, fin) =>
+        s"try ${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}${handlers.map(_.repr).mkString("")}${
+            if (fin.isEmpty) ""
+            else s" finally ${"{"}\n${fin.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+          }"
     }
+  }
+
+  extension (h: Handler) {
+    def repr: String =
+      s" catch (${h.binder.map(b => s"${b.symbol}: ").getOrElse("")}${h.caught.map(_.tpe.repr).getOrElse("_")}${h.caught
+          .map(x => s" /* ${x.sourceName} */")
+          .getOrElse("")}) ${"{"}\n${h.body
+          .map(_.repr)
+          .mkString("\n")
+          .indent(2)}\n${"}"}"
   }
 
   extension (a: Arg) {

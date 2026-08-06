@@ -72,6 +72,12 @@ extension (e: => Throwable) {
   def failE[A]: Result[A] = Left(e)
 }
 
+extension (t: p.Stmt.Try) {
+  def blocks: List[List[p.Stmt]] = t.body :: t.fin :: t.handlers.map(_.body)
+  def mapBlocks(f: List[p.Stmt] => List[p.Stmt]): p.Stmt.Try =
+    p.Stmt.Try(f(t.body), t.handlers.map(h => h.copy(body = f(h.body))), f(t.fin))
+}
+
 extension (sd: p.StructDef) {
   def applied(args: List[p.Type]): p.Type.Struct = p.Type.Struct(sd.name, args)
   def erasedTpe: p.Type.Struct =
@@ -276,8 +282,11 @@ def mapStmtsRec(stmts: List[p.Stmt])(leaf: p.Stmt => List[p.Stmt]): List[p.Stmt]
   case p.Stmt.While(c, b)                => List(p.Stmt.While(c, mapStmtsRec(b)(leaf)))
   case p.Stmt.Cond(c, t, e)              => List(p.Stmt.Cond(c, mapStmtsRec(t)(leaf), mapStmtsRec(e)(leaf)))
   case p.Stmt.ForRange(i, lb, ub, st, b) => List(p.Stmt.ForRange(i, lb, ub, st, mapStmtsRec(b)(leaf)))
-  case p.Stmt.Annotated(inner, pos, c)   => mapStmtsRec(List(inner))(leaf).map(p.Stmt.Annotated(_, pos, c))
-  case s                                 => leaf(s)
+  case t: p.Stmt.Try                     => List(t.mapBlocks(mapStmtsRec(_)(leaf)))
+  case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+    List(p.Stmt.Raise(value, exceptionKind, mapStmtsRec(cleanup)(leaf)))
+  case p.Stmt.Annotated(inner, pos, c) => mapStmtsRec(List(inner))(leaf).map(p.Stmt.Annotated(_, pos, c))
+  case s                               => leaf(s)
 }
 
 def dropAliasDecls(stmts: List[p.Stmt], aliases: Set[String]): List[p.Stmt] = mapStmtsRec(stmts) {

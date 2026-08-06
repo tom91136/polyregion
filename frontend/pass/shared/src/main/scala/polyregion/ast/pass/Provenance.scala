@@ -61,20 +61,21 @@ object Provenance {
       def trace(root: p.Named): p.Region = m.getOrElse(root, p.Region.Rooted(root))
       def of(root: p.Named, steps: List[p.PathStep], t: p.Type): p.Region =
         if (arena) selectRegion(trace(root), steps, t) else trace(root)
-      def regionOf(n: p.Named, e: p.Expr): p.Region = e match {
-        case p.Expr.RefTo(p.Term.Select(root, steps, t), _, _, _, _)   => of(root, steps, t)
-        case p.Expr.Cast(p.Term.Select(root, steps, t), _: p.Type.Ptr) => of(root, steps, t)
-        case p.Expr.Alias(p.Term.Select(root, steps, t))               => of(root, steps, t)
-        case _: p.Expr.Alloc                                           => p.Region.Rooted(n)
-        case p.Expr.Alias(p.Term.StringConst(_))                       => p.Region.Rooted(n)
-        case p.Expr.Cast(p.Term.StringConst(_), _: p.Type.Ptr)         => p.Region.Rooted(n)
-        case _                                                         => p.Region.Opaque
+      def regionOf(n: p.Named, e: p.Expr): Option[p.Region] = e match {
+        case p.Expr.Alias(_: p.Term.NullPtrConst)                      => None
+        case p.Expr.RefTo(p.Term.Select(root, steps, t), _, _, _, _)   => Some(of(root, steps, t))
+        case p.Expr.Cast(p.Term.Select(root, steps, t), _: p.Type.Ptr) => Some(of(root, steps, t))
+        case p.Expr.Alias(p.Term.Select(root, steps, t))               => Some(of(root, steps, t))
+        case _: p.Expr.Alloc                                           => Some(p.Region.Rooted(n))
+        case p.Expr.Alias(p.Term.StringConst(_))                       => Some(p.Region.Rooted(n))
+        case p.Expr.Cast(p.Term.StringConst(_), _: p.Type.Ptr)         => Some(p.Region.Rooted(n))
+        case _                                                         => Some(p.Region.Opaque)
       }
       def join(n: p.Named, r: p.Region): Map[p.Named, p.Region] =
         m + (n -> m.get(n).fold(r)(joinRegions(_, r)))
       stmt match {
-        case p.Stmt.Var(n, Some(e), _) if isPtr(n.tpe)               => join(n, regionOf(n, e))
-        case p.Stmt.Mut(p.Term.Select(n, Nil, _), e) if isPtr(n.tpe) => join(n, regionOf(n, e))
+        case p.Stmt.Var(n, Some(e), _) if isPtr(n.tpe)               => regionOf(n, e).fold(m)(join(n, _))
+        case p.Stmt.Mut(p.Term.Select(n, Nil, _), e) if isPtr(n.tpe) => regionOf(n, e).fold(m)(join(n, _))
         case _                                                       => m
       }
     }

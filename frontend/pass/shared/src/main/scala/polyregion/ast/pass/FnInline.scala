@@ -34,18 +34,25 @@ object FnInline extends ProgramPass {
     }
 
   private def renameAll(f: p.Function, ctr: java.util.concurrent.atomic.AtomicLong): p.Function = {
-    val id                 = ctr.incrementAndGet()
-    def rename(n: p.Named) = p.Named(s"_inline_${id}_${f.mangledName}_${n.symbol}", n.tpe)
-    val captureNames       = f.moduleCaptures.map(_.named).toSet
+    val id = ctr.incrementAndGet()
+    def semantic(n: p.Named) =
+      n.symbol == p.Conventions.ExceptionValue || n.symbol == p.Conventions.ExceptionWhat ||
+        n.symbol == p.Conventions.ExceptionCode
+    def rename(n: p.Named) =
+      if (semantic(n)) n else p.Named(s"_inline_${id}_${f.mangledName}_${n.symbol}", n.tpe)
+    val captureNames = f.moduleCaptures.map(_.named).toSet
     val body = f.body
       .modifyAll[p.Term] {
         case s @ p.Term.Select(root, _, _) if captureNames.contains(root) => s
+        case s @ p.Term.Select(root, _, _) if semantic(root)              => s
         case p.Term.Select(root, steps, tpe)                              => p.Term.Select(rename(root), steps, tpe)
         case x                                                            => x
       }
       .modifyAll[p.Stmt] {
-        case p.Stmt.Var(n, expr, isMutable) => p.Stmt.Var(rename(n), expr, isMutable)
-        case x                              => x
+        case p.Stmt.Var(n, expr, isMutable)         => p.Stmt.Var(rename(n), expr, isMutable)
+        case p.Stmt.ForRange(i, lb, ub, step, body) => p.Stmt.ForRange(rename(i), lb, ub, step, body)
+        case p.Stmt.Try(b, hs, fin) => p.Stmt.Try(b, hs.map(h => h.copy(binder = h.binder.map(rename))), fin)
+        case x                      => x
       }
     p.Function(
       f.name,
@@ -104,15 +111,93 @@ object FnInline extends ProgramPass {
     returnExprs match {
       case Nil =>
         throw AssertionError(s"no return in function ${f.signature}")
-      case expr :: Nil =>
+      case expr :: Nil if !returnsInsideTry(sunk.body) =>
         val noReturnBody = sunk.body.flatMap(stripReturn)
         (expr, noReturnBody, renamed.moduleCaptures)
-      case xs =>
+      case _ =>
         val phiName                  = p.Named(s"_inline_phi_${ctr.incrementAndGet()}", ivk.tpe)
         val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
         val phiDecl                  = p.Stmt.Var(phiName, None, isMutable = true)
-        val rebound                  = sunk.body.map(rebindReturn(phiSelect))
-        (p.Expr.Alias(phiSelect), phiDecl :: rebound, renamed.moduleCaptures)
+        if (returnsInsideTry(sunk.body)) {
+          val flagName                = p.Named(s"_inline_exit_${ctr.incrementAndGet()}", p.Type.Bool1)
+          val flagTerm: p.Term.Select = p.Term.Select(flagName, Nil, p.Type.Bool1)
+          val flagDecl = p.Stmt.Var(flagName, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true)
+          val unwound  = unwindReturn(sunk.body, phiSelect, flagTerm, inLoop = false, ctr)
+          (p.Expr.Alias(phiSelect), phiDecl :: flagDecl :: unwound, renamed.moduleCaptures)
+        } else {
+          val rebound = sunk.body.map(rebindReturn(phiSelect))
+          (p.Expr.Alias(phiSelect), phiDecl :: rebound, renamed.moduleCaptures)
+        }
+    }
+  }
+
+  private def containsReturn(s: p.Stmt): Boolean =
+    s.collectFirst_[p.Stmt] { case r: p.Stmt.Return => r }.isDefined
+
+  private def returnsInsideTry(stmts: List[p.Stmt]): Boolean = stmts.exists {
+    case t: p.Stmt.Try        => t.blocks.exists(_.exists(containsReturn)) || t.blocks.exists(returnsInsideTry)
+    case p.Stmt.Cond(_, t, f) => returnsInsideTry(t) || returnsInsideTry(f)
+    case p.Stmt.While(_, b)   => returnsInsideTry(b)
+    case p.Stmt.ForRange(_, _, _, _, b) => returnsInsideTry(b)
+    case p.Stmt.Annotated(inner, _, _)  => returnsInsideTry(List(inner))
+    case _                              => false
+  }
+
+  private def unwindReturn(
+      stmts: List[p.Stmt],
+      phi: p.Term.Select,
+      flag: p.Term.Select,
+      inLoop: Boolean,
+      ctr: java.util.concurrent.atomic.AtomicLong
+  ): List[p.Stmt] = {
+    def guard(tail: List[p.Stmt]): List[p.Stmt] =
+      if (inLoop) List(p.Stmt.Cond(flag, List(p.Stmt.Break), tail))
+      else if (tail.isEmpty) Nil
+      else List(p.Stmt.Cond(flag, Nil, tail))
+
+    def finalizer(fin: List[p.Stmt]): List[p.Stmt] = {
+      val rewritten = unwindReturn(fin, phi, flag, inLoop = false, ctr)
+      if (!fin.exists(containsReturn)) rewritten
+      else {
+        val savedName            = p.Named(s"_inline_pending_${ctr.incrementAndGet()}", p.Type.Bool1)
+        val saved: p.Term.Select = p.Term.Select(savedName, Nil, p.Type.Bool1)
+        val save                 = p.Stmt.Var(savedName, Some(p.Expr.Alias(flag)), isMutable = false)
+        val clear                = p.Stmt.Mut(flag, p.Expr.Alias(p.Term.Bool1Const(false)))
+        val restore              = p.Stmt.Mut(flag, p.Expr.Alias(saved))
+        save :: clear :: rewritten ::: List(p.Stmt.Cond(flag, Nil, List(restore)))
+      }
+    }
+
+    stmts match {
+      case Nil => Nil
+      case p.Stmt.Return(e) :: _ =>
+        List(p.Stmt.Mut(phi, e), p.Stmt.Mut(flag, p.Expr.Alias(p.Term.Bool1Const(true)))) :::
+          Option.when(inLoop)(p.Stmt.Break).toList
+      case p.Stmt.Cond(c, t, f) :: rest =>
+        val head = p.Stmt.Cond(c, unwindReturn(t, phi, flag, inLoop, ctr), unwindReturn(f, phi, flag, inLoop, ctr))
+        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
+        if (t.exists(containsReturn) || f.exists(containsReturn)) head :: guard(tail) else head :: tail
+      case p.Stmt.While(c, b) :: rest =>
+        val head = p.Stmt.While(c, unwindReturn(b, phi, flag, inLoop = true, ctr))
+        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
+        if (b.exists(containsReturn)) head :: guard(tail) else head :: tail
+      case p.Stmt.ForRange(i, lb, ub, step, b) :: rest =>
+        val head = p.Stmt.ForRange(i, lb, ub, step, unwindReturn(b, phi, flag, inLoop = true, ctr))
+        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
+        if (b.exists(containsReturn)) head :: guard(tail) else head :: tail
+      case (t: p.Stmt.Try) :: rest =>
+        val head = p.Stmt.Try(
+          unwindReturn(t.body, phi, flag, inLoop = false, ctr),
+          t.handlers.map(h => h.copy(body = unwindReturn(h.body, phi, flag, inLoop = false, ctr))),
+          finalizer(t.fin)
+        )
+        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
+        if (containsReturn(t)) head :: guard(tail) else head :: tail
+      case p.Stmt.Annotated(inner, pos, comment) :: rest =>
+        val head = unwindReturn(List(inner), phi, flag, inLoop, ctr).map(p.Stmt.Annotated(_, pos, comment))
+        val tail = unwindReturn(rest, phi, flag, inLoop, ctr)
+        if (containsReturn(inner)) head ::: guard(tail) else head ::: tail
+      case other :: rest => other :: unwindReturn(rest, phi, flag, inLoop, ctr)
     }
   }
 
@@ -134,7 +219,8 @@ object FnInline extends ProgramPass {
         case (false, true) if rest.nonEmpty => List(p.Stmt.Cond(c, sinkAfterReturn(t2 ::: rest), f2))
         case _                              => p.Stmt.Cond(c, t2, f2) :: sinkAfterReturn(rest)
       }
-    case other :: rest => other :: sinkAfterReturn(rest)
+    case (t: p.Stmt.Try) :: rest => t.mapBlocks(sinkAfterReturn) :: sinkAfterReturn(rest)
+    case other :: rest           => other :: sinkAfterReturn(rest)
   }
 
   private def stripReturn(s: p.Stmt): List[p.Stmt] = s match {
@@ -142,6 +228,7 @@ object FnInline extends ProgramPass {
     case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, t.flatMap(stripReturn), f.flatMap(stripReturn)) :: Nil
     case p.Stmt.While(c, b)                => p.Stmt.While(c, b.flatMap(stripReturn)) :: Nil
     case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, b.flatMap(stripReturn)) :: Nil
+    case t: p.Stmt.Try                     => t.mapBlocks(_.flatMap(stripReturn)) :: Nil
     case p.Stmt.Annotated(inner, pos, c)   => stripReturn(inner).map(p.Stmt.Annotated(_, pos, c))
     case other                             => other :: Nil
   }
@@ -151,6 +238,7 @@ object FnInline extends ProgramPass {
     case p.Stmt.Cond(c, t, f)              => p.Stmt.Cond(c, t.map(rebindReturn(phi)), f.map(rebindReturn(phi)))
     case p.Stmt.While(c, b)                => p.Stmt.While(c, b.map(rebindReturn(phi)))
     case p.Stmt.ForRange(i, lb, ub, st, b) => p.Stmt.ForRange(i, lb, ub, st, b.map(rebindReturn(phi)))
+    case t: p.Stmt.Try                     => t.mapBlocks(_.map(rebindReturn(phi)))
     case p.Stmt.Annotated(inner, pos, c)   => p.Stmt.Annotated(rebindReturn(phi)(inner), pos, c)
     case other                             => other
   }
@@ -222,6 +310,17 @@ object FnInline extends ProgramPass {
     case p.Stmt.ForRange(i, lb, ub, step, body) =>
       val (newBody, caps) = body.foldMap(s => inlineStmt(s, program, ctr))
       (List(p.Stmt.ForRange(i, lb, ub, step, newBody)), caps)
+    case p.Stmt.Try(body, handlers, fin) =>
+      val (newBody, capsB) = body.foldMap(s => inlineStmt(s, program, ctr))
+      val (newHandlers, capsH) = handlers.foldMap { h =>
+        val (hBody, hCaps) = h.body.foldMap(s => inlineStmt(s, program, ctr))
+        (List(h.copy(body = hBody)), hCaps)
+      }
+      val (newFin, capsF) = fin.foldMap(s => inlineStmt(s, program, ctr))
+      (List(p.Stmt.Try(newBody, newHandlers, newFin)), capsB ++ capsH ++ capsF)
+    case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+      val (newCleanup, caps) = cleanup.foldMap(s => inlineStmt(s, program, ctr))
+      (List(p.Stmt.Raise(value, exceptionKind, newCleanup)), caps)
     case p.Stmt.Annotated(inner, pos, c) =>
       val (rewritten, caps) = inlineStmt(inner, program, ctr)
       (rewritten.map(p.Stmt.Annotated(_, pos, c)), caps)

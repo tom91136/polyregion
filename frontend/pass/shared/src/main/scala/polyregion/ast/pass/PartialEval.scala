@@ -145,9 +145,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   }
 
   private def isTerminator(s: p.Stmt): Boolean = s match {
-    case _: p.Stmt.Return | p.Stmt.Break | p.Stmt.Cont => true
-    case p.Stmt.Annotated(inner, _, _)                 => isTerminator(inner)
-    case _                                             => false
+    case _: p.Stmt.Return | _: p.Stmt.Raise | p.Stmt.Rethrow | p.Stmt.Break | p.Stmt.Cont => true
+    case p.Stmt.Annotated(inner, _, _)                                                    => isTerminator(inner)
+    case _                                                                                => false
   }
 
   private def evalStmt(
@@ -203,6 +203,13 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
           (Nil, st)
         case c2 => (p.Stmt.While(c2, evalStmts(body, st, excluded, reassigned, log)._1) :: Nil, st)
       }
+
+    case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+      val lowered = evalStmts(cleanup, st, excluded, reassigned, log)._1
+      (p.Stmt.Raise(resolveTerm(value, st), exceptionKind, lowered) :: Nil, st)
+    case p.Stmt.Rethrow => (p.Stmt.Rethrow :: Nil, st)
+
+    case t: p.Stmt.Try => (t.mapBlocks(evalStmts(_, st, excluded, reassigned, log)._1) :: Nil, st)
 
     case p.Stmt.ForRange(induction, lb, ub, step, body) =>
       val lb2   = resolveTerm(lb, st)
@@ -356,6 +363,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       (p.Stmt.Cond(c, reassocStmts(t, Map.empty)._1, reassocStmts(f, Map.empty)._1), Map.empty)
     case p.Stmt.While(c, b)                => (p.Stmt.While(c, reassocStmts(b, Map.empty)._1), Map.empty)
     case p.Stmt.ForRange(i, lb, ub, st, b) => (p.Stmt.ForRange(i, lb, ub, st, reassocStmts(b, Map.empty)._1), Map.empty)
+    case t: p.Stmt.Try                     => (t.mapBlocks(reassocStmts(_, Map.empty)._1), Map.empty)
     case p.Stmt.Annotated(inner, pos, c) =>
       val (i2, e2) = reassocStmt(inner, env); (p.Stmt.Annotated(i2, pos, c), e2)
     case p.Stmt.Var(n, Some(p.Expr.IntrOp(op)), false) if !op.terms.exists(termReadsMemory) =>
@@ -448,6 +456,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       case p.Stmt.While(c, b) => (p.Stmt.While(c, cseStmts(b, Avail.empty, addrTaken)._1), Avail.empty)
       case p.Stmt.ForRange(i, lb, ub, st, b) =>
         (p.Stmt.ForRange(i, lb, ub, st, cseStmts(b, Avail.empty, addrTaken)._1), Avail.empty)
+      case t: p.Stmt.Try => (t.mapBlocks(cseStmts(_, Avail.empty, addrTaken)._1), Avail.empty)
       case p.Stmt.Annotated(inner, pos, c) =>
         val (i2, av) = cseStmt(inner, avail, addrTaken); (p.Stmt.Annotated(i2, pos, c), av)
       case p.Stmt.Var(n, Some(e), false) if cseEligible(e) =>

@@ -197,6 +197,9 @@ private[polyregion] object compiletime {
            )}) at {}:{})", __FILE__, __LINE__));
             |}()""".stripMargin
       case Apply(Ident("repr"), x :: Nil) => s"repr(${remap(x, scope, depth + 1)})"
+      case Apply(Select(xs, "mkString"), sep :: Nil) =>
+        s"(${remap(xs, scope, depth + 1)} | mk_string(${remap(sep, scope, depth + 1)}))"
+      case Select(xs, "mkString") => s"(${remap(xs, scope, depth + 1)} | mk_string(\"\"s))"
       case x =>
         Expr.betaReduce(x.asExpr) match {
           case '{ ($x: Any).toString() } => s"std::to_string(${remap(x.asTerm, scope, depth + 1)})"

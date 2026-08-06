@@ -14,6 +14,17 @@ object PassTest {
   def named(name: String, tpe: p.Type = p.Type.IntS32): p.Named = p.Named(name, tpe)
   def arg(name: String, tpe: p.Type = p.Type.IntS32): p.Arg     = p.Arg(named(name, tpe))
 
+  def raise(value: p.Term, sourceName: String, cleanup: List[p.Stmt] = Nil): p.Stmt.Raise =
+    p.Stmt.Raise(value, p.ExceptionKind(value.tpe, sourceName), cleanup)
+
+  def handler(
+      tpe: Option[p.Type],
+      binder: Option[p.Named],
+      body: List[p.Stmt],
+      sourceName: Option[String]
+  ): p.Handler =
+    p.Handler(tpe.zip(sourceName).map(p.ExceptionKind.apply), binder, body)
+
   // The old DSL exposed `select(...)` returning an `Expr.Select`. Under the new shape, Select is
   // a Term variant; for tests that want it as an Expr we wrap with Alias.
   def selectT(n: p.Named): p.Term.Select                                = p.Term.Select(n, Nil, n.tpe)

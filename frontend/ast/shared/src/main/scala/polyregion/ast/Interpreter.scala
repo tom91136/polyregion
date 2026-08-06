@@ -12,6 +12,13 @@ object Interpreter {
   private final class Ret(val v: V) extends scala.util.control.ControlThrowable
   private object Brk                extends scala.util.control.ControlThrowable
   private object Cnt                extends scala.util.control.ControlThrowable
+  private object Rth                extends scala.util.control.ControlThrowable
+  private final class Rse(
+      val v: V,
+      val address: Option[Long],
+      val exceptionKind: p.ExceptionKind,
+      val cleanup: List[p.Stmt]
+  ) extends scala.util.control.ControlThrowable
 
   type Foreign = (name: String, args: List[(p.Type, V)], rtn: p.Type) => V
 
@@ -23,8 +30,9 @@ object Interpreter {
 
     var foreign: Foreign = Vm.noForeign
 
-    private val defs = program.defs.map(d => d.name -> d).toMap
-    private val fns  = (program.entry :: program.functions).map(f => f.name -> f).toMap
+    private val defs        = program.defs.map(d => d.name -> d).toMap
+    private val baseByField = program.defs.map(d => s"${p.Conventions.BaseFieldPrefix}_${d.name.repr}" -> d).toMap
+    private val fns         = (program.entry :: program.functions).map(f => f.name -> f).toMap
 
     // device allocations live in a disjoint range so the kernel cannot reach host memory by accident;
     // an unmirrored or unpatched pointer surviving into the kernel trips the deviceMode guard below
@@ -92,6 +100,7 @@ object Interpreter {
     private def alignUp(x: Long, a: Long): Long = if (a <= 1) x else (x + a - 1) / a * a
 
     private val layoutMemo = mutable.Map.empty[p.Sym, (Map[String, Long], Long)]
+    private var callDepth  = 0
     private def layout(s: p.Sym): (Map[String, Long], Long) = layoutMemo.getOrElseUpdate(
       s, {
         var off  = 0L
@@ -178,8 +187,14 @@ object Interpreter {
         fr.slots(a.named.symbol) = slot
         store(slot, v, a.named.tpe)
       }
+      callDepth += 1
       try { f.body.foreach(exec(_, fr)); V.U }
-      catch { case r: Ret => r.v }
+      catch {
+        case r: Ret => r.v
+        case r: Rse =>
+          if (callDepth == 1) runCleanup(r, fr)
+          throw r
+      } finally callDepth -= 1
     }
     def call(name: String, args: List[(p.Type, V)]): V = call(p.Sym(List(name)), args)
 
@@ -223,7 +238,154 @@ object Interpreter {
       case p.Stmt.Break         => throw Brk
       case p.Stmt.Cont          => throw Cnt
       case p.Stmt.Annotated(inner, _, _) => exec(inner, fr)
+      case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+        if (isAggregate(value.tpe)) {
+          val slot = allocOf(value.tpe)
+          copy(slot, addressOf(value, fr), sizeOf(value.tpe))
+          throw new Rse(V.U, Some(slot), exceptionKind, cleanup)
+        } else throw new Rse(evalT(value, fr), None, exceptionKind, cleanup)
+      case p.Stmt.Rethrow => throw Rth
+      case p.Stmt.Try(body, handlers, fin) =>
+        var pending = Option.empty[Rse]
+        def runProtected(): Unit =
+          try body.foreach(exec(_, fr))
+          catch {
+            case r: Rse =>
+              try dispatch(r, handlers, fr)
+              catch {
+                case next: Rse =>
+                  pending = Some(next)
+                  throw next
+              }
+          }
+        try runProtected()
+        finally
+          try fin.foreach(exec(_, fr))
+          catch {
+            case replacement: Rse =>
+              pending.filterNot(_ eq replacement).foreach(runCleanup(_, fr))
+              throw replacement
+            case exit: Ret =>
+              pending.foreach(runCleanup(_, fr))
+              throw exit
+            case Brk =>
+              pending.foreach(runCleanup(_, fr))
+              throw Brk
+            case Cnt =>
+              pending.foreach(runCleanup(_, fr))
+              throw Cnt
+          }
     }
+
+    private def isAggregate(t: p.Type): Boolean = t match {
+      case _: p.Type.Struct | _: p.Type.Arr => true
+      case _                                => false
+    }
+
+    private def projection(from: p.Type, to: p.Type): Option[List[String]] =
+      if (from == to) Some(Nil)
+      else
+        (from, to) match {
+          case (s: p.Type.Struct, target: p.Type.Struct) =>
+            defs
+              .get(s.name)
+              .toList
+              .flatMap(_.members)
+              .collect {
+                case p.Named(name, parent: p.Type.Struct, _) if name.startsWith(p.Conventions.BaseFieldPrefix) =>
+                  name -> parent
+              }
+              .iterator
+              .flatMap { (name, parent) =>
+                val direct = baseByField.get(name)
+                if (direct.exists(d => d.name == target.name || (d.name != parent.name && d.parents.contains(target))))
+                  Some(List(name))
+                else projection(parent, to).map(name :: _)
+              }
+              .nextOption()
+          case _ => None
+        }
+
+    private def convertible(raised: p.Type, caught: p.Type): Boolean = (raised, caught) match {
+      case (s: p.Type.Struct, _: p.Type.Struct) =>
+        defs.get(s.name).exists(_.parents.contains(caught)) && projection(raised, caught).isDefined
+      case (p.Type.Ptr(p.Type.Nothing, p.Type.Space.Constant), _: p.Type.Ptr)           => true
+      case (p.Type.Ptr(from, _), p.Type.Ptr(p.Type.Unit0, _)) if from != p.Type.Nothing => true
+      case (p.Type.Ptr(from: p.Type.Struct, _), p.Type.Ptr(to: p.Type.Struct, _)) =>
+        defs.get(from.name).exists(_.parents.contains(to)) && projection(from, to).isDefined
+      case _ => false
+    }
+
+    private def catches(r: Rse, handler: p.Handler): Boolean =
+      handler.caught.forall(_.catches(r.exceptionKind)(convertible))
+
+    private def project(source: Long, from: p.Type.Struct, to: p.Type.Struct): Long =
+      projection(from, to).get
+        .foldLeft(source -> from: (Long, p.Type)) { case ((addr, current), field) =>
+          val sym  = structSym(current)
+          val next = memberTpe(sym, field)
+          (addr + offsetOf(sym, field)) -> next
+        }
+        ._1
+
+    private def runCleanup(r: Rse, fr: Frame): Unit = if (r.cleanup.nonEmpty) {
+      val slot = r.address.getOrElse {
+        val slot = allocOf(r.exceptionKind.tpe)
+        store(slot, r.v, r.exceptionKind.tpe)
+        slot
+      }
+      val symbol   = p.Conventions.ExceptionValue
+      val previous = fr.slots.put(symbol, slot)
+      try r.cleanup.foreach(exec(_, fr))
+      finally
+        previous match {
+          case Some(slot) => fr.slots(symbol) = slot
+          case None       => fr.slots.remove(symbol)
+        }
+    }
+
+    private def dispatch(r: Rse, handlers: List[p.Handler], fr: Frame): Unit =
+      handlers.find(catches(r, _)) match {
+        case None => throw r
+        case Some(h) =>
+          h.binder.foreach { b =>
+            val slot = allocOf(b.tpe)
+            fr.slots(b.symbol) = slot
+            (r.exceptionKind.tpe, h.caught.map(_.tpe)) match {
+              case (from: p.Type.Ptr, Some(to: p.Type.Ptr)) if from != to =>
+                val source = asI(r.v)
+                val adjusted = (from.comp, to.comp) match {
+                  case (p.Type.Nothing, _) if from.space == p.Type.Space.Constant => 0L
+                  case (_, p.Type.Unit0)                                          => source
+                  case (a: p.Type.Struct, z: p.Type.Struct) if source == 0        => 0L
+                  case (a: p.Type.Struct, z: p.Type.Struct)                       => project(source, a, z)
+                  case _ => sys.error(s"invalid pointer catch $from -> $to")
+                }
+                store(slot, V.I(adjusted), b.tpe)
+              case _ =>
+                h.caught.flatMap(c => r.address.map(_ -> c.tpe)) match {
+                  case Some((source, caught)) =>
+                    val projected = (r.exceptionKind.tpe, caught) match {
+                      case (from: p.Type.Struct, to: p.Type.Struct) => project(source, from, to)
+                      case _                                        => source
+                    }
+                    b.tpe match {
+                      case p.Type.Ptr(component, _) if component == caught => store(slot, V.I(projected), b.tpe)
+                      case _ if isAggregate(b.tpe)                         => copy(slot, projected, sizeOf(b.tpe))
+                      case _                                               => store(slot, r.v, b.tpe)
+                    }
+                  case None => store(slot, r.v, b.tpe)
+                }
+            }
+          }
+          var rethrows = false
+          try h.body.foreach(exec(_, fr))
+          catch {
+            case Rth =>
+              rethrows = true
+              throw r
+          } finally if (!rethrows) runCleanup(r, fr)
+      }
 
     private def eval(e: p.Expr, fr: Frame): V = e match {
       case p.Expr.Alias(t)              => evalT(t, fr)

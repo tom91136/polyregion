@@ -232,6 +232,24 @@ object Verify {
         val c3 = validateTerm(c2, step)
         body.foldLeft(c3)(validateStmt(_, _))
       case p.Stmt.Annotated(inner, _, _) => validateStmt(c, inner)
+      case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+        val c0 = validateTerm(c, value)
+        val typeErrors = Option
+          .when(exceptionKind.tpe != value.tpe)(
+            s"raise exception type ${exceptionKind.tpe.repr} does not match value type ${value.tpe.repr}"
+          )
+          .toList
+        val errors = cleanup.foldLeft(c0.copy(errors = Nil))(validateStmt(_, _)).errors
+        c0.copy(errors = typeErrors ::: errors ::: c0.errors)
+      case p.Stmt.Rethrow => c
+      case p.Stmt.Try(body, handlers, fin) =>
+        def isolated(initial: Context, stmts: List[p.Stmt]): List[String] =
+          stmts.foldLeft(initial.copy(errors = Nil))(validateStmt(_, _)).errors
+        val errors = handlers.flatMap(p.Handler.validationErrors) :::
+          isolated(c, body) :::
+          handlers.flatMap(h => isolated(h.binder.fold(c)(c + _), h.body)) :::
+          isolated(c, fin)
+        c.copy(errors = errors ::: c.errors)
     }
 
     val referenceAndTypeErrors = f.body match {

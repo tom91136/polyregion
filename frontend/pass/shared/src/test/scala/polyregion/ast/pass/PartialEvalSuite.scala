@@ -859,6 +859,65 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(once.entry.body, twice.entry.body)
   }
 
+  test("raise drops the unreachable tail of its block") {
+    val dead = named("dead", p.Type.IntS32)
+    val out = pe(
+      List(
+        raise(p.Term.IntS32Const(1), "int"),
+        p.Stmt.Var(dead, Some(p.Expr.ForeignCall("effect", Nil, p.Type.IntS32)))
+      )
+    )
+    assertEquals(out, List(raise(p.Term.IntS32Const(1), "int")))
+  }
+
+  test("dead bindings are removed from every try block") {
+    val bodyDead    = named("bodyDead", p.Type.IntS32)
+    val handlerDead = named("handlerDead", p.Type.IntS32)
+    val finallyDead = named("finallyDead", p.Type.IntS32)
+    val out = pe(
+      List(
+        p.Stmt.Try(
+          List(p.Stmt.Var(bodyDead, Some(p.Expr.Alias(p.Term.IntS32Const(1))))),
+          List(
+            handler(
+              None,
+              None,
+              List(p.Stmt.Var(handlerDead, Some(p.Expr.Alias(p.Term.IntS32Const(2))))),
+              None
+            )
+          ),
+          List(p.Stmt.Var(finallyDead, Some(p.Expr.Alias(p.Term.IntS32Const(3)))))
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val t = out.head.asInstanceOf[p.Stmt.Try]
+    assertEquals(t.blocks, List(Nil, Nil, Nil))
+  }
+
+  test("raise cleanup is partially evaluated in an isolated scope") {
+    val outArg = arg("out", p.Type.IntS32)
+    val local  = named("cleanupLocal", p.Type.IntS32)
+    val out = pe(
+      List(
+        raise(
+          p.Term.IntS32Const(1),
+          "int",
+          List(
+            p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.IntS32Const(7)))),
+            p.Stmt.Mut(selectT(outArg.named), p.Expr.Alias(selectT(local)))
+          )
+        )
+      ),
+      args = List(outArg)
+    )
+    val cleanup = out.head.asInstanceOf[p.Stmt.Raise].cleanup
+    assertEquals(
+      cleanup,
+      List(p.Stmt.Mut(selectT(outArg.named), p.Expr.Alias(p.Term.IntS32Const(7))))
+    )
+  }
+
   // --- one walk reaches the combined fixpoint the retired pass sequence needed ordering for ---
 
   test("fully folds a fused const/alias/dead-code/dead-loop program to a single constant") {

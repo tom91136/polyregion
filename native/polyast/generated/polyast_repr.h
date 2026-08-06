@@ -16,6 +16,7 @@ namespace polyregion::polyast {
 [[nodiscard]] std::string repr(const Term::Any &t);
 [[nodiscard]] std::string repr(const Expr::Any &e);
 [[nodiscard]] std::string repr(const Stmt::Any &stmt);
+[[nodiscard]] std::string repr(const Handler &h);
 [[nodiscard]] std::string repr(const Arg &a);
 [[nodiscard]] std::string repr(const FunctionVisibility::Any &v);
 [[nodiscard]] std::string repr(const FunctionFpMode::Any &m);

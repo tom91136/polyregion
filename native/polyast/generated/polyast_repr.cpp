@@ -504,9 +504,32 @@ std::string repr(const Stmt::Any &stmt) {
                          _x->pos ^ map([&](const SourcePosition &p) { return fmt::format(" /* {} */", repr(p)); }) ^ get_or_else(""s),
                          _x->comment ^ map([&](const std::string &c) { return fmt::format(" /* {} */", c); }) ^ get_or_else(""s));
     }
+    if (auto _x = stmt.get<Stmt::Raise>()) {
+      return fmt::format("raise {} /* {} */", repr(_x->value), _x->exceptionKind.sourceName);
+    }
+    if (stmt.is<Stmt::Rethrow>()) {
+      return "rethrow"s;
+    }
+    if (auto _x = stmt.get<Stmt::Try>()) {
+      return fmt::format(
+          "try {}\n{}\n{}{}{}", "{"s, (_x->body | map([&](const Stmt::Any &_v8_0) { return repr(_v8_0); }) | mk_string("\n"s)) ^ indent(2),
+          "}"s, (_x->handlers | map([&](const Handler &_v7_0) { return repr(_v7_0); }) | mk_string(""s)),
+          (_x->fin.empty()
+               ? ""s
+               : fmt::format(" finally {}\n{}\n{}", "{"s,
+                             (_x->fin | map([&](const Stmt::Any &_v10_0) { return repr(_v10_0); }) | mk_string("\n"s)) ^ indent(2), "}"s)));
+    }
 
     throw std::logic_error(fmt::format("Unhandled match case for stmt (of type Stmt::Any) at {}:{})", __FILE__, __LINE__));
   }();
+}
+
+std::string repr(const Handler &h) {
+  return fmt::format(" catch ({}{}{}) {}\n{}\n{}",
+                     h.binder ^ map([&](const Named &b) { return fmt::format("{}: ", b.symbol); }) ^ get_or_else(""s),
+                     h.caught ^ map([&](const ExceptionKind &_v5_0) { return repr(_v5_0.tpe); }) ^ get_or_else("_"s),
+                     h.caught ^ map([&](const ExceptionKind &x) { return fmt::format(" /* {} */", x.sourceName); }) ^ get_or_else(""s),
+                     "{"s, (h.body | map([&](const Stmt::Any &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 }
 
 std::string repr(const Arg &a) {

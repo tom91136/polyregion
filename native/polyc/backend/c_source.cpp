@@ -358,6 +358,10 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
                              [&](const Type::Struct &x) { return normalise(x.name); }, //
                              [&](const Type::Ptr &x) {
+                               if (x.comp.template is<Type::Nothing>()) {
+                                 if (dialect == Dialect::MSL1_0) return fmt::format("{} char*", mslPtrPrefix(x.space));
+                                 return "int8_t*"s;
+                               }
                                // a pointer to an array needs the `c(*)[n]` form; `c[n]*` is not valid C
                                if (auto arr = x.comp.template get<Type::Arr>(); arr) {
                                  const std::string pfx = dialect == Dialect::MSL1_0 ? std::string(mslPtrPrefix(x.space)) + " " : "";
@@ -400,6 +404,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                                                                  [&](TypeSpace::Local) { return "local"; },       //
                                                                  [&](TypeSpace::Private) { return "private"; }    //
                                );
+                               if (x.comp.template is<Type::Nothing>()) return fmt::format("{} char*", prefix);
                                // a pointer to an array needs the `c(*)[n]` form; `c[n]*` is not valid C
                                if (auto arr = x.comp.template get<Type::Arr>(); arr)
                                  return fmt::format("{} {} (*)[{}]", prefix, mkTpe(arr->comp), arr->length);
@@ -464,9 +469,9 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           [](const Term::IntS32Const &x) { return fmt::format("{}", x.value); }, //
                           [](const Term::IntS64Const &x) { return fmt::format("{}", x.value); }, //
 
-                          [](const Term::Unit0Const &) { return "/*void*/"s; },                                //
-                          [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },              //
-                          [&](const Term::NullPtrConst &x) { return fmt::format("0 /*{}*/", mkTpe(x.comp)); }, //
+                          [](const Term::Unit0Const &) { return "/*void*/"s; },                   //
+                          [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; }, //
+                          [](const Term::NullPtrConst &) { return "0"s; },                        //
                           [&](const Term::Poison &x) {
                             // `0` not `NULL`: comgr doesn't predefine NULL for AMD kernel sources (non-ptr poison still casts)
                             if (x.tpe.is<Type::Ptr>()) return fmt::format("(0 /*{}*/)", repr(x.tpe));
@@ -495,7 +500,11 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                                     acc = "(*" + acc + ")";
                                     if (auto p = current.template get<Type::Ptr>()) current = p->comp;
                                   },
-                                  [&](const PathStep::Index &) { throw std::logic_error("PathStep::Index not supported in c_source"); },
+                                  [&](const PathStep::Index &i) {
+                                    acc += "[" + std::to_string(i.idx) + "]";
+                                    if (auto p = current.template get<Type::Ptr>()) current = p->comp;
+                                    else if (auto a = current.template get<Type::Arr>()) current = a->comp;
+                                  },
                                   [&](const PathStep::IndexDyn &i) {
                                     acc += "[" + mkTerm(i.idx) + "]";
                                     if (auto p = current.template get<Type::Ptr>()) current = p->comp;
@@ -663,7 +672,10 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                 [&](const PathStep::Deref &) {
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
                 },
-                [&](const PathStep::Index &) {},
+                [&](const PathStep::Index &) {
+                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
+                  else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
+                },
                 [&](const PathStep::IndexDyn &) {
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
                   else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
@@ -761,7 +773,10 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       },
       [&](const Stmt::Return &x) { return "return " + mkExpr(x.value) + ";"; }, //
       // Annotations carry no codegen meaning; unwrap and recurse.
-      [&](const Stmt::Annotated &x) { return mkStmt(x.inner); });
+      [&](const Stmt::Annotated &x) { return mkStmt(x.inner); },
+      [&](const Stmt::Try &) -> std::string { throw std::logic_error("Stmt::Try should be erased"); },
+      [&](const Stmt::Raise &) -> std::string { throw std::logic_error("Stmt::Raise should be erased"); },
+      [&](const Stmt::Rethrow &) -> std::string { throw std::logic_error("Stmt::Rethrow should be erased"); });
 }
 
 std::string backend::CSource::mkFnProto(const Function &fnTree) {

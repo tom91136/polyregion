@@ -2695,6 +2695,38 @@ POLYREGION_EXPORT bool Math::Hypot::operator==(const Base &rhs_) const {
 Math::Hypot::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Hypot>(*this)); }
 Math::Any Math::Hypot::widen() const { return Any(*this); };
 
+ExceptionKind::ExceptionKind(Type::Any tpe, std::string sourceName) noexcept : tpe(std::move(tpe)), sourceName(std::move(sourceName)) {}
+size_t ExceptionKind::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(sourceName)>()(sourceName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ExceptionKind ExceptionKind::withTpe(const Type::Any &v_) const { return ExceptionKind(v_, sourceName); }
+ExceptionKind ExceptionKind::withSourceName(const std::string &v_) const { return ExceptionKind(tpe, v_); }
+POLYREGION_EXPORT bool ExceptionKind::operator!=(const ExceptionKind &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool ExceptionKind::operator==(const ExceptionKind &rhs) const {
+  return (tpe == rhs.tpe) && (sourceName == rhs.sourceName);
+}
+
+Handler::Handler(std::optional<ExceptionKind> caught, std::optional<Named> binder, std::vector<Stmt::Any> body) noexcept
+    : caught(std::move(caught)), binder(std::move(binder)), body(std::move(body)) {}
+size_t Handler::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(caught)>()(caught) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(binder)>()(binder) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Handler Handler::withCaught(const std::optional<ExceptionKind> &v_) const { return Handler(v_, binder, body); }
+Handler Handler::withBinder(const std::optional<Named> &v_) const { return Handler(caught, v_, body); }
+Handler Handler::withBody(const std::vector<Stmt::Any> &v_) const { return Handler(caught, binder, v_); }
+POLYREGION_EXPORT bool Handler::operator!=(const Handler &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool Handler::operator==(const Handler &rhs) const {
+  return (caught == rhs.caught) && (binder == rhs.binder) &&
+         std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
+
 Stmt::Base::Base() = default;
 uint32_t Stmt::Any::id() const { return _v->id(); }
 size_t Stmt::Any::hash_code() const { return _v->hash_code(); }
@@ -2930,6 +2962,75 @@ POLYREGION_EXPORT bool Stmt::Annotated::operator<(const Stmt::Annotated &rhs) co
 POLYREGION_EXPORT bool Stmt::Annotated::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
 Stmt::Annotated::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Annotated>(*this)); }
 Stmt::Any Stmt::Annotated::widen() const { return Any(*this); };
+
+Stmt::Try::Try(std::vector<Stmt::Any> body, std::vector<Handler> handlers, std::vector<Stmt::Any> fin) noexcept
+    : Stmt::Base(), body(std::move(body)), handlers(std::move(handlers)), fin(std::move(fin)) {}
+uint32_t Stmt::Try::id() const { return variant_id; };
+size_t Stmt::Try::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(handlers)>()(handlers) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(fin)>()(fin) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Stmt::Try Stmt::Try::withBody(const std::vector<Stmt::Any> &v_) const { return Stmt::Try(v_, handlers, fin); }
+Stmt::Try Stmt::Try::withHandlers(const std::vector<Handler> &v_) const { return Stmt::Try(body, v_, fin); }
+Stmt::Try Stmt::Try::withFin(const std::vector<Stmt::Any> &v_) const { return Stmt::Try(body, handlers, v_); }
+POLYREGION_EXPORT bool Stmt::Try::operator==(const Stmt::Try &rhs) const {
+  return std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
+         (this->handlers == rhs.handlers) &&
+         std::equal(this->fin.begin(), this->fin.end(), rhs.fin.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
+POLYREGION_EXPORT bool Stmt::Try::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Stmt::Try &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool Stmt::Try::operator<(const Stmt::Try &rhs) const { return false; }
+POLYREGION_EXPORT bool Stmt::Try::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+Stmt::Try::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Try>(*this)); }
+Stmt::Any Stmt::Try::widen() const { return Any(*this); };
+
+Stmt::Raise::Raise(Term::Any value, ExceptionKind exceptionKind, std::vector<Stmt::Any> cleanup) noexcept
+    : Stmt::Base(), value(std::move(value)), exceptionKind(std::move(exceptionKind)), cleanup(std::move(cleanup)) {}
+uint32_t Stmt::Raise::id() const { return variant_id; };
+size_t Stmt::Raise::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(exceptionKind)>()(exceptionKind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(cleanup)>()(cleanup) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Stmt::Raise Stmt::Raise::withValue(const Term::Any &v_) const { return Stmt::Raise(v_, exceptionKind, cleanup); }
+Stmt::Raise Stmt::Raise::withExceptionKind(const ExceptionKind &v_) const { return Stmt::Raise(value, v_, cleanup); }
+Stmt::Raise Stmt::Raise::withCleanup(const std::vector<Stmt::Any> &v_) const { return Stmt::Raise(value, exceptionKind, v_); }
+POLYREGION_EXPORT bool Stmt::Raise::operator==(const Stmt::Raise &rhs) const {
+  return (this->value == rhs.value) && (this->exceptionKind == rhs.exceptionKind) &&
+         std::equal(this->cleanup.begin(), this->cleanup.end(), rhs.cleanup.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
+POLYREGION_EXPORT bool Stmt::Raise::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Stmt::Raise &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool Stmt::Raise::operator<(const Stmt::Raise &rhs) const { return false; }
+POLYREGION_EXPORT bool Stmt::Raise::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+Stmt::Raise::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Raise>(*this)); }
+Stmt::Any Stmt::Raise::widen() const { return Any(*this); };
+
+Stmt::Rethrow::Rethrow() noexcept : Stmt::Base() {}
+uint32_t Stmt::Rethrow::id() const { return variant_id; };
+size_t Stmt::Rethrow::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool Stmt::Rethrow::operator==(const Stmt::Rethrow &rhs) const { return true; }
+POLYREGION_EXPORT bool Stmt::Rethrow::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool Stmt::Rethrow::operator<(const Stmt::Rethrow &rhs) const { return false; }
+POLYREGION_EXPORT bool Stmt::Rethrow::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+Stmt::Rethrow::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rethrow>(*this)); }
+Stmt::Any Stmt::Rethrow::widen() const { return Any(*this); };
 
 Signature::Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args,
                      std::vector<Type::Any> moduleCaptures, std::vector<Type::Any> termCaptures, Type::Any rtn) noexcept
@@ -3914,6 +4015,12 @@ std::size_t std::hash<polyregion::polyast::Math::Atan2>::operator()(const polyre
 std::size_t std::hash<polyregion::polyast::Math::Hypot>::operator()(const polyregion::polyast::Math::Hypot &x) const noexcept {
   return x.hash_code();
 }
+std::size_t std::hash<polyregion::polyast::ExceptionKind>::operator()(const polyregion::polyast::ExceptionKind &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Handler>::operator()(const polyregion::polyast::Handler &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Stmt::Any>::operator()(const polyregion::polyast::Stmt::Any &x) const noexcept {
   return x.hash_code();
 }
@@ -3945,6 +4052,15 @@ std::size_t std::hash<polyregion::polyast::Stmt::Return>::operator()(const polyr
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Stmt::Annotated>::operator()(const polyregion::polyast::Stmt::Annotated &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Stmt::Try>::operator()(const polyregion::polyast::Stmt::Try &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Stmt::Raise>::operator()(const polyregion::polyast::Stmt::Raise &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Stmt::Rethrow>::operator()(const polyregion::polyast::Stmt::Rethrow &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Signature>::operator()(const polyregion::polyast::Signature &x) const noexcept {

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "e3328c3a2bac53f71f5993878a49b661";
+constexpr auto AdtHash = "a2c550d545942542eacea560a5f409d6";
 
 namespace {
 
@@ -2104,6 +2104,38 @@ json Math::any_to_json(const Math::Any &x_) {
                         [](const Math::Hypot &y_) -> json { return {24, Math::hypot_to_json(y_)}; });
 }
 
+ExceptionKind exceptionkind_from_json(const json &j_) {
+  auto tpe = Type::any_from_json(j_.at(0));
+  auto sourceName = j_.at(1).get<std::string>();
+  return {tpe, sourceName};
+}
+
+json exceptionkind_to_json(const ExceptionKind &x_) {
+  auto tpe = Type::any_to_json(x_.tpe);
+  auto sourceName = x_.sourceName;
+  return json::array({tpe, sourceName});
+}
+
+Handler handler_from_json(const json &j_) {
+  auto caught = j_.at(0).is_null() ? std::nullopt : std::make_optional(exceptionkind_from_json(j_.at(0)));
+  auto binder = j_.at(1).is_null() ? std::nullopt : std::make_optional(named_from_json(j_.at(1)));
+  std::vector<Stmt::Any> body;
+  for (const auto &v_ : j_.at(2)) {
+    body.emplace_back(Stmt::any_from_json(v_));
+  }
+  return {caught, binder, body};
+}
+
+json handler_to_json(const Handler &x_) {
+  auto caught = x_.caught ? exceptionkind_to_json(*x_.caught) : json();
+  auto binder = x_.binder ? named_to_json(*x_.binder) : json();
+  std::vector<json> body;
+  for (const auto &v_ : x_.body) {
+    body.emplace_back(Stmt::any_to_json(v_));
+  }
+  return json::array({caught, binder, body});
+}
+
 Stmt::Var Stmt::var_from_json(const json &j_) {
   auto name = named_from_json(j_.at(0));
   auto expr = j_.at(1).is_null() ? std::nullopt : std::make_optional(Expr::any_from_json(j_.at(1)));
@@ -2244,6 +2276,62 @@ json Stmt::annotated_to_json(const Stmt::Annotated &x_) {
   return json::array({inner, pos, comment});
 }
 
+Stmt::Try Stmt::try_from_json(const json &j_) {
+  std::vector<Stmt::Any> body;
+  for (const auto &v_ : j_.at(0)) {
+    body.emplace_back(Stmt::any_from_json(v_));
+  }
+  std::vector<Handler> handlers;
+  for (const auto &v_ : j_.at(1)) {
+    handlers.emplace_back(handler_from_json(v_));
+  }
+  std::vector<Stmt::Any> fin;
+  for (const auto &v_ : j_.at(2)) {
+    fin.emplace_back(Stmt::any_from_json(v_));
+  }
+  return {body, handlers, fin};
+}
+
+json Stmt::try_to_json(const Stmt::Try &x_) {
+  std::vector<json> body;
+  for (const auto &v_ : x_.body) {
+    body.emplace_back(Stmt::any_to_json(v_));
+  }
+  std::vector<json> handlers;
+  for (const auto &v_ : x_.handlers) {
+    handlers.emplace_back(handler_to_json(v_));
+  }
+  std::vector<json> fin;
+  for (const auto &v_ : x_.fin) {
+    fin.emplace_back(Stmt::any_to_json(v_));
+  }
+  return json::array({body, handlers, fin});
+}
+
+Stmt::Raise Stmt::raise_from_json(const json &j_) {
+  auto value = Term::any_from_json(j_.at(0));
+  auto exceptionKind = exceptionkind_from_json(j_.at(1));
+  std::vector<Stmt::Any> cleanup;
+  for (const auto &v_ : j_.at(2)) {
+    cleanup.emplace_back(Stmt::any_from_json(v_));
+  }
+  return {value, exceptionKind, cleanup};
+}
+
+json Stmt::raise_to_json(const Stmt::Raise &x_) {
+  auto value = Term::any_to_json(x_.value);
+  auto exceptionKind = exceptionkind_to_json(x_.exceptionKind);
+  std::vector<json> cleanup;
+  for (const auto &v_ : x_.cleanup) {
+    cleanup.emplace_back(Stmt::any_to_json(v_));
+  }
+  return json::array({value, exceptionKind, cleanup});
+}
+
+Stmt::Rethrow Stmt::rethrow_from_json(const json &j_) { return {}; }
+
+json Stmt::rethrow_to_json(const Stmt::Rethrow &x_) { return json::array({}); }
+
 Stmt::Any Stmt::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -2258,6 +2346,9 @@ Stmt::Any Stmt::any_from_json(const json &j_) {
     case 7: return Stmt::cond_from_json(t_);
     case 8: return Stmt::return_from_json(t_);
     case 9: return Stmt::annotated_from_json(t_);
+    case 10: return Stmt::try_from_json(t_);
+    case 11: return Stmt::raise_from_json(t_);
+    case 12: return Stmt::rethrow_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -2272,7 +2363,10 @@ json Stmt::any_to_json(const Stmt::Any &x_) {
                         [](const Stmt::Cont &y_) -> json { return {6, Stmt::cont_to_json(y_)}; },
                         [](const Stmt::Cond &y_) -> json { return {7, Stmt::cond_to_json(y_)}; },
                         [](const Stmt::Return &y_) -> json { return {8, Stmt::return_to_json(y_)}; },
-                        [](const Stmt::Annotated &y_) -> json { return {9, Stmt::annotated_to_json(y_)}; });
+                        [](const Stmt::Annotated &y_) -> json { return {9, Stmt::annotated_to_json(y_)}; },
+                        [](const Stmt::Try &y_) -> json { return {10, Stmt::try_to_json(y_)}; },
+                        [](const Stmt::Raise &y_) -> json { return {11, Stmt::raise_to_json(y_)}; },
+                        [](const Stmt::Rethrow &y_) -> json { return {12, Stmt::rethrow_to_json(y_)}; });
 }
 
 Signature signature_from_json(const json &j_) {
@@ -3026,6 +3120,18 @@ Stmt::Annotated annotated_fields_from_msgpack(MsgpackReader &, size_t);
 void annotated_fields_to_msgpack(MsgpackWriter &, const Stmt::Annotated &);
 Stmt::Annotated annotated_from_msgpack(MsgpackReader &);
 void annotated_to_msgpack(MsgpackWriter &, const Stmt::Annotated &);
+Stmt::Try try_fields_from_msgpack(MsgpackReader &, size_t);
+void try_fields_to_msgpack(MsgpackWriter &, const Stmt::Try &);
+Stmt::Try try_from_msgpack(MsgpackReader &);
+void try_to_msgpack(MsgpackWriter &, const Stmt::Try &);
+Stmt::Raise raise_fields_from_msgpack(MsgpackReader &, size_t);
+void raise_fields_to_msgpack(MsgpackWriter &, const Stmt::Raise &);
+Stmt::Raise raise_from_msgpack(MsgpackReader &);
+void raise_to_msgpack(MsgpackWriter &, const Stmt::Raise &);
+Stmt::Rethrow rethrow_fields_from_msgpack(MsgpackReader &, size_t);
+void rethrow_fields_to_msgpack(MsgpackWriter &, const Stmt::Rethrow &);
+Stmt::Rethrow rethrow_from_msgpack(MsgpackReader &);
+void rethrow_to_msgpack(MsgpackWriter &, const Stmt::Rethrow &);
 Stmt::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Stmt::Any &);
 } // namespace Stmt
@@ -3409,6 +3515,14 @@ Overload overload_fields_from_msgpack(MsgpackReader &, size_t);
 void overload_fields_to_msgpack(MsgpackWriter &, const Overload &);
 Overload overload_from_msgpack(MsgpackReader &);
 void overload_to_msgpack(MsgpackWriter &, const Overload &);
+ExceptionKind exceptionkind_fields_from_msgpack(MsgpackReader &, size_t);
+void exceptionkind_fields_to_msgpack(MsgpackWriter &, const ExceptionKind &);
+ExceptionKind exceptionkind_from_msgpack(MsgpackReader &);
+void exceptionkind_to_msgpack(MsgpackWriter &, const ExceptionKind &);
+Handler handler_fields_from_msgpack(MsgpackReader &, size_t);
+void handler_fields_to_msgpack(MsgpackWriter &, const Handler &);
+Handler handler_from_msgpack(MsgpackReader &);
+void handler_to_msgpack(MsgpackWriter &, const Handler &);
 Signature signature_fields_from_msgpack(MsgpackReader &, size_t);
 void signature_fields_to_msgpack(MsgpackWriter &, const Signature &);
 Signature signature_from_msgpack(MsgpackReader &);
@@ -7260,6 +7374,79 @@ void Math::any_to_msgpack(MsgpackWriter &w_, const Math::Any &x_) {
       });
 }
 
+ExceptionKind exceptionkind_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected ExceptionKind with 2 field(s)");
+  auto tpe = Type::any_from_msgpack(r_);
+  auto sourceName = r_.readString();
+  return {tpe, sourceName};
+}
+
+void exceptionkind_fields_to_msgpack(MsgpackWriter &w_, const ExceptionKind &x_) {
+  Type::any_to_msgpack(w_, x_.tpe);
+  w_.writeString(x_.sourceName);
+}
+
+ExceptionKind exceptionkind_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return exceptionkind_fields_from_msgpack(r_, n_);
+}
+
+void exceptionkind_to_msgpack(MsgpackWriter &w_, const ExceptionKind &x_) {
+  w_.writeArrayHeader(2);
+  exceptionkind_fields_to_msgpack(w_, x_);
+}
+
+Handler handler_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Handler with 3 field(s)");
+  std::optional<ExceptionKind> caught;
+  if (!r_.tryReadNil()) {
+    auto caught_value = exceptionkind_from_msgpack(r_);
+    caught = std::move(caught_value);
+  }
+  std::optional<Named> binder;
+  if (!r_.tryReadNil()) {
+    auto binder_value = named_from_msgpack(r_);
+    binder = std::move(binder_value);
+  }
+  std::vector<Stmt::Any> body;
+  {
+    auto body_size = r_.readArrayHeader();
+    body.reserve(body_size);
+    for (size_t body_idx = 0; body_idx < body_size; ++body_idx) {
+      auto body_elem = Stmt::any_from_msgpack(r_);
+      body.emplace_back(std::move(body_elem));
+    }
+  }
+  return {caught, binder, body};
+}
+
+void handler_fields_to_msgpack(MsgpackWriter &w_, const Handler &x_) {
+  if (x_.caught) {
+    exceptionkind_to_msgpack(w_, (*x_.caught));
+  } else {
+    w_.writeNil();
+  }
+  if (x_.binder) {
+    named_to_msgpack(w_, (*x_.binder));
+  } else {
+    w_.writeNil();
+  }
+  w_.writeArrayHeader(x_.body.size());
+  for (const auto &v0_ : x_.body) {
+    Stmt::any_to_msgpack(w_, v0_);
+  }
+}
+
+Handler handler_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return handler_fields_from_msgpack(r_, n_);
+}
+
+void handler_to_msgpack(MsgpackWriter &w_, const Handler &x_) {
+  w_.writeArrayHeader(3);
+  handler_fields_to_msgpack(w_, x_);
+}
+
 Stmt::Var Stmt::var_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 3) throw std::runtime_error("Expected Stmt::Var with 3 field(s)");
   auto name = named_from_msgpack(r_);
@@ -7548,6 +7735,115 @@ void Stmt::annotated_to_msgpack(MsgpackWriter &w_, const Stmt::Annotated &x_) {
   Stmt::annotated_fields_to_msgpack(w_, x_);
 }
 
+Stmt::Try Stmt::try_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Stmt::Try with 3 field(s)");
+  std::vector<Stmt::Any> body;
+  {
+    auto body_size = r_.readArrayHeader();
+    body.reserve(body_size);
+    for (size_t body_idx = 0; body_idx < body_size; ++body_idx) {
+      auto body_elem = Stmt::any_from_msgpack(r_);
+      body.emplace_back(std::move(body_elem));
+    }
+  }
+  std::vector<Handler> handlers;
+  {
+    auto handlers_size = r_.readArrayHeader();
+    handlers.reserve(handlers_size);
+    for (size_t handlers_idx = 0; handlers_idx < handlers_size; ++handlers_idx) {
+      auto handlers_elem = handler_from_msgpack(r_);
+      handlers.emplace_back(std::move(handlers_elem));
+    }
+  }
+  std::vector<Stmt::Any> fin;
+  {
+    auto fin_size = r_.readArrayHeader();
+    fin.reserve(fin_size);
+    for (size_t fin_idx = 0; fin_idx < fin_size; ++fin_idx) {
+      auto fin_elem = Stmt::any_from_msgpack(r_);
+      fin.emplace_back(std::move(fin_elem));
+    }
+  }
+  return {body, handlers, fin};
+}
+
+void Stmt::try_fields_to_msgpack(MsgpackWriter &w_, const Stmt::Try &x_) {
+  w_.writeArrayHeader(x_.body.size());
+  for (const auto &v0_ : x_.body) {
+    Stmt::any_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.handlers.size());
+  for (const auto &v0_ : x_.handlers) {
+    handler_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.fin.size());
+  for (const auto &v0_ : x_.fin) {
+    Stmt::any_to_msgpack(w_, v0_);
+  }
+}
+
+Stmt::Try Stmt::try_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Stmt::try_fields_from_msgpack(r_, n_);
+}
+
+void Stmt::try_to_msgpack(MsgpackWriter &w_, const Stmt::Try &x_) {
+  w_.writeArrayHeader(3);
+  Stmt::try_fields_to_msgpack(w_, x_);
+}
+
+Stmt::Raise Stmt::raise_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Stmt::Raise with 3 field(s)");
+  auto value = Term::any_from_msgpack(r_);
+  auto exceptionKind = exceptionkind_from_msgpack(r_);
+  std::vector<Stmt::Any> cleanup;
+  {
+    auto cleanup_size = r_.readArrayHeader();
+    cleanup.reserve(cleanup_size);
+    for (size_t cleanup_idx = 0; cleanup_idx < cleanup_size; ++cleanup_idx) {
+      auto cleanup_elem = Stmt::any_from_msgpack(r_);
+      cleanup.emplace_back(std::move(cleanup_elem));
+    }
+  }
+  return {value, exceptionKind, cleanup};
+}
+
+void Stmt::raise_fields_to_msgpack(MsgpackWriter &w_, const Stmt::Raise &x_) {
+  Term::any_to_msgpack(w_, x_.value);
+  exceptionkind_to_msgpack(w_, x_.exceptionKind);
+  w_.writeArrayHeader(x_.cleanup.size());
+  for (const auto &v0_ : x_.cleanup) {
+    Stmt::any_to_msgpack(w_, v0_);
+  }
+}
+
+Stmt::Raise Stmt::raise_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Stmt::raise_fields_from_msgpack(r_, n_);
+}
+
+void Stmt::raise_to_msgpack(MsgpackWriter &w_, const Stmt::Raise &x_) {
+  w_.writeArrayHeader(3);
+  Stmt::raise_fields_to_msgpack(w_, x_);
+}
+
+Stmt::Rethrow Stmt::rethrow_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Stmt::Rethrow with 0 field(s)");
+  return {};
+}
+
+void Stmt::rethrow_fields_to_msgpack(MsgpackWriter &w_, const Stmt::Rethrow &x_) {}
+
+Stmt::Rethrow Stmt::rethrow_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Stmt::rethrow_fields_from_msgpack(r_, n_);
+}
+
+void Stmt::rethrow_to_msgpack(MsgpackWriter &w_, const Stmt::Rethrow &x_) {
+  w_.writeArrayHeader(0);
+  Stmt::rethrow_fields_to_msgpack(w_, x_);
+}
+
 Stmt::Any Stmt::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -7564,6 +7860,9 @@ Stmt::Any Stmt::any_from_msgpack(MsgpackReader &r_) {
       case 7: return Stmt::cond_fields_from_msgpack(r_, n_ - 1);
       case 8: return Stmt::return_fields_from_msgpack(r_, n_ - 1);
       case 9: return Stmt::annotated_fields_from_msgpack(r_, n_ - 1);
+      case 10: return Stmt::try_fields_from_msgpack(r_, n_ - 1);
+      case 11: return Stmt::raise_fields_from_msgpack(r_, n_ - 1);
+      case 12: return Stmt::rethrow_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -7579,6 +7878,9 @@ Stmt::Any Stmt::any_from_msgpack(MsgpackReader &r_) {
       case 7: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 8: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 9: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 10: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 11: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 12: return Stmt::rethrow_fields_from_msgpack(r_, 0);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -7626,7 +7928,18 @@ void Stmt::any_to_msgpack(MsgpackWriter &w_, const Stmt::Any &x_) {
         w_.writeArrayHeader(4);
         w_.writeInt32(9);
         Stmt::annotated_fields_to_msgpack(w_, y_);
-      });
+      },
+      [&](const Stmt::Try &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(10);
+        Stmt::try_fields_to_msgpack(w_, y_);
+      },
+      [&](const Stmt::Raise &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(11);
+        Stmt::raise_fields_to_msgpack(w_, y_);
+      },
+      [&](const Stmt::Rethrow &y_) -> void { w_.writeInt32(12); });
 }
 
 Signature signature_fields_from_msgpack(MsgpackReader &r_, size_t n_) {

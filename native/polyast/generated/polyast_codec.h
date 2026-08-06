@@ -143,6 +143,12 @@ namespace Stmt {
 [[nodiscard]] POLYREGION_EXPORT json return_to_json(const Stmt::Return &);
 [[nodiscard]] POLYREGION_EXPORT Stmt::Annotated annotated_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json annotated_to_json(const Stmt::Annotated &);
+[[nodiscard]] POLYREGION_EXPORT Stmt::Try try_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json try_to_json(const Stmt::Try &);
+[[nodiscard]] POLYREGION_EXPORT Stmt::Raise raise_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json raise_to_json(const Stmt::Raise &);
+[[nodiscard]] POLYREGION_EXPORT Stmt::Rethrow rethrow_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json rethrow_to_json(const Stmt::Rethrow &);
 [[nodiscard]] POLYREGION_EXPORT Stmt::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Stmt::Any &);
 } // namespace Stmt
@@ -350,6 +356,10 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json named_to_json(const Named &);
 [[nodiscard]] POLYREGION_EXPORT Overload overload_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json overload_to_json(const Overload &);
+[[nodiscard]] POLYREGION_EXPORT ExceptionKind exceptionkind_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json exceptionkind_to_json(const ExceptionKind &);
+[[nodiscard]] POLYREGION_EXPORT Handler handler_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json handler_to_json(const Handler &);
 [[nodiscard]] POLYREGION_EXPORT Signature signature_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json signature_to_json(const Signature &);
 [[nodiscard]] POLYREGION_EXPORT InvokeSignature invokesignature_from_json(const json &);

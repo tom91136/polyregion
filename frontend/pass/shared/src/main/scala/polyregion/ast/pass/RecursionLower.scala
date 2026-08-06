@@ -65,19 +65,25 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
       .filter(c => c.sizeIs > 1 || edges.getOrElse(c.head, Nil).contains(c.head))
     if (recComps.isEmpty) program
     else {
+      val loweredByName = byName ++ recComps.flatten.distinct.flatMap { name =>
+        val f = byName(name)
+        Option.when(f.collectFirst_[p.Stmt] { case _: p.Stmt.Try => () }.isDefined)(
+          name -> StructuredExit.lowerHandledFunction(f, program.defs, log)
+        )
+      }
       val replace = mutable.Map.empty[p.Sym, p.Function]
       val extra   = mutable.ListBuffer.empty[p.Function]
       val frames  = mutable.ListBuffer.empty[p.StructDef]
       recComps.foreach { comp =>
         if (comp.sizeIs == 1) {
-          val (g, frame) = transform(byName(comp.head))
+          val (g, frame) = transform(loweredByName(comp.head))
           replace(comp.head) = g
           frame.foreach(frames += _)
         } else {
           // mutual recursion: merge the cluster into one tag-dispatched self-recursive driver, then reuse the
           // single-function transform (TCO when the merge is tail, generic stack otherwise); members become
           // thin wrappers that seed the driver with their tag and arguments
-          val members = comp.map(byName)
+          val members = comp.map(loweredByName)
           if (members.map(_.rtn).distinct.sizeIs != 1)
             sys.error(s"RecursionLower: mutual recursion with mixed return types (${comp.map(_.repr).mkString(", ")})")
           if (members.map(_.args.map(_.named.tpe)).distinct.sizeIs != 1)
