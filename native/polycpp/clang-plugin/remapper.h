@@ -31,6 +31,12 @@ struct Remapper {
     const clang::CXXDestructorDecl *dtor;
     Named instance;
   };
+  struct ActiveCatch {
+    Named binder;
+    Type::Any valueTpe;
+    std::string tpeName;
+    bool canRethrow;
+  };
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
     bool ctorChain = false;
@@ -46,6 +52,10 @@ struct Remapper {
     Vector<std::function<void(RemapContext &)>> onBreak{};
     Vector<Vector<Cleanup>> cleanups{};
     size_t loopFrame{};
+    // A raise unwinds to the innermost enclosing try, or the whole function when none exists.
+    size_t tryFrame{};
+    Opt<ActiveCatch> activeCatch{};
+    Vector<Vector<Opt<Type::Any>>> catchFrames{};
     bool cleanupsSuspended = false;
 
     template <typename T>
@@ -53,25 +63,23 @@ struct Remapper {
                                                     const Opt<bool> &scopeCtorChain = {},                   //
                                                     const Opt<Type::Any> &scopeRtnType = {},                //
                                                     const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                                    const bool persistCounter = true) {
-      const std::shared_ptr<StructDef> nextParent = scopeStructName ? scopeStructName : parent;
-      RemapContext r{nextParent,
-                     scopeCtorChain.value_or(ctorChain),
-                     scopeRtnType.value_or(rtnType),
-                     persistCounter ? counter : 0,
-                     {}, //
-                     functions,
-                     structs,
-                     layouts,
-                     parents,
-                     bitFields,
-                     onContinue,
-                     onBreak,
-                     persistCounter ? cleanups : Vector<Vector<Cleanup>>{},
-                     persistCounter ? loopFrame : 0,
-                     persistCounter && cleanupsSuspended};
+                                                    const bool persistFunctionState = true) {
+      RemapContext r = *this;
+      r.parent = scopeStructName ? scopeStructName : parent;
+      r.ctorChain = scopeCtorChain.value_or(ctorChain);
+      r.rtnType = scopeRtnType.value_or(rtnType);
+      r.stmts.clear();
+      if (!persistFunctionState) {
+        r.counter = 0;
+        r.cleanups.clear();
+        r.loopFrame = 0;
+        r.tryFrame = 0;
+        r.activeCatch.reset();
+        r.catchFrames.clear();
+        r.cleanupsSuspended = false;
+      }
       auto result = f(r);
-      if (persistCounter) {
+      if (persistFunctionState) {
         counter = r.counter;
       }
       functions = r.functions;
@@ -81,14 +89,12 @@ struct Remapper {
       bitFields = r.bitFields;
       return {result, r.stmts};
     }
-    // persistCounter=true keeps `_v<N>` temporaries unique across sibling scopes within one
-    // function -- polyc's flat stackVarPtrs LUT rejects same-name re-declarations of differing
-    // types. Function-level scopes pass false to reset, which also drops the caller's cleanups.
+    // Function-level scopes pass false to reset temporaries, cleanups and exception state.
     [[nodiscard]] Vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
                                            const Opt<bool> &scopeCtorChain = {},                   //
                                            const Opt<Type::Any> &scopeRtnType = {},                //
                                            const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                           bool persistCounter = true);
+                                           bool persistFunctionState = true);
 
     [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
     [[nodiscard]] bool emptyStruct(const StructDef &def);
@@ -114,6 +120,8 @@ struct Remapper {
   [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
   void handleStmt(const clang::Stmt *root, RemapContext &expr);
+  // `downTo` is inclusive: an exit edge destroys every frame it leaves, innermost first
+  void unwindCleanups(RemapContext &r, size_t downTo);
 };
 
 } // namespace polyregion::polystl

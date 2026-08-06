@@ -29,8 +29,9 @@
 
 #pragma region case: throw-strict
 #pragma region offload-only
-#pragma region compile-fails: Unsupported throw
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=3 -DCHECK_OFFLOAD -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 0
 
 #pragma region case: local-dtor
 #pragma region offload-only
@@ -47,8 +48,9 @@
 
 #pragma region case: try-strict
 #pragma region offload-only
-#pragma region compile-fails: Unsupported try/catch
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=5 -DCHECK_OFFLOAD -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 0
 
 #ifndef CHECK_KIND
   #error "CHECK_KIND undefined"

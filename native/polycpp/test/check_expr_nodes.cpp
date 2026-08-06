@@ -29,9 +29,9 @@
 #pragma region requires: 1
 
 #pragma region case: throw
-#pragma region offload-only
-#pragma region compile-fails: Unsupported throw
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=6 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 3
 
 #pragma region case: delete
 #pragma region offload-only
@@ -124,7 +124,13 @@ int main() {
 #elif CHECK_KIND == 5
   const int r = __polyregion_offload_f1__([=]() { return __builtin_LINE() > 0 ? 1 : 0; });
 #elif CHECK_KIND == 6
-  const int r = __polyregion_offload_f1__([=]() -> int { throw 1; });
+  const int r = __polyregion_offload_f1__([=]() -> int {
+    try {
+      throw 1;
+    } catch (int e) {
+      return e + 2;
+    }
+  });
 #elif CHECK_KIND == 7
   int *heap = new int(7);
   const int r = __polyregion_offload_f1__([=]() {

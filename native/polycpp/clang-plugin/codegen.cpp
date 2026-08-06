@@ -105,7 +105,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
     if (opts.verbose)
       emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "JIT deferred [%0]: %1 target(s), program %2 bytes",
            moduleId, std::to_string(jitObjects.size()), std::to_string(packed.size()));
-    const bool jitAsserts = !program.template collect_all<polyast::Spec::Assert>().empty();
+    // the deferred path decides before lowering, so a raise counts too: both end up writing the #error buffer
+    const bool jitAsserts =
+        !program.template collect_all<polyast::Spec::Assert>().empty() || !program.template collect_all<polyast::Stmt::Raise>().empty();
     return polyfront::KernelBundle{moduleId,
                                    jitObjects,
                                    layouts,

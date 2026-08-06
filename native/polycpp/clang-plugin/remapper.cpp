@@ -65,21 +65,14 @@ const static std::string Empty = "#empty";
 
 [[nodiscard]] static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
                                       const std::function<bool(const StructDef &)> &predicate, Vector<std::shared_ptr<StructDef>> &chain) {
-
   const auto parents = r.parents ^ get_maybe(repr(derived.name));
   if (!parents) return false;
-
-  if (const auto directBases = *parents ^ filter([&](auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
-    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name, {}), predicate, chain); });
-  } else if (directBases.size() != 1) {
-    // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
-    raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
-                      directBases ^ mk_string(", ", [](auto &s) { return repr(s->name); }), repr(derived),
-                      chain ^ mk_string("->", [](auto &s) { return repr(s->name); })));
-  } else {
-    chain.emplace_back(directBases[0]);
-    return true;
+  for (const auto &parent : *parents) {
+    chain.emplace_back(parent);
+    if (predicate(*parent) || walkParents(r, Type::Struct(parent->name, {}), predicate, chain)) return true;
+    chain.pop_back();
   }
+  return false;
 }
 
 [[nodiscard]] static Named baseMember(const StructDef &s) {
@@ -212,13 +205,13 @@ Vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapC
                                                  const Opt<bool> &scopeCtorChain,                   //
                                                  const Opt<Type::Any> &scopeRtnType,                //
                                                  const std::shared_ptr<StructDef> &scopeStructName, //
-                                                 const bool persistCounter) {
+                                                 const bool persistFunctionState) {
   return scoped<std::nullptr_t>(
              [&](auto &r) {
                f(r);
                return nullptr;
              },
-             scopeCtorChain, scopeRtnType, scopeStructName, persistCounter)
+             scopeCtorChain, scopeRtnType, scopeStructName, persistFunctionState)
       .second;
 }
 
@@ -732,7 +725,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   decl = def;
 
   auto resolveStruct = [&](const Vector<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
-                           const Vector<StructLayoutMember> &members) {
+                           const Vector<StructLayoutMember> &members, const Vector<std::shared_ptr<StructDef>> &catchableParents = {}) {
     // For C/C++ sizeof(type{}) == 1
     // However, compilers are allowed to do https://en.cppreference.com/w/cpp/language/ebo
     //    struct N{};
@@ -782,7 +775,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
         Sym({name}), std::vector<std::string>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
-        std::vector<Type::Struct>{},
+        catchableParents | map([](auto &p) { return Type::Struct(p->name, std::vector<Type::Any>{}); }) | to_vector(),
         /*isUnion*/ decl->isUnion());
     const auto layout = std::make_shared<StructLayout>(                            //
         name,                                                                      //
@@ -880,7 +873,26 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
     const auto parents = resolveBases(cxxRecord->bases());
 
-    if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields());
+    Vector<const clang::CXXRecordDecl *> baseDecls;
+    std::function<void(const clang::CXXRecordDecl *)> collectBases = [&](const auto *record) {
+      for (const auto &base : record->bases())
+        if (const auto *baseDecl = base.getType()->getAsCXXRecordDecl()) {
+          baseDecl = baseDecl->getCanonicalDecl();
+          if (std::find(baseDecls.begin(), baseDecls.end(), baseDecl) != baseDecls.end()) continue;
+          baseDecls.emplace_back(baseDecl);
+          collectBases(baseDecl);
+        }
+    };
+    collectBases(cxxRecord);
+    Vector<std::shared_ptr<StructDef>> catchableParents;
+    for (const auto *base : baseDecls) {
+      clang::CXXBasePaths paths(/*FindAmbiguities*/ true, /*RecordPaths*/ true, /*DetectVirtual*/ false);
+      if (!cxxRecord->isDerivedFrom(base, paths) || paths.isAmbiguous(context.getCanonicalTagType(base))) continue;
+      if (std::none_of(paths.begin(), paths.end(), [](const auto &path) { return path.Access == clang::AS_public; })) continue;
+      catchableParents.emplace_back(handleRecord(base, r));
+    }
+
+    if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields(), catchableParents);
     else {
       const auto members = cxxRecord->fields() | zip(cxxRecord->captures()) |
                            collect([&](auto &field, auto &capture) -> Opt<StructLayoutMember> {
@@ -899,7 +911,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                              }
                            }) |
                            to_vector();
-      return resolveStruct(parents, members);
+      return resolveStruct(parents, members, catchableParents);
     }
   } else return resolveStruct({}, resolveFields());
 }
@@ -1047,6 +1059,46 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   const auto body = llvm::dyn_cast_if_present<clang::CompoundStmt>(dtor->getBody());
   if (!body || !body->body_empty()) return false;
   return destroysByBodyAlone(rd);
+}
+
+[[nodiscard]] static bool needsManagedException(const clang::CXXRecordDecl *rd) {
+  return rd && (!rd->isTriviallyCopyable() || !rd->hasTrivialDestructor());
+}
+
+[[nodiscard]] static std::string exceptionTypeName(clang::QualType type) {
+  const auto canonical = type.getNonReferenceType().getCanonicalType().getUnqualifiedType();
+  if (const auto pointer = canonical->getAs<clang::PointerType>()) return exceptionTypeName(pointer->getPointeeType()) + " *";
+  if (const auto *tag = canonical->getAsTagDecl()) {
+    const auto name = tag->getQualifiedNameAsString();
+    if (!name.empty()) return name;
+  }
+  return canonical.getAsString();
+}
+
+[[nodiscard]] static bool catchMatches(const Remapper::RemapContext &r, const Type::Any &thrown, const Opt<Type::Any> &handler) {
+  if (!handler || *handler == thrown) return true;
+  const auto derived = thrown.get<Type::Struct>();
+  const auto base = handler->get<Type::Struct>();
+  if (!derived || !base) return false;
+  Vector<std::shared_ptr<StructDef>> chain;
+  return walkParents(r, *derived, [&](const auto &parent) { return parent.name == base->name; }, chain);
+}
+
+[[nodiscard]] static bool nearestCatchIsExact(const Remapper::RemapContext &r, const Type::Any &thrown) {
+  for (auto frame = r.catchFrames.rbegin(); frame != r.catchFrames.rend(); ++frame)
+    for (const auto &handler : *frame)
+      if (catchMatches(r, thrown, handler)) return handler && *handler == thrown;
+  return false;
+}
+
+[[nodiscard]] static const clang::Expr *throwValue(const clang::Expr *expr) {
+  while (true) {
+    if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::CXXFunctionalCastExpr>(expr)) expr = x->getSubExpr();
+    else if (const auto x = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expr)) expr = x->getSubExpr();
+    else return expr;
+  }
 }
 
 Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
@@ -1264,6 +1316,17 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           defaultInitialiseStruct(r, *structTpe, allocated);
           if (const auto rd = expr->getType()->getAsRecordDecl()) {
             unsigned i = 0;
+            if (const auto cxx = llvm::dyn_cast<clang::CXXRecordDecl>(rd)) {
+              for (const auto &base : cxx->bases()) {
+                if (i >= expr->getNumInits()) break;
+                const auto *init = expr->getInit(i++);
+                const auto baseDef = handleRecord(base.getType()->getAsCXXRecordDecl(), r);
+                // Empty bases carry no observable state and may use the synthetic #empty storage type for EBO.
+                if (r.emptyStruct(*baseDef) || llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
+                const auto btpe = handleType(base.getType(), r);
+                r.push(Stmt::Mut(select(r, {allocated}, baseMember(*baseDef)), conform(r, handleExpr(init, r), btpe)));
+              }
+            }
             for (const auto *field : rd->fields()) {
               if (i >= expr->getNumInits()) break;
               const auto *init = expr->getInit(i++);
@@ -1319,8 +1382,31 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::CXXThrowExpr *expr) -> Expr::Any {
         if (emitLibraryMode) return Expr::Alias(Term::Unit0Const());
-        raise(fmt::format("Unsupported throw at {} (offload regions cannot throw or unwind)",
-                          expr->getBeginLoc().printToString(context.getSourceManager())));
+        const auto loc = expr->getBeginLoc().printToString(context.getSourceManager());
+        const auto sub = expr->getSubExpr();
+        if (!sub) {
+          if (!r.activeCatch) raise(fmt::format("Unsupported rethrow at {} (it is not inside a typed handler)", loc));
+          if (!r.activeCatch->canRethrow)
+            raise(fmt::format("Unsupported rethrow of non-trivial {} at {} (sharing one exception object's lifetime "
+                              "across nested handlers is not representable yet)",
+                              r.activeCatch->tpeName, loc));
+          const auto value = r.newVar(conform(r, Expr::Alias(select(r, {}, r.activeCatch->binder)), r.activeCatch->valueTpe));
+          unwindCleanups(r, r.tryFrame);
+          r.push(Stmt::Raise(value, ExceptionKind(r.activeCatch->valueTpe, r.activeCatch->tpeName), {}));
+          return Expr::Alias(Term::Unit0Const());
+        }
+        const auto thrown = sub->getType().getNonReferenceType().getUnqualifiedType();
+        const auto thrownTpe = handleType(thrown, r);
+        if (needsManagedException(thrown->getAsCXXRecordDecl()) && !nearestCatchIsExact(r, thrownTpe))
+          raise(fmt::format("Unsupported non-trivial exception payload {} at {} (its nearest matching handler must "
+                            "have the exact type; catch-all, base catches, escaping payloads, and cross-function "
+                            "propagation cannot preserve its dynamic destruction yet)",
+                            thrown.getAsString(), loc));
+        // The handler owns a directly-thrown prvalue. Bypass Clang's source-scope lifetime wrappers.
+        const auto value = r.newVar(conform(r, handleExpr(throwValue(sub), r), thrownTpe));
+        unwindCleanups(r, r.tryFrame);
+        r.push(Stmt::Raise(value, ExceptionKind(thrownTpe, exceptionTypeName(thrown)), {}));
+        return Expr::Alias(Term::Unit0Const());
       },
       [&](const clang::CXXDeleteExpr *expr) -> Expr::Any {
         raise(fmt::format("Unsupported delete at {} (offload regions cannot release host allocations)",
@@ -2021,7 +2107,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 [[nodiscard]] static bool terminated(const Vector<Stmt::Any> &stmts) {
   if (stmts.empty()) return false;
   const auto &last = stmts.back();
-  return last.is<Stmt::Return>() || last.is<Stmt::Break>() || last.is<Stmt::Cont>();
+  return last.is<Stmt::Return>() || last.is<Stmt::Break>() || last.is<Stmt::Cont>() || last.is<Stmt::Raise>();
 }
 
 [[nodiscard]] static bool continuesEnclosingLoop(const clang::Stmt *stmt) {
@@ -2041,20 +2127,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
   return false;
 }
 
+void Remapper::unwindCleanups(Remapper::RemapContext &r, const size_t downTo) {
+  for (auto frame = r.cleanups.size(); frame-- > downTo;)
+    for (auto i = r.cleanups[frame].size(); i-- > 0;) {
+      const auto &[dtor, instance] = r.cleanups[frame][i];
+      const auto [name, fn] = handleCall(dtor, r);
+      const auto self = r.newVar(conform(r, Expr::Alias(select(r, {}, instance)), fn->args.front().named.tpe));
+      auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                                     std::vector<Term::Any>{self}, Type::Unit0()));
+    }
+}
+
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
-
-  // `downTo` is inclusive: an exit edge destroys every frame it leaves, innermost first
-  const auto unwind = [&](const size_t downTo) {
-    for (auto frame = r.cleanups.size(); frame-- > downTo;)
-      for (auto i = r.cleanups[frame].size(); i-- > 0;) {
-        const auto &[dtor, instance] = r.cleanups[frame][i];
-        const auto [name, fn] = handleCall(dtor, r);
-        const auto self = r.newVar(conform(r, Expr::Alias(select(r, {}, instance)), fn->args.front().named.tpe));
-        auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
-                                       std::vector<Term::Any>{self}, Type::Unit0()));
-      }
-  };
 
   // a loop/if/switch header declares into the enclosing frame, which would destroy too late; refuse instead
   const auto handleHeaderStmt = [&](const clang::Stmt *header, RemapContext &rc) {
@@ -2151,7 +2236,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         r.cleanups.emplace_back();
         for (auto s : stmt->body())
           handleStmt(s, r);
-        if (!terminated(r.stmts)) unwind(r.cleanups.size() - 1);
+        if (!terminated(r.stmts)) unwindCleanups(r, r.cleanups.size() - 1);
         r.cleanups.pop_back();
       },
       [&](const clang::DeclStmt *stmt) {
@@ -2300,17 +2385,17 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
           r.push(v);
           return Expr::Any(Expr::Alias(select(r, {}, v.name).widen()));
         }();
-        unwind(0);
+        unwindCleanups(r, 0);
         r.push(Stmt::Return(bound));
       },
       [&](const clang::BreakStmt *stmt) {
-        unwind(r.loopFrame);
+        unwindCleanups(r, r.loopFrame);
         if (!r.onBreak.empty()) r.onBreak.back()(r);
         else r.push(Stmt::Break());
       },
       [&](const clang::ContinueStmt *stmt) {
         // the iteration's locals die before the latch runs, matching the order a real `continue` observes
-        unwind(r.loopFrame);
+        unwindCleanups(r, r.loopFrame);
         if (!r.onContinue.empty()) r.onContinue.back()(r);
         else r.push(Stmt::Cont());
       },
@@ -2361,8 +2446,62 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
       [&](const clang::CXXTryStmt *stmt) {
         if (emitLibraryMode) return handleStmt(stmt->getTryBlock(), r);
-        raise(fmt::format("Unsupported try/catch at {} (offload regions cannot throw or unwind)",
-                          stmt->getBeginLoc().printToString(context.getSourceManager())));
+        Vector<Opt<Type::Any>> catchFrame;
+        catchFrame.reserve(stmt->getNumHandlers());
+        for (unsigned i = 0; i < stmt->getNumHandlers(); ++i) {
+          const auto decl = stmt->getHandler(i)->getExceptionDecl();
+          catchFrame.emplace_back(decl ? Opt<Type::Any>{handleType(decl->getType().getNonReferenceType().getUnqualifiedType(), r)}
+                                       : Opt<Type::Any>{});
+        }
+        auto body = r.scoped([&](RemapContext &rb) {
+          rb.tryFrame = rb.cleanups.size();
+          rb.catchFrames.emplace_back(catchFrame);
+          handleStmt(stmt->getTryBlock(), rb);
+        });
+        // a handler body sits outside its own try, so a raise from it targets the enclosing tryFrame
+        Vector<Handler> handlers;
+        for (unsigned i = 0; i < stmt->getNumHandlers(); ++i) {
+          const auto handler = stmt->getHandler(i);
+          const auto decl = handler->getExceptionDecl();
+          Opt<Type::Any> tpe;
+          Opt<Named> binder;
+          const clang::CXXDestructorDecl *exceptionDtor = nullptr;
+          bool canRethrow = false;
+          std::string caughtName;
+          if (decl) {
+            const auto caught = decl->getType().getNonReferenceType().getUnqualifiedType();
+            tpe = handleType(caught, r);
+            caughtName = exceptionTypeName(caught);
+            const auto binderTpe = handleType(decl->getType(), r);
+            binder = decl->getName().empty() ? r.newName(binderTpe) : Named(declName(decl), binderTpe);
+            if (const auto rd = caught->getAsCXXRecordDecl(); needsManagedException(rd)) {
+              const auto loc = handler->getBeginLoc().printToString(context.getSourceManager());
+              if (!decl->getType()->isReferenceType())
+                raise(
+                    fmt::format("Unsupported non-trivial catch-by-value {} at {} (its copy constructor does not lower)", caughtName, loc));
+              if (!destroysByBodyAlone(rd) || !rd->getDestructor())
+                raise(fmt::format("Unsupported non-trivial caught object {} at {} (a base/member destructor has effects "
+                                  "or its destructor is unresolved)",
+                                  caughtName, loc));
+              exceptionDtor = rd->getDestructor();
+            } else canRethrow = true;
+          }
+          const auto caughtKind = tpe ? Opt<ExceptionKind>{ExceptionKind(*tpe, caughtName)} : Opt<ExceptionKind>{};
+          handlers.emplace_back(caughtKind, binder, r.scoped([&](RemapContext &rh) {
+            rh.activeCatch = {};
+            if (binder) rh.activeCatch = ActiveCatch{*binder, *tpe, caughtName, canRethrow};
+            if (exceptionDtor) {
+              rh.cleanups.emplace_back();
+              rh.cleanups.back().emplace_back(Cleanup{exceptionDtor, *binder});
+            }
+            handleStmt(handler->getHandlerBlock(), rh);
+            if (exceptionDtor) {
+              if (!terminated(rh.stmts)) unwindCleanups(rh, rh.cleanups.size() - 1);
+              rh.cleanups.pop_back();
+            }
+          }));
+        }
+        r.push(Stmt::Try(body, handlers, {}));
       },
       [&](const clang::GCCAsmStmt *stmt) {
         raise(fmt::format("Unsupported inline asm at {}: {}", stmt->getBeginLoc().printToString(context.getSourceManager()),
