@@ -211,6 +211,13 @@ static Expr::Any exceptionMessagePointer(const Named &message) {
   return Expr::Alias(Term::Select(message, {}, message.tpe));
 }
 
+static Term::Any exceptionMessageBytes(Remapper::RemapContext &r, const Term::Any &source) {
+  const auto ptr = source.tpe().get<Type::Ptr>();
+  if (!ptr || (!ptr->comp.is<Type::IntS8>() && !ptr->comp.is<Type::IntU8>()))
+    raise(fmt::format("Cannot copy exception message from {}", repr(source.tpe())));
+  return ptr->comp.is<Type::IntS8>() ? source : r.newVar(Expr::Cast(source, Type::Ptr(Type::IntS8(), ptr->space)));
+}
+
 static Opt<Term::Any> findCharacterPointer(Remapper::RemapContext &r, const Term::Any &value, Set<std::string> seen = {}) {
   const auto direct = value.tpe().get<Type::Ptr>();
   if (direct && (direct->comp.is<Type::IntS8>() || direct->comp.is<Type::IntU8>())) return value;
@@ -250,12 +257,13 @@ static void copyExceptionMessageInto(Remapper::RemapContext &r, const Term::Any 
     r.push(Stmt::Update(slots, Term::IntU64Const(size), Term::IntS8Const(0)));
     return;
   }
+  const auto bytes = exceptionMessageBytes(r, source);
   const auto index = r.newName(Type::IntU32());
   const auto ch = r.newName(Type::IntS8());
   const auto atNul = r.newName(Type::Bool1());
   const auto at = Term::Select(index, {}, index.tpe);
   const auto value = Term::Select(ch, {}, ch.tpe);
-  const auto body = Vector<Stmt::Any>{Stmt::Var(ch, Expr::Index(source, at, Type::IntS8()), false), Stmt::Update(slots, at, value),
+  const auto body = Vector<Stmt::Any>{Stmt::Var(ch, Expr::Index(bytes, at, Type::IntS8()), false), Stmt::Update(slots, at, value),
                                       Stmt::Var(atNul, Expr::IntrOp(Intr::LogicEq(value, Term::IntS8Const(0))), false),
                                       Stmt::Cond(Term::Select(atNul, {}, atNul.tpe), {Stmt::Break()}, {})};
   r.push(Stmt::ForRange(index, Term::IntU32Const(0), Term::IntU32Const(polyregion::conventions::AssertMessageLimit - 1),
@@ -265,15 +273,16 @@ static void copyExceptionMessageInto(Remapper::RemapContext &r, const Term::Any 
 
 static void copyExceptionMessageInto(Remapper::RemapContext &r, const Term::Any &source, const Term::Any &count, const Named &message) {
   const auto slots = Term::Select(message, {}, message.tpe);
+  const auto bytes = exceptionMessageBytes(r, source);
   const auto limit = Term::IntU32Const(polyregion::conventions::AssertMessageLimit - 1);
   const auto size = r.newName(Type::IntU32());
   r.push(Stmt::Var(size, Expr::IntrOp(Intr::Min(r.newVar(Expr::Cast(count, Type::IntU32())), limit, Type::IntU32())), false));
   const auto index = r.newName(Type::IntU32());
   const auto ch = r.newName(Type::IntS8());
   const auto at = Term::Select(index, {}, index.tpe);
-  r.push(Stmt::ForRange(
-      index, Term::IntU32Const(0), Term::Select(size, {}, size.tpe), Term::IntU32Const(1),
-      {Stmt::Var(ch, Expr::Index(source, at, Type::IntS8()), false), Stmt::Update(slots, at, Term::Select(ch, {}, ch.tpe))}));
+  r.push(
+      Stmt::ForRange(index, Term::IntU32Const(0), Term::Select(size, {}, size.tpe), Term::IntU32Const(1),
+                     {Stmt::Var(ch, Expr::Index(bytes, at, Type::IntS8()), false), Stmt::Update(slots, at, Term::Select(ch, {}, ch.tpe))}));
   r.push(Stmt::Update(slots, Term::Select(size, {}, size.tpe), Term::IntS8Const(0)));
 }
 
@@ -394,7 +403,7 @@ static Type::Any storageType(const uint64_t sizeInBytes, const bool isSigned) {
     case 2: return isSigned ? Type::IntS16().widen() : Type::IntU16().widen();
     case 4: return isSigned ? Type::IntS32().widen() : Type::IntU32().widen();
     case 8: return isSigned ? Type::IntS64().widen() : Type::IntU64().widen();
-    default: raise(fmt::format("Unsupported bitfield storage size {} bytes", sizeInBytes));
+    default: raise(fmt::format("Unsupported integer storage size {} bytes", sizeInBytes));
   }
 }
 
@@ -1105,6 +1114,8 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
           case clang::BuiltinType::SChar: return Type::IntS8();
           case clang::BuiltinType::Char_U: [[fallthrough]];
           case clang::BuiltinType::UChar: return Type::IntU8();
+          case clang::BuiltinType::WChar_S: return storageType(context.getTypeSize(clang::QualType(tpe, 0)) / 8, /*isSigned*/ true);
+          case clang::BuiltinType::WChar_U: return storageType(context.getTypeSize(clang::QualType(tpe, 0)) / 8, /*isSigned*/ false);
           case clang::BuiltinType::Float: return Type::Float32();
           case clang::BuiltinType::Double: return Type::Float64();
           case clang::BuiltinType::Bool: return Type::Bool1();
@@ -2505,13 +2516,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (const auto member = llvm::dyn_cast<clang::MemberExpr>(expr->getCallee()->IgnoreParenImpCasts());
               member && !member->performsVirtualDispatch(context.getLangOpts()) && stdExceptionNamed(method->getParent(), "exception")) {
             const auto what = copyExceptionMessage(r, Term::StringConst("std::exception"));
-            return exceptionMessagePointer(what);
+            return conform(r, exceptionMessagePointer(what), handleType(expr->getType(), r));
           }
           const auto what = findExceptionMetadata(expr->getImplicitObjectArgument(), r.exceptionWhats);
           if (derivesStdExceptionNamed(sourceRecord(expr->getImplicitObjectArgument()), "system_error") ||
               (what && r.incompleteExceptionWhats.contains(what->symbol)))
             raise("Unsupported composed standard exception what() (error category and path state are not represented)");
-          if (what) return exceptionMessagePointer(*what);
+          if (what) return conform(r, exceptionMessagePointer(*what), handleType(expr->getType(), r));
           raise(fmt::format("Unsupported standard exception observer without object metadata: {}", pretty_string(expr, context)));
         }
         if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
@@ -2755,7 +2766,9 @@ void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record
     (void)r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), {}, {}, {self}, Type::Unit0()));
   }
   if (record->isUnion()) return;
-  const Vector<const clang::FieldDecl *> fields(record->field_begin(), record->field_end());
+  Vector<const clang::FieldDecl *> fields;
+  for (const auto *field : record->fields())
+    fields.emplace_back(field);
   for (const auto *field : fields | reverse()) {
     const auto memberRecord = field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
     if (!memberRecord || memberRecord->hasTrivialDestructor()) continue;

@@ -381,18 +381,22 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
       const bool offloadCompile = toks ^ exists([](auto &t) { return t == "-fstdpar"; });
       if (!out.empty() && offloadCompile) {
         // XXX macOS embeds a non-deterministic LC_UUID and ad-hoc code signature in linked executables, just compare objects here
-        const std::string obj1 = out + ".r1.o", obj2 = out + ".r2.o";
-        const auto objCmd = [&](const std::string &o) {
-          return (toks ^ mk_string(" ", [&](auto &t) { return t == out ? o : t; })) + " -c";
-        };
-        const auto r1 = runStep(task, cfg, objCmd(obj1), /*isRunStep=*/false);
-        const auto r2 = runStep(task, cfg, objCmd(obj2), /*isRunStep=*/false);
+        const std::string obj = out + ".repro.o";
+#ifdef _WIN32
+        // COFF timestamps are enabled by default; disable them for bytewise comparison.
+        constexpr const char *reproFlags = " -mno-incremental-linker-compatible -c";
+#else
+        constexpr const char *reproFlags = " -c";
+#endif
+        const auto objCmd = (toks ^ mk_string(" ", [&](auto &t) { return t == out ? obj : t; })) + reproFlags;
+        const auto r1 = runStep(task, cfg, objCmd, /*isRunStep=*/false);
+        const auto first = r1.exitCode == 0 ? polyregion::read_string(obj) : std::string{};
+        const auto r2 = runStep(task, cfg, objCmd, /*isRunStep=*/false);
         if (r1.exitCode != 0 || r2.exitCode != 0)
           reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode);
-        else if (polyregion::read_string(obj1) != polyregion::read_string(obj2))
+        else if (first != polyregion::read_string(obj))
           reproReason = "non-reproducible build: two compiles of the same source produced different objects";
-        llvm::sys::fs::remove(obj1);
-        llvm::sys::fs::remove(obj2);
+        llvm::sys::fs::remove(obj);
       }
     }
   absorbStep(o, std::move(r));

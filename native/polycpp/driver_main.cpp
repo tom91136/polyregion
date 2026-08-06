@@ -101,13 +101,14 @@ int main(int argc, const char *argv[]) {
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
                  const bool noRewrite = std::getenv(polyregion::env::PolycppNoRewrite) != nullptr;
+                 const auto mem = noRewrite ? StdParOptions::MemKind::Direct : opts->mem;
 #ifndef POLYREGION_FUSED_DRIVER
                  // XXX non-fused: plugin only loaded when rewriting; fused needs it for polyreflect callbacks.
                  if (!noRewrite) append({"-Xclang", "-load", "-Xclang", polycppClangPlugin});
 #endif
                  if (!noRewrite
 #ifdef POLYREGION_FUSED_DRIVER
-                     || opts->mem != StdParOptions::MemKind::Direct
+                     || mem != StdParOptions::MemKind::Direct
 #endif
                  ) {
                    append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
@@ -132,7 +133,7 @@ int main(int argc, const char *argv[]) {
                    return Driver::clangPassPluginFlags(polyreflectPlugin, mllvmArgs);
 #endif
                  };
-                 switch (opts->mem) {
+                 switch (mem) {
                    case StdParOptions::MemKind::Direct: break;
                    case StdParOptions::MemKind::Interpose:
                      append(passPluginFlags({fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"), //
@@ -148,7 +149,7 @@ int main(int argc, const char *argv[]) {
                  }
 
                  if (!compileOnly) {
-                   switch (opts->mem) {
+                   switch (mem) {
                      case StdParOptions::MemKind::Direct: break;
                      case StdParOptions::MemKind::Interpose: break;
                      case StdParOptions::MemKind::Reflect:
@@ -209,7 +210,7 @@ int main(int argc, const char *argv[]) {
                    append(jitCompilerLinkFlags(opts->jit, polycppLibPath, compilerLibPath, /*needsCxxRuntime*/ false));
                    // XXX on macOS static libc++ so the interposer sees its internal allocations; last so it resolves
                    // against the user + polystl objects
-                   if (opts->mem == StdParOptions::MemKind::Reflect) {
+                   if (mem == StdParOptions::MemKind::Reflect) {
                      const auto toolchainBin = clangPath.empty() ? execParentPath : llvm::sys::path::parent_path(clangPath).str();
                      append(appleDistLibcxxStatic(joinPath(toolchainBin, "..", "lib")));
                    }

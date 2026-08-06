@@ -4,7 +4,7 @@
 #pragma region requires: 25
 
 #pragma region case: message-construction-and-ownership
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=5 -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fno-signed-char -DCHECK_KIND=5 -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: 31
 
@@ -34,7 +34,7 @@
 #pragma region requires: 29
 
 #pragma region case: base-slicing-semantics
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=50 -o {output} {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fno-signed-char -DCHECK_KIND=50 -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: 31
 
@@ -205,7 +205,20 @@ int main() {
     const std::exception copy{derived};
     std::exception assigned;
     assigned = derived;
-    count = copy.what()[0] == 's' && assigned.what()[0] == 's' && copy.what()[0] != derived.what()[0] ? 31 : 0;
+    int caught = 0;
+    try {
+      throw copy;
+    } catch (const std::runtime_error &) {
+    } catch (const std::exception &e) {
+      if (e.what()) caught |= 1;
+    }
+    try {
+      throw assigned;
+    } catch (const std::runtime_error &) {
+    } catch (const std::exception &e) {
+      if (e.what()) caught |= 2;
+    }
+    count = caught == 3 ? 31 : 0;
 #else
   #error "CHECK_KIND undefined"
 #endif
