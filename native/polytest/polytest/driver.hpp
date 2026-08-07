@@ -383,8 +383,10 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
         // XXX macOS embeds a non-deterministic LC_UUID and ad-hoc code signature in linked executables, just compare objects here
         const std::string obj = out + ".repro.o";
 #ifdef _WIN32
-        // COFF timestamps are enabled by default; disable them for bytewise comparison.
-        constexpr const char *reproFlags = " -mno-incremental-linker-compatible -c";
+        // Clang emits COFF timestamps by default; Flang rejects this Clang-only flag and already
+        // emits reproducible objects.
+        const bool isPolyfc = toks ^ exists([](const auto &t) { return t.ends_with("polyfc") || t.ends_with("polyfc.exe"); });
+        const char *reproFlags = isPolyfc ? " -c" : " -mno-incremental-linker-compatible -c";
 #else
         constexpr const char *reproFlags = " -c";
 #endif

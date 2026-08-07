@@ -681,10 +681,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                   else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
                 });
           if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-          const bool emptyBase = resolveFieldType(owner, lastField->name).template get<Type::Struct>() ^ exists([&](auto &s) {
-                                   const auto it = structDefsByName.find(normalise(s.name));
-                                   return it != structDefsByName.end() && it->second.empty();
-                                 });
+          const bool emptyBase = resolveFieldType(owner, lastField->name).template get<Type::Struct>() ^
+                                 exists([&](auto &s) { return zeroSizeStructNames.contains(normalise(s.name)); });
           if (emptyBase) {
             const auto full = mkTerm(x.lhs);
             const auto cut = full.rfind('.');
@@ -768,6 +766,8 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
           return fmt::format("if ({}) {}", mkTerm(x.cond), trueBr);
         } else {
           auto falseBr = x.falseBr ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); });
+          // Metal can miscompile an empty taken arm guarding a loop latch through a mutable flag.
+          if (dialect == Dialect::MSL1_0 && x.trueBr.empty()) return fmt::format("if (!({})) {}", mkTerm(x.cond), falseBr);
           return fmt::format("if ({}) {} else {}", mkTerm(x.cond), trueBr, falseBr);
         }
       },
@@ -885,6 +885,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         if (def.members ^ forall(zeroSizeMember)) zeroSizeStructs.emplace(def.name);
       changed = zeroSizeStructs.size() != seen;
     }
+  zeroSizeStructNames = zeroSizeStructs | map([&](const auto &name) { return normalise(name); }) | to<Set>();
   auto realStorageMember = [&](const Named &m) { return !zeroSizeMember(m); };
 
   // only by-value members create a definition-order dependency; pointer members resolve via the forward decl

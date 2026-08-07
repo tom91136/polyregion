@@ -23,7 +23,7 @@
 #pragma region do: {output}
 #pragma region requires: 19
 
-#pragma region case: nullptr-matches-pointer
+#pragma region case: null-pointer-matches-pointer
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=5 -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: 23
@@ -110,7 +110,7 @@ int main() {
 #elif CHECK_KIND == 5
   const int r = __polyregion_offload_f1__([=]() {
     try {
-      if (p[0] == 1) throw nullptr;
+      if (p[0] == 1) throw static_cast<int *>(nullptr);
     } catch (int *e) {
       return e == nullptr ? 23 : 0;
     }

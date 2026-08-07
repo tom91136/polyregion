@@ -29,7 +29,7 @@ inline void __polyregion_builtin_gpu_fence_local() {}
 inline void __polyregion_builtin_gpu_fence_all() {}
 
 template <typename F> //
-std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
+[[clang::noinline]] std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
   static bool offload = !std::getenv(polyregion::env::PolystlNoOffload);
   std::invoke_result_t<F> result{};
   size_t totalObjects = 0;

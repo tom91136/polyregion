@@ -210,7 +210,7 @@ int main(int argc, const char *argv[]) {
                    append(jitCompilerLinkFlags(opts->jit, polycppLibPath, compilerLibPath, /*needsCxxRuntime*/ false));
                    // XXX on macOS static libc++ so the interposer sees its internal allocations; last so it resolves
                    // against the user + polystl objects
-                   if (mem == StdParOptions::MemKind::Reflect) {
+                   if (opts->mem == StdParOptions::MemKind::Reflect) {
                      const auto toolchainBin = clangPath.empty() ? execParentPath : llvm::sys::path::parent_path(clangPath).str();
                      append(appleDistLibcxxStatic(joinPath(toolchainBin, "..", "lib")));
                    }

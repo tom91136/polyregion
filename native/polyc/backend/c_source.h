@@ -22,6 +22,7 @@ public:
 private:
   Dialect dialect;
   Map<std::string, std::vector<std::pair<std::string, Type::Any>>> structDefsByName;
+  Set<std::string> zeroSizeStructNames;
   Set<std::string> unionDefNames;
   Map<std::string, std::string> stringConstNames;
   std::string normalise(const std::string &s) const;

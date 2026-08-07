@@ -197,6 +197,7 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   const auto emptySym = Sym({"#empty"});
   const auto nestedSym = Sym({"#nested"});
   const auto ownerSym = Sym({"Owner"});
+  const auto derivedSym = Sym({"Derived"});
   const StructDef empty(emptySym, {}, {}, {}, false);
   const StructDef nested(nestedSym, {}, {Named("inner", Type::Struct(emptySym, {}))}, {}, false);
   const StructDef owner(ownerSym, {},
@@ -207,10 +208,22 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
                             Named("tail", Type::IntU8()),
                         },
                         {}, false);
+  const StructDef derived(derivedSym, {}, {Named("#base_nested", Type::Struct(nestedSym, {}))}, {}, false);
+  const Named value("value", Type::Struct(derivedSym, {}));
+  const Named base("base", Type::Ptr(Type::Struct(emptySym, {}), TypeSpace::Private()));
   Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
-                 {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Exported(),
-                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
-  Program p(entry, {}, {empty, nested, owner}, PassPhase::Initial(), {});
+                 {
+                     Var(value, std::optional<Expr::Any>{}, true).widen(),
+                     Var(base,
+                         Expr::RefTo(Term::Select(value, {PathStep::Field("#base_nested")}, Type::Struct(nestedSym, {})).widen(), {},
+                                     Type::Struct(emptySym, {}), TypeSpace::Private(), Region::Opaque())
+                             .widen(),
+                         false)
+                         .widen(),
+                     Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+                 },
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Program p(entry, {}, {empty, nested, owner, derived}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
   opts.pipelineSpec = "FullOpt(level=0)";
@@ -220,7 +233,36 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
   CHECK(source.find("_empty pad") == std::string::npos);
   CHECK(source.find("_nested nest") == std::string::npos);
+  CHECK(source.find("value._base_nested") == std::string::npos);
+  CHECK(source.find("&(value)") != std::string::npos);
   CHECK(source.find("uint8_t tail;") != std::string::npos);
+}
+
+TEST_CASE("metal source canonicalises empty true branches", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const Named flag("flag", Type::Bool1());
+  const Named value("value", Type::IntS32());
+  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
+                 {
+                     Var(flag, Expr::Alias(Term::Bool1Const(false).widen()).widen(), true).widen(),
+                     Var(value, Expr::Alias(Term::IntS32Const(0).widen()).widen(), true).widen(),
+                     Cond(Term::Select(flag, {}, flag.tpe).widen(), {},
+                          {Mut(Term::Select(value, {}, value.tpe), Expr::Alias(Term::IntS32Const(1).widen()).widen()).widen()})
+                         .widen(),
+                     Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+                 },
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("if (!(flag))") != std::string::npos);
+  CHECK(source.find("if (flag) {\n\n  } else") == std::string::npos);
 }
 
 TEST_CASE("opencl source escapes reserved words as whole identifiers only", "[backend]") {
