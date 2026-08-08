@@ -663,30 +663,40 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
           // 0) instead. the Select is typed as the logical base, so key elision on the field's owner-declared
           // type (#empty for an EBO base), not the Select type
           Type::Any owner = lhsSel->root.tpe;
-          for (size_t i = 0; i + 1 < lhsSel->steps.size(); ++i)
-            lhsSel->steps[i].match_total(
+          std::vector<bool> elidedBaseSteps;
+          for (const auto &step : lhsSel->steps)
+            step.match_total(
                 [&](const PathStep::Field &f) {
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-                  owner = resolveFieldType(owner, f.name);
+                  const auto selected = resolveFieldType(owner, f.name);
+                  const bool elided = (f.name ^ starts_with(conventions::BaseFieldPrefix)) &&
+                                      (selected.template get<Type::Struct>() ^
+                                       exists([&](auto &s) { return zeroSizeStructNames.contains(normalise(s.name)); }));
+                  elidedBaseSteps.emplace_back(elided);
+                  owner = selected;
                 },
                 [&](const PathStep::Deref &) {
+                  elidedBaseSteps.emplace_back(false);
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
                 },
                 [&](const PathStep::Index &) {
+                  elidedBaseSteps.emplace_back(false);
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
                   else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
                 },
                 [&](const PathStep::IndexDyn &) {
+                  elidedBaseSteps.emplace_back(false);
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
                   else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
                 });
-          if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-          const bool emptyBase = resolveFieldType(owner, lastField->name).template get<Type::Struct>() ^
-                                 exists([&](auto &s) { return zeroSizeStructNames.contains(normalise(s.name)); });
-          if (emptyBase) {
-            const auto full = mkTerm(x.lhs);
-            const auto cut = full.rfind('.');
-            str = fmt::format("&({})", cut == std::string::npos ? full : full.substr(0, cut));
+          if (!elidedBaseSteps.empty() && elidedBaseSteps.back()) {
+            auto parent = mkTerm(x.lhs);
+            for (auto it = elidedBaseSteps.rbegin(); it != elidedBaseSteps.rend() && *it; ++it) {
+              const auto cut = parent.rfind('.');
+              if (cut == std::string::npos) break;
+              parent.resize(cut);
+            }
+            str = fmt::format("&({})", parent);
           }
           str = fmt::format("(({}) {})", mkTpe(Type::Ptr(x.comp, x.space).widen()), str);
         }

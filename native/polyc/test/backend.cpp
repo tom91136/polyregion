@@ -196,10 +196,12 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
 
   const auto emptySym = Sym({"#empty"});
   const auto nestedSym = Sym({"#nested"});
+  const auto middleSym = Sym({"#middle"});
   const auto ownerSym = Sym({"Owner"});
   const auto derivedSym = Sym({"Derived"});
   const StructDef empty(emptySym, {}, {}, {}, false);
   const StructDef nested(nestedSym, {}, {Named("inner", Type::Struct(emptySym, {}))}, {}, false);
+  const StructDef middle(middleSym, {}, {Named("#base_nested", Type::Struct(nestedSym, {}))}, {Type::Struct(nestedSym, {})}, false);
   const StructDef owner(ownerSym, {},
                         {
                             Named("bytes", Type::Arr(Type::IntS8(), 23, TypeSpace::Global())),
@@ -208,22 +210,25 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
                             Named("tail", Type::IntU8()),
                         },
                         {}, false);
-  const StructDef derived(derivedSym, {}, {Named("#base_nested", Type::Struct(nestedSym, {}))}, {}, false);
+  const StructDef derived(derivedSym, {}, {Named("#base_middle", Type::Struct(middleSym, {}))},
+                          {Type::Struct(middleSym, {}), Type::Struct(nestedSym, {})}, false);
   const Named value("value", Type::Struct(derivedSym, {}));
-  const Named base("base", Type::Ptr(Type::Struct(emptySym, {}), TypeSpace::Private()));
+  const Named base("base", Type::Ptr(Type::Struct(nestedSym, {}), TypeSpace::Private()));
   Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
                  {
                      Var(value, std::optional<Expr::Any>{}, true).widen(),
                      Var(base,
-                         Expr::RefTo(Term::Select(value, {PathStep::Field("#base_nested")}, Type::Struct(nestedSym, {})).widen(), {},
-                                     Type::Struct(emptySym, {}), TypeSpace::Private(), Region::Opaque())
+                         Expr::RefTo(Term::Select(value, {PathStep::Field("#base_middle"), PathStep::Field("#base_nested")},
+                                                  Type::Struct(nestedSym, {}))
+                                         .widen(),
+                                     {}, Type::Struct(nestedSym, {}), TypeSpace::Private(), Region::Opaque())
                              .widen(),
                          false)
                          .widen(),
                      Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
                  },
                  FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
-  Program p(entry, {}, {empty, nested, owner, derived}, PassPhase::Initial(), {});
+  Program p(entry, {}, {empty, nested, middle, owner, derived}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
   opts.pipelineSpec = "FullOpt(level=0)";
@@ -233,7 +238,7 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
   CHECK(source.find("_empty pad") == std::string::npos);
   CHECK(source.find("_nested nest") == std::string::npos);
-  CHECK(source.find("value._base_nested") == std::string::npos);
+  CHECK(source.find("value._base_middle") == std::string::npos);
   CHECK(source.find("&(value)") != std::string::npos);
   CHECK(source.find("uint8_t tail;") != std::string::npos);
 }

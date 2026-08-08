@@ -503,9 +503,9 @@ object StructuredExit extends ProgramPass {
         case other => other
       }
 
-    private def runFinally(fin: List[p.Stmt], pendingPossible: Boolean): List[p.Stmt] =
+    private def runFinally(fin: List[p.Stmt], pendingPossible: Boolean, canBreak: Boolean): List[p.Stmt] =
       if (fin.isEmpty) Nil
-      else if (!pendingPossible) guard(fin)
+      else if (!pendingPossible) guard(fin, canBreak)
       else {
         val savedFlag  = fresh(p.Type.Bool1)
         val savedTag   = Option.when(tags.nonEmpty)(fresh(p.Type.IntS32))
@@ -581,7 +581,7 @@ object StructuredExit extends ProgramPass {
           slotDecls ::: saveSlots :::
           List(p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(false)))) :::
           Option.when(tags.nonEmpty)(p.Stmt.Mut(tagSel, p.Expr.Alias(p.Term.IntS32Const(AssertTag)))).toList :::
-          discardBeforeAbrupt(guard(fin)) :::
+          discardBeforeAbrupt(guard(fin, canBreak)) :::
           ifThen(p.Expr.Alias(asserted), discardPending, restore)
       }
 
@@ -669,7 +669,12 @@ object StructuredExit extends ProgramPass {
           .toList
       }
 
-    private def lowerTry(body: List[p.Stmt], handlers: List[p.Handler], fin: List[p.Stmt]): List[p.Stmt] = {
+    private def lowerTry(
+        body: List[p.Stmt],
+        handlers: List[p.Handler],
+        fin: List[p.Stmt],
+        canBreak: Boolean
+    ): List[p.Stmt] = {
       val raised = flow.raised(body)
       val chain =
         if (raised.isEmpty) Nil
@@ -728,7 +733,7 @@ object StructuredExit extends ProgramPass {
                     .toList
                 val taken = setup :::
                   p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(false))) ::
-                  bindHandler(h, thrown, saved, guard(protectedBody))
+                  bindHandler(h, thrown, saved, guard(protectedBody, canBreak))
                 thrown -> taken
               },
               nextHandler
@@ -739,42 +744,44 @@ object StructuredExit extends ProgramPass {
         raised.exists(t => !handlers.exists(h => flow.catches(h, t))) || handlers.exists(
           _.body.exists(flow.escapes)
         )
-      guard(body) ::: dispatch ::: runFinally(fin, pendingPossible)
+      guard(body, canBreak) ::: dispatch ::: runFinally(fin, pendingPossible, canBreak)
     }
 
-    private def lower(s: p.Stmt): List[p.Stmt] = s match {
+    private def lower(s: p.Stmt, canBreak: Boolean): List[p.Stmt] = s match {
       case p.Stmt.Var(_, Some(p.Expr.SpecOp(p.Spec.Assert(code, message))), _) => lowerAssert(code, message)
       case p.Stmt.Mut(p.Term.Select(root, Nil, _), p.Expr.Alias(source)) if root.symbol == ExceptionWhatSym =>
         if (usesWhat) copyMessage(source) else Nil
       case p.Stmt.Raise(v, exceptionKind, _) => lowerRaise(v, exceptionKind)
       case p.Stmt.Rethrow =>
         throw IllegalStateException("rethrow reached structured-exit lowering outside a handler")
-      case p.Stmt.Try(b, hs, f)              => lowerTry(b, hs, f)
+      case p.Stmt.Try(b, hs, f)              => lowerTry(b, hs, f, canBreak)
       case p.Stmt.While(c, b)                => List(p.Stmt.While(c, drainTop(b)))
       case p.Stmt.ForRange(i, lb, ub, st, b) => List(p.Stmt.ForRange(i, lb, ub, st, drainTop(b)))
-      case p.Stmt.Cond(c, t, f)              => List(p.Stmt.Cond(c, guard(t), guard(f)))
-      case p.Stmt.Annotated(inner, pos, c)   => lower(inner).map(p.Stmt.Annotated(_, pos, c))
+      case p.Stmt.Cond(c, t, f)              => List(p.Stmt.Cond(c, guard(t, canBreak), guard(f, canBreak)))
+      case p.Stmt.Annotated(inner, pos, c)   => lower(inner, canBreak).map(p.Stmt.Annotated(_, pos, c))
       case other                             => List(other)
     }
 
     private def drainTop(body: List[p.Stmt]): List[p.Stmt] = {
-      val lowered = guard(body)
+      val lowered = guard(body, canBreak = true)
       if (body.exists(flow.escapes)) p.Stmt.Cond(asserted, List(p.Stmt.Break), Nil) :: lowered else lowered
     }
 
-    def guard(stmts: List[p.Stmt]): List[p.Stmt] = stmts match {
+    def guard(stmts: List[p.Stmt], canBreak: Boolean = false): List[p.Stmt] = stmts match {
       case Nil => Nil
       case s :: rest =>
-        val head = lower(s)
-        if (flow.escapes(s)) head ::: fence(rest)
-        else head ::: guard(rest)
+        val head = lower(s, canBreak)
+        if (flow.escapes(s)) head ::: fence(rest, canBreak)
+        else head ::: guard(rest, canBreak)
     }
 
-    private def fence(stmts: List[p.Stmt]): List[p.Stmt] = {
+    private def fence(stmts: List[p.Stmt], canBreak: Boolean): List[p.Stmt] = {
       val (free, rest) = stmts.span(s => !containsBarrier(s))
       rest match {
-        case Nil             => if (free.isEmpty) Nil else List(p.Stmt.Cond(asserted, Nil, guard(free)))
-        case barrier :: tail => guard(free) ::: lower(barrier) ::: fence(tail)
+        case Nil if free.isEmpty => Nil
+        case Nil if canBreak     => p.Stmt.Cond(asserted, List(p.Stmt.Break), Nil) :: guard(free, canBreak)
+        case Nil                 => List(p.Stmt.Cond(asserted, Nil, guard(free, canBreak)))
+        case barrier :: tail     => guard(free, canBreak) ::: lower(barrier, canBreak) ::: fence(tail, canBreak)
       }
     }
 

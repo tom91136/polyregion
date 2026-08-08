@@ -576,7 +576,8 @@ class StructuredExitSuite extends munit.FunSuite {
       p.Stmt.Var(t, Some(p.Expr.IntrOp(p.Intr.Add(selectT(i), p.Term.IntS32Const(1), i32)))),
       p.Stmt.Update(selectT(arr), selectT(i), selectT(t)),
       p.Stmt.Var(c, Some(p.Expr.IntrOp(p.Intr.LogicEq(selectT(i), p.Term.IntS32Const(1))))),
-      p.Stmt.Cond(selectT(c), List(assertStmt()), Nil)
+      p.Stmt.Cond(selectT(c), List(assertStmt()), Nil),
+      p.Stmt.Update(selectT(arr), selectT(i), selectT(t))
     )
     val out = lower(
       List(p.Arg(arr)),
@@ -587,6 +588,12 @@ class StructuredExitSuite extends munit.FunSuite {
     val err = vm.alloc(4L + limit)
     vm.call(p.Conventions.EntryName, List(errT -> V.I(err), p.Type.Ptr(i32, g) -> V.I(a)))
     assertEquals((0 until 4).map(k => i32At(vm, a + 4L * k)).toList, List(1L, 2L, 0L, 0L))
+    val drainBreaks = out.collectWhere[p.Stmt] {
+      case c @ p.Stmt.Cond(p.Term.Select(root, Nil, _), List(p.Stmt.Break), Nil)
+          if root.symbol == p.Conventions.AssertedFlag =>
+        c
+    }
+    assertEquals(drainBreaks.size, 2) // loop entry plus the post-assert tail fence
   }
 
   test("an asserting lane and a non-asserting lane execute the same collective barriers") {
