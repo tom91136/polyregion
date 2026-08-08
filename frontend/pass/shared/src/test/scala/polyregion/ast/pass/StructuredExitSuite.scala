@@ -596,6 +596,46 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(drainBreaks.size, 2) // loop entry plus the post-assert tail fence
   }
 
+  test("a handled raise inside a loop reaches its handler and continues the loop") {
+    val i = named("i", i32)
+    val handled = p.Stmt.Try(
+      List(raise(selectT(i), "int")),
+      List(handler(Some(i32), None, append(1, "Handled"), Some("int"))),
+      Nil
+    )
+    val loop = p.Stmt.ForRange(
+      i,
+      p.Term.IntS32Const(0),
+      p.Term.IntS32Const(3),
+      p.Term.IntS32Const(1),
+      handled :: append(2, "Tail")
+    )
+    assertEquals(runOut(loop), 121212L -> (0, ""))
+  }
+
+  test("a raise escaping a loop breaks directly at the raise site") {
+    val i = named("i", i32)
+    val loop = p.Stmt.ForRange(
+      i,
+      p.Term.IntS32Const(0),
+      p.Term.IntS32Const(3),
+      p.Term.IntS32Const(1),
+      raise(selectT(i), "int") :: append(9, "Unreachable")
+    )
+    val handled = p.Stmt.Try(
+      List(loop),
+      List(handler(Some(i32), None, append(1, "Handled"), Some("int"))),
+      Nil
+    )
+    val out    = lower(List(p.Arg(outArg)), List(handled, ret))
+    val breaks = out.collectWhere[p.Stmt] { case p.Stmt.Break => () }
+    assertEquals(breaks.size, 3) // loop entry, raise site, and the generic tail fence
+    val vm   = Interpreter.Vm(out)
+    val cell = vm.alloc(4L)
+    vm.call(p.Conventions.EntryName, List(outArg.tpe -> V.I(cell)))
+    assertEquals(i32At(vm, cell), 1L)
+  }
+
   test("an asserting lane and a non-asserting lane execute the same collective barriers") {
     val flag    = named("flag", p.Type.Bool1)
     val barrier = p.Stmt.Var(named("_b", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuBarrierLocal)), isMutable = false)
