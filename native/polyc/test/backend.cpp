@@ -191,6 +191,51 @@ TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer s
   CHECK(source.find("private char* p") == std::string::npos);
 }
 
+TEST_CASE("C source zero-initialises struct locals", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto stateSym = Sym({"State"});
+  const auto stateTpe = Type::Struct(stateSym, {});
+  const StructDef state(stateSym, {}, {Named("x", Type::IntS32()), Named("y", Type::IntS32())}, {}, false);
+  const Named value("value", stateTpe);
+  Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(value, std::optional<Expr::Any>{}, true).widen(), Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  Program p(entry, {}, {state}, PassPhase::Initial(), {});
+
+  for (const auto &[target, expected] : std::vector<std::pair<Target, std::string>>{
+           {Target::Source_C_OpenCL1_1, "State value = {0};"},
+           {Target::Source_C_Metal1_0, "State value = {};"},
+       }) {
+    polyregion::compiler::Options opts{target, ""};
+    opts.pipelineSpec = "FullOpt(level=0)";
+    const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    INFO(repr(c));
+    REQUIRE(c.binary != std::nullopt);
+    const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+    CHECK(source.find(expected) != std::string::npos);
+  }
+}
+
+TEST_CASE("C source emits every entry function", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto body = std::vector<Stmt::Any>{Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()};
+  Function first = mkFn("first_kernel", {}, Type::Unit0(), body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  Function second = mkFn("second_kernel", {}, Type::Unit0(), body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  Program p(first, {second}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("first_kernel") != std::string::npos);
+  CHECK(source.find("second_kernel") != std::string::npos);
+}
+
 TEST_CASE("metal source does not emit zero-size empty marker members", "[backend]") {
   polyregion::compiler::initialise();
 

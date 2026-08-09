@@ -231,7 +231,7 @@ struct CLAddressSpaceTracePass {
           f.withArgs(f.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
     };
     auto entry = remap(p.entry);
-    auto fns = p.functions | filter([](const auto &f) { return !f.isEntry; }) | map(remap) | to_vector();
+    auto fns = p.functions | map(remap) | to_vector();
 
     auto sigOf = [](const Expr::Invoke &inv) {
       return Signature(calleeName(inv), /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](const auto &e) { return e.tpe(); }),
@@ -738,6 +738,27 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
   return fmt::format("{} = {};", lhs, rhs);
 }
 
+std::optional<std::string> backend::CSource::mkZeroInit(const Type::Any &tpe) const {
+  if (dialect == Dialect::MSL1_0) return "{}"s;
+  const std::function<bool(const Type::Any &, size_t)> reachesScalar = [&](const Type::Any &t, const size_t depth) -> bool {
+    if (depth > 32) return false;
+    if (const auto a = t.template get<Type::Arr>()) return a->length > 0 && reachesScalar(a->comp, depth + 1);
+    if (const auto s = t.template get<Type::Struct>()) {
+      const auto members = structDefsByName.find(normalise(s->name));
+      if (members == structDefsByName.end()) return false;
+      const auto first = members->second | find([&](const auto &member) {
+                           const auto &memberTpe = member.second;
+                           return !memberTpe.template is<Type::FnRef>()
+                                  && !(memberTpe.template get<Type::Struct>()
+                                       ^ exists([&](const auto &nested) { return zeroSizeStructNames.contains(normalise(nested.name)); }));
+                         });
+      return first ^ exists([&](const auto &member) { return reachesScalar(member.second, depth + 1); });
+    }
+    return !t.template is<Type::FnRef>() && !t.template is<Type::Unit0>() && !t.template is<Type::Nothing>();
+  };
+  return reachesScalar(tpe, 0) ? std::optional{"{0}"s} : std::nullopt;
+}
+
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   // member-wise reads repeat side effects, so a struct only decomposes for a plain lvalue source
   const auto memberwise = [&](const Type::Any &tpe, const bool lvalueSource) {
@@ -751,6 +772,8 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         if (x.expr && memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
           return fmt::format("{}; {}", mkDecl(x.name.tpe, normalise(x.name.symbol)),
                              mkValueCopy(normalise(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
+        if (!x.expr && x.name.tpe.is<Type::Struct>())
+          if (const auto init = mkZeroInit(x.name.tpe)) return fmt::format("{} = {};", mkDecl(x.name.tpe, normalise(x.name.symbol)), *init);
         return fmt::format("{}{};", mkDecl(x.name.tpe, normalise(x.name.symbol)), x.expr ? " = " + mkExpr(*x.expr) : "");
       },
       [&](const Stmt::Mut &x) {
