@@ -58,7 +58,11 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
     log.info("rename table", replacementTable.map((k, v) => s"${k.repr} => ${v.repr}").toSeq*)
 
-    def doReplacement(t: p.Type): p.Type = t match {
+    val replacementsByName: Map[p.Sym, List[(p.Type.Struct, p.StructDef)]] = replacementTable.toList.groupBy(_._1.name)
+
+    val replacementCache                 = scala.collection.mutable.HashMap.empty[p.Type, p.Type]
+    def doReplacement(t: p.Type): p.Type = replacementCache.getOrElseUpdate(t, computeReplacement(t))
+    def computeReplacement(t: p.Type): p.Type = t match {
       case s @ p.Type.Struct(name, args) =>
         val newArgs                        = args.map(doReplacement(_))
         val withRenamedArgs: p.Type.Struct = p.Type.Struct(name, newArgs)
@@ -67,10 +71,8 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
         val byName =
           if (byOriginal.isDefined || byRenamed.isDefined) None
           else
-            replacementTable.collectFirst {
-              case (key, sdef)
-                  if key.name == name && key.args.size == newArgs.size &&
-                    key.args.map(doReplacement) == newArgs =>
+            replacementsByName.getOrElse(name, Nil).collectFirst {
+              case (key, sdef) if key.args.size == newArgs.size && key.args.map(doReplacement) == newArgs =>
                 sdef
             }
         byOriginal.orElse(byRenamed).orElse(byName) match {

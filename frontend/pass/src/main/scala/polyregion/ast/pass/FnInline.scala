@@ -278,9 +278,10 @@ object FnInline extends ProgramPass {
   ): (p.Expr, List[p.Stmt], List[p.Arg]) =
     expr match {
       case ivk: p.Expr.Invoke =>
-        val (resultExpr, inlineStmts, caps) = inlineOne(ivk, resolveOverload(ivk, program), ctr)
-        val (rewrittenStmts, nestedCaps)    = inlineStmts.foldMap(s => inlineStmt(s, program, ctr))
-        (resultExpr, rewrittenStmts, caps ++ nestedCaps)
+        val (resultExpr, inlineStmts, caps)  = inlineOne(ivk, resolveOverload(ivk, program), ctr)
+        val (rewrittenStmts, nestedCaps)     = inlineStmts.foldMap(s => inlineStmt(s, program, ctr))
+        val (finalExpr, tailStmts, tailCaps) = inlineExpr(resultExpr, program, ctr)
+        (finalExpr, rewrittenStmts ::: tailStmts, caps ++ nestedCaps ++ tailCaps)
       case _ => (expr, Nil, Nil)
     }
 
