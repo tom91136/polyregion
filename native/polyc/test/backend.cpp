@@ -218,6 +218,55 @@ TEST_CASE("C source zero-initialises struct locals", "[backend]") {
   }
 }
 
+TEST_CASE("C source omits values without a representation", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto sourceOf = [](const Program &p) {
+    polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+    const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    INFO(repr(c));
+    REQUIRE(c.binary != std::nullopt);
+    return std::string(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  };
+
+  SECTION("function references") {
+    const auto fnTpe = Type::FnRef(Sym({"dead"})).widen();
+    const auto boxSym = Sym({"Box"});
+    const auto boxTpe = Type::Struct(boxSym, {}).widen();
+    const StructDef box(boxSym, {}, {Named("value", Type::IntS32()), Named("fn", fnTpe)}, {}, false);
+    const Named fn("fn", fnTpe);
+    const Named value("value", boxTpe);
+    const auto poison = Expr::Alias(Term::Poison(fnTpe).widen()).widen();
+    const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                                {Var(fn, poison, false).widen(), Var(value, std::optional<Expr::Any>{}, true).widen(),
+                                 Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    const auto source = sourceOf(Program(entry, {}, {box}, PassPhase::Initial(), {}));
+    CHECK(source.find("int value;") != std::string::npos);
+    CHECK(source.find("fn;") == std::string::npos);
+  }
+
+  SECTION("aggregate poison") {
+    const auto boxSym = Sym({"Box"});
+    const auto boxTpe = Type::Struct(boxSym, {}).widen();
+    const auto arrTpe = Type::Arr(Type::IntS32(), 2, TypeSpace::Global()).widen();
+    const StructDef box(boxSym, {}, {Named("value", Type::IntS32())}, {}, false);
+    const Named record("record", boxTpe);
+    const Named values("values", arrTpe);
+    const auto recordPoison = Expr::Alias(Term::Poison(boxTpe).widen()).widen();
+    const auto valuesPoison = Expr::Alias(Term::Poison(arrTpe).widen()).widen();
+    const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                                {Var(record, recordPoison, true).widen(), Mut(selectNamed(record), recordPoison).widen(),
+                                 Var(values, valuesPoison, true).widen(), Mut(selectNamed(values), valuesPoison).widen(),
+                                 Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    const auto source = sourceOf(Program(entry, {}, {box}, PassPhase::Initial(), {}));
+    CHECK(source.find("Box record;") != std::string::npos);
+    CHECK(source.find("int values[2];") != std::string::npos);
+    CHECK(source.find("poison") == std::string::npos);
+  }
+}
+
 TEST_CASE("C source emits every entry function", "[backend]") {
   polyregion::compiler::initialise();
 

@@ -39,6 +39,11 @@ static bool isLocalArr(const Type::Any &t) {
   return t.template get<Type::Arr>() ^ exists([](const auto &a) { return a.space.template is<TypeSpace::Local>(); });
 }
 
+static bool isPoisonInit(const Expr::Any &e) {
+  const auto alias = e.template get<Expr::Alias>();
+  return alias && alias->ref.template is<Term::Poison>();
+}
+
 template <typename T> static bool usesTpe(const std::vector<Function> &fns, const std::vector<StructDef> &defs) {
   return (fns ^ exists([](const auto &f) { return !f.template collect_all<T>().empty(); }))
          || (defs ^ exists([](const auto &d) {
@@ -728,7 +733,11 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
     // a populated union stays whole; naming its members would not preserve the active one
     // a zero-size member has no storage in the emitted body, so it must not be named
     if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !unionDefNames.contains(name)))
-      return it->second //
+      return it->second | filter([&](const auto &m) {
+               return !m.second.template is<Type::FnRef>() && !(m.second.template get<Type::Struct>() ^ exists([&](const auto &nested) {
+                                                                  return zeroSizeStructNames.contains(normalise(nested.name));
+                                                                }));
+             })
              | map([&](const auto &m) {
                  return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
                })                                                     //
@@ -766,9 +775,14 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   };
   return stmt.match_total( //
       [&](const Stmt::Var &x) {
+        if (x.name.tpe.is<Type::FnRef>()) return ""s;
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
         // hoisted to the kernel's outermost scope by mkFn; drop the nested decl
         if (!x.expr && isLocalArr(x.name.tpe)) return ""s;
+        if (x.expr && isPoisonInit(*x.expr) && (x.name.tpe.is<Type::Struct>() || x.name.tpe.is<Type::Arr>())) {
+          if (isLocalArr(x.name.tpe)) return ""s;
+          return fmt::format("{};", mkDecl(x.name.tpe, normalise(x.name.symbol)));
+        }
         if (x.expr && memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
           return fmt::format("{}; {}", mkDecl(x.name.tpe, normalise(x.name.symbol)),
                              mkValueCopy(normalise(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
@@ -777,6 +791,8 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         return fmt::format("{}{};", mkDecl(x.name.tpe, normalise(x.name.symbol)), x.expr ? " = " + mkExpr(*x.expr) : "");
       },
       [&](const Stmt::Mut &x) {
+        if (x.name.tpe.template is<Type::FnRef>()) return ""s;
+        if (isPoisonInit(x.expr) && (x.name.tpe.template is<Type::Struct>() || x.name.tpe.template is<Type::Arr>())) return ""s;
         if (x.name.tpe.template is<Type::Unit0>()) return fmt::format("{};", mkExpr(x.expr));
         if (memberwise(x.name.tpe, x.expr.template is<Expr::Alias>())) return mkValueCopy(mkTerm(x.name), mkExpr(x.expr), x.name.tpe, 0);
         return fmt::format("{} = {};", mkTerm(x.name), mkExpr(x.expr));
@@ -919,7 +935,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                              | map([](const auto &def) { return def.name; })               //
                              | to<Set>();
   auto zeroSizeMember = [&](const Named &m) {
-    return m.tpe.template get<Type::Struct>() ^ exists([&](const auto &s) { return zeroSizeStructs.contains(s.name); });
+    return m.tpe.template is<Type::FnRef>()
+           || (m.tpe.template get<Type::Struct>() ^ exists([&](const auto &s) { return zeroSizeStructs.contains(s.name); }));
   };
   // metal rejects an all-zero-size body as a `[[buffer]]` pointee; OpenCL-C tolerates the empty member
   if (dialect == Dialect::MSL1_0)
