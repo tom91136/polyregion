@@ -12,7 +12,7 @@ case class FullOpt(level: Int = 3, stackDepth: Int = 1024) extends ProgramPass d
 
 object FullOpt {
   private val baseline: Vector[ProgramPass] =
-    Vector(PartialEval(), DeadArgElimination)
+    Vector(PartialEval(), DeadArgElimination, DeadStructElimination)
 
   // XXX Intrinsify runs once to recognise direct `intrinsics.X` calls, then again after
   // FnInline so calls revealed by inlining a prism replacement (e.g. `StdLib.math.abs`

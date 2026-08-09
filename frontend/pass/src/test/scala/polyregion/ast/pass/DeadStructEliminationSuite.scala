@@ -22,4 +22,10 @@ class DeadStructEliminationSuite extends munit.FunSuite {
     val out  = DeadStructElimination(program(entry(args = List(a)), defs = List(s)), NoopLog)
     assert(out.defs.exists(_.name == s.name), "referenced struct must be kept")
   }
+
+  test("FullOpt removes an orphan struct") {
+    val orphan = p.StructDef(sym("orphan"), Nil, Nil, Nil)
+    val out    = FullOpt(level = 1)(program(entry(), defs = List(orphan)), NoopLog)
+    assert(!out.defs.exists(_.name == orphan.name))
+  }
 }
