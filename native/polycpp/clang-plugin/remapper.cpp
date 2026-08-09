@@ -1016,7 +1016,9 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                                    return resolveField(field, var->getName().str(), tpe);
                                  }
                                  case clang::LCK_ByRef: {
-                                   const auto tpe = Type::Ptr(handleType(var->getType(), r), TypeSpace::Global());
+                                   const auto varTpe = var->getType();
+                                   const auto tpe = varTpe->isReferenceType() ? handleType(varTpe, r)
+                                                                              : Type::Ptr(handleType(varTpe, r), TypeSpace::Global());
                                    return resolveField(field, var->getName().str(), tpe);
                                  }
                                  default: return {};
@@ -2321,7 +2323,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (!field) continue;
           const auto member = select(r, {instance}, *field);
           if (const auto arr = field->tpe.get<Type::Arr>()) copyArray(r, member, r.newVar(handleExpr(init, r)), *arr);
-          else r.push(Stmt::Mut(member, conform(r, handleExpr(init, r), field->tpe)));
+          else {
+            const auto value = [&]() -> Expr::Any {
+              if (capture.getCaptureKind() != clang::LCK_ByRef) return handleExpr(init, r);
+              const auto initValue = r.newVar(handleExpr(init, r));
+              if (var->getType()->isReferenceType()) return Expr::Alias(initValue);
+              return Expr::RefTo(termToSel(initValue), {}, initValue.tpe(), TypeSpace::Global(), Region::Opaque());
+            }();
+            r.push(Stmt::Mut(member, conform(r, value, field->tpe)));
+          }
         }
         return Expr::Alias(select(r, {}, instance));
       },
