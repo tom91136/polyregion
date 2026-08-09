@@ -1,7 +1,6 @@
 package polyregion.jvm;
 
 import java.io.File;
-import java.nio.Buffer;
 
 @SuppressWarnings("unused")
 public final class Natives {

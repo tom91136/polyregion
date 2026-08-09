@@ -21,25 +21,30 @@ public final class Event {
 
   @Override
   public String toString() {
-    String self = "[@"
-        + epochMillis
-        + ",+"
-        + String.format("%.3f", (double) elapsedNanos / 1.0e6)
-        + "ms] "
-        + name
-        + (data.isEmpty()
-            ? ""
-            : ":\n"
-                + Arrays.stream(data.split("\\n"))
-                    .map(l -> " │" + l)
-                    .collect(Collectors.joining("\n"))
-                + "\n ╰───");
+    String self =
+        "[@"
+            + epochMillis
+            + ",+"
+            + String.format("%.3f", (double) elapsedNanos / 1.0e6)
+            + "ms] "
+            + name
+            + (data.isEmpty()
+                ? ""
+                : ":\n"
+                    + Arrays.stream(data.split("\\n"))
+                        .map(l -> " │" + l)
+                        .collect(Collectors.joining("\n"))
+                    + "\n ╰───");
     if (items.length == 0) return self;
     return self
         + "\n"
         + Arrays.stream(items)
             .map(Event::toString)
-            .map(s -> Arrays.stream(s.split("\\n")).map(l -> "  " + l).collect(Collectors.joining("\n")))
+            .map(
+                s ->
+                    Arrays.stream(s.split("\\n"))
+                        .map(l -> "  " + l)
+                        .collect(Collectors.joining("\n")))
             .collect(Collectors.joining("\n"));
   }
 }

@@ -4,12 +4,11 @@ import static polyregion.javalang.Runtime.offload;
 
 public class AnotherClass {
 
-	static {
-		offload(() -> "1");
-	}
+  static {
+    offload(() -> "1");
+  }
 
-
-	public  final static void a(){
-		offload(() -> System.out.println("A"));
-	}
+  public static final void a() {
+    offload(() -> System.out.println("A"));
+  }
 }

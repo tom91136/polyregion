@@ -2,10 +2,9 @@ import static polyregion.javalang.Runtime.offload;
 
 public class NoPackageTest {
 
-//	class B{}
+  //	class B{}
 
-	public static void main(String[] args) {
-		offload(() -> 42);
-	}
-
+  public static void main(String[] args) {
+    offload(() -> 42);
+  }
 }

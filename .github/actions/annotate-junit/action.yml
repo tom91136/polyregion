@@ -3,7 +3,7 @@ description: Emit GitHub Actions annotations and a step summary from JUnit XML (
 
 inputs:
   junit:
-    description: Path to a JUnit XML file or a directory of *.xml reports.
+    description: Path or recursive glob for JUnit XML files or report directories.
     required: true
   label:
     description: Short label for the annotations and summary (e.g. ctest, scala).
@@ -20,12 +20,14 @@ runs:
         import os, re, sys, glob, xml.etree.ElementTree as ET
         path, label = sys.argv[1], sys.argv[2]
         illegal = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\ufffe\\uffff]")
-        if os.path.isdir(path):
-            files = sorted(glob.glob(os.path.join(path, "**", "*.xml"), recursive=True))
-        elif os.path.exists(path):
-            files = [path]
-        else:
-            files = []
+        matches = glob.glob(path, recursive=True) if glob.has_magic(path) else [path]
+        files = []
+        for match in matches:
+            if os.path.isdir(match):
+                files.extend(glob.glob(os.path.join(match, "**", "*.xml"), recursive=True))
+            elif os.path.isfile(match):
+                files.append(match)
+        files = sorted(set(files))
         if not files:
             print(f"::warning::{label}: no JUnit XML at {path}")
             sys.exit(0)

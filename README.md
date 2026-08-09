@@ -14,9 +14,9 @@ Top-level orchestration is via [`just`](https://github.com/casey/just); `just` f
 ### Quick start (fresh clone)
 
 Prerequisites:
- * `JAVA_HOME` (JDK 21+)
-   * Fedora: `sudo dnf install java-latest-openjdk-devel` 
-   * Windows: `winget install -e --id EclipseAdoptium.Temurin.21.JDK` 
+ * `JAVA_HOME` (JDK 17+)
+   * Fedora: `sudo dnf install java-17-openjdk-devel`
+   * Windows: `winget install -e --id EclipseAdoptium.Temurin.17.JDK`
  * `sbt` - https://www.scala-sbt.org/download/
  * bash
    * Windows: use Git bash 
@@ -24,7 +24,7 @@ Prerequisites:
 ***Important: Use Git Bash on Windows; just recipies are bash scripts***
 
 ```shell
-export JAVA_HOME=/usr/lib/jvm/java  # any JDK 21+ install root
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk  # any JDK 17+ install root
 
 just build-vcpkg               # clone + bootstrap vcpkg at the pinned commit
 just build-sysroot             # AL8 sysroot for portable binaries (optional; podman or docker required)
@@ -138,8 +138,7 @@ sbt 'compiler-testsuite-scala/testOnly polyregion.ControlFlowSuite -- *while-le-
 If you change anything in `compiler/` (macros) or `prism/StdLib.scala`, force a clean macro re-expansion as sbt's incremental compiler doesn't always track macro changes correctly:
 
 ```sh
-rm -rf compiler-testsuite-scala/target/scala-3.7.4 compiler/target/scala-3.7.4/classes
-sbt 'compiler-testsuite-scala/test'
+sbt 'compiler/clean ; compiler-testsuite-scala/clean ; compiler-testsuite-scala/testFull'
 ```
 
 Likewise after editing C++ in `native/polyc/backend/`, rebuild `polyc-JNI` (the JVM caches the `.so` per process, so a stale build will silently mask backend changes).

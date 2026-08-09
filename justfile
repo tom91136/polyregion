@@ -101,8 +101,8 @@ _format mode sbt_task_a sbt_task_b:
         | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
     if [ -f frontend/sbtx ]; then
-        echo "Scala:   sbt {{ sbt_task_a }} {{ sbt_task_b }}"
-        (cd frontend && {{ sbt }} {{ sbt_task_a }} {{ sbt_task_b }}) &
+        echo "Scala:   sbt {{ sbt_task_a }} ; {{ sbt_task_b }}"
+        (cd frontend && {{ sbt }} '{{ sbt_task_a }} ; {{ sbt_task_b }}') &
         pid_s=$!
     else
         echo "frontend/sbtx not found - skipping Scala format" >&2
@@ -136,10 +136,17 @@ _codegen-sbt:
     cd frontend && {{ sbt }} 'codegen/genCodegen'
 
 _codegen-format:
-    "$(just _clang-format)" -i native/polyast/generated/*.{h,cpp} native/bindings/jvm/generated/*.{h,cpp}
+    find native/polyast/generated native/bindings/jvm/generated native/common/generated \
+        -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print0 \
+        | xargs -0 -r "$(just _clang-format)" -i
 
 _codegen-diff:
-    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/polyc/generated native/polyc/include/polyregion/polypass.h
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `git diff` does not report newly generated, untracked outputs.
+    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm)
+    [ -z "$untracked" ] || { echo "untracked generated files:" >&2; echo "$untracked" >&2; exit 1; }
+    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm
 
 # === Pass bundles ===
 
@@ -236,7 +243,7 @@ test-scala *args='':
     if [ -z "${POLYREGION_NATIVE_LIB_DIR:-}" ] && [ -n "$BUILD" ]; then
         export POLYREGION_NATIVE_LIB_DIR="$PWD/$BUILD/bindings/jvm"
     fi
-    cd frontend && {{ sbt }} 'compiler-testsuite-scala/test' {{ args }}
+    cd frontend && {{ sbt }} 'compiler-testsuite-scala/testFull' {{ args }}
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
 # Skips are not ctest SKIP entries (that property is O(n^2) at parse); the runner logs them per workdir.

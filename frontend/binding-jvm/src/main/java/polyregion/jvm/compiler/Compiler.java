@@ -3,7 +3,6 @@ package polyregion.jvm.compiler;
 import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.Optional;
-
 import polyregion.jvm.Loader;
 import polyregion.jvm.NativeLibrary;
 

@@ -20,7 +20,7 @@ final class SArray[A: ClassTag, N <: Int] private (val actual: Array[A]) {
 
   type ClampZero <: Int = N match {
     case 0   => 0
-    case Int => (N - 1)
+    case Int => N - 1
   }
   def tail: SArray[A, ClampZero] = new SArray(actual.tail)
 

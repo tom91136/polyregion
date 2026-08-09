@@ -651,7 +651,7 @@ private[polyregion] object CppStructGen {
             s"  return ${clsName(qualified = true)}(${modifyAllCtorExprs
                 .map {
                   case (_, name) => name
-                  case (name)    => name
+                  case name      => name
                 }
                 .mkString(", ")});" ::
             s"}" ::

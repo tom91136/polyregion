@@ -2,7 +2,6 @@ package polyregion.jvm.runtime;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
-
 import polyregion.jvm.runtime.Device.Queue;
 
 @SuppressWarnings("unused")

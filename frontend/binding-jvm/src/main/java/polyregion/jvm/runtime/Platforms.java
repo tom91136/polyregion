@@ -4,7 +4,6 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Paths;
-
 import polyregion.jvm.Loader;
 import polyregion.jvm.NativeLibrary;
 

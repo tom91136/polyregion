@@ -25,7 +25,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - &setup-sbt
         name: Setup sbt
@@ -496,7 +496,7 @@ jobs:
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: frontend/compiler-testsuite-scala/target/test-reports
+          junit: frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
           label: scala
 
       - name: Upload test results
@@ -505,7 +505,7 @@ jobs:
         uses: *upload
         with:
           name: scala-test-results-windows-${{ matrix.arch }}-Release
-          path: ./frontend/compiler-testsuite-scala/target/test-reports/
+          path: ./frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
           if-no-files-found: warn
 
   build-emulators:

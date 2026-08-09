@@ -21,7 +21,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - &setup-sbt
         name: Setup sbt
@@ -64,6 +64,7 @@ jobs:
       POLYREGION_FLANG_PARALLEL_COMPILE_JOBS: ${{ matrix.flang_parallel_compile_jobs }}
     steps:
       - uses: *checkout
+      - *setup-java
 
       - name: Install dependencies
         run: |
@@ -134,13 +135,13 @@ jobs:
       POLYC_PASS_BUNDLE: dso
     steps:
       - uses: *checkout
+      - *setup-java
 
       - name: Install dependencies
         # gcc brings gfortran which flang-rt needs at LLVM-runtimes configure time.
         run: |
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet llvm lld cmake ninja zlib gcc sbt
-          echo "JAVA_HOME=$(/usr/libexec/java_home)" >> "$GITHUB_ENV"
           echo "$(brew --prefix llvm)/bin"          >> "$GITHUB_PATH"
 
       - name: Dotenv
@@ -446,7 +447,7 @@ jobs:
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: frontend/compiler-testsuite-scala/target/test-reports
+          junit: frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
           label: scala
 
       - name: Upload test results
@@ -455,7 +456,7 @@ jobs:
         uses: *upload
         with:
           name: scala-test-results-darwin-${{ matrix.arch }}-Release
-          path: ./frontend/compiler-testsuite-scala/target/test-reports/
+          path: ./frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
           if-no-files-found: warn
 
   build-san:
@@ -474,12 +475,12 @@ jobs:
       ASAN_OPTIONS: detect_leaks=0
     steps:
       - uses: *checkout
+      - *setup-java
 
       - name: Install dependencies
         run: |
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet cmake ninja zlib
-          echo "JAVA_HOME=$(/usr/libexec/java_home)" >> "$GITHUB_ENV"
 
       - name: Dotenv
         id: dotenv
