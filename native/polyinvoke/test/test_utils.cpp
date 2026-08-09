@@ -5,6 +5,7 @@
 #include "test_utils.h"
 
 #include <cctype>
+#include <mutex>
 
 #if !defined(_WIN32)
   #include <fcntl.h>
@@ -144,9 +145,11 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
   }
 #endif
 
-  // leaked so the flock is never released before process exit: a scope release runs before exit_files
-  // closes /dev/kfd, re-opening the teardown-handoff window on gfx1036 (see device_lock.cpp)
-  auto &lock = *new std::optional<invoke::DeviceLock>();
+  struct ProcessDeviceLocks {
+    std::mutex mutex;
+    std::vector<std::pair<invoke::PhysicalDevice, std::unique_ptr<invoke::DeviceLock>>> locks;
+  };
+  static auto *processDeviceLocks = new ProcessDeviceLocks();
   try {
     auto platform = invoke::Platform::maybe(backend);
     if (!platform) return 77;
@@ -165,7 +168,12 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
       break;
     }
     if (!device) return 77;
-    if (serialise) lock.emplace(device->physicalDevice());
+    if (serialise) {
+      const auto physical = device->physicalDevice();
+      std::lock_guard guard(processDeviceLocks->mutex);
+      if (!(processDeviceLocks->locks ^ exists([&](const auto &entry) { return entry.first == physical; })))
+        processDeviceLocks->locks.emplace_back(physical, std::make_unique<invoke::DeviceLock>(physical));
+    }
     auto imageGroup = findTestImage(images, backend, device->features());
     if (imageGroup.empty()) return 77;
     runner(ctx, backend, *platform, *device, imageGroup);
