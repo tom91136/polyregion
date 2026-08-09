@@ -28,7 +28,7 @@ using polyregion::polytest::cases::Task;
 
 namespace {
 
-void runArgs(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+void runArgs(Context &ctx, Backend backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
   std::function<std::string(size_t)> kernelName, moduleName;
   if (device.singleEntryPerModule()) {
     for (auto &[module_, data] : imageGroup)
@@ -55,7 +55,7 @@ void runArgs(Context &ctx, Backend backend, Platform &, Device &device, const Im
     auto values = iota(1.0f) | take(scalarArgCount) | to_vector();
 
     ArgBuffer buffer;
-    if (device.sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
+    prependTidArg(platform, buffer);
     for (auto &v : values)
       buffer.append(Type::Float32, &v);
     if (args != 0) buffer.append(Type::Ptr, &out_d);

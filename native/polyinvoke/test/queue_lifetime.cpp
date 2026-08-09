@@ -26,7 +26,7 @@ using namespace std::chrono_literals;
 
 namespace {
 
-void runQueueLifetime(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+void runQueueLifetime(Context &ctx, Backend backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
   if (imageGroup.size() != 1) {
     POLYTEST_FAIL(ctx, "expected exactly 1 image for fma kernel, got {} ({})", imageGroup.size(), magic_enum::enum_name(backend));
   }
@@ -49,7 +49,7 @@ void runQueueLifetime(Context &ctx, Backend backend, Platform &, Device &device,
 
   float a = 1.f, b = 2.f, c = 3.f;
   ArgBuffer buffer;
-  if (device.sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
+  prependTidArg(platform, buffer);
   buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
 
   queue->enqueueInvokeAsync(module_, function_, buffer, {}, Callback{[&]() {

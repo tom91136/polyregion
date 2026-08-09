@@ -35,7 +35,7 @@ const std::vector<float> xs{0.f,
                             std::numeric_limits<float>::max(),     //
                             std::numeric_limits<float>::min()};
 
-void runFma(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
+void runFma(Context &ctx, Backend backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
   if (imageGroup.size() != 1) {
     POLYTEST_FAIL(ctx, "expected exactly 1 image group, got {} for device `{}` (backend={})", //
                   imageGroup.size(), device.name(), magic_enum::enum_name(backend));
@@ -57,7 +57,7 @@ void runFma(Context &ctx, Backend backend, Platform &, Device &device, const Ima
     for (auto b : xs)
       for (auto c : xs) {
         ArgBuffer buffer;
-        if (device.sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
+        prependTidArg(platform, buffer);
         buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
         waitAll([&](auto &h) { q->enqueueInvokeAsync(module_, function_, buffer, {}, h); });
         float out = {};

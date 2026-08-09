@@ -21,6 +21,10 @@ ImageGroup findTestImage(const ImageGroups &images, const invoke::Backend &backe
 
 using DeviceSkip = std::function<bool(invoke::Backend, invoke::Device &)>;
 
+inline void prependTidArg(invoke::Platform &platform, invoke::ArgBuffer &buffer) {
+  if (platform.kind() == invoke::PlatformKind::HostThreaded) buffer.append(invoke::Type::IntS64, nullptr);
+}
+
 using DeviceRunner =
     std::function<void(polytest::cases::Context &, invoke::Backend, invoke::Platform &, invoke::Device &, const ImageGroup &)>;
 
