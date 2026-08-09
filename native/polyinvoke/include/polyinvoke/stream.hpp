@@ -11,6 +11,8 @@
 
 namespace polyregion::stream {
 
+using namespace aspartame;
+
 using namespace polyregion::runtime;
 using namespace polyregion::invoke;
 using namespace polyregion::concurrency_utils;
@@ -42,12 +44,11 @@ template <typename T> struct Kernels {
 
 template <typename T, typename FValidate, typename FValidateSum>
 void validate(size_t size, size_t times, FValidate fValidate, FValidateSum fValidateSum, const std::vector<T> &a, const std::vector<T> &b,
-              const std::vector<T> &c, const std::vector<T> &sum) {
+              const std::vector<T> &c, const std::vector<T> &sums) {
   auto [expectedA, expectedB, expectedC, expectedSum] = expectedResult(times, size, StartA<T>, StartA<T>, StartC<T>, StartScalar<T>);
 
-  using namespace aspartame;
-  auto error = [](auto xs, auto expected) {
-    return (xs | map([&](const T x) { return std::fabs(x - expected); }) | aspartame::sum()) / xs.size();
+  auto error = [](const auto &xs, const auto &expected) {
+    return (xs | map([&](const auto &x) { return std::fabs(x - expected); }) | sum()) / xs.size();
   };
   auto eps = std::numeric_limits<T>::epsilon() * 100.0;
   auto check = [&](const char *name, const std::vector<T> &xs, T expected) {
@@ -67,7 +68,7 @@ void validate(size_t size, size_t times, FValidate fValidate, FValidateSum fVali
   check("a", a, expectedA);
   check("b", b, expectedB);
   check("c", c, expectedC);
-  auto reducedSum = sum ^ aspartame::sum();
+  auto reducedSum = sums ^ sum();
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
 }
 
@@ -81,8 +82,7 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
                                        .triad = static_cast<double>(3 * sizeof(T) * size) / 1000 / 1000, //
                                        .dot = static_cast<double>(2 * sizeof(T) * size) / 1000 / 1000};
 
-  using namespace aspartame;
-  auto bandwidth = [&](auto &&f) { return *f(sizesMB) / *(*f(elapsed) ^ min()); };
+  auto bandwidth = [&](const auto &f) { return *f(sizesMB) / *(*f(elapsed) ^ min()); };
 
   fmt::print(stderr,
              "===BabelStream ({})===\n"
@@ -101,9 +101,9 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
              "Add      {:.3f}\n"
              "Triad    {:.3f}\n"
              "Dot      {:.3f}\n",
-             bandwidth([](auto &x) { return &x.copy; }), bandwidth([](auto &x) { return &x.mul; }),
-             bandwidth([](auto &x) { return &x.add; }), bandwidth([](auto &x) { return &x.triad; }),
-             bandwidth([](auto &x) { return &x.dot; }));
+             bandwidth([](const auto &x) { return &x.copy; }), bandwidth([](const auto &x) { return &x.mul; }),
+             bandwidth([](const auto &x) { return &x.add; }), bandwidth([](const auto &x) { return &x.triad; }),
+             bandwidth([](const auto &x) { return &x.dot; }));
 }
 
 template <typename T>
@@ -120,7 +120,7 @@ Kernels<std::vector<double>> dispatch(Type tpe, size_t size, size_t times, size_
       .dot = std::vector<double>(times),
   };
   auto invoke = [&](const auto &acc, const std::pair<std::string, std::string> &spec, const Policy &policy, const ArgBuffer &buffer) {
-    return [&](auto &h) {
+    return [&](const auto &h) {
       auto _buffer = buffer;
       if (threaded) _buffer.prepend({{Type::IntS64, nullptr}, {Type::Ptr, &begins_d}, {Type::Ptr, &ends_d}});
 
@@ -141,15 +141,15 @@ Kernels<std::vector<double>> dispatch(Type tpe, size_t size, size_t times, size_
 
   for (size_t i = 0; i < times; i++) {
     waitAll(10000,
-            invoke([=](auto &acc, auto x) { acc.copy[i] = x; }, specs.copy, forPolicy,
+            invoke([=](auto &acc, const auto &x) { acc.copy[i] = x; }, specs.copy, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.mul[i] = x; }, specs.mul, forPolicy,
+            invoke([=](auto &acc, const auto &x) { acc.mul[i] = x; }, specs.mul, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {tpe, &scalar}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.add[i] = x; }, specs.add, forPolicy,
+            invoke([=](auto &acc, const auto &x) { acc.add[i] = x; }, specs.add, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.triad[i] = x; }, specs.triad, forPolicy,
+            invoke([=](auto &acc, const auto &x) { acc.triad[i] = x; }, specs.triad, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {tpe, &scalar}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.dot[i] = x; }, specs.dot, dotPolicy,
+            invoke([=](auto &acc, const auto &x) { acc.dot[i] = x; }, specs.dot, dotPolicy,
                    threaded ? ArgBuffer{{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {Type::Ptr, &sum_d}, {Type::Void, {}}}
                             : ArgBuffer{{Type::Ptr, &a_d},
                                         {Type::Ptr, &b_d},
@@ -190,7 +190,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   auto h2dT1 = std::chrono::high_resolution_clock::now();
   {
-    waitAllN([&, begin = begin, end = end](auto h) {
+    waitAllN([&, begin = begin, end = end](const auto &h) {
       if (threaded) {
         q->enqueueHostToDeviceAsyncTyped(begin.data(), begins_d, begin.size(), h());
         q->enqueueHostToDeviceAsyncTyped(end.data(), ends_d, end.size(), h());
@@ -215,7 +215,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   auto d2hT1 = std::chrono::high_resolution_clock::now();
   {
-    waitAllN([&](auto h) {
+    waitAllN([&](const auto &h) {
       q->enqueueDeviceToHostAsyncTyped(a_d, a.data(), size, h());
       q->enqueueDeviceToHostAsyncTyped(b_d, b.data(), size, h());
       q->enqueueDeviceToHostAsyncTyped(c_d, c.data(), size, h());

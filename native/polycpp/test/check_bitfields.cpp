@@ -25,8 +25,8 @@ int main() {
     bits.lo = 5;
     bits.mid = bits.mid + 3;
     signedBits.high = -11;
-    return static_cast<int>(bits.lo) * 1000000 + static_cast<int>(bits.mid) * 10000 + static_cast<int>(bits.hi) * 100 +
-           static_cast<int>(signedBits.low + 30) * 10 + static_cast<int>(signedBits.high + 30);
+    return static_cast<int>(bits.lo) * 1000000 + static_cast<int>(bits.mid) * 10000 + static_cast<int>(bits.hi) * 100
+           + static_cast<int>(signedBits.low + 30) * 10 + static_cast<int>(signedBits.high + 30);
   });
   const bool ok = result == 5220589;
   std::printf(ok ? "pass" : "fail (result=%d)", result);

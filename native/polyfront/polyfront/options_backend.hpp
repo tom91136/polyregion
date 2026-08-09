@@ -36,7 +36,7 @@ namespace polyregion::polyfront {
 using namespace aspartame;
 
 inline bool entryNeedsErrorBuffer(const polyast::CompileResult &r) {
-  return r.entryArgs ^ exists([](auto &n) { return n.symbol == conventions::ErrorArg; });
+  return r.entryArgs ^ exists([](const auto &n) { return n.symbol == conventions::ErrorArg; });
 }
 
 struct KernelObject {
@@ -88,17 +88,18 @@ struct Options {
     }
     if (auto targets = maybeTargets) {
       for (auto &rawEntry : *targets ^ split(';')) {
-        const auto bang = rawEntry.find('!');
-        const auto rawArchAndFeaturesList = bang == std::string::npos ? rawEntry : rawEntry.substr(0, bang);
-        auto archAndFeatures = rawArchAndFeaturesList ^ split('@');
-        if (archAndFeatures.size() != 2) {
+        const auto compileAndRuntime = rawEntry ^ split_once('!');
+        const auto rawArchAndFeaturesList = compileAndRuntime ? compileAndRuntime->first : rawEntry;
+        const auto archAndFeatures = rawArchAndFeaturesList ^ split_once('@');
+        if (!archAndFeatures) {
           errors.emplace_back("Missing or invalid placement of arch and feature separator '@' in " + rawArchAndFeaturesList);
           continue;
         }
-        if (auto s = polyregion::compiletime::TargetSpec::findByName(archAndFeatures[0]); s) {
-          for (auto &feature : archAndFeatures[1] ^ split(','))
-            opts.targets.emplace_back(s->codegen, feature);
-        } else errors.emplace_back("Unknown arch " + archAndFeatures[0]);
+        if (auto s = polyregion::compiletime::TargetSpec::findByName(archAndFeatures->first); s) {
+          archAndFeatures->second //
+              ^ split(',')        //
+              ^ for_each([&](const auto &feature) { opts.targets.emplace_back(s->codegen, feature); });
+        } else errors.emplace_back("Unknown arch " + archAndFeatures->first);
       }
       opts.targets = opts.targets ^ distinct();
     } else errors.emplace_back("target argument missing");
@@ -109,7 +110,7 @@ struct Options {
   static std::variant<std::vector<std::string>, Options> parseArgs(const std::vector<std::string> &args) {
     auto parseSuffix = [&](const std::string &key) -> std::optional<std::string> {
       const auto prefix = key + "=";
-      return args ^ collect_first([&](auto &arg) -> std::optional<std::string> {
+      return args ^ collect_first([&](const auto &arg) -> std::optional<std::string> {
                if (arg ^ starts_with(prefix)) return arg.substr(prefix.size());
                return {};
              });
@@ -164,15 +165,14 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   std::vector<llvm::StringRef> args{
       //
       "", "--polyc", inputPath.str(), "--out", outputPath.str(), "--target", std::string_view(canonical->canonical), "--arch", arch};
-  for (const auto &a : extraArgs)
-    args.emplace_back(a);
+  extraArgs ^ append_to(args);
 
   if (opts.verbose) {
-    (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
+    (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](const auto &s) { return s.data(); })) << "\n").flush();
   }
 
   if (int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
-    return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
+    return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](const auto &s) { return s.str(); }));
 
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
@@ -180,8 +180,8 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   // The polycpp clang plugin is built with -fno-exceptions, so a throw from `from_msgpack(empty)`
   // would unwind into terminate(); return a string error here instead of letting it propagate.
   if ((*BufferOrErr)->getBufferSize() == 0)
-    return "Empty output from polyc subprocess (exit code was zero, this is a polyc bug) for task: " +
-           (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
+    return "Empty output from polyc subprocess (exit code was zero, this is a polyc bug) for task: "
+           + (args ^ mk_string(" ", [](const auto &s) { return s.str(); }));
   const auto *begin = reinterpret_cast<const uint8_t *>((*BufferOrErr)->getBufferStart());
   const auto *end = begin + (*BufferOrErr)->getBufferSize();
   return polyast::compileresult_from_msgpack(begin, end);
@@ -210,8 +210,7 @@ struct ManagedHostMirror {
 
 static ManagedHostMirror compileManagedHostMirror(const Options &opts, const polyast::Program &program, const runtime::PlatformKind kind,
                                                   const std::string &moduleId) {
-  using namespace aspartame;
-  const auto managed = [](auto &t, auto &) { return runtime::targetPlatformKind(t) == runtime::PlatformKind::Managed; };
+  const auto managed = [](const auto &t, const auto &) { return runtime::targetPlatformKind(t) == runtime::PlatformKind::Managed; };
   if (kind != runtime::PlatformKind::Managed || !(opts.targets ^ exists(managed))) return {};
   // physical backends (cuda/hsa Compiletime mirror) consume this host prelude; binding-slot targets
   // marshal through the runtime arena and ignore it

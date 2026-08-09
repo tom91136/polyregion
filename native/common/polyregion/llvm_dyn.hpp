@@ -34,8 +34,8 @@ template <typename U, typename... Fs> bool visitDyn0(U n, Fs... fs) {
               return true;
             }
             return false;
-          }()) ||
-          ...);
+          }())
+          || ...);
 }
 
 } // namespace polyregion::llvm_shared

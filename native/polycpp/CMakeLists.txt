@@ -89,9 +89,8 @@ if (POLYREGION_FUSED_DRIVER)
             ../polyreflect/reflect-stack.cpp)
     target_include_directories(polycpp PRIVATE
             clang-plugin
-            ../polyreflect
-            ${LLVM_INCLUDE_DIRS}
-            ${CLANG_INCLUDE_DIRS})
+            ../polyreflect)
+    target_include_directories(polycpp SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
     target_compile_definitions(polycpp PRIVATE
             ${LLVM_DEFINITIONS}
             POLYREGION_FUSED_DRIVER=1)
@@ -147,12 +146,13 @@ add_dependencies(polycpp-tests polycpp polystl)
 target_include_directories(polycpp-tests PRIVATE
         ../include
         polystl
-        ${LLVM_INCLUDE_DIRS}
         ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
+target_include_directories(polycpp-tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 polyregion_test_profile_dir(polycpp-tests)
 
-target_include_directories(polycpp PRIVATE ../compiler ../include ${LLVM_INCLUDE_DIRS})
+target_include_directories(polycpp PRIVATE ../compiler ../include)
+target_include_directories(polycpp SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 target_link_libraries(polycpp PRIVATE
         polyc-driver
         polyfront-options

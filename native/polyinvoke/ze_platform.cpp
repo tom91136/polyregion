@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -9,6 +10,7 @@
 
 #include "dl_util.h"
 
+using namespace aspartame;
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::ze;
 
@@ -71,11 +73,7 @@ std::vector<std::unique_ptr<Device>> ZePlatform::enumerate() {
   if (count == 0) return {};
   std::vector<ze_device_handle_t> handles(count);
   CHECKED(zeDeviceGet(driver, &count, handles.data()));
-  std::vector<std::unique_ptr<Device>> devices;
-  devices.reserve(count);
-  for (auto h : handles)
-    devices.push_back(std::make_unique<ZeDevice>(driver, h));
-  return devices;
+  return handles ^ map([&](const auto &h) -> std::unique_ptr<Device> { return std::make_unique<ZeDevice>(driver, h); });
 }
 
 // ---
@@ -115,13 +113,13 @@ std::string moduleIdentity(ze_driver_handle_t driver, ze_device_handle_t device)
 
 ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
     : driver(driver), device(device), context([this]() { return createContext(this->driver); },
-                                              [](auto ctx) {
+                                              [](const auto &ctx) {
                                                 POLYINVOKE_TRACE();
                                                 CHECKED(zeContextDestroy(ctx));
                                               }),
       store(
           PREFIX,
-          [this](auto &&image) {
+          [this](const auto &image) {
             POLYINVOKE_TRACE();
             context.touch();
             const auto create = [&](ze_module_format_t format, const uint8_t *data, size_t size, bool fatal) {
@@ -157,18 +155,18 @@ ZeDevice::ZeDevice(ze_driver_handle_t driver, ze_device_handle_t device)
             }
             return module;
           },
-          [](auto &&module, auto &&name, auto &&) {
+          [](const auto &module, const auto &name, const auto &) {
             POLYINVOKE_TRACE();
             ze_kernel_desc_t desc{ZE_STRUCTURE_TYPE_KERNEL_DESC, nullptr, 0, name.c_str()};
             ze_kernel_handle_t kernel = {};
             CHECKED(zeKernelCreate(module, &desc, &kernel));
             return kernel;
           },
-          [&](auto &&module) {
+          [&](const auto &module) {
             POLYINVOKE_TRACE();
             CHECKED(zeModuleDestroy(module));
           },
-          [&](auto &&kernel) {
+          [&](const auto &kernel) {
             POLYINVOKE_TRACE();
             CHECKED(zeKernelDestroy(kernel));
           }) {

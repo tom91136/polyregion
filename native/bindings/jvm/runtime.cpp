@@ -18,6 +18,7 @@
 #include "generated/platforms.h"
 #include "jni_utils.h"
 
+using namespace aspartame;
 using namespace polyregion;
 namespace rt = ::invoke;
 namespace gen = ::generated;
@@ -75,7 +76,7 @@ static std::shared_ptr<T> findRef(JNIEnv *env, std::unordered_map<jlong, std::sh
 
 static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
   return toJni(env, xs, gen::Property::of(env).clazz,
-               [&](auto &x) { return gen::Property::of(env)(env, toJni(env, x.first), toJni(env, x.second)).instance; });
+               [&](const auto &x) { return gen::Property::of(env)(env, toJni(env, x.first), toJni(env, x.second)).instance; });
 }
 
 void Platforms::deleteAllPeers0(JNIEnv *env, jclass) {
@@ -123,8 +124,8 @@ jlong Platforms::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
 static jobject toJni(JNIEnv *env, rt::Backend backend) {
   return wrapException(env, EX, [&]() {
     if (auto errorOrPlatform = rt::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend)) +
-                               " failed to initialise: " + std::get<std::string>(errorOrPlatform));
+      throw std::runtime_error("Backend " + std::string(magic_enum::enum_name(backend))
+                               + " failed to initialise: " + std::get<std::string>(errorOrPlatform));
     } else {
       auto [peer, platform] =
           emplaceRef(platforms, std::shared_ptr<rt::Platform>(std::move(std::get<std::unique_ptr<rt::Platform>>(errorOrPlatform))));
@@ -172,7 +173,7 @@ jobjectArray Platform::deviceProperties0(JNIEnv *env, jclass, jlong nativePeer) 
 jobjectArray Platform::deviceFeatures0(JNIEnv *env, jclass, jlong nativePeer) {
   return wrapException(env, EX, [&]() {
     auto xs = findRef(env, devices, nativePeer)->features();
-    return toJni(env, xs, gen::String::of(env).clazz, [&](auto &x) { return toJni(env, x); });
+    return toJni(env, xs, gen::String::of(env).clazz, [&](const auto &x) { return toJni(env, x); });
   });
 }
 
@@ -272,25 +273,24 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
     static_assert(sizeof(jbyte) == sizeof(std::byte));
     static_assert(sizeof(jbyte) == sizeof(rt::Type));
 
-    using namespace aspartame;
-    auto argTs = fromJni<jbyte>(env, argTypes) ^ map([](auto &t) { return static_cast<rt::Type>(t); });
-    auto argPs = fromJni<jbyte>(env, argData) ^ map([](auto &t) { return static_cast<std::byte>(t); });
+    auto argTs = fromJni<jbyte>(env, argTypes) ^ map([](const auto &t) { return static_cast<rt::Type>(t); });
+    auto argPs = fromJni<jbyte>(env, argData) ^ map([](const auto &t) { return static_cast<std::byte>(t); });
 
     auto p = gen::Policy::of(env).wrap(env, policy);
     auto global = fromJni(env, p.global(env, gen::Dim3::of(env)));
     auto localMemoryBytes = p.localMemoryBytes(env);
-    auto local = p.local(env, gen::Dim3::of(env)).map<rt::Dim3>([&](auto x) { return fromJni(env, x); });
+    auto local = p.local(env, gen::Dim3::of(env)).map<rt::Dim3>([&](const auto &x) { return fromJni(env, x); });
     if (!local && localMemoryBytes) {
       throwGeneric(env, EX, "Launch configured with no local dims but with local memory");
     }
 
     findRef(env, deviceQueues, nativePeer)
         ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs,
-                             rt::Policy{global, {(local ^ map([&](auto &&d) { return std::make_pair(d, localMemoryBytes); }))}},
+                             rt::Policy{global, {(local ^ map([&](const auto &d) { return std::make_pair(d, localMemoryBytes); }))}},
                              fromJni(env, cb));
 
     if (argTs[argCount - 1] == rt::Type::Ptr) {
-      auto args = argTs ^ mk_string(",", [](auto &tpe) { return std::string(magic_enum::enum_name(tpe)); });
+      auto args = argTs ^ mk_string(",", [](const auto &tpe) { return std::string(magic_enum::enum_name(tpe)); });
       throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
     }
   });

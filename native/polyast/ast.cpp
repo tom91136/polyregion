@@ -17,23 +17,17 @@ static void renderCompileEvent(std::string &out, const CompileEvent &e, size_t d
   fmt::format_to(std::back_inserter(out), "{}[{}, +{}ms] {}", prefix, e.epochMillis, static_cast<double>(e.elapsedNanos) / 1e6, e.name);
   if (e.data.empty()) {
     out += '\n';
-  } else if (e.data.find('\n') == std::string::npos) {
+  } else if (e.data ^ none_match([](char c) { return c == '\n'; })) {
     fmt::format_to(std::back_inserter(out), ": {}\n", e.data);
   } else {
     out += ":\n";
-    size_t ln = 0;
-    for (size_t start = 0; start < e.data.size();) {
-      const size_t nl = e.data.find('\n', start);
-      const auto line = e.data.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
-      ++ln;
-      fmt::format_to(std::back_inserter(out), "{}{:>3}│{}\n", prefix, ln, line);
-      if (nl == std::string::npos) break;
-      start = nl + 1;
-    }
+    e.data                          //
+            ^ lines()               //
+        | zip_with_index(size_t{1}) //
+        | for_each([&](const auto &line, const auto &ln) { fmt::format_to(std::back_inserter(out), "{}{:>3}│{}\n", prefix, ln, line); });
     fmt::format_to(std::back_inserter(out), "{}   ╰───\n", prefix);
   }
-  for (auto &child : e.items)
-    renderCompileEvent(out, child, depth + 1);
+  e.items ^ for_each([&](const auto &child) { renderCompileEvent(out, child, depth + 1); });
 }
 
 string polyast::qualified(const Term::Select &select) {
@@ -61,7 +55,7 @@ Term::Select polyast::selectField(const Term::Select &base, const Named &field) 
 }
 
 Type::Struct polyast::typeOf(const StructDef &def) {
-  return Type::Struct(def.name, def.tpeVars ^ map([](auto &v) -> Type::Any { return Type::Var(v); }));
+  return Type::Struct(def.name, def.tpeVars ^ map([](const auto &v) -> Type::Any { return Type::Var(v); }));
 }
 
 string polyast::repr(const CompileResult &compilation) {
@@ -72,13 +66,12 @@ string polyast::repr(const CompileResult &compilation) {
                  compilation.messages.empty() ? "(none)" : "`" + compilation.messages + "`",
                  compilation.features.empty() ? "(none)" : compilation.features ^ mk_string(","));
   if (compilation.layouts.empty()) out += "\n  layouts: (none)";
-  else fmt::format_to(sink, "\n  layouts:\n{}", compilation.layouts ^ mk_string("\n", [](auto &l) { return repr(l) ^ indent(4); }));
+  else fmt::format_to(sink, "\n  layouts:\n{}", compilation.layouts ^ mk_string("\n", [](const auto &l) { return repr(l) ^ indent(4); }));
   out += "\n  events:";
   if (compilation.events.empty()) out += " (none)";
   else out += '\n';
 
-  for (auto &e : compilation.events)
-    renderCompileEvent(out, e, 0);
+  compilation.events ^ for_each([&](const auto &e) { renderCompileEvent(out, e, 0); });
   out += "}";
   return out;
 }
@@ -127,7 +120,7 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
 }
 
 Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table) {
-  if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) ^ map([](auto &sl) { return sl.sizeInBytes; })};
+  if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) ^ map([](const auto &sl) { return sl.sizeInBytes; })};
   if (const auto p = t.get<Type::Ptr>()) {
     auto [indirection, componentSize] = countIndirectionsAndComponentSize(p->comp, table);
     return {indirection + 1, componentSize};
@@ -146,17 +139,19 @@ bool polyast::isSelfOpaque(const Type::Any &tpe) {
 }
 
 bool polyast::isSelfOpaque(const StructLayout &sl) {
-  return sl.members ^ forall([](auto &m) { return isSelfOpaque(m.name.tpe); });
+  return sl.members ^ forall([](const auto &m) { return isSelfOpaque(m.name.tpe); });
 }
 
 bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::Struct, StructLayout> &table) {
-  return isSelfOpaque(sl) &&
-         sl.members ^ forall([&](auto &m) {
-           return m.name.tpe.template get<Type::Struct>() ^
-                  fold(
-                      [&](auto &s) { return table ^ get_maybe(s) ^ map([&](auto &x) { return isOpaque(x, table); }) ^ get_or_else(false); },
-                      []() { return true; });
-         });
+  return isSelfOpaque(sl)
+         && sl.members ^ forall([&](const auto &m) {
+              return m.name.tpe.template get<Type::Struct>() //
+                     ^ fold(
+                         [&](const auto &s) {
+                           return table ^ get_maybe(s) ^ map([&](const auto &x) { return isOpaque(x, table); }) ^ get_or_else(false);
+                         },
+                         []() { return true; });
+            });
 }
 
 // ====================
@@ -166,12 +161,11 @@ Type::Ptr dsl::Ptr(const Type::Any &t, std::optional<int32_t>, const TypeSpace::
 
 std::vector<Stmt::Any> dsl::whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body) {
   std::vector<Stmt::Any> result = prelude;
-  std::vector<Stmt::Any> loopBody = body;
-  for (const auto &s : prelude) {
-    if (auto v = s.get<Stmt::Var>(); v && v->expr) {
-      loopBody.push_back(Stmt::Mut(Term::Select(v->name, {}, v->name.tpe), *v->expr));
-    } else loopBody.push_back(s);
-  }
+  const auto loopBody = body ^ concat(prelude ^ map([](const auto &s) -> Stmt::Any {
+                                        if (auto v = s.template get<Stmt::Var>(); v && v->expr)
+                                          return Stmt::Mut(Term::Select(v->name, {}, v->name.tpe), *v->expr);
+                                        return s;
+                                      }));
   result.push_back(Stmt::While(cond, loopBody));
   return result;
 }
@@ -179,7 +173,7 @@ Type::Arr dsl::Arr(const Type::Any &t, int32_t length, const TypeSpace::Any &s) 
 Type::Struct dsl::Struct(std::string name, Vector<Type::Any> args) { return Type::Struct(Sym({std::move(name)}), std::move(args)); }
 
 Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
-  auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
+  auto unsupported = [](const auto &t, const auto &v) -> Term::Any {
     throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value " + std::to_string(v));
   };
   return tpe.match_total(                                                        //
@@ -225,7 +219,7 @@ std::function<Term::Any(Type::Any)> dsl::operator""_(long double x) {
 }
 std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, size_t) {
   string name_(name);
-  return [=](auto &&tpe) { return NamedBuilder{Named(name_, tpe)}; };
+  return [=](const auto &tpe) { return NamedBuilder{Named(name_, tpe)}; };
 }
 
 Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Stmt::Var(Named(name, tpe), {}, /*isMutable*/ false); }
@@ -234,13 +228,13 @@ dsl::AssignmentBuilder dsl::var(const string &name) { return AssignmentBuilder{n
 
 Term::Select dsl::Select(const Vector<Named> &init, const Named &last) {
   if (init.empty()) return Term::Select(last, {}, last.tpe);
-  auto steps = init | drop(1) | map([](auto &n) -> PathStep::Any { return PathStep::Field(n.symbol); }) | to_vector();
+  auto steps = init | drop(1) | map([](const auto &n) -> PathStep::Any { return PathStep::Field(n.symbol); }) | to_vector();
   steps.push_back(PathStep::Field(last.symbol));
   return Term::Select(init.front(), steps, last.tpe);
 }
 
 Term::Select dsl::selectFromBuilders(const Vector<NamedBuilder> &init, const Named &last) {
-  return dsl::Select(init ^ map([](auto &nb) { return nb.named; }), last);
+  return dsl::Select(init ^ map([](const auto &nb) { return nb.named; }), last);
 }
 
 Expr::IntrOp dsl::call(const Intr::Any &intr) { return Expr::IntrOp(intr); }
@@ -249,7 +243,7 @@ Expr::SpecOp dsl::call(const Spec::Any &intr) { return Expr::SpecOp(intr); }
 
 std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, const Vector<Arg> &args, const Type::Any &rtn,
                                                          FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode, bool isEntry) {
-  return [=](auto &&stmts) {
+  return [=](const auto &stmts) {
     return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, visibility, fpMode,
                     isEntry, FunctionAffinity::Offload());
   };

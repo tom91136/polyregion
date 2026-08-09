@@ -1,13 +1,9 @@
 #pragma once
 
-#include "aspartame/all.hpp"
-
 #include "ftypes.h"
 #include "polyast.h"
 
 namespace polyregion::polyfc {
-
-using namespace aspartame;
 
 polyast::Expr::Any selectAny(const polyast::Expr::Any &base, const polyast::Named &that);
 

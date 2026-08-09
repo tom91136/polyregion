@@ -30,7 +30,11 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "aspartame/all.hpp"
+
 #include "polyregion/env.h"
+
+using namespace aspartame;
 
 // XXX Template instantiation with a pointer-to-private-member bypasses access checks so the
 // inner friend can call the private setDriverMode.
@@ -79,8 +83,7 @@ int flang_main(int argc, const char **argv) {
   llvm::cl::ExpansionContext expCtx(saver.getAllocator(), llvm::cl::TokenizeGNUCommandLine);
   if (llvm::Error err = expCtx.expandResponseFiles(args)) llvm::errs() << toString(std::move(err)) << '\n';
 
-  auto firstArg = std::find_if(args.begin() + 1, args.end(), [](const char *a) { return a != nullptr; });
-  if (firstArg != args.end()) {
+  if (args | drop(1) | exists([](const auto &a) { return a != nullptr; })) {
     if (llvm::StringRef(args[1]).starts_with("-cc1")) {
       llvm::errs() << "error: unknown integrated tool '" << args[1] << "'. Valid tools include '-fc1'.\n";
       return 1;

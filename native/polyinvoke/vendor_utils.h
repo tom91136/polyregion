@@ -1,18 +1,19 @@
 #pragma once
 
-#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 
+#include "aspartame/all.hpp"
+
 namespace polyregion::invoke {
 
+using namespace aspartame;
+
 inline std::string normaliseVendor(std::string_view vendor) {
-  std::string lower(vendor.size(), {});
-  for (size_t i = 0; i < vendor.size(); ++i)
-    lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(vendor[i])));
-  const auto has = [&](std::string_view s) { return lower.find(s) != std::string::npos; };
+  const auto lower = vendor ^ to_lower();
+  const auto has = [&](std::string_view s) { return lower ^ contains_slice(s); };
   if (has("nvidia")) return "nvidia";
   if (has("intel")) return "intel";
   if (has("advanced micro devices") || has("amd") || has("radv") || has("radeon")) return "amd";

@@ -41,13 +41,13 @@ struct TestCase {
     auto parseNormalised = [&]<typename F>(std::ifstream &s, F f) {
       auto pos = s.tellg();
       std::vector<typename std::invoke_result_t<F, std::string &>::value_type> xs;
-      for (std::string line; std::getline(s, line);) {
-        line = line ^ trim();
+      for (const auto &[rawLine, nextPos] : istream_lines_with_position(s)) {
+        auto line = rawLine ^ trim();
         if (!(line ^ starts_with(directive))) continue;
         line = line ^ replace_all(directive, "");
         if (auto t = f(line)) {
           xs.emplace_back(*t);
-          pos = s.tellg();
+          pos = nextPos;
         } else break;
       }
       s.seekg(pos); // backtrack on failure
@@ -55,23 +55,24 @@ struct TestCase {
     };
 
     auto parseRight = [](const std::string &prefix, const std::string &line) -> std::optional<std::string> {
-      const auto pos = line.find(prefix);
-      return pos != std::string::npos ? std::optional{line.substr(pos + prefix.size())} : std::nullopt;
+      if (const auto pair = line ^ split_once(prefix)) return pair->second;
+      return std::nullopt;
     };
 
     auto parseExpects = [&]() {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<Run::Expect> {
-        return parseRight("requires", line) ^ map([](auto &expect) {
+        return parseRight("requires", line) ^ map([](const auto &expect) {
                  const auto delimIdx = expect.find(':', 0);
-                 auto lineNum = expect ^ starts_with("@") ? std::optional{std::stoi(expect.substr(1, delimIdx))} : std::nullopt;
-                 return Run::Expect{lineNum, expect.substr(delimIdx + 1) ^ trim()};
+                 const auto [location, message] = expect ^ split_at(delimIdx);
+                 auto lineNum = location ^ starts_with("@") ? std::optional{std::stoi(location ^ drop(1))} : std::nullopt;
+                 return Run::Expect{lineNum, message ^ drop(1) ^ trim()};
                });
       });
     };
 
     auto parseRuns = [&]() {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
-        return parseRight("do:", line) ^ map([&](auto &runLine) { return Run{runLine ^ trim(), parseExpects()}; });
+        return parseRight("do:", line) ^ map([&](const auto &runLine) { return Run{runLine ^ trim(), parseExpects()}; });
       });
     };
 
@@ -83,36 +84,36 @@ struct TestCase {
 
     auto parseValue = [&](const std::string &name) -> std::optional<std::string> {
       auto values = parseNormalised(file, [&](const std::string &line) -> std::optional<std::string> {
-        return parseRight(name, line) ^ map([](auto &value) { return value ^ trim(); });
+        return parseRight(name, line) ^ map([](const auto &value) { return value ^ trim(); });
       });
       return values.empty() ? std::nullopt : std::optional{values.front()};
     };
 
     auto parseMatrices = [&]() {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<std::vector<Variable>> {
-        return parseRight("using:", line) ^ map([](auto &matrixLine) {
-                 return matrixLine ^ trim() ^ split(' ') ^ map([](auto &v) {
-                          const auto delimIdx = v.find('=', 0);
-                          const auto vs = v.substr(delimIdx + 1) ^ split(',');
-                          return std::pair{v.substr(0, delimIdx), vs};
+        return parseRight("using:", line) ^ map([](const auto &matrixLine) {
+                 return matrixLine ^ trim() ^ split(' ') ^ map([](const auto &v) {
+                          auto [name, values] = (v ^ split_once('=')).value_or(std::pair{v, std::string{}});
+                          return std::pair{std::move(name), values ^ split(',')};
                         });
                });
       });
     };
 
     return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase> {
-      return parseRight("case:", line) ^ map([&](auto &c) {
-               return TestCase{
-                   .name = c ^ trim(),
-                   .matrices = (parseMatrices()                                                                                           //
-                                | flatten()                                                                                               //
-                                | concat(extraMatrices)                                                                                   //
-                                | map([](auto &name, auto &values) { return values ^ map([&](auto &v) { return std::pair{name, v}; }); }) //
-                                | to_vector())                                                                                            //
-                               ^ cartesian_product(),
-                   .offloadOnly = parseFlag("offload-only"),
-                   .compileFailure = parseValue("compile-fails:"),
-                   .runs = parseRuns()};
+      return parseRight("case:", line) ^ map([&](const auto &c) {
+               return TestCase{.name = c ^ trim(),
+                               .matrices = (parseMatrices()         //
+                                            | flatten()             //
+                                            | concat(extraMatrices) //
+                                            | map([](const auto &name, const auto &values) {
+                                                return values ^ map([&](const auto &v) { return std::pair{name, v}; });
+                                              })           //
+                                            | to_vector()) //
+                                           ^ cartesian_product(),
+                               .offloadOnly = parseFlag("offload-only"),
+                               .compileFailure = parseValue("compile-fails:"),
+                               .runs = parseRuns()};
              });
     });
   }

@@ -13,6 +13,8 @@
 
 namespace polyregion::polytest::cases {
 
+using namespace aspartame;
+
 // Modes:
 //   --list-ids               one id per line on stdout
 //   --run-task <id>          run a single task; exit 0/77/1
@@ -49,12 +51,10 @@ inline int runMain(int argc, char **argv) {
     }
   }
 
-  using namespace aspartame;
-
-  auto all = ::polyregion::polytest::cases::discoverers() ^ flat_map([](auto &d) { return d(); });
+  auto all = ::polyregion::polytest::cases::discoverers() ^ flat_map([](const auto &d) { return d(); });
 
   if (mode == "list") {
-    all | for_each([](auto &t) {
+    all | for_each([](const auto &t) {
       if (t.labels.empty()) fmt::print("{}\n", t.id);
       else fmt::print("{}\t{}\n", t.id, t.labels);
     });
@@ -62,7 +62,7 @@ inline int runMain(int argc, char **argv) {
   }
 
   if (mode == "emit") {
-    const auto tasks = all ^ map([](auto &t) { return CtestEntry{std::string(t.id), std::string(t.labels), {}}; });
+    const auto tasks = all ^ map([](const auto &t) { return CtestEntry{std::string(t.id), std::string(t.labels), {}}; });
     emitCtestFragment(emitFile, emitPrefix, emitBinary, emitWorkdir, {}, tasks);
     if (!emitDistFile.empty())
       emitCtestFragment(emitDistFile, emitPrefix, emitDistBinary, {}, emitDistSubdir.empty() ? std::string{} : distEnv(emitDistSubdir),
@@ -93,7 +93,7 @@ inline int runMain(int argc, char **argv) {
   };
 
   if (mode == "run") {
-    if (auto found = all ^ find([&](auto &t) { return t.id == target; })) {
+    if (auto found = all ^ find([&](const auto &t) { return t.id == target; })) {
       const int rc = runOne(*found);
       if (rc == 77) return recordSkip(std::string(found->id), "no compatible device/feature"), 0;
       return rc;
@@ -102,7 +102,7 @@ inline int runMain(int argc, char **argv) {
     return 2;
   }
 
-  return all ^ fold_left(0, [&](const int worst, auto &t) {
+  return all ^ fold_left(0, [&](const int worst, const auto &t) {
            const int rc = runOne(t);
            return worst == 0 && rc != 0 && rc != 77 ? rc : worst;
          });

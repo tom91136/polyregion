@@ -77,13 +77,13 @@ class SynchronisedMemAllocation {
   }
 
   auto queryLocal(const void *p, const bool allowPastEnd = false) {
-    return offsetQuery(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; }, allowPastEnd);
+    return offsetQuery(localToRemoteAlloc, p, [](const auto &x) { return x.remote.sizeInBytes; }, allowPastEnd);
   }
   auto queryLocalIt(const void *p, const bool allowPastEnd = false) {
-    return offsetQueryIt(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; }, allowPastEnd);
+    return offsetQueryIt(localToRemoteAlloc, p, [](const auto &x) { return x.remote.sizeInBytes; }, allowPastEnd);
   }
   auto queryRemote(const void *p, const bool allowPastEnd = false) {
-    return offsetQuery(remoteToLocalPtr, p, [](auto &x) { return x.sizeInBytes; }, allowPastEnd);
+    return offsetQuery(remoteToLocalPtr, p, [](const auto &x) { return x.sizeInBytes; }, allowPastEnd);
   }
 
   uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s, bool hostReadOnly = false) {
@@ -632,7 +632,8 @@ public:
     genArenaSeenRoot = false;
     if (genArenaPersist && genArenaCaptureCap) {
       // keep resident leaves; drop only the transient root rec (off 0)
-      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](auto &r) { return r.off == 0; }), genArenaRecs.end());
+      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](const auto &r) { return r.off == 0; }),
+                         genArenaRecs.end());
       return;
     }
     genArenaStaging.clear();

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <functional>
+#include <optional>
 // XXX gcc-10 (Ubuntu 20.04) ships source_location as experimental only
 #if __has_include(<source_location>)
   #include <source_location>
@@ -16,9 +17,12 @@ using source_location = std::experimental::source_location;
 #include <string_view>
 #include <vector>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 
 namespace polyregion::polytest::cases {
+
+using namespace aspartame;
 
 struct Task {
   std::string id;
@@ -99,13 +103,11 @@ template <typename T> bool approxEqual(T a, T b, T relTol = T{1e-5}, T absTol = 
 }
 
 inline std::string sanitiseId(std::string_view s) {
-  std::string out;
-  out.reserve(s.size());
-  for (char c : s) {
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-') out.push_back(c);
-    else if (c == ' ' || c == '\t' || c == '/' || c == '\\') out.push_back('_');
-  }
-  return out;
+  return s ^ collect_to<std::basic_string>([](char c) -> std::optional<char> {
+           if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-') return c;
+           if (c == ' ' || c == '\t' || c == '/' || c == '\\') return '_';
+           return std::nullopt;
+         });
 }
 
 } // namespace polyregion::polytest::cases

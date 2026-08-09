@@ -4,6 +4,7 @@
 #include <mutex>
 #include <utility>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -21,6 +22,7 @@
 #include "libm.h"
 
 using namespace polyregion;
+using namespace aspartame;
 
 template <typename F, typename It> constexpr static void insertIntoBufferAt(invoke::ArgBuffer &buffer, It begin, It end, F f) {
   for (auto it = begin; it != end; ++it) {
@@ -44,7 +46,7 @@ void invoke::ArgBuffer::append(const ArgBuffer &that) {
   types.insert(types.end(), that.types.begin(), that.types.end());
 }
 void invoke::ArgBuffer::append(const std::initializer_list<TypedPointer> args) {
-  insertIntoBufferAt(*this, args.begin(), args.end(), [](auto &it) { return it.end(); });
+  insertIntoBufferAt(*this, args.begin(), args.end(), [](const auto &it) { return it.end(); });
 }
 void invoke::ArgBuffer::prepend(Type tpe, void *ptr) { prepend({{tpe, ptr}}); }
 void invoke::ArgBuffer::prepend(const ArgBuffer &that) {
@@ -53,7 +55,7 @@ void invoke::ArgBuffer::prepend(const ArgBuffer &that) {
 }
 void invoke::ArgBuffer::prepend(std::initializer_list<TypedPointer> args) {
   // begin always inserts to the front, so we traverse it backwards to keep the same order
-  insertIntoBufferAt(*this, rbegin(args), rend(args), [](auto &it) { return it.begin(); });
+  insertIntoBufferAt(*this, rbegin(args), rend(args), [](const auto &it) { return it.begin(); });
 }
 
 void invoke::init() { libm::exportAll(); }
@@ -62,12 +64,7 @@ std::variant<std::string, std::unique_ptr<invoke::Platform>> invoke::Platform::o
   using namespace polyregion::invoke;
   if (const char *raw = std::getenv(polyregion::env::PolyinvokeDisableBackends); raw && *raw) {
     const auto needle = magic_enum::enum_name(b);
-    std::string_view s(raw);
-    for (size_t i = 0, j = 0; i <= s.size(); ++i)
-      if (i == s.size() || s[i] == ',') {
-        if (i > j && s.substr(j, i - j) == needle) return std::string("disabled by POLYINVOKE_DISABLE_BACKENDS");
-        j = i + 1;
-      }
+    if (std::string_view(raw) ^ split(',') ^ contains(needle)) return std::string("disabled by POLYINVOKE_DISABLE_BACKENDS");
   }
   switch (b) {
     case Backend::CUDA: return cuda::CudaPlatform::create();

@@ -4,6 +4,7 @@ AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: All
 IndentCaseLabels: true
 ColumnLimit: 140
+BreakBeforeBinaryOperators: NonAssignment
 CompactNamespaces: true
 FixNamespaceComments: true
 IndentPPDirectives: BeforeHash

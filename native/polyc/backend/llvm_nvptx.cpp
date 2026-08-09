@@ -9,6 +9,7 @@
 #include "aspartame/all.hpp"
 #include "aspartame/ext/llvm.hpp"
 
+using namespace aspartame;
 using namespace polyregion::backend::details;
 
 void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
@@ -120,10 +121,9 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
     return sharedGlobal;
   };
 
-  using namespace aspartame;
-  auto kernels = M                                                                                                              //
-                 | filter([](auto &fn) { return !fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel; }) //
-                 | map([](auto &fn) { return const_cast<llvm::Function *>(&fn); })                                              //
+  auto kernels = M                                                                                                                    //
+                 | filter([](const auto &fn) { return !fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel; }) //
+                 | map([](const auto &fn) { return const_cast<llvm::Function *>(&fn); })                                              //
                  | to_vector();
 
   for (auto *fn : kernels) {

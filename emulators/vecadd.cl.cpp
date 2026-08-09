@@ -73,9 +73,9 @@ std::string spirv_from_kernel() {
   }
   // clang's native SPIR-V target, else the translator (llvm-spirv) for clang builds without it
   auto sys = [](const std::string &c) { return std::system(c.c_str()) == 0; };
-  const bool ok = sys("clang -x cl -cl-std=CL1.2 -target spirv64 -c \"" + cl + "\" -o \"" + spv + "\" 2>" NULDEV) ||
-                  sys("clang -x cl -cl-std=CL1.2 -emit-llvm -target spir64 -c \"" + cl + "\" -o \"" + bc +
-                      "\" 2>" NULDEV " && llvm-spirv \"" + bc + "\" -o \"" + spv + "\" 2>" NULDEV);
+  const bool ok = sys("clang -x cl -cl-std=CL1.2 -target spirv64 -c \"" + cl + "\" -o \"" + spv + "\" 2>" NULDEV)
+                  || sys("clang -x cl -cl-std=CL1.2 -emit-llvm -target spir64 -c \"" + cl + "\" -o \"" + bc
+                         + "\" 2>" NULDEV " && llvm-spirv \"" + bc + "\" -o \"" + spv + "\" 2>" NULDEV);
   if (!ok) return {};
   std::ifstream f{spv, std::ios::binary};
   return {std::istreambuf_iterator<char>{f}, std::istreambuf_iterator<char>{}};

@@ -29,7 +29,7 @@ target_sources(polycommon-generated
         generated/polyregion/conventions.h
         generated/polyregion/enums.h
 )
-target_link_libraries(polycommon INTERFACE polycommon-generated)
+target_link_libraries(polycommon INTERFACE Aspartame::Aspartame polycommon-generated)
 
 
 add_executable(polycommon-tests test/arith.cpp)

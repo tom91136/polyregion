@@ -58,7 +58,7 @@ String findBundledPlugin() {
     jsBeside = joinPath(dir, {JsBasename});
     jsLib = joinPath(dir, {"../lib", JsBasename});
   }
-  const String candidates[] = {
+  const std::array candidates = {
       dsoBeside,
       dsoLib,
 #ifdef POLYPASS_DSO_DEV_PATH
@@ -74,9 +74,7 @@ String findBundledPlugin() {
       String(),
 #endif
   };
-  for (const auto &c : candidates)
-    if (!c.empty() && fs::exists(c)) return resolveSymlink(c);
-  return {};
+  return candidates | find([&](const auto &c) { return !c.empty() && fs::exists(c); }) | map(resolveSymlink) | get_or_else(String{});
 }
 
 } // namespace
@@ -97,21 +95,19 @@ Vector<PluginRef> resolvePlugins(String &error) {
       error = std::string(abi::EnvPlugins) + " set but empty after splitting";
       return {};
     }
-    Vector<PluginRef> out;
-    out.reserve(paths.size());
-    for (const auto &path : paths) {
-      if (!fs::exists(path)) {
-        error = std::string(abi::EnvPlugins) + ": missing file " + path;
-        return {};
-      }
-      const auto kind = pluginKindFor(path);
-      if (!kind) {
-        error = std::string(abi::EnvPlugins) + ": unrecognised extension " + path;
-        return {};
-      }
-      out.push_back({resolveSymlink(path), *kind});
-    }
-    return out;
+    const auto out = paths ^ traverse([&](const auto &path) -> std::optional<PluginRef> {
+                       if (!fs::exists(path)) {
+                         error = std::string(abi::EnvPlugins) + ": missing file " + path;
+                         return std::nullopt;
+                       }
+                       const auto kind = pluginKindFor(path);
+                       if (!kind) {
+                         error = std::string(abi::EnvPlugins) + ": unrecognised extension " + path;
+                         return std::nullopt;
+                       }
+                       return PluginRef{resolveSymlink(path), *kind};
+                     });
+    return out ^ get_or_else(Vector<PluginRef>{});
   }
 
   const auto bundled = findBundledPlugin();

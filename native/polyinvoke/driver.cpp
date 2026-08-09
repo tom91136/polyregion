@@ -244,7 +244,7 @@ void run() {
 
     for (auto &d : devices) {
 
-      auto features = d->features() | mk_string(",", [](auto &&s) { return s; });
+      auto features = d->features() | mk_string(",", [](const auto &s) { return s; });
 
       fmt::print("[Device {}]name: `{}`; features: {}\n", d->id(), d->name(), features);
 

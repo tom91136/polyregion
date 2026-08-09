@@ -64,8 +64,9 @@ void runFma(Context &ctx, Backend backend, Platform &, Device &device, const Ima
         waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
         const auto expected = a * b + c;
         // Subnormal-underflow corner: min*eps + 0 may flush to 0 on some HW; accept either.
-        const bool acceptable = (c == 0.f && ((a == std::numeric_limits<float>::min() && b == std::numeric_limits<float>::epsilon()) ||
-                                              (b == std::numeric_limits<float>::min() && a == std::numeric_limits<float>::epsilon())))
+        const bool acceptable = (c == 0.f
+                                 && ((a == std::numeric_limits<float>::min() && b == std::numeric_limits<float>::epsilon())
+                                     || (b == std::numeric_limits<float>::min() && a == std::numeric_limits<float>::epsilon())))
                                     ? (approxEqual(out, expected) || approxEqual(out, 0.f))
                                     : approxEqual(out, expected);
         POLYTEST_CHECK_S(ctx, acceptable, "a={} b={} c={} actual={} expected={}", a, b, c, out, expected);

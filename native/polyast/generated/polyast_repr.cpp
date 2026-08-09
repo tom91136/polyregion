@@ -598,9 +598,9 @@ std::string repr(const StructLayout &l) {
   return fmt::format("StructLayout[{}, sizeInBytes={}, align={}]{}\n{}\n{}", l.name, l.sizeInBytes, l.alignment, "{"s,
                      (l.members | map([&](const StructLayoutMember &m) {
                         return fmt::format("{}: {} (+{},{})", m.name.symbol, repr(m.name.tpe), m.offsetInBytes, m.sizeInBytes);
-                      }) |
-                      mk_string("\n"s)) ^
-                         indent(2),
+                      })
+                      | mk_string("\n"s))
+                         ^ indent(2),
                      "}"s);
 }
 

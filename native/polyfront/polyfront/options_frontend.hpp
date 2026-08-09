@@ -81,20 +81,25 @@ struct CliArgs {
   explicit CliArgs(const std::vector<const char *> &data) : data(data) {}
 
   bool has(const std::string &flag) const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() |
-           exists([&](auto &chars) { return chars == flag; });
+    return data                                                                     //
+           | zip_with_index()                                                       //
+           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
+           | keys()                                                                 //
+           | exists([&](const auto &chars) { return chars == flag; });
   }
 
   bool has(const std::string &flag, size_t pos) const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) |
-           exists([&](auto &chars, auto i) { return chars == flag && i == pos; });
+    return data                                                                     //
+           | zip_with_index()                                                       //
+           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
+           | exists([&](const auto &chars, const auto &i) { return chars == flag && i == pos; });
   }
 
   std::optional<std::string> get(const std::string &flag) const {
-    return data                                                        //
-           | zip_with_index()                                          //
-           | filter([&](auto v, auto i) { return !deleted.count(i); }) //
-           | collect_first([&](auto &chars, auto i) -> std::optional<std::string> {
+    return data                                                                     //
+           | zip_with_index()                                                       //
+           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
+           | collect_first([&](const auto &chars, const auto &i) -> std::optional<std::string> {
                if (const std::string arg = chars; arg == flag) {
                  if (i + 1 < data.size()) return data[i + 1];                                // -foo :: bar :: Nil
                  else return {};                                                             // -foo :: Nil
@@ -105,7 +110,7 @@ struct CliArgs {
 
   bool popBool(const std::string &flag) {
     const auto oldSize = deleted.size();
-    data | zip_with_index<size_t>() | for_each([&](auto &x, auto i) {
+    data | zip_with_index<size_t>() | for_each([&](const auto &x, const auto &i) {
       if (!deleted.count(i) && x == flag) deleted.insert(i);
     });
     return oldSize != deleted.size();
@@ -128,7 +133,11 @@ struct CliArgs {
   }
 
   std::vector<const char *> remaining() const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() | to_vector();
+    return data                                                                     //
+           | zip_with_index()                                                       //
+           | filter([&](const auto &, const auto &i) { return !deleted.count(i); }) //
+           | keys()                                                                 //
+           | to_vector();
   }
 };
 
@@ -174,7 +183,7 @@ struct Driver {
                fmt::format("-fplugin={}", pluginPath),
                fmt::format("-fpass-plugin={}", pluginPath),
            } //
-           ^ concat(args ^ map([](auto &arg) { return fmt::format("-mllvm={}", arg); }));
+           ^ concat(args ^ map([](const auto &arg) { return fmt::format("-mllvm={}", arg); }));
   }
 
   static std::vector<std::string> lldPassPluginFlags(const std::string &pluginPath, const std::vector<std::string> &args = {}) {
@@ -183,7 +192,7 @@ struct Driver {
                fmt::format("-Wl,--load-pass-plugin,{}", pluginPath),
                fmt::format("-Wl,-mllvm,-load={}", pluginPath),
            } //
-           ^ concat(args ^ map([](auto &arg) { return fmt::format("-Wl,-mllvm,{}", arg); }));
+           ^ concat(args ^ map([](const auto &arg) { return fmt::format("-Wl,-mllvm,{}", arg); }));
   }
 };
 
@@ -313,14 +322,14 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
     case StdParOptions::LinkKind::Static: {
       out ^= concat(anchor());
 #if defined(_WIN32)
-      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} |
-                    flat_map([](auto s) { return std::vector<std::string>{"-Xlinker", fmt::format("/EXPORT:{}", s)}; }));
+      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} //
+                    ^ flat_map([](const auto &s) { return std::vector<std::string>{"-Xlinker", fmt::format("/EXPORT:{}", s)}; }));
 #elif defined(__APPLE__)
-      out ^= concat(std::vector{"_polyc_jit_compile", "_polyc_jit_last_error", "_polyc_jit_free"} |
-                    map([](auto s) { return fmt::format("-Wl,-exported_symbol,{}", s); }));
+      out ^= concat(std::vector{"_polyc_jit_compile", "_polyc_jit_last_error", "_polyc_jit_free"} //
+                    ^ map([](const auto &s) { return fmt::format("-Wl,-exported_symbol,{}", s); }));
 #else
-      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} |
-                    map([](auto s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
+      out ^= concat(std::vector{"polyc_jit_compile", "polyc_jit_last_error", "polyc_jit_free"} //
+                    ^ map([](const auto &s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
 #endif
       out ^= append(joinPath(libsPath, staticLibraryName("polyc-jit-static")));
 #if defined(__APPLE__)
@@ -385,14 +394,12 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
 }
 
 inline std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading, const char separator) {
-  std::vector<std::string> xs;
   if (auto line = std::getenv(env); line) {
-    for (auto &path : line ^ split(separator)) {
-      if (leading) xs.push_back(*leading);
-      xs.push_back(path);
-    }
+    return std::string(line) ^ split(separator) ^ flat_map([&](const auto &path) {
+             return leading ? std::vector<std::string>{*leading, path} : std::vector<std::string>{path};
+           });
   }
-  return xs;
+  return {};
 }
 
 inline std::string dynamicLibSuffix() {

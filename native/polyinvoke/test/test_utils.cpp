@@ -50,9 +50,10 @@ ImageGroup findTestImage(const ImageGroups &archToImage, const invoke::Backend &
     return out;
   }
 
-  if (auto direct = sortedFeatures ^ collect_first([&](auto &feature) {
-                      return archToImage ^ get_maybe(feature) //
-                             ^ map([&](auto &x) { return ImageGroup{{feature, std::string(x.begin(), x.end())}}; });
+  if (auto direct = sortedFeatures ^ collect_first([&](const auto &feature) {
+                      return archToImage          //
+                             ^ get_maybe(feature) //
+                             ^ map([&](const auto &x) { return ImageGroup{{feature, std::string(x.begin(), x.end())}}; });
                     }))
     return *direct;
 
@@ -76,7 +77,8 @@ ImageGroup findTestImage(const ImageGroups &archToImage, const invoke::Backend &
 #endif
     std::vector<std::string> required;
     llvm_shared::collectCPUFeatures(arch, archType, required);
-    if (required ^ forall([&](auto &r) { return sortedFeatures ^ contains(r); })) return {{arch, std::string(image.begin(), image.end())}};
+    if (required ^ forall([&](const auto &r) { return sortedFeatures ^ contains(r); }))
+      return {{arch, std::string(image.begin(), image.end())}};
   }
 
   if (const auto x = archToImage ^ get_maybe(std::string{})) return {{"", std::string(x->begin(), x->end())}};
@@ -152,11 +154,11 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
     std::unique_ptr<invoke::Device> device;
     for (auto &d : platform->enumerate()) {
       const auto features = d->features();
-      const auto hasFeature = [&](const std::string_view f) { return features ^ exists([&](auto &x) { return x == f; }); };
+      const auto hasFeature = [&](const std::string_view f) { return features ^ exists([&](const auto &x) { return x == f; }); };
       if (!(requiredFeatures ^ forall(hasFeature))) continue;
       // arch matches a device feature (sm_35, gfx1036, fp64, ...) or a case-insensitive substring of the device name
-      if (archAsFeature && !arch.empty() && arch != "*" && !hasFeature(arch) &&
-          !((d->name() ^ to_lower()) ^ contains_slice(std::string(arch) ^ to_lower())))
+      if (archAsFeature && !arch.empty() && arch != "*" && !hasFeature(arch)
+          && !((d->name() ^ to_lower()) ^ contains_slice(std::string(arch) ^ to_lower())))
         continue;
       if (skip(backend, *d)) continue;
       device = std::move(d);
@@ -177,9 +179,9 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
 
 std::vector<Task> discoverMatrix(const std::vector<Suite> &suites) {
   const auto targets = polytest::resolveTestTargets(POLYREGION_TEST_PROFILE_DIR, env::PolyinvokeTestTargets);
-  return suites ^ flat_map([&](const Suite &s) {
-           return s.backends ^ flat_map([&](const invoke::Backend b) {
-                    return targets ^ collect([&](auto &t) -> std::optional<Task> {
+  return suites ^ flat_map([&](const auto &s) {
+           return s.backends ^ flat_map([&](const auto &b) {
+                    return targets ^ collect([&](const auto &t) -> std::optional<Task> {
                              if (t.spec.runtime != b) return {};
                              const std::string arch = t.arch;
                              const std::vector<std::string> required(t.spec.requiredDeviceFeatures.begin(),

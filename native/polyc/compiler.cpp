@@ -182,8 +182,7 @@ PluginRegistry &sharedPlugins() {
 }
 
 std::string bareName(const std::string &step) {
-  const auto paren = step.find('(');
-  return paren == std::string::npos ? step : trim(step.substr(0, paren));
+  return std::string(std::string_view(step) ^ take_while([](char c) { return c != '('; }) ^ trim());
 }
 
 } // namespace
@@ -192,7 +191,7 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
   const std::string_view spec = rawSpec.empty() ? std::string_view{compiler::DefaultPipelineSpec} : rawSpec;
   const auto rootEpoch = compiler::nowMs();
   const auto rootStart = compiler::nowMono();
-  auto timed = [](auto &&name, auto &&data, auto &&f) {
+  auto timed = [](const auto &name, const auto &data, const auto &f) {
     const auto epoch = compiler::nowMs();
     const auto start = compiler::nowMono();
     auto out = f();
@@ -211,17 +210,19 @@ static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::s
     return it->second;
   };
 
-  const auto stepsWithOwner = (std::string(spec) ^ split(';'))                                  //
-                              | map([](auto &s) { return trim(s); })                            //
-                              | filter([](auto &s) { return !s.empty(); })                      //
-                              | map([&](auto &step) { return std::pair{ownerOf(step), step}; }) //
+  const auto stepsWithOwner = std::string(spec)                                                       //
+                                  ^ split(';')                                                        //
+                              | map([](const auto &s) { return trim(s); })                            //
+                              | filter([](const auto &s) { return !s.empty(); })                      //
+                              | map([&](const auto &step) { return std::pair{ownerOf(step), step}; }) //
                               | to_vector();
 
-  std::vector<std::pair<size_t, std::vector<std::string>>> groups;
-  for (const auto &[owner, step] : stepsWithOwner) {
-    if (groups.empty() || groups.back().first != owner) groups.emplace_back(owner, std::vector<std::string>{});
-    groups.back().second.emplace_back(step);
-  }
+  const auto groups = stepsWithOwner                                                              //
+                      | chunk_by([](const auto &a, const auto &b) { return a.first == b.first; }) //
+                      | map([](const auto &group) {                                               //
+                          return std::pair{group.front().first, group ^ map([](const auto &, const auto &step) { return step; })};
+                        }) //
+                      | to_vector();
   if (groups.empty()) throw std::logic_error(fmt::format("PolyPass: empty pipeline spec '{}'", spec));
 
   std::vector<polyast::CompileEvent> items;
@@ -292,15 +293,16 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   }
 
   if (options.hostMirroring) {
-    auto hostFns = (std::vector<polyast::Function>{effective.entry} ^ concat(effective.functions)) //
-                   ^ filter([](auto &f) { return f.affinity.template is<polyast::FunctionAffinity::Host>(); });
+    auto hostFns = std::vector<polyast::Function>{effective.entry} //
+                   ^ concat(effective.functions)                   //
+                   ^ filter([](const auto &f) { return f.affinity.template is<polyast::FunctionAffinity::Host>(); });
     if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions", {}};
     effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
                                  effective.phase, effective.metadata);
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
-  c.entryArgs = effective.entry.args ^ map([](auto &a) { return a.named; });
+  c.entryArgs = effective.entry.args ^ map([](const auto &a) { return a.named; });
   c.events ^= concat(preEvents);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;

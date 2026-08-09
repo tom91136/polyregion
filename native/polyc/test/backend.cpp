@@ -6,6 +6,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 
+#include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 #include "fmt/format.h"
 
@@ -14,6 +15,7 @@
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
 
+using namespace aspartame;
 using namespace polyregion::polyast;
 using namespace polyregion::compiletime;
 using namespace Stmt;
@@ -28,9 +30,9 @@ static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any r
 }
 
 template <typename C> static const std::string &eventDataOf(const C &c, const std::string &name) {
-  const auto event = std::find_if(c.events.begin(), c.events.end(), [&](auto &e) { return e.name == name; });
-  REQUIRE(event != c.events.end());
-  return event->data;
+  const auto event = c.events ^ find_cref([&](const auto &e) { return e.name == name; });
+  REQUIRE(event);
+  return event->get().data;
 }
 
 template <typename C> static const std::string &llvmIrOf(const C &c) { return eventDataOf(c, "ast_to_llvm_ir"); }
@@ -142,7 +144,7 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
   INFO(repr(c));
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
-  CHECK(std::find(c.features.begin(), c.features.end(), "fp16") == c.features.end());
+  CHECK(!(c.features ^ contains("fp16")));
 }
 
 TEST_CASE("by-value array initialisation copies contents on by-pointer targets", "[backend]") {
@@ -172,9 +174,7 @@ TEST_CASE("by-value array initialisation copies contents on by-pointer targets",
   INFO(repr(c));
   CHECK(c.messages == "");
 
-  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
-  REQUIRE(event != c.events.end());
-  CHECK(event->data.find("llvm.memcpy") != std::string::npos);
+  CHECK(llvmIrOf(c).find("llvm.memcpy") != std::string::npos);
 }
 
 TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer space", "[backend]") {
@@ -320,9 +320,7 @@ TEST_CASE("integer comparisons follow operand signedness", "[backend]") {
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
 
-  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
-  REQUIRE(event != c.events.end());
-  const auto &ir = event->data;
+  const auto &ir = llvmIrOf(c);
   for (const auto *predicate : {"icmp ult", "icmp ule", "icmp ugt", "icmp uge", //
                                 "icmp slt", "icmp sle", "icmp sgt", "icmp sge"}) {
     INFO(predicate);
@@ -360,9 +358,7 @@ TEST_CASE("integer division, remainder, min, max and shift follow operand signed
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
 
-  const auto event = std::find_if(c.events.begin(), c.events.end(), [](auto &e) { return e.name == "ast_to_llvm_ir"; });
-  REQUIRE(event != c.events.end());
-  const auto &ir = event->data;
+  const auto &ir = llvmIrOf(c);
   for (const auto *op : {"udiv i32", "urem i32", "icmp ult", "lshr i32", //
                          "sdiv i32", "srem i32", "icmp slt", "ashr i32"}) {
     INFO(op);

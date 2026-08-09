@@ -36,14 +36,14 @@ using namespace polyast;
 using namespace std::string_literals;
 
 static bool isLocalArr(const Type::Any &t) {
-  return t.template get<Type::Arr>() ^ exists([](auto &a) { return a.space.template is<TypeSpace::Local>(); });
+  return t.template get<Type::Arr>() ^ exists([](const auto &a) { return a.space.template is<TypeSpace::Local>(); });
 }
 
 template <typename T> static bool usesTpe(const std::vector<Function> &fns, const std::vector<StructDef> &defs) {
-  return (fns ^ exists([](const Function &f) { return !f.template collect_all<T>().empty(); })) ||
-         (defs ^ exists([](const StructDef &d) {
-            return d.members ^ exists([](const Named &m) { return !m.tpe.template collect_all<T>().empty(); });
-          }));
+  return (fns ^ exists([](const auto &f) { return !f.template collect_all<T>().empty(); }))
+         || (defs ^ exists([](const auto &d) {
+               return d.members ^ exists([](const auto &m) { return !m.tpe.template collect_all<T>().empty(); });
+             }));
 }
 
 struct CLAddressSpaceTracePass {
@@ -68,10 +68,11 @@ struct CLAddressSpaceTracePass {
       const auto rebound = scope.vars ^ get_or_default(sel->root.symbol, sel->root);
       // a final pointer field keeps its own space; a value subobject takes the root's space (local for a
       // declared local array, private otherwise)
-      const auto rootSpace = rebound.tpe.template get<Type::Ptr>() ^ map([](auto &p) { return p.space; }) ^
-                             get_or_else(isLocalArr(rebound.tpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
-      const auto space = (sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>()) ^
-                         map([](auto &p) { return p.space; }) ^ //
+      const auto rootSpace = rebound.tpe.template get<Type::Ptr>()        //
+                             ^ map([](const auto &p) { return p.space; }) //
+                             ^ get_or_else(isLocalArr(rebound.tpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
+      const auto space = (sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>()) //
+                         ^ map([](const auto &p) { return p.space; }) ^                                         //
                          get_or_else(rootSpace);
       return SpacedTerm{Term::Select(rebound, sel->steps, sel->tpe), space};
     }
@@ -97,7 +98,9 @@ struct CLAddressSpaceTracePass {
           if (auto asPtr = x.as.template get<Type::Ptr>(); asPtr && !x.from.tpe().template is<Type::Ptr>())
             return {Expr::Cast(st.actual, x.as), asPtr->space};
           // re-space the cast target so OpenCL doesn't see a global<-private mismatch
-          auto as = x.as.template get<Type::Ptr>() ^ map([&](auto &p) { return Type::Ptr(p.comp, st.space).widen(); }) ^ get_or_else(x.as);
+          auto as = x.as.template get<Type::Ptr>()                                            //
+                    ^ map([&](const auto &p) { return Type::Ptr(p.comp, st.space).widen(); }) //
+                    ^ get_or_else(x.as);
           return {Expr::Cast(st.actual, as), st.space};
         },
         [&](const Expr::Invoke &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },
@@ -118,10 +121,10 @@ struct CLAddressSpaceTracePass {
 
   static Function mapFn(const Function &fn) {
 
-    StackScope scope{.vars = fn.args                                                                  //
-                             | flat_map([&](auto &arg) { return arg.template collect_all<Named>(); }) //
-                             | filter([](auto &n) { return n.tpe.template is<Type::Ptr>(); })         //
-                             | map([](auto &n) { return std::pair(n.symbol, n); })                    //
+    StackScope scope{.vars = fn.args                                                                        //
+                             | flat_map([&](const auto &arg) { return arg.template collect_all<Named>(); }) //
+                             | filter([](const auto &n) { return n.tpe.template is<Type::Ptr>(); })         //
+                             | map([](const auto &n) { return std::pair(n.symbol, n); })                    //
                              | to<Map>()};
 
     // a phi pointer var (declared with no initialiser, assigned in branches) keeps its declared space;
@@ -145,7 +148,7 @@ struct CLAddressSpaceTracePass {
           for (auto &s : stmts) {
             if (auto var = s.template get<Stmt::Var>()) {
               auto name = var->name;
-              if (auto expr = var->expr ^ map([&](auto &e) { return mapExpr(e, scan); })) {
+              if (auto expr = var->expr ^ map([&](const auto &e) { return mapExpr(e, scan); })) {
                 if (auto ptr = expr->actual.tpe().template get<Type::Ptr>())
                   name = Named(var->name.symbol, Type::Ptr(ptr->comp, expr->space));
               } else if (auto ptr = var->name.tpe.template get<Type::Ptr>()) {
@@ -184,10 +187,10 @@ struct CLAddressSpaceTracePass {
       }
     }
 
-    auto body = fn.body ^ map([&](auto &s) {
+    auto body = fn.body ^ map([&](const auto &s) {
                   return s
-                      .template modify_all<Stmt::Var>([&](auto &var) { //
-                        if (auto expr = var.expr ^ map([&](auto &e) { return mapExpr(e, scope); })) {
+                      .template modify_all<Stmt::Var>([&](const auto &var) { //
+                        if (auto expr = var.expr ^ map([&](const auto &e) { return mapExpr(e, scope); })) {
                           auto name = var.name;
                           if (auto ptr = expr->actual.tpe().template get<Type::Ptr>()) {
                             name = Named(var.name.symbol, Type::Ptr(ptr->comp, expr->space));
@@ -201,14 +204,14 @@ struct CLAddressSpaceTracePass {
                         scope.vars.emplace(name.symbol, name);
                         return Stmt::Var(name, {}, var.isMutable);
                       })
-                      .template modify_all<Expr::Any>([&](auto &e) { return mapExpr(e, scope).actual; }); //
+                      .template modify_all<Expr::Any>([&](const auto &e) { return mapExpr(e, scope).actual; }); //
                 });
 
-    const auto tracedRtnTpes = body                                                                        //
-                               | flat_map([&](auto &s) { return s.template collect_all<Stmt::Return>(); }) //
-                               | map([&](auto &r) { return r.value.tpe(); })                               //
-                               | distinct()                                                                //
-                               | to_vector();                                                              //
+    const auto tracedRtnTpes = body                                                                              //
+                               | flat_map([&](const auto &s) { return s.template collect_all<Stmt::Return>(); }) //
+                               | map([&](const auto &r) { return r.value.tpe(); })                               //
+                               | distinct()                                                                      //
+                               | to_vector();
     return Function(fn.name, fn.tpeVars, fn.receiver, fn.args, fn.moduleCaptures, fn.termCaptures, tracedRtnTpes[0], body, fn.visibility,
                     fn.fpMode, fn.isEntry, fn.affinity);
   }
@@ -217,7 +220,7 @@ struct CLAddressSpaceTracePass {
     // address-space inference must run on the ENTRY: OpenCL 1.2 rejects a global* initialised from a private*
     const auto remap = [](const Function &f) {
       const auto kernel = f.isEntry;
-      auto remapSpace = [&](auto &s) {
+      auto remapSpace = [&](const auto &s) {
         return s.match_total(
             [&](const TypeSpace::Global &) { return kernel ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); }, //
             [&](const TypeSpace::Constant &) { return kernel ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); },
@@ -225,49 +228,50 @@ struct CLAddressSpaceTracePass {
             [&](const TypeSpace::Private &x) { return x.widen(); });
       };
       return CLAddressSpaceTracePass::mapFn(
-          f.withArgs(f.args ^ map([&](auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
+          f.withArgs(f.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
     };
     auto entry = remap(p.entry);
-    auto fns = p.functions ^ filter([](const Function &f) { return !f.isEntry; }) ^ map(remap);
+    auto fns = p.functions | filter([](const auto &f) { return !f.isEntry; }) | map(remap) | to_vector();
 
     auto sigOf = [](const Expr::Invoke &inv) {
-      return Signature(calleeName(inv), /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](auto &e) { return e.tpe(); }),
+      return Signature(calleeName(inv), /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](const auto &e) { return e.tpe(); }),
                        /*moduleCaptures*/ {}, /*termCaptures*/ {}, inv.rtn);
     };
 
     Map<Signature, std::shared_ptr<Function>> functionTable;
-    fns | for_each([&](auto &f) {
-      const Signature sig(f.name, /*tpeVars*/ {}, /*receiver*/ {}, f.args ^ map([](auto &e) { return e.named.tpe; }),
+    fns | for_each([&](const auto &f) {
+      const Signature sig(f.name, /*tpeVars*/ {}, /*receiver*/ {}, f.args ^ map([](const auto &e) { return e.named.tpe; }),
                           /*moduleCaptures*/ {}, /*termCaptures*/ {}, f.rtn);
       functionTable[sig] = std::make_shared<Function>(f);
     });
 
     while (true) {
-      const auto specialised =
-          functionTable                                                                                //
-          | flat_map([&](auto, auto &f) { return f->template collect_all<Expr::Invoke>(); })           //
-          | collect([&](auto &inv) -> std::optional<std::pair<Signature, std::shared_ptr<Function>>> { //
-              if (const auto sig = sigOf(inv); !functionTable.contains(sig)) {
-                if (auto spec =
-                        functionTable ^ find([&](auto &lhs, auto) { return lhs.name == sig.name && lhs.args.size() == sig.args.size(); })) {
-                  const auto fn = *spec->second;
-                  const auto args = fn.args                                                                           //
-                                    | zip(sig.args)                                                                   //
-                                    | map([](auto &arg, auto &tpe) { return arg.withNamed(arg.named.withTpe(tpe)); }) //
-                                    | to_vector();
+      const auto specialised = functionTable                                                                                      //
+                               | flat_map([&](const auto &, const auto &f) { return f->template collect_all<Expr::Invoke>(); })   //
+                               | collect([&](const auto &inv) -> std::optional<std::pair<Signature, std::shared_ptr<Function>>> { //
+                                   if (const auto sig = sigOf(inv); !functionTable.contains(sig)) {
+                                     if (auto spec = functionTable ^ find([&](const auto &lhs, const auto &) {
+                                                       return lhs.name == sig.name && lhs.args.size() == sig.args.size();
+                                                     })) {
+                                       const auto fn = *spec->second;
+                                       const auto args =
+                                           fn.args                                                                                       //
+                                           | zip(sig.args)                                                                               //
+                                           | map([](const auto &arg, const auto &tpe) { return arg.withNamed(arg.named.withTpe(tpe)); }) //
+                                           | to_vector();
 
-                  return std::pair{sig, std::make_shared<Function>(CLAddressSpaceTracePass::mapFn(fn.withArgs(args)))};
-                }
-              }
-              return {};
-            }) //
-          | to<Map>();
+                                       return std::pair{sig, std::make_shared<Function>(CLAddressSpaceTracePass::mapFn(fn.withArgs(args)))};
+                                     }
+                                   }
+                                   return {};
+                                 }) //
+                               | to<Map>();
       if (specialised.empty()) break;
       functionTable.insert(specialised.begin(), specialised.end());
     }
 
     const auto spaceSpecialisedName = [](const Sym &name, const std::vector<TypeSpace::Any> &ts) -> Sym {
-      auto suffix = ts ^ mk_string("", [&](auto &s) {
+      auto suffix = ts ^ mk_string("", [&](const auto &s) {
                       return s.match_total([&](TypeSpace::Global) { return "g"; },                                          //
                                            [&](TypeSpace::Constant) { return "g"; }, [&](TypeSpace::Local) { return "l"; }, //
                                            [&](TypeSpace::Private) { return "p"; });
@@ -278,15 +282,15 @@ struct CLAddressSpaceTracePass {
       return Sym(fqn);
     };
 
-    auto spaces = [&](auto &a) { return a.template collect_all<TypeSpace::Any>(); };
+    auto spaces = [&](const auto &a) { return a.template collect_all<TypeSpace::Any>(); };
     const auto renameInvokes = [&](const Function &f) {
       return f.template modify_all<Expr::Invoke>(
-          [&](auto &inv) { return inv.withCallee(Type::FnRef(spaceSpecialisedName(calleeName(inv), inv.args ^ flat_map(spaces)))); });
+          [&](const auto &inv) { return inv.withCallee(Type::FnRef(spaceSpecialisedName(calleeName(inv), inv.args ^ flat_map(spaces)))); });
     };
-    const auto spaceSpecialisedFns =     //
-        functionTable                    //
-        | values()                       //
-        | map([&](auto &f) -> Function { //
+    const auto spaceSpecialisedFns =           //
+        functionTable                          //
+        | values()                             //
+        | map([&](const auto &f) -> Function { //
             return renameInvokes(*f).withName(f->isEntry ? f->name : spaceSpecialisedName(f->name, f->args ^ flat_map(spaces)));
           }) //
         | to_vector();
@@ -306,7 +310,7 @@ std::string backend::CSource::normalise(const std::string &s) const {
   }();
   static const Set<std::string> mslReserved = {"device", "threadgroup", "thread"};
   // allowlist non-identifier chars to `_`: a stray `=` from `operator=` parses as an OpenCL assignment
-  auto out = s ^ map([](const char c) {
+  auto out = s ^ map([](const auto &c) {
                return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') ? c : '_';
              });
   // escape whole identifiers only: a symbol merely containing `kernel` must stay verbatim to match the launch lookup
@@ -320,7 +324,7 @@ Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::
   if (auto s = owner.get<Type::Struct>()) {
     if (auto it = structDefsByName.find(normalise(s->name)); it != structDefsByName.end()) {
       const auto field = normalise(fieldName);
-      if (auto m = it->second ^ find([&](auto &member) { return member.first == field; })) return m->second;
+      if (auto m = it->second ^ find([&](const auto &name, const auto &) { return name == field; })) return m->second;
     }
     throw std::logic_error("field " + fieldName + " not found on struct " + repr(s->name));
   }
@@ -643,7 +647,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       },
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
       [&](const Expr::Invoke &x) {
-        return fmt::format("{}({})", normalise(calleeName(x)), x.args ^ mk_string(", ", [&](auto &arg) { return mkTerm(arg); }));
+        return fmt::format("{}({})", normalise(calleeName(x)), x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       }, //
       [&](const Expr::Index &x) { return fmt::format("{}[{}]", mkTerm(x.lhs), mkTerm(x.idx)); },
       [&](const Expr::RefTo &x) {
@@ -669,9 +673,9 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                 [&](const PathStep::Field &f) {
                   if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
                   const auto selected = resolveFieldType(owner, f.name);
-                  const bool elided = (f.name ^ starts_with(conventions::BaseFieldPrefix)) &&
-                                      (selected.template get<Type::Struct>() ^
-                                       exists([&](auto &s) { return zeroSizeStructNames.contains(normalise(s.name)); }));
+                  const bool elided = (f.name ^ starts_with(conventions::BaseFieldPrefix))
+                                      && (selected.template get<Type::Struct>() //
+                                          ^ exists([&](const auto &s) { return zeroSizeStructNames.contains(normalise(s.name)); }));
                   elidedBaseSteps.emplace_back(elided);
                   owner = selected;
                 },
@@ -704,7 +708,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       },
       [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); },
       [&](const Expr::ForeignCall &x) {
-        return fmt::format("{}({})", x.name, x.args ^ mk_string(", ", [&](auto &arg) { return mkTerm(arg); }));
+        return fmt::format("{}({})", x.name, x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       },
       [&](const Expr::OffsetOf &x) { return fmt::format("__builtin_offsetof({}, {})", mkTpe(x.structTpe), normalise(x.field)); },
       [&](const Expr::SizeOf &x) { return fmt::format("sizeof({})", mkTpe(x.forTpe)); });
@@ -722,12 +726,14 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
   if (auto s = tpe.template get<Type::Struct>(); s && dialect == Dialect::OpenCL1_1) {
     const auto name = normalise(s->name);
     // a populated union stays whole; naming its members would not preserve the active one
+    // a zero-size member has no storage in the emitted body, so it must not be named
     if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !unionDefNames.contains(name)))
-      return it->second ^ map([&](auto &m) {
-               return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
-             }) ^
-             // a zero-size member has no storage in the emitted body, so it must not be named
-             filter([](auto &copy) { return !copy.empty(); }) ^ mk_string(" ");
+      return it->second //
+             | map([&](const auto &m) {
+                 return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
+               })                                                     //
+             | filter([](const auto &copy) { return !copy.empty(); }) //
+             | mk_string(" ");
   }
   return fmt::format("{} = {};", lhs, rhs);
 }
@@ -758,11 +764,11 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         return fmt::format("{}[{}] = {};", mkTerm(x.lhs), mkTerm(x.idx), mkTerm(x.value));
       },
       [&](const Stmt::While &x) {
-        const auto body = x.body | mk_string("\n", [&](auto &s) { return mkStmt(s); });
+        const auto body = x.body | mk_string("\n", [&](const auto &s) { return mkStmt(s); });
         return fmt::format("while({}) {{\n{}\n}}", mkTerm(x.cond), body ^ indent(2));
       },
       [&](const Stmt::ForRange &x) {
-        const auto body = x.body | mk_string("\n", [&](auto &s) { return mkStmt(s); });
+        const auto body = x.body | mk_string("\n", [&](const auto &s) { return mkStmt(s); });
         const auto induction = normalise(x.induction.symbol);
         return fmt::format("for({} {} = {}; {} < {}; {} += {}) {{\n{}\n}}",     //
                            mkTpe(x.induction.tpe), induction, mkTerm(x.lbIncl), //
@@ -771,11 +777,11 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Break &) { return "break;"s; },   //
       [&](const Stmt::Cont &) { return "continue;"s; }, //
       [&](const Stmt::Cond &x) {
-        auto trueBr = x.trueBr ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); });
+        auto trueBr = x.trueBr ^ mk_string("{\n", "\n", "\n}", [&](const auto &s) { return mkStmt(s) ^ indent(2); });
         if (x.falseBr.empty()) {
           return fmt::format("if ({}) {}", mkTerm(x.cond), trueBr);
         } else {
-          auto falseBr = x.falseBr ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); });
+          auto falseBr = x.falseBr ^ mk_string("{\n", "\n", "\n}", [&](const auto &s) { return mkStmt(s) ^ indent(2); });
           // Metal can miscompile an empty taken arm guarding a loop latch through a mutable flag.
           if (dialect == Dialect::MSL1_0 && x.trueBr.empty()) return fmt::format("if (!({})) {}", mkTerm(x.cond), falseBr);
           return fmt::format("if ({}) {} else {}", mkTerm(x.cond), trueBr, falseBr);
@@ -794,31 +800,33 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
   const auto entry = fnTree.isEntry;
 
   std::vector<std::string> argExprs =
-      fnTree.args | zip_with_index() | map([&](auto &arg, auto idx) {
-        auto tpe = mkTpe(arg.named.tpe);
-        auto name = normalise(arg.named.symbol);
-        std::string decl;
-        switch (dialect) {
-          case Dialect::OpenCL1_1: {
-            decl = mkDecl(arg.named.tpe, name);
-            break;
-          }
-          case Dialect::MSL1_0: {
-            if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
-              decl = arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
-                                            [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
-                                            [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
-                                            [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }    //
-              );
-            } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
+      fnTree.args        //
+      | zip_with_index() //
+      | map([&](const auto &arg, const auto &idx) {
+          auto tpe = mkTpe(arg.named.tpe);
+          auto name = normalise(arg.named.symbol);
+          std::string decl;
+          switch (dialect) {
+            case Dialect::OpenCL1_1: {
+              decl = mkDecl(arg.named.tpe, name);
+              break;
+            }
+            case Dialect::MSL1_0: {
+              if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
+                decl = arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
+                                              [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
+                                              [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
+                                              [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }    //
+                );
+              } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
 
-            break;
+              break;
+            }
+            default: break;
           }
-          default: break;
-        }
-        return decl;
-      }) |
-      to_vector();
+          return decl;
+        }) //
+      | to_vector();
 
   if (dialect == Dialect::MSL1_0) {
 
@@ -834,8 +842,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
       if (spec->op.is<Spec::GpuLocalIdx>()) iargs.emplace("get_local_id", "thread_position_in_threadgroup");
       if (spec->op.is<Spec::GpuLocalSize>()) iargs.emplace("get_local_size", "threads_per_threadgroup");
     }
-    for (auto &[name, attr] : iargs)
-      argExprs.emplace_back(fmt::format("uint3 __{}__ [[ {} ]]", name, attr));
+    argExprs ^= concat(iargs ^ map([](const auto &name, const auto &attr) { return fmt::format("uint3 __{}__ [[ {} ]]", name, attr); }));
   }
 
   std::string fnPrefix;
@@ -859,13 +866,13 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 
 std::string backend::CSource::mkFn(const Function &fnTree) {
   // OpenCL local-AS declarations must sit in the kernel's outermost scope
-  const auto allVars = fnTree.body | flat_map([](auto &s) { return s.template collect_all<Stmt::Var>(); }) | to_vector();
-  const auto localDecls = allVars ^ collect([&](auto &v) -> std::optional<std::string> {
+  const auto allVars = fnTree.body ^ flat_map([](const auto &s) { return s.template collect_all<Stmt::Var>(); });
+  const auto localDecls = allVars ^ collect([&](const auto &v) -> std::optional<std::string> {
                             if (!v.expr && isLocalArr(v.name.tpe)) return fmt::format("{};", mkDecl(v.name.tpe, normalise(v.name.symbol)));
                             return std::nullopt;
                           });
-  const auto stmts = concat(localDecls, fnTree.body ^ map([&](auto &s) { return mkStmt(s); }));
-  return fmt::format("{} {}", mkFnProto(fnTree), stmts ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return s ^ indent(2); }));
+  const auto stmts = concat(localDecls, fnTree.body ^ map([&](const auto &s) { return mkStmt(s); }));
+  return fmt::format("{} {}", mkFnProto(fnTree), stmts ^ mk_string("{\n", "\n", "\n}", [&](const auto &s) { return s ^ indent(2); }));
 }
 
 CompileResult backend::CSource::compileProgram(const Program &program_, const compiletime::OptLevel &opt) {
@@ -876,16 +883,20 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   const auto start = compiler::nowMono();
 
   structDefsByName =
-      program.defs ^ map([&](auto &def) {
-        return std::pair{normalise(def.name), def.members ^ map([&](auto &m) { return std::pair{normalise(m.symbol), m.tpe}; })};
-      }) ^
-      to<Map>();
-  unionDefNames = program.defs ^ filter([](auto &def) { return def.isUnion; }) ^ //
-                  map([&](auto &def) { return normalise(def.name); }) ^ to<Set>();
-  Set<Sym> zeroSizeStructs =
-      program.defs ^ filter([](auto &def) { return def.members.empty(); }) ^ map([](auto &def) { return def.name; }) ^ to<Set>();
+      program.defs | map([&](const auto &def) {
+        return std::pair{normalise(def.name), def.members ^ map([&](const auto &m) { return std::pair{normalise(m.symbol), m.tpe}; })};
+      }) //
+      | to<Map>();
+  unionDefNames = program.defs                                                //
+                  | filter([](const auto &def) { return def.isUnion; })       //
+                  | map([&](const auto &def) { return normalise(def.name); }) //
+                  | to<Set>();
+  Set<Sym> zeroSizeStructs = program.defs                                                  //
+                             | filter([](const auto &def) { return def.members.empty(); }) //
+                             | map([](const auto &def) { return def.name; })               //
+                             | to<Set>();
   auto zeroSizeMember = [&](const Named &m) {
-    return m.tpe.template get<Type::Struct>() ^ exists([&](auto &s) { return zeroSizeStructs.contains(s.name); });
+    return m.tpe.template get<Type::Struct>() ^ exists([&](const auto &s) { return zeroSizeStructs.contains(s.name); });
   };
   // metal rejects an all-zero-size body as a `[[buffer]]` pointee; OpenCL-C tolerates the empty member
   if (dialect == Dialect::MSL1_0)
@@ -899,22 +910,22 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   auto realStorageMember = [&](const Named &m) { return !zeroSizeMember(m); };
 
   // only by-value members create a definition-order dependency; pointer members resolve via the forward decl
-  auto structsAndDeps = program.defs ^ map([&](auto &def) {
-                          const auto deps = def.members ^ collect([&](auto &m) -> std::optional<Sym> {
+  auto structsAndDeps = program.defs | map([&](const auto &def) {
+                          const auto deps = def.members ^ collect([&](const auto &m) -> std::optional<Sym> {
                                               Type::Any base = m.tpe;
                                               while (auto a = base.template get<Type::Arr>())
                                                 base = a->comp;
-                                              return base.template get<Type::Struct>() ^ map([](auto &s) { return s.name; });
+                                              return base.template get<Type::Struct>() ^ map([](const auto &s) { return s.name; });
                                             });
                           return std::pair{def, deps};
-                        }) ^
-                        to<Map>();
+                        }) //
+                        | to<Map>();
 
   const auto includes = dialect == Dialect::C11 ? std::vector<std::string>{"#include <stdint.h>\n#include <stdbool.h>\n#include <math.h>"}
                                                 : std::vector<std::string>{};
   // forward-declare every struct so pointer members (including cyclic ones) resolve
   const auto typedefs =
-      program.defs ^ map([&](auto &def) {
+      program.defs ^ map([&](const auto &def) {
         return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", normalise(def.name), normalise(def.name));
       });
 
@@ -922,23 +933,23 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   std::vector<std::string> structBodies;
   Set<Sym> resolved;
   while (resolved.size() != program.defs.size()) {
-    const auto noDeps = structsAndDeps                      //
-                        | filter([&](auto &s, auto &deps) { //
-                            return !resolved.contains(s.name) && deps | forall([&](auto &d) { return resolved.contains(d); });
-                          }) //
-                        | keys() | to_vector();
+    const auto noDeps = structsAndDeps                                  //
+                        | filter([&](const auto &s, const auto &deps) { //
+                            return !resolved.contains(s.name) && deps | forall([&](const auto &d) { return resolved.contains(d); });
+                          })     //
+                        | keys() //
+                        | to_vector();
     if (noDeps.empty()) {
       structBodies ^= concat(std::vector<std::string>{"// Some structs cannot be resolved due to recursive by-value dependencies"});
       break;
     }
-    structBodies ^= concat(noDeps | map([&](auto &s) {
+    structBodies ^= concat(noDeps ^ map([&](const auto &s) {
                              return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", normalise(s.name),
-                                                s.members | filter(realStorageMember) | mk_string("{\n", "\n", "\n}", [&](auto &m) {
+                                                s.members | filter(realStorageMember) | mk_string("{\n", "\n", "\n}", [&](const auto &m) {
                                                   return fmt::format("  {};", mkDecl(m.tpe, normalise(m.symbol)));
                                                 }));
-                           }) |
-                           to_vector());
-    resolved ^= concat(noDeps | map([](auto &s) { return s.name; }) | to_vector());
+                           }));
+    resolved ^= concat(noDeps ^ map([](const auto &s) { return s.name; }));
   }
 
   const auto allFns = std::vector<Function>{program.entry} ^ concat(program.functions);
@@ -947,12 +958,12 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   // OpenCL literal has no addressable storage so reading it through a pointer yields garbage
   const char *constQual = dialect == Dialect::OpenCL1_1 ? "__constant " : dialect == Dialect::MSL1_0 ? "constant " : "static const ";
   stringConstNames.clear();
-  const auto stringDecls =                                                               //
-      allFns                                                                             //
-      | flat_map([](const Function &fn) { return fn.collect_all<Term::StringConst>(); }) //
-      | map([](const Term::StringConst &sc) { return sc.value; })                        //
-      | distinct()                                                                       //
-      | map([&](const std::string &value) {                                              //
+  const auto stringDecls =                                                                    //
+      allFns                                                                                  //
+      | flat_map([](const auto &fn) { return fn.template collect_all<Term::StringConst>(); }) //
+      | map([](const auto &sc) { return sc.value; })                                          //
+      | distinct()                                                                            //
+      | map([&](const auto &value) {                                                          //
           const auto name = fmt::format("_polyregion_str_{}", stringConstNames.size());
           stringConstNames.emplace(value, name);
           // MSL is C++ so char and int8_t do not convert
@@ -960,9 +971,15 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         }) //
       | to_vector();
 
-  const auto protos = allFns | mk_string("\n", [&](auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
-  auto code = includes | concat(typedefs) | concat(structBodies) | concat(stringDecls) | append(protos) | append(std::string("\n")) |
-              concat(allFns ^ map([&](auto &f) { return mkFn(f); })) | mk_string("\n");
+  const auto protos = allFns | mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
+  auto code = includes                                                       //
+              | concat(typedefs)                                             //
+              | concat(structBodies)                                         //
+              | concat(stringDecls)                                          //
+              | append(protos)                                               //
+              | append(std::string("\n"))                                    //
+              | concat(allFns ^ map([&](const auto &f) { return mkFn(f); })) //
+              | mk_string("\n");
 
   std::vector<std::string> features;
   if (usesTpe<Type::Float64>(allFns, program.defs)) features.emplace_back("fp64");

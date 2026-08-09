@@ -23,9 +23,9 @@ polyfront::KernelBundle polyfc::compileRegion( //
   using Level = clang::DiagnosticsEngine::Level;
   if (opts.jit) {
     auto jitObjects =
-        opts.targets                                                                             //
-        | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; }) //
-        | collect([&](auto &target, auto &arch) -> std::optional<polyfront::KernelObject> {
+        opts.targets                                                                                            //
+        | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
+        | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
             auto format = runtime::moduleFormatOf(target);
             if (!format) return std::nullopt;
             const auto pp = polyfront::passes::arenaPassesFor(target, opts.stackDepth);
@@ -52,9 +52,9 @@ polyfront::KernelBundle polyfc::compileRegion( //
                                    std::string(packed.begin(), packed.end())};
   }
   const auto compiled =
-      opts.targets                                                                             //
-      | filter([&](auto target, auto) { return runtime::targetPlatformKind(target) == kind; }) //
-      | collect([&](auto &target, auto &features) {                                            //
+      opts.targets                                                                                            //
+      | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
+      | collect([&](const auto &target, const auto &features) {                                               //
           return polyfront::compileProgram(opts, region.program, target, features,
                                            polyfront::passes::arenaPassesFor(target, opts.stackDepth)) //
                  ^ fold_total([&](const polyast::CompileResult &r) -> std::optional<polyast::CompileResult> { return r; },
@@ -64,50 +64,51 @@ polyfront::KernelBundle polyfc::compileRegion( //
                                      diagLoc, moduleId, std::string(magic_enum::enum_name(target)), features, err);
                                 return std::nullopt;
                               }) //
-                 ^ map([&](auto &x) { return std::tuple{target, features, x}; });
+                 ^ map([&](const auto &x) { return std::tuple{target, features, x}; });
         }) //
       | to_vector();
 
-  const bool asserts = compiled ^ exists([](auto &, auto &, auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
+  const bool asserts =
+      compiled ^ exists([](const auto &, const auto &, const auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
 
   const auto objects =
-      compiled //
-      | collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
-          auto targetName = std::string(magic_enum::enum_name(target));
-          emit(diag, Level::Remark, "%0 " POLYREGION_DIAG_POLYDCO "Compilation events for [%1, target=%2, features=%3]\n%4", //
-               diagLoc, moduleId, targetName, features, repr(result));
-          if (auto bin = result.binary) {
-            auto size = std::to_string(static_cast<float>(bin->size()) / 1000.f);
-            if (!result.messages.empty())
-              emit(diag, Level::Warning,
-                   "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary (%1KB) with warnings [%2, target=%3, features=%4]\n%5", //
-                   diagLoc, size, moduleId, targetName, features, result.messages);
-            else
-              emit(diag, Level::Remark, "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary (%1KB) [%2, target=%3, features=%4]", //
-                   diagLoc, size, moduleId, targetName, features);
-            if (auto format = runtime::moduleFormatOf(target)) {
-              return polyfront::KernelObject{
-                  *format,                                                                                                         //
-                  *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
-                  result.features,                                                                                                 //
-                  std::string(bin->begin(), bin->end())                                                                            //
-              };
-            } else
-              emit(diag, Level::Remark,
-                   "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary for unknown target [%1, target=%2,features=%3]", //
-                   diagLoc, moduleId, targetName, features, result.messages);
-          } else
+      compiled | collect([&](const auto &target, const auto &features, const auto &result) -> std::optional<polyfront::KernelObject> {
+        auto targetName = std::string(magic_enum::enum_name(target));
+        emit(diag, Level::Remark, "%0 " POLYREGION_DIAG_POLYDCO "Compilation events for [%1, target=%2, features=%3]\n%4", //
+             diagLoc, moduleId, targetName, features, repr(result));
+        if (auto bin = result.binary) {
+          auto size = std::to_string(static_cast<float>(bin->size()) / 1000.f);
+          if (!result.messages.empty())
             emit(diag, Level::Warning,
-                 "%0 " POLYREGION_DIAG_POLYDCO "Backend failed to compile program [%1, target=%2, features=%3]\nReason: %4", //
+                 "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary (%1KB) with warnings [%2, target=%3, features=%4]\n%5", //
+                 diagLoc, size, moduleId, targetName, features, result.messages);
+          else
+            emit(diag, Level::Remark, "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary (%1KB) [%2, target=%3, features=%4]", //
+                 diagLoc, size, moduleId, targetName, features);
+          if (auto format = runtime::moduleFormatOf(target)) {
+            return polyfront::KernelObject{
+                *format,                                                                                                         //
+                *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
+                result.features,                                                                                                 //
+                std::string(bin->begin(), bin->end())                                                                            //
+            };
+          } else
+            emit(diag, Level::Remark,
+                 "%0 " POLYREGION_DIAG_POLYDCO "Backend emitted binary for unknown target [%1, target=%2,features=%3]", //
                  diagLoc, moduleId, targetName, features, result.messages);
+        } else
+          emit(diag, Level::Warning,
+               "%0 " POLYREGION_DIAG_POLYDCO "Backend failed to compile program [%1, target=%2, features=%3]\nReason: %4", //
+               diagLoc, moduleId, targetName, features, result.messages);
 
-          return std::nullopt;
-        }) //
+        return std::nullopt;
+      }) //
       | to_vector();
   // If targets were requested for this kind but every one failed, escalate to a hard error so
   // the user sees the failure at compile time instead of an opaque "no compatible image" abort
   // from the runtime later on.
-  const auto requestedForKind = opts.targets ^ count([&](auto &target, auto &) { return runtime::targetPlatformKind(target) == kind; });
+  const auto requestedForKind =
+      opts.targets ^ count([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; });
   if (requestedForKind > 0 && objects.empty()) {
     emit(diag, Level::Error,
          "%0 " POLYREGION_DIAG_POLYDCO
@@ -149,8 +150,8 @@ void polyfc::compileLibrary(clang::DiagnosticsEngine &diag, const polyfront::Opt
   const auto program = polyfront::libraryProgram(r.functions | concat(r.userFuncs | values()) | to_vector(),
                                                  r.defs | values() | concat(r.syntheticDefs) | to_vector());
 
-  polyfront::writeProgramMsgpack(program, outPath) ^
-      foreach_total(
+  polyfront::writeProgramMsgpack(program, outPath) //
+      ^ foreach_total(
           [&](const std::error_code &ec) {
             emit(diag, Level::Error, POLYREGION_DIAG_POLYDCO "Cannot open library output %0: %1", outPath, ec.message());
           },

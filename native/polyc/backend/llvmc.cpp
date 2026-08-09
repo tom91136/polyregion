@@ -253,8 +253,8 @@ static std::string patchSpirvAliased(std::string spv) {
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
-    if (op == spv::OpDecorate || op == spv::OpMemberDecorate || op == spv::OpDecorationGroup || op == spv::OpGroupDecorate ||
-        op == spv::OpGroupMemberDecorate)
+    if (op == spv::OpDecorate || op == spv::OpMemberDecorate || op == spv::OpDecorationGroup || op == spv::OpGroupDecorate
+        || op == spv::OpGroupMemberDecorate)
       lastDecorEnd = i + wc;
     if (op == spv::OpDecorate && wc >= 3 && src[i + 2] == spv::DecorationAliased) aliased.insert(src[i + 1]);
     if (op == spv::OpVariable && wc >= 4 && src[i + 3] == spv::StorageClassStorageBuffer) ssboVars.push_back(src[i + 2]);
@@ -398,9 +398,7 @@ std::string llvmc::findVendorBitcode(llvm::StringRef name) {
     owned.emplace_back(lib.str().str());
   }
   if (std::string_view dev = POLYREGION_BITCODE_DEV_DIR; !dev.empty()) owned.emplace_back(dev);
-  llvm::SmallVector<llvm::StringRef, 4> refs;
-  for (auto &s : owned)
-    refs.emplace_back(s);
+  const auto refs = owned ^ map([](const auto &s) { return llvm::StringRef(s); });
   return findInDirs(name, refs);
 }
 
@@ -497,10 +495,12 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
     return false;
   };
   llvm::SmallVector<std::string> missing;
-  for (const llvm::Function &F : M)
-    if (F.isDeclaration() && !F.isIntrinsic() && !isLegitDecl(F.getName())) missing.emplace_back(F.getName().str());
-  for (const llvm::GlobalVariable &G : M.globals())
-    if (G.isDeclaration() && !isLegitDecl(G.getName())) missing.emplace_back(G.getName().str());
+  M                                                                                                               //
+      | filter([&](const auto &F) { return F.isDeclaration() && !F.isIntrinsic() && !isLegitDecl(F.getName()); }) //
+      | for_each([&](const auto &F) { missing.emplace_back(F.getName().str()); });
+  M.globals()                                                                                 //
+      | filter([&](const auto &G) { return G.isDeclaration() && !isLegitDecl(G.getName()); }) //
+      | for_each([&](const auto &G) { missing.emplace_back(G.getName().str()); });
   if (missing.empty()) return;
   std::string msg = "unresolved kernel-side symbols for " + triple.str() + " (stage vendor bitcode via POLYREGION_BITCODE_DIR):";
   for (auto &s : missing) {
@@ -523,7 +523,7 @@ static bool isStackDereferenceable(llvm::Value *v, unsigned depth = 0) {
   v = llvm::getUnderlyingObject(v);
   if (llvm::isa<llvm::AllocaInst>(v)) return true;
   if (auto *ph = llvm::dyn_cast<llvm::PHINode>(v); ph && ph->getType()->isPointerTy() && depth < 8)
-    return ph->incoming_values() ^ forall([&](llvm::Value *in) { return isStackDereferenceable(in, depth + 1); });
+    return ph->incoming_values() ^ forall([&](const auto &in) { return isStackDereferenceable(in, depth + 1); });
   return false;
 }
 
@@ -537,7 +537,7 @@ static void sinkLoadsThroughPointerPhis(llvm::Function &F) {
         llvm::Type *loadTy = nullptr;
         // sink only when every user is a load; a phi feeding another pointer phi (nested std::max) waits
         // until that outer phi is sunk and its users become loads
-        const bool allLoads = phi.users() ^ forall([&](llvm::User *u) {
+        const bool allLoads = phi.users() ^ forall([&](const auto &u) {
                                 auto *ld = llvm::dyn_cast<llvm::LoadInst>(u);
                                 if (!ld || ld->getPointerOperand() != &phi || ld->isVolatile() || (loadTy && loadTy != ld->getType()))
                                   return false;
@@ -545,7 +545,7 @@ static void sinkLoadsThroughPointerPhis(llvm::Function &F) {
                                 return true;
                               });
         if (!allLoads || !loadTy) continue;
-        if (phi.incoming_values() ^ forall([](llvm::Value *in) { return isStackDereferenceable(in); })) targets.push_back(&phi);
+        if (phi.incoming_values() ^ forall([](const auto &in) { return isStackDereferenceable(in); })) targets.push_back(&phi);
       }
     for (llvm::PHINode *phi : targets) {
       auto *loadTy = llvm::cast<llvm::LoadInst>(*phi->user_begin())->getType();
@@ -806,7 +806,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
 
   auto collectPrecisionFeatures = [](const llvm::Module &M) {
     bool usesFp64 = false, usesFp16 = false, usesInt64 = false;
-    auto inspect = [&](const llvm::Type *t, auto &self) -> void {
+    auto inspect = [&](const llvm::Type *t, const auto &self) -> void {
       if (!t) return;
       if (t->isDoubleTy()) usesFp64 = true;
       else if (t->isHalfTy()) usesFp16 = true;

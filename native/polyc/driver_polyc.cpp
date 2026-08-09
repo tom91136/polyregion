@@ -45,9 +45,9 @@ static std::string targetDescription = [] {
           names += std::string("|") + std::string(a);
         return names + ": \t" + std::string(magic_enum::enum_name(s.codegen)) + " via " + std::string(magic_enum::enum_name(s.runtime));
       });
-  std::string env = std::string("\n\nEnvironment:\n  ") + polypass::abi::EnvPlugins +
-                    " - PATH-separated list of PolyPass plugin paths (libpolypass.so / polypass.js). "
-                    "Overrides the bundled default plugin.";
+  std::string env = std::string("\n\nEnvironment:\n  ") + polypass::abi::EnvPlugins
+                    + " - PATH-separated list of PolyPass plugin paths (libpolypass.so / polypass.js). "
+                      "Overrides the bundled default plugin.";
   return "PolyAST to object code compiler.\nSupported targets:" + targets + env;
 }();
 
@@ -79,9 +79,9 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
-  return compiletime::TargetSpec::findByName(rawTarget) ^
-         fold(
-             [&](const compiletime::TargetSpec &spec) {
+  return compiletime::TargetSpec::findByName(rawTarget) //
+         ^ fold(
+             [&](const auto &spec) {
                const auto target = spec.codegen;
                compiletime::OptLevel opt;
                switch (rawOpt) {
@@ -94,7 +94,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                }
 
                auto bytes = maybePath ? polyregion::read_struct<uint8_t>(maybePath.value()) : readFromStdIn<uint8_t>();
-               auto isJson = bytes ^ forall([](auto c) { return c <= 127; });
+               auto isJson = bytes ^ forall([](const auto &c) { return c <= 127; });
 
                try {
                  auto program = [&]() {
@@ -106,7 +106,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  }();
 
                  const auto exportsOf = [](const polyast::Program &p) {
-                   return p.functions ^ collect([](auto &f) {
+                   return p.functions ^ collect([](const auto &f) {
                             return f.visibility.template is<polyast::FunctionVisibility::Exported>() ? std::optional{repr(f.name)}
                                                                                                      : std::nullopt;
                           });
@@ -136,7 +136,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                        return EXIT_FAILURE;
                      }
                      for (auto &f : program.functions)
-                       if (f.visibility.is<polyast::FunctionVisibility::Exported>() && repr(f.name) != exportName)
+                       if (f.visibility.template is<polyast::FunctionVisibility::Exported>() && repr(f.name) != exportName)
                          f.visibility = polyast::FunctionVisibility::Internal();
                    }
                    // an empty spec means no passes here, not the compile default: FullOpt on an entry-less library

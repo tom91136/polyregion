@@ -101,11 +101,11 @@ struct Task {
 
   std::string display() const {
     return fmt::format("[{}] {}/{} {}", modeName(mode), extractTestName(testFile), caseName,
-                       variables | mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; }));
+                       variables | mk_string(" ", [](const auto &k, const auto &v) { return k + "=" + v; }));
   }
 
   std::string id() const {
-    auto vars = variables | mk_string("", [&](auto &k, auto &v) { return "-" + ctestSafe(k) + "_" + ctestSafe(v); });
+    auto vars = variables | mk_string("", [&](const auto &k, const auto &v) { return "-" + ctestSafe(k) + "_" + ctestSafe(v); });
     return fmt::format("{}-{}-{}{}", modeName(mode), ctestSafe(extractTestName(testFile)), ctestSafe(caseName), vars);
   }
 };
@@ -124,8 +124,8 @@ struct TaskOutcome {
 namespace detail {
 
 inline std::string archFor(const Task &t, const DriverConfig &cfg) {
-  return t.variables                                                                                           //
-         ^ collect_first([&](auto &k, auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) //
+  return t.variables                                                                                                       //
+         ^ collect_first([&](const auto &k, const auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) //
          ^ get_or_else(std::string{});
 }
 
@@ -140,8 +140,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
     kvs.emplace_back(std::string(k), std::string(v));
   };
   auto putKv = [&](const std::string &kv) {
-    const auto eq = kv.find('=');
-    if (eq != std::string::npos) put(kv.substr(0, eq), kv.substr(eq + 1));
+    if (const auto pair = kv ^ split_once('=')) put(pair->first, pair->second);
   };
   if (t.mode == Mode::Passthrough)
     for (auto &kv : cfg.passthroughEnvs)
@@ -203,7 +202,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   if (const char *icds = std::getenv("VK_DRIVER_FILES") ? std::getenv("VK_DRIVER_FILES") : std::getenv("VK_ICD_FILENAMES")) {
     const auto a = archFor(t, cfg);
     if (const char *want = a ^ contains_slice("llvmpipe") ? "lvp_icd" : a ^ contains_slice("SwiftShader") ? "swiftshader" : nullptr)
-      if (const auto entry = std::string(icds) ^ split(':') ^ find([&](auto &e) { return e ^ contains_slice(want); })) {
+      if (const auto entry = std::string(icds) ^ split(':') ^ find([&](const auto &e) { return e ^ contains_slice(want); })) {
         put("VK_DRIVER_FILES", *entry);
         put("VK_ICD_FILENAMES", *entry);
       }
@@ -255,7 +254,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   #endif
     }
 #endif
-  return kvs ^ map([](auto &k, auto &v) { return k + "=" + v; });
+  return kvs ^ map([](const auto &k, const auto &v) { return k + "=" + v; });
 }
 
 inline std::string resolveBin(const std::string &name, const DriverConfig &cfg) {
@@ -291,15 +290,15 @@ struct StepResult {
 
 inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command, bool isRunStep) {
   auto fragments = command ^ split(' ');
-  auto [envBits, args] = fragments ^ span([](auto &x) { return x ^ contains('='); });
+  auto [envBits, args] = fragments ^ span([](const auto &x) { return x ^ contains('='); });
 
-  auto envs = baseEnvs(task, cfg, isRunStep) ^ filter([&](auto &e) {
-                return !(envBits ^ exists([&](auto &kv) { return e ^ starts_with(kv.substr(0, kv.find('=') + 1)); }));
+  auto envs = baseEnvs(task, cfg, isRunStep) ^ filter([&](const auto &e) {
+                return !(envBits ^ exists([&](const auto &kv) { return e ^ starts_with(kv.substr(0, kv.find('=') + 1)); }));
               });
   envs ^= concat(envBits);
 
-  const std::vector<llvm::StringRef> envRefs = envs ^ map([](auto &x) -> llvm::StringRef { return x; });
-  const std::vector<llvm::StringRef> argRefs = args ^ map([](auto &x) -> llvm::StringRef { return x; });
+  const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
+  const std::vector<llvm::StringRef> argRefs = args ^ map([](const auto &x) -> llvm::StringRef { return x; });
 
   // XXX TempFile holds an exclusive Windows handle that blocks the child's redirect; use createUniqueFile + FileRemover
   auto makeTempPath = [&](std::string_view suffix) -> std::optional<std::string> {
@@ -335,7 +334,7 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   // XXX -2 is LLVM's signal-killed sentinel; surface WTERMSIG via the ErrMsg out-param.
   if (code == -2 && !execErr.empty()) stderrText += "\n[polytest] signal: " + execErr + "\n";
 
-  std::string cmdline = argRefs | drop(1) | prepend(llvm::StringRef(resolved)) | mk_string(" ", [](auto &s) { return s.str(); });
+  std::string cmdline = argRefs | drop(1) | prepend(llvm::StringRef(resolved)) | mk_string(" ", [](const auto &s) { return s.str(); });
   return {code, std::move(stdoutText), std::move(stderrText), std::move(cmdline)};
 }
 
@@ -375,10 +374,12 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
     if (const char *e = std::getenv(polyregion::env::PolytestReproCheck); !(e && e[0] == '0')) {
       const auto &cmd = task.runs[0].command;
       const auto toks = cmd ^ split(' ');
-      const auto out = toks ^ sliding(2, 1) ^ fold_left(std::string{}, [](auto acc, auto &w) { //
-                         return w.size() == 2 && w[0] == "-o" ? w[1] : acc;
-                       });
-      const bool offloadCompile = toks ^ exists([](auto &t) { return t == "-fstdpar"; });
+      const auto out = toks                                                            //
+                       | sliding(2, 1)                                                 //
+                       | fold_left(std::string{}, [](const auto &acc, const auto &w) { //
+                           return w.size() == 2 && w[0] == "-o" ? w[1] : acc;
+                         });
+      const bool offloadCompile = toks ^ exists([](const auto &t) { return t == "-fstdpar"; });
       if (!out.empty() && offloadCompile) {
         // XXX macOS embeds a non-deterministic LC_UUID and ad-hoc code signature in linked executables, just compare objects here
         const std::string obj = out + ".repro.o";
@@ -390,7 +391,7 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
 #else
         constexpr const char *reproFlags = " -c";
 #endif
-        const auto objCmd = (toks ^ mk_string(" ", [&](auto &t) { return t == out ? obj : t; })) + reproFlags;
+        const auto objCmd = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? obj : t; })) + reproFlags;
         const auto r1 = runStep(task, cfg, objCmd, /*isRunStep=*/false);
         const auto first = r1.exitCode == 0 ? polyregion::read_string(obj) : std::string{};
         const auto r2 = runStep(task, cfg, objCmd, /*isRunStep=*/false);
@@ -444,11 +445,11 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                                         const std::vector<std::string> &caseFilters) {
   auto mkArgStore = [](const std::vector<std::pair<std::string, std::string>> &xs) {
     fmt::dynamic_format_arg_store<fmt::format_context> s;
-    xs | for_each([&](auto &k, auto &v) { s.push_back(fmt::arg(k.c_str(), v)); });
+    xs | for_each([&](const auto &k, const auto &v) { s.push_back(fmt::arg(k.c_str(), v)); });
     return s;
   };
   const auto matches = [&](const std::string &shortName, const std::string &caseName) {
-    return caseFilters.empty() || (caseFilters | exists([&](auto &f) { return f == shortName || f == caseName; }));
+    return caseFilters.empty() || (caseFilters | exists([&](const auto &f) { return f == shortName || f == caseName; }));
   };
   const std::string libmFlag =
 #if defined(_WIN32)
@@ -465,25 +466,27 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
   const auto tasksFor = [&](const std::string &file, const std::string &shortName, const auto &tc, const auto &vars,
                             const std::string &label, const std::string &value) {
     const auto varsWithLabel = vars ^ append(std::pair{cfg.defaultsLabelVar, label});
-    const auto augmented = varsWithLabel ^ concat(std::vector<std::pair<std::string, std::string>>{
-                                               {cfg.defaultsVar, value},
-                                               {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))},
-                                               {"input", file},
-                                               {"libm", libmFlag}});
+    const auto augmented = varsWithLabel //
+                           ^ concat(std::vector<std::pair<std::string, std::string>>{
+                               {cfg.defaultsVar, value},
+                               {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))},
+                               {"input", file},
+                               {"libm", libmFlag}});
     const auto unevalStore = mkArgStore(augmented ^ append(std::pair{std::string("output"), std::string("<unevaluated>")}));
-    const auto runsCmd = tc.runs ^ mk_string("", [&](auto &r) { return fmt::vformat(r.command, unevalStore); });
-    const auto varsKey = varsWithLabel ^ mk_string("|", [](auto &k, auto &v) { return k + "=" + v; });
+    const auto runsCmd = tc.runs ^ mk_string("", [&](const auto &r) { return fmt::vformat(r.command, unevalStore); });
+    const auto varsKey = varsWithLabel ^ mk_string("|", [](const auto &k, const auto &v) { return k + "=" + v; });
     const auto runsHash = std::hash<std::string>{}(runsCmd + "\0" + varsKey);
     const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
     const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
                                         static_cast<std::uint32_t>(runsHash));
-    const auto arch = varsWithLabel ^ collect_first([&](auto &k, auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) ^
-                      get_or_else(std::string{});
+    const auto arch = varsWithLabel                                                                                                     //
+                      ^ collect_first([&](const auto &k, const auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) //
+                      ^ get_or_else(std::string{});
     const bool physical = (arch ^ starts_with("cuda")) || (arch ^ starts_with("hsa")) || (arch ^ starts_with("hip"));
     const auto detBase =
         fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
-    const auto caseModes = tc.offloadOnly ? (modes ^ filter([](auto m) { return m == Mode::Offload; })) : modes;
-    return caseModes ^ map([&](const auto mode) -> Task {
+    const auto caseModes = tc.offloadOnly ? (modes ^ filter([](const auto &m) { return m == Mode::Offload; })) : modes;
+    return caseModes ^ map([&](const auto &mode) -> Task {
              std::vector<RunVariant> variants;
              if (mode == Mode::Offload && physical)
                variants = {RunVariant{"", {}},                                                   // compiletime (default)
@@ -491,19 +494,19 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                            RunVariant{"usm", {{std::string(env::PolyrtMirror), "off"}}}};        // USM; 77 if no USM
              const auto output = fmt::format("{}_{}", variants.empty() ? baseOutput : detBase, modeName(mode));
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
-             auto runs = tc.runs ^ map([&](auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; });
+             auto runs = tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; });
              return {mode, file, tc.name, varsWithLabel, output, tc.compileFailure, std::move(runs), std::move(variants)};
            });
   };
 
-  const auto all = cfg.testFiles ^ flat_map([&](const std::string &file) {
+  const auto all = cfg.testFiles ^ flat_map([&](const auto &file) {
                      std::ifstream src(file, std::ios::in | std::ios::binary);
                      const auto cases = TestCase::parseTestCase(src, cfg.directive, {{cfg.archVar, targets}});
                      const auto shortName = extractTestName(file);
-                     return cases ^ flat_map([&](auto &tc) -> std::vector<Task> {
+                     return cases ^ flat_map([&](const auto &tc) -> std::vector<Task> {
                               if (!matches(shortName, tc.name)) return {};
-                              return tc.matrices ^ flat_map([&](auto &vars) {
-                                       return cfg.defaultsVariants ^ flat_map([&](auto &label, auto &value) {
+                              return tc.matrices ^ flat_map([&](const auto &vars) {
+                                       return cfg.defaultsVariants ^ flat_map([&](const auto &label, const auto &value) {
                                                 return tasksFor(file, shortName, tc, vars, label, value);
                                               });
                                      });
@@ -512,7 +515,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
 
   return all ^ distinct_by([&](const Task &t) -> std::string {
            if (t.mode != Mode::Passthrough) return t.id();
-           return fmt::format("P|{}|{}|{}", t.testFile, t.caseName, t.variables ^ mk_string("|", [&](auto &k, auto &v) {
+           return fmt::format("P|{}|{}|{}", t.testFile, t.caseName, t.variables ^ mk_string("|", [&](const auto &k, const auto &v) {
                                                                       return k + "=" + (k == cfg.archVar ? v.substr(0, v.find('@')) : v);
                                                                     }));
          });
@@ -542,15 +545,15 @@ struct RunnerOptions {
 
 inline void emitCtest(const std::vector<Task> &tasks, const DriverConfig &cfg, const std::string &file, const std::string &prefix,
                       const std::string &binary, const std::string &workdir, const std::string &env) {
-  const auto entries = tasks ^ map([&](const Task &t) {
-                         const auto vs =
-                             t.variants ^ map([](const RunVariant &v) {
-                               return std::pair{v.suffix, v.env ^ mk_string(";", [](auto &k, auto &val) { return k + "=" + val; })};
-                             });
-                         const auto target = detail::archFor(t, cfg);
-                         const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(target);
-                         return CtestEntry{t.id(), labels, vs};
-                       });
+  const auto entries =
+      tasks ^ map([&](const auto &t) {
+        const auto vs = t.variants ^ map([](const auto &v) {
+                          return std::pair{v.suffix, v.env ^ mk_string(";", [](const auto &k, const auto &val) { return k + "=" + val; })};
+                        });
+        const auto target = detail::archFor(t, cfg);
+        const auto labels = target.empty() ? std::string{} : "codegen;" + ctestSafe(target);
+        return CtestEntry{t.id(), labels, vs};
+      });
   emitCtestFragment(file, prefix, binary, workdir, env, entries);
 }
 
@@ -570,8 +573,10 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   setrlimit(RLIMIT_CORE, &noCore);
 #endif
   if (opts.listShards) {
-    loadTestTargets(cfg.profileDir) ^ map([](auto &t) { return ctestSafe(t); }) ^ distinct() //
-        | for_each([](auto &s) { std::fprintf(stdout, "%s\n", s.c_str()); });
+    loadTestTargets(cfg.profileDir)                           //
+            ^ map([](const auto &t) { return ctestSafe(t); }) //
+            ^ distinct()                                      //
+        | for_each([](const auto &s) { std::fprintf(stdout, "%s\n", s.c_str()); });
     return 0;
   }
   auto allTasks = enumerateTasks(cfg, opts.offload, opts.passthrough, opts.caseFilters);
@@ -580,7 +585,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
                            : !opts.runOnlyTask.empty() ? opts.runOnlyTask
                                                        : opts.cleanupTask;
       !single.empty()) {
-    auto it = allTasks ^ find([&](auto &t) { return t.id() == single; });
+    auto it = allTasks ^ find([&](const auto &t) { return t.id() == single; });
     if (!it) return std::fprintf(stderr, "polytest: no task with id '%s'\n", single.c_str()), 1;
     const Task &t = *it;
     if (!opts.cleanupTask.empty()) {
@@ -604,7 +609,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return o.status == TaskStatus::Pass ? 0 : 1;
   }
   if (!opts.runTask.empty()) {
-    auto it = allTasks ^ find([&](auto &t) { return t.id() == opts.runTask; });
+    auto it = allTasks ^ find([&](const auto &t) { return t.id() == opts.runTask; });
     if (!it) {
       std::fprintf(stderr, "polytest: no task with id '%s'\n", opts.runTask.c_str());
       return 1;
@@ -619,11 +624,15 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.listIds) {
-    const auto ids = tasks ^ map([](auto &t) { return t.id(); });
-    ids | for_each([](auto &id) { std::fprintf(stdout, "%s\n", id.c_str()); });
+    const auto ids = tasks ^ map([](const auto &t) { return t.id(); });
+    ids | for_each([](const auto &id) { std::fprintf(stdout, "%s\n", id.c_str()); });
     // XXX duplicate ids shadow tasks: ctest registers both names but --run-task resolves the first
-    const auto dups = ids ^ group_by([](auto &id) { return id; }) ^ filter([](auto &, auto &xs) { return xs.size() > 1; }) ^ keys();
-    dups | for_each([](auto &id) { std::fprintf(stderr, "polytest: duplicate task id '%s'\n", id.c_str()); });
+    const auto groupedIds = ids ^ group_by([](const auto &id) { return id; });
+    const auto dups = groupedIds | collect([](const auto &id, const auto &xs) -> std::optional<std::string> {
+                        return xs.size() > 1 ? std::optional{id} : std::nullopt;
+                      }) //
+                      | to_vector();
+    dups | for_each([](const auto &id) { std::fprintf(stderr, "polytest: duplicate task id '%s'\n", id.c_str()); });
     return dups.empty() ? 0 : 1;
   }
   if (!opts.emitFile.empty()) {
@@ -632,7 +641,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return 0;
   }
   if (opts.list) {
-    tasks | for_each([](auto &t) { std::fprintf(stdout, "%s\n", t.display().c_str()); });
+    tasks | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.display().c_str()); });
     return 0;
   }
 
@@ -700,15 +709,15 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
 
-  const auto countBy = [&](TaskStatus s) { return finalOutcomes | aspartame::count([s](auto &o) { return o.status == s; }); };
+  const auto countBy = [&](TaskStatus s) { return finalOutcomes | count([s](const auto &o) { return o.status == s; }); };
   const auto pass = countBy(TaskStatus::Pass);
   const auto skip = countBy(TaskStatus::Skip);
   const auto fail = countBy(TaskStatus::Fail);
   if (fail > 0) {
-    const auto failedDisplay = tasks                                                                  //
-                               | zip(finalOutcomes)                                                   //
-                               | filter([](auto &, auto &o) { return o.status == TaskStatus::Fail; }) //
-                               | mk_string("\n", [](auto &t, auto &) { return "  - " + t.display(); });
+    const auto failedDisplay = tasks                                                                              //
+                               | zip(finalOutcomes)                                                               //
+                               | filter([](const auto &, const auto &o) { return o.status == TaskStatus::Fail; }) //
+                               | mk_string("\n", [](const auto &t, const auto &) { return "  - " + t.display(); });
     std::fprintf(stderr, "polytest: failures (%zu):\n%s\n", fail, failedDisplay.c_str());
   }
   std::fprintf(stderr, "polytest: pass=%zu skip=%zu fail=%zu total=%zu compile=%.1fs run=%.1fs\n", pass, skip, fail, tasks.size(),

@@ -57,8 +57,9 @@ llvm::Value *VulkanLowering::bufferElementPtr(const AnyType &ptrTpe, llvm::Value
 
 llvm::Value *VulkanLowering::handleOf(const Term::Select &select) {
   if (!select.steps.empty()) return nullptr;
-  return bufferHandles ^ get_maybe(select.root.symbol) ^
-         fold([](auto &, auto &h) -> llvm::Value * { return h; }, []() -> llvm::Value * { return nullptr; });
+  return bufferHandles                   //
+         ^ get_maybe(select.root.symbol) //
+         ^ fold([](const auto &, const auto &h) -> llvm::Value * { return h; }, []() -> llvm::Value * { return nullptr; });
 }
 
 llvm::Value *VulkanLowering::elementPtr(const Term::Select &lhs, llvm::Value *idx) {
@@ -88,9 +89,9 @@ std::optional<std::tuple<llvm::Value *, llvm::Type *, std::vector<llvm::Value *>
     base = cg.mkTermVal(Term::Select(select.root, {}, select.root.tpe));
     arrTy = cg.resolveType(select.root.tpe);
   } else return std::nullopt;
-  if (!(select.steps ^ forall([](auto &step) { return step.template is<PathStep::IndexDyn>(); }))) return std::nullopt;
+  if (!(select.steps ^ forall([](const auto &step) { return step.template is<PathStep::IndexDyn>(); }))) return std::nullopt;
   const auto indices =
-      select.steps ^ map([&](auto &step) { return cg.i64SExt(cg.mkTermVal(step.template get<PathStep::IndexDyn>()->idx)); });
+      select.steps ^ map([&](const auto &step) { return cg.i64SExt(cg.mkTermVal(step.template get<PathStep::IndexDyn>()->idx)); });
   return std::tuple{base, arrTy, indices};
 }
 
@@ -104,22 +105,22 @@ std::pair<llvm::ArrayType *, std::vector<uint64_t>> VulkanLowering::flattenArray
   std::vector<uint64_t> strides(dims.size(), 1);
   for (int i = static_cast<int>(dims.size()) - 2; i >= 0; --i)
     strides[i] = strides[i + 1] * dims[i + 1];
-  const auto total = dims ^ fold_left(uint64_t{1}, [](auto acc, auto d) { return acc * d; });
+  const auto total = dims ^ fold_left(uint64_t{1}, [](const auto &acc, const auto &d) { return acc * d; });
   return {llvm::ArrayType::get(t, total), strides};
 }
 
 llvm::Value *VulkanLowering::localChainPtr(llvm::Value *base, llvm::Type *arrTy, const std::vector<llvm::Value *> &indices) {
   // multi-dim access chains are unlowerable, so flatten to [total x scalar] and address by one index
   const auto [flatTy, strides] = flattenArray(arrTy);
-  llvm::Value *flatIdx = indices | zip(strides) | fold_left(i64Zero(), [&](llvm::Value *acc, auto &is) {
+  llvm::Value *flatIdx = indices | zip(strides) | fold_left(i64Zero(), [&](llvm::Value *acc, const auto &is) {
                            return cg.B.CreateAdd(acc, cg.B.CreateMul(is.first, llvm::ConstantInt::get(cg.C.i64Ty(), is.second)));
                          });
   return cg.B.CreateInBoundsGEP(flatTy, base, {llvm::ConstantInt::get(cg.C.i32Ty(), 0), flatIdx}, "wg_flat_ptr");
 }
 
 std::vector<llvm::Value *> VulkanLowering::extendIndices(const std::vector<llvm::Value *> &base, const AnyType &lhsTpe, llvm::Value *idx) {
-  const bool descend = lhsTpe.template is<Type::Arr>() ||
-                       (lhsTpe.template get<Type::Ptr>() ^ exists([](auto &p) { return p.comp.template is<Type::Arr>(); }));
+  const bool descend = lhsTpe.template is<Type::Arr>()
+                       || (lhsTpe.template get<Type::Ptr>() ^ exists([](const auto &p) { return p.comp.template is<Type::Arr>(); }));
   std::vector<llvm::Value *> out = base;
   if (descend || out.empty()) out.push_back(cg.i64SExt(idx));
   else out.back() = cg.B.CreateAdd(out.back(), cg.i64SExt(idx));
@@ -162,7 +163,7 @@ void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::T
       physicalFieldCopy(dst, src, rootTy, info.tpe, std::move(idxs));
       return;
     }
-    info.def.members | zip_with_index<size_t>() | for_each([&](auto &m, auto i) {
+    info.def.members | zip_with_index<size_t>() | for_each([&](const auto &m, const auto &i) {
       structFieldCopy(dst, src, rootTy, m.tpe, idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
     });
   } else if (auto a = tpe.template get<Type::Arr>()) {
@@ -240,23 +241,24 @@ bool VulkanLowering::defineLocalString(CodeGen &, const std::string &symbol, con
 bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg> &argsNoUnit, const Function &fn) {
   auto &B = cg.B;
   cg.stackVarPtrs.clear();
-  const auto localPtr = [](auto &arg) {
-    return arg.named.tpe.template get<Type::Ptr>() ^ exists([](auto &p) { return p.space.template is<TypeSpace::Local>(); });
+  const auto localPtr = [](const auto &arg) {
+    return arg.named.tpe.template get<Type::Ptr>() ^ exists([](const auto &p) { return p.space.template is<TypeSpace::Local>(); });
   };
   // local-AS pointers back workgroup-shared globals
-  localBases ^= concat(argsNoUnit | filter(localPtr) | map([&](auto &arg) {
+  localBases ^= concat(argsNoUnit | filter(localPtr) | map([&](const auto &arg) {
                          const auto p = *arg.named.tpe.template get<Type::Ptr>();
                          auto *arrTy = llvm::ArrayType::get(cg.resolveType(p.comp), program_meta::VkWorkgroupSizeXValue);
                          auto *gv = new llvm::GlobalVariable(cg.M, arrTy, /*isConstant*/ false, llvm::GlobalValue::InternalLinkage,
                                                              llvm::PoisonValue::get(arrTy), "wg_" + arg.named.symbol, nullptr,
                                                              llvm::GlobalValue::NotThreadLocal, AddrSpace::Workgroup);
                          return std::pair{arg.named.symbol, std::tuple{p.comp, arrTy, static_cast<llvm::Value *>(gv)}};
-                       }) |
-                       to_vector());
+                       }) //
+                       | to_vector());
   // global pointers bind to sequential storage-buffer descriptors; accumulate once, derive both maps
-  const auto bound = argsNoUnit                                                                                    //
-                     | filter([&](auto &arg) { return arg.named.tpe.template is<Type::Ptr>() && !localPtr(arg); }) //
-                     | zip_with_index<unsigned>() | map([&](auto &arg, auto binding) {
+  const auto bound = argsNoUnit                                                                                          //
+                     | filter([&](const auto &arg) { return arg.named.tpe.template is<Type::Ptr>() && !localPtr(arg); }) //
+                     | zip_with_index<unsigned>()                                                                        //
+                     | map([&](const auto &arg, const auto &binding) {
                          const auto p = *arg.named.tpe.template get<Type::Ptr>();
                          auto *handle = bufferHandle(cg.resolveType(p.comp), binding, arg.named.symbol);
                          auto *base = bufferElementPtr(arg.named.tpe, handle, i64Zero());
@@ -265,11 +267,13 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
                          return std::tuple{arg.named.symbol, arg.named.tpe, handle, slot};
                        }) //
                      | to_vector();
-  bufferHandles ^=
-      concat(bound ^ map([](auto &symbol, auto &tpe, auto &handle, auto &slot) { return std::pair{symbol, std::pair{tpe, handle}}; }));
-  cg.stackVarPtrs ^=
-      concat(bound ^ map([](auto &symbol, auto &tpe, auto &handle, auto &slot) { return std::pair{symbol, std::pair{tpe, slot}}; }));
-  const auto scalars = argsNoUnit ^ collect([](auto &arg) -> std::optional<std::pair<std::string, Type::Any>> {
+  bufferHandles ^= concat(bound ^ map([](const auto &symbol, const auto &tpe, const auto &handle, const auto &slot) {
+                            return std::pair{symbol, std::pair{tpe, handle}};
+                          }));
+  cg.stackVarPtrs ^= concat(bound ^ map([](const auto &symbol, const auto &tpe, const auto &handle, const auto &slot) {
+                              return std::pair{symbol, std::pair{tpe, slot}};
+                            }));
+  const auto scalars = argsNoUnit ^ collect([](const auto &arg) -> std::optional<std::pair<std::string, Type::Any>> {
                          if (arg.named.tpe.template is<Type::Ptr>()) return std::nullopt;
                          return std::pair{arg.named.symbol, arg.named.tpe};
                        });
@@ -277,8 +281,8 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
     // std140 padding must mirror the host packing exactly, else a strict driver reads a member as garbage
     const auto &dl = cg.M.getDataLayout();
     auto *i8Ty = llvm::Type::getInt8Ty(cg.C.actual);
-    const auto scalarTys = scalars ^ map([&](auto &s) { return cg.resolveType(s.second); });
-    const std::vector<size_t> sizes = scalarTys ^ map([&](auto *ty) { return static_cast<size_t>(dl.getTypeAllocSize(ty)); });
+    const auto scalarTys = scalars ^ map([&](const auto &, const auto &tpe) { return cg.resolveType(tpe); });
+    const std::vector<size_t> sizes = scalarTys ^ map([&](const auto &ty) { return static_cast<size_t>(dl.getTypeAllocSize(ty)); });
     const auto offsets = runtime::std140ScalarLayout(sizes).first;
     std::vector<llvm::Type *> blockMembers;
     uint64_t off = 0;

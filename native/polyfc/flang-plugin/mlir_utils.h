@@ -15,8 +15,9 @@
 
 namespace polyregion::polyfc {
 
-using namespace mlir;
 using namespace aspartame;
+
+using namespace mlir;
 
 Location uLoc(OpBuilder &B);
 Type i64Ty(OpBuilder &B);
@@ -115,8 +116,8 @@ template <size_t N> struct AggregateMirror {
   Value local(OpBuilder &B, const std::vector<std::array<Value, N>> &fieldGroups) const {
     const auto ty = structTy();
     auto alloca = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
-    fieldGroups | zip_with_index() | for_each([&](auto &fields, auto group) {
-      fields | zip_with_index() | for_each([&](auto &field, auto idx) {
+    fieldGroups | zip_with_index() | for_each([&](const auto &fields, const auto &group) {
+      fields | zip_with_index() | for_each([&](const auto &field, const auto &idx) {
         LLVM::StoreOp::create(B, uLoc(B), field,
                               LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), ty, alloca,
                                                   llvm::ArrayRef{intConst(B, i64Ty(B), group), intConst(B, i64Ty(B), idx)}));
@@ -143,11 +144,11 @@ template <size_t N> struct AggregateMirror {
           B, uLoc(B),
           groups                          //
               | zip_with_index<int64_t>() //
-              | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), arrayTy), [&](auto acc, auto &group) {
+              | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), arrayTy), [&](const auto &acc, const auto &group) {
                   Value structInit =
                       group.first                 //
                       | zip_with_index<int64_t>() //
-                      | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), ty), [&](auto acc, auto &value) {
+                      | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), ty), [&](const auto &acc, const auto &value) {
                           return LLVM::InsertValueOp::create(B, uLoc(B), ty, acc, value.first, llvm::ArrayRef<int64_t>{value.second});
                         });
                   return LLVM::InsertValueOp::create(B, uLoc(B), arrayTy, acc, structInit, llvm::ArrayRef<int64_t>{group.second});

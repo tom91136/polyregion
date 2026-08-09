@@ -30,6 +30,8 @@
 
 namespace polyregion::polytest {
 
+using namespace aspartame;
+
 inline std::optional<std::string> hostname() {
 #ifdef _WIN32
   DWORD n = 0;
@@ -48,27 +50,23 @@ inline std::optional<std::string> hostname() {
 
 // `[export ]KEY[+]=VALUE` -> (KEY, VALUE); nullopt for comments, blanks, and non-assignments
 inline std::optional<std::pair<std::string, std::string>> parseEnvLine(const std::string &raw) {
-  using namespace aspartame;
   const auto line = raw ^ trim_leading();
   if (line.empty() || line[0] == '#') return {};
-  const auto body = line ^ starts_with("export ") ? line.substr(7) : line;
-  const auto eq = body.find('=');
-  if (eq == std::string::npos) return {};
-  const auto keyEnd = eq > 0 && body[eq - 1] == '+' ? eq - 1 : eq;
-  return std::pair{body.substr(0, keyEnd), body.substr(eq + 1)};
+  const auto body = line ^ starts_with("export ") ? line ^ drop(7) : line;
+  const auto assignment = body ^ split_once('=');
+  if (!assignment) return {};
+  auto [key, value] = *assignment;
+  if (!key.empty() && key.back() == '+') key ^= drop_right(1);
+  return std::pair{std::move(key), std::move(value)};
 }
 
 inline std::vector<std::string> fileLines(const std::string &file) {
   std::ifstream is(file);
-  std::vector<std::string> out;
-  for (std::string line; std::getline(is, line);)
-    out.push_back(line);
-  return out;
+  return istream_lines(is) | to_vector();
 }
 
 // candidate profile files, most-specific first: <profile>.<os>.env, <profile>.env, <hostname>.<os>.env, <hostname>.env, default.env
 inline std::vector<std::string> profileCandidates(const std::string &profileDir) {
-  using namespace aspartame;
   const auto path = [&](const std::string &name) {
     llvm::SmallString<128> p(profileDir);
     llvm::sys::path::append(p, name);
@@ -78,16 +76,15 @@ inline std::vector<std::string> profileCandidates(const std::string &profileDir)
   std::vector<std::string> bases; // the profile name, then the short hostname
   if (const auto v = std::getenv(polyregion::env::PolyregionTestProfile)) bases ^= append(v);
   if (auto h = hostname()) bases ^= append(*h ^ take_while([](char c) { return c != '.'; }));
-  return bases                                                                                                              //
-         ^ flat_map([&](auto &b) { return std::vector{path(b + "." + std::string(hostOs()) + ".env"), path(b + ".env")}; }) //
+  return bases                                                                                                                    //
+         ^ flat_map([&](const auto &b) { return std::vector{path(b + "." + std::string(hostOs()) + ".env"), path(b + ".env")}; }) //
          ^ append(path("default.env"));
 }
 
 inline std::vector<std::string> loadTestTargets(const std::string &profileDir,
                                                 const char *envKey = polyregion::env::PolyregionTestTargets) {
-  using namespace aspartame;
   const auto splitTargets = [](const std::string &v) {
-    return v ^ split(';') ^ collect([](auto &piece) -> std::optional<std::string> {
+    return v ^ split(';') ^ collect([](const auto &piece) -> std::optional<std::string> {
              auto t = piece ^ trim();
              return t.empty() ? std::nullopt : std::optional{t};
            });
@@ -95,28 +92,33 @@ inline std::vector<std::string> loadTestTargets(const std::string &profileDir,
   if (const auto v = std::getenv(envKey)) return splitTargets(v);
   const auto readKey = [&](const std::string &file) -> std::optional<std::vector<std::string>> {
     if (!llvm::sys::fs::exists(file)) return {};
-    const auto vals = fileLines(file) ^ collect(parseEnvLine) ^ collect([&](auto &k, auto &v) { //
-                        return k == envKey ? std::optional{v} : std::nullopt;
-                      });
+    const auto vals = fileLines(file)                               //
+                      | collect(parseEnvLine)                       //
+                      | collect([&](const auto &k, const auto &v) { //
+                          return k == envKey ? std::optional{v} : std::nullopt;
+                        }) //
+                      | to_vector();
     if (vals.empty()) return {};
-    return vals ^ flat_map([&](auto &v) { return splitTargets(v ^ starts_with(":") ? v.substr(1) : v); });
+    return vals ^ flat_map([&](const auto &v) { return splitTargets(v ^ starts_with(":") ? v ^ drop(1) : v); });
   };
   return profileCandidates(profileDir) ^ collect_first(readKey) ^ get_or_else(std::vector<std::string>{});
 }
 
 inline const std::vector<std::string> &loadProfileEnv(const std::string &profileDir) {
-  using namespace aspartame;
   static const std::vector<std::string> cached = [&profileDir] {
-    return profileCandidates(profileDir)                            //
-           ^ find([](auto &f) { return llvm::sys::fs::exists(f); }) //
-           ^ map([](auto &file) {
-               return fileLines(file) ^ collect(parseEnvLine) ^ collect([](auto &k, auto &v) -> std::optional<std::string> {
-                        return k == polyregion::env::PolyregionTestTargets || k == polyregion::env::PolyinvokeTestTargets
-                                   ? std::nullopt
-                                   : std::optional{k + "=" + v};
-                      });
-             }) ^
-           get_or_else(std::vector<std::string>{});
+    return profileCandidates(profileDir)                                  //
+           ^ find([](const auto &f) { return llvm::sys::fs::exists(f); }) //
+           ^ map([](const auto &file) {
+               return fileLines(file)         //
+                      | collect(parseEnvLine) //
+                      | collect([](const auto &k, const auto &v) -> std::optional<std::string> {
+                          return k == polyregion::env::PolyregionTestTargets || k == polyregion::env::PolyinvokeTestTargets
+                                     ? std::nullopt
+                                     : std::optional{k + "=" + v};
+                        }) //
+                      | to_vector();
+             }) //
+           ^ get_or_else(std::vector<std::string>{});
   }();
   return cached;
 }
@@ -131,17 +133,16 @@ struct ResolvedTarget {
 };
 
 inline std::optional<ResolvedTarget> resolveTestTarget(std::string_view token) {
-  const auto at = token.find('@');
-  const auto backendName = token.substr(0, at);
-  const auto arch = at == std::string_view::npos ? std::string_view{} : token.substr(at + 1);
+  const auto pair = token ^ split_once('@');
+  const auto backendName = pair ? pair->first : token;
+  const auto arch = pair ? pair->second : std::string_view{};
   if (auto s = compiletime::TargetSpec::findByName(backendName)) return ResolvedTarget{*s, std::string(arch)};
   return std::nullopt;
 }
 
 inline std::vector<ResolvedTarget> resolveTestTargets(const std::string &profileDir,
                                                       const char *envKey = polyregion::env::PolyregionTestTargets) {
-  using namespace aspartame;
-  return loadTestTargets(profileDir, envKey) ^ collect([](auto &t) { return resolveTestTarget(t); });
+  return loadTestTargets(profileDir, envKey) ^ collect([](const auto &t) { return resolveTestTarget(t); });
 }
 
 } // namespace polyregion::polytest

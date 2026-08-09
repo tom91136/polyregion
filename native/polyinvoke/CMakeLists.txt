@@ -93,6 +93,7 @@ set(POLYINVOKE_SRC
         ${RUNTIME_SRC_FILES})
 
 set(POLYINVOKE_PUBLIC_LIBS
+        Aspartame::Aspartame
         ${LLVM_LIBS}
         nlohmann_json::nlohmann_json
         Vulkan::Headers
@@ -102,7 +103,6 @@ set(POLYINVOKE_PUBLIC_LIBS
 set(POLYINVOKE_PRIVATE_LIBS
         unofficial::libffi::libffi
         fmt::fmt
-        Aspartame
         CACHE INTERNAL "")
 set(POLYINVOKE_LIBS ${POLYINVOKE_PUBLIC_LIBS} ${POLYINVOKE_PRIVATE_LIBS} CACHE INTERNAL "")
 
@@ -129,8 +129,8 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
     target_include_directories(${TARGET} PUBLIC
             thirdparty/
             ${POLYINVOKE_WRANGLER_INCLUDES}
-            ${LLVM_INCLUDE_DIRS}
             ${RUNTIME_INCLUDE_DIRS})
+    target_include_directories(${TARGET} SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS} _POSIX_C_SOURCE=200809L)
     # XXX vulkan-hpp operator <=> assumes 64-bit handles so force equality-only on aarch32
     if (CMAKE_SIZEOF_VOID_P LESS 8)

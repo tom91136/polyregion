@@ -19,13 +19,12 @@ add_llvm_library(polyfc-flang-plugin
         PARTIAL_SOURCES_INTENDED)
 set_property(TARGET polyfc-flang-plugin PROPERTY CXX_STANDARD 17)
 
-target_include_directories(polyfc-flang-plugin PRIVATE
+target_include_directories(polyfc-flang-plugin PRIVATE ../polydco)
+target_include_directories(polyfc-flang-plugin SYSTEM PRIVATE
         ${LLVM_INCLUDE_DIRS}
         ${CLANG_INCLUDE_DIRS}
         ${FLANG_INCLUDE_DIRS}
-        ${MLIR_INCLUDE_DIRS}
-        ../polydco
-)
+        ${MLIR_INCLUDE_DIRS})
 target_compile_definitions(polyfc-flang-plugin PRIVATE ${LLVM_DEFINITIONS} FLANG_LITTLE_ENDIAN)
 target_compile_options(polyfc-flang-plugin PRIVATE ${COMPILE_OPTIONS}
         -Wno-deprecated-copy

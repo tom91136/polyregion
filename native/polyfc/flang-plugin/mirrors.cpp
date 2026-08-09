@@ -1,7 +1,5 @@
 #include "mirrors.h"
 
-#include "aspartame/all.hpp"
-
 #include "polyregion/conventions.h"
 
 #include "ast.h"

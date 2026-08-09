@@ -43,11 +43,11 @@ class AdaptiveJitPolicy {
     }
     if (state.observations.size() >= observationLimit) {
       state.observations                                                               //
-          | map([](const auto key, const auto &observation) {                          //
+          | map([](const auto &key, const auto &observation) {                         //
               return std::pair{key, std::pair{observation.hits, observation.touched}}; //
             })                                                                         //
           | min_by([](const auto &, const auto &rank) { return rank; })                //
-          | for_each([&](const auto &victim) { state.observations.erase(victim.first); });
+          | for_each([&](const auto &victim, const auto &) { state.observations.erase(victim); });
     }
     state.observations.emplace(key, Observation{1, ++tick});
   }

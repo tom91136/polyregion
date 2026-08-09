@@ -1,5 +1,7 @@
 #include "mlir_utils.h"
 
+using namespace aspartame;
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
@@ -76,11 +78,11 @@ polyregion::polyfc::DynamicAggregateMirror::DynamicAggregateMirror(MLIRContext *
 
 mlir::Value polyregion::polyfc::DynamicAggregateMirror::local(OpBuilder &B, const std::vector<std::vector<Value>> &fieldGroups) const {
   auto alloca = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
-  fieldGroups | zip_with_index() | for_each([&](auto &fields, auto group) {
+  fieldGroups | zip_with_index() | for_each([&](const auto &fields, const auto &group) {
     if (ty.getBody().size() != fields.size()) {
       raise(fmt::format("Cannot initialise LLVM struct {} with mismatching ({}) field counts", show(static_cast<Type>(ty)), fields.size()));
     }
-    fields | zip_with_index() | for_each([&](auto &field, auto idx) {
+    fields | zip_with_index() | for_each([&](const auto &field, const auto &idx) {
       LLVM::StoreOp::create(
           B, uLoc(B), field,
           LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), group), intConst(B, i64Ty(B), idx)}));

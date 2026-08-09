@@ -47,7 +47,7 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
     accessQuals.push_back(llvm::MDString::get(cg.C.actual, "none")); // write_only | read_only | read_write | none
 
     auto typeName = [](const Type::Any &tpe) -> std::string {
-      auto impl = [](const Type::Any &x, auto &thunk) -> std::string {
+      auto impl = [](const Type::Any &x, const auto &thunk) -> std::string {
         return x.match_total(                                                                                               //
             [&](const Type::Float16 &) -> std::string { return "half"; },                                                   //
             [&](const Type::Float32 &) -> std::string { return "float"; },                                                  //
@@ -152,7 +152,7 @@ struct OclMangledMath {
 
 static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requestedRtn, llvm::ArrayRef<ValPtr> args) {
   auto &ctx = cg.C.actual;
-  auto paramTys = b.args ^ map([&](auto &mk) { return mk(ctx); });
+  auto paramTys = b.args ^ map([&](const auto &mk) { return mk(ctx); });
   auto *fnTy = llvm::FunctionType::get(b.ret(ctx), paramTys, /*isVarArg*/ false);
   auto fnCallee = cg.M.getOrInsertFunction(b.mangled, fnTy);
   auto *fn = llvm::cast<llvm::Function>(fnCallee.getCallee());
@@ -160,13 +160,13 @@ static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requested
   fn->addFnAttr(llvm::Attribute::Convergent);
   fn->addFnAttr(llvm::Attribute::NoUnwind);
 
-  auto coerced = args | zip_with_index<size_t>() | map([&](auto *src, auto i) -> llvm::Value * {
+  auto coerced = args | zip_with_index<size_t>() | map([&](const auto &src, const auto &i) -> llvm::Value * {
                    auto *dst = paramTys[i];
                    if (src->getType() == dst) return src;
                    if (src->getType()->isIntegerTy() && dst->isIntegerTy()) return cg.B.CreateIntCast(src, dst, /*isSigned*/ false);
                    throw polyregion::backend::BackendException(std::string("cannot coerce arg to OCL builtin ") + b.mangled);
-                 }) |
-                 to_vector();
+                 }) //
+                 | to_vector();
   auto *call = cg.B.CreateCall(fn, coerced);
   call->setCallingConv(llvm::CallingConv::SPIR_FUNC);
 

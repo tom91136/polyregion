@@ -9,6 +9,6 @@ target_sources(polytest
         polytest/driver.hpp
         polytest/test_case.hpp
         polytest/test_runner.hpp)
-target_link_libraries(polytest INTERFACE Aspartame polycommon LLVMSupport fmt::fmt Catch2::Catch2)
+target_link_libraries(polytest INTERFACE Aspartame::Aspartame polycommon LLVMSupport fmt::fmt Catch2::Catch2)
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../polyinvoke/include)
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -255,9 +255,11 @@ Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vecto
   }
 
   JSValue stepsArr = JS_NewArray(ctx);
-  steps | zip_with_index<uint32_t>() | for_each([&](auto &s, auto i) { //
-    JS_SetPropertyUint32(ctx, stepsArr, i, JS_NewStringLen(ctx, s.data(), s.size()));
-  });
+  steps                                              //
+      | zip_with_index<uint32_t>()                   //
+      | for_each([&](const auto &s, const auto &i) { //
+          JS_SetPropertyUint32(ctx, stepsArr, i, JS_NewStringLen(ctx, s.data(), s.size()));
+        });
 
   static uint8_t empty = 0;
   auto *inputData = programBytes.empty() ? &empty : const_cast<uint8_t *>(programBytes.data());

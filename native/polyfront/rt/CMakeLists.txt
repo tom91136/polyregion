@@ -9,7 +9,7 @@ target_sources(polyrt-obj
         include/polyrt/mem.hpp
         include/polyrt/sma_runtime.hpp
 )
-target_link_libraries(polyrt-obj PUBLIC polyinvoke-obj polyreflect-rt PRIVATE Aspartame::Aspartame)
+target_link_libraries(polyrt-obj PUBLIC polyinvoke-obj polyreflect-rt Aspartame::Aspartame)
 polyregion_apply_common_options(polyrt-obj)
 target_include_directories(polyrt-obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 if (APPLE)

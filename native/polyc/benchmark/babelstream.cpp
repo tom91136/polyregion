@@ -81,7 +81,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
 
   auto copy = mkCpuStreamFn( //
       "copy", {}, empty,
-      [&](auto _, auto i) -> Stmts {
+      [&](const auto &_, const auto &i) -> Stmts {
         return {
             let("ai") = "a"_(Ptr(type))[i],   // ai = a[i]
             "c"_(Ptr(type))[i] = "ai"_(type), // c[i] = ai
@@ -91,7 +91,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
 
   auto mul = mkCpuStreamFn( //
       "mul", {"scalar"_(type)()}, empty,
-      [&](auto _, auto i) -> Stmts {
+      [&](const auto &_, const auto &i) -> Stmts {
         return {
             let("ci") = "c"_(Ptr(type))[i],                           // ci = b[i]
             let("r") = call(Mul("ci"_(type), "scalar"_(type), type)), // r = ci * scalar
@@ -102,7 +102,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
 
   auto add = mkCpuStreamFn( //
       "add", {}, empty,
-      [&](auto _, auto i) -> Stmts {
+      [&](const auto &_, const auto &i) -> Stmts {
         return {
             let("ai") = "a"_(Ptr(type))[i],                       // ai = a[i]
             let("bi") = "b"_(Ptr(type))[i],                       // bi = b[i]
@@ -114,7 +114,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
 
   auto triad = mkCpuStreamFn( //
       "triad", {"scalar"_(type)()}, empty,
-      [&](auto _, auto i) -> Stmts {
+      [&](const auto &_, const auto &i) -> Stmts {
         return {
             let("bi") = "b"_(Ptr(type))[i],                            // bi = b[i]
             let("ci") = "c"_(Ptr(type))[i],                            // ci = b[i]
@@ -128,12 +128,12 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
   auto dot = !gpu ? //
                  mkCpuStreamFn(
                      "dot", {"sum"_(Ptr(type))()},
-                     [&](auto id, auto i) -> Stmts { //
+                     [&](const auto &id, const auto &i) -> Stmts { //
                        return {
                            var("acc") = 0_(type) // mutable accumulator across iterations
                        };
                      },
-                     [&](auto id, auto i) -> Stmts {
+                     [&](const auto &id, const auto &i) -> Stmts {
                        return {
                            let("ai") = "a"_(Ptr(type))[i],                              // ai = a[i]
                            let("bi") = "b"_(Ptr(type))[i],                              // bi = b[i]
@@ -143,7 +143,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
 
                        };
                      },
-                     [&](auto id, auto i) -> Stmts {
+                     [&](const auto &id, const auto &i) -> Stmts {
                        return {
                            "sum"_(Ptr(type))[id] = "acc"_(type) // sum[id] = acc
                        };
@@ -151,7 +151,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
                   : //
                  mkCpuStreamFn(
                      "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, {}, Local))(), "array_size"_(UInt)()}, empty,
-                     [&](auto local_i, auto i) -> Stmts {
+                     [&](const auto &local_i, const auto &i) -> Stmts {
                        Stmts body;
                        body.push_back(let("global_size") = call(GpuGlobalSize(0_(UInt))));
                        body.push_back("wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type));
@@ -245,9 +245,9 @@ int main() {
 
       for (auto &d : platform->enumerate()) {
 
-        const auto isSpirvImage = target == compiletime::Target::Object_LLVM_SPIRV32_Kernel ||
-                                  target == compiletime::Target::Object_LLVM_SPIRV64_Kernel ||
-                                  target == compiletime::Target::Object_LLVM_SPIRV_GLCompute;
+        const auto isSpirvImage = target == compiletime::Target::Object_LLVM_SPIRV32_Kernel
+                                  || target == compiletime::Target::Object_LLVM_SPIRV64_Kernel
+                                  || target == compiletime::Target::Object_LLVM_SPIRV_GLCompute;
         if (backend == invoke::Backend::OpenCL) {
           const auto features = d->features();
           const auto hasSpirvKernel = features ^ contains(std::string("spirv_kernel"));
@@ -271,13 +271,13 @@ int main() {
         size_t times = 100;
         size_t groups = cpu ? std::thread::hardware_concurrency() : 256;
 
-        auto fValidate = [](auto actual, auto tolerance) {
+        auto fValidate = [](const auto &actual, const auto &tolerance) {
           if (actual >= tolerance) {
             fmt::print(stderr, "Tolerance ({}%) exceeded for array value delta: {}%\n", tolerance * 100, actual * 100);
           }
         };
 
-        auto fValidateSum = [=](auto actual) {
+        auto fValidateSum = [=](const auto &actual) {
           if (actual >= relTolerance) {
             fmt::print(stderr, "Tolerance ({}%) exceeded for dot value delta: {}%\n", relTolerance * 100, actual * 100);
           }

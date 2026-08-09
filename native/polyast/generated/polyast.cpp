@@ -415,8 +415,8 @@ size_t Type::Struct::hash_code() const {
 Type::Struct Type::Struct::withName(const Sym &v_) const { return Type::Struct(v_, args); }
 Type::Struct Type::Struct::withArgs(const std::vector<Type::Any> &v_) const { return Type::Struct(name, v_); }
 POLYREGION_EXPORT bool Type::Struct::operator==(const Type::Struct &rhs) const {
-  return (this->name == rhs.name) &&
-         std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return (this->name == rhs.name)
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Type::Struct::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -497,9 +497,9 @@ Type::Exec Type::Exec::withTpeVars(const std::vector<std::string> &v_) const { r
 Type::Exec Type::Exec::withArgs(const std::vector<Type::Any> &v_) const { return Type::Exec(tpeVars, v_, rtn); }
 Type::Exec Type::Exec::withRtn(const Type::Any &v_) const { return Type::Exec(tpeVars, args, v_); }
 POLYREGION_EXPORT bool Type::Exec::operator==(const Type::Exec &rhs) const {
-  return (this->tpeVars == rhs.tpeVars) &&
-         std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (this->rtn == rhs.rtn);
+  return (this->tpeVars == rhs.tpeVars)
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (this->rtn == rhs.rtn);
 }
 POLYREGION_EXPORT bool Type::Exec::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -925,9 +925,9 @@ Term::Select Term::Select::withRoot(const Named &v_) const { return Term::Select
 Term::Select Term::Select::withSteps(const std::vector<PathStep::Any> &v_) const { return Term::Select(root, v_, tpe); }
 Term::Select Term::Select::withTpe(const Type::Any &v_) const { return Term::Select(root, steps, v_); }
 POLYREGION_EXPORT bool Term::Select::operator==(const Term::Select &rhs) const {
-  return (this->root == rhs.root) &&
-         std::equal(this->steps.begin(), this->steps.end(), rhs.steps.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (this->tpe == rhs.tpe);
+  return (this->root == rhs.root)
+         && std::equal(this->steps.begin(), this->steps.end(), rhs.steps.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (this->tpe == rhs.tpe);
 }
 POLYREGION_EXPORT bool Term::Select::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1067,8 +1067,8 @@ Expr::RefTo Expr::RefTo::withComp(const Type::Any &v_) const { return Expr::RefT
 Expr::RefTo Expr::RefTo::withSpace(const TypeSpace::Any &v_) const { return Expr::RefTo(lhs, idx, comp, v_, region); }
 Expr::RefTo Expr::RefTo::withRegion(const Region::Any &v_) const { return Expr::RefTo(lhs, idx, comp, space, v_); }
 POLYREGION_EXPORT bool Expr::RefTo::operator==(const Expr::RefTo &rhs) const {
-  return (this->lhs == rhs.lhs) && ((!this->idx && !rhs.idx) || (this->idx && rhs.idx && *this->idx == *rhs.idx)) &&
-         (this->comp == rhs.comp) && (this->space == rhs.space) && (this->region == rhs.region);
+  return (this->lhs == rhs.lhs) && ((!this->idx && !rhs.idx) || (this->idx && rhs.idx && *this->idx == *rhs.idx))
+         && (this->comp == rhs.comp) && (this->space == rhs.space) && (this->region == rhs.region);
 }
 POLYREGION_EXPORT bool Expr::RefTo::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1123,11 +1123,11 @@ Expr::Invoke Expr::Invoke::withReceiver(const std::optional<Term::Any> &v_) cons
 Expr::Invoke Expr::Invoke::withArgs(const std::vector<Term::Any> &v_) const { return Expr::Invoke(callee, tpeArgs, receiver, v_, rtn); }
 Expr::Invoke Expr::Invoke::withRtn(const Type::Any &v_) const { return Expr::Invoke(callee, tpeArgs, receiver, args, v_); }
 POLYREGION_EXPORT bool Expr::Invoke::operator==(const Expr::Invoke &rhs) const {
-  return (this->callee == rhs.callee) &&
-         std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         ((!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver)) &&
-         std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (this->rtn == rhs.rtn);
+  return (this->callee == rhs.callee)
+         && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && ((!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver))
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (this->rtn == rhs.rtn);
 }
 POLYREGION_EXPORT bool Expr::Invoke::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -1150,9 +1150,9 @@ Expr::ForeignCall Expr::ForeignCall::withName(const std::string &v_) const { ret
 Expr::ForeignCall Expr::ForeignCall::withArgs(const std::vector<Term::Any> &v_) const { return Expr::ForeignCall(name, v_, rtn); }
 Expr::ForeignCall Expr::ForeignCall::withRtn(const Type::Any &v_) const { return Expr::ForeignCall(name, args, v_); }
 POLYREGION_EXPORT bool Expr::ForeignCall::operator==(const Expr::ForeignCall &rhs) const {
-  return (this->name == rhs.name) &&
-         std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (this->rtn == rhs.rtn);
+  return (this->name == rhs.name)
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (this->rtn == rhs.rtn);
 }
 POLYREGION_EXPORT bool Expr::ForeignCall::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -2723,8 +2723,8 @@ Handler Handler::withBinder(const std::optional<Named> &v_) const { return Handl
 Handler Handler::withBody(const std::vector<Stmt::Any> &v_) const { return Handler(caught, binder, v_); }
 POLYREGION_EXPORT bool Handler::operator!=(const Handler &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Handler::operator==(const Handler &rhs) const {
-  return (caught == rhs.caught) && (binder == rhs.binder) &&
-         std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return (caught == rhs.caught) && (binder == rhs.binder)
+         && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 
 Stmt::Base::Base() = default;
@@ -2748,8 +2748,8 @@ Stmt::Var Stmt::Var::withName(const Named &v_) const { return Stmt::Var(v_, expr
 Stmt::Var Stmt::Var::withExpr(const std::optional<Expr::Any> &v_) const { return Stmt::Var(name, v_, isMutable); }
 Stmt::Var Stmt::Var::withIsMutable(const bool &v_) const { return Stmt::Var(name, expr, v_); }
 POLYREGION_EXPORT bool Stmt::Var::operator==(const Stmt::Var &rhs) const {
-  return (this->name == rhs.name) && ((!this->expr && !rhs.expr) || (this->expr && rhs.expr && *this->expr == *rhs.expr)) &&
-         (this->isMutable == rhs.isMutable);
+  return (this->name == rhs.name) && ((!this->expr && !rhs.expr) || (this->expr && rhs.expr && *this->expr == *rhs.expr))
+         && (this->isMutable == rhs.isMutable);
 }
 POLYREGION_EXPORT bool Stmt::Var::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -2816,8 +2816,8 @@ size_t Stmt::While::hash_code() const {
 Stmt::While Stmt::While::withCond(const Term::Any &v_) const { return Stmt::While(v_, body); }
 Stmt::While Stmt::While::withBody(const std::vector<Stmt::Any> &v_) const { return Stmt::While(cond, v_); }
 POLYREGION_EXPORT bool Stmt::While::operator==(const Stmt::While &rhs) const {
-  return (this->cond == rhs.cond) &&
-         std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return (this->cond == rhs.cond)
+         && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::While::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -2849,8 +2849,8 @@ Stmt::ForRange Stmt::ForRange::withBody(const std::vector<Stmt::Any> &v_) const 
   return Stmt::ForRange(induction, lbIncl, ubExcl, step, v_);
 }
 POLYREGION_EXPORT bool Stmt::ForRange::operator==(const Stmt::ForRange &rhs) const {
-  return (this->induction == rhs.induction) && (this->lbIncl == rhs.lbIncl) && (this->ubExcl == rhs.ubExcl) && (this->step == rhs.step) &&
-         std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return (this->induction == rhs.induction) && (this->lbIncl == rhs.lbIncl) && (this->ubExcl == rhs.ubExcl) && (this->step == rhs.step)
+         && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::ForRange::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -2907,9 +2907,9 @@ Stmt::Cond Stmt::Cond::withCond(const Term::Any &v_) const { return Stmt::Cond(v
 Stmt::Cond Stmt::Cond::withTrueBr(const std::vector<Stmt::Any> &v_) const { return Stmt::Cond(cond, v_, falseBr); }
 Stmt::Cond Stmt::Cond::withFalseBr(const std::vector<Stmt::Any> &v_) const { return Stmt::Cond(cond, trueBr, v_); }
 POLYREGION_EXPORT bool Stmt::Cond::operator==(const Stmt::Cond &rhs) const {
-  return (this->cond == rhs.cond) &&
-         std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return (this->cond == rhs.cond)
+         && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::Cond::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -2977,9 +2977,9 @@ Stmt::Try Stmt::Try::withBody(const std::vector<Stmt::Any> &v_) const { return S
 Stmt::Try Stmt::Try::withHandlers(const std::vector<Handler> &v_) const { return Stmt::Try(body, v_, fin); }
 Stmt::Try Stmt::Try::withFin(const std::vector<Stmt::Any> &v_) const { return Stmt::Try(body, handlers, v_); }
 POLYREGION_EXPORT bool Stmt::Try::operator==(const Stmt::Try &rhs) const {
-  return std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (this->handlers == rhs.handlers) &&
-         std::equal(this->fin.begin(), this->fin.end(), rhs.fin.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (this->handlers == rhs.handlers)
+         && std::equal(this->fin.begin(), this->fin.end(), rhs.fin.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::Try::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3004,8 +3004,8 @@ Stmt::Raise Stmt::Raise::withValue(const Term::Any &v_) const { return Stmt::Rai
 Stmt::Raise Stmt::Raise::withExceptionKind(const ExceptionKind &v_) const { return Stmt::Raise(value, v_, cleanup); }
 Stmt::Raise Stmt::Raise::withCleanup(const std::vector<Stmt::Any> &v_) const { return Stmt::Raise(value, exceptionKind, v_); }
 POLYREGION_EXPORT bool Stmt::Raise::operator==(const Stmt::Raise &rhs) const {
-  return (this->value == rhs.value) && (this->exceptionKind == rhs.exceptionKind) &&
-         std::equal(this->cleanup.begin(), this->cleanup.end(), rhs.cleanup.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return (this->value == rhs.value) && (this->exceptionKind == rhs.exceptionKind)
+         && std::equal(this->cleanup.begin(), this->cleanup.end(), rhs.cleanup.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::Raise::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3068,12 +3068,12 @@ Signature Signature::withRtn(const Type::Any &v_) const {
 }
 POLYREGION_EXPORT bool Signature::operator!=(const Signature &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Signature::operator==(const Signature &rhs) const {
-  return (name == rhs.name) && (tpeVars == rhs.tpeVars) &&
-         ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver)) &&
-         std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         std::equal(moduleCaptures.begin(), moduleCaptures.end(), rhs.moduleCaptures.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         std::equal(termCaptures.begin(), termCaptures.end(), rhs.termCaptures.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (rtn == rhs.rtn);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars)
+         && ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver))
+         && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(moduleCaptures.begin(), moduleCaptures.end(), rhs.moduleCaptures.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(termCaptures.begin(), termCaptures.end(), rhs.termCaptures.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (rtn == rhs.rtn);
 }
 
 InvokeSignature::InvokeSignature(Sym name, std::vector<Type::Any> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args,
@@ -3101,9 +3101,9 @@ InvokeSignature InvokeSignature::withArgs(const std::vector<Type::Any> &v_) cons
 InvokeSignature InvokeSignature::withRtn(const Type::Any &v_) const { return InvokeSignature(name, tpeVars, receiver, args, v_); }
 POLYREGION_EXPORT bool InvokeSignature::operator!=(const InvokeSignature &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool InvokeSignature::operator==(const InvokeSignature &rhs) const {
-  return (name == rhs.name) && std::equal(tpeVars.begin(), tpeVars.end(), rhs.tpeVars.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver)) &&
-         std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
+  return (name == rhs.name) && std::equal(tpeVars.begin(), tpeVars.end(), rhs.tpeVars.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver))
+         && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
 
 FunctionVisibility::Base::Base() = default;
@@ -3301,10 +3301,10 @@ Function Function::withAffinity(const FunctionAffinity::Any &v_) const {
 }
 POLYREGION_EXPORT bool Function::operator!=(const Function &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Function::operator==(const Function &rhs) const {
-  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (receiver == rhs.receiver) && (args == rhs.args) &&
-         (moduleCaptures == rhs.moduleCaptures) && (termCaptures == rhs.termCaptures) && (rtn == rhs.rtn) &&
-         std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; }) &&
-         (visibility == rhs.visibility) && (fpMode == rhs.fpMode) && (isEntry == rhs.isEntry) && (affinity == rhs.affinity);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (receiver == rhs.receiver) && (args == rhs.args)
+         && (moduleCaptures == rhs.moduleCaptures) && (termCaptures == rhs.termCaptures) && (rtn == rhs.rtn)
+         && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (visibility == rhs.visibility) && (fpMode == rhs.fpMode) && (isEntry == rhs.isEntry) && (affinity == rhs.affinity);
 }
 
 StructDef::StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents,
@@ -3349,8 +3349,8 @@ Mirror Mirror::withFunctions(const std::vector<Function> &v_) const { return Mir
 Mirror Mirror::withDependencies(const std::vector<StructDef> &v_) const { return Mirror(source, sourceParents, structDef, functions, v_); }
 POLYREGION_EXPORT bool Mirror::operator!=(const Mirror &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Mirror::operator==(const Mirror &rhs) const {
-  return (source == rhs.source) && (sourceParents == rhs.sourceParents) && (structDef == rhs.structDef) && (functions == rhs.functions) &&
-         (dependencies == rhs.dependencies);
+  return (source == rhs.source) && (sourceParents == rhs.sourceParents) && (structDef == rhs.structDef) && (functions == rhs.functions)
+         && (dependencies == rhs.dependencies);
 }
 
 PassPhase::Base::Base() = default;
@@ -3486,8 +3486,8 @@ CompileEvent CompileEvent::withItems(const std::vector<CompileEvent> &v_) const 
 }
 POLYREGION_EXPORT bool CompileEvent::operator!=(const CompileEvent &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileEvent::operator==(const CompileEvent &rhs) const {
-  return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data) &&
-         (items == rhs.items);
+  return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data)
+         && (items == rhs.items);
 }
 
 PassArg::PassArg(std::string name, std::string value) noexcept : name(std::move(name)), value(std::move(value)) {}
@@ -3572,8 +3572,8 @@ CompileResult CompileResult::withEntryArgs(const std::vector<Named> &v_) const {
 }
 POLYREGION_EXPORT bool CompileResult::operator!=(const CompileResult &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileResult::operator==(const CompileResult &rhs) const {
-  return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts) &&
-         (messages == rhs.messages) && (entryArgs == rhs.entryArgs);
+  return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts)
+         && (messages == rhs.messages) && (entryArgs == rhs.entryArgs);
 }
 
 } // namespace polyregion::polyast

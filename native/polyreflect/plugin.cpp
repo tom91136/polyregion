@@ -65,9 +65,12 @@ public:
   explicit LinkMirrorPass(bool verbose) : verbose(verbose) {}
 
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &) {
-    llvm::SmallVector<llvm::GlobalVariable *, 2> bcGlobals;
-    for (llvm::GlobalVariable &G : M.globals())
-      if (G.hasInitializer() && G.getName().contains(conventions::reflect::MirrorBitcodeGlobal)) bcGlobals.push_back(&G);
+    auto bcGlobals = M.globals()                                                                                       //
+                     | filter([](const auto &G) {                                                                      //
+                         return G.hasInitializer() && G.getName().contains(conventions::reflect::MirrorBitcodeGlobal); //
+                       })                                                                                              //
+                     | map([](auto &G) { return &G; })                                                                 //
+                     | to_vector();
 
     // re-applies at every EP: under `-g` a mid-pipeline GlobalOpt nulls the bundle fields after early wiring
     bool linked = false;
@@ -108,8 +111,8 @@ public:
         }
         // pin prelude/postlude so they survive to OptimizerLastEP (compiler.used drops before codegen)
         for (llvm::Function &F : M.functions())
-          if (F.getName().starts_with(std::string(conventions::reflect::MirrorPrelude) + "_") ||
-              F.getName().starts_with(std::string(conventions::reflect::MirrorPostlude) + "_"))
+          if (F.getName().starts_with(std::string(conventions::reflect::MirrorPrelude) + "_")
+              || F.getName().starts_with(std::string(conventions::reflect::MirrorPostlude) + "_"))
             llvm::appendToCompilerUsed(M, {&F});
       }
     }
@@ -156,14 +159,13 @@ public:
       if (verbose) llvm::errs() << "[LinkMirror] wired prelude/postlude " << *id << " into " << gName.str() << "\n";
       return llvm::ConstantStruct::get(st, ops);
     };
-    for (llvm::GlobalVariable &G : M.globals()) {
-      if (!G.hasInitializer()) continue;
+    M.globals() | filter([](const auto &G) { return G.hasInitializer(); }) | for_each([&](auto &G) {
       auto *init = G.getInitializer();
       if (auto *cs = llvm::dyn_cast<llvm::ConstantStruct>(init)) {
         if (auto *wired = wireStruct(cs, G.getName()); wired != cs) G.setInitializer(wired);
       } else if (auto *ca = llvm::dyn_cast<llvm::ConstantArray>(init)) {
         auto *elemTy = llvm::dyn_cast<llvm::StructType>(ca->getType()->getElementType());
-        if (!elemTy || !elemTy->hasName() || !elemTy->getName().contains(conventions::KernelBundleType)) continue;
+        if (!elemTy || !elemTy->hasName() || !elemTy->getName().contains(conventions::KernelBundleType)) return;
         llvm::SmallVector<llvm::Constant *, 4> elems;
         bool changed = false;
         for (unsigned i = 0; i < ca->getNumOperands(); ++i) {
@@ -174,7 +176,7 @@ public:
         }
         if (changed) G.setInitializer(llvm::ConstantArray::get(ca->getType(), elems));
       }
-    }
+    });
     return wiredAny;
   }
 };

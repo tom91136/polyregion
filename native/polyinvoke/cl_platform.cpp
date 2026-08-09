@@ -265,8 +265,8 @@ static std::string patchSpirvNativeTrig(const char *data, size_t len) {
   for (size_t i = 5; i < n;) {
     const uint16_t wc = wcount(w[i]);
     if (wc == 0 || i + wc > n) return out;
-    if (opcode(w[i]) == spv::OpExtInstImport && wc >= 3 &&
-        std::strncmp(reinterpret_cast<const char *>(&w[i + 2]), "OpenCL.std", sizeof("OpenCL.std")) == 0)
+    if (opcode(w[i]) == spv::OpExtInstImport && wc >= 3
+        && std::strncmp(reinterpret_cast<const char *>(&w[i + 2]), "OpenCL.std", sizeof("OpenCL.std")) == 0)
       openclSet = w[i + 1];
     i += wc;
   }
@@ -313,8 +313,8 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
             CHECKED(clReleaseContext(c));
           }),
       // <cl_platform>:<cl_device> [<format>] - prefix selects the ICD, suffix the source/SPIR-V instance
-      deviceName(platformName + ":" + queryDeviceInfo(device, CL_DEVICE_NAME) +
-                 (format == ModuleFormat::SPIRV_Kernel ? " [SPIR-V]" : " [source]")),
+      deviceName(platformName + ":" + queryDeviceInfo(device, CL_DEVICE_NAME)
+                 + (format == ModuleFormat::SPIRV_Kernel ? " [SPIR-V]" : " [source]")),
       quirks(resolveQuirks(deviceName)), format(format), ilCreateFn(ilCreateFn), svm(svm),
       svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
       store(
@@ -694,9 +694,9 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   if (local.x > 1) {
     cl_device_id dev = {};
     size_t kernelMax = 0;
-    if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(dev), &dev, nullptr) == CL_SUCCESS &&
-        clGetKernelWorkGroupInfo(kernel, dev, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelMax), &kernelMax, nullptr) == CL_SUCCESS &&
-        kernelMax) {
+    if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(dev), &dev, nullptr) == CL_SUCCESS
+        && clGetKernelWorkGroupInfo(kernel, dev, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelMax), &kernelMax, nullptr) == CL_SUCCESS
+        && kernelMax) {
       const size_t lyz = std::max<size_t>(1, local.y * local.z);
       if (local.x * lyz > kernelMax) local.x = std::max<size_t>(1, kernelMax / lyz);
     }

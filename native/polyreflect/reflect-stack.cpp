@@ -71,10 +71,11 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
       continue;
     }
 
-    std::vector<llvm::AllocaInst *> Allocas;
-    for (llvm::Instruction &I : F.getEntryBlock()) {
-      if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(&I)) Allocas.push_back(AI);
-    }
+    const auto Allocas = F.getEntryBlock() | collect([](auto &I) -> std::optional<llvm::AllocaInst *> {
+                           if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(&I)) return AI;
+                           return {};
+                         }) //
+                         | to_vector();
     if (Allocas.empty()) continue;
 
     llvm::DILocation *zeroDebugLoc{};

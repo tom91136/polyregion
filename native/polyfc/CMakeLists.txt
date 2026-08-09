@@ -85,11 +85,8 @@ if (POLYREGION_FUSED_DRIVER)
     endif ()
     target_include_directories(polyfc PRIVATE
             flang-plugin
-            ${LLVM_INCLUDE_DIRS}
-            ${CLANG_INCLUDE_DIRS}
-            ${FLANG_INCLUDE_DIRS}
-            ${MLIR_INCLUDE_DIRS}
             polydco)
+    target_include_directories(polyfc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS} ${FLANG_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS})
     target_compile_definitions(polyfc PRIVATE
             ${LLVM_DEFINITIONS}
             FLANG_LITTLE_ENDIAN
@@ -143,12 +140,13 @@ add_dependencies(polyfc-tests polyfc polydco)
 target_include_directories(polyfc-tests PRIVATE
         ../include
         polydco
-        ${LLVM_INCLUDE_DIRS}
         ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
+target_include_directories(polyfc-tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 polyregion_test_profile_dir(polyfc-tests)
 
-target_include_directories(polyfc PRIVATE ../compiler ../include ${LLVM_INCLUDE_DIRS})
+target_include_directories(polyfc PRIVATE ../compiler ../include)
+target_include_directories(polyfc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 target_link_libraries(polyfc PRIVATE
         polycommon
         polyc-driver

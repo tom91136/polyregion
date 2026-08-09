@@ -25,8 +25,7 @@ void dumpDevice(Device &d, const size_t i, const std::string &indent) {
   fmt::print("{}  features:             {}\n", indent, d.features() | mk_string(", "));
   if (const auto props = d.properties(); !props.empty()) {
     fmt::print("{}  properties:\n", indent);
-    for (auto &[k, v] : props)
-      fmt::print("{}    {}: {}\n", indent, k, v);
+    props ^ for_each([&](const auto &k, const auto &v) { fmt::print("{}    {}: {}\n", indent, k, v); });
   }
 }
 
@@ -35,7 +34,7 @@ void dumpDevice(Device &d, const size_t i, const std::string &indent) {
 int fired_main( //
     bool list = fire::arg({"-l", "--list", "List backends and their devices by name only, like `clinfo -l`"})) {
 
-  magic_enum::enum_values<Backend>() | zip_with_index<size_t>() | for_each([&](const auto backend, const auto backendIdx) {
+  magic_enum::enum_values<Backend>() | zip_with_index<size_t>() | for_each([&](const auto &backend, const auto &backendIdx) {
     auto r = Platform::of(backend);
     if (const auto err = r ^ get_maybe<std::string>()) {
       if (!list) fmt::print("Backend #{} {}: unavailable ({})\n", backendIdx, magic_enum::enum_name(backend), *err);
@@ -46,16 +45,15 @@ int fired_main( //
 
     if (list) {
       fmt::print("Backend #{}: {} [{}]\n", backendIdx, platform->name(), magic_enum::enum_name(platform->kind()));
-      for (size_t i = 0; i < devices.size(); ++i)
-        fmt::print(" {}-- Device #{}: {}\n", i + 1 == devices.size() ? "`" : "+", i, devices[i]->name());
+      devices | zip_with_index() | for_each([&](const auto &device, const auto &i) {
+        fmt::print(" {}-- Device #{}: {}\n", i + 1 == devices.size() ? "`" : "+", i, device->name());
+      });
     } else {
       fmt::print("Backend #{}: {} [{}] ({} device(s))\n", backendIdx, platform->name(), magic_enum::enum_name(platform->kind()),
                  devices.size());
       if (const auto props = platform->properties(); !props.empty())
-        for (auto &[k, v] : props)
-          fmt::print("  {}: {}\n", k, v);
-      for (size_t i = 0; i < devices.size(); ++i)
-        dumpDevice(*devices[i], i, "  ");
+        props ^ for_each([](const auto &k, const auto &v) { fmt::print("  {}: {}\n", k, v); });
+      devices | zip_with_index() | for_each([&](const auto &device, const auto &i) { dumpDevice(*device, i, "  "); });
     }
   });
   return EXIT_SUCCESS;

@@ -28,7 +28,8 @@ TEST_CASE("polyc JIT C ABI compiles and owns its result", "[jit]") {
   uint8_t *image = nullptr;
   size_t imageLen = 0;
   REQUIRE(polyc_jit_compile(packed.data(), packed.size(), static_cast<uint32_t>(Target::Object_LLVM_HOST), "native", nullptr,
-                            static_cast<uint32_t>(OptLevel::O0), nullptr, 0, &image, &imageLen) == POLYC_JIT_OK);
+                            static_cast<uint32_t>(OptLevel::O0), nullptr, 0, &image, &imageLen)
+          == POLYC_JIT_OK);
   REQUIRE(image != nullptr);
   CHECK(imageLen > 0);
   CHECK(polyc_jit_last_error() == nullptr);
@@ -82,7 +83,8 @@ TEST_CASE("polyc JIT C ABI reports malformed programs", "[jit]") {
   uint8_t *image = nullptr;
   size_t imageLen = 0;
   CHECK(polyc_jit_compile(malformed, sizeof(malformed), static_cast<uint32_t>(Target::Object_LLVM_HOST), "native", nullptr,
-                          static_cast<uint32_t>(OptLevel::O0), nullptr, 0, &image, &imageLen) == POLYC_JIT_FAILED);
+                          static_cast<uint32_t>(OptLevel::O0), nullptr, 0, &image, &imageLen)
+        == POLYC_JIT_FAILED);
   CHECK(image == nullptr);
   CHECK(imageLen == 0);
   REQUIRE(polyc_jit_last_error() != nullptr);
@@ -92,11 +94,13 @@ TEST_CASE("polyc JIT C ABI rejects invalid argument spans", "[jit]") {
   uint8_t *image = nullptr;
   size_t imageLen = 0;
   CHECK(polyc_jit_compile(nullptr, 1, static_cast<uint32_t>(Target::Object_LLVM_HOST), "native", nullptr,
-                          static_cast<uint32_t>(OptLevel::O0), nullptr, 0, &image, &imageLen) == POLYC_JIT_FAILED);
+                          static_cast<uint32_t>(OptLevel::O0), nullptr, 0, &image, &imageLen)
+        == POLYC_JIT_FAILED);
   REQUIRE(polyc_jit_last_error() != nullptr);
 
   const uint8_t program[] = {0x80};
   CHECK(polyc_jit_compile(program, sizeof(program), static_cast<uint32_t>(Target::Object_LLVM_HOST), "native", nullptr,
-                          static_cast<uint32_t>(OptLevel::O0), nullptr, 1, &image, &imageLen) == POLYC_JIT_FAILED);
+                          static_cast<uint32_t>(OptLevel::O0), nullptr, 1, &image, &imageLen)
+        == POLYC_JIT_FAILED);
   REQUIRE(polyc_jit_last_error() != nullptr);
 }

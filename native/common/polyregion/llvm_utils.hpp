@@ -20,6 +20,8 @@
 
 namespace polyregion::llvm_shared {
 
+using namespace aspartame;
+
 static bool isCPUTargetSupported(const std::string &CPU, //
                                  const llvm::Triple::ArchType &arch) {
   using namespace llvm;
@@ -44,20 +46,17 @@ static void collectCPUFeatures(const std::string &CPU,             //
 
   using namespace llvm;
   auto normaliseFeature = [](const std::vector<StringRef> &features, std::vector<std::string> &drain) {
-    for (auto &f : features) {
-      if (f.empty() || f[0] == '-') continue;
-      drain.emplace_back(f[0] == '+' ? f.drop_front().str() : f.str());
-    }
+    features                                                                              //
+        | filter([](const auto &f) { return !f.empty() && f[0] != '-'; })                 //
+        | map([](const auto &f) { return f[0] == '+' ? f.drop_front().str() : f.str(); }) //
+        | for_each([&](const auto &f) { drain.emplace_back(std::move(f)); });
   };
 
   // normalise drain first, stuff could come in with +/- prefix
-  for (auto it = drain.begin(); it != drain.end();) {
-    if (it->empty() || (*it)[0] == '-') it = drain.erase(it);
-    else {
-      if ((*it)[0] == '+') it->erase(0, 1);
-      ++it;
-    }
-  }
+  drain = drain                                                              //
+          | filter([](const auto &f) { return !f.empty() && f[0] != '-'; })  //
+          | map([](const auto &f) { return f[0] == '+' ? f.substr(1) : f; }) //
+          | to_vector();
 
   switch (arch) {
     case Triple::x86_64: {
@@ -68,12 +67,13 @@ static void collectCPUFeatures(const std::string &CPU,             //
       SmallVector<StringRef> buffer;
       X86::getFeaturesForCPU(CPU, buffer);
       StringMap<bool> implied;
-      for (auto &b : buffer) {
+      buffer | for_each([&](const auto &b) {
         drain.push_back(b.str());
         X86::updateImpliedFeatures(b, true, implied);
-      }
-      for (auto &i : implied)
-        if (i.second) drain.emplace_back(i.first().str());
+      });
+      implied                                                  //
+          | filter([](const auto &i) { return i.getValue(); }) //
+          | for_each([&](const auto &i) { drain.emplace_back(i.getKey().str()); });
       break;
     }
     case Triple::arm: {
@@ -95,8 +95,7 @@ static void collectCPUFeatures(const std::string &CPU,             //
       if (!RISCV::parseCPU(CPU, arch == Triple::riscv64)) break;
       SmallVector<std::string> buffer;
       RISCV::getFeaturesForCPU(CPU, buffer);
-      for (auto &b : buffer)
-        drain.emplace_back(b);
+      buffer | for_each([&](const auto &b) { drain.emplace_back(b); });
       break;
     }
     case Triple::ppc64le:
@@ -105,16 +104,15 @@ static void collectCPUFeatures(const std::string &CPU,             //
       Triple T;
       T.setArch(arch);
       if (auto features = PPC::getPPCDefaultTargetFeatures(T, CPU)) {
-        for (auto &kv : *features) {
-          if (kv.second) drain.emplace_back(kv.first().str());
-        }
+        *features                                              //
+            | filter([](const auto &kv) { return kv.second; }) //
+            | for_each([&](const auto &kv) { drain.emplace_back(kv.first().str()); });
       }
       break;
     }
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());
   }
 
-  using namespace aspartame;
   drain ^= sort();
   drain ^= distinct();
 }

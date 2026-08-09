@@ -21,6 +21,8 @@
 
 namespace polyregion::polytest {
 
+using namespace aspartame;
+
 // out-of-band skip log: ctest's SKIP_RETURN_CODE is an O(n^2) name scan at parse, so a skip exits 0
 // and appends here instead; shared by both runners
 inline void recordSkip(const std::string &id, const std::string &reason) {
@@ -44,7 +46,6 @@ struct CtestEntry {
 
 inline void emitCtestFragment(const std::string &file, const std::string &prefix, const std::string &binary,
                               const std::string & /*workdir*/, const std::string &env, const std::vector<CtestEntry> &tasks) {
-  using namespace aspartame;
   // set_tests_properties is an O(n^2) name scan at parse, so emit it only where needed: the runner
   // chdirs itself and reports run-skips out-of-band, so a plain test is a bare add_test. only the
   // FIXTURES_SETUP keeps SKIP_RETURN_CODE, to cascade a compile-skip to its runs
@@ -76,18 +77,18 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
               // shared-compile: one setup, a run per variant, one cleanup, gated on a per-task fixture
               const auto fix = "fix-" + t.id;
               const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
-              auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\")\n", name, binary, t.id) +
-                          fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{}{})\n",
-                                      name, fix, labelsProp, envProp({}));
+              auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\")\n", name, binary, t.id)
+                          + fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{}{})\n",
+                                        name, fix, labelsProp, envProp({}));
               frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
                         const auto vname = suffix.empty() ? name : name + "-" + suffix;
-                        return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\")\n", vname, binary, t.id) +
-                               fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\"{}{})\n", vname, fix, labelsProp,
-                                           envProp(extraEnv));
+                        return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\")\n", vname, binary, t.id)
+                               + fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\"{}{})\n", vname, fix,
+                                             labelsProp, envProp(extraEnv));
                       });
-              return frag + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\")\n", name, binary, t.id) +
-                     fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{}{})\n", name, fix, labelsProp,
-                                 envProp({}));
+              return frag + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\")\n", name, binary, t.id)
+                     + fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{}{})\n", name, fix, labelsProp,
+                                   envProp({}));
             }));
 }
 

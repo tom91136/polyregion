@@ -36,7 +36,7 @@ polyregion_test_dist_record(NAME polyreflect-rt-tests COMMAND :bin:polyreflect-r
 
 # Plugin source is statically linked into polycpp/polyfc under fused builds; no .so needed.
 if (NOT POLYREGION_FUSED_DRIVER)
-    target_include_directories(polyreflect-plugin PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_include_directories(polyreflect-plugin SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
     target_compile_definitions(polyreflect-plugin PRIVATE ${LLVM_DEFINITIONS})
     target_compile_options(polyreflect-plugin PRIVATE ${COMPILE_OPTIONS})
     target_link_options(polyreflect-plugin PRIVATE ${PLUGIN_LINK_OPTIONS})
@@ -51,4 +51,3 @@ if (NOT POLYREGION_FUSED_DRIVER)
             magic_enum::magic_enum
             fmt::fmt-header-only)
 endif ()
-

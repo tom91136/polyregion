@@ -30,13 +30,13 @@ template <typename T> auto ptrView(const T *p, const size_t n) { return view(p, 
 
 std::string cachePath(const uint8_t *program, size_t programLen, uint8_t target, const char *arch, const char *pipelineSpec, uint8_t opt,
                       const polyc_jit_spec_const_t *specs, size_t nSpecs) {
-  const auto meta = ptrView(specs, nSpecs) |
-                    fold_left(fmt::format("polyc-jit-v2|{}|{}|{}|{}", target, opt, arch ? arch : "", pipelineSpec ? pipelineSpec : ""),
-                              [](std::string acc, const auto &spec) {
-                                return std::move(acc)
-                                    .append(fmt::format("|{}={}:", spec.field, spec.repr))
-                                    .append(reinterpret_cast<const char *>(spec.data), spec.dataLen);
-                              });
+  const auto meta = ptrView(specs, nSpecs) //
+                    | fold_left(fmt::format("polyc-jit-v2|{}|{}|{}|{}", target, opt, arch ? arch : "", pipelineSpec ? pipelineSpec : ""),
+                                [](std::string acc, const auto &spec) {
+                                  return std::move(acc)
+                                      .append(fmt::format("|{}={}:", spec.field, spec.repr))
+                                      .append(reinterpret_cast<const char *>(spec.data), spec.dataLen);
+                                });
   return cache::path("jit", {meta, std::string_view(reinterpret_cast<const char *>(program), programLen)}, ".o");
 }
 
@@ -56,9 +56,10 @@ polyc_jit_status_t deliver(unsigned char *buf, size_t len, uint8_t **out, size_t
 std::unordered_map<std::string, polyast::Term::Any> buildSpecialise(const polyc_jit_spec_const_t *specs, size_t n) {
   return ptrView(specs, n)                                                                             //
          | collect([](const auto &spec) -> std::optional<std::pair<std::string, polyast::Term::Any>> { //
-             return polyast::jitConstFromRepr(spec.repr, spec.data, spec.dataLen)                      //
-                    | map([&](auto &c) { return std::pair{std::string(spec.field), c}; });             //
-           })                                                                                          //
+             return polyast::jitConstFromRepr(spec.repr, spec.data,
+                                              spec.dataLen)                                      //
+                    | map([&](const auto &c) { return std::pair{std::string(spec.field), c}; }); //
+           })                                                                                    //
          | to<std::unordered_map>();
 }
 
@@ -66,11 +67,10 @@ polyast::Program applySpecialise(const polyast::Program &p, const std::unordered
   if (bindings.empty()) return p;
   return p.modify_all<polyast::Term::Any>([&](const polyast::Term::Any &t) -> polyast::Term::Any {
     if (auto sel = t.get<polyast::Term::Select>(); sel && sel->root.symbol == conventions::ThisReceiver && !sel->steps.empty()) {
-      const auto path = sel->steps                                                          //
-                            ^ traverse([](const auto &step) -> std::optional<std::string> { //
-                                return step.template get<polyast::PathStep::Field>()        //
-                                       | map([](const auto &field) { return field.name; }); //
-                              })                                                            //
+      const auto path = sel->steps                                                                                                        //
+                            ^ traverse([](const auto &step) -> std::optional<std::string> {                                               //
+                                return step.template get<polyast::PathStep::Field>() | map([](const auto &field) { return field.name; }); //
+                              })                                                                                                          //
                         | map([](const auto &fields) { return fields | mk_string("."); });
       return path | flat_map([&](const auto &p) { return bindings ^ get_maybe(p); }) | get_or_else(t);
     }
@@ -96,9 +96,11 @@ extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t p
     return POLYC_JIT_FAILED;
   }
   const auto invalidSpec =
-      ptrView(specialise, specialiseLen) | zip_with_index() | collect_first([](const auto &spec, const auto i) -> std::optional<size_t> {
-        return !spec.field || !spec.repr || (spec.dataLen > 0 && !spec.data) ? std::optional<size_t>{i} : std::nullopt;
-      });
+      ptrView(specialise, specialiseLen) //
+      | zip_with_index()                 //
+      | collect_first([](const auto &spec, const auto &i) -> std::optional<size_t> {
+          return !spec.field || !spec.repr || (spec.dataLen > 0 && !spec.data) ? std::optional<size_t>{i} : std::nullopt;
+        });
   if (invalidSpec) {
     lastError = fmt::format("polyc_jit_compile: invalid specialise entry {}", *invalidSpec);
     return POLYC_JIT_FAILED;

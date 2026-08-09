@@ -8,6 +8,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -21,6 +22,7 @@
 #include "kernels/generated_opencl_spirv_fma.hpp"
 #include "test_utils.h"
 
+using namespace aspartame;
 using namespace polyregion;
 using namespace polyregion::invoke;
 using namespace polyregion::test_utils;
@@ -49,7 +51,7 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> entriesUnder(Context &
     if (fs::file_status status; fs::status(it->path(), status)) POLYTEST_FAIL(ctx, "cannot stat cache entry {}", it->path());
     out.emplace_back(it->path(), read_struct<uint8_t>(it->path()));
   }
-  std::sort(out.begin(), out.end(), [](auto &l, auto &r) { return l.first < r.first; });
+  out ^= sort_by([](const auto &path, const auto &) { return path; });
   return out;
 }
 
@@ -118,8 +120,8 @@ void runModuleCache(Context &ctx, Backend backend, Platform &, Device &device, c
     ArgBuffer buffer;
     if (device.sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
     buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
-    waitAll([&](auto &h) { q->enqueueInvokeAsync(module_, function_, buffer, {}, h); });
-    waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
+    waitAll([&](const auto &h) { q->enqueueInvokeAsync(module_, function_, buffer, {}, h); });
+    waitAll([&](const auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
     return out;
   };
 

@@ -67,24 +67,15 @@ int main(int argc, const char *argv[]) {
   }
 #endif
 
-  return StdParOptions::parse(args) ^
-         fold_total(
+  return StdParOptions::parse(args) //
+         ^ fold_total(
              [&](const std::vector<std::string> &errors) {
                fmt::print(stderr, "[PolyFC] Unable to parse PolyFC specific arguments:\n{}\n", (errors ^ mk_string("\n") ^ indent(2)));
                return EXIT_FAILURE;
              },
              [&](const std::optional<StdParOptions> &opts) {
-               auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) {
-                 for (const auto &x : xs) {
-#if defined(__APPLE__)
-                   // Runtime, libc++, and JIT dependencies can share install
-                   // locations; ld64.lld warns for repeated identical rpaths.
-                   if (x.starts_with("-Wl,-rpath,") && std::find(remaining.begin(), remaining.end(), x) != remaining.end()) continue;
-#endif
-                   remaining.push_back(x);
-                 }
-               };
+               auto remaining = args.remaining() ^ map([](const auto &s) -> std::string { return s; });
+               auto append = [&](const std::vector<std::string> &xs) { xs ^ append_to(remaining); };
 
                std::vector<std::pair<const char *, std::string>> envs;
 
@@ -114,7 +105,7 @@ int main(int argc, const char *argv[]) {
                  }
 
                  const auto compileOnly =
-                     std::vector{"-c", "-S", "-E", "-M", "-fsyntax-only"} ^ exists([&](auto &flag) { return args.has(flag); });
+                     std::vector{"-c", "-S", "-E", "-M", "-fsyntax-only"} ^ exists([&](const auto &flag) { return args.has(flag); });
                  if (!compileOnly) {
                    // XXX flang has no clang -fplugin / -fpass-plugin equivalent; both Interpose and
                    // Reflect run at link time via LLD's LTO codegen. The Interpose pass rewrites
@@ -191,6 +182,11 @@ int main(int argc, const char *argv[]) {
                  }
                }
 
+#if defined(__APPLE__)
+               // Runtime, libc++, and JIT dependencies can share install locations; ld64.lld warns for repeated identical rpaths.
+               remaining ^= distinct_by_if([](const auto &x) { return x.starts_with("-Wl,-rpath,"); }, [](const auto &x) { return x; });
+#endif
+
                for (auto [k, v] : envs)
                  polyregion::env::put(k, v.c_str(), true);
 #ifdef POLYREGION_FUSED_DRIVER
@@ -217,10 +213,10 @@ int main(int argc, const char *argv[]) {
                }
   #endif
                remaining[0] = execPath;
-               auto rawArgs = remaining ^ map([](auto &arg) { return arg.c_str(); });
+               auto rawArgs = remaining ^ map([](const auto &arg) { return arg.c_str(); });
                return flang_main(static_cast<int>(rawArgs.size()), rawArgs.data());
 #else
-               return llvm::sys::ExecuteAndWait(flangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
+               return llvm::sys::ExecuteAndWait(flangPath, remaining ^ map([](const auto &x) -> llvm::StringRef { return x; }));
 #endif
              });
 }

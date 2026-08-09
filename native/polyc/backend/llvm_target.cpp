@@ -163,14 +163,15 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
         // At a function boundary, structs travel as opaque pointers (the kernel runtime passes a
         // ptr to the encoded struct). Inside the function body, they're materialised on the stack.
         if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(TypeSpace::Global()));
-        return structs ^ get_maybe(repr(x.name)) ^
-               fold([](auto &info) { return info.tpe; },
-                    [&]() -> llvm::StructType * {
-                      throw BackendException(fmt::format("Unseen struct def {}, currently in-scope structs: {}", repr(x),
-                                                         structs | values() | mk_string("\n", "\n", "\n", [](auto &ty) {
-                                                           return fmt::format(" -> {}", to_string(ty.def));
-                                                         })));
-                    });
+        return structs                   //
+               ^ get_maybe(repr(x.name)) //
+               ^ fold([](const auto &info) { return info.tpe; },
+                      [&]() -> llvm::StructType * {
+                        throw BackendException(fmt::format("Unseen struct def {}, currently in-scope structs: {}", repr(x),
+                                                           structs | values() | mk_string("\n", "\n", "\n", [](const auto &ty) {
+                                                             return fmt::format(" -> {}", to_string(ty.def));
+                                                           })));
+                      });
       },                                                                                                  //
       [&](const Type::Ptr &x) -> llvm::Type * { return llvm::PointerType::get(actual, ptrAS(x.space)); }, //
       [&](const Type::Arr &x) -> llvm::Type * {
@@ -187,14 +188,14 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
 }
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
-  const auto types = def.members ^ map([&](auto &m) { return resolveType(m.tpe, structs); });
-  const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to_vector()) ^ to<Map>();
+  const auto types = def.members ^ map([&](const auto &m) { return resolveType(m.tpe, structs); });
+  const auto table = def.members | map([](const auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to<Map>();
   const auto tpe = llvm::StructType::create(actual, types, repr(def.name));
   const auto structLayout = dataLayout.getStructLayout(tpe);
   const StructLayout layout(/*name*/ repr(def.name),
                             /*sizeInBytes*/ structLayout->getSizeInBytes(),
                             /*alignment*/ static_cast<int64_t>(structLayout->getAlignment().value()),
-                            /*members*/ def.members | zip_with_index<size_t>() | map([&](auto &named, auto i) {
+                            /*members*/ def.members | zip_with_index<size_t>() | map([&](const auto &named, const auto &i) {
                               return StructLayoutMember(
                                   /*name*/ named,                                                            //
                                   /*offsetInBytes*/ static_cast<int64_t>(structLayout->getElementOffset(i)), //
@@ -225,18 +226,21 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
     }
     return {};
   };
-  const auto structNames = structs | flat_map([&](auto &def) {
-                             return Vector<std::string>{repr(def.name)} |
-                                    concat(def.members | flat_map([&](auto &m) { return referencedStructNames(m.tpe); })) | to_vector();
-                           }) |
-                           distinct() | to_vector();
-  const auto opaqueTypes =
-      structNames | map([&](auto &name) { return std::pair{name, llvm::StructType::create(actual, name)}; }) | to<Map>();
+  const auto structNames = structs | flat_map([&](const auto &def) {
+                             return Vector<std::string>{repr(def.name)}                                                           //
+                                    | concat(def.members | flat_map([&](const auto &m) { return referencedStructNames(m.tpe); })) //
+                                    | to_vector();
+                           })           //
+                           | distinct() //
+                           | to_vector();
+  const auto opaqueTypes = structNames                                                                                      //
+                           | map([&](const auto &name) { return std::pair{name, llvm::StructType::create(actual, name)}; }) //
+                           | to<Map>();
   // Synthesise StructDefs for any types we created opaque shells for but weren't in the input.
   // We give them a single i8 placeholder member so LLVM treats them as sized (size 1) — empty
   // structs aren't well-supported by `DataLayout::getAlignment`.
-  const auto originalNames = structs | map([](auto &d) { return repr(d.name); }) | to<Set>();
-  const auto syntheticDefs = structNames | collect([&](auto &name) -> Opt<StructDef> {
+  const auto originalNames = structs | map([](const auto &d) { return repr(d.name); }) | to<Set>();
+  const auto syntheticDefs = structNames | collect([&](const auto &name) -> Opt<StructDef> {
                                if (originalNames.contains(name)) return {};
                                return StructDef(Sym({name}), {}, {Named("__opaque", Type::IntS8())}, {}, /*isUnion*/ false);
                              });
@@ -244,12 +248,12 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
 
   // Phase 2a: register stubs so resolveType can refer to any struct by name during body resolution.
   const auto resolved =
-      allDefs | map([&](auto &def) {
+      allDefs | map([&](const auto &def) {
         const auto name = repr(def.name);
         return std::pair{name,
                          StructInfo{.def = def, .layout = StructLayout(name, 0, 0, {}), .tpe = opaqueTypes.at(name), .memberIndices = {}}};
-      }) |
-      to<Map>();
+      }) //
+      | to<Map>();
   // Phase 2b: setBody on every struct so all types are sized (recursive defs can ask each other for size).
   // Struct-typed fields are laid out inline (functionBoundary=false) so the layout matches what a
   // host C++ compiler produces for a captured-by-value struct — the kernel receives a pointer to the
@@ -267,14 +271,14 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   auto setBody = [&](const StructDef &def) {
     auto *tpe = opaqueTypes.at(repr(def.name));
     if (!tpe->isOpaque()) return true; // body already set; safe in case of duplicate StructDefs
-    if (def.isUnion && !(def.members | forall([&](auto &m) { return typeReadyForUnionStorage(m.tpe); }))) return false;
-    const auto memberTypes =
-        def.members | map([&](auto &m) { return resolveType(m.tpe, resolved, /*functionBoundary*/ false); }) | to_vector();
+    if (def.isUnion && !(def.members | forall([&](const auto &m) { return typeReadyForUnionStorage(m.tpe); }))) return false;
+    const auto memberTypes = def.members ^ map([&](const auto &m) { return resolveType(m.tpe, resolved, /*functionBoundary*/ false); });
     if (def.isUnion && !memberTypes.empty()) {
-      const auto maxSize = memberTypes | fold_left(uint64_t{0}, [&](auto acc, auto *mt) { //
-                             return std::max(acc, dataLayout.getTypeAllocSize(mt).getFixedValue());
-                           });
-      auto *const leadTy = (memberTypes | max_by([&](auto *mt) { return dataLayout.getABITypeAlign(mt).value(); })).value();
+      const auto maxSize = memberTypes                                                     //
+                           | fold_left(uint64_t{0}, [&](const auto &acc, const auto &mt) { //
+                               return std::max(acc, dataLayout.getTypeAllocSize(mt).getFixedValue());
+                             });
+      auto *const leadTy = (memberTypes | max_by([&](const auto &mt) { return dataLayout.getABITypeAlign(mt).value(); })).value();
       const auto leadSize = dataLayout.getTypeAllocSize(leadTy).getFixedValue();
       const auto storage = maxSize > leadSize
                                ? std::vector<llvm::Type *>{leadTy, llvm::ArrayType::get(llvm::Type::getInt8Ty(actual), maxSize - leadSize)}
@@ -283,41 +287,41 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
     } else tpe->setBody(memberTypes);
     return true;
   };
-  allDefs | filter([](auto &def) { return !def.isUnion; }) | for_each([&](auto &def) { setBody(def); });
+  allDefs | filter([](const auto &def) { return !def.isUnion; }) | for_each([&](const auto &def) { setBody(def); });
   bool progressed = true;
   while (progressed) {
-    progressed = allDefs                                                                                        //
-                 | filter([&](auto &def) { return def.isUnion && opaqueTypes.at(repr(def.name))->isOpaque(); }) //
-                 | fold_left(false, [&](auto acc, auto &def) { return setBody(def) || acc; });
+    progressed = allDefs                                                                                              //
+                 | filter([&](const auto &def) { return def.isUnion && opaqueTypes.at(repr(def.name))->isOpaque(); }) //
+                 | fold_left(false, [&](const auto &acc, const auto &def) { return setBody(def) || acc; });
   }
-  allDefs | for_each([&](auto &def) {
+  allDefs | for_each([&](const auto &def) {
     if (opaqueTypes.at(repr(def.name))->isOpaque()) {
       throw BackendException(fmt::format("Could not size union struct {}", repr(def.name)));
     }
   });
   // Phase 2c: now that all bodies are set, compute layouts.
-  return allDefs | map([&](auto &def) {
+  return allDefs | map([&](const auto &def) {
            auto tpe = opaqueTypes.at(repr(def.name));
-           const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to_vector()) ^ to<Map>();
+           const auto table = def.members | map([](const auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to<Map>();
            if (def.isUnion) {
              const StructLayout layout(
                  /*name*/ repr(def.name),
                  /*sizeInBytes*/ static_cast<int64_t>(dataLayout.getTypeAllocSize(tpe).getFixedValue()),
                  /*alignment*/ static_cast<int64_t>(dataLayout.getABITypeAlign(tpe).value()),
-                 /*members*/ def.members | map([&](auto &named) {
+                 /*members*/ def.members ^ map([&](const auto &named) {
                    return StructLayoutMember(
                        /*name*/ named, /*offsetInBytes*/ 0,
                        /*sizeInBytes*/
                        static_cast<int64_t>(
                            dataLayout.getTypeAllocSize(resolveType(named.tpe, resolved, /*functionBoundary*/ false)).getFixedValue()));
-                 }) | to_vector());
+                 }));
              return std::pair{repr(def.name), StructInfo{.def = def, .layout = layout, .tpe = tpe, .memberIndices = table}};
            }
            const auto structLayout = dataLayout.getStructLayout(tpe);
            const StructLayout layout(/*name*/ repr(def.name),
                                      /*sizeInBytes*/ structLayout->getSizeInBytes(),
                                      /*alignment*/ static_cast<int64_t>(structLayout->getAlignment().value()),
-                                     /*members*/ def.members | zip_with_index<size_t>() | map([&](auto &named, auto i) {
+                                     /*members*/ def.members | zip_with_index<size_t>() | map([&](const auto &named, const auto &i) {
                                        return StructLayoutMember(
                                            /*name*/ named,                                                            //
                                            /*offsetInBytes*/ static_cast<int64_t>(structLayout->getElementOffset(i)), //
@@ -325,8 +329,8 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
                                        );
                                      }) | to_vector());
            return std::pair{repr(def.name), StructInfo{.def = def, .layout = layout, .tpe = tpe, .memberIndices = table}};
-         }) |
-         to<Map>();
+         }) //
+         | to<Map>();
 }
 
 llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
@@ -358,9 +362,9 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     const Triple defaultTriple = llvmc::defaultHostTriple();
     const bool wantHost = arch.empty() || arch == "native";
     if (wantHost && defaultTriple.getArch() != archTpe)
-      throw BackendException("Requested host CPU detection (`" + (arch.empty() ? std::string{"<empty>"} : arch) + "`) with " +
-                             Triple::getArchTypeName(archTpe).str() + " but the host arch is different (" +
-                             Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
+      throw BackendException("Requested host CPU detection (`" + (arch.empty() ? std::string{"<empty>"} : arch) + "`) with "
+                             + Triple::getArchTypeName(archTpe).str() + " but the host arch is different ("
+                             + Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
 
     Triple triple = defaultTriple;
     triple.setArch(archTpe);

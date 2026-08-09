@@ -18,6 +18,8 @@
 #include <hermes/hermes.h>
 #include <jsi/jsi.h>
 
+using namespace aspartame;
+
 namespace polyregion::polypass {
 
 namespace jsi = facebook::jsi;
@@ -234,10 +236,11 @@ Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vecto
     auto runFn = runFnVal.asObject(rt).asFunction(rt);
 
     auto stepsArr = jsi::Array(rt, steps.size());
-    using namespace aspartame;
-    steps | zip_with_index<size_t>() | for_each([&](auto &s, auto i) { //
-      stepsArr.setValueAtIndex(rt, i, jsi::String::createFromUtf8(rt, s));
-    });
+    steps                                              //
+        | zip_with_index<size_t>()                     //
+        | for_each([&](const auto &s, const auto &i) { //
+            stepsArr.setValueAtIndex(rt, i, jsi::String::createFromUtf8(rt, s));
+          });
 
     auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
     auto abVal = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(programBytes.size()))});

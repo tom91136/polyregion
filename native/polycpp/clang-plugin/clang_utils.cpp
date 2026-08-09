@@ -10,6 +10,8 @@
 
 #include "ast.h"
 
+using namespace aspartame;
+
 namespace polyregion::polystl {
 
 Location getLocation(const clang::SourceLocation &l, clang::ASTContext &c) {
@@ -41,7 +43,7 @@ std::string dump_to_string(const clang::Expr *decl, const clang::ASTContext &c) 
 }
 
 bool hasAnnotation(const clang::Decl *decl, const llvm::StringRef annotation) {
-  return decl->attrs() | aspartame::exists([&](const clang::Attr *a) {
+  return decl->attrs() | exists([&](const auto &a) {
            const auto *ann = llvm::dyn_cast<clang::AnnotateAttr>(a);
            return ann && ann->getAnnotation() == annotation;
          });

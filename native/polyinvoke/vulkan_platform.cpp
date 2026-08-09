@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 #include "spirv/unified1/spirv.hpp"
@@ -24,6 +25,7 @@
   #pragma clang diagnostic pop // -Wno-everything
 #endif
 
+using namespace aspartame;
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::vulkan;
 
@@ -113,18 +115,18 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
                                          std::vector<const char *> &layers,     //
                                          const vk::raii::Context &ctx) {
 
-  auto insertSupported = [](auto &from, auto &to, auto &available, auto f) {
-    std::copy_if(from.begin(), from.end(), std::back_inserter(to), [&](auto ext) {
-      return std::find_if(available.begin(), available.end(), [&](auto avail) { return std::string_view(f(avail)) == ext; }) !=
-             available.end();
-    });
+  auto insertSupported = [](const auto &from, auto &to, const auto &available, const auto &f) {
+    from | filter([&](const auto &ext) {
+      return available ^ exists([&](const auto &avail) { return std::string_view(f(avail)) == ext; });
+    }) //
+        | append_to(to);
   };
 
   auto supportedExtensions = ctx.enumerateInstanceExtensionProperties();
   auto supportedLayers = ctx.enumerateInstanceLayerProperties();
-  insertSupported(commonExtensions, extensions, supportedExtensions, [](auto e) { return e.extensionName; });
-  insertSupported(extraExtensions, extensions, supportedExtensions, [](auto e) { return e.extensionName; });
-  insertSupported(extraLayers, layers, supportedLayers, [](auto e) { return e.layerName; });
+  insertSupported(commonExtensions, extensions, supportedExtensions, [](const auto &e) { return e.extensionName; });
+  insertSupported(extraExtensions, extensions, supportedExtensions, [](const auto &e) { return e.extensionName; });
+  insertSupported(extraLayers, layers, supportedLayers, [](const auto &e) { return e.layerName; });
 
   vk::InstanceCreateInfo info(vk::InstanceCreateFlags(), &AppInfo, //
                               layers.size(), layers.data(),        //
@@ -160,11 +162,7 @@ ModuleFormat VulkanDevice::moduleFormat() {
 }
 
 template <typename T, typename U, typename F> constexpr static auto transform_idx_if(U &from, F &&f) {
-  std::vector<typename decltype(f(from[0], T(0)))::value_type> out;
-  for (T i = 0; i < from.size(); ++i) {
-    if (auto maybe = f(from[i], i); maybe) out.push_back(*maybe);
-  }
-  return out;
+  return from | zip_with_index<T>() | collect(std::forward<F>(f)) | to_vector();
 };
 
 std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
@@ -174,11 +172,11 @@ std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
     for (const vk::raii::PhysicalDevice &dev : instance.enumeratePhysicalDevices()) {
       std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
 
-      auto computeQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
+      auto computeQueueIds = transform_idx_if<uint32_t>(queueProps, [](const auto &q, const auto &i) {
         return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eCompute ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
       });
 
-      auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
+      auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](const auto &q, const auto &i) {
         return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
       });
 
@@ -238,14 +236,14 @@ static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32
 
 // ---
 
-details::Resolved::Resolved(uint32_t computeQueueId,
-                            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
-                            uint32_t maxWorkGroupX,                                      //
-                            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
-                            const std::vector<vk::DescriptorPoolSize> &sizes,
-                            const vk::raii::Device &ctx)        //
-    : shaderModule(shaderModule), maxWorkGroupX(maxWorkGroupX), //
-      dscLayout(ctx.createDescriptorSetLayout({{}, bindings})), //
+polyregion::invoke::vulkan::details::Resolved::Resolved(uint32_t computeQueueId,
+                                                        const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
+                                                        uint32_t maxWorkGroupX,                                      //
+                                                        const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
+                                                        const std::vector<vk::DescriptorPoolSize> &sizes,
+                                                        const vk::raii::Device &ctx) //
+    : shaderModule(shaderModule), maxWorkGroupX(maxWorkGroupX),                      //
+      dscLayout(ctx.createDescriptorSetLayout({{}, bindings})),                      //
       dscPool(ctx.createDescriptorPool(
           vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, sizes))), //
       dscSet(std::move(ctx.allocateDescriptorSets({*dscPool, *dscLayout})[0])), pipeCache({}),                                           //
@@ -278,7 +276,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
           std::move(ctx.allocateCommandBuffers({**transferCmdPool, vk::CommandBufferLevel::ePrimary, 1})[0]))),
       store(
           PREFIX,
-          [this](auto &&s) {
+          [this](const auto &s) {
             POLYINVOKE_TRACE();
             auto data = std::vector<uint32_t>((s.size() + 3) / 4, 0);
             std::copy(s.begin(), s.end(), reinterpret_cast<char *>(data.data()));
@@ -286,9 +284,9 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
             uint32_t maxWgX = UINT32_MAX;
             if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = subgroupSize;
-            return details::LoadedModule{module, maxWgX};
+            return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX};
           },
-          [this](auto &&m, auto &&name, auto &&types) {
+          [this](const auto &m, const auto &name, const auto &types) {
             POLYINVOKE_TRACE();
             std::vector<vk::DescriptorSetLayoutBinding> bindings;
             uint32_t bindingsId = 0;
@@ -306,7 +304,8 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             if (storages != 0) sizes.emplace_back(vk::DescriptorType::eStorageBuffer, storages);
             if (scalars != 0) sizes.emplace_back(vk::DescriptorType::eUniformBuffer, scalars);
 
-            return details::Resolved(this->computeQueueId.first, m.module, m.maxWorkGroupX, bindings, sizes, ctx);
+            return polyregion::invoke::vulkan::details::Resolved(this->computeQueueId.first, m.module, m.maxWorkGroupX, bindings, sizes,
+                                                                 ctx);
           }) {
   POLYINVOKE_TRACE();
 }
@@ -324,9 +323,7 @@ std::string VulkanDevice::name() {
 PhysicalDevice VulkanDevice::physicalDevice() {
   POLYINVOKE_TRACE();
   const auto exts = device.enumerateDeviceExtensionProperties();
-  const bool hasPci = std::any_of(exts.begin(), exts.end(), [](const vk::ExtensionProperties &e) {
-    return std::strcmp(e.extensionName, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME) == 0;
-  });
+  const bool hasPci = exts ^ exists([](const auto &e) { return std::strcmp(e.extensionName, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME) == 0; });
   if (hasPci) {
     const auto chain = device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDevicePCIBusInfoPropertiesEXT>();
     const auto &pci = chain.template get<vk::PhysicalDevicePCIBusInfoPropertiesEXT>();
@@ -397,12 +394,12 @@ bool VulkanDevice::moduleLoaded(const std::string &name) {
   return store.moduleLoaded(name);
 }
 
-static details::MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
+static polyregion::invoke::vulkan::details::MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
   VkBufferCreateInfo bufferInfo = {};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = size;
-  bufferInfo.usage = (uniform ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) |
-                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufferInfo.usage = (uniform ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+                     | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   VmaAllocationCreateInfo allocCreateInfo = {};
   allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
   allocCreateInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -425,7 +422,7 @@ uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
     POLYINVOKE_FATAL(PREFIX,
                      "device buffer of %zu bytes exceeds maxMemoryAllocationSize (%zu); the marshalling arena is too large for this device",
                      size, deviceMaxAllocSize);
-  return memoryObjects.malloc(std::make_shared<details::MemObject>(allocate(allocator, size, false)));
+  return memoryObjects.malloc(std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, size, false)));
 }
 void VulkanDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
@@ -449,7 +446,7 @@ std::unique_ptr<DeviceQueue> VulkanDevice::createQueue(const std::chrono::durati
   return std::make_unique<VulkanDeviceQueue>(ctx, allocator, //
                                              ctx.getQueue(computeQueueId.first, activeComputeQueues++ % computeQueueId.second),
                                              ctx.getQueue(transferQueueId.first, activeTransferQueues++ % transferQueueId.second), store,
-                                             [this](auto &&ptr) {
+                                             [this](const auto &ptr) {
                                                if (auto mem = memoryObjects.query(ptr); mem) {
                                                  return *mem;
                                                } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
@@ -546,7 +543,9 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   }
   const auto [scalarOffsets, argBufferSize] = polyregion::runtime::std140ScalarLayout(scalarSizes);
 
-  auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<details::MemObject>(allocate(allocator, argBufferSize, true));
+  auto argObj = argBufferSize == 0
+                    ? nullptr
+                    : std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, argBufferSize, true));
   if (argObj) {
     auto *argBase = static_cast<std::byte *>(argObj->mappedData);
     for (size_t i = 0; i < scalarSizes.size(); ++i)
@@ -581,11 +580,12 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
           )              //
   );
 
-  std::vector<vk::WriteDescriptorSet> writeDsSets;
-  {
-    for (uint32_t i = 0; i < infos.size(); ++i)
-      writeDsSets.emplace_back(*fn.dscSet, i, 0, 1, infos[i].second, nullptr, &infos[i].first);
-  }
+  const auto writeDsSets = infos                        //
+                           | zip_with_index<uint32_t>() //
+                           | map([&](const auto &info, const auto &i) {
+                               return vk::WriteDescriptorSet(*fn.dscSet, i, 0, 1, info.second, nullptr, &info.first);
+                             }) //
+                           | to_vector();
 
   ctx.updateDescriptorSets(writeDsSets, {});
 
@@ -598,8 +598,8 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   fn.cmdBuffer.end();
 
   if (cb) {
-    auto [key, enqueued] = enqueuedStore.store(
-        std::make_shared<details::Enqueued>(details::Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
+    auto [key, enqueued] = enqueuedStore.store(std::make_shared<polyregion::invoke::vulkan::details::Enqueued>(
+        polyregion::invoke::vulkan::details::Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *(enqueued->fence));
     callbackQueue.push([this, &fn, cb, key = key]() {

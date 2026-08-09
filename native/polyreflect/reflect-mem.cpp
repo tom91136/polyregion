@@ -145,7 +145,7 @@ class CoarseGrainedTaintAnalysis {
   std::unordered_set<llvm::Value *> tainted;
   std::stack<llvm::Value *> workList;
   std::unordered_multimap<llvm::Value *, llvm::Value *> globals;
-  std::function<bool(llvm::Function *)> fnPredicate = [](auto) { return true; };
+  std::function<bool(llvm::Function *)> fnPredicate = [](const auto &) { return true; };
   bool debug = false;
 
   bool isTainted(llvm::Value *V) const { return tainted.count(V); }
@@ -434,12 +434,12 @@ void insertMapCalls(llvm::Module &M, //
     if (auto *A = llvm::dyn_cast<llvm::Argument>(V)) return A->getArgNo(); // args sort ahead of body
     return 0;
   };
-  // total order (module position, then first-seen index) for deterministic std::sort (avoids stable_sort's deprecated get_temporary_buffer)
+  // total order (module position, then first-seen index) for deterministic sorting
   for (auto &[F, Vs] : groups) {
     llvm::DenseMap<llvm::Value *, size_t> seen;
     for (auto *V : Vs)
       seen.try_emplace(V, seen.size());
-    std::sort(Vs.begin(), Vs.end(), [&](llvm::Value *a, llvm::Value *b) {
+    Vs ^= sort([&](llvm::Value *a, llvm::Value *b) {
       const size_t pa = posOf(a), pb = posOf(b);
       return pa != pb ? pa < pb : seen.lookup(a) < seen.lookup(b);
     });
@@ -609,15 +609,14 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   if (verbose) llvm::errs() << "[ReflectMemPass] CGTA yielded " << tainted.size() << " tainted values\n";
 
   const std::vector<std::pair<llvm::Function *, std::vector<llvm::Value *>>> groups =
-      tainted //
-      ^ group_by([](auto &V) -> llvm::Function * {
-          if (auto I = llvm::dyn_cast<llvm::Instruction>(V)) return I->getFunction();
-          if (auto A = llvm::dyn_cast<llvm::Argument>(V)) return A->getParent();
-          return {};
-        })                                                                            //
-      ^ to_vector()                                                                   //
-      ^ sort_by([](auto &F, auto &) { return F ? F->getName() : llvm::StringRef{}; }) //
-      ^ map([](auto &F, auto &Ins) { return std::pair{F, Ins ^ to_vector()}; });
+      tainted ^ group_by([](const auto &V) -> llvm::Function * {
+        if (auto I = llvm::dyn_cast<llvm::Instruction>(V)) return I->getFunction();
+        if (auto A = llvm::dyn_cast<llvm::Argument>(V)) return A->getParent();
+        return {};
+      })                                                                                          //
+      ^ to_vector()                                                                               //
+      ^ sort_by([](const auto &F, const auto &) { return F ? F->getName() : llvm::StringRef{}; }) //
+      ^ map([](const auto &F, const auto &Ins) { return std::pair{F, Ins ^ to_vector()}; });
 
   if (verbose) {
     size_t cgtaLoads = 0, cgtaStores = 0;

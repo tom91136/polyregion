@@ -1,6 +1,5 @@
 #include "ast.h"
 
-#include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 
 #include "generated/polyast.h"

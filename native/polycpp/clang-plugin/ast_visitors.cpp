@@ -56,8 +56,7 @@ bool SpecialisationPathVisitor::VisitCallExpr(clang::CallExpr *expr) {
   return true;
 }
 std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> SpecialisationPathVisitor::resolve(const clang::FunctionDecl *decl) const {
-  std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> xs;
-  for (auto entry = map ^ get_maybe(decl); entry; entry = map ^ get_maybe(entry->first))
-    xs.emplace_back(*entry);
-  return xs;
+  const auto entry = map ^ get_maybe(decl);
+  if (!entry) return {};
+  return unfold(*entry, [&](const auto &parent) { return map ^ get_maybe(parent.first); }) | to_vector();
 }

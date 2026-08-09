@@ -177,8 +177,8 @@ class MsgpackReader {
 
   uint32_t u32() {
     require(4);
-    uint32_t x = (static_cast<uint32_t>(cursor_[0]) << 24) | (static_cast<uint32_t>(cursor_[1]) << 16) |
-                 (static_cast<uint32_t>(cursor_[2]) << 8) | static_cast<uint32_t>(cursor_[3]);
+    uint32_t x = (static_cast<uint32_t>(cursor_[0]) << 24) | (static_cast<uint32_t>(cursor_[1]) << 16)
+                 | (static_cast<uint32_t>(cursor_[2]) << 8) | static_cast<uint32_t>(cursor_[3]);
     cursor_ += 4;
     return x;
   }
@@ -187,10 +187,10 @@ class MsgpackReader {
 
   uint64_t u64() {
     require(8);
-    uint64_t x = (static_cast<uint64_t>(cursor_[0]) << 56) | (static_cast<uint64_t>(cursor_[1]) << 48) |
-                 (static_cast<uint64_t>(cursor_[2]) << 40) | (static_cast<uint64_t>(cursor_[3]) << 32) |
-                 (static_cast<uint64_t>(cursor_[4]) << 24) | (static_cast<uint64_t>(cursor_[5]) << 16) |
-                 (static_cast<uint64_t>(cursor_[6]) << 8) | static_cast<uint64_t>(cursor_[7]);
+    uint64_t x = (static_cast<uint64_t>(cursor_[0]) << 56) | (static_cast<uint64_t>(cursor_[1]) << 48)
+                 | (static_cast<uint64_t>(cursor_[2]) << 40) | (static_cast<uint64_t>(cursor_[3]) << 32)
+                 | (static_cast<uint64_t>(cursor_[4]) << 24) | (static_cast<uint64_t>(cursor_[5]) << 16)
+                 | (static_cast<uint64_t>(cursor_[6]) << 8) | static_cast<uint64_t>(cursor_[7]);
     cursor_ += 8;
     return x;
   }
@@ -324,8 +324,8 @@ public:
 };
 
 bool isInternedEnvelope(const uint8_t *begin, const uint8_t *end) {
-  return end - begin >= 6 && begin[0] == 0x93 && begin[1] == 0xd2 && begin[2] == 0x4d && begin[3] == 0x50 && begin[4] == 0x43 &&
-         begin[5] == 0x49;
+  return end - begin >= 6 && begin[0] == 0x93 && begin[1] == 0xd2 && begin[2] == 0x4d && begin[3] == 0x50 && begin[4] == 0x43
+         && begin[5] == 0x49;
 }
 
 template <typename F> std::vector<uint8_t> encodeInterned(F &&writeValue) {

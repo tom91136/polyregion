@@ -10,9 +10,8 @@ add_executable(polyld-link
         ../polyreflect/reflect-stack.cpp)
 
 target_include_directories(polyld-link PRIVATE
-        ../polyreflect
-        ${LLD_INCLUDE_DIRS}
-        ${LLVM_INCLUDE_DIRS})
+        ../polyreflect)
+target_include_directories(polyld-link SYSTEM PRIVATE ${LLD_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(polyld-link PRIVATE
         ${LLVM_DEFINITIONS}
         POLYREGION_FUSED_DRIVER=1)

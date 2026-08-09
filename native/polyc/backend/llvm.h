@@ -67,8 +67,8 @@ struct TargetedContext {
   [[nodiscard]] llvm::Type *i32Ty();
   [[nodiscard]] llvm::Type *i64Ty();
   [[nodiscard]] bool isSpirv() const {
-    return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel ||
-           options.target == LLVMBackend::Target::SPIRV_GLCompute;
+    return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel
+           || options.target == LLVMBackend::Target::SPIRV_GLCompute;
   }
   [[nodiscard]] bool isSpirvKernel() const {
     return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel;

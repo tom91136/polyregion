@@ -266,36 +266,37 @@ class Binder {
 
 public:
   Binder(OpBuilder &B, PolyDCOMirror &dco, FReductionMirror &reductionMirror, const std::string &name,
-         const Remapper::DoConcurrentRegion &region)                                                          //
-      : dco(dco),                                                                                             //
-        reductionMirror(reductionMirror),                                                                     //
-        preludeTy(LLVM::LLVMArrayType::get(B.getContext(), B.getI8Type(), region.preludeLayout.sizeInBytes)), //
-        captureFields(region.captures ^ flat_map([&](auto &c) {                                               //
-                        const auto layouts = region.layouts                                                   //
-                                             | map([](auto, auto &l) { return std::pair{l.name, l}; })        //
-                                             | to<std::unordered_map>();
-                        const auto maybeLayout = c.named.tpe.template get<polyast::Type::Ptr>()                                   //
-                                                 ^ flat_map([](auto &t) { return t.comp.template get<polyast::Type::Struct>(); }) //
-                                                 ^ flat_map([&](auto &s) { return layouts ^ get_maybe(repr(s.name)); });          //
-                        std::vector<CaptureField> fields;                                                                         //
-                        bindRef(B, c.value, maybeLayout, fields);                                                                 //
-                        return fields;                                                                                            //
-                      })),                                                                                                        //
+         const Remapper::DoConcurrentRegion &region)                                                                   //
+      : dco(dco),                                                                                                      //
+        reductionMirror(reductionMirror),                                                                              //
+        preludeTy(LLVM::LLVMArrayType::get(B.getContext(), B.getI8Type(), region.preludeLayout.sizeInBytes)),          //
+        captureFields(region.captures                                                                                  //
+                      ^ flat_map([&](const auto &c) {                                                                  //
+                          const auto layouts = region.layouts                                                          //
+                                               | map([](const auto &, const auto &l) { return std::pair{l.name, l}; }) //
+                                               | to<std::unordered_map>();
+                          const auto maybeLayout = c.named.tpe.template get<polyast::Type::Ptr>()                                         //
+                                                   ^ flat_map([](const auto &t) { return t.comp.template get<polyast::Type::Struct>(); }) //
+                                                   ^ flat_map([&](const auto &s) { return layouts ^ get_maybe(repr(s.name)); });          //
+                          std::vector<CaptureField> fields;                                                                               //
+                          bindRef(B, c.value, maybeLayout, fields);                                                                       //
+                          return fields;                                                                                                  //
+                        })),                                                                                                              //
         captureMirror(B.getContext(), "Capture_" + name,
-                      captureFields | map([](auto &f) { return f.fieldPtr.getType(); }) | prepend(preludeTy) | to_vector()),
-        reductionFields(region.reductions ^ map([&](auto &rd) { return ReductionField{rd, bindScalarRefOrBox(B, rd.value)}; })) {}
+                      captureFields | map([](const auto &f) { return f.fieldPtr.getType(); }) | prepend(preludeTy) | to_vector()),
+        reductionFields(region.reductions ^ map([&](const auto &rd) { return ReductionField{rd, bindScalarRefOrBox(B, rd.value)}; })) {}
 
   Type structType() const { return captureMirror.ty; }
 
   Value createCapture(OpBuilder &B, ModuleOp &M) const {
     const auto annotationConst = strConst(B, M, POLYREFLECT_TRACK_ANNOTATION);
-    captureFields | for_each([&](auto &f) {
+    captureFields | for_each([&](const auto &f) {
       // XXX skip non-pointer fields (inline scalar captures): VarAnnotation requires a ptr operand.
       if (!llvm::isa<LLVM::LLVMPointerType>(f.fieldPtr.getType())) return;
       LLVM::VarAnnotation::create(B, uLoc(B), f.fieldPtr, annotationConst, nullConst(B), intConst(B, i32Ty(B), 0), nullConst(B));
     });
     return captureMirror.local(B, {captureFields                                                   //
-                                   | map([](auto &f) { return f.fieldPtr; })                       //
+                                   | map([](const auto &f) { return f.fieldPtr; })                 //
                                    | prepend(LLVM::ZeroOp::create(B, uLoc(B), preludeTy).getRes()) //
                                    | to_vector()});
   }
@@ -303,7 +304,7 @@ public:
   Value createReductions(OpBuilder &B) const {
     if (reductionFields.empty()) return nullConst(B);
     return reductionMirror.local(
-        B, reductionFields ^ map([&](auto &f) {
+        B, reductionFields ^ map([&](const auto &f) {
              const auto tpe = f.reduction.named.tpe;
              const auto rtTpe = runtimeType(tpe);
              if (!rtTpe) raise(fmt::format("Unsupported reduction type {}", polyast::repr(tpe)));
@@ -318,15 +319,15 @@ public:
   Value createReductionsCount(OpBuilder &B) const { return intConst(B, i64Ty(B), reductionFields.size()); }
 
   void recordTemporariesAndDependents(OpBuilder &B) {
-    captureFields ^ for_each([&](auto &field) {
-      field.dependent | concat(field.temporary) | for_each([&](auto &w) { dco.record(B, w.ptr, w.sizeInBytes); });
+    captureFields ^ for_each([&](const auto &field) {
+      field.dependent | concat(field.temporary) | for_each([&](const auto &w) { dco.record(B, w.ptr, w.sizeInBytes); });
       if (field.box) dco.recordBox(B, field.box);
     });
   }
 
   void releaseTemporaries(OpBuilder &B) {
-    captureFields ^ for_each([&](auto &field) {
-      field.temporary | for_each([&](auto &w) { dco.release(B, w.ptr); });
+    captureFields ^ for_each([&](const auto &field) {
+      field.temporary | for_each([&](const auto &w) { dco.release(B, w.ptr); });
       // XXX Release boxes only when the field itself is temporary (boxed-by-value); dependent
       // boxes outlive the dispatch and are released by the owning scope.
       if (field.box && !field.temporary.empty()) dco.releaseBox(B, field.box);
@@ -361,8 +362,8 @@ public:
                                  polyast::Type::Unit0(),
                                  polyast::Type::Bool1(), //
                              } //
-                             | collect([&](auto &t) {
-                                 return polyast::primitiveSize(t) ^ map([&](auto sizeInBytes) {
+                             | collect([&](const auto &t) {
+                                 return polyast::primitiveSize(t) ^ map([&](const auto &sizeInBytes) {
                                           return std::pair{t, TypeLayout.global(M, [&](OpBuilder &B0) {
                                                              return std::vector{
                                                                  std::array{strConst(B0, M, polyast::repr(t)),    //
@@ -383,7 +384,7 @@ public:
 
   void ifKindEq(OpBuilder &B, const polyfront::Options &opts, const runtime::PlatformKind kind,
                 const std::function<void(OpBuilder &, runtime::PlatformKind)> &f) {
-    if (!(opts.targets ^ exists([&](auto &t, auto) { return runtime::targetPlatformKind(t) == kind; }))) return;
+    if (!(opts.targets ^ exists([&](const auto &t, const auto &) { return runtime::targetPlatformKind(t) == kind; }))) return;
     auto B0 = fir::IfOp::create(B, uLoc(B), dco.isPlatformKind(B, kind), false).getThenBodyBuilder();
     f(B0, kind);
   }
@@ -397,13 +398,13 @@ public:
 
     const auto table = bundle.layouts                                                                //
                        | values()                                                                    //
-                       | map([&](auto &sl) {                                                         //
+                       | map([&](const auto &sl) {                                                   //
                            return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}), sl}; //
                          })                                                                          //
                        | to<std::unordered_map>();
 
     auto structLayoutsArray = TypeLayout.global(M, [&](OpBuilder &B0) {
-      return bundle.layouts ^ map([&](auto, auto &l) {
+      return bundle.layouts ^ map([&](const auto &, const auto &l) {
                auto attrs = runtime::LayoutAttrs::None;
                if (isSelfOpaque(l)) attrs |= runtime::LayoutAttrs::SelfOpaque;
                if (isOpaque(l, table)) attrs |= runtime::LayoutAttrs::Opaque;
@@ -416,83 +417,87 @@ public:
              });
     });
 
-    const auto structNameToTypeLayoutIdx = bundle.layouts                          //
-                                           | values()                              //
-                                           | map([](auto &sl) { return sl.name; }) //
-                                           | zip_with_index()                      //
+    const auto structNameToTypeLayoutIdx = bundle.layouts                                //
+                                           | values()                                    //
+                                           | map([](const auto &sl) { return sl.name; }) //
+                                           | zip_with_index()                            //
                                            | to<std::unordered_map>();
 
     // region.boxes
     auto aggregateMembersArray =
-        bundle.layouts | values() | map([&](const polyast::StructLayout &l) {
-          return AggregateMember.global(M, [&](OpBuilder &B0) {
-            const auto fbm =
-                region.boxes ^ get_maybe(l.name) ^ map([&](const FBoxedMirror &m) {
-                  static size_t id = 0;
-                  const auto fn = defineFunc(
-                      M, fmt::format("box_size_resolver_{}", ++id), i64Ty(B0), {ptrTy(B0)}, LLVM::Linkage::Internal,
-                      [&](OpBuilder &B1, LLVM::LLVMFuncOp &f) {
-                        const auto loadField = [&](const polyast::Named &n, const Type &ty) {
-                          return l.members ^ find([&](auto &x) { return x.name == n; }) ^
-                                 fold(
-                                     [&](auto &slm) -> Value {
-                                       auto gep = LLVM::GEPOp::create(B1, uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
-                                                                      ValueRange{intConst(B1, i64Ty(B1), slm.offsetInBytes)});
-                                       return LLVM::LoadOp::create(B1, uLoc(B1), ty, gep.getRes());
-                                     },
-                                     [&]() -> Value { raise(fmt::format("Missing field {}", repr(n))); });
-                        };
-                        auto totalSizeInBytes = loadField(m.sizeInBytes, i64Ty(B1));
-                        if (m.ranks != 0) {
-                          const auto dimsTy = LLVM::LLVMStructType::getLiteral(M.getContext(), {i64Ty(B1), i64Ty(B1), i64Ty(B1)});
-                          const auto dims = loadField(m.dims, LLVM::LLVMArrayType::get(dimsTy, m.ranks));
-                          for (int64_t i = 0; i < static_cast<int64_t>(m.ranks); ++i) {
-                            // XXX Dim type fields are: { 0 = lowerBound, 1 = extent, 2 = stride }, we want the extent (1) at
-                            // rank
-                            const auto dim = LLVM::ExtractValueOp::create(B1, uLoc(B1), dims, ArrayRef{i}).getResult();
-                            const auto extent = LLVM::ExtractValueOp::create(B1, uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
-                            totalSizeInBytes = arith::MulIOp::create(B1, uLoc(B1), totalSizeInBytes, extent).getResult();
-                          }
-                        }
-                        LLVM::ReturnOp::create(B1, uLoc(B1), totalSizeInBytes);
-                      });
-                  return std::pair{m.addr, LLVM::AddressOfOp::create(B0, uLoc(B0), fn).getRes()};
-                });
-            return l.members ^ map([&](auto &m) {
-                     const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
-                     const auto ptrToTypeLayout =
-                         polyast::extractComponent(m.name.tpe) ^ flat_map([&](auto &t) {
-                           return primitiveTypeLayouts                                        //
-                                  ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) //
-                                  ^ or_else([&]() {
-                                      return t.template get<polyast::Type::Struct>() ^ flat_map([&](auto &s) {
-                                               return structNameToTypeLayoutIdx                                                     //
-                                                      ^ get_maybe(repr(s.name))                                                     //
-                                                      ^ map([&](auto layoutIdx) { return structLayoutsArray.gep(B0, layoutIdx); }); //
+        bundle.layouts //
+        | values()     //
+        | map([&](const auto &l) {
+            return AggregateMember.global(M, [&](OpBuilder &B0) {
+              const auto fbm =
+                  region.boxes        //
+                  ^ get_maybe(l.name) //
+                  ^ map([&](const auto &m) {
+                      static size_t id = 0;
+                      const auto fn = defineFunc(
+                          M, fmt::format("box_size_resolver_{}", ++id), i64Ty(B0), {ptrTy(B0)}, LLVM::Linkage::Internal,
+                          [&](OpBuilder &B1, LLVM::LLVMFuncOp &f) {
+                            const auto loadField = [&](const polyast::Named &n, const Type &ty) {
+                              return l.members                                          //
+                                     ^ find([&](const auto &x) { return x.name == n; }) //
+                                     ^ fold(
+                                         [&](const auto &slm) -> Value {
+                                           auto gep = LLVM::GEPOp::create(B1, uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
+                                                                          ValueRange{intConst(B1, i64Ty(B1), slm.offsetInBytes)});
+                                           return LLVM::LoadOp::create(B1, uLoc(B1), ty, gep.getRes());
+                                         },
+                                         [&]() -> Value { raise(fmt::format("Missing field {}", repr(n))); });
+                            };
+                            auto totalSizeInBytes = loadField(m.sizeInBytes, i64Ty(B1));
+                            if (m.ranks != 0) {
+                              const auto dimsTy = LLVM::LLVMStructType::getLiteral(M.getContext(), {i64Ty(B1), i64Ty(B1), i64Ty(B1)});
+                              const auto dims = loadField(m.dims, LLVM::LLVMArrayType::get(dimsTy, m.ranks));
+                              for (int64_t i = 0; i < static_cast<int64_t>(m.ranks); ++i) {
+                                // XXX Dim type fields are: { 0 = lowerBound, 1 = extent, 2 = stride }, we want
+                                // the extent (1) at rank
+                                const auto dim = LLVM::ExtractValueOp::create(B1, uLoc(B1), dims, ArrayRef{i}).getResult();
+                                const auto extent = LLVM::ExtractValueOp::create(B1, uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
+                                totalSizeInBytes = arith::MulIOp::create(B1, uLoc(B1), totalSizeInBytes, extent).getResult();
+                              }
+                            }
+                            LLVM::ReturnOp::create(B1, uLoc(B1), totalSizeInBytes);
+                          });
+                      return std::pair{m.addr, LLVM::AddressOfOp::create(B0, uLoc(B0), fn).getRes()};
+                    });
+              return l.members ^ map([&](const auto &m) {
+                       const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
+                       const auto ptrToTypeLayout =
+                           polyast::extractComponent(m.name.tpe) ^ flat_map([&](auto t) {
+                             return primitiveTypeLayouts ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) ^ or_else([&]() {
+                                      return t.template get<polyast::Type::Struct>() ^ flat_map([&](const auto &s) {
+                                               return structNameToTypeLayoutIdx //
+                                                      ^ get_maybe(repr(s.name)) //
+                                                      ^ map(
+                                                          [&](const auto &layoutIdx) { return structLayoutsArray.gep(B0, layoutIdx); }); //
                                              });
                                     }); //
-                         });
-                     return std::array{
-                         strConst(B0, M, m.name.symbol),                                 //
-                         intConst(B0, i64Ty(B0), m.offsetInBytes),                       //
-                         intConst(B0, i64Ty(B0), m.sizeInBytes),                         //
-                         intConst(B0, i64Ty(B0), indirections),                          //
-                         intConst(B0, i64Ty(B0), componentSize.value_or(m.sizeInBytes)), //
-                         ptrToTypeLayout ^ get_or_else(nullConst(B0)),
-                         intConst(B0, i64Ty(B0), 0), /* readOnly: Fortran captures always synced back */
-                         fbm                         //
-                             ^ filter([&](auto &field, auto &) { return field == m.name; })                      //
-                             ^ fold([](auto &, auto &v) -> Value { return v; }, [&]() { return nullConst(B0); }) //
-                     };
-                   });
-          });
-        })                 //
+                           });
+                       return std::array{
+                           strConst(B0, M, m.name.symbol),                                 //
+                           intConst(B0, i64Ty(B0), m.offsetInBytes),                       //
+                           intConst(B0, i64Ty(B0), m.sizeInBytes),                         //
+                           intConst(B0, i64Ty(B0), indirections),                          //
+                           intConst(B0, i64Ty(B0), componentSize.value_or(m.sizeInBytes)), //
+                           ptrToTypeLayout ^ get_or_else(nullConst(B0)),
+                           intConst(B0, i64Ty(B0), 0), /* readOnly: Fortran captures always synced back */
+                           fbm                         //
+                               ^ filter([&](const auto &field, const auto &) { return field == m.name; })                      //
+                               ^ fold([](const auto &, const auto &v) -> Value { return v; }, [&]() { return nullConst(B0); }) //
+                       };
+                     });
+            });
+          })               //
         | zip_with_index() //
         | to_vector();
 
     static size_t id = 0;
     defineGlobalCtor(M, fmt::format("dco_layoutInit_{}_{}", magic_enum::enum_name(kind), ++id), [&](OpBuilder &FB, auto &) {
-      aggregateMembersArray | for_each([&](auto &g, auto idx) {
+      aggregateMembersArray | for_each([&](auto g, const auto &idx) {
         LLVM::StoreOp::create(FB, uLoc(FB), g.gep(FB), structLayoutsArray.gep(FB, idx, TypeLayout.members));
       });
       LLVM::ReturnOp::create(FB, uLoc(FB), ValueRange{});
@@ -500,9 +505,9 @@ public:
 
     auto globalKOs = KernelObject.global(M, [&](OpBuilder &B0) {
       const auto program = bundle.program.empty() ? nullConst(B0) : strConst(B0, M, bundle.program, false);
-      return bundle.objects ^ map([&](auto &o) {
+      return bundle.objects ^ map([&](const auto &o) {
                auto features = CharStar.global(
-                   M, [&](OpBuilder &B1) { return o.features ^ map([&](auto &f) { return std::array{strConst(B1, M, f)}; }); });
+                   M, [&](OpBuilder &B1) { return o.features ^ map([&](const auto &f) { return std::array{strConst(B1, M, f)}; }); });
                return KernelObjectMirror::Init{intConst(B0, i8Ty(B0), value_of(o.kind)),                    //
                                                intConst(B0, i8Ty(B0), value_of(o.format)),                  //
                                                intConst(B0, i64Ty(B0), o.features.size()),                  //
@@ -520,27 +525,29 @@ public:
 
     if (!bundle.hostMirrorBitcode.empty()) emitMirrorBcGlobal(M, bundle.hostMirrorBitcode);
     auto globalBundle = KernelBundle.global(M, [&](OpBuilder &B0) {
-      return std::vector{std::array{strConst(B0, M, moduleId), //
+      return std::vector{
+          std::array{strConst(B0, M, moduleId), //
 
-                                    intConst(B0, i64Ty(B0), bundle.objects.size()), //
-                                    globalKOs.gep(B0),                              //
+                     intConst(B0, i64Ty(B0), bundle.objects.size()), //
+                     globalKOs.gep(B0),                              //
 
-                                    intConst(B0, i64Ty(B0), bundle.layouts.size()), //
-                                    structLayoutsArray.gep(B0),
-                                    intConst(B0, i64Ty(B0), bundle.layouts | index_where([](auto &iface, auto) { return iface; })),
+                     intConst(B0, i64Ty(B0), bundle.layouts.size()), //
+                     structLayoutsArray.gep(B0),
+                     intConst(B0, i64Ty(B0), bundle.layouts | index_where([](const auto &iface, const auto &) { return iface; })),
 
-                                    strConst(B0, M, bundle.metadata), //
-                                    strConst(B0, M, bundle.mirrorId), //
-                                    nullConst(B0), nullConst(B0),     //
-                                    intConst(B0, i8Ty(B0), bundle.asserts ? 1 : 0)}};
+                     strConst(B0, M, bundle.metadata), //
+                     strConst(B0, M, bundle.mirrorId), //
+                     nullConst(B0), nullConst(B0),     //
+                     intConst(B0, i8Ty(B0), bundle.asserts ? 1 : 0)}};
     });
 
     Binder binder(B, dco, FReduction, moduleId, region);
 
     if (int64_t binderSize = L.getTypeSize(binder.structType()); binderSize != region.captureLayout.sizeInBytes) {
-      raise(fmt::format(
-          "Capture and binder type size mismatch, expecting {} but binder gave {}\nBinder layout is:\n\t{}\nCapture layout is:\n\t{}", //
-          region.captureLayout.sizeInBytes, binderSize, show(binder.structType()) ^ indent(2), repr(region.captureLayout) ^ indent(2)));
+      raise(fmt::format("Capture and binder type size mismatch, expecting {} but binder gave {}\nBinder "
+                        "layout is:\n\t{}\nCapture layout is:\n\t{}", //
+                        region.captureLayout.sizeInBytes, binderSize, show(binder.structType()) ^ indent(2),
+                        repr(region.captureLayout) ^ indent(2)));
     }
 
     binder.recordTemporariesAndDependents(B);
@@ -591,10 +598,10 @@ void doRewrite(ModuleOp op) {
       // lowering adds extra uses (ArrayCoor for the scratch slot) so a strict hasOneUse check
       // would skip the rewrite and leave the IV storage as a shared race across threads.
       const auto match =
-          induction.getUsers() ^ collect_first([](auto *user) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
+          induction.getUsers() ^ collect_first([](const auto &user) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
             auto cv = llvm::dyn_cast<fir::ConvertOp>(user);
             if (!cv) return std::nullopt;
-            return cv->getUsers() ^ collect_first([&](auto *cvUser) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
+            return cv->getUsers() ^ collect_first([&](const auto &cvUser) -> std::optional<std::pair<fir::ConvertOp, fir::StoreOp>> {
                      if (auto st = llvm::dyn_cast<fir::StoreOp>(cvUser)) return std::pair{cv, st};
                      return std::nullopt;
                    });
@@ -738,8 +745,8 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
             return;
           }
           const auto op = ra.getReduceOperation();
-          if (op != fir::ReduceOperationEnum::Add && op != fir::ReduceOperationEnum::Multiply && op != fir::ReduceOperationEnum::MAX &&
-              op != fir::ReduceOperationEnum::MIN) {
+          if (op != fir::ReduceOperationEnum::Add && op != fir::ReduceOperationEnum::Multiply && op != fir::ReduceOperationEnum::MAX
+              && op != fir::ReduceOperationEnum::MIN) {
             emit(diag, clang::DiagnosticsEngine::Error,
                  POLYREGION_DIAG_POLYFC
                  "unsupported reduction operator in `do concurrent ... reduce(...)`; only +, *, min, max are supported");
@@ -940,13 +947,13 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         auto memref = chaseDef(op->getOperand(0));
         auto coor = memref.getDefiningOp<fir::ArrayCoorOp>();
         if (!coor) return;
-        if (!(scratchBoxes ^ exists([&](auto sb) { return coor.getMemref() == sb; }))) return;
+        if (!(scratchBoxes ^ exists([&](const auto &sb) { return coor.getMemref() == sb; }))) return;
         // Replace declare uses with the underlying memref so the symbol name no longer aliases.
         for (auto r : op->getResults())
           r.replaceAllUsesWith(op->getOperand(0));
         declsToErase.push_back(op);
       });
-      declsToErase ^ for_each([](auto *d) { d->erase(); });
+      declsToErase ^ for_each([](const auto &d) { d->erase(); });
     }
     // XXX rewrite allocatable-reduce body: box_addr(load(fakeBoxStorage)) -> per-thread slot,
     // hlfir.assign through fakeBoxStorage -> direct fir.store (polypass can't lower the runtime call).
@@ -1027,7 +1034,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         if (fakeBoxStorageToSlot.find(op->getOperand(0).getDefiningOp()) == fakeBoxStorageToSlot.end()) return;
         declaresToErase.push_back(op);
       });
-      declaresToErase ^ for_each([](auto *d) { d->erase(); });
+      declaresToErase ^ for_each([](const auto &d) { d->erase(); });
       bool progress = true;
       while (progress) {
         progress = false;
@@ -1098,7 +1105,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   polyfront::Options::parseArgsFromEnv() //
       ^ foreach_total([&](const polyfront::Options &x) { opts = x; },
                       [&](const std::vector<std::string> &errors) {
-                        errors ^ for_each([&](auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
+                        errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
                       });
 
   if (!opts.emitLibraryPath.empty()) {

@@ -50,8 +50,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   // an int64 tid as their first parameter -- the runtime fills the same slot for both. Drop
   // the lambda's leading int64 from the arg list and alias it to `__tid` at the top of the body.
   Vector<Stmt::Any> tidAliases;
-  Vector<const clang::ParmVarDecl *> userParams =
-      functor.parameters() | map([](auto *p) -> const clang::ParmVarDecl * { return p; }) | to_vector();
+  Vector<const clang::ParmVarDecl *> userParams = functor.parameters()                                                 //
+                                                  | map([](const auto &p) -> const clang::ParmVarDecl * { return p; }) //
+                                                  | to_vector();
   if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
     // declName() carries the per-decl ID suffix so the alias matches what DeclRefExpr emits.
     auto name = declName(userParams.front());
@@ -63,21 +64,24 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   }
   stmts.insert(stmts.begin(), tidAliases.begin(), tidAliases.end());
 
-  auto args = userParams |
-              map([&](const clang::ParmVarDecl *x) { return Arg(Named(declName(x), remapper.annotateLocalSpace(x, r)), {}); }) //
-              | append(recv)                                                                                                   //
+  auto args = userParams                                                                                           //
+              | map([&](const auto &x) { return Arg(Named(declName(x), remapper.annotateLocalSpace(x, r)), {}); }) //
+              | append(recv)                                                                                       //
               | to_vector();
 
   auto f0 = std::make_shared<Function>(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args,
                                        std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(),
                                        FunctionFpMode::Relaxed(), true, FunctionAffinity::Offload());
 
-  auto program = Program(*f0, r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
+  auto program = Program(*f0, r.functions | values() | map([&](const auto &x) { return *x; }) | to_vector(),
+                         r.structs | values() | map([&](const auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
 
   auto exportedStructNames = std::unordered_set<std::string>{repr(parentDef->name)};
 
-  auto layouts = r.layouts | values() | map([&](auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) | to_vector();
+  auto layouts = r.layouts                                                                                    //
+                 | values()                                                                                   //
+                 | map([&](const auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) //
+                 | to_vector();
 
   if (opts.verbose) {
     emit(diag, loc, clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Remapped program [%0, sizeof capture=%1]\n%2",
@@ -85,9 +89,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   }
 
   if (opts.jit) {
-    auto jitObjects = opts.targets                                                                                //
-                      | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
-                      | collect([&](auto &target, auto &arch) -> std::optional<polyfront::KernelObject> {
+    auto jitObjects = opts.targets                                                                                            //
+                      | filter([&](const auto &target, const auto &) { return kind == runtime::targetPlatformKind(target); }) //
+                      | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
                           auto format = runtime::moduleFormatOf(target);
                           if (!format) return std::nullopt;
                           const auto pp = polyfront::passes::arenaPassesFor(target, opts.stackDepth);
@@ -120,25 +124,26 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   }
 
   const auto compiled =
-      opts.targets                                                                                //
-      | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
-      | collect([&](auto &target, auto &features) {
-          return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target, opts.stackDepth)) ^
-                 fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
-                            [&](const std::string &err) -> std::optional<CompileResult> {
-                              emit(diag, clang::DiagnosticsEngine::Level::Warning,
-                                   POLYREGION_DIAG_POLYSTL "Frontend failed to compile program [%0, target=%1, features=%2]\n%3", moduleId,
-                                   std::string(magic_enum::enum_name(target)), features, err);
-                              return std::nullopt;
-                            }) ^
-                 map([&](auto &x) { return std::tuple{target, features, x}; });
+      opts.targets                                                                                            //
+      | filter([&](const auto &target, const auto &) { return kind == runtime::targetPlatformKind(target); }) //
+      | collect([&](const auto &target, const auto &features) {
+          return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target, opts.stackDepth)) //
+                 ^ fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
+                              [&](const std::string &err) -> std::optional<CompileResult> {
+                                emit(diag, clang::DiagnosticsEngine::Level::Warning,
+                                     POLYREGION_DIAG_POLYSTL "Frontend failed to compile program [%0, target=%1, features=%2]\n%3",
+                                     moduleId, std::string(magic_enum::enum_name(target)), features, err);
+                                return std::nullopt;
+                              }) //
+                 ^ map([&](const auto &x) { return std::tuple{target, features, x}; });
         }) //
       | to_vector();
 
-  const bool asserts = compiled ^ exists([](auto &, auto &, auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
+  const bool asserts =
+      compiled ^ exists([](const auto &, const auto &, const auto &result) { return polyfront::entryNeedsErrorBuffer(result); });
 
   auto objects = compiled //
-                 | collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
+                 | collect([&](const auto &target, const auto &features, const auto &result) -> std::optional<polyfront::KernelObject> {
                      emit(diag, loc, clang::DiagnosticsEngine::Level::Remark,
                           POLYREGION_DIAG_POLYSTL "Compilation events for [%0, target=%1, features=%2]\n%3", moduleId,
                           std::string(magic_enum::enum_name(target)), features, repr(result));
@@ -183,7 +188,8 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   // to a hard error: a kernel bundle with zero objects compiles cleanly but then fails at run
   // time with "no compatible image", which is much harder to diagnose than a compile-time
   // failure that surfaces the original backend error.
-  const auto requestedForKind = opts.targets ^ count([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); });
+  const auto requestedForKind =
+      opts.targets ^ count([&](const auto &target, const auto &) { return kind == runtime::targetPlatformKind(target); });
   if (requestedForKind > 0 && objects.empty()) {
     emit(diag, loc, clang::DiagnosticsEngine::Level::Error,
          POLYREGION_DIAG_POLYSTL "No kernels compiled successfully for [%0, kind=%1] (requested %2 target(s)); "
@@ -221,11 +227,11 @@ void polystl::compileLibrary(const polyfront::Options &opts,                    
            name);
   }
 
-  const auto program = polyfront::libraryProgram(r.functions | values() | map([](auto &x) { return std::move(*x); }) | to_vector(),
-                                                 r.structs | values() | map([](auto &x) { return std::move(*x); }) | to_vector());
+  const auto program = polyfront::libraryProgram(r.functions | values() | map([](const auto &x) { return std::move(*x); }) | to_vector(),
+                                                 r.structs | values() | map([](const auto &x) { return std::move(*x); }) | to_vector());
 
-  polyfront::writeProgramMsgpack(program, outPath) ^
-      foreach_total(
+  polyfront::writeProgramMsgpack(program, outPath) //
+      ^ foreach_total(
           [&](const std::error_code &ec) {
             emit(diag, clang::DiagnosticsEngine::Level::Error, POLYREGION_DIAG_POLYSTL "Cannot open library output %0: %1", outPath,
                  ec.message());

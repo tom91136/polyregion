@@ -3,10 +3,14 @@
 #ifdef RUNTIME_ENABLE_METAL
 
   #define METALCPP_SYMBOL_VISIBILITY_HIDDEN
+  #include "aspartame/all.hpp"
+
   #include "Metal/Metal.hpp"
   #include "runtime.h"
 
 namespace polyregion::invoke::metal {
+
+using namespace aspartame;
 
 class POLYREGION_EXPORT MetalPlatform final : public Platform {
   NS::AutoreleasePool *pool;
@@ -50,11 +54,7 @@ public:
   }
   std::vector<MTL::Buffer *> snapshot() const {
     std::shared_lock g(mutex);
-    std::vector<MTL::Buffer *> v;
-    v.reserve(map.size());
-    for (auto &[_, b] : map)
-      v.push_back(b);
-    return v;
+    return map ^ values();
   }
 };
 

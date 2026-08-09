@@ -87,7 +87,7 @@ Vector<uint8_t> DsoPassRunner::runPasses(const Vector<String> &steps, const Vect
     return {};
   }
   // XXX steps as a NUL-terminated C-string array, as the ABI expects.
-  auto raw = steps | map([](const auto &s) { return s.c_str(); }) | to_vector();
+  auto raw = steps ^ map([](const auto &s) { return s.c_str(); });
   raw.push_back(nullptr);
   uint8_t *out = nullptr;
   size_t out_len = 0;

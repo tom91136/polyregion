@@ -152,38 +152,23 @@ namespace {
 
 bool hasFeature(Device &d, const std::string_view token) {
   const auto needle = std::string(token) ^ to_lower();
-  return d.features() ^ exists([&](const std::string &f) { return (f ^ to_lower()) == needle; });
+  return d.features() ^ exists([&](const auto &f) { return (f ^ to_lower()) == needle; });
 }
 
-bool globMatch(const std::string_view pat, const std::string_view s) {
-  const auto lc = [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c; };
-  size_t pi = 0, si = 0, star = std::string_view::npos, mark = 0;
-  while (si < s.size()) {
-    if (pi < pat.size() && pat[pi] == '*') star = pi++, mark = si;
-    else if (pi < pat.size() && (pat[pi] == '?' || lc(pat[pi]) == lc(s[si]))) ++pi, ++si;
-    else if (star != std::string_view::npos) pi = star + 1, si = ++mark;
-    else return false;
-  }
-  while (pi < pat.size() && pat[pi] == '*')
-    ++pi;
-  return pi == pat.size();
-}
 } // namespace
 
 static void selectDevice(Platform &p, const std::vector<std::string_view> &requiredFeatures, const std::string &glob, bool strict) {
   auto devices = p.enumerate();
   auto eligible = devices                                    //
                   | map([](auto &d) { return std::ref(d); }) //
-                  | filter([&](auto rw) {                    //
-                      return requiredFeatures ^ forall([&](auto &r) { return hasFeature(*rw.get(), r); });
+                  | filter([&](const auto &rw) {             //
+                      return requiredFeatures ^ forall([&](const auto &r) { return hasFeature(*rw.get(), r); });
                     }) //
                   | to_vector();
 
   const std::string pattern = glob.empty() ? "*" : glob;
-  auto matched = eligible                                                                //
-                 | filter([&](auto rw) { return globMatch(pattern, rw.get()->name()); }) //
-                 | to_vector();
-  const auto names = [](auto &xs) { return xs | map([](auto rw) { return rw.get()->name(); }) | mk_string(", "); };
+  auto matched = eligible | filter([&](const auto &rw) { return rw.get()->name() ^ glob_matches_ignore_case(pattern); }) | to_vector();
+  const auto names = [](const auto &xs) { return xs | map([](const auto &rw) { return rw.get()->name(); }) | mk_string(", "); };
 
   if (matched.empty()) {
     if (strict || !eligible.empty()) {
@@ -271,8 +256,9 @@ void polyregion::polyrt::initialise() {
             currentDevice ? currentDevice->name().c_str() : "(none)", //
             currentDevice ? magic_enum::enum_name(currentDevice->moduleFormat()).data() : "(no device)");
         if (currentDevice)
-          currentDevice->features() ^ grouped(10) ^
-              for_each([](const auto &chunk) { log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str()); });
+          currentDevice->features() //
+              ^ grouped(10)         //
+              ^ for_each([](const auto &chunk) { log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str()); });
       }
     }
   });
@@ -355,14 +341,14 @@ static const JitAbi &resolveJitAbi() {
 #else
     constexpr auto defaultJitLib = "libpolyc.so";
 #endif
-    return std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib} |
-           collect_first([&](const char *name) -> std::optional<JitAbi> {
-             if (!name || !name[0]) return std::nullopt;
-             if (auto h = polyregion_dl_open(name))
-               if (auto r = from(h); r.compile && r.free) return r;
-             return std::nullopt;
-           }) |
-           get_or_else(JitAbi{});
+    return std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib} //
+           | collect_first([&](const auto &name) -> std::optional<JitAbi> {
+               if (!name || !name[0]) return std::nullopt;
+               if (auto h = polyregion_dl_open(name))
+                 if (auto r = from(h); r.compile && r.free) return r;
+               return std::nullopt;
+             }) //
+           | get_or_else(JitAbi{});
   }();
   return abi;
 }
@@ -400,8 +386,9 @@ static SpecConsts collectSpecConsts(const void *capture, const polyregion::runti
 static uint64_t hashSpecs(const std::vector<polyc_jit_spec_const_t> &specs) {
   const auto add = [](uint64_t h, const void *p, size_t n) {
     const auto *begin = static_cast<const unsigned char *>(p);
-    return view(begin, n ? begin + n : begin) |
-           fold_left(h, [](const uint64_t acc, const unsigned char x) { return (acc ^ x) * 1099511628211ull; });
+    return view(begin,
+                n ? begin + n : begin) //
+           | fold_left(h, [](const uint64_t acc, const unsigned char x) { return (acc ^ x) * 1099511628211ull; });
   };
   return specs | fold_left(uint64_t{1469598103934665603ull}, [&](uint64_t h, const auto &s) {
            const auto fieldLen = std::strlen(s.field);

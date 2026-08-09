@@ -34,6 +34,8 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned CodePage, unsig
 
 #include "rewriter.h"
 
+using namespace aspartame;
+
 namespace {
 
 std::vector<std::string> getCmdLine() {
@@ -43,11 +45,7 @@ std::vector<std::string> getCmdLine() {
     std::fprintf(stderr, "Failed to open /proc/self/cmdline\n");
     std::abort();
   }
-  std::vector<std::string> args;
-  std::string line;
-  while (std::getline(cmdline, line, '\0'))
-    args.push_back(line);
-  return args;
+  return istream_split(cmdline, '\0') | to_vector();
 #elif defined(__APPLE__)
   char ***argvp = _NSGetArgv();
   int *argcp = _NSGetArgc();
@@ -147,9 +145,8 @@ class RewriteIRAction final : public Fortran::frontend::PluginParseTreeAction {
     Fortran::semantics::SemanticsContext &ctx = getInstance().getSemanticsContext();
     llvm::outs() << "[PolyFC] opts=" << ctx.targetCharacteristics().compilerOptionsString() << "\n";
 
-    using namespace aspartame;
     const auto cmdArgs = getCmdLine();
-    const auto cmdArgRef = cmdArgs ^ map([](auto &x) { return x.c_str(); });
+    const auto cmdArgRef = cmdArgs ^ map([](const auto &x) { return x.c_str(); });
     unsigned int missingArgIndex{};
     unsigned int missingArgCount{};
     const auto args =

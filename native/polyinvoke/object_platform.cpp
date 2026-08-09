@@ -28,6 +28,8 @@
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
+#include "aspartame/all.hpp"
+
 #include "polyinvoke/object_platform.h"
 #include "polyregion/compat.h"
 #include "polyregion/env_keys.h"
@@ -36,6 +38,7 @@
 // keep last: libffi pollutes the global namespace with macros
 #include "ffi_wrapped.h"
 
+using namespace aspartame;
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::object;
 
@@ -105,10 +108,10 @@ std::vector<Property> ObjectDevice::properties() {
 std::vector<std::string> ObjectDevice::features() {
   POLYINVOKE_TRACE();
 
-  std::vector<std::string> features;
-  for (auto &F : llvm::sys::getHostCPUFeatures()) {
-    if (F.second) features.push_back(F.first().str());
-  }
+  auto features = llvm::sys::getHostCPUFeatures()                                   //
+                  | filter([](const auto &feature) { return feature.getValue(); })  //
+                  | map([](const auto &feature) { return feature.getKey().str(); }) //
+                  | to_vector();
 
   polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(), llvm::Triple(llvm::sys::getProcessTriple()).getArch(),
                                               features);
@@ -274,8 +277,8 @@ RelocatableDevice::RelocatableDevice() {
   // XXX RTDyld: SIGBUS on x86_64 macOS after libm kernels; missing R_RISCV_BRANCH (riscv64), TOC relocs (ppc64le)
   // and R_ARM_REL32 (arm), which PIC uses for every string literal reference
   const auto elfArch = hostTriple.isOSBinFormatELF() ? hostTriple.getArch() : llvm::Triple::UnknownArch;
-  const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::riscv64 || elfArch == llvm::Triple::ppc64le ||
-                          elfArch == llvm::Triple::arm || elfArch == llvm::Triple::thumb;
+  const bool useJITLink = hostTriple.isOSBinFormatMachO() || elfArch == llvm::Triple::riscv64 || elfArch == llvm::Triple::ppc64le
+                          || elfArch == llvm::Triple::arm || elfArch == llvm::Triple::thumb;
   if (useJITLink) {
     auto mm = llvm::jitlink::InProcessMemoryManager::Create();
     if (!mm) POLYINVOKE_FATAL(RELOBJ_PREFIX, "Cannot create JITLink memory manager: %s", toString(mm.takeError()).c_str());
@@ -381,7 +384,7 @@ RelocatableDeviceQueue::RelocatableDeviceQueue(const std::chrono::duration<int64
 }
 
 void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
-  if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0)
+  if (auto scratchCount = types ^ count([](Type t) { return t == Type::Scratch; }); scratchCount != 0)
     POLYINVOKE_FATAL(prefix, "Scratch types are not supported on the CPU, found %td arg(s)", scratchCount);
   if (policy.global.y != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Y > 1 is not supported: %zu", policy.global.y);
   if (policy.global.z != 1) POLYINVOKE_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);

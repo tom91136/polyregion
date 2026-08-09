@@ -1,3 +1,4 @@
+#include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 
 #include "ast.h"
@@ -7,6 +8,7 @@
 
 using namespace polyregion::polyast;
 using namespace polyregion::compiletime;
+using namespace aspartame;
 using Catch::Matchers::ContainsSubstring;
 
 using namespace Stmt;
@@ -888,11 +890,10 @@ TEST_CASE("cast aggregate value to pointer aliases its storage", "[compiler]") {
                            {FunctionVisibility::Exported()});
 
   const auto result = assertCompile(program({pairDef}, {fn}));
-  const auto ir =
-      std::find_if(result.events.begin(), result.events.end(), [](const auto &event) { return event.name == "ast_to_llvm_ir"; });
-  REQUIRE(ir != result.events.end());
-  CHECK_THAT(ir->data, ContainsSubstring("store ptr %pair_stack_ptr, ptr %storage_stack_ptr"));
-  CHECK_THAT(ir->data, ContainsSubstring("store i32 42, ptr %storage_update_ptr"));
+  const auto ir = result.events ^ find_cref([](const auto &event) { return event.name == "ast_to_llvm_ir"; });
+  REQUIRE(ir);
+  CHECK_THAT(ir->get().data, ContainsSubstring("store ptr %pair_stack_ptr, ptr %storage_stack_ptr"));
+  CHECK_THAT(ir->get().data, ContainsSubstring("store i32 42, ptr %storage_update_ptr"));
 }
 
 TEST_CASE("cast fp to int expr", "[compiler]") {

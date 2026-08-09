@@ -6,6 +6,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 #include "nlohmann/json.hpp"
@@ -13,6 +14,7 @@
 #include "dl_util.h"
 #include "vendor_utils.h"
 
+using namespace aspartame;
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hsa;
 
@@ -105,12 +107,9 @@ std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
               },
               &agents));
 
-  auto host = std::find_if(agents.begin(), agents.end(), [](auto x) {
-    auto &[dispatch, queueSize, _] = x;
-    return queueSize == 0;
-  });
-  if (host == agents.end()) POLYINVOKE_FATAL(PREFIX, "No host agent available, AMDKFD not initialised (total agents=%zu)", agents.size());
-  hsa_agent_t hostAgent = std::get<2>(*host);
+  const auto host = agents ^ find([](const auto &, const auto &queueSize, const auto &) { return queueSize == 0; });
+  if (!host) POLYINVOKE_FATAL(PREFIX, "No host agent available, AMDKFD not initialised (total agents=%zu)", agents.size());
+  const hsa_agent_t hostAgent = std::get<2>(*host);
 
   std::vector<std::unique_ptr<Device>> devices;
   for (auto &[_, queueSize, agent] : agents) {
@@ -179,7 +178,7 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
           using namespace nlohmann;
           auto kernels =
               nlohmann::json::from_msgpack(note.getDesc(s.sh_addralign).begin(), note.getDesc(s.sh_addralign).end()).at("amdhsa.kernels");
-          details::SymbolArgOffsetTable offsetTable(kernels.size());
+          polyregion::invoke::hsa::details::SymbolArgOffsetTable offsetTable(kernels.size());
           for (auto &kernel : kernels) {
             auto kernelName = kernel.at(".name").template get<std::string>();
             auto args = kernel.at(".args");
@@ -198,7 +197,7 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
   }
 };
 
-static details::SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
+static polyregion::invoke::hsa::details::SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
   using namespace llvm::object;
 
   if (auto object = ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), "")); auto e = object.takeError()) {
@@ -218,7 +217,7 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
     : queueSize(queueSize), hostAgent(hostAgent), agent(agent),
       store(
           PREFIX,
-          [this](auto &&s) {
+          [this](const auto &s) {
             POLYINVOKE_TRACE();
             hsa_code_object_reader_t reader;
             CHECKED("Load code object from memory", hsa_code_object_reader_create_from_memory(s.data(), s.size(), &reader));
@@ -239,7 +238,7 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
               POLYINVOKE_FATAL(PREFIX, "Cannot to extract AMDGPU METADATA from image: %s", e.what());
             }
           },
-          [this](auto &&m, auto &&name, auto) {
+          [this](const auto &m, const auto &name, const auto &) {
             POLYINVOKE_TRACE();
             auto [exec, offsets] = m;
             hsa_executable_symbol_t symbol;
@@ -248,18 +247,22 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
             if (auto it = offsets.find(name); it != offsets.end()) return std::make_pair(symbol, it->second);
             else POLYINVOKE_FATAL(PREFIX, "Cannot argument offset table for symbol `%s`", name.c_str());
           },
-          [&](auto &&m) {
+          [&](const auto &m) {
             POLYINVOKE_TRACE();
             auto [exec, offsets] = m;
             CHECKED("Release executable", hsa_executable_destroy(exec));
           },
-          [&](auto &&) { POLYINVOKE_TRACE(); }) {
+          [&](const auto &) { POLYINVOKE_TRACE(); }) {
   POLYINVOKE_TRACE();
   // As per HSA_AGENT_INFO_NAME, name must be <= 63 chars
 
   auto marketingName = detail::allocateAndTruncate(
-      [&](auto &&data, auto) { hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), data); }, 64);
-  auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
+      [&](const auto &data, const auto &) {
+        hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), data);
+      },
+      64);
+  auto gfxArch =
+      detail::allocateAndTruncate([&](const auto &data, const auto &) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   deviceName = marketingName + "(" + gfxArch + ")";
 
   auto regions = queryRegions(agent);
@@ -306,7 +309,8 @@ PagingMode HsaDevice::pagingMode() {
   POLYINVOKE_TRACE();
   hsa_isa_t isa{};
   if (hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa) == HSA_STATUS_SUCCESS) {
-    const auto name = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, data); }, 128);
+    const auto name =
+        detail::allocateAndTruncate([&](const auto &data, const auto &) { hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, data); }, 128);
     if (name.find("xnack+") != std::string::npos) return PagingMode::System;
   }
   return PagingMode::Managed; // xnack-/missing: coarse-grain pool only, no system paging
@@ -321,7 +325,8 @@ std::vector<Property> HsaDevice::properties() {
 }
 std::vector<std::string> HsaDevice::features() {
   POLYINVOKE_TRACE();
-  auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
+  auto gfxArch =
+      detail::allocateAndTruncate([&](const auto &data, const auto &) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   std::vector<std::string> out{"hsa", "amd", gfxArch};
   const auto paging = pagingMode();
   out.emplace_back(paging == PagingMode::System ? "xnack+" : "xnack-");

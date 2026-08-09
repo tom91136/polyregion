@@ -68,24 +68,15 @@ int main(int argc, const char *argv[]) {
   }
 #endif
 
-  return StdParOptions::parse(args) ^
-         fold_total(
+  return StdParOptions::parse(args) //
+         ^ fold_total(
              [&](const std::vector<std::string> &errors) {
                fmt::print(stderr, "[PolyCpp] Unable to parse PolyCpp specific arguments:\n{}\n", (errors ^ mk_string("\n") ^ indent(2)));
                return EXIT_FAILURE;
              },
              [&](const std::optional<StdParOptions> &opts) {
-               auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) {
-                 for (const auto &x : xs) {
-#if defined(__APPLE__)
-                   // Runtime, libc++, and JIT dependencies can share install
-                   // locations; ld64.lld warns for repeated identical rpaths.
-                   if (x.starts_with("-Wl,-rpath,") && std::find(remaining.begin(), remaining.end(), x) != remaining.end()) continue;
-#endif
-                   remaining.push_back(x);
-                 }
-               };
+               auto remaining = args.remaining() ^ map([](const auto &s) -> std::string { return s; });
+               auto append = [&](const std::vector<std::string> &xs) { xs ^ append_to(remaining); };
 
                if (opts) {
                  remaining ^= concat(mkDelimitedEnvPaths(polyregion::env::PolystlInclude, "-isystem", llvm::sys::EnvPathSeparator));
@@ -123,12 +114,12 @@ int main(int argc, const char *argv[]) {
                      append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontEmitLibrary, opts->emitLibrary)});
                  }
 
-                 const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
-                                          exists([&](auto &flag) { return args.has(flag); });
+                 const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} //
+                                          ^ exists([&](const auto &flag) { return args.has(flag); });
 
                  const auto passPluginFlags = [&](const std::vector<std::string> &mllvmArgs) {
 #ifdef POLYREGION_FUSED_DRIVER
-                   return mllvmArgs ^ map([](auto &arg) { return fmt::format("-mllvm={}", arg); });
+                   return mllvmArgs ^ map([](const auto &arg) { return fmt::format("-mllvm={}", arg); });
 #else
                    return Driver::clangPassPluginFlags(polyreflectPlugin, mllvmArgs);
 #endif
@@ -224,6 +215,11 @@ int main(int argc, const char *argv[]) {
                  }
                }
 
+#if defined(__APPLE__)
+               // Runtime, libc++, and JIT dependencies can share install locations; ld64.lld warns for repeated identical rpaths.
+               remaining ^= distinct_by_if([](const auto &x) { return x.starts_with("-Wl,-rpath,"); }, [](const auto &x) { return x; });
+#endif
+
 #ifdef POLYREGION_FUSED_DRIVER
                // XXX a basename ending in `cpp` puts clang into CPP (preprocess-only) mode; force
                // g++ mode via argv[1], except for -cc1* re-entrant invocations.
@@ -231,12 +227,12 @@ int main(int argc, const char *argv[]) {
                const bool isCC1 =
                    remaining.size() >= 2 && (remaining[1] == "-cc1" || remaining[1] == "-cc1as" || remaining[1] == "-cc1gen-reproducer");
                if (!isCC1) remaining.insert(remaining.begin() + 1, "--driver-mode=g++");
-               auto rawArgs = remaining ^ map([](auto &arg) { return const_cast<char *>(arg.data()); });
+               auto rawArgs = remaining ^ map([](const auto &arg) { return const_cast<char *>(arg.data()); });
                llvm::ToolContext toolContext{execPath.c_str(), nullptr, false};
                return clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext);
 #else
                remaining[0] = "clang++";
-               return llvm::sys::ExecuteAndWait(clangPath, remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
+               return llvm::sys::ExecuteAndWait(clangPath, remaining ^ map([](const auto &x) -> llvm::StringRef { return x; }));
 #endif
              });
 }
