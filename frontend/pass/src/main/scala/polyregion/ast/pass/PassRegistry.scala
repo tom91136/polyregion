@@ -42,6 +42,7 @@ object PassRegistry {
     PassDef.singleton(Intrinsify),
     PassDef.singleton(MonoStruct),
     PassDef.singleton(Specialisation),
+    PassDef.singleton(KernelCaptureFlatten),
     PassDef.configured(VerifyAnchors()),
     PassDef.singleton(ArenaLower),
     PassDef.singleton(ArenaView),
