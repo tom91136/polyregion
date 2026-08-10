@@ -223,6 +223,7 @@ TEST_CASE("C source omits values without a representation", "[backend]") {
 
   const auto sourceOf = [](const Program &p) {
     polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+    opts.pipelineSpec = "FullOpt(level=0)";
     const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
     INFO(repr(c));
     REQUIRE(c.binary != std::nullopt);
