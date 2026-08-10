@@ -28,6 +28,16 @@ namespace details {
 using ClModuleStore = detail::ModuleStore<cl_program, cl_kernel>;
 using ClCreateProgramWithIL_fn = cl_program(CL_API_CALL *)(cl_context, const void *, size_t, cl_int *);
 
+struct LaunchDimensions {
+  Dim3 global;
+  Dim3 local;
+};
+
+POLYREGION_EXPORT LaunchDimensions launchDimensions(const Dim3 &groups, const Dim3 &local);
+POLYREGION_EXPORT std::optional<LaunchDimensions> retryLaunchDimensions(cl_int error, const Dim3 &groups, const Dim3 &local,
+                                                                        size_t kernelMax);
+POLYREGION_EXPORT std::string errorString(cl_int error);
+
 struct SVMTracker {
   struct Entry {
     size_t size;

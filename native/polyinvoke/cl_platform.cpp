@@ -4,6 +4,7 @@
 #include <cstring>
 #include <thread>
 
+#include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 #include "spirv/unified1/OpenCL.std.h"
@@ -18,10 +19,11 @@
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cl;
+namespace cl_details = polyregion::invoke::cl::details;
 
 static constexpr const char *PREFIX = "OpenCL";
 
-static const char *clewErrorString(cl_int error) {
+std::string cl_details::errorString(cl_int error) {
   static const char *strings[] = {
       "CL_SUCCESS",
       "CL_DEVICE_NOT_FOUND",
@@ -95,15 +97,29 @@ static const char *clewErrorString(cl_int error) {
   };
   static const int num_errors = sizeof(strings) / sizeof(strings[0]);
   if (error == -1001) return "CL_PLATFORM_NOT_FOUND_KHR";
-  if (error > 0 || -error >= num_errors) return "Unknown OpenCL error";
-  return strings[-error];
+  const auto index = -static_cast<int64_t>(error);
+  if (index >= 0 && index < num_errors && strings[index][0] != '\0') return strings[index];
+  return fmt::format("unknown OpenCL error ({})", error);
+}
+
+cl_details::LaunchDimensions cl_details::launchDimensions(const Dim3 &groups, const Dim3 &local) {
+  return {Dim3{groups.x * local.x, groups.y * local.y, groups.z * local.z}, local};
+}
+
+std::optional<cl_details::LaunchDimensions> cl_details::retryLaunchDimensions(cl_int error, const Dim3 &groups, const Dim3 &local,
+                                                                              size_t kernelMax) {
+  if (error != CL_INVALID_WORK_GROUP_SIZE || local.x <= 1 || kernelMax == 0) return {};
+  const auto yz = local.y * local.z;
+  return std::optional{kernelMax / yz} | aspartame::filter([&](size_t x) { return yz <= kernelMax && x > 0 && x < local.x; })
+         | aspartame::map([&](size_t x) { return launchDimensions(groups, Dim3{x, local.y, local.z}); });
 }
 
 #define CHECKED(f__)                                                                                                                       \
   do {                                                                                                                                     \
     cl_int result__ = (f__);                                                                                                               \
     if (result__ != CL_SUCCESS) {                                                                                                          \
-      POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, clewErrorString(result__));                                                \
+      const auto message__ = cl_details::errorString(result__);                                                                            \
+      POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, message__.c_str());                                                        \
     }                                                                                                                                      \
   } while (0)
 
@@ -114,7 +130,8 @@ static const char *clewErrorString(cl_int error) {
     auto OUT_ERR = &result__;                                                                                                              \
     auto x__ = (f__);                                                                                                                      \
     if (result__ == CL_SUCCESS) return x__;                                                                                                \
-    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, clewErrorString(result__));                                                  \
+    const auto message__ = cl_details::errorString(result__);                                                                              \
+    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, message__.c_str());                                                          \
   })()
 
 static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
@@ -229,11 +246,11 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
     CHECKED(clGetDeviceIDs(platform, AcceleratorMask, numDevices, devices.data(), nullptr));
     const auto platformName = queryPlatformInfo(platform, CL_PLATFORM_NAME);
     auto ilFn =
-        reinterpret_cast<details::ClCreateProgramWithIL_fn>(clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithIL"));
+        reinterpret_cast<cl_details::ClCreateProgramWithIL_fn>(clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithIL"));
     if (!ilFn)
-      ilFn = reinterpret_cast<details::ClCreateProgramWithIL_fn>(
+      ilFn = reinterpret_cast<cl_details::ClCreateProgramWithIL_fn>(
           clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithILKHR"));
-    if (!ilFn) ilFn = reinterpret_cast<details::ClCreateProgramWithIL_fn>(clCreateProgramWithIL);
+    if (!ilFn) ilFn = reinterpret_cast<cl_details::ClCreateProgramWithIL_fn>(clCreateProgramWithIL);
     for (auto &device : devices) {
       auto svm = resolveSVM(device, platformName);
       clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm, platformName));
@@ -286,8 +303,8 @@ static std::string patchSpirvNativeTrig(const char *data, size_t len) {
   return out;
 }
 
-ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreateProgramWithIL_fn ilCreateFn, std::optional<cl_bitfield> svm,
-                   const std::string &platformName)
+ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreateProgramWithIL_fn ilCreateFn,
+                   std::optional<cl_bitfield> svm, const std::string &platformName)
     : device(
           [&, device]() {
             POLYINVOKE_TRACE();
@@ -316,7 +333,7 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
       deviceName(platformName + ":" + queryDeviceInfo(device, CL_DEVICE_NAME)
                  + (format == ModuleFormat::SPIRV_Kernel ? " [SPIR-V]" : " [source]")),
       quirks(resolveQuirks(deviceName)), format(format), ilCreateFn(ilCreateFn), svm(svm),
-      svmTracker(svm ? std::make_shared<details::SVMTracker>() : nullptr),
+      svmTracker(svm ? std::make_shared<cl_details::SVMTracker>() : nullptr),
       store(
           PREFIX,
           [this](auto &&image) {
@@ -354,7 +371,7 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, details::ClCreatePr
                 CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
                 std::string buildLog(len, '\0');
                 CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
-                auto compilerMessage = std::string(clewErrorString(result));
+                auto compilerMessage = cl_details::errorString(result);
                 POLYINVOKE_FATAL(PREFIX, "Program failed to compile with: %s\nDiagnostics:\n%s\n===Program source===:\n%s\n", //
                                  compilerMessage.c_str(), buildLog.c_str(), image.c_str());
               }
@@ -491,7 +508,7 @@ bool ClDevice::moduleLoaded(const std::string &name) {
 void ClDevice::trackSvm(void *p, size_t size) {
   if (!svmTracker) return;
   std::lock_guard lock(svmTracker->mtx);
-  svmTracker->entries.emplace(p, details::SVMTracker::Entry{size, /*mappedForHost*/ false});
+  svmTracker->entries.emplace(p, cl_details::SVMTracker::Entry{size, /*mappedForHost*/ false});
 }
 void ClDevice::untrackSvm(void *p) {
   if (!svmTracker) return;
@@ -571,7 +588,7 @@ ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
                              decltype(queryMemObject) queryMemObject, std::optional<cl_bitfield> svm,
-                             std::shared_ptr<details::SVMTracker> svmTracker)
+                             std::shared_ptr<cl_details::SVMTracker> svmTracker)
     : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
 }
@@ -687,21 +704,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   };
 
   const auto args = detail::argDataAsPointers(types, argData);
-  auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
-  // clamp the work-group to the kernel's max: gfx1036's 2-CU iGPU caps a reduction's group below the
-  // requested 256 (local-memory pressure) -> CL_INVALID_WORK_GROUP_SIZE. global is groups*local
-  // componentwise, so shrinking local keeps the group count and the reduction's one-partial-per-group
-  if (local.x > 1) {
-    cl_device_id dev = {};
-    size_t kernelMax = 0;
-    if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(dev), &dev, nullptr) == CL_SUCCESS
-        && clGetKernelWorkGroupInfo(kernel, dev, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelMax), &kernelMax, nullptr) == CL_SUCCESS
-        && kernelMax) {
-      const size_t lyz = std::max<size_t>(1, local.y * local.z);
-      if (local.x * lyz > kernelMax) local.x = std::max<size_t>(1, kernelMax / lyz);
-    }
-  }
-  const auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
+  const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
 
   for (cl_uint i = 0; i < types.size() - 1; ++i) {
     const auto rawPtr = args[i];
@@ -766,12 +769,26 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   POLYINVOKE_TRACE();
   unmapAllSvmForDevice();
   cl_event event = {};
-  CHECKED(clEnqueueNDRangeKernel(queue, kernel,         //
-                                 3,                     //
-                                 nullptr,               //
-                                 global.sizes().data(), //
-                                 local.sizes().data(),  //
-                                 0, nullptr, &event));
+  const auto enqueue = [&](const cl_details::LaunchDimensions &dimensions) {
+    return clEnqueueNDRangeKernel(queue, kernel,                    //
+                                  3,                                //
+                                  nullptr,                          //
+                                  dimensions.global.sizes().data(), //
+                                  dimensions.local.sizes().data(),  //
+                                  0, nullptr, &event);
+  };
+  auto dimensions = cl_details::launchDimensions(policy.global, local);
+  cl_int result = enqueue(dimensions);
+  if (result == CL_INVALID_WORK_GROUP_SIZE) {
+    cl_device_id device = {};
+    size_t kernelMax = 0;
+    if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(device), &device, nullptr) == CL_SUCCESS
+        && clGetKernelWorkGroupInfo(kernel, device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelMax), &kernelMax, nullptr) == CL_SUCCESS) {
+      cl_details::retryLaunchDimensions(result, policy.global, local, kernelMax)
+          | aspartame::for_each([&](const auto &retry) { result = enqueue(retry); });
+    }
+  }
+  CHECKED(result);
   enqueueCallback(cb, event);
   CHECKED(clFlush(queue));
 }
