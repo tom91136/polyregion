@@ -426,6 +426,17 @@ static constexpr bool isTrapBuiltin(unsigned id) {
     default: return false;
   }
 }
+
+[[nodiscard]] static TypeSpace::Any storageSpace(const Term::Select &selection) {
+  if (const auto pointer = selection.root.tpe.get<Type::Ptr>()) return pointer->space;
+  return TypeSpace::Private();
+}
+
+[[nodiscard]] static TypeSpace::Any storageSpace(const Term::Any &term) {
+  if (const auto selection = term.get<Term::Select>()) return storageSpace(*selection);
+  return TypeSpace::Private();
+}
+
 std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
   // Locals/parms get a per-decl ID suffix so shadowed names in the same function (e.g. nested
   // `for (int l = ...)` loops in miniBUDE's fasten_main) stay distinct in polyc's flat per-function
@@ -465,12 +476,12 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     // Handle decay
     //   int rhs = /* */;
     //   int &lhs = rhs;
-    return Expr::RefTo(*rhsSelectTerm, {}, rhsTpe, TypeSpace::Global(), Region::Opaque());
+    return Expr::RefTo(*rhsSelectTerm, {}, rhsTpe, tgtPtrTpe->space, Region::Opaque());
   } else if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && exprIndex) {
     // Handle decay
     //   auto rhs = xs[0];
     //   int &lhs = rhs;
-    return Expr::RefTo(exprIndex->lhs, exprIndex->idx, exprIndex->comp, TypeSpace::Global(), Region::Opaque());
+    return Expr::RefTo(exprIndex->lhs, exprIndex->idx, exprIndex->comp, tgtPtrTpe->space, Region::Opaque());
   } else if (!rhsPtrTpe && tgtPtrTpe) {
     // array-to-pointer decay: `T arr[N]; T *p = arr` yields `&arr[0]` (`T*`), not `&arr` (`T(*)[N]`)
     // std::string `_Myptr` needs this (`char* = _Bx._Buf` where `_Buf` is `char[16]`); index element 0
@@ -481,7 +492,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
         return select(r, {}, bound.name).widen();
       }();
       const auto idx = r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0));
-      return Expr::RefTo(arrLval, idx, arr->comp, TypeSpace::Global(), Region::Opaque());
+      return Expr::RefTo(arrLval, idx, arr->comp, tgtPtrTpe->space, Region::Opaque());
     }
     // Handle promote
     //   int rhs = /* */;
@@ -490,7 +501,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     // newVar short-circuits atomic aliases and would hand back the addressless term, so bind directly
     const auto bound = Stmt::Var(r.newName(rhsTpe), expr, /*isMutable*/ false);
     r.push(bound);
-    return Expr::RefTo(select(r, {}, bound.name).widen(), {}, rhsTpe, TypeSpace::Global(), Region::Opaque());
+    return Expr::RefTo(select(r, {}, bound.name), {}, rhsTpe, tgtPtrTpe->space, Region::Opaque());
   } else if (rhsPtrTpe && targetTpe == rhsPtrTpe->comp) {
     // Handle decay
     //   int &rhs = /* */;
@@ -498,6 +509,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     auto idxTerm = r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0));
     return Expr::Index(r.newVar(expr), idxTerm, targetTpe);
   } else if (rhsPtrTpe && tgtPtrTpe) {
+    if (const auto refTo = expr.get<Expr::RefTo>(); refTo && rhsPtrTpe->comp == tgtPtrTpe->comp) return refTo->withSpace(tgtPtrTpe->space);
     if (auto tgtStruct = tgtPtrTpe->comp.get<Type::Struct>()) {
       if (auto rhsStruct = rhsPtrTpe->comp.get<Type::Struct>()) {
         // XXX empty struct lacks #base_<Name>; EBO places empty bases at offset 0 so the bitcast below is correct.
@@ -508,7 +520,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
             Vector<PathStep::Any> steps = rhsSelectTerm->steps;
             chain ^ for_each([&](const auto &s) { steps.emplace_back(PathStep::Field(baseMember(*s).symbol)); });
             auto extended = Term::Select(rhsSelectTerm->root, steps, tgtStruct->widen());
-            return Expr::RefTo(extended, {}, tgtStruct->widen(), TypeSpace::Global(), Region::Opaque());
+            return Expr::RefTo(extended, {}, tgtStruct->widen(), tgtPtrTpe->space, Region::Opaque());
           }
         }
       }
@@ -523,6 +535,13 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
   } else {
     return Expr::Alias(Term::Poison(targetTpe));
   }
+}
+
+static bool sameTypeShape(const Type::Any &lhs, const Type::Any &rhs) {
+  const auto eraseSpace = [](const Type::Any &tpe) {
+    return tpe.modify_all<TypeSpace::Any>([](const auto &) { return TypeSpace::Global().widen(); });
+  };
+  return eraseSpace(lhs) == eraseSpace(rhs);
 }
 
 std::string Remapper::typeName(const Type::Any &tpe) const {
@@ -562,17 +581,25 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   Opt<Arg> receiver{};
   std::shared_ptr<StructDef> parent{};
 
+  auto receiverType = [&](const clang::CXXRecordDecl *record) {
+    const auto canonical = record->getCanonicalDecl();
+    const auto nestedLambda =
+        record->isLambda() && r.entryCapture && canonical != r.entryCapture && !(r.globalCaptures ^ contains(canonical));
+    const auto space = nestedLambda ? TypeSpace::Private().widen() : TypeSpace::Global().widen();
+    return Type::Ptr(handleType(context.getCanonicalTagType(record), r), space).widen();
+  };
+
   if (auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
     auto record = ctor->getParent();
-    receiver = Arg(Named(This, ptrTo(handleType(context.getCanonicalTagType(record), r))), {});
+    receiver = Arg(Named(This, receiverType(record)), {});
     parent = handleRecord(record, r);
   } else if (auto dtor = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
     auto record = dtor->getParent();
-    receiver = Arg(Named(This, ptrTo(handleType(context.getCanonicalTagType(record), r))), {});
+    receiver = Arg(Named(This, receiverType(record)), {});
     parent = handleRecord(record, r);
   } else if (auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl); method && method->isInstance()) {
     auto record = method->getParent();
-    receiver = Arg(Named(This, ptrTo(handleType(context.getCanonicalTagType(record), r))), {});
+    receiver = Arg(Named(This, receiverType(record)), {});
     parent = handleRecord(record, r);
   }
 
@@ -613,6 +640,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 
   auto fnBody = r.scoped(
       [&](auto &r) {
+        if (receiver) r.thisSpace = receiver->named.tpe.get<Type::Ptr>()->space;
         switch (static_cast<clang::Builtin::ID>(decl->getBuiltinID())) {
           case clang::Builtin::BImove:
           case clang::Builtin::BIforward: {
@@ -1005,26 +1033,35 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
     if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields(), catchableParents);
     else {
-      const auto members = cxxRecord->fields()          //
-                           | zip(cxxRecord->captures()) //
-                           | collect([&](const auto &field, const auto &capture) -> Opt<StructLayoutMember> {
-                               const auto var = capture.getCapturedVar();
-                               if (var->getType().isConstQualified()) readOnlyMembers[name].emplace(var->getName().str());
-                               switch (capture.getCaptureKind()) {
-                                 case clang::LCK_ByCopy: {
-                                   const auto tpe = handleType(field->getType(), r);
-                                   return resolveField(field, var->getName().str(), tpe);
-                                 }
-                                 case clang::LCK_ByRef: {
-                                   const auto varTpe = var->getType();
-                                   const auto tpe = varTpe->isReferenceType() ? handleType(varTpe, r)
-                                                                              : Type::Ptr(handleType(varTpe, r), TypeSpace::Global());
-                                   return resolveField(field, var->getName().str(), tpe);
-                                 }
-                                 default: return {};
-                               }
-                             }) //
-                           | to_vector();
+      const auto canonical = cxxRecord->getCanonicalDecl();
+      const auto globalCapture = canonical == r.entryCapture || (r.globalCaptures ^ contains(canonical));
+      if (globalCapture) r.globalCaptures.emplace(canonical);
+      const auto members =
+          cxxRecord->fields()          //
+          | zip(cxxRecord->captures()) //
+          | collect([&](const auto &field, const auto &capture) -> Opt<StructLayoutMember> {
+              const auto var = capture.getCapturedVar();
+              if (var->getType().isConstQualified()) readOnlyMembers[name].emplace(var->getName().str());
+              switch (capture.getCaptureKind()) {
+                case clang::LCK_ByCopy: {
+                  if (const auto captured = field->getType()->getAsCXXRecordDecl(); captured && captured->isLambda() && globalCapture)
+                    r.globalCaptures.emplace(captured->getCanonicalDecl());
+                  const auto tpe = handleType(field->getType(), r);
+                  return resolveField(field, var->getName().str(), tpe);
+                }
+                case clang::LCK_ByRef: {
+                  const auto varTpe = var->getType();
+                  const auto nested = r.entryCapture && !globalCapture;
+                  const auto space = nested ? TypeSpace::Private().widen() : TypeSpace::Global().widen();
+                  const auto inferred = r.valueTypes ^ get_maybe(var);
+                  const auto capturedTpe = inferred ? *inferred : handleType(varTpe, r);
+                  const auto tpe = varTpe->isReferenceType() ? capturedTpe : Type::Ptr(capturedTpe, space).widen();
+                  return resolveField(field, var->getName().str(), tpe);
+                }
+                default: return {};
+              }
+            }) //
+          | to_vector();
       return resolveStruct(parents, members, catchableParents);
     }
   } else return resolveStruct({}, resolveFields());
@@ -1811,10 +1848,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_LValueToRValue:
             if (targetTpe == sourceExpr.tpe()) {
               return sourceExpr;
-            } else if (const auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && targetTpe == ptrTpe->comp) {
+            } else if (const auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && sameTypeShape(targetTpe, ptrTpe->comp)) {
               auto base = r.newVar(sourceExpr);
               auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
-              return Expr::Index(base, idx, targetTpe);
+              return Expr::Index(base, idx, ptrTpe->comp);
             } else if (const auto src = sourceExpr.tpe().get<Type::Ptr>(), dst = targetTpe.get<Type::Ptr>();
                        src && dst && src->comp == dst->comp) {
               return sourceExpr;
@@ -2056,13 +2093,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                      ? refDeclName
                                      : decl->getDeclName().getAsString();
           if (const auto field = r.parent->members | find([&](const auto &m) { return m.symbol == fieldName; })) {
-            return Expr::Alias(select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {})))}, *field));
+            return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, *field));
           } else {
             const auto declName = Named(fieldName, handleType(decl->getType(), r));
-            return Expr::Alias(select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {})))}, declName));
+            return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, declName));
           }
         } else {
-          const auto declName = Named(refDeclName, annotateLocalSpace(decl, r));
+          const auto inferred = r.valueTypes ^ get_maybe(decl);
+          const auto declName = Named(refDeclName, inferred ? *inferred : annotateLocalSpace(decl, r));
           return Expr::Alias(select(r, {}, declName));
         }
 
@@ -2170,7 +2208,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             else return ref(lhs);
           case clang::UO_Deref: {
             auto idx = r.newVar(integralConstOfType(Type::IntU64(), 0));
-            return Expr::RefTo(termToSel(lhs), idx, exprTpe, TypeSpace::Global(), Region::Opaque());
+            const auto ptrTpe = lhs.tpe().get<Type::Ptr>();
+            if (!ptrTpe) raise("Cannot dereference non-pointer type: " + repr(lhs.tpe()));
+            return Expr::RefTo(termToSel(lhs), idx, exprTpe, ptrTpe->space, Region::Opaque());
           }
           case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, exprTpe));
           case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, exprTpe));
@@ -2328,7 +2368,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               if (capture.getCaptureKind() != clang::LCK_ByRef) return handleExpr(init, r);
               const auto initValue = r.newVar(handleExpr(init, r));
               if (var->getType()->isReferenceType()) return Expr::Alias(initValue);
-              return Expr::RefTo(termToSel(initValue), {}, initValue.tpe(), TypeSpace::Global(), Region::Opaque());
+              const auto ptr = field->tpe.get<Type::Ptr>();
+              if (!ptr) raise("By-reference capture field resulted in a non-pointer type: " + repr(field->tpe));
+              return Expr::RefTo(termToSel(initValue), {}, ptr->comp, ptr->space, Region::Opaque());
             }();
             r.push(Stmt::Mut(member, conform(r, value, field->tpe)));
           }
@@ -2915,6 +2957,24 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
 
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             auto name = Named(declName(var), annotateLocalSpace(var, r));
+            Opt<Expr::Any> pointerInit;
+            if (var->hasInit() && name.tpe.is<Type::Ptr>() && !llvm::isa<clang::InitListExpr>(var->getInit())) {
+              auto raw = handleExpr(var->getInit(), r);
+              auto target = name.tpe;
+              if (const auto refTo = raw.get<Expr::RefTo>(); refTo && storageSpace(refTo->lhs).is<TypeSpace::Private>()) {
+                raw = refTo->withSpace(TypeSpace::Private());
+              } else if (const auto alias = raw.get<Expr::Alias>()) {
+                if (const auto targetPtr = target.get<Type::Ptr>()) {
+                  if (const auto selection = alias->ref.get<Term::Select>(); selection && targetPtr->comp == raw.tpe())
+                    target = Type::Ptr(targetPtr->comp, storageSpace(*selection));
+                }
+              }
+              if (raw.tpe().is<Type::Ptr>() && sameTypeShape(raw.tpe(), target)) target = raw.tpe();
+              const auto lowered = conform(r, raw, target);
+              if (lowered.tpe().is<Type::Ptr>() && sameTypeShape(lowered.tpe(), name.tpe)) name = Named(name.symbol, lowered.tpe());
+              pointerInit = lowered;
+            }
+            r.valueTypes.emplace(var, name.tpe);
             Opt<Cleanup> cleanup;
 
             if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
@@ -2967,7 +3027,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               }
             } else if (var->hasInit()) {
               const bool isMutable = !var->getType().isConstQualified();
-              r.push(Stmt::Var(name, conform(r, handleExpr(var->getInit(), r), name.tpe), isMutable));
+              r.push(Stmt::Var(name, pointerInit ? *pointerInit : conform(r, handleExpr(var->getInit(), r), name.tpe), isMutable));
             } else if (auto arrInit = createInit(var->getType(), name.tpe); arrInit) {
               const bool isMutable = !var->getType().isConstQualified();
               r.push(Stmt::Var(name, *arrInit, isMutable));

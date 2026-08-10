@@ -53,7 +53,12 @@ object Provenance {
   def selectRegion(base: p.Region, steps: List[p.PathStep], tpe: p.Type): p.Region =
     if (base == p.Region.Opaque) p.Region.Opaque
     else if (steps.isEmpty) base
-    else if (isPtr(tpe)) p.Region.Opaque
+    else if (
+      tpe match {
+        case p.Type.Ptr(_, p.Type.Space.Global | p.Type.Space.Constant) => true
+        case _                                                          => false
+      }
+    ) p.Region.Opaque
     else base
 
   def derivedIn(f: p.Function, arena: Boolean = false): Map[p.Named, p.Region] =
@@ -62,8 +67,11 @@ object Provenance {
       def of(root: p.Named, steps: List[p.PathStep], t: p.Type): p.Region =
         if (arena) selectRegion(trace(root), steps, t) else trace(root)
       def regionOf(n: p.Named, e: p.Expr): Option[p.Region] = e match {
-        case p.Expr.Alias(_: p.Term.NullPtrConst)                      => None
-        case p.Expr.RefTo(p.Term.Select(root, steps, t), _, _, _, _)   => Some(of(root, steps, t))
+        case p.Expr.Alias(_: p.Term.NullPtrConst)                    => None
+        case p.Expr.RefTo(p.Term.Select(root, steps, t), _, _, _, _) => Some(of(root, steps, t))
+        case p.Expr.Index(p.Term.Select(_, _, _), _, p.Type.Ptr(_, p.Type.Space.Global | p.Type.Space.Constant)) =>
+          Some(p.Region.Opaque)
+        case p.Expr.Index(p.Term.Select(root, steps, t), _, _)         => Some(of(root, steps, t))
         case p.Expr.Cast(p.Term.Select(root, steps, t), _: p.Type.Ptr) => Some(of(root, steps, t))
         case p.Expr.Alias(p.Term.Select(root, steps, t))               => Some(of(root, steps, t))
         case _: p.Expr.Alloc                                           => Some(p.Region.Rooted(n))

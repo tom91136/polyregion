@@ -33,6 +33,9 @@ struct Remapper {
   };
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
+    const clang::CXXRecordDecl *entryCapture = {};
+    Set<const clang::CXXRecordDecl *> globalCaptures{};
+    TypeSpace::Any thisSpace = TypeSpace::Global();
     bool ctorChain = false;
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
@@ -42,6 +45,7 @@ struct Remapper {
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
     Map<std::string, BitFieldInfo> bitFields{};
+    Map<const clang::ValueDecl *, Type::Any> valueTypes{};
     Map<std::string, Named> exceptionWhats{};
     Map<std::string, Named> exceptionCodes{};
     Set<std::string> incompleteExceptionWhats{};
@@ -86,6 +90,7 @@ struct Remapper {
       layouts = r.layouts;
       parents = r.parents;
       bitFields = r.bitFields;
+      globalCaptures = r.globalCaptures;
       return {result, r.stmts};
     }
     // Function-level scopes pass false to reset temporaries, cleanups and exception state.

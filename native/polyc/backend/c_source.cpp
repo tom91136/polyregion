@@ -112,11 +112,13 @@ struct CLAddressSpaceTracePass {
         [&](const Expr::Index &x) -> SpacedExpr {
           auto stLhs = mapTerm_(x.lhs);
           auto stIdx = mapTerm_(x.idx);
-          return {Expr::Index(stLhs.actual, stIdx.actual, x.comp), stLhs.space};
+          const auto space = x.comp.template get<Type::Ptr>() ^ fold([](const auto &p) { return p.space; }, [&] { return stLhs.space; });
+          return {Expr::Index(stLhs.actual, stIdx.actual, x.comp), space};
         },
         [&](const Expr::RefTo &x) -> SpacedExpr {
           auto stLhs = mapTerm_(x.lhs);
-          return {Expr::RefTo(stLhs.actual, x.idx ^ map(mapTerm0_), x.comp, stLhs.space, Region::Opaque()), stLhs.space};
+          const auto space = x.space.template is<TypeSpace::Private>() ? x.space : stLhs.space;
+          return {Expr::RefTo(stLhs.actual, x.idx ^ map(mapTerm0_), x.comp, space, Region::Opaque()), space};
         },
         [&](const Expr::Alloc &x) -> SpacedExpr { return {Expr::Alloc(x.comp, mapTerm0_(x.size), x.space, Region::Opaque())}; },
         [&](const Expr::ForeignCall &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },

@@ -53,4 +53,129 @@ class ArenaViewSuite extends munit.FunSuite {
     }
     assertEquals(staleFieldSelects, Nil, result.entry.body.map(_.repr).mkString("\n"))
   }
+
+  test("a private pointer field in a stack-local closure stays a pointer") {
+    val closureSym    = p.Sym("Closure")
+    val privatePtr    = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private)
+    val privatePtrPtr = p.Type.Ptr(privatePtr, p.Type.Space.Private)
+    val closureTpe    = p.Type.Struct(closureSym, Nil)
+    val closure       = named("closure", closureTpe)
+    val value         = named("value", p.Type.IntS32)
+    val pointer       = named("pointer", privatePtr)
+    val loaded        = named("loaded", privatePtr)
+    val capArg        = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(value, Some(p.Expr.Alias(p.Term.IntS32Const(42))), isMutable = true),
+          p.Stmt.Var(
+            pointer,
+            Some(p.Expr.RefTo(selectT(value), None, p.Type.IntS32, p.Type.Space.Private, p.Region.Opaque)),
+            isMutable = true
+          ),
+          p.Stmt.Var(closure, None, isMutable = true),
+          p.Stmt.Mut(
+            p.Term.Select(closure, List(p.PathStep.Field("ref")), privatePtrPtr),
+            p.Expr.RefTo(selectT(pointer), None, privatePtr, p.Type.Space.Private, p.Region.Opaque)
+          ),
+          p.Stmt.Var(
+            loaded,
+            Some(
+              p.Expr.Index(
+                p.Term.Select(closure, List(p.PathStep.Field("ref")), privatePtrPtr),
+                p.Term.IntS64Const(0),
+                privatePtr
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(
+        p.StructDef(capSym, Nil, Nil, Nil),
+        p.StructDef(closureSym, Nil, List(named("ref", privatePtrPtr)), Nil)
+      )
+    )
+
+    val result = ArenaView(program, NoopLog)
+    assertEquals(result.defs.find(_.name == closureSym).flatMap(_.members.headOption).map(_.tpe), Some(privatePtrPtr))
+    val fieldMut = result.entry.collectAll[p.Stmt].collectFirst {
+      case m @ p.Stmt.Mut(p.Term.Select(_, List(p.PathStep.Field("ref")), _), _) => m
+    }
+    assertEquals(fieldMut.map(_.name.tpe), Some(privatePtrPtr))
+    assertEquals(fieldMut.map(_.expr.tpe), Some(privatePtrPtr))
+    val loadedVar =
+      result.entry.collectAll[p.Stmt].collectFirst { case v: p.Stmt.Var if v.name.symbol == loaded.symbol => v }
+    assertEquals(loadedVar.map(_.name.tpe), Some(privatePtr))
+    assertEquals(loadedVar.flatMap(_.expr).map(_.tpe), Some(privatePtr))
+  }
+
+  test("a private pointer to a local arena-offset slot keeps only its outer pointer") {
+    val closureSym   = p.Sym("MixedClosure")
+    val closureTpe   = p.Type.Struct(closureSym, Nil)
+    val globalPtr    = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val mixedPtr     = p.Type.Ptr(globalPtr, p.Type.Space.Private)
+    val loweredMixed = p.Type.Ptr(p.Type.IntS64, p.Type.Space.Private)
+    val capArg       = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val pointer      = named("pointer", globalPtr)
+    val closure      = named("closure", closureTpe)
+    val loaded       = named("loaded", globalPtr)
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(
+            pointer,
+            Some(
+              p.Expr.RefTo(
+                p.Term.Select(capArg.named, List(p.PathStep.Field("value")), p.Type.IntS32),
+                None,
+                p.Type.IntS32,
+                p.Type.Space.Global,
+                p.Region.Opaque
+              )
+            ),
+            isMutable = true
+          ),
+          p.Stmt.Var(closure, None, isMutable = true),
+          p.Stmt.Mut(
+            p.Term.Select(closure, List(p.PathStep.Field("ref")), mixedPtr),
+            p.Expr.RefTo(selectT(pointer), None, globalPtr, p.Type.Space.Private, p.Region.Opaque)
+          ),
+          p.Stmt.Var(
+            loaded,
+            Some(
+              p.Expr.Index(
+                p.Term.Select(closure, List(p.PathStep.Field("ref")), mixedPtr),
+                p.Term.IntS64Const(0),
+                globalPtr
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(
+        p.StructDef(capSym, Nil, List(named("value", p.Type.IntS32)), Nil),
+        p.StructDef(closureSym, Nil, List(named("ref", mixedPtr)), Nil)
+      )
+    )
+
+    val result = ArenaView(program, NoopLog)
+    assertEquals(result.defs.find(_.name == closureSym).flatMap(_.members.headOption).map(_.tpe), Some(loweredMixed))
+    val fieldMut = result.entry.collectAll[p.Stmt].collectFirst {
+      case m @ p.Stmt.Mut(p.Term.Select(_, List(p.PathStep.Field("ref")), _), _) => m
+    }
+    assertEquals(fieldMut.map(_.name.tpe), Some(loweredMixed))
+    assertEquals(fieldMut.map(_.expr.tpe), Some(loweredMixed))
+    val loadedVar =
+      result.entry.collectAll[p.Stmt].collectFirst { case v: p.Stmt.Var if v.name.symbol == loaded.symbol => v }
+    assertEquals(loadedVar.map(_.name.tpe), Some(p.Type.IntS64))
+    assertEquals(loadedVar.flatMap(_.expr).map(_.tpe), Some(p.Type.IntS64))
+  }
 }

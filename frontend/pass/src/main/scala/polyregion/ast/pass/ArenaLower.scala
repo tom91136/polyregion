@@ -201,7 +201,7 @@ object ArenaLower extends ProgramPass {
         else p.Expr.Index(rwTerm(b), rwTerm(i), comp)
       // address-of through an arena offset pointer (`&p[i]`) remains an offset token. emitting a real
       // address here would make the next arena deref add the arena base twice.
-      case p.Expr.RefTo(t, idx, comp, _, _) if isPtr(t.tpe) && offsetVal(t) =>
+      case p.Expr.RefTo(t, idx, comp, p.Type.Space.Global, _) if isPtr(t.tpe) && offsetVal(t) =>
         p.Expr.Cast(offsetAt(rwTerm(t), idx, comp), p.Type.Ptr(comp, p.Type.Space.Global))
       // address-of a non-pointer subobject reached through an arena-relative pointer (e.g. `&result.#base`
       // where result is an offset): the result must stay an offset, else a downstream deref re-adds the

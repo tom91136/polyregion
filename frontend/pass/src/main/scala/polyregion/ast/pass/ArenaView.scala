@@ -41,11 +41,13 @@ object ArenaView extends ProgramPass {
   private def elem(t: p.Type): p.Type = t match {
     case p.Type.Ptr(c, _) => c; case p.Type.Arr(c, _, _) => c; case _ => t
   }
-  // a pointer (or array-of-pointer) struct field holds an arena byte offset, so retype to i64 (same layout)
+  // a Global pointer (or array-of-pointer) struct field holds an arena byte offset, so retype to i64
+  // (same layout). Private pointer fields belong to stack-local aggregates and remain real pointers.
   private def i64ify(t: p.Type): p.Type = t match {
-    case _: p.Type.Ptr       => I64
-    case p.Type.Arr(c, n, s) => p.Type.Arr(i64ify(c), n, s)
-    case _                   => t
+    case p.Type.Ptr(_, p.Type.Space.Global) => I64
+    case p.Type.Ptr(c, s)                   => p.Type.Ptr(i64ify(c), s)
+    case p.Type.Arr(c, n, s)                => p.Type.Arr(i64ify(c), n, s)
+    case _                                  => t
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
@@ -312,7 +314,8 @@ object ArenaView extends ProgramPass {
       case p.Term.Select(root, steps, resultT) if steps.nonEmpty =>
         lvalueOffset(root, steps) match {
           case Some(off) => loadAt(off, if (isPtr(resultT)) I64 else resultT)
-          case None      => p.Term.Select(root, steps.map(rwStep), if (isPtr(resultT) && arenaTerm(t)) I64 else resultT)
+          case None =>
+            p.Term.Select(root, steps.map(rwStep), if (isPtr(resultT) && arenaTerm(t)) I64 else i64ify(resultT))
         }
       case x => x
     }
@@ -335,6 +338,8 @@ object ArenaView extends ProgramPass {
         val v = ptrValue(from)
         if (isPtr(as) || as == I64) p.Expr.Alias(v) else p.Expr.Cast(v, as)
       case p.Expr.Cast(from, as) => p.Expr.Cast(rwTerm(from), as)
+      case p.Expr.RefTo(base, idx, comp, p.Type.Space.Private, r) =>
+        p.Expr.RefTo(rwTerm(base), idx.map(rwTerm), i64ify(comp), p.Type.Space.Private, r)
       case p.Expr.RefTo(base, idx, comp, sp, r) if arenaTerm(base) =>
         val off0 = if (isPtr(base.tpe)) ptrValue(base) else addrOffset(base)
         p.Expr.Alias(add(off0, idx.fold(i64(0))(i => mulBytes(rwTerm(i), comp))))
@@ -342,7 +347,7 @@ object ArenaView extends ProgramPass {
       case p.Expr.Index(base, idx, comp) =>
         derefOffset(base) match {
           case Some(off0) => p.Expr.Alias(loadAt(add(off0, mulBytes(rwTerm(idx), comp)), comp))
-          case None       => p.Expr.Index(rwTerm(base), rwTerm(idx), comp)
+          case None       => p.Expr.Index(rwTerm(base), rwTerm(idx), i64ify(comp))
         }
       case p.Expr.Alloc(c, sz, sp, r)            => p.Expr.Alloc(c, rwTerm(sz), sp, r)
       case p.Expr.ForeignCall(n, args, rtn)      => p.Expr.ForeignCall(n, args.map(rwTerm), rtn)
@@ -372,7 +377,7 @@ object ArenaView extends ProgramPass {
           case Some(off) => storeVal(off, scalarT, bind("st", rwExpr(e)))
           case None      =>
             // local struct field write; a pointer field is now i64
-            val lhsT = if (isPtr(scalarT) && arenaTerm(p.Term.Select(n, steps, scalarT))) I64 else scalarT
+            val lhsT = if (isPtr(scalarT) && arenaTerm(p.Term.Select(n, steps, scalarT))) I64 else i64ify(scalarT)
             List(p.Stmt.Mut(p.Term.Select(n, steps.map(rwStep), lhsT), rwExpr(e)))
         }
       case p.Stmt.Update(base @ p.Term.Select(_, _, ptrT), idx, v) =>

@@ -37,6 +37,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto body = functor.getBody();
 
   auto r = Remapper::RemapContext{};
+  r.entryCapture = parent->getCanonicalDecl();
   auto parentDef = remapper.handleRecord(parent, r);
 
   auto rtnTpe = remapper.handleType(returnTpe, r);
