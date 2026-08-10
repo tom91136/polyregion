@@ -116,6 +116,35 @@ TEST_CASE("C source bounds local names and retains source names on request", "[b
   }
 }
 
+TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named value("value", Type::Float32());
+  const Named result("result", Type::Float32());
+  const Function entry =
+      mkFn("kernel", {Arg(value, {})}, Type::Unit0(),
+           {Var(result,
+                Expr::SpecOp(Spec::GpuShuffleDown(selectNamed(value).widen(), Term::IntU32Const(1).widen(), Term::IntU32Const(7).widen(),
+                                                  Term::IntU32Const(~uint32_t{0}).widen(), Type::Float32()))
+                    .widen(),
+                false)
+                .widen(),
+            Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "SubgroupLower(width=8,maxGroupSize=256)";
+
+  const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("[256]") != std::string::npos);
+  CHECK(source.find("get_local_id(0)") != std::string::npos);
+  CHECK(source.find("sub_group_barrier(CLK_LOCAL_MEM_FENCE)") != std::string::npos);
+}
+
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);

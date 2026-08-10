@@ -636,7 +636,20 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             [&](const Spec::GpuGroupIdx &v) { return gpuDimIntr({.cl = "get_group_id", .msl = "__get_group_id__"}, v.dim); },         //
             [&](const Spec::GpuGroupSize &v) { return gpuDimIntr({.cl = "get_num_groups", .msl = "__get_num_groups__"}, v.dim); },    //
             [&](const Spec::GpuLocalIdx &v) { return gpuDimIntr({.cl = "get_local_id", .msl = "__get_local_id__"}, v.dim); },         //
-            [&](const Spec::GpuLocalSize &v) { return gpuDimIntr({.cl = "get_local_size", .msl = "__get_local_size__"}, v.dim); }     //
+            [&](const Spec::GpuLocalSize &v) { return gpuDimIntr({.cl = "get_local_size", .msl = "__get_local_size__"}, v.dim); },    //
+            [&](const Spec::GpuLaneIdx &) -> std::string { throw BackendException("Spec::GpuLaneIdx requires SubgroupLower"); },
+            [&](const Spec::GpuSubgroupSize &) -> std::string { throw BackendException("Spec::GpuSubgroupSize requires SubgroupLower"); },
+            [&](const Spec::GpuShuffleDown &) -> std::string { throw BackendException("Spec::GpuShuffleDown requires SubgroupLower"); },
+            [&](const Spec::GpuShuffleUp &) -> std::string { throw BackendException("Spec::GpuShuffleUp requires SubgroupLower"); },
+            [&](const Spec::GpuShuffleIdx &) -> std::string { throw BackendException("Spec::GpuShuffleIdx requires SubgroupLower"); },
+            [&](const Spec::GpuShuffleXor &) -> std::string { throw BackendException("Spec::GpuShuffleXor requires SubgroupLower"); },
+            [&](const Spec::GpuSubgroupBarrier &) -> std::string {
+              if (dialect == Dialect::OpenCL1_1) return "sub_group_barrier(CLK_LOCAL_MEM_FENCE)";
+              throw BackendException("Spec::GpuSubgroupBarrier is unsupported for this C source dialect");
+            },
+            [&](const Spec::GpuBallot &) -> std::string { throw BackendException("Spec::GpuBallot requires SubgroupLower"); },
+            [&](const Spec::GpuVoteAny &) -> std::string { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
+            [&](const Spec::GpuVoteAll &) -> std::string { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); } //
         );
       },
       [&](const Expr::IntrOp &x) {

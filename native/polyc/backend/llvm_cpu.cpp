@@ -25,7 +25,17 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
       [&](const Spec::GpuGroupIdx &) -> ValPtr { throw BackendException("unimplemented"); },   //
       [&](const Spec::GpuGroupSize &) -> ValPtr { throw BackendException("unimplemented"); },  //
       [&](const Spec::GpuLocalIdx &v) -> ValPtr { return k(v, 0); },                           //
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return k(v, 1); }                           //
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return k(v, 1); },                          //
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires SubgroupLower"); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { throw BackendException("Spec::GpuSubgroupSize requires SubgroupLower"); },
+      [&](const Spec::GpuShuffleDown &) -> ValPtr { throw BackendException("Spec::GpuShuffleDown requires SubgroupLower"); },
+      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires SubgroupLower"); },
+      [&](const Spec::GpuShuffleIdx &) -> ValPtr { throw BackendException("Spec::GpuShuffleIdx requires SubgroupLower"); },
+      [&](const Spec::GpuShuffleXor &) -> ValPtr { throw BackendException("Spec::GpuShuffleXor requires SubgroupLower"); },
+      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return noop(); },
+      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires SubgroupLower"); },
+      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); } //
   );
 }
 ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {

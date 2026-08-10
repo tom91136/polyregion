@@ -144,7 +144,25 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
                             localSizeU32(0), //
                             localSizeU32(1), //
                             localSizeU32(2));
-      });
+      },
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
+        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleDown &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleXor &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return cg.intr0(llvm::Intrinsic::amdgcn_wave_barrier); },
+      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
 }
 ValPtr AMDGPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   // XXX OCML: `__ocml_<name>_f32` / `__ocml_<name>_f64`.

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "a2c550d545942542eacea560a5f409d6";
+constexpr auto AdtHash = "d9da3eb055cfbec98f011c226c2b091e";
 
 namespace {
 
@@ -1315,6 +1315,132 @@ json Spec::gpulocalsize_to_json(const Spec::GpuLocalSize &x_) {
   return json::array({dim});
 }
 
+Spec::GpuLaneIdx Spec::gpulaneidx_from_json(const json &j_) { return {}; }
+
+json Spec::gpulaneidx_to_json(const Spec::GpuLaneIdx &x_) { return json::array({}); }
+
+Spec::GpuSubgroupSize Spec::gpusubgroupsize_from_json(const json &j_) { return {}; }
+
+json Spec::gpusubgroupsize_to_json(const Spec::GpuSubgroupSize &x_) { return json::array({}); }
+
+Spec::GpuShuffleDown Spec::gpushuffledown_from_json(const json &j_) {
+  auto value = Term::any_from_json(j_.at(0));
+  auto delta = Term::any_from_json(j_.at(1));
+  auto width = Term::any_from_json(j_.at(2));
+  auto mask = Term::any_from_json(j_.at(3));
+  auto rtn = Type::any_from_json(j_.at(4));
+  return {value, delta, width, mask, rtn};
+}
+
+json Spec::gpushuffledown_to_json(const Spec::GpuShuffleDown &x_) {
+  auto value = Term::any_to_json(x_.value);
+  auto delta = Term::any_to_json(x_.delta);
+  auto width = Term::any_to_json(x_.width);
+  auto mask = Term::any_to_json(x_.mask);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({value, delta, width, mask, rtn});
+}
+
+Spec::GpuShuffleUp Spec::gpushuffleup_from_json(const json &j_) {
+  auto value = Term::any_from_json(j_.at(0));
+  auto delta = Term::any_from_json(j_.at(1));
+  auto width = Term::any_from_json(j_.at(2));
+  auto mask = Term::any_from_json(j_.at(3));
+  auto rtn = Type::any_from_json(j_.at(4));
+  return {value, delta, width, mask, rtn};
+}
+
+json Spec::gpushuffleup_to_json(const Spec::GpuShuffleUp &x_) {
+  auto value = Term::any_to_json(x_.value);
+  auto delta = Term::any_to_json(x_.delta);
+  auto width = Term::any_to_json(x_.width);
+  auto mask = Term::any_to_json(x_.mask);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({value, delta, width, mask, rtn});
+}
+
+Spec::GpuShuffleIdx Spec::gpushuffleidx_from_json(const json &j_) {
+  auto value = Term::any_from_json(j_.at(0));
+  auto srcLane = Term::any_from_json(j_.at(1));
+  auto width = Term::any_from_json(j_.at(2));
+  auto mask = Term::any_from_json(j_.at(3));
+  auto rtn = Type::any_from_json(j_.at(4));
+  return {value, srcLane, width, mask, rtn};
+}
+
+json Spec::gpushuffleidx_to_json(const Spec::GpuShuffleIdx &x_) {
+  auto value = Term::any_to_json(x_.value);
+  auto srcLane = Term::any_to_json(x_.srcLane);
+  auto width = Term::any_to_json(x_.width);
+  auto mask = Term::any_to_json(x_.mask);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({value, srcLane, width, mask, rtn});
+}
+
+Spec::GpuShuffleXor Spec::gpushufflexor_from_json(const json &j_) {
+  auto value = Term::any_from_json(j_.at(0));
+  auto laneMask = Term::any_from_json(j_.at(1));
+  auto width = Term::any_from_json(j_.at(2));
+  auto mask = Term::any_from_json(j_.at(3));
+  auto rtn = Type::any_from_json(j_.at(4));
+  return {value, laneMask, width, mask, rtn};
+}
+
+json Spec::gpushufflexor_to_json(const Spec::GpuShuffleXor &x_) {
+  auto value = Term::any_to_json(x_.value);
+  auto laneMask = Term::any_to_json(x_.laneMask);
+  auto width = Term::any_to_json(x_.width);
+  auto mask = Term::any_to_json(x_.mask);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({value, laneMask, width, mask, rtn});
+}
+
+Spec::GpuSubgroupBarrier Spec::gpusubgroupbarrier_from_json(const json &j_) {
+  auto mask = Term::any_from_json(j_.at(0));
+  return Spec::GpuSubgroupBarrier(mask);
+}
+
+json Spec::gpusubgroupbarrier_to_json(const Spec::GpuSubgroupBarrier &x_) {
+  auto mask = Term::any_to_json(x_.mask);
+  return json::array({mask});
+}
+
+Spec::GpuBallot Spec::gpuballot_from_json(const json &j_) {
+  auto mask = Term::any_from_json(j_.at(0));
+  auto pred = Term::any_from_json(j_.at(1));
+  return {mask, pred};
+}
+
+json Spec::gpuballot_to_json(const Spec::GpuBallot &x_) {
+  auto mask = Term::any_to_json(x_.mask);
+  auto pred = Term::any_to_json(x_.pred);
+  return json::array({mask, pred});
+}
+
+Spec::GpuVoteAny Spec::gpuvoteany_from_json(const json &j_) {
+  auto mask = Term::any_from_json(j_.at(0));
+  auto pred = Term::any_from_json(j_.at(1));
+  return {mask, pred};
+}
+
+json Spec::gpuvoteany_to_json(const Spec::GpuVoteAny &x_) {
+  auto mask = Term::any_to_json(x_.mask);
+  auto pred = Term::any_to_json(x_.pred);
+  return json::array({mask, pred});
+}
+
+Spec::GpuVoteAll Spec::gpuvoteall_from_json(const json &j_) {
+  auto mask = Term::any_from_json(j_.at(0));
+  auto pred = Term::any_from_json(j_.at(1));
+  return {mask, pred};
+}
+
+json Spec::gpuvoteall_to_json(const Spec::GpuVoteAll &x_) {
+  auto mask = Term::any_to_json(x_.mask);
+  auto pred = Term::any_to_json(x_.pred);
+  return json::array({mask, pred});
+}
+
 Spec::Any Spec::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -1332,6 +1458,16 @@ Spec::Any Spec::any_from_json(const json &j_) {
     case 10: return Spec::gpugroupsize_from_json(t_);
     case 11: return Spec::gpulocalidx_from_json(t_);
     case 12: return Spec::gpulocalsize_from_json(t_);
+    case 13: return Spec::gpulaneidx_from_json(t_);
+    case 14: return Spec::gpusubgroupsize_from_json(t_);
+    case 15: return Spec::gpushuffledown_from_json(t_);
+    case 16: return Spec::gpushuffleup_from_json(t_);
+    case 17: return Spec::gpushuffleidx_from_json(t_);
+    case 18: return Spec::gpushufflexor_from_json(t_);
+    case 19: return Spec::gpusubgroupbarrier_from_json(t_);
+    case 20: return Spec::gpuballot_from_json(t_);
+    case 21: return Spec::gpuvoteany_from_json(t_);
+    case 22: return Spec::gpuvoteall_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1349,7 +1485,17 @@ json Spec::any_to_json(const Spec::Any &x_) {
                         [](const Spec::GpuGroupIdx &y_) -> json { return {9, Spec::gpugroupidx_to_json(y_)}; },
                         [](const Spec::GpuGroupSize &y_) -> json { return {10, Spec::gpugroupsize_to_json(y_)}; },
                         [](const Spec::GpuLocalIdx &y_) -> json { return {11, Spec::gpulocalidx_to_json(y_)}; },
-                        [](const Spec::GpuLocalSize &y_) -> json { return {12, Spec::gpulocalsize_to_json(y_)}; });
+                        [](const Spec::GpuLocalSize &y_) -> json { return {12, Spec::gpulocalsize_to_json(y_)}; },
+                        [](const Spec::GpuLaneIdx &y_) -> json { return {13, Spec::gpulaneidx_to_json(y_)}; },
+                        [](const Spec::GpuSubgroupSize &y_) -> json { return {14, Spec::gpusubgroupsize_to_json(y_)}; },
+                        [](const Spec::GpuShuffleDown &y_) -> json { return {15, Spec::gpushuffledown_to_json(y_)}; },
+                        [](const Spec::GpuShuffleUp &y_) -> json { return {16, Spec::gpushuffleup_to_json(y_)}; },
+                        [](const Spec::GpuShuffleIdx &y_) -> json { return {17, Spec::gpushuffleidx_to_json(y_)}; },
+                        [](const Spec::GpuShuffleXor &y_) -> json { return {18, Spec::gpushufflexor_to_json(y_)}; },
+                        [](const Spec::GpuSubgroupBarrier &y_) -> json { return {19, Spec::gpusubgroupbarrier_to_json(y_)}; },
+                        [](const Spec::GpuBallot &y_) -> json { return {20, Spec::gpuballot_to_json(y_)}; },
+                        [](const Spec::GpuVoteAny &y_) -> json { return {21, Spec::gpuvoteany_to_json(y_)}; },
+                        [](const Spec::GpuVoteAll &y_) -> json { return {22, Spec::gpuvoteall_to_json(y_)}; });
 }
 
 Intr::BNot Intr::bnot_from_json(const json &j_) {
@@ -3324,6 +3470,46 @@ Spec::GpuLocalSize gpulocalsize_fields_from_msgpack(MsgpackReader &, size_t);
 void gpulocalsize_fields_to_msgpack(MsgpackWriter &, const Spec::GpuLocalSize &);
 Spec::GpuLocalSize gpulocalsize_from_msgpack(MsgpackReader &);
 void gpulocalsize_to_msgpack(MsgpackWriter &, const Spec::GpuLocalSize &);
+Spec::GpuLaneIdx gpulaneidx_fields_from_msgpack(MsgpackReader &, size_t);
+void gpulaneidx_fields_to_msgpack(MsgpackWriter &, const Spec::GpuLaneIdx &);
+Spec::GpuLaneIdx gpulaneidx_from_msgpack(MsgpackReader &);
+void gpulaneidx_to_msgpack(MsgpackWriter &, const Spec::GpuLaneIdx &);
+Spec::GpuSubgroupSize gpusubgroupsize_fields_from_msgpack(MsgpackReader &, size_t);
+void gpusubgroupsize_fields_to_msgpack(MsgpackWriter &, const Spec::GpuSubgroupSize &);
+Spec::GpuSubgroupSize gpusubgroupsize_from_msgpack(MsgpackReader &);
+void gpusubgroupsize_to_msgpack(MsgpackWriter &, const Spec::GpuSubgroupSize &);
+Spec::GpuShuffleDown gpushuffledown_fields_from_msgpack(MsgpackReader &, size_t);
+void gpushuffledown_fields_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleDown &);
+Spec::GpuShuffleDown gpushuffledown_from_msgpack(MsgpackReader &);
+void gpushuffledown_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleDown &);
+Spec::GpuShuffleUp gpushuffleup_fields_from_msgpack(MsgpackReader &, size_t);
+void gpushuffleup_fields_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleUp &);
+Spec::GpuShuffleUp gpushuffleup_from_msgpack(MsgpackReader &);
+void gpushuffleup_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleUp &);
+Spec::GpuShuffleIdx gpushuffleidx_fields_from_msgpack(MsgpackReader &, size_t);
+void gpushuffleidx_fields_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleIdx &);
+Spec::GpuShuffleIdx gpushuffleidx_from_msgpack(MsgpackReader &);
+void gpushuffleidx_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleIdx &);
+Spec::GpuShuffleXor gpushufflexor_fields_from_msgpack(MsgpackReader &, size_t);
+void gpushufflexor_fields_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleXor &);
+Spec::GpuShuffleXor gpushufflexor_from_msgpack(MsgpackReader &);
+void gpushufflexor_to_msgpack(MsgpackWriter &, const Spec::GpuShuffleXor &);
+Spec::GpuSubgroupBarrier gpusubgroupbarrier_fields_from_msgpack(MsgpackReader &, size_t);
+void gpusubgroupbarrier_fields_to_msgpack(MsgpackWriter &, const Spec::GpuSubgroupBarrier &);
+Spec::GpuSubgroupBarrier gpusubgroupbarrier_from_msgpack(MsgpackReader &);
+void gpusubgroupbarrier_to_msgpack(MsgpackWriter &, const Spec::GpuSubgroupBarrier &);
+Spec::GpuBallot gpuballot_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuballot_fields_to_msgpack(MsgpackWriter &, const Spec::GpuBallot &);
+Spec::GpuBallot gpuballot_from_msgpack(MsgpackReader &);
+void gpuballot_to_msgpack(MsgpackWriter &, const Spec::GpuBallot &);
+Spec::GpuVoteAny gpuvoteany_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuvoteany_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVoteAny &);
+Spec::GpuVoteAny gpuvoteany_from_msgpack(MsgpackReader &);
+void gpuvoteany_to_msgpack(MsgpackWriter &, const Spec::GpuVoteAny &);
+Spec::GpuVoteAll gpuvoteall_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuvoteall_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVoteAll &);
+Spec::GpuVoteAll gpuvoteall_from_msgpack(MsgpackReader &);
+void gpuvoteall_to_msgpack(MsgpackWriter &, const Spec::GpuVoteAll &);
 Spec::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Spec::Any &);
 } // namespace Spec
@@ -5771,6 +5957,238 @@ void Spec::gpulocalsize_to_msgpack(MsgpackWriter &w_, const Spec::GpuLocalSize &
   Spec::gpulocalsize_fields_to_msgpack(w_, x_);
 }
 
+Spec::GpuLaneIdx Spec::gpulaneidx_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Spec::GpuLaneIdx with 0 field(s)");
+  return {};
+}
+
+void Spec::gpulaneidx_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuLaneIdx &x_) {}
+
+Spec::GpuLaneIdx Spec::gpulaneidx_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpulaneidx_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpulaneidx_to_msgpack(MsgpackWriter &w_, const Spec::GpuLaneIdx &x_) {
+  w_.writeArrayHeader(0);
+  Spec::gpulaneidx_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuSubgroupSize Spec::gpusubgroupsize_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Spec::GpuSubgroupSize with 0 field(s)");
+  return {};
+}
+
+void Spec::gpusubgroupsize_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuSubgroupSize &x_) {}
+
+Spec::GpuSubgroupSize Spec::gpusubgroupsize_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpusubgroupsize_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpusubgroupsize_to_msgpack(MsgpackWriter &w_, const Spec::GpuSubgroupSize &x_) {
+  w_.writeArrayHeader(0);
+  Spec::gpusubgroupsize_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuShuffleDown Spec::gpushuffledown_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected Spec::GpuShuffleDown with 5 field(s)");
+  auto value = Term::any_from_msgpack(r_);
+  auto delta = Term::any_from_msgpack(r_);
+  auto width = Term::any_from_msgpack(r_);
+  auto mask = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {value, delta, width, mask, rtn};
+}
+
+void Spec::gpushuffledown_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleDown &x_) {
+  Term::any_to_msgpack(w_, x_.value);
+  Term::any_to_msgpack(w_, x_.delta);
+  Term::any_to_msgpack(w_, x_.width);
+  Term::any_to_msgpack(w_, x_.mask);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuShuffleDown Spec::gpushuffledown_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpushuffledown_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpushuffledown_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleDown &x_) {
+  w_.writeArrayHeader(5);
+  Spec::gpushuffledown_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuShuffleUp Spec::gpushuffleup_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected Spec::GpuShuffleUp with 5 field(s)");
+  auto value = Term::any_from_msgpack(r_);
+  auto delta = Term::any_from_msgpack(r_);
+  auto width = Term::any_from_msgpack(r_);
+  auto mask = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {value, delta, width, mask, rtn};
+}
+
+void Spec::gpushuffleup_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleUp &x_) {
+  Term::any_to_msgpack(w_, x_.value);
+  Term::any_to_msgpack(w_, x_.delta);
+  Term::any_to_msgpack(w_, x_.width);
+  Term::any_to_msgpack(w_, x_.mask);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuShuffleUp Spec::gpushuffleup_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpushuffleup_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpushuffleup_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleUp &x_) {
+  w_.writeArrayHeader(5);
+  Spec::gpushuffleup_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuShuffleIdx Spec::gpushuffleidx_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected Spec::GpuShuffleIdx with 5 field(s)");
+  auto value = Term::any_from_msgpack(r_);
+  auto srcLane = Term::any_from_msgpack(r_);
+  auto width = Term::any_from_msgpack(r_);
+  auto mask = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {value, srcLane, width, mask, rtn};
+}
+
+void Spec::gpushuffleidx_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleIdx &x_) {
+  Term::any_to_msgpack(w_, x_.value);
+  Term::any_to_msgpack(w_, x_.srcLane);
+  Term::any_to_msgpack(w_, x_.width);
+  Term::any_to_msgpack(w_, x_.mask);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuShuffleIdx Spec::gpushuffleidx_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpushuffleidx_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpushuffleidx_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleIdx &x_) {
+  w_.writeArrayHeader(5);
+  Spec::gpushuffleidx_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuShuffleXor Spec::gpushufflexor_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected Spec::GpuShuffleXor with 5 field(s)");
+  auto value = Term::any_from_msgpack(r_);
+  auto laneMask = Term::any_from_msgpack(r_);
+  auto width = Term::any_from_msgpack(r_);
+  auto mask = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {value, laneMask, width, mask, rtn};
+}
+
+void Spec::gpushufflexor_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleXor &x_) {
+  Term::any_to_msgpack(w_, x_.value);
+  Term::any_to_msgpack(w_, x_.laneMask);
+  Term::any_to_msgpack(w_, x_.width);
+  Term::any_to_msgpack(w_, x_.mask);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuShuffleXor Spec::gpushufflexor_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpushufflexor_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpushufflexor_to_msgpack(MsgpackWriter &w_, const Spec::GpuShuffleXor &x_) {
+  w_.writeArrayHeader(5);
+  Spec::gpushufflexor_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuSubgroupBarrier Spec::gpusubgroupbarrier_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Spec::GpuSubgroupBarrier with 1 field(s)");
+  auto mask = Term::any_from_msgpack(r_);
+  return Spec::GpuSubgroupBarrier(mask);
+}
+
+void Spec::gpusubgroupbarrier_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuSubgroupBarrier &x_) {
+  Term::any_to_msgpack(w_, x_.mask);
+}
+
+Spec::GpuSubgroupBarrier Spec::gpusubgroupbarrier_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpusubgroupbarrier_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpusubgroupbarrier_to_msgpack(MsgpackWriter &w_, const Spec::GpuSubgroupBarrier &x_) {
+  w_.writeArrayHeader(1);
+  Spec::gpusubgroupbarrier_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuBallot Spec::gpuballot_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Spec::GpuBallot with 2 field(s)");
+  auto mask = Term::any_from_msgpack(r_);
+  auto pred = Term::any_from_msgpack(r_);
+  return {mask, pred};
+}
+
+void Spec::gpuballot_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuBallot &x_) {
+  Term::any_to_msgpack(w_, x_.mask);
+  Term::any_to_msgpack(w_, x_.pred);
+}
+
+Spec::GpuBallot Spec::gpuballot_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuballot_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuballot_to_msgpack(MsgpackWriter &w_, const Spec::GpuBallot &x_) {
+  w_.writeArrayHeader(2);
+  Spec::gpuballot_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuVoteAny Spec::gpuvoteany_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Spec::GpuVoteAny with 2 field(s)");
+  auto mask = Term::any_from_msgpack(r_);
+  auto pred = Term::any_from_msgpack(r_);
+  return {mask, pred};
+}
+
+void Spec::gpuvoteany_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuVoteAny &x_) {
+  Term::any_to_msgpack(w_, x_.mask);
+  Term::any_to_msgpack(w_, x_.pred);
+}
+
+Spec::GpuVoteAny Spec::gpuvoteany_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuvoteany_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuvoteany_to_msgpack(MsgpackWriter &w_, const Spec::GpuVoteAny &x_) {
+  w_.writeArrayHeader(2);
+  Spec::gpuvoteany_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuVoteAll Spec::gpuvoteall_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Spec::GpuVoteAll with 2 field(s)");
+  auto mask = Term::any_from_msgpack(r_);
+  auto pred = Term::any_from_msgpack(r_);
+  return {mask, pred};
+}
+
+void Spec::gpuvoteall_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuVoteAll &x_) {
+  Term::any_to_msgpack(w_, x_.mask);
+  Term::any_to_msgpack(w_, x_.pred);
+}
+
+Spec::GpuVoteAll Spec::gpuvoteall_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuvoteall_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuvoteall_to_msgpack(MsgpackWriter &w_, const Spec::GpuVoteAll &x_) {
+  w_.writeArrayHeader(2);
+  Spec::gpuvoteall_fields_to_msgpack(w_, x_);
+}
+
 Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -5790,6 +6208,16 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 10: return Spec::gpugroupsize_fields_from_msgpack(r_, n_ - 1);
       case 11: return Spec::gpulocalidx_fields_from_msgpack(r_, n_ - 1);
       case 12: return Spec::gpulocalsize_fields_from_msgpack(r_, n_ - 1);
+      case 13: return Spec::gpulaneidx_fields_from_msgpack(r_, n_ - 1);
+      case 14: return Spec::gpusubgroupsize_fields_from_msgpack(r_, n_ - 1);
+      case 15: return Spec::gpushuffledown_fields_from_msgpack(r_, n_ - 1);
+      case 16: return Spec::gpushuffleup_fields_from_msgpack(r_, n_ - 1);
+      case 17: return Spec::gpushuffleidx_fields_from_msgpack(r_, n_ - 1);
+      case 18: return Spec::gpushufflexor_fields_from_msgpack(r_, n_ - 1);
+      case 19: return Spec::gpusubgroupbarrier_fields_from_msgpack(r_, n_ - 1);
+      case 20: return Spec::gpuballot_fields_from_msgpack(r_, n_ - 1);
+      case 21: return Spec::gpuvoteany_fields_from_msgpack(r_, n_ - 1);
+      case 22: return Spec::gpuvoteall_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -5808,6 +6236,16 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 10: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 11: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 12: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 13: return Spec::gpulaneidx_fields_from_msgpack(r_, 0);
+      case 14: return Spec::gpusubgroupsize_fields_from_msgpack(r_, 0);
+      case 15: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 16: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 17: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 18: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 19: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 20: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 21: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 22: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -5853,6 +6291,47 @@ void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         w_.writeArrayHeader(2);
         w_.writeInt32(12);
         Spec::gpulocalsize_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuLaneIdx &y_) -> void { w_.writeInt32(13); }, [&](const Spec::GpuSubgroupSize &y_) -> void { w_.writeInt32(14); },
+      [&](const Spec::GpuShuffleDown &y_) -> void {
+        w_.writeArrayHeader(6);
+        w_.writeInt32(15);
+        Spec::gpushuffledown_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuShuffleUp &y_) -> void {
+        w_.writeArrayHeader(6);
+        w_.writeInt32(16);
+        Spec::gpushuffleup_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuShuffleIdx &y_) -> void {
+        w_.writeArrayHeader(6);
+        w_.writeInt32(17);
+        Spec::gpushuffleidx_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuShuffleXor &y_) -> void {
+        w_.writeArrayHeader(6);
+        w_.writeInt32(18);
+        Spec::gpushufflexor_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuSubgroupBarrier &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(19);
+        Spec::gpusubgroupbarrier_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuBallot &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(20);
+        Spec::gpuballot_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuVoteAny &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(21);
+        Spec::gpuvoteany_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuVoteAll &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(22);
+        Spec::gpuvoteall_fields_to_msgpack(w_, y_);
       });
 }
 

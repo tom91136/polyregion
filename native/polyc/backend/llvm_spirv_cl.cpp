@@ -124,6 +124,7 @@ constexpr uint32_t CrossWorkgroupMemory = 0x200;
 } // namespace SpvMemSem
 namespace SpvScope {
 constexpr uint32_t Workgroup = 2;
+constexpr uint32_t Subgroup = 3;
 } // namespace SpvScope
 
 struct OclMangledMath {
@@ -188,6 +189,10 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
   auto fence = [&](const AnyType &tpe, uint32_t memSem) -> ValPtr {
     return callOcl(cg, MEMORY_BARRIER, tpe, {u32(SpvScope::Workgroup), u32(memSem | SpvMemSem::AcquireRelease)});
   };
+  auto subgroupBarrier = [&]() -> ValPtr {
+    const auto scope = u32(SpvScope::Subgroup);
+    return callOcl(cg, CONTROL_BARRIER, Type::Unit0(), {scope, scope, u32(SpvMemSem::WorkgroupMemory | SpvMemSem::AcquireRelease)});
+  };
 
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },
@@ -202,7 +207,25 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuBarrierAll &v) -> ValPtr { return barrier(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); },
       [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::CrossWorkgroupMemory); },
       [&](const Spec::GpuFenceLocal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory); },
-      [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); });
+      [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); },
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
+        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleDown &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleXor &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return subgroupBarrier(); },
+      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   OclMangledMath m{cg};
@@ -262,7 +285,27 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuBarrierAll &) -> ValPtr { return groupBarrier(); },
       [&](const Spec::GpuFenceGlobal &) -> ValPtr { return groupBarrier(); },
       [&](const Spec::GpuFenceLocal &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(); });
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(); },
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
+        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleDown &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleXor &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr {
+        throw BackendException("Spec::GpuSubgroupBarrier is unsupported for SPIRV-Vulkan");
+      },
+      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
 }
 
 // XXX Vulkan float math uses LLVM intrinsics (GLSL.std.450), the OpenCL.std mangled libcalls crash the Intel driver

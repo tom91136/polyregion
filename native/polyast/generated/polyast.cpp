@@ -1431,6 +1431,253 @@ POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Base &rhs_) const {
 Spec::GpuLocalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalSize>(*this)); }
 Spec::Any Spec::GpuLocalSize::widen() const { return Any(*this); };
 
+Spec::GpuLaneIdx::GpuLaneIdx() noexcept : Spec::Base({Overload({}, Type::IntU32())}, {}, Type::IntU32()) {}
+uint32_t Spec::GpuLaneIdx::id() const { return variant_id; };
+size_t Spec::GpuLaneIdx::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool Spec::GpuLaneIdx::operator==(const Spec::GpuLaneIdx &rhs) const { return true; }
+POLYREGION_EXPORT bool Spec::GpuLaneIdx::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+Spec::GpuLaneIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLaneIdx>(*this)); }
+Spec::Any Spec::GpuLaneIdx::widen() const { return Any(*this); };
+
+Spec::GpuSubgroupSize::GpuSubgroupSize() noexcept : Spec::Base({Overload({}, Type::IntU32())}, {}, Type::IntU32()) {}
+uint32_t Spec::GpuSubgroupSize::id() const { return variant_id; };
+size_t Spec::GpuSubgroupSize::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool Spec::GpuSubgroupSize::operator==(const Spec::GpuSubgroupSize &rhs) const { return true; }
+POLYREGION_EXPORT bool Spec::GpuSubgroupSize::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+Spec::GpuSubgroupSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuSubgroupSize>(*this)); }
+Spec::Any Spec::GpuSubgroupSize::widen() const { return Any(*this); };
+
+Spec::GpuShuffleDown::GpuShuffleDown(Term::Any value, Term::Any delta, Term::Any width, Term::Any mask, Type::Any rtn) noexcept
+    : Spec::Base({}, {value, delta, width, mask}, rtn), value(std::move(value)), delta(std::move(delta)), width(std::move(width)),
+      mask(std::move(mask)), rtn(std::move(rtn)) {}
+uint32_t Spec::GpuShuffleDown::id() const { return variant_id; };
+size_t Spec::GpuShuffleDown::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(delta)>()(delta) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuShuffleDown Spec::GpuShuffleDown::withValue(const Term::Any &v_) const {
+  return Spec::GpuShuffleDown(v_, delta, width, mask, rtn);
+}
+Spec::GpuShuffleDown Spec::GpuShuffleDown::withDelta(const Term::Any &v_) const {
+  return Spec::GpuShuffleDown(value, v_, width, mask, rtn);
+}
+Spec::GpuShuffleDown Spec::GpuShuffleDown::withWidth(const Term::Any &v_) const {
+  return Spec::GpuShuffleDown(value, delta, v_, mask, rtn);
+}
+Spec::GpuShuffleDown Spec::GpuShuffleDown::withMask(const Term::Any &v_) const {
+  return Spec::GpuShuffleDown(value, delta, width, v_, rtn);
+}
+Spec::GpuShuffleDown Spec::GpuShuffleDown::withRtn(const Type::Any &v_) const {
+  return Spec::GpuShuffleDown(value, delta, width, mask, v_);
+}
+POLYREGION_EXPORT bool Spec::GpuShuffleDown::operator==(const Spec::GpuShuffleDown &rhs) const {
+  return (this->value == rhs.value) && (this->delta == rhs.delta) && (this->width == rhs.width) && (this->mask == rhs.mask)
+         && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Spec::GpuShuffleDown::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuShuffleDown &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuShuffleDown::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuShuffleDown>(*this)); }
+Spec::Any Spec::GpuShuffleDown::widen() const { return Any(*this); };
+
+Spec::GpuShuffleUp::GpuShuffleUp(Term::Any value, Term::Any delta, Term::Any width, Term::Any mask, Type::Any rtn) noexcept
+    : Spec::Base({}, {value, delta, width, mask}, rtn), value(std::move(value)), delta(std::move(delta)), width(std::move(width)),
+      mask(std::move(mask)), rtn(std::move(rtn)) {}
+uint32_t Spec::GpuShuffleUp::id() const { return variant_id; };
+size_t Spec::GpuShuffleUp::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(delta)>()(delta) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuShuffleUp Spec::GpuShuffleUp::withValue(const Term::Any &v_) const { return Spec::GpuShuffleUp(v_, delta, width, mask, rtn); }
+Spec::GpuShuffleUp Spec::GpuShuffleUp::withDelta(const Term::Any &v_) const { return Spec::GpuShuffleUp(value, v_, width, mask, rtn); }
+Spec::GpuShuffleUp Spec::GpuShuffleUp::withWidth(const Term::Any &v_) const { return Spec::GpuShuffleUp(value, delta, v_, mask, rtn); }
+Spec::GpuShuffleUp Spec::GpuShuffleUp::withMask(const Term::Any &v_) const { return Spec::GpuShuffleUp(value, delta, width, v_, rtn); }
+Spec::GpuShuffleUp Spec::GpuShuffleUp::withRtn(const Type::Any &v_) const { return Spec::GpuShuffleUp(value, delta, width, mask, v_); }
+POLYREGION_EXPORT bool Spec::GpuShuffleUp::operator==(const Spec::GpuShuffleUp &rhs) const {
+  return (this->value == rhs.value) && (this->delta == rhs.delta) && (this->width == rhs.width) && (this->mask == rhs.mask)
+         && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Spec::GpuShuffleUp::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuShuffleUp &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuShuffleUp::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuShuffleUp>(*this)); }
+Spec::Any Spec::GpuShuffleUp::widen() const { return Any(*this); };
+
+Spec::GpuShuffleIdx::GpuShuffleIdx(Term::Any value, Term::Any srcLane, Term::Any width, Term::Any mask, Type::Any rtn) noexcept
+    : Spec::Base({}, {value, srcLane, width, mask}, rtn), value(std::move(value)), srcLane(std::move(srcLane)), width(std::move(width)),
+      mask(std::move(mask)), rtn(std::move(rtn)) {}
+uint32_t Spec::GpuShuffleIdx::id() const { return variant_id; };
+size_t Spec::GpuShuffleIdx::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(srcLane)>()(srcLane) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuShuffleIdx Spec::GpuShuffleIdx::withValue(const Term::Any &v_) const { return Spec::GpuShuffleIdx(v_, srcLane, width, mask, rtn); }
+Spec::GpuShuffleIdx Spec::GpuShuffleIdx::withSrcLane(const Term::Any &v_) const { return Spec::GpuShuffleIdx(value, v_, width, mask, rtn); }
+Spec::GpuShuffleIdx Spec::GpuShuffleIdx::withWidth(const Term::Any &v_) const { return Spec::GpuShuffleIdx(value, srcLane, v_, mask, rtn); }
+Spec::GpuShuffleIdx Spec::GpuShuffleIdx::withMask(const Term::Any &v_) const { return Spec::GpuShuffleIdx(value, srcLane, width, v_, rtn); }
+Spec::GpuShuffleIdx Spec::GpuShuffleIdx::withRtn(const Type::Any &v_) const { return Spec::GpuShuffleIdx(value, srcLane, width, mask, v_); }
+POLYREGION_EXPORT bool Spec::GpuShuffleIdx::operator==(const Spec::GpuShuffleIdx &rhs) const {
+  return (this->value == rhs.value) && (this->srcLane == rhs.srcLane) && (this->width == rhs.width) && (this->mask == rhs.mask)
+         && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Spec::GpuShuffleIdx::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuShuffleIdx &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuShuffleIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuShuffleIdx>(*this)); }
+Spec::Any Spec::GpuShuffleIdx::widen() const { return Any(*this); };
+
+Spec::GpuShuffleXor::GpuShuffleXor(Term::Any value, Term::Any laneMask, Term::Any width, Term::Any mask, Type::Any rtn) noexcept
+    : Spec::Base({}, {value, laneMask, width, mask}, rtn), value(std::move(value)), laneMask(std::move(laneMask)), width(std::move(width)),
+      mask(std::move(mask)), rtn(std::move(rtn)) {}
+uint32_t Spec::GpuShuffleXor::id() const { return variant_id; };
+size_t Spec::GpuShuffleXor::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(laneMask)>()(laneMask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(width)>()(width) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuShuffleXor Spec::GpuShuffleXor::withValue(const Term::Any &v_) const {
+  return Spec::GpuShuffleXor(v_, laneMask, width, mask, rtn);
+}
+Spec::GpuShuffleXor Spec::GpuShuffleXor::withLaneMask(const Term::Any &v_) const {
+  return Spec::GpuShuffleXor(value, v_, width, mask, rtn);
+}
+Spec::GpuShuffleXor Spec::GpuShuffleXor::withWidth(const Term::Any &v_) const {
+  return Spec::GpuShuffleXor(value, laneMask, v_, mask, rtn);
+}
+Spec::GpuShuffleXor Spec::GpuShuffleXor::withMask(const Term::Any &v_) const {
+  return Spec::GpuShuffleXor(value, laneMask, width, v_, rtn);
+}
+Spec::GpuShuffleXor Spec::GpuShuffleXor::withRtn(const Type::Any &v_) const {
+  return Spec::GpuShuffleXor(value, laneMask, width, mask, v_);
+}
+POLYREGION_EXPORT bool Spec::GpuShuffleXor::operator==(const Spec::GpuShuffleXor &rhs) const {
+  return (this->value == rhs.value) && (this->laneMask == rhs.laneMask) && (this->width == rhs.width) && (this->mask == rhs.mask)
+         && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Spec::GpuShuffleXor::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuShuffleXor &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuShuffleXor::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuShuffleXor>(*this)); }
+Spec::Any Spec::GpuShuffleXor::widen() const { return Any(*this); };
+
+Spec::GpuSubgroupBarrier::GpuSubgroupBarrier(Term::Any mask) noexcept
+    : Spec::Base({Overload({Type::IntU32()}, Type::Unit0())}, {mask}, Type::Unit0()), mask(std::move(mask)) {}
+uint32_t Spec::GpuSubgroupBarrier::id() const { return variant_id; };
+size_t Spec::GpuSubgroupBarrier::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuSubgroupBarrier Spec::GpuSubgroupBarrier::withMask(const Term::Any &v_) const { return Spec::GpuSubgroupBarrier(v_); }
+POLYREGION_EXPORT bool Spec::GpuSubgroupBarrier::operator==(const Spec::GpuSubgroupBarrier &rhs) const { return (this->mask == rhs.mask); }
+POLYREGION_EXPORT bool Spec::GpuSubgroupBarrier::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuSubgroupBarrier &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuSubgroupBarrier::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuSubgroupBarrier>(*this)); }
+Spec::Any Spec::GpuSubgroupBarrier::widen() const { return Any(*this); };
+
+Spec::GpuBallot::GpuBallot(Term::Any mask, Term::Any pred) noexcept
+    : Spec::Base({Overload({Type::IntU32(), Type::Bool1()}, Type::IntU32())}, {mask, pred}, Type::IntU32()), mask(std::move(mask)),
+      pred(std::move(pred)) {}
+uint32_t Spec::GpuBallot::id() const { return variant_id; };
+size_t Spec::GpuBallot::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuBallot Spec::GpuBallot::withMask(const Term::Any &v_) const { return Spec::GpuBallot(v_, pred); }
+Spec::GpuBallot Spec::GpuBallot::withPred(const Term::Any &v_) const { return Spec::GpuBallot(mask, v_); }
+POLYREGION_EXPORT bool Spec::GpuBallot::operator==(const Spec::GpuBallot &rhs) const {
+  return (this->mask == rhs.mask) && (this->pred == rhs.pred);
+}
+POLYREGION_EXPORT bool Spec::GpuBallot::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuBallot &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuBallot::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBallot>(*this)); }
+Spec::Any Spec::GpuBallot::widen() const { return Any(*this); };
+
+Spec::GpuVoteAny::GpuVoteAny(Term::Any mask, Term::Any pred) noexcept
+    : Spec::Base({Overload({Type::IntU32(), Type::Bool1()}, Type::Bool1())}, {mask, pred}, Type::Bool1()), mask(std::move(mask)),
+      pred(std::move(pred)) {}
+uint32_t Spec::GpuVoteAny::id() const { return variant_id; };
+size_t Spec::GpuVoteAny::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuVoteAny Spec::GpuVoteAny::withMask(const Term::Any &v_) const { return Spec::GpuVoteAny(v_, pred); }
+Spec::GpuVoteAny Spec::GpuVoteAny::withPred(const Term::Any &v_) const { return Spec::GpuVoteAny(mask, v_); }
+POLYREGION_EXPORT bool Spec::GpuVoteAny::operator==(const Spec::GpuVoteAny &rhs) const {
+  return (this->mask == rhs.mask) && (this->pred == rhs.pred);
+}
+POLYREGION_EXPORT bool Spec::GpuVoteAny::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuVoteAny &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuVoteAny::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVoteAny>(*this)); }
+Spec::Any Spec::GpuVoteAny::widen() const { return Any(*this); };
+
+Spec::GpuVoteAll::GpuVoteAll(Term::Any mask, Term::Any pred) noexcept
+    : Spec::Base({Overload({Type::IntU32(), Type::Bool1()}, Type::Bool1())}, {mask, pred}, Type::Bool1()), mask(std::move(mask)),
+      pred(std::move(pred)) {}
+uint32_t Spec::GpuVoteAll::id() const { return variant_id; };
+size_t Spec::GpuVoteAll::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(mask)>()(mask) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(pred)>()(pred) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuVoteAll Spec::GpuVoteAll::withMask(const Term::Any &v_) const { return Spec::GpuVoteAll(v_, pred); }
+Spec::GpuVoteAll Spec::GpuVoteAll::withPred(const Term::Any &v_) const { return Spec::GpuVoteAll(mask, v_); }
+POLYREGION_EXPORT bool Spec::GpuVoteAll::operator==(const Spec::GpuVoteAll &rhs) const {
+  return (this->mask == rhs.mask) && (this->pred == rhs.pred);
+}
+POLYREGION_EXPORT bool Spec::GpuVoteAll::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuVoteAll &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuVoteAll::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVoteAll>(*this)); }
+Spec::Any Spec::GpuVoteAll::widen() const { return Any(*this); };
+
 Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept
     : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Intr::Any::id() const { return _v->id(); }
@@ -3857,6 +4104,42 @@ std::size_t std::hash<polyregion::polyast::Spec::GpuLocalIdx>::operator()(const 
 }
 std::size_t
 std::hash<polyregion::polyast::Spec::GpuLocalSize>::operator()(const polyregion::polyast::Spec::GpuLocalSize &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuLaneIdx>::operator()(const polyregion::polyast::Spec::GpuLaneIdx &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuSubgroupSize>::operator()(const polyregion::polyast::Spec::GpuSubgroupSize &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuShuffleDown>::operator()(const polyregion::polyast::Spec::GpuShuffleDown &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuShuffleUp>::operator()(const polyregion::polyast::Spec::GpuShuffleUp &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuShuffleIdx>::operator()(const polyregion::polyast::Spec::GpuShuffleIdx &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuShuffleXor>::operator()(const polyregion::polyast::Spec::GpuShuffleXor &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuSubgroupBarrier>::operator()(
+    const polyregion::polyast::Spec::GpuSubgroupBarrier &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuBallot>::operator()(const polyregion::polyast::Spec::GpuBallot &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuVoteAny>::operator()(const polyregion::polyast::Spec::GpuVoteAny &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuVoteAll>::operator()(const polyregion::polyast::Spec::GpuVoteAll &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Intr::Any>::operator()(const polyregion::polyast::Intr::Any &x) const noexcept {

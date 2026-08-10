@@ -43,6 +43,7 @@ object PassRegistry {
     PassDef.singleton(MonoStruct),
     PassDef.singleton(Specialisation),
     PassDef.singleton(KernelCaptureFlatten),
+    PassDef.configured(SubgroupLower()),
     PassDef.configured(VerifyAnchors()),
     PassDef.singleton(ArenaLower),
     PassDef.singleton(ArenaView),

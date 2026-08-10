@@ -3765,6 +3765,431 @@ struct POLYREGION_EXPORT GpuLocalSize : Spec::Base {
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
+
+struct POLYREGION_EXPORT GpuLaneIdx : Spec::Base {
+  constexpr static uint32_t variant_id = 13;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuLaneIdx>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuLaneIdx modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuLaneIdx>) {
+      return f(*this);
+    }
+    return Spec::GpuLaneIdx();
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuLaneIdx &) const;
+  GpuLaneIdx() noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuSubgroupSize : Spec::Base {
+  constexpr static uint32_t variant_id = 14;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuSubgroupSize>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuSubgroupSize modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuSubgroupSize>) {
+      return f(*this);
+    }
+    return Spec::GpuSubgroupSize();
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuSubgroupSize &) const;
+  GpuSubgroupSize() noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuShuffleDown : Spec::Base {
+  Term::Any value;
+  Term::Any delta;
+  Term::Any width;
+  Term::Any mask;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 15;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleDown withValue(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleDown withDelta(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleDown withWidth(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleDown withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleDown withRtn(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleDown>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    value.collect_where<T, U>(results_, f);
+    delta.collect_where<T, U>(results_, f);
+    width.collect_where<T, U>(results_, f);
+    mask.collect_where<T, U>(results_, f);
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuShuffleDown modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleDown>) {
+      return f(*this);
+    }
+    return Spec::GpuShuffleDown(value.modify_all<T>(f), delta.modify_all<T>(f), width.modify_all<T>(f), mask.modify_all<T>(f),
+                                rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuShuffleDown &) const;
+  GpuShuffleDown(Term::Any value, Term::Any delta, Term::Any width, Term::Any mask, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuShuffleUp : Spec::Base {
+  Term::Any value;
+  Term::Any delta;
+  Term::Any width;
+  Term::Any mask;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 16;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleUp withValue(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleUp withDelta(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleUp withWidth(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleUp withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleUp withRtn(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleUp>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    value.collect_where<T, U>(results_, f);
+    delta.collect_where<T, U>(results_, f);
+    width.collect_where<T, U>(results_, f);
+    mask.collect_where<T, U>(results_, f);
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuShuffleUp modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleUp>) {
+      return f(*this);
+    }
+    return Spec::GpuShuffleUp(value.modify_all<T>(f), delta.modify_all<T>(f), width.modify_all<T>(f), mask.modify_all<T>(f),
+                              rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuShuffleUp &) const;
+  GpuShuffleUp(Term::Any value, Term::Any delta, Term::Any width, Term::Any mask, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuShuffleIdx : Spec::Base {
+  Term::Any value;
+  Term::Any srcLane;
+  Term::Any width;
+  Term::Any mask;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 17;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleIdx withValue(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleIdx withSrcLane(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleIdx withWidth(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleIdx withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleIdx withRtn(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleIdx>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    value.collect_where<T, U>(results_, f);
+    srcLane.collect_where<T, U>(results_, f);
+    width.collect_where<T, U>(results_, f);
+    mask.collect_where<T, U>(results_, f);
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuShuffleIdx modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleIdx>) {
+      return f(*this);
+    }
+    return Spec::GpuShuffleIdx(value.modify_all<T>(f), srcLane.modify_all<T>(f), width.modify_all<T>(f), mask.modify_all<T>(f),
+                               rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuShuffleIdx &) const;
+  GpuShuffleIdx(Term::Any value, Term::Any srcLane, Term::Any width, Term::Any mask, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuShuffleXor : Spec::Base {
+  Term::Any value;
+  Term::Any laneMask;
+  Term::Any width;
+  Term::Any mask;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 18;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleXor withValue(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleXor withLaneMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleXor withWidth(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleXor withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleXor withRtn(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleXor>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    value.collect_where<T, U>(results_, f);
+    laneMask.collect_where<T, U>(results_, f);
+    width.collect_where<T, U>(results_, f);
+    mask.collect_where<T, U>(results_, f);
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuShuffleXor modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuShuffleXor>) {
+      return f(*this);
+    }
+    return Spec::GpuShuffleXor(value.modify_all<T>(f), laneMask.modify_all<T>(f), width.modify_all<T>(f), mask.modify_all<T>(f),
+                               rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuShuffleXor &) const;
+  GpuShuffleXor(Term::Any value, Term::Any laneMask, Term::Any width, Term::Any mask, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuSubgroupBarrier : Spec::Base {
+  Term::Any mask;
+  constexpr static uint32_t variant_id = 19;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuSubgroupBarrier withMask(const Term::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuSubgroupBarrier>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    mask.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuSubgroupBarrier modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuSubgroupBarrier>) {
+      return f(*this);
+    }
+    return Spec::GpuSubgroupBarrier(mask.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuSubgroupBarrier &) const;
+  explicit GpuSubgroupBarrier(Term::Any mask) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuBallot : Spec::Base {
+  Term::Any mask;
+  Term::Any pred;
+  constexpr static uint32_t variant_id = 20;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuBallot withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuBallot withPred(const Term::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuBallot>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    mask.collect_where<T, U>(results_, f);
+    pred.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuBallot modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuBallot>) {
+      return f(*this);
+    }
+    return Spec::GpuBallot(mask.modify_all<T>(f), pred.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuBallot &) const;
+  GpuBallot(Term::Any mask, Term::Any pred) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuVoteAny : Spec::Base {
+  Term::Any mask;
+  Term::Any pred;
+  constexpr static uint32_t variant_id = 21;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAny withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAny withPred(const Term::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuVoteAny>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    mask.collect_where<T, U>(results_, f);
+    pred.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuVoteAny modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuVoteAny>) {
+      return f(*this);
+    }
+    return Spec::GpuVoteAny(mask.modify_all<T>(f), pred.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuVoteAny &) const;
+  GpuVoteAny(Term::Any mask, Term::Any pred) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
+struct POLYREGION_EXPORT GpuVoteAll : Spec::Base {
+  Term::Any mask;
+  Term::Any pred;
+  constexpr static uint32_t variant_id = 22;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAll withMask(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAll withPred(const Term::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuVoteAll>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    mask.collect_where<T, U>(results_, f);
+    pred.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT GpuVoteAll modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, GpuVoteAll>) {
+      return f(*this);
+    }
+    return Spec::GpuVoteAll(mask.modify_all<T>(f), pred.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::GpuVoteAll &) const;
+  GpuVoteAll(Term::Any mask, Term::Any pred) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
 } // namespace Spec
 namespace Intr {
 
@@ -8350,7 +8775,8 @@ POLYREGION_EXPORT polyregion::polyast::Expr::Any polyregion::polyast::Expr::Any:
 }
 namespace polyregion::polyast::Spec {
 using All = alternatives<Assert, GpuBarrierGlobal, GpuBarrierLocal, GpuBarrierAll, GpuFenceGlobal, GpuFenceLocal, GpuFenceAll, GpuGlobalIdx,
-                         GpuGlobalSize, GpuGroupIdx, GpuGroupSize, GpuLocalIdx, GpuLocalSize>;
+                         GpuGlobalSize, GpuGroupIdx, GpuGroupSize, GpuLocalIdx, GpuLocalSize, GpuLaneIdx, GpuSubgroupSize, GpuShuffleDown,
+                         GpuShuffleUp, GpuShuffleIdx, GpuShuffleXor, GpuSubgroupBarrier, GpuBallot, GpuVoteAny, GpuVoteAll>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Spec::Any::is() const {
   static_assert((polyregion::polyast::Spec::All::contains<T>), "type not part of the variant");
@@ -9337,6 +9763,36 @@ template <> struct hash<polyregion::polyast::Spec::GpuLocalIdx> {
 };
 template <> struct hash<polyregion::polyast::Spec::GpuLocalSize> {
   std::size_t operator()(const polyregion::polyast::Spec::GpuLocalSize &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuLaneIdx> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuLaneIdx &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuSubgroupSize> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuSubgroupSize &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuShuffleDown> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuShuffleDown &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuShuffleUp> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuShuffleUp &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuShuffleIdx> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuShuffleIdx &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuShuffleXor> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuShuffleXor &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuSubgroupBarrier> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuSubgroupBarrier &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuBallot> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuBallot &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuVoteAny> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuVoteAny &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Spec::GpuVoteAll> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuVoteAll &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Intr::Any> {
   std::size_t operator()(const polyregion::polyast::Intr::Any &) const noexcept;

@@ -101,7 +101,28 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x), //
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_y), //
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_z));
-      });
+      },
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
+        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleDown &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuShuffleXor &) -> ValPtr {
+        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
+      },
+      [&](const Spec::GpuSubgroupBarrier &v) -> ValPtr {
+        return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}),
+                               cg.mkTermVal(v.mask));
+      },
+      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
 }
 
 void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {

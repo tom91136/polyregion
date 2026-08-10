@@ -259,6 +259,36 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Spec::GpuLocalSize>()) {
           return fmt::format("'gpuLocalSize({})", repr(_z->dim));
         }
+        if (_x->op.is<Spec::GpuLaneIdx>()) {
+          return "'gpuLaneIdx"s;
+        }
+        if (_x->op.is<Spec::GpuSubgroupSize>()) {
+          return "'gpuSubgroupSize"s;
+        }
+        if (auto _z = _x->op.get<Spec::GpuShuffleDown>()) {
+          return fmt::format("'gpuShuffleDown({}, {}, {}, {})", repr(_z->value), repr(_z->delta), repr(_z->width), repr(_z->mask));
+        }
+        if (auto _z = _x->op.get<Spec::GpuShuffleUp>()) {
+          return fmt::format("'gpuShuffleUp({}, {}, {}, {})", repr(_z->value), repr(_z->delta), repr(_z->width), repr(_z->mask));
+        }
+        if (auto _z = _x->op.get<Spec::GpuShuffleIdx>()) {
+          return fmt::format("'gpuShuffleIdx({}, {}, {}, {})", repr(_z->value), repr(_z->srcLane), repr(_z->width), repr(_z->mask));
+        }
+        if (auto _z = _x->op.get<Spec::GpuShuffleXor>()) {
+          return fmt::format("'gpuShuffleXor({}, {}, {}, {})", repr(_z->value), repr(_z->laneMask), repr(_z->width), repr(_z->mask));
+        }
+        if (auto _z = _x->op.get<Spec::GpuSubgroupBarrier>()) {
+          return fmt::format("'gpuSubgroupBarrier({})", repr(_z->mask));
+        }
+        if (auto _z = _x->op.get<Spec::GpuBallot>()) {
+          return fmt::format("'gpuBallot({}, {})", repr(_z->mask), repr(_z->pred));
+        }
+        if (auto _z = _x->op.get<Spec::GpuVoteAny>()) {
+          return fmt::format("'gpuVoteAny({}, {})", repr(_z->mask), repr(_z->pred));
+        }
+        if (auto _z = _x->op.get<Spec::GpuVoteAll>()) {
+          return fmt::format("'gpuVoteAll({}, {})", repr(_z->mask), repr(_z->pred));
+        }
 
         throw std::logic_error(fmt::format("Unhandled match case for _x->op (of type Spec::Any) at {}:{})", __FILE__, __LINE__));
       }();

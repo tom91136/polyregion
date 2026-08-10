@@ -178,12 +178,14 @@ object PolyAST {
     case Rethrow
   }
 
-  case class Overload(args: List[Type], rtn: Type) derives MsgPack.Codec
+  case class Overload(args: List[Type] = Nil, rtn: Type = Type.Nothing) derives MsgPack.Codec
 
   object Spec {
     inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
+    inline def NullaryU32  = List(Overload(List[Type](), Type.IntU32))
     inline def AssertSig   = List(Overload(List(Type.IntU32, Type.Ptr(Type.IntS8, Type.Space.Constant)), Type.Unit0))
+    inline def Unchecked   = List[Overload]()
   }
   enum Spec(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
     case Assert(code: Term, message: Term) extends Spec(Spec.AssertSig, List(code, message), Type.Unit0)
@@ -199,6 +201,24 @@ object PolyAST {
     case GpuGroupSize(dim: Term)           extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
     case GpuLocalIdx(dim: Term)            extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
     case GpuLocalSize(dim: Term)           extends Spec(Spec.GpuIndex, List(dim), Type.IntU32)
+    case GpuLaneIdx                        extends Spec(Spec.NullaryU32, List[Term](), Type.IntU32)
+    case GpuSubgroupSize                   extends Spec(Spec.NullaryU32, List[Term](), Type.IntU32)
+    case GpuShuffleDown(value: Term, delta: Term, width: Term, mask: Term, rtn: Type)
+        extends Spec(Spec.Unchecked, List(value, delta, width, mask), rtn)
+    case GpuShuffleUp(value: Term, delta: Term, width: Term, mask: Term, rtn: Type)
+        extends Spec(Spec.Unchecked, List(value, delta, width, mask), rtn)
+    case GpuShuffleIdx(value: Term, srcLane: Term, width: Term, mask: Term, rtn: Type)
+        extends Spec(Spec.Unchecked, List(value, srcLane, width, mask), rtn)
+    case GpuShuffleXor(value: Term, laneMask: Term, width: Term, mask: Term, rtn: Type)
+        extends Spec(Spec.Unchecked, List(value, laneMask, width, mask), rtn)
+    case GpuSubgroupBarrier(mask: Term)
+        extends Spec(List(Overload(List(Type.IntU32), Type.Unit0)), List(mask), Type.Unit0)
+    case GpuBallot(mask: Term, pred: Term)
+        extends Spec(List(Overload(List(Type.IntU32, Type.Bool1), Type.IntU32)), List(mask, pred), Type.IntU32)
+    case GpuVoteAny(mask: Term, pred: Term)
+        extends Spec(List(Overload(List(Type.IntU32, Type.Bool1), Type.Bool1)), List(mask, pred), Type.Bool1)
+    case GpuVoteAll(mask: Term, pred: Term)
+        extends Spec(List(Overload(List(Type.IntU32, Type.Bool1), Type.Bool1)), List(mask, pred), Type.Bool1)
   }
 
   object Intr {
@@ -835,19 +855,29 @@ object PolyAST {
       case Expr.Alias(ref) => ref.repr
       case Expr.SpecOp(op) =>
         op match {
-          case Spec.Assert(code, msg)  => s"'assert(${code.repr}, ${msg.repr})"
-          case Spec.GpuBarrierGlobal   => "'gpuBarrierGlobal"
-          case Spec.GpuBarrierLocal    => "'gpuBarrierLocal"
-          case Spec.GpuBarrierAll      => "'gpuBarrierAll"
-          case Spec.GpuFenceGlobal     => "'gpuFenceGlobal"
-          case Spec.GpuFenceLocal      => "'gpuFenceLocal"
-          case Spec.GpuFenceAll        => "'gpuFenceAll"
-          case Spec.GpuGlobalIdx(dim)  => s"'gpuGlobalIdx(${dim.repr})"
-          case Spec.GpuGlobalSize(dim) => s"'gpuGlobalSize(${dim.repr})"
-          case Spec.GpuGroupIdx(dim)   => s"'gpuGroupIdx(${dim.repr})"
-          case Spec.GpuGroupSize(dim)  => s"'gpuGroupSize(${dim.repr})"
-          case Spec.GpuLocalIdx(dim)   => s"'gpuLocalIdx(${dim.repr})"
-          case Spec.GpuLocalSize(dim)  => s"'gpuLocalSize(${dim.repr})"
+          case Spec.Assert(code, msg)             => s"'assert(${code.repr}, ${msg.repr})"
+          case Spec.GpuBarrierGlobal              => "'gpuBarrierGlobal"
+          case Spec.GpuBarrierLocal               => "'gpuBarrierLocal"
+          case Spec.GpuBarrierAll                 => "'gpuBarrierAll"
+          case Spec.GpuFenceGlobal                => "'gpuFenceGlobal"
+          case Spec.GpuFenceLocal                 => "'gpuFenceLocal"
+          case Spec.GpuFenceAll                   => "'gpuFenceAll"
+          case Spec.GpuGlobalIdx(dim)             => s"'gpuGlobalIdx(${dim.repr})"
+          case Spec.GpuGlobalSize(dim)            => s"'gpuGlobalSize(${dim.repr})"
+          case Spec.GpuGroupIdx(dim)              => s"'gpuGroupIdx(${dim.repr})"
+          case Spec.GpuGroupSize(dim)             => s"'gpuGroupSize(${dim.repr})"
+          case Spec.GpuLocalIdx(dim)              => s"'gpuLocalIdx(${dim.repr})"
+          case Spec.GpuLocalSize(dim)             => s"'gpuLocalSize(${dim.repr})"
+          case Spec.GpuLaneIdx                    => "'gpuLaneIdx"
+          case Spec.GpuSubgroupSize               => "'gpuSubgroupSize"
+          case Spec.GpuShuffleDown(v, d, w, m, _) => s"'gpuShuffleDown(${v.repr}, ${d.repr}, ${w.repr}, ${m.repr})"
+          case Spec.GpuShuffleUp(v, d, w, m, _)   => s"'gpuShuffleUp(${v.repr}, ${d.repr}, ${w.repr}, ${m.repr})"
+          case Spec.GpuShuffleIdx(v, s, w, m, _)  => s"'gpuShuffleIdx(${v.repr}, ${s.repr}, ${w.repr}, ${m.repr})"
+          case Spec.GpuShuffleXor(v, l, w, m, _)  => s"'gpuShuffleXor(${v.repr}, ${l.repr}, ${w.repr}, ${m.repr})"
+          case Spec.GpuSubgroupBarrier(m)         => s"'gpuSubgroupBarrier(${m.repr})"
+          case Spec.GpuBallot(m, p)               => s"'gpuBallot(${m.repr}, ${p.repr})"
+          case Spec.GpuVoteAny(m, p)              => s"'gpuVoteAny(${m.repr}, ${p.repr})"
+          case Spec.GpuVoteAll(m, p)              => s"'gpuVoteAll(${m.repr}, ${p.repr})"
         }
       case Expr.MathOp(op) =>
         op match {

@@ -253,6 +253,26 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT json gpulocalidx_to_json(const Spec::GpuLocalIdx &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuLocalSize gpulocalsize_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json gpulocalsize_to_json(const Spec::GpuLocalSize &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuLaneIdx gpulaneidx_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpulaneidx_to_json(const Spec::GpuLaneIdx &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuSubgroupSize gpusubgroupsize_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpusubgroupsize_to_json(const Spec::GpuSubgroupSize &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleDown gpushuffledown_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpushuffledown_to_json(const Spec::GpuShuffleDown &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleUp gpushuffleup_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpushuffleup_to_json(const Spec::GpuShuffleUp &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleIdx gpushuffleidx_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpushuffleidx_to_json(const Spec::GpuShuffleIdx &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuShuffleXor gpushufflexor_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpushufflexor_to_json(const Spec::GpuShuffleXor &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuSubgroupBarrier gpusubgroupbarrier_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpusubgroupbarrier_to_json(const Spec::GpuSubgroupBarrier &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuBallot gpuballot_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuballot_to_json(const Spec::GpuBallot &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAny gpuvoteany_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuvoteany_to_json(const Spec::GpuVoteAny &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAll gpuvoteall_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuvoteall_to_json(const Spec::GpuVoteAll &);
 [[nodiscard]] POLYREGION_EXPORT Spec::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Spec::Any &);
 } // namespace Spec
