@@ -260,6 +260,435 @@ TEST_CASE("C source accounts for workgroup struct storage", "[backend]") {
   CHECK(source.find("sizeof(State) <= (") != std::string::npos);
 }
 
+TEST_CASE("C source specialises pointer-bearing structs by address space", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"});
+  const auto box = Type::Struct(boxSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const auto localStorage = Type::Arr(Type::IntS32(), 0, TypeSpace::Local()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
+      scratch("scratch", localStorage), localBox("localBox", box);
+  const auto member = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
+  const Function entry =
+      mkFn("kernel", {Arg(input, {})}, Type::Unit0(),
+           {
+               Var(value, std::optional<Expr::Any>{}, true).widen(),
+               Var(globalBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
+               Mut(member(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+               Var(privateBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
+               Mut(member(privateBox),
+                   Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque())
+                       .widen())
+                   .widen(),
+               Var(scratch, std::optional<Expr::Any>{}, true).widen(),
+               Var(localBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
+               Mut(member(localBox), Expr::RefTo(Term::Select(scratch, {}, localStorage).widen(), Term::IntS32Const(0).widen(),
+                                                 Type::IntS32(), TypeSpace::Local(), Region::Opaque())
+                                         .widen())
+                   .widen(),
+               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+           },
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  opts.workgroupMemoryBytes = 64;
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("typedef struct Box_asp Box_asp;") != std::string::npos);
+  CHECK(source.find("typedef struct Box_asg Box_asg;") != std::string::npos);
+  CHECK(source.find("global int* ptr;") != std::string::npos);
+  CHECK(source.find("private int* ptr;") != std::string::npos);
+  CHECK(source.find("local int* ptr;") != std::string::npos);
+  CHECK(source.find("Box_asp _v3;") != std::string::npos);
+  CHECK(source.find("Box _v5;") != std::string::npos);
+
+  opts.target = Target::Source_C_Metal1_0;
+  const auto metal = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(metal));
+  REQUIRE(metal.binary != std::nullopt);
+  const std::string metalSource(reinterpret_cast<const char *>(metal.binary->data()), metal.binary->size());
+  CHECK(metalSource.find("thread int32_t* ptr;") != std::string::npos);
+  CHECK(metalSource.find("threadgroup int32_t* ptr;") != std::string::npos);
+  CHECK(metalSource.find("device int32_t* ptr;") != std::string::npos);
+
+  opts.target = Target::Source_C_C11;
+  const auto c11 = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c11));
+  REQUIRE(c11.binary != std::nullopt);
+  const std::string c11Source(reinterpret_cast<const char *>(c11.binary->data()), c11.binary->size());
+  CHECK(c11Source.find("Box_as") == std::string::npos);
+}
+
+TEST_CASE("C source propagates address-space specialisation through stored structs", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"}), wrapperSym = Sym({"Wrapper"});
+  const auto box = Type::Struct(boxSym, {}).widen(), wrapper = Type::Struct(wrapperSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const StructDef wrapperDef(wrapperSym, {}, {Named("#base_Box", box)}, {Type::Struct(boxSym, {})}, false);
+  const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
+      globalWrapper("globalWrapper", wrapper), privateWrapper("privateWrapper", wrapper);
+  const auto ptrMember = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
+  const auto boxMember = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("#base_Box").widen()}, box); };
+  const auto poison = [](const Type::Any &tpe) { return Expr::Alias(Term::Poison(tpe).widen()).widen(); };
+  const Function entry = mkFn("kernel", {Arg(input, {})}, Type::Unit0(),
+                              {
+                                  Var(value, std::optional<Expr::Any>{}, true).widen(),
+                                  Var(globalBox, poison(box), true).widen(),
+                                  Mut(ptrMember(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+                                  Var(privateBox, poison(box), true).widen(),
+                                  Mut(ptrMember(privateBox), Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {},
+                                                                         Type::IntS32(), TypeSpace::Private(), Region::Opaque())
+                                                                 .widen())
+                                      .widen(),
+                                  Var(globalWrapper, poison(wrapper), true).widen(),
+                                  Mut(boxMember(globalWrapper), Expr::Alias(Term::Select(globalBox, {}, box).widen()).widen()).widen(),
+                                  Var(privateWrapper, poison(wrapper), true).widen(),
+                                  Mut(boxMember(privateWrapper), Expr::Alias(Term::Select(privateBox, {}, box).widen()).widen()).widen(),
+                                  Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+                              },
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef, wrapperDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("typedef struct Wrapper_asp Wrapper_asp;") != std::string::npos);
+  CHECK(source.find("Box_asp _base_Box;") != std::string::npos);
+  CHECK(source.find("Wrapper_asp _v5;") != std::string::npos);
+}
+
+TEST_CASE("C source combines nested struct specialisations deterministically", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"}), wrapperSym = Sym({"Wrapper"});
+  const auto box = Type::Struct(boxSym, {}).widen(), wrapper = Type::Struct(wrapperSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const StructDef wrapperDef(wrapperSym, {}, {Named("left", box), Named("right", box)}, {}, false);
+  const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
+      mixed("mixed", wrapper), reversed("reversed", wrapper);
+  const auto ptrMember = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
+  const auto boxMember = [&](const Named &owner, const std::string &name) {
+    return Term::Select(owner, {PathStep::Field(name).widen()}, box);
+  };
+  const auto poison = [](const Type::Any &tpe) { return Expr::Alias(Term::Poison(tpe).widen()).widen(); };
+  const auto copy = [&](const Named &destination, const std::string &member, const Named &source) {
+    return Mut(boxMember(destination, member), Expr::Alias(Term::Select(source, {}, box).widen()).widen()).widen();
+  };
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(globalBox, poison(box), true).widen(),
+       Mut(ptrMember(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+       Var(privateBox, poison(box), true).widen(),
+       Mut(ptrMember(privateBox),
+           Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen())
+           .widen(),
+       Var(mixed, poison(wrapper), true).widen(), copy(mixed, "left", privateBox), copy(mixed, "right", globalBox),
+       Var(reversed, poison(wrapper), true).widen(), copy(reversed, "left", globalBox), copy(reversed, "right", privateBox),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef, wrapperDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  const auto gp = source.find("typedef struct Wrapper_asgp Wrapper_asgp;");
+  const auto pg = source.find("typedef struct Wrapper_aspg Wrapper_aspg;");
+  CHECK(gp != std::string::npos);
+  CHECK(pg != std::string::npos);
+  CHECK(gp < pg);
+  CHECK(source.find("Box_asp left;") != std::string::npos);
+  CHECK(source.find("Box_asp right;") != std::string::npos);
+}
+
+TEST_CASE("C source rejects cross-space pointer merges before dereference", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named input("input", globalPtr), value("value", Type::IntS32()), merged("merged", globalPtr), result("result", Type::IntS32());
+  const auto assign = [&](const Expr::Any &expr) { return Mut(Term::Select(merged, {}, globalPtr), expr).widen(); };
+  const Function entry =
+      mkFn("kernel", {Arg(input, {})}, Type::Unit0(),
+           {
+               Var(value, std::optional<Expr::Any>{}, true).widen(),
+               Var(merged, std::optional<Expr::Any>{}, true).widen(),
+               Stmt::Cond(Term::Bool1Const(true).widen(), {assign(Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen())},
+                          {assign(Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(),
+                                              Region::Opaque())
+                                      .widen())})
+                   .widen(),
+               Var(result, Expr::Alias(Term::Select(merged, {PathStep::Deref().widen()}, Type::IntS32()).widen()).widen(), false).widen(),
+               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+           },
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("cross-address-space pointer merge"));
+}
+
+TEST_CASE("C source rejects cross-space pointer merges that escape", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named input("input", globalPtr), value("value", Type::IntS32()), merged("merged", globalPtr);
+  const auto assign = [&](const Expr::Any &expr) { return Mut(Term::Select(merged, {}, globalPtr), expr).widen(); };
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {
+          Var(value, std::optional<Expr::Any>{}, true).widen(),
+          Var(merged, std::optional<Expr::Any>{}, true).widen(),
+          Stmt::Cond(Term::Bool1Const(true).widen(), {assign(Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen())},
+                     {assign(Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(),
+                                         Region::Opaque())
+                                 .widen())})
+              .widen(),
+          Mut(Term::Select(merged, {PathStep::Deref().widen()}, Type::IntS32()), Expr::Alias(Term::IntS32Const(1).widen()).widen()).widen(),
+          Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("cross-address-space pointer merge escapes read-only use"));
+}
+
+TEST_CASE("C source rejects indexed cross-space pointer merges", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named input("input", globalPtr), value("value", Type::IntS32()), merged("merged", globalPtr), result("result", Type::IntS32());
+  const auto assign = [&](const Expr::Any &expr) { return Mut(Term::Select(merged, {}, globalPtr), expr).widen(); };
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(merged, std::optional<Expr::Any>{}, true).widen(),
+       Stmt::Cond(
+           Term::Bool1Const(true).widen(), {assign(Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen())},
+           {assign(Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque())
+                       .widen())})
+           .widen(),
+       Var(result, Expr::Index(Term::Select(merged, {}, globalPtr), Term::IntS32Const(1).widen(), Type::IntS32()).widen(), false).widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("cross-address-space pointer merge escapes read-only use"));
+}
+
+TEST_CASE("C source rejects cross-space pointer demotion across mutation", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named input("input", globalPtr), value("value", Type::IntS32()), merged("merged", globalPtr), result("result", Type::IntS32());
+  const auto assign = [&](const Expr::Any &expr) { return Mut(Term::Select(merged, {}, globalPtr), expr).widen(); };
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(merged, std::optional<Expr::Any>{}, true).widen(),
+       Stmt::Cond(
+           Term::Bool1Const(true).widen(), {assign(Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen())},
+           {assign(Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque())
+                       .widen())})
+           .widen(),
+       Mut(Term::Select(value, {}, Type::IntS32()), Expr::Alias(Term::IntS32Const(7).widen()).widen()).widen(),
+       Var(result, Expr::Alias(Term::Select(merged, {PathStep::Deref().widen()}, Type::IntS32()).widen()).widen(), false).widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("cross-address-space pointer merge escapes read-only use"));
+}
+
+TEST_CASE("C source traces reads from address-space-specialised fields", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"});
+  const auto box = Type::Struct(boxSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
+      loaded("loaded", globalPtr);
+  const auto member = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(globalBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
+       Mut(member(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+       Var(privateBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
+       Mut(member(privateBox),
+           Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen())
+           .widen(),
+       Var(loaded, Expr::Alias(member(privateBox).widen()).widen(), false).widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("private int* _v4 = _v3.ptr;") != std::string::npos);
+}
+
+TEST_CASE("C source distinguishes struct specialisations by complete field signature", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto pairSym = Sym({"Pair"});
+  const auto pair = Type::Struct(pairSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef pairDef(pairSym, {}, {Named("a", globalPtr), Named("b", globalPtr)}, {}, false);
+  const Named input("input", globalPtr), x("x", Type::IntS32()), y("y", Type::IntS32()), base("base", pair), left("left", pair),
+      right("right", pair);
+  const auto member = [&](const Named &owner, const std::string &name) {
+    return Term::Select(owner, {PathStep::Field(name).widen()}, globalPtr);
+  };
+  const auto privateRef = [&](const Named &value) {
+    return Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen();
+  };
+  const auto poison = Expr::Alias(Term::Poison(pair).widen()).widen();
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(x, std::optional<Expr::Any>{}, true).widen(), Var(y, std::optional<Expr::Any>{}, true).widen(), Var(base, poison, true).widen(),
+       Mut(member(base, "a"), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+       Mut(member(base, "b"), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(), Var(left, poison, true).widen(),
+       Mut(member(left, "a"), privateRef(x)).widen(), Var(right, poison, true).widen(), Mut(member(right, "b"), privateRef(y)).widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {pairDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("typedef struct Pair_aspg Pair_aspg;") != std::string::npos);
+  CHECK(source.find("typedef struct Pair_asgp Pair_asgp;") != std::string::npos);
+  CHECK(source.find("Pair_aspg _v4;") != std::string::npos);
+  CHECK(source.find("Pair_asgp _v5;") != std::string::npos);
+}
+
+TEST_CASE("C source traces pointer fields through fixed array indices", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"});
+  const auto box = Type::Struct(boxSym, {}).widen();
+  const auto boxesTpe = Type::Arr(box, 1, TypeSpace::Private()).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const Named value("value", Type::IntS32()), boxes("boxes", boxesTpe);
+  const Term::Select member(boxes, {PathStep::Index(0).widen(), PathStep::Field("ptr").widen()}, globalPtr);
+  const Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(boxes, std::optional<Expr::Any>{}, true).widen(),
+       Mut(member,
+           Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen())
+           .widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("private int* ptr;") != std::string::npos);
+}
+
+TEST_CASE("C source rejects conflicting pointer fields through fixed array indices", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"});
+  const auto box = Type::Struct(boxSym, {}).widen();
+  const auto boxesTpe = Type::Arr(box, 1, TypeSpace::Private()).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), boxes("boxes", boxesTpe);
+  const Term::Select direct(globalBox, {PathStep::Field("ptr").widen()}, globalPtr);
+  const Term::Select indexed(boxes, {PathStep::Index(0).widen(), PathStep::Field("ptr").widen()}, globalPtr);
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(globalBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
+       Mut(direct, Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+       Var(boxes, std::optional<Expr::Any>{}, true).widen(),
+       Mut(indexed,
+           Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen())
+           .widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("cannot specialise indirect conflicting pointer field"));
+}
+
+TEST_CASE("C source keeps constant and global struct pointer fields distinct", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"});
+  const auto box = Type::Struct(boxSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS8(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const Named input("input", globalPtr), globalBox("globalBox", box), constantBox("constantBox", box);
+  const auto member = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
+  const auto poison = Expr::Alias(Term::Poison(box).widen()).widen();
+  const Function entry =
+      mkFn("kernel", {Arg(input, {})}, Type::Unit0(),
+           {Var(globalBox, poison, true).widen(),
+            Mut(member(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+            Var(constantBox, poison, true).widen(), Mut(member(constantBox), Expr::Alias(Term::StringConst("x").widen()).widen()).widen(),
+            Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("typedef struct Box_asc Box_asc;") != std::string::npos);
+  CHECK(source.find("constant char* ptr;") != std::string::npos);
+}
+
+TEST_CASE("C source isolates struct specialisations between overloaded functions", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"});
+  const auto box = Type::Struct(boxSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS8(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const auto worker = Sym({"worker"});
+  const auto makeWorker = [&](const Type::Any &argTpe, const Expr::Any &value) {
+    const Named arg("arg", argTpe), storage("storage", Type::IntS8()), slot("slot", box);
+    const Term::Select member(slot, {PathStep::Field("ptr").widen()}, globalPtr);
+    return mkFn(repr(worker), {Arg(arg, {})}, globalPtr,
+                {Var(storage, std::optional<Expr::Any>{}, true).widen(),
+                 Var(slot, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(), Mut(member, value).widen(),
+                 Return(value).widen()});
+  };
+  const auto constantWorker = makeWorker(Type::IntS32(), Expr::Alias(Term::StringConst("x").widen()).widen());
+  const Named privateStorage("storage", Type::IntS8());
+  const auto privateWorker = makeWorker(Type::IntS64(), Expr::RefTo(Term::Select(privateStorage, {}, Type::IntS8()).widen(), {},
+                                                                    Type::IntS8(), TypeSpace::Private(), Region::Opaque())
+                                                            .widen());
+  const Function entry = mkFn("kernel", {}, Type::Unit0(), {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {constantWorker, privateWorker}, {boxDef}, PassPhase::Initial(), {}), opts,
+                                               OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("Box_asc _v2;") != std::string::npos);
+  CHECK(source.find("Box_asp _v2;") != std::string::npos);
+}
+
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);

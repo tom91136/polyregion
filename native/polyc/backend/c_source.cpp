@@ -47,6 +47,38 @@ static bool isPoisonInit(const Expr::Any &e) {
   return alias && alias->ref.template is<Term::Poison>();
 }
 
+static std::optional<Sym> structNameOf(const Type::Any &t) {
+  Type::Any base = t;
+  if (const auto ptr = base.template get<Type::Ptr>()) base = ptr->comp;
+  if (const auto structure = base.template get<Type::Struct>()) return structure->name;
+  return std::nullopt;
+}
+
+static std::optional<Term::Select> aliasSelect(const Expr::Any &e) {
+  if (const auto alias = e.template get<Expr::Alias>()) return alias->ref.template get<Term::Select>();
+  return std::nullopt;
+}
+
+static std::optional<Term::Select> initSelect(const Expr::Any &e) {
+  if (const auto alias = e.template get<Expr::Alias>()) return alias->ref.template get<Term::Select>();
+  if (const auto ref = e.template get<Expr::RefTo>()) return ref->lhs.template get<Term::Select>();
+  if (const auto cast = e.template get<Expr::Cast>()) return cast->from.template get<Term::Select>();
+  return std::nullopt;
+}
+
+struct SlotUnion {
+  Map<std::string, std::string> parent;
+  std::string find(const std::string &key) {
+    const auto it = parent.find(key);
+    if (it == parent.end()) return parent[key] = key;
+    return it->second == key ? key : parent[key] = find(it->second);
+  }
+  void unite(const std::string &lhs, const std::string &rhs) {
+    const auto l = find(lhs), r = find(rhs);
+    if (l != r) parent[l] = r;
+  }
+};
+
 static std::optional<uint64_t> scalarBytes(const Type::Any &t) {
   if (t.template is<Type::Bool1>() || t.template is<Type::IntU8>() || t.template is<Type::IntS8>()) return 1;
   if (t.template is<Type::Float16>() || t.template is<Type::IntU16>() || t.template is<Type::IntS16>()) return 2;
@@ -83,6 +115,8 @@ template <typename T> static bool usesTpe(const std::vector<Function> &fns, cons
 
 struct CLAddressSpaceTracePass {
 
+  bool strictSpaces = true;
+
   struct StackScope {
     Map<std::string, Named> vars;
   };
@@ -97,18 +131,58 @@ struct CLAddressSpaceTracePass {
     TypeSpace::Any space = TypeSpace::Private();
   };
 
+  Map<Sym, Map<std::string, Type::Any>> fields;
+
+  std::optional<Type::Any> fieldType(const Type::Any &owner, const std::string &name) const {
+    Type::Any t = owner;
+    if (const auto p = t.template get<Type::Ptr>()) t = p->comp;
+    const auto s = t.template get<Type::Struct>();
+    if (!s) return std::nullopt;
+    if (const auto members = fields ^ get_maybe(s->name)) return *members ^ get_maybe(name);
+    return std::nullopt;
+  }
+
+  struct PathWalk {
+    Type::Any type;
+    TypeSpace::Any space;
+  };
+
+  PathWalk walkPath(const Type::Any &rootTpe, const std::vector<PathStep::Any> &steps, size_t upto) const {
+    Type::Any current = rootTpe;
+    TypeSpace::Any live = rootTpe.template get<Type::Ptr>() ^ map([](const auto &p) { return p.space; })
+                          ^ get_or_else(isLocalArr(rootTpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
+    for (size_t i = 0; i < upto && i < steps.size(); ++i) {
+      steps[i].match_total(
+          [&](const PathStep::Field &f) {
+            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
+            if (const auto tpe = fieldType(current, f.name)) current = *tpe;
+          },
+          [&](const PathStep::Deref &) {
+            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
+          },
+          [&](const PathStep::Index &) {
+            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
+            else if (const auto a = current.template get<Type::Arr>()) current = a->comp;
+          },
+          [&](const PathStep::IndexDyn &) {
+            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
+            else if (const auto a = current.template get<Type::Arr>()) current = a->comp;
+          });
+    }
+    return {current, live};
+  }
+
   // Map a Term: only Term::Select needs scope rewiring; all other Term variants are pure atoms.
-  static SpacedTerm mapTerm(const Term::Any &term, StackScope &scope) {
+  SpacedTerm mapTerm(const Term::Any &term, StackScope &scope) {
     if (auto sel = term.template get<Term::Select>()) {
       const auto rebound = scope.vars ^ get_or_default(sel->root.symbol, sel->root);
-      // a final pointer field keeps its own space; a value subobject takes the root's space (local for a
-      // declared local array, private otherwise)
-      const auto rootSpace = rebound.tpe.template get<Type::Ptr>()        //
-                             ^ map([](const auto &p) { return p.space; }) //
-                             ^ get_or_else(isLocalArr(rebound.tpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
-      const auto space = (sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>()) //
-                         ^ map([](const auto &p) { return p.space; }) ^                                         //
-                         get_or_else(rootSpace);
+      const auto liveSpace = walkPath(rebound.tpe, sel->steps, sel->steps.size()).space;
+      auto declared = sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>();
+      if (declared)
+        if (const auto field = sel->steps.back().template get<PathStep::Field>())
+          if (const auto tpe = fieldType(walkPath(rebound.tpe, sel->steps, sel->steps.size() - 1).type, field->name))
+            declared = tpe->template get<Type::Ptr>() ^ get_or_else(*declared);
+      const auto space = declared ^ map([](const auto &p) { return p.space; }) ^ get_or_else(liveSpace);
       return SpacedTerm{Term::Select(rebound, sel->steps, sel->tpe), space};
     }
     // XXX null seeds its space from the pointee (refTpe=Global) so `T* p = nullptr` later infers Global not Private
@@ -117,7 +191,7 @@ struct CLAddressSpaceTracePass {
     return SpacedTerm{term};
   }
 
-  static SpacedExpr mapExpr(const Expr::Any &expr, StackScope &scope) {
+  SpacedExpr mapExpr(const Expr::Any &expr, StackScope &scope) {
     auto mapTerm_ = [&](const Term::Any &t) { return mapTerm(t, scope); };
     auto mapTerm0_ = [&](const Term::Any &t) { return mapTerm(t, scope).actual; };
     return expr.match_total(
@@ -156,7 +230,34 @@ struct CLAddressSpaceTracePass {
         [&](const Expr::SizeOf &x) -> SpacedExpr { return {Expr::SizeOf(x.forTpe)}; });
   }
 
-  static Function mapFn(const Function &fn) {
+  std::optional<std::pair<Sym, std::string>> memberStoreTarget(const Term::Select &select, StackScope &scope) const {
+    if (select.steps.empty()) return std::nullopt;
+    const auto field = select.steps.back().template get<PathStep::Field>();
+    if (!field) return std::nullopt;
+    const auto rebound = scope.vars ^ get_or_default(select.root.symbol, select.root);
+    Type::Any owner = walkPath(rebound.tpe, select.steps, select.steps.size() - 1).type;
+    if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
+    const auto structure = owner.template get<Type::Struct>();
+    if (!structure) return std::nullopt;
+    const auto tpe = fieldType(owner, field->name);
+    return tpe && tpe->template is<Type::Ptr>() ? std::optional<std::pair<Sym, std::string>>{{structure->name, field->name}} : std::nullopt;
+  }
+
+  struct MemberStores {
+    Map<Sym, Set<std::string>> global, constant, local, priv;
+  };
+
+  static void eachStmt(const std::vector<Stmt::Any> &stmts, const std::function<void(const Stmt::Any &)> &f) {
+    for (const auto &stmt : stmts) {
+      f(stmt);
+      if (const auto c = stmt.template get<Stmt::Cond>()) eachStmt(c->trueBr, f), eachStmt(c->falseBr, f);
+      else if (const auto w = stmt.template get<Stmt::While>()) eachStmt(w->body, f);
+      else if (const auto r = stmt.template get<Stmt::ForRange>()) eachStmt(r->body, f);
+      else if (const auto a = stmt.template get<Stmt::Annotated>()) eachStmt({a->inner}, f);
+    }
+  }
+
+  Function mapFn(const Function &fn, MemberStores *memberStores = nullptr) {
 
     StackScope scope{.vars = fn.args                                                                        //
                              | flat_map([&](const auto &arg) { return arg.template collect_all<Named>(); }) //
@@ -168,6 +269,7 @@ struct CLAddressSpaceTracePass {
     // pre-scan its Mut assignments so the decl takes the assigned value's space, else OpenCL rejects the
     // `global* = private*` of e.g. std::min(&a, &b) over stack scalars in basic_string::max_size
     Map<std::string, TypeSpace::Any> phiSpace;
+    Map<std::string, int> phiKinds;
     {
       auto spaceKind = [](const TypeSpace::Any &s) {
         return s.match_total([](const TypeSpace::Global &) { return 0; }, [](const TypeSpace::Constant &) { return 1; },
@@ -180,6 +282,7 @@ struct CLAddressSpaceTracePass {
       for (size_t iter = 0; changed && iter <= scope.vars.size() + 2; ++iter) {
         changed = false;
         Map<std::string, TypeSpace::Any> next;
+        Map<std::string, int> nextKinds;
         StackScope scan{.vars = scope.vars};
         std::function<void(const std::vector<Stmt::Any> &)> walk = [&](const std::vector<Stmt::Any> &stmts) {
           for (auto &s : stmts) {
@@ -195,6 +298,7 @@ struct CLAddressSpaceTracePass {
             } else if (auto mut = s.template get<Stmt::Mut>()) {
               if (mut->name.steps.empty() && mut->name.root.tpe.template is<Type::Ptr>()) {
                 const auto sp = mapExpr(mut->expr, scan).space;
+                nextKinds[mut->name.root.symbol] |= 1 << spaceKind(sp);
                 // a private<-private+global merge can't be a global pointer in CL 1.2; keep it private
                 const auto prev = next ^ get_maybe(mut->name.root.symbol);
                 next.insert_or_assign(mut->name.root.symbol,
@@ -221,7 +325,14 @@ struct CLAddressSpaceTracePass {
             }
           }
         phiSpace = next;
+        phiKinds = nextKinds;
       }
+    }
+
+    if (strictSpaces) {
+      const auto conflicted =
+          phiKinds | filter([](const auto &, const auto mask) { return (mask & (mask - 1)) != 0; }) | keys() | to<Set>();
+      if (!conflicted.empty()) throw backend::BackendException("cross-address-space pointer merge escapes read-only use");
     }
 
     auto body = fn.body ^ map([&](const auto &s) {
@@ -244,6 +355,21 @@ struct CLAddressSpaceTracePass {
                       .template modify_all<Expr::Any>([&](const auto &e) { return mapExpr(e, scope).actual; }); //
                 });
 
+    if (memberStores) {
+      eachStmt(fn.body, [&](const Stmt::Any &stmt) {
+        const auto mut = stmt.template get<Stmt::Mut>();
+        if (!mut) return;
+        if (const auto target = memberStoreTarget(mut->name, scope)) {
+          const auto space = mapExpr(mut->expr, scope).space;
+          auto &bucket = space.template is<TypeSpace::Global>()     ? memberStores->global
+                         : space.template is<TypeSpace::Constant>() ? memberStores->constant
+                         : space.template is<TypeSpace::Local>()    ? memberStores->local
+                                                                    : memberStores->priv;
+          bucket[target->first].insert(target->second);
+        }
+      });
+    }
+
     const auto tracedRtnTpes = body                                                                              //
                                | flat_map([&](const auto &s) { return s.template collect_all<Stmt::Return>(); }) //
                                | map([&](const auto &r) { return r.value.tpe(); })                               //
@@ -253,9 +379,286 @@ struct CLAddressSpaceTracePass {
                     fn.fpMode, fn.isEntry, fn.affinity);
   }
 
-  static Program execute(const Program &p) {
-    // address-space inference must run on the ENTRY: OpenCL 1.2 rejects a global* initialised from a private*
-    const auto remap = [](const Function &f) {
+  struct ConflictSplit {
+    Map<Sym, StructDef> clones;
+    Map<Sym, Map<std::string, Sym>> memberRetype;
+    Map<std::string, Map<std::string, Sym>> fnVarRetype;
+  };
+
+  static std::string functionKey(const Function &fn) {
+    const auto types = [](const std::vector<Arg> &args) {
+      std::vector<Type::Any> result;
+      result.reserve(args.size());
+      for (const auto &arg : args)
+        result.push_back(arg.named.tpe);
+      return result;
+    };
+    std::optional<Type::Any> receiver;
+    if (fn.receiver) receiver = fn.receiver->named.tpe;
+    return repr(Signature(fn.name, fn.tpeVars, receiver, types(fn.args), types(fn.moduleCaptures), types(fn.termCaptures), Type::Unit0()));
+  }
+
+  static Type::Any retypeStructOccurrence(const Type::Any &tpe, const Sym &clone) {
+    if (const auto structure = tpe.template get<Type::Struct>()) return Type::Struct(clone, structure->args).widen();
+    if (const auto ptr = tpe.template get<Type::Ptr>())
+      if (const auto structure = ptr->comp.template get<Type::Struct>())
+        return Type::Ptr(Type::Struct(clone, structure->args).widen(), ptr->space).widen();
+    return tpe;
+  }
+
+  static int spaceCode(const TypeSpace::Any &space) {
+    return space.match_total([](const TypeSpace::Global &) { return 0; }, [](const TypeSpace::Constant &) { return 1; },
+                             [](const TypeSpace::Local &) { return 2; }, [](const TypeSpace::Private &) { return 3; });
+  }
+
+  static TypeSpace::Any spaceFromCode(int code) {
+    return code == 1   ? TypeSpace::Constant().widen()
+           : code == 2 ? TypeSpace::Local().widen()
+           : code == 3 ? TypeSpace::Private().widen()
+                       : TypeSpace::Global().widen();
+  }
+
+  std::optional<ConflictSplit> planConflictSplit(const std::vector<Function> &functions, const Set<Sym> &conflicted,
+                                                 const Map<Sym, StructDef> &structDefs) {
+    const auto carries = [&](const Type::Any &tpe) -> std::optional<Sym> {
+      const auto structure = structNameOf(tpe);
+      return structure && conflicted.contains(*structure) ? structure : std::nullopt;
+    };
+
+    SlotUnion slots;
+    Map<std::string, Sym> slotStruct;
+    Map<std::string, std::pair<std::string, std::string>> variableSlots;
+    Map<std::string, std::pair<Sym, std::string>> memberSlots;
+    const auto variableKey = [](const std::string &fn, const std::string &symbol) { return "V\x1f" + fn + "\x1f" + symbol; };
+    const auto memberKey = [](const Sym &owner, const std::string &member) { return "M\x1f" + repr(owner) + "\x1f" + member; };
+    const auto registerVariable = [&](const std::string &fn, const std::string &symbol, const Sym &structure) {
+      const auto key = variableKey(fn, symbol);
+      slotStruct.insert_or_assign(key, structure);
+      variableSlots.insert_or_assign(key, std::pair{fn, symbol});
+      slots.find(key);
+      return key;
+    };
+    const auto registerMember = [&](const Sym &owner, const std::string &member, const Sym &structure) {
+      const auto key = memberKey(owner, member);
+      slotStruct.insert_or_assign(key, structure);
+      memberSlots.insert_or_assign(key, std::pair{owner, member});
+      slots.find(key);
+      return key;
+    };
+
+    const auto designated = [&](const std::string &fn, const Term::Select &select) -> std::optional<std::string> {
+      if (select.steps.empty()) {
+        if (const auto structure = carries(select.root.tpe)) return registerVariable(fn, select.root.symbol, *structure);
+        return std::nullopt;
+      }
+      const auto field = select.steps.back().template get<PathStep::Field>();
+      if (!field) return std::nullopt;
+      Type::Any owner = walkPath(select.root.tpe, select.steps, select.steps.size() - 1).type;
+      if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
+      const auto structure = owner.template get<Type::Struct>();
+      if (!structure) return std::nullopt;
+      if (const auto tpe = fieldType(owner, field->name))
+        if (const auto carried = carries(*tpe)) return registerMember(structure->name, field->name, *carried);
+      return std::nullopt;
+    };
+    const auto expressionSpace = [&](const Expr::Any &expr) {
+      if (const auto alias = expr.template get<Expr::Alias>())
+        if (const auto select = alias->ref.template get<Term::Select>())
+          return spaceCode(walkPath(select->root.tpe, select->steps, select->steps.size()).space);
+      if (const auto ref = expr.template get<Expr::RefTo>()) return spaceCode(ref->space);
+      if (const auto ptr = expr.tpe().template get<Type::Ptr>()) return spaceCode(ptr->space);
+      return 3;
+    };
+
+    bool valid = true;
+    std::vector<std::tuple<std::string, std::string, int>> colours;
+    struct NestedCopy {
+      std::string function;
+      Sym owner;
+      std::string destination, member, source;
+    };
+    std::vector<NestedCopy> nestedCopies;
+    for (const auto &function : functions) {
+      const auto fn = functionKey(function);
+      eachStmt(function.body, [&](const Stmt::Any &stmt) {
+        if (const auto var = stmt.template get<Stmt::Var>()) {
+          if (const auto structure = carries(var->name.tpe)) {
+            const auto dst = registerVariable(fn, var->name.symbol, *structure);
+            if (var->expr && !isPoisonInit(*var->expr)) {
+              const auto source = initSelect(*var->expr);
+              const auto src = source ^ flat_map([&](const auto &select) { return designated(fn, select); });
+              if (src) slots.unite(dst, *src);
+              else valid = false;
+            }
+          }
+          return;
+        }
+        const auto mut = stmt.template get<Stmt::Mut>();
+        if (!mut) return;
+        const auto &select = mut->name;
+        if (select.steps.empty()) {
+          if (const auto structure = carries(select.root.tpe)) {
+            const auto source = aliasSelect(mut->expr);
+            const auto src = source ^ flat_map([&](const auto &value) { return designated(fn, value); });
+            if (src) slots.unite(registerVariable(fn, select.root.symbol, *structure), *src);
+            else valid = false;
+          }
+          return;
+        }
+        const auto field = select.steps.back().template get<PathStep::Field>();
+        if (!field) return;
+        Type::Any owner = walkPath(select.root.tpe, select.steps, select.steps.size() - 1).type;
+        if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
+        const auto structure = owner.template get<Type::Struct>();
+        const auto tpe = structure ? fieldType(owner, field->name) : std::nullopt;
+        if (structure && tpe && tpe->template is<Type::Ptr>() && conflicted.contains(structure->name)) {
+          if (select.steps.size() != 1) throw backend::BackendException("cannot specialise indirect conflicting pointer field");
+          colours.emplace_back(registerVariable(fn, select.root.symbol, structure->name), field->name, expressionSpace(mut->expr));
+        } else if (structure && tpe) {
+          if (const auto carried = carries(*tpe)) {
+            const auto source = aliasSelect(mut->expr);
+            if (source && select.steps.size() == 1 && source->steps.empty() && select.root.tpe.template is<Type::Struct>())
+              nestedCopies.push_back({fn, structure->name, select.root.symbol, field->name, source->root.symbol});
+            else {
+              const auto src = source ^ flat_map([&](const auto &value) { return designated(fn, value); });
+              if (src) slots.unite(registerMember(structure->name, field->name, *carried), *src);
+              else valid = false;
+            }
+          }
+        }
+      });
+    }
+    if (!valid) return std::nullopt;
+
+    Map<std::string, Map<std::string, int>> componentColours;
+    for (const auto &[slot, member, code] : colours) {
+      auto &signature = componentColours[slots.find(slot)];
+      if (const auto it = signature.find(member); it != signature.end() && it->second != code) return std::nullopt;
+      signature[member] = code;
+    }
+
+    ConflictSplit plan;
+    Map<std::string, Sym> clones;
+    for (const auto &[slot, structure] : slotStruct) {
+      const auto component = slots.find(slot);
+      const auto coloursIt = componentColours.find(component);
+      if (coloursIt == componentColours.end()) continue;
+      const auto fieldsIt = fields.find(structure);
+      bool differs = false;
+      for (const auto &[member, code] : coloursIt->second) {
+        const auto tpe = fieldsIt != fields.end() ? fieldsIt->second ^ get_maybe(member) : std::nullopt;
+        differs |= !tpe || !tpe->template is<Type::Ptr>() || spaceCode(tpe->template get<Type::Ptr>()->space) != code;
+      }
+      if (!differs) continue;
+
+      std::map<std::string, int> signature;
+      if (const auto def = structDefs.find(structure); def != structDefs.end())
+        for (const auto &member : def->second.members)
+          if (const auto ptr = member.tpe.template get<Type::Ptr>()) signature.emplace(member.symbol, spaceCode(ptr->space));
+      for (const auto &[member, code] : coloursIt->second)
+        signature.insert_or_assign(member, code);
+      const auto suffix = signature | values() | fold_left(std::string("_as"), [](const auto &acc, const auto code) {
+                            return acc + (code == 1 ? "c" : code == 2 ? "l" : code == 3 ? "p" : "g");
+                          });
+      auto cloneName = structure.fqn;
+      if (cloneName.empty()) cloneName.push_back(suffix);
+      else cloneName.back() += suffix;
+      const auto clone = clones ^ get_or_default(component, Sym(cloneName));
+      clones.emplace(component, clone);
+      if (!plan.clones.contains(clone))
+        if (const auto def = structDefs.find(structure); def != structDefs.end())
+          plan.clones.emplace(clone, def->second.withName(clone).withMembers(
+                                         def->second.members ^ map([&](const Named &member) {
+                                           const auto code = signature ^ get_maybe(member.symbol);
+                                           const auto ptr = member.tpe.template get<Type::Ptr>();
+                                           return code && ptr ? member.withTpe(Type::Ptr(ptr->comp, spaceFromCode(*code)).widen()) : member;
+                                         })));
+      if (const auto variable = variableSlots.find(slot); variable != variableSlots.end())
+        plan.fnVarRetype[variable->second.first].insert_or_assign(variable->second.second, clone);
+      if (const auto member = memberSlots.find(slot); member != memberSlots.end())
+        plan.memberRetype[member->second.first].insert_or_assign(member->second.second, clone);
+    }
+
+    Map<std::string, Sym> nestedClones;
+    if (strictSpaces)
+      for (bool changed = true; changed;) {
+        changed = false;
+        Map<std::string, std::vector<NestedCopy>> groups;
+        for (const auto &copy : nestedCopies)
+          groups[copy.function + "\x1f" + copy.destination].push_back(copy);
+        for (const auto &[_, copies] : groups) {
+          if (copies.empty()) continue;
+          auto function = plan.fnVarRetype.find(copies.front().function);
+          const auto owner = structDefs.find(copies.front().owner);
+          if (function == plan.fnVarRetype.end() || owner == structDefs.end()) continue;
+          std::map<std::string, Sym> replacements;
+          for (const auto &copy : copies)
+            if (const auto source = function->second.find(copy.source); source != function->second.end())
+              replacements.insert_or_assign(copy.member, source->second);
+          if (replacements.empty()) continue;
+
+          std::string suffix = "_as", key = repr(copies.front().owner);
+          for (const auto &member : owner->second.members) {
+            const auto carried = structNameOf(member.tpe);
+            if (!carried || !conflicted.contains(*carried)) continue;
+            if (const auto replacement = replacements.find(member.symbol); replacement != replacements.end()) {
+              const auto child = repr(replacement->second);
+              const auto at = child.rfind("_as");
+              const auto code = at == std::string::npos ? "g" : child.substr(at + 3);
+              suffix += code;
+              key += "\x1f" + member.symbol + "\x1f" + child;
+            } else {
+              suffix += "g";
+              key += "\x1f" + member.symbol + "\x1f";
+            }
+          }
+          auto clone = nestedClones ^ get_maybe(key);
+          if (!clone) {
+            auto name = copies.front().owner.fqn;
+            if (name.empty()) name.push_back(suffix);
+            else name.back() += suffix;
+            clone = Sym(name);
+            nestedClones.emplace(key, *clone);
+            plan.clones.emplace(*clone, owner->second.withName(*clone).withMembers(
+                                            owner->second.members ^ map([&](const Named &member) {
+                                              const auto replacement = replacements.find(member.symbol);
+                                              return replacement == replacements.end()
+                                                         ? member
+                                                         : member.withTpe(retypeStructOccurrence(member.tpe, replacement->second));
+                                            })));
+          }
+          const auto current = function->second.find(copies.front().destination);
+          if (current == function->second.end() || current->second != *clone) {
+            function->second.insert_or_assign(copies.front().destination, *clone);
+            changed = true;
+          }
+        }
+      }
+    return plan;
+  }
+
+  Function retypeConflicted(const Function &fn, const ConflictSplit &plan) {
+    const auto it = plan.fnVarRetype.find(functionKey(fn));
+    if (it == plan.fnVarRetype.end()) return fn;
+    const auto &types = it->second;
+    auto retyped = fn.template modify_all<Named>([&](const Named &named) {
+      const auto type = types.find(named.symbol);
+      return type == types.end() ? named : named.withTpe(retypeStructOccurrence(named.tpe, type->second));
+    });
+    return retyped.template modify_all<Expr::RefTo>([&](const Expr::RefTo &ref) {
+      const auto select = ref.lhs.template get<Term::Select>();
+      if (!select || !types.contains(select->root.symbol)) return ref;
+      return Expr::RefTo(ref.lhs, ref.idx, walkPath(select->root.tpe, select->steps, select->steps.size()).type, ref.space, ref.region);
+    });
+  }
+
+  static Program execute(const Program &p, bool strictSpaces) {
+    CLAddressSpaceTracePass pass;
+    pass.strictSpaces = strictSpaces;
+    for (const auto &def : p.defs)
+      pass.fields.emplace(def.name, def.members ^ map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) ^ to<Map>());
+
+    const auto argRespace = [](const Function &f) {
       const auto kernel = f.isEntry;
       auto remapSpace = [&](const auto &s) {
         return s.match_total(
@@ -264,9 +667,84 @@ struct CLAddressSpaceTracePass {
             [&](const TypeSpace::Local &x) { return x.widen(); }, //
             [&](const TypeSpace::Private &x) { return x.widen(); });
       };
-      return CLAddressSpaceTracePass::mapFn(
-          f.withArgs(f.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
+      return f.withArgs(f.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); }));
     };
+
+    auto seeds = std::vector<Function>{argRespace(p.entry)} ^ concat(p.functions ^ map(argRespace));
+    for (bool changed = true; changed;) {
+      changed = false;
+      MemberStores stores;
+      seeds | for_each([&](const auto &function) { pass.mapFn(function, &stores); });
+      const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
+        const auto it = members.find(structure);
+        return it != members.end() && it->second.contains(field);
+      };
+      const auto respace = [&](const auto &members, const TypeSpace::Any &space, const auto &skip) {
+        for (const auto &[structure, names] : members)
+          for (const auto &name : names) {
+            if (skip(structure, name)) continue;
+            const auto owner = pass.fields.find(structure);
+            if (owner == pass.fields.end()) continue;
+            const auto field = owner->second.find(name);
+            if (field == owner->second.end()) continue;
+            if (const auto ptr = field->second.template get<Type::Ptr>(); ptr && ptr->space != space)
+              field->second = Type::Ptr(ptr->comp, space).widen(), changed = true;
+          }
+      };
+      respace(stores.constant, TypeSpace::Constant().widen(), [&](const auto &structure, const auto &field) {
+        return has(stores.global, structure, field) || has(stores.local, structure, field) || has(stores.priv, structure, field);
+      });
+      respace(stores.local, TypeSpace::Local().widen(), [](const auto &, const auto &) { return false; });
+      respace(stores.priv, TypeSpace::Private().widen(), [&](const auto &structure, const auto &field) {
+        return has(stores.global, structure, field) || has(stores.constant, structure, field) || has(stores.local, structure, field);
+      });
+    }
+
+    MemberStores stores;
+    if (strictSpaces) seeds | for_each([&](const auto &function) { pass.mapFn(function, &stores); });
+    const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
+      const auto it = members.find(structure);
+      return it != members.end() && it->second.contains(field);
+    };
+    Set<Sym> conflicted;
+    for (const auto *bucket : {&stores.global, &stores.constant, &stores.local, &stores.priv})
+      for (const auto &[structure, fields] : *bucket)
+        for (const auto &field : fields)
+          if (static_cast<int>(has(stores.global, structure, field)) + static_cast<int>(has(stores.constant, structure, field))
+                  + static_cast<int>(has(stores.local, structure, field)) + static_cast<int>(has(stores.priv, structure, field))
+              >= 2)
+            conflicted.insert(structure);
+
+    ConflictSplit split;
+    if (!conflicted.empty()) {
+      const auto structDefs = p.defs ^ map([](const auto &def) { return std::pair{def.name, def}; }) ^ to<Map>();
+      const auto planned =
+          pass.planConflictSplit(seeds ^ map([&](const auto &function) { return pass.mapFn(function); }), conflicted, structDefs);
+      if (!planned) throw backend::BackendException("address-space-specialized struct escapes representable storage");
+      split = *planned;
+    }
+    for (const auto &[owner, members] : split.memberRetype)
+      if (const auto fields = pass.fields.find(owner); fields != pass.fields.end())
+        for (const auto &[member, clone] : members)
+          if (const auto field = fields->second.find(member); field != fields->second.end())
+            field->second = retypeStructOccurrence(field->second, clone);
+    for (const auto &[name, def] : split.clones)
+      pass.fields.insert_or_assign(name,
+                                   def.members ^ map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) ^ to<Map>());
+    const auto reify = [&](const StructDef &def) {
+      const auto fields = pass.fields.find(def.name);
+      return fields == pass.fields.end() ? def : def.withMembers(def.members ^ map([&](const auto &member) {
+                                                                   const auto field = fields->second.find(member.symbol);
+                                                                   return field == fields->second.end() ? member
+                                                                                                        : member.withTpe(field->second);
+                                                                 }));
+    };
+    auto defs = p.defs ^ map(reify);
+    auto cloneDefs = split.clones | values() | map(reify) | to_vector();
+    std::sort(cloneDefs.begin(), cloneDefs.end(), [](const auto &lhs, const auto &rhs) { return repr(lhs.name) < repr(rhs.name); });
+    defs ^= concat(cloneDefs);
+
+    const auto remap = [&](const Function &function) { return pass.mapFn(pass.retypeConflicted(argRespace(function), split)); };
     auto entry = remap(p.entry);
     auto fns = p.functions | map(remap) | to_vector();
 
@@ -297,7 +775,7 @@ struct CLAddressSpaceTracePass {
                                            | map([](const auto &arg, const auto &tpe) { return arg.withNamed(arg.named.withTpe(tpe)); }) //
                                            | to_vector();
 
-                                       return std::pair{sig, std::make_shared<Function>(CLAddressSpaceTracePass::mapFn(fn.withArgs(args)))};
+                                       return std::pair{sig, std::make_shared<Function>(pass.mapFn(fn.withArgs(args)))};
                                      }
                                    }
                                    return {};
@@ -332,7 +810,7 @@ struct CLAddressSpaceTracePass {
           }) //
         | to_vector();
 
-    return Program(renameInvokes(entry), spaceSpecialisedFns, p.defs, p.phase, p.metadata);
+    return Program(renameInvokes(entry), spaceSpecialisedFns, defs, p.phase, p.metadata);
   }
 };
 
@@ -1076,7 +1554,7 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
 
 CompileResult backend::CSource::compileProgram(const Program &program_, const compiletime::OptLevel &opt) {
   const auto tracePassStart = compiler::nowMono();
-  auto program = CLAddressSpaceTracePass::execute(program_);
+  auto program = CLAddressSpaceTracePass::execute(program_, dialect != Dialect::C11);
   CompileEvent cltpEvent(compiler::nowMs(), compiler::elapsedNs(tracePassStart), "polyast_cltp", repr(program), {});
 
   const auto start = compiler::nowMono();
