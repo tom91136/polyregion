@@ -267,14 +267,14 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
       case compiletime::Target::Object_LLVM_AMDGCN:
       case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
       case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
-      case compiletime::Target::Object_LLVM_SPIRV_GLCompute:                             //
-        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));    //
-      case compiletime::Target::Source_C_OpenCL1_1:                                      //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
-      case compiletime::Target::Source_C_Metal1_0:                                       //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0);    //
-      case compiletime::Target::Source_C_C11:                                            //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11);       //
+      case compiletime::Target::Object_LLVM_SPIRV_GLCompute:                                                           //
+        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));                                  //
+      case compiletime::Target::Source_C_OpenCL1_1:                                                                    //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1, options.workgroupMemoryBytes); //
+      case compiletime::Target::Source_C_Metal1_0:                                                                     //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0, options.workgroupMemoryBytes);    //
+      case compiletime::Target::Source_C_C11:                                                                          //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11, options.workgroupMemoryBytes);       //
       default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
     }
   };

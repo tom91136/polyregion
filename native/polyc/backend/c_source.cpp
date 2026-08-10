@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <set>
 
 #include "aspartame/all.hpp"
@@ -44,6 +45,33 @@ static bool isLocalArr(const Type::Any &t) {
 static bool isPoisonInit(const Expr::Any &e) {
   const auto alias = e.template get<Expr::Alias>();
   return alias && alias->ref.template is<Term::Poison>();
+}
+
+static std::optional<uint64_t> scalarBytes(const Type::Any &t) {
+  if (t.template is<Type::Bool1>() || t.template is<Type::IntU8>() || t.template is<Type::IntS8>()) return 1;
+  if (t.template is<Type::Float16>() || t.template is<Type::IntU16>() || t.template is<Type::IntS16>()) return 2;
+  if (t.template is<Type::Float32>() || t.template is<Type::IntU32>() || t.template is<Type::IntS32>()) return 4;
+  if (t.template is<Type::Float64>() || t.template is<Type::IntU64>() || t.template is<Type::IntS64>()) return 8;
+  return std::nullopt;
+}
+
+struct ArrayExtent {
+  Type::Any element;
+  uint64_t count;
+};
+
+static std::optional<ArrayExtent> arrayExtent(const Type::Any &t) {
+  Type::Any element = t;
+  uint64_t count = 1;
+  bool found = false;
+  while (const auto a = element.template get<Type::Arr>()) {
+    found = true;
+    if (a->length < 0) return std::nullopt;
+    if (a->length != 0 && count > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(a->length)) return std::nullopt;
+    count *= static_cast<uint64_t>(a->length);
+    element = a->comp;
+  }
+  return found ? std::optional<ArrayExtent>{{element, count}} : std::nullopt;
 }
 
 template <typename T> static bool usesTpe(const std::vector<Function> &fns, const std::vector<StructDef> &defs) {
@@ -488,22 +516,21 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
   }
 }
 
+std::string backend::CSource::mkArrayDecl(const Type::Any &element, const TypeSpace::Any &space, const std::string &name,
+                                          const std::string &extent) {
+  std::string dims = fmt::format("[{}]", extent);
+  Type::Any base = element;
+  while (auto a = base.template get<Type::Arr>()) {
+    dims += fmt::format("[{}]", a->length);
+    base = a->comp;
+  }
+  const auto q = space.template is<TypeSpace::Local>() ? dialect == Dialect::MSL1_0 ? "threadgroup " : "local " : "";
+  return fmt::format("{}{} {}{}", q, mkTpe(base), name, dims);
+}
+
 // a C declarator places array extents AFTER the identifier (`T n[N][M]`), unlike mkTpe
 std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &name) {
-  if (tpe.template is<Type::Arr>()) {
-    std::string dims;
-    Type::Any base = tpe;
-    std::optional<TypeSpace::Any> space;
-    while (auto a = base.template get<Type::Arr>()) {
-      if (!space) space = a->space;
-      dims += fmt::format("[{}]", a->length);
-      base = a->comp;
-    }
-    // workgroup arrays need the `local`/`threadgroup` qualifier; private (the default) needs none
-    std::string q;
-    if (space && space->template is<TypeSpace::Local>()) q = dialect == Dialect::MSL1_0 ? "threadgroup " : "local ";
-    return fmt::format("{}{} {}{}", q, mkTpe(base), name, dims);
-  }
+  if (const auto a = tpe.template get<Type::Arr>()) return mkArrayDecl(a->comp, a->space, name, std::to_string(a->length));
   if (auto p = tpe.template get<Type::Ptr>(); p && p->comp.template is<Type::Arr>()) {
     // pointer-to-array `T (*name)[d1][d2]` keeps all pointee extents so `&base[0][idx]` strides by sub-array
     std::string dims;
@@ -848,10 +875,13 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::FnRef>()) return ""s;
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
-        // hoisted to the kernel's outermost scope by mkFn; drop the nested decl
-        if (!x.expr && isLocalArr(x.name.tpe)) return ""s;
+        if (isLocalArr(x.name.tpe)) {
+          if (!x.expr || isPoisonInit(*x.expr)) return ""s;
+          if (memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
+            return mkValueCopy(localName(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0);
+          throw BackendException("workgroup array initializer is not representable");
+        }
         if (x.expr && isPoisonInit(*x.expr) && (x.name.tpe.is<Type::Struct>() || x.name.tpe.is<Type::Arr>())) {
-          if (isLocalArr(x.name.tpe)) return ""s;
           return fmt::format("{};", mkDecl(x.name.tpe, localName(x.name.symbol)));
         }
         if (x.expr && memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
@@ -977,13 +1007,70 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 
 std::string backend::CSource::mkFn(const Function &fnTree) {
   bindLocalNames(fnTree);
-  // OpenCL local-AS declarations must sit in the kernel's outermost scope
   const auto allVars = fnTree.body ^ flat_map([](const auto &s) { return s.template collect_all<Stmt::Var>(); });
-  const auto localDecls = allVars ^ collect([&](const auto &v) -> std::optional<std::string> {
-                            if (!v.expr && isLocalArr(v.name.tpe)) return fmt::format("{};", mkDecl(v.name.tpe, localName(v.name.symbol)));
-                            return std::nullopt;
+  Set<std::string> seen;
+  const auto localVars =
+      (allVars ^ filter([&](const auto &v) { return isLocalArr(v.name.tpe) && seen.insert(v.name.symbol).second; })) ^ to_vector();
+  struct Usage {
+    uint64_t fixedBytes = 0;
+    std::vector<std::string> fixedSizeExprs;
+    const Named *dynamic = nullptr;
+  };
+  const auto usage = localVars ^ fold_left(Usage{}, [&](Usage acc, const auto &v) {
+                       const auto extent = arrayExtent(v.name.tpe);
+                       if (!extent) throw BackendException("workgroup array extent overflow");
+                       if (extent->count == 0) {
+                         if (!acc.dynamic) acc.dynamic = &v.name;
+                       } else if (const auto bytes = scalarBytes(extent->element)) {
+                         if (extent->count > std::numeric_limits<uint64_t>::max() / *bytes)
+                           throw BackendException("workgroup array extent overflow");
+                         const auto total = extent->count * *bytes;
+                         if (acc.fixedBytes > std::numeric_limits<uint64_t>::max() - total)
+                           throw BackendException("workgroup array extent overflow");
+                         acc.fixedBytes += total;
+                       } else acc.fixedSizeExprs.push_back(fmt::format("({} * sizeof({}))", extent->count, mkTpe(extent->element)));
+                       return acc;
+                     });
+  if (usage.fixedBytes > workgroupMemoryBytes || (usage.dynamic && usage.fixedBytes >= workgroupMemoryBytes))
+    throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", workgroupMemoryBytes));
+
+  const bool inPlace = usage.dynamic && scalarBytes(usage.dynamic->tpe.template get<Type::Arr>()->comp) == 1;
+  const auto regionName = !usage.dynamic ? ""s : inPlace ? localName(usage.dynamic->symbol) : localName("#workgroup_region");
+  const auto fixedExpr = usage.fixedSizeExprs ^ mk_string("", " + ", "", [](const auto &x) { return x; });
+  const auto remaining = workgroupMemoryBytes - usage.fixedBytes;
+  const auto available = fixedExpr.empty() ? std::to_string(remaining) : fmt::format("{} - ({})", remaining, fixedExpr);
+  std::vector<std::string> regionConditions;
+  if (!fixedExpr.empty()) regionConditions.push_back(fmt::format("({}) <= {}", fixedExpr, remaining));
+  if (usage.dynamic) {
+    const auto required = (fnTree.template collect_all<Expr::Cast>() ^ collect([&](const auto &cast) -> std::optional<std::string> {
+                             if (const auto ptr = cast.as.template get<Type::Ptr>(); ptr && ptr->space.template is<TypeSpace::Local>())
+                               if (const auto structure = ptr->comp.template get<Type::Struct>()) return mkTpe(structure->widen());
+                             return std::nullopt;
+                           }))
+                          ^ to<Set>();
+    regionConditions ^=
+        concat(required ^ map([&](const auto &structure) { return fmt::format("sizeof({}) <= ({})", structure, available); }));
+  }
+  const auto condition = regionConditions ^ mk_string("", " && ", "", [](const auto &x) { return x; });
+  const auto regionExtent = condition.empty() ? available : fmt::format("(({}) ? {} : -1)", condition, available);
+  const auto regionDecl = [&](const Type::Any &element, const TypeSpace::Any &space, const std::string &name) {
+    return fmt::format("__attribute__((aligned(16))) {};", mkArrayDecl(element, space, name, regionExtent));
+  };
+
+  std::vector<std::string> regionDecls;
+  if (usage.dynamic && !inPlace) regionDecls.push_back(regionDecl(Type::IntS8(), TypeSpace::Local(), regionName));
+
+  const auto localDecls = localVars ^ map([&](const auto &v) {
+                            const auto a = v.name.tpe.template get<Type::Arr>();
+                            if (!a || a->length != 0) return fmt::format("{};", mkDecl(v.name.tpe, localName(v.name.symbol)));
+                            const auto name = localName(v.name.symbol);
+                            if (name == regionName) return regionDecl(a->comp, a->space, name);
+                            const auto ptr = Type::Ptr(a->comp, a->space).widen();
+                            return fmt::format("{} = (({}) {});", mkDecl(ptr, name), mkTpe(ptr), regionName);
                           });
-  const auto stmts = concat(localDecls, fnTree.body ^ map([&](const auto &s) { return mkStmt(s); }));
+  if (!usage.fixedSizeExprs.empty() && !usage.dynamic)
+    regionDecls.push_back(fmt::format("typedef char _polyregion_workgroup_capacity[({}) <= {} ? 1 : -1];", fixedExpr, remaining));
+  const auto stmts = concat(concat(regionDecls, localDecls), fnTree.body ^ map([&](const auto &s) { return mkStmt(s); }));
   return fmt::format("{} {}", mkFnProto(fnTree), stmts ^ mk_string("{\n", "\n", "\n}", [&](const auto &s) { return s ^ indent(2); }));
 }
 

@@ -145,6 +145,121 @@ TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
   CHECK(source.find("sub_group_barrier(CLK_LOCAL_MEM_FENCE)") != std::string::npos);
 }
 
+TEST_CASE("C source shares one bounded workgroup region per kernel", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto dynamicBytes = Type::Arr(Type::IntS8(), 0, TypeSpace::Local()).widen();
+  const auto dynamicInts = Type::Arr(Type::IntS32(), 0, TypeSpace::Local()).widen();
+  const auto staticFloats = Type::Arr(Type::Float32(), 64, TypeSpace::Local()).widen();
+  const auto kernel = [&](const std::string &name) {
+    const auto scratch = Var(Named("static", staticFloats), Expr::Alias(Term::Poison(staticFloats).widen()).widen(), false).widen();
+    return mkFn(name, {}, Type::Unit0(),
+                {scratch, scratch, Var(Named("bytes", dynamicBytes), std::optional<Expr::Any>{}, false).widen(),
+                 Var(Named("ints", dynamicInts), std::optional<Expr::Any>{}, false).widen(),
+                 Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  };
+  const Program p(kernel("first"), {kernel("second")}, {}, PassPhase::Initial(), {});
+
+  for (const auto target : {Target::Source_C_OpenCL1_1, Target::Source_C_Metal1_0}) {
+    polyregion::compiler::Options opts{target, ""};
+    opts.pipelineSpec = "Mirror";
+    opts.workgroupMemoryBytes = 1024;
+    const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    INFO(repr(c));
+    REQUIRE(c.binary != std::nullopt);
+    const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+    const auto occurrences = [&](const std::string &needle) {
+      return source | sliding(needle.size(), 1)
+             | count([&](const auto &window) { return std::equal(window.begin(), window.end(), needle.begin()); });
+    };
+    CHECK(occurrences("[64]") == 2);
+    CHECK(occurrences("[768]") == 2);
+    CHECK(occurrences("_v2 = ((") == 2);
+    CHECK(source.find("[0]") == std::string::npos);
+  }
+}
+
+TEST_CASE("C source rejects workgroup storage beyond the configured capacity", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto compile = [](uint32_t elements, uint32_t capacity = 128) {
+    const auto local = Type::Arr(Type::IntU8(), elements, TypeSpace::Local()).widen();
+    const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                                {Var(Named("storage", local), std::optional<Expr::Any>{}, false).widen(),
+                                 Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+    opts.pipelineSpec = "Mirror";
+    opts.workgroupMemoryBytes = capacity;
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  };
+
+  CHECK(compile(128).binary != std::nullopt);
+  REQUIRE_THROWS_WITH(compile(129), Catch::Matchers::ContainsSubstring("workgroup storage exceeds configured capacity"));
+  REQUIRE_THROWS_WITH(compile(0, 0), Catch::Matchers::ContainsSubstring("workgroup storage exceeds configured capacity"));
+}
+
+TEST_CASE("C source preserves hoisted workgroup array initialisation", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto fixed = Type::Arr(Type::IntS32(), 2, TypeSpace::Local()).widen();
+  const auto dynamic = Type::Arr(Type::IntS32(), 0, TypeSpace::Local()).widen();
+  const Named source("source", fixed), copy("copy", fixed), view("view", dynamic);
+  const Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {Var(source, std::optional<Expr::Any>{}, false).widen(), Var(copy, Expr::Alias(selectNamed(source).widen()).widen(), false).widen(),
+       Var(view, std::optional<Expr::Any>{}, false).widen(), Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  opts.workgroupMemoryBytes = 64;
+
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string sourceText(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(sourceText.find("local char _v3[48]") != std::string::npos);
+  CHECK(sourceText.find("local int* _v2 = ((local int*) _v3)") != std::string::npos);
+  CHECK(sourceText.find("_v1[_ac0] = _v0[_ac0]") != std::string::npos);
+}
+
+TEST_CASE("C source accounts for workgroup struct storage", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto stateSym = Sym({"State"});
+  const auto emptySym = Sym({"Empty"});
+  const auto state = Type::Struct(stateSym, {}).widen();
+  const auto empty = Type::Struct(emptySym, {}).widen();
+  const StructDef stateDef(stateSym, {}, {Named("x", Type::IntS32()), Named("y", Type::IntS32())}, {}, false);
+  const StructDef emptyDef(emptySym, {}, {}, {}, false);
+  const auto fixedStates = Type::Arr(state, 2, TypeSpace::Local()).widen();
+  const auto fixedEmpty = Type::Arr(empty, 1, TypeSpace::Local()).widen();
+  const auto dynamic = Type::Arr(Type::IntS8(), 0, TypeSpace::Local()).widen();
+  const auto statePtr = Type::Ptr(state, TypeSpace::Local()).widen();
+  const Named states("states", fixedStates), empties("empties", fixedEmpty), storage("storage", dynamic), view("view", statePtr);
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(states, std::optional<Expr::Any>{}, false).widen(), Var(empties, std::optional<Expr::Any>{}, false).widen(),
+            Var(storage, std::optional<Expr::Any>{}, false).widen(),
+            Var(view, Expr::Cast(selectNamed(storage).widen(), statePtr).widen(), false).widen(),
+            Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  opts.workgroupMemoryBytes = 64;
+
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {stateDef, emptyDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source.find("2 * sizeof(State)") != std::string::npos);
+  CHECK(source.find("1 * sizeof(Empty)") != std::string::npos);
+  CHECK(source.find("sizeof(State) <= (") != std::string::npos);
+}
+
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);

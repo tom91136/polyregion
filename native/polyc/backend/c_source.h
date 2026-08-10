@@ -21,6 +21,7 @@ public:
 
 private:
   Dialect dialect;
+  uint32_t workgroupMemoryBytes;
   Map<std::string, std::vector<std::pair<std::string, Type::Any>>> structDefsByName;
   Set<std::string> zeroSizeStructNames;
   Set<std::string> unionDefNames;
@@ -36,6 +37,7 @@ private:
   std::string mkValueCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const;
   std::optional<std::string> mkZeroInit(const Type::Any &tpe) const;
   std::string mkTpe(const Type::Any &tpe);
+  std::string mkArrayDecl(const Type::Any &element, const TypeSpace::Any &space, const std::string &name, const std::string &extent);
   std::string mkDecl(const Type::Any &tpe, const std::string &name);
   std::string mkTerm(const Term::Any &term);
   std::string mkExpr(const Expr::Any &expr);
@@ -44,7 +46,7 @@ private:
   std::string mkFn(const Function &);
 
 public:
-  explicit CSource(const Dialect &dialect) : dialect(dialect) {}
+  explicit CSource(const Dialect &dialect, uint32_t workgroupMemoryBytes) : dialect(dialect), workgroupMemoryBytes(workgroupMemoryBytes) {}
 
   CompileResult compileProgram(const Program &, const compiletime::OptLevel &) override;
   std::vector<StructLayout> resolveLayouts(const std::vector<StructDef> &) override;
