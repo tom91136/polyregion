@@ -1,9 +1,10 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <unordered_map>
+#include <set>
 
 #include "polyregion/compat.h"
 
@@ -39,12 +40,34 @@ POLYREGION_EXPORT std::optional<LaunchDimensions> retryLaunchDimensions(cl_int e
 POLYREGION_EXPORT std::string errorString(cl_int error);
 
 struct SVMTracker {
+  enum class Ownership { Device, Host, InheritedHost };
+
   struct Entry {
     size_t size;
-    bool mappedForHost; // true while host may safely read/write the alloc
+    Ownership ownership;
   };
-  std::mutex mtx;
-  std::unordered_map<void *, Entry> entries;
+
+private:
+  mutable std::mutex mutex;
+  std::map<uintptr_t, Entry> entries;
+  std::set<uintptr_t> leakedHostMaps;
+  bool freeReleasesMap = false;
+
+  auto owner(uintptr_t ptr);
+  auto owner(uintptr_t ptr) const;
+
+public:
+  using Map = std::function<cl_int(void *, size_t)>;
+  using Unmap = std::function<cl_int(void *)>;
+
+  void track(void *ptr, size_t size);
+  void untrack(void *ptr);
+  std::optional<cl_int> mapForHost(void *ptr, const Map &map);
+  cl_int mapAllForHost(const Map &map);
+  cl_int unmapAllForDevice(const Unmap &unmap);
+  std::vector<void *> pointers() const;
+  std::optional<Ownership> ownership(void *ptr) const;
+  bool freeReleasesHostMap() const;
 };
 } // namespace details
 
@@ -109,9 +132,7 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
   std::shared_ptr<details::SVMTracker> svmTracker;
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
-  // Coarse-grain SVM only: unmap all host-mapped allocs so the GPU can read/write them, then
-  // remap them on completion so subsequent host accesses see the new contents. No-op if svm is
-  // not coarse-grain or the impl lacks map/unmap.
+  bool mapSvmForHost(void *ptr);
   void unmapAllSvmForDevice();
   void mapAllSvmForHost();
 

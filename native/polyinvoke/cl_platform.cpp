@@ -23,6 +23,88 @@ namespace cl_details = polyregion::invoke::cl::details;
 
 static constexpr const char *PREFIX = "OpenCL";
 
+auto cl_details::SVMTracker::owner(uintptr_t ptr) {
+  const auto next = entries.upper_bound(ptr);
+  if (next == entries.begin()) return entries.end();
+  const auto candidate = std::prev(next);
+  return ptr - candidate->first < candidate->second.size ? candidate : entries.end();
+}
+
+auto cl_details::SVMTracker::owner(uintptr_t ptr) const {
+  const auto next = entries.upper_bound(ptr);
+  if (next == entries.begin()) return entries.end();
+  const auto candidate = std::prev(next);
+  return ptr - candidate->first < candidate->second.size ? candidate : entries.end();
+}
+
+void cl_details::SVMTracker::track(void *ptr, size_t size) {
+  std::lock_guard lock(mutex);
+  const auto base = reinterpret_cast<uintptr_t>(ptr);
+  const auto inherited = leakedHostMaps.erase(base) != 0 && !freeReleasesMap;
+  entries.insert_or_assign(base, Entry{size, inherited ? Ownership::InheritedHost : Ownership::Device});
+}
+
+void cl_details::SVMTracker::untrack(void *ptr) {
+  std::lock_guard lock(mutex);
+  const auto base = reinterpret_cast<uintptr_t>(ptr);
+  const auto it = entries.find(base);
+  if (it == entries.end()) return;
+  if (it->second.ownership != Ownership::Device) leakedHostMaps.insert(base);
+  entries.erase(it);
+}
+
+std::optional<cl_int> cl_details::SVMTracker::mapForHost(void *ptr, const Map &map) {
+  std::lock_guard lock(mutex);
+  const auto it = owner(reinterpret_cast<uintptr_t>(ptr));
+  if (it == entries.end()) return {};
+  if (it->second.ownership == Ownership::Device) {
+    const auto result = map(reinterpret_cast<void *>(it->first), it->second.size);
+    if (result != CL_SUCCESS) return result;
+    it->second.ownership = Ownership::Host;
+  }
+  return CL_SUCCESS;
+}
+
+cl_int cl_details::SVMTracker::mapAllForHost(const Map &map) {
+  std::lock_guard lock(mutex);
+  for (auto &[base, entry] : entries) {
+    if (entry.ownership != Ownership::Device) continue;
+    if (const auto result = map(reinterpret_cast<void *>(base), entry.size); result != CL_SUCCESS) return result;
+    entry.ownership = Ownership::Host;
+  }
+  return CL_SUCCESS;
+}
+
+cl_int cl_details::SVMTracker::unmapAllForDevice(const Unmap &unmap) {
+  std::lock_guard lock(mutex);
+  for (auto &[base, entry] : entries) {
+    if (entry.ownership == Ownership::Device) continue;
+    if (const auto result = unmap(reinterpret_cast<void *>(base)); result != CL_SUCCESS) {
+      if (result != CL_INVALID_VALUE || entry.ownership != Ownership::InheritedHost) return result;
+      freeReleasesMap = true;
+    }
+    entry.ownership = Ownership::Device;
+  }
+  return CL_SUCCESS;
+}
+
+std::vector<void *> cl_details::SVMTracker::pointers() const {
+  std::lock_guard lock(mutex);
+  return entries | aspartame::keys() | aspartame::map([](uintptr_t base) { return reinterpret_cast<void *>(base); })
+         | aspartame::to_vector();
+}
+
+std::optional<cl_details::SVMTracker::Ownership> cl_details::SVMTracker::ownership(void *ptr) const {
+  std::lock_guard lock(mutex);
+  const auto it = owner(reinterpret_cast<uintptr_t>(ptr));
+  return it == entries.end() ? std::nullopt : std::optional{it->second.ownership};
+}
+
+bool cl_details::SVMTracker::freeReleasesHostMap() const {
+  std::lock_guard lock(mutex);
+  return freeReleasesMap;
+}
+
 std::string cl_details::errorString(cl_int error) {
   static const char *strings[] = {
       "CL_SUCCESS",
@@ -502,18 +584,11 @@ bool ClDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();
   return store.moduleLoaded(name);
 }
-// Track every SVM alloc (device-only and shared) so it participates in CL_KERNEL_EXEC_INFO_SVM_PTRS
-// indirect-SVM declarations and coarse-grain map/unmap; without tracking, reductions through
-// pointer-in-pointer args silently zero partials on Intel/NVIDIA.
 void ClDevice::trackSvm(void *p, size_t size) {
-  if (!svmTracker) return;
-  std::lock_guard lock(svmTracker->mtx);
-  svmTracker->entries.emplace(p, cl_details::SVMTracker::Entry{size, /*mappedForHost*/ false});
+  if (svmTracker) svmTracker->track(p, size);
 }
 void ClDevice::untrackSvm(void *p) {
-  if (!svmTracker) return;
-  std::lock_guard lock(svmTracker->mtx);
-  svmTracker->entries.erase(p);
+  if (svmTracker) svmTracker->untrack(p);
 }
 
 uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
@@ -601,25 +676,23 @@ ClDeviceQueue::~ClDeviceQueue() {
   POLYINVOKE_TRACE();
   CHECKED(clReleaseCommandQueue(queue));
 }
+bool ClDeviceQueue::mapSvmForHost(void *ptr) {
+  if (!svmTracker || !clEnqueueSVMMap || *svm != 0) return false;
+  const auto result = svmTracker->mapForHost(
+      ptr, [&](void *base, size_t size) { return clEnqueueSVMMap(queue, CL_TRUE, /*CL_MAP_READ*/ 0x1, base, size, 0, nullptr, nullptr); });
+  if (!result) return false;
+  CHECKED(*result);
+  return true;
+}
 void ClDeviceQueue::unmapAllSvmForDevice() {
-  // fine-grain SVM is auto-coherent; coarse-grain needs explicit map/unmap (skip if the impl lacks them)
   if (!svmTracker || !clEnqueueSVMUnmap || *svm != 0) return;
-  std::lock_guard lock(svmTracker->mtx);
-  for (auto &[ptr, entry] : svmTracker->entries) {
-    if (!entry.mappedForHost) continue;
-    CHECKED(clEnqueueSVMUnmap(queue, ptr, 0, nullptr, nullptr));
-    entry.mappedForHost = false;
-  }
+  CHECKED(svmTracker->unmapAllForDevice([&](void *ptr) { return clEnqueueSVMUnmap(queue, ptr, 0, nullptr, nullptr); }));
 }
 void ClDeviceQueue::mapAllSvmForHost() {
   if (!svmTracker || !clEnqueueSVMMap || *svm != 0) return;
-  std::lock_guard lock(svmTracker->mtx);
-  for (auto &[ptr, entry] : svmTracker->entries) {
-    if (entry.mappedForHost) continue;
-    // 0x3 = CL_MAP_READ | CL_MAP_WRITE; blocking so the caller can read immediately
-    CHECKED(clEnqueueSVMMap(queue, CL_TRUE, 0x3, ptr, entry.size, 0, nullptr, nullptr));
-    entry.mappedForHost = true;
-  }
+  CHECKED(svmTracker->mapAllForHost([&](void *ptr, size_t size) {
+    return clEnqueueSVMMap(queue, CL_TRUE, /*CL_MAP_READ | CL_MAP_WRITE*/ 0x3, ptr, size, 0, nullptr, nullptr);
+  }));
 }
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   POLYINVOKE_TRACE();
@@ -647,12 +720,21 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
   POLYINVOKE_TRACE();
   cl_event event = {};
   if (svm) {
-    // XXX Coarse-grain SVMMemcpy is UB if either region is host-mapped; unmap first.
-    unmapAllSvmForDevice();
-    auto *srcP = reinterpret_cast<const char *>(src) + srcOffset;
+    auto *srcP = reinterpret_cast<char *>(src) + srcOffset;
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
-    // blocking: src must stay valid until the copy completes
-    CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, srcP, size, 0, nullptr, nullptr));
+    if (*svm == 0 && clEnqueueSVMMap && clEnqueueSVMUnmap) {
+      std::vector<char> staging(size);
+      if (mapSvmForHost(srcP)) std::memcpy(staging.data(), srcP, size);
+      else {
+        unmapAllSvmForDevice();
+        CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, staging.data(), srcP, size, 0, nullptr, nullptr));
+      }
+      unmapAllSvmForDevice();
+      CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, staging.data(), size, 0, nullptr, nullptr));
+    } else {
+      unmapAllSvmForDevice();
+      CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, srcP, size, 0, nullptr, nullptr));
+    }
   } else {
     const auto srcMem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(src), srcOffset, size);
     const auto dstMem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(dst), dstOffset, size);
@@ -686,11 +768,8 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
   if (size == 0) return enqueueCallback(cb, {});
   if (svm) {
     auto *srcP = reinterpret_cast<char *>(src) + srcOffset;
-    if (*svm == 0 && clEnqueueSVMMap && clEnqueueSVMUnmap) {
-      // Intel NEO SVMMemcpy reads stale coarse-grain SVM after a kernel write; Map/Unmap forces the flush
-      CHECKED(clEnqueueSVMMap(queue, CL_TRUE, /*CL_MAP_READ*/ 0x1, srcP, size, 0, nullptr, nullptr));
+    if (mapSvmForHost(srcP)) {
       std::memcpy(dst, srcP, size);
-      CHECKED(clEnqueueSVMUnmap(queue, srcP, 0, nullptr, nullptr));
     } else {
       unmapAllSvmForDevice();
       CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
@@ -758,7 +837,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     // indirect SVM allocs need CL_KERNEL_EXEC_INFO_SVM_PTRS or the driver skips coherency; some drivers
     // reject the batched call but accept it per-pointer, so on CL_INVALID_VALUE retry per-pointer
     std::vector<void *> allSvmPtrs;
-    allSvmPtrs.reserve(types.size() + (svmTracker ? svmTracker->entries.size() : 0));
+    const auto tracked = svmTracker ? svmTracker->pointers() : std::vector<void *>{};
+    allSvmPtrs.reserve(types.size() + tracked.size());
     for (cl_uint i = 0; i < types.size() - 1; ++i) {
       if (types[i] != Type::Ptr) continue;
       uintptr_t ptr = {};
@@ -766,11 +846,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
       // NVIDIA OpenCL rejects clSetKernelExecInfo on a null entry with CL_INVALID_VALUE.
       if (ptr) allSvmPtrs.push_back(reinterpret_cast<void *>(ptr));
     }
-    if (svmTracker) {
-      std::lock_guard lock(svmTracker->mtx);
-      for (auto &[ptr, _] : svmTracker->entries)
-        allSvmPtrs.push_back(ptr);
-    }
+    allSvmPtrs.insert(allSvmPtrs.end(), tracked.begin(), tracked.end());
     auto declare = [&](void *const *ptrs, size_t n) {
       return n == 0 ? CL_SUCCESS : clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS_, n * sizeof(void *), ptrs);
     };
