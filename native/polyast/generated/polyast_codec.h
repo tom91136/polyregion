@@ -12,60 +12,6 @@
 using json = nlohmann::json;
 
 namespace polyregion::polyast {
-namespace Intr {
-[[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicNot logicnot_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logicnot_to_json(const Intr::LogicNot &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Pos pos_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json pos_to_json(const Intr::Pos &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Neg neg_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json neg_to_json(const Intr::Neg &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Add add_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json add_to_json(const Intr::Add &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Sub sub_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json sub_to_json(const Intr::Sub &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Mul mul_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json mul_to_json(const Intr::Mul &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Div div_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json div_to_json(const Intr::Div &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Rem rem_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json rem_to_json(const Intr::Rem &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Min min_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json min_to_json(const Intr::Min &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Max max_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json max_to_json(const Intr::Max &);
-[[nodiscard]] POLYREGION_EXPORT Intr::BAnd band_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json band_to_json(const Intr::BAnd &);
-[[nodiscard]] POLYREGION_EXPORT Intr::BOr bor_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bor_to_json(const Intr::BOr &);
-[[nodiscard]] POLYREGION_EXPORT Intr::BXor bxor_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bxor_to_json(const Intr::BXor &);
-[[nodiscard]] POLYREGION_EXPORT Intr::BSL bsl_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bsl_to_json(const Intr::BSL &);
-[[nodiscard]] POLYREGION_EXPORT Intr::BSR bsr_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bsr_to_json(const Intr::BSR &);
-[[nodiscard]] POLYREGION_EXPORT Intr::BZSR bzsr_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bzsr_to_json(const Intr::BZSR &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicAnd logicand_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logicand_to_json(const Intr::LogicAnd &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicOr logicor_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logicor_to_json(const Intr::LogicOr &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicEq logiceq_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logiceq_to_json(const Intr::LogicEq &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicNeq logicneq_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logicneq_to_json(const Intr::LogicNeq &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicLte logiclte_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logiclte_to_json(const Intr::LogicLte &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicGte logicgte_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logicgte_to_json(const Intr::LogicGte &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicLt logiclt_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logiclt_to_json(const Intr::LogicLt &);
-[[nodiscard]] POLYREGION_EXPORT Intr::LogicGt logicgt_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json logicgt_to_json(const Intr::LogicGt &);
-[[nodiscard]] POLYREGION_EXPORT Intr::Any any_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json any_to_json(const Intr::Any &);
-} // namespace Intr
 namespace FunctionFpMode {
 [[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Relaxed relaxed_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json relaxed_to_json(const FunctionFpMode::Relaxed &);
@@ -206,6 +152,20 @@ namespace Math {
 [[nodiscard]] POLYREGION_EXPORT Math::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Math::Any &);
 } // namespace Math
+namespace MemOrder {
+[[nodiscard]] POLYREGION_EXPORT MemOrder::Relaxed relaxed_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json relaxed_to_json(const MemOrder::Relaxed &);
+[[nodiscard]] POLYREGION_EXPORT MemOrder::Acquire acquire_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json acquire_to_json(const MemOrder::Acquire &);
+[[nodiscard]] POLYREGION_EXPORT MemOrder::Release release_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json release_to_json(const MemOrder::Release &);
+[[nodiscard]] POLYREGION_EXPORT MemOrder::AcqRel acqrel_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json acqrel_to_json(const MemOrder::AcqRel &);
+[[nodiscard]] POLYREGION_EXPORT MemOrder::SeqCst seqcst_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json seqcst_to_json(const MemOrder::SeqCst &);
+[[nodiscard]] POLYREGION_EXPORT MemOrder::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const MemOrder::Any &);
+} // namespace MemOrder
 namespace TypeSpace {
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Global global_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json global_to_json(const TypeSpace::Global &);
@@ -273,6 +233,12 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT json gpuvoteany_to_json(const Spec::GpuVoteAny &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuVoteAll gpuvoteall_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json gpuvoteall_to_json(const Spec::GpuVoteAll &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuAtomicRMW gpuatomicrmw_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuatomicrmw_to_json(const Spec::GpuAtomicRMW &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuVolatileLoad gpuvolatileload_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuvolatileload_to_json(const Spec::GpuVolatileLoad &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuVolatileStore gpuvolatilestore_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuvolatilestore_to_json(const Spec::GpuVolatileStore &);
 [[nodiscard]] POLYREGION_EXPORT Spec::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Spec::Any &);
 } // namespace Spec
@@ -412,6 +378,92 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json passrunresult_to_json(const PassRunResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
+namespace Intr {
+[[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicNot logicnot_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logicnot_to_json(const Intr::LogicNot &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Pos pos_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json pos_to_json(const Intr::Pos &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Neg neg_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json neg_to_json(const Intr::Neg &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Add add_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json add_to_json(const Intr::Add &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Sub sub_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json sub_to_json(const Intr::Sub &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Mul mul_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json mul_to_json(const Intr::Mul &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Div div_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json div_to_json(const Intr::Div &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Rem rem_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json rem_to_json(const Intr::Rem &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Min min_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json min_to_json(const Intr::Min &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Max max_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json max_to_json(const Intr::Max &);
+[[nodiscard]] POLYREGION_EXPORT Intr::BAnd band_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json band_to_json(const Intr::BAnd &);
+[[nodiscard]] POLYREGION_EXPORT Intr::BOr bor_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bor_to_json(const Intr::BOr &);
+[[nodiscard]] POLYREGION_EXPORT Intr::BXor bxor_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bxor_to_json(const Intr::BXor &);
+[[nodiscard]] POLYREGION_EXPORT Intr::BSL bsl_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bsl_to_json(const Intr::BSL &);
+[[nodiscard]] POLYREGION_EXPORT Intr::BSR bsr_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bsr_to_json(const Intr::BSR &);
+[[nodiscard]] POLYREGION_EXPORT Intr::BZSR bzsr_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bzsr_to_json(const Intr::BZSR &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicAnd logicand_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logicand_to_json(const Intr::LogicAnd &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicOr logicor_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logicor_to_json(const Intr::LogicOr &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicEq logiceq_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logiceq_to_json(const Intr::LogicEq &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicNeq logicneq_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logicneq_to_json(const Intr::LogicNeq &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicLte logiclte_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logiclte_to_json(const Intr::LogicLte &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicGte logicgte_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logicgte_to_json(const Intr::LogicGte &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicLt logiclt_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logiclt_to_json(const Intr::LogicLt &);
+[[nodiscard]] POLYREGION_EXPORT Intr::LogicGt logicgt_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json logicgt_to_json(const Intr::LogicGt &);
+[[nodiscard]] POLYREGION_EXPORT Intr::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const Intr::Any &);
+} // namespace Intr
+namespace AtomicOp {
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Xchg xchg_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json xchg_to_json(const AtomicOp::Xchg &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Add add_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json add_to_json(const AtomicOp::Add &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Sub sub_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json sub_to_json(const AtomicOp::Sub &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::And and_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json and_to_json(const AtomicOp::And &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Or or_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json or_to_json(const AtomicOp::Or &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Xor xor_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json xor_to_json(const AtomicOp::Xor &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Min min_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json min_to_json(const AtomicOp::Min &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Max max_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json max_to_json(const AtomicOp::Max &);
+[[nodiscard]] POLYREGION_EXPORT AtomicOp::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const AtomicOp::Any &);
+} // namespace AtomicOp
+namespace MemScope {
+[[nodiscard]] POLYREGION_EXPORT MemScope::Subgroup subgroup_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json subgroup_to_json(const MemScope::Subgroup &);
+[[nodiscard]] POLYREGION_EXPORT MemScope::Workgroup workgroup_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json workgroup_to_json(const MemScope::Workgroup &);
+[[nodiscard]] POLYREGION_EXPORT MemScope::Device device_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json device_to_json(const MemScope::Device &);
+[[nodiscard]] POLYREGION_EXPORT MemScope::System system_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json system_to_json(const MemScope::System &);
+[[nodiscard]] POLYREGION_EXPORT MemScope::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const MemScope::Any &);
+} // namespace MemScope
 namespace TypeKind {
 [[nodiscard]] POLYREGION_EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json none_to_json(const TypeKind::None &);

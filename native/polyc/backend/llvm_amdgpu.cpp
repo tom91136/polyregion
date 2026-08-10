@@ -162,7 +162,10 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return cg.intr0(llvm::Intrinsic::amdgcn_wave_barrier); },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for AMDGPU"); },
+      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for AMDGPU"); },
+      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for AMDGPU"); });
 }
 ValPtr AMDGPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   // XXX OCML: `__ocml_<name>_f32` / `__ocml_<name>_f64`.

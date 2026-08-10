@@ -35,7 +35,10 @@ private:
   std::string localName(const std::string &symbol);
   Type::Any resolveFieldType(const Type::Any &owner, const std::string &fieldName) const;
   std::string mkValueCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const;
+  std::string mkVolatileCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const;
+  std::string mkVolatileHelper(bool load, const Type::Any &tpe, const std::string &space);
   std::optional<std::string> mkZeroInit(const Type::Any &tpe) const;
+  std::string mslPtrSpace(const Term::Any &ptr) const;
   std::string mkTpe(const Type::Any &tpe);
   std::string mkArrayDecl(const Type::Any &element, const TypeSpace::Any &space, const std::string &name, const std::string &extent);
   std::string mkDecl(const Type::Any &tpe, const std::string &name);

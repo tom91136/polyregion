@@ -225,7 +225,10 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return subgroupBarrier(); },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for SPIRV-CL"); },
+      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for SPIRV-CL"); },
+      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for SPIRV-CL"); });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   OclMangledMath m{cg};
@@ -305,7 +308,10 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); });
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for SPIRV-Vulkan"); },
+      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for SPIRV-Vulkan"); },
+      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for SPIRV-Vulkan"); });
 }
 
 // XXX Vulkan float math uses LLVM intrinsics (GLSL.std.450), the OpenCL.std mangled libcalls crash the Intel driver

@@ -1212,6 +1212,299 @@ POLYREGION_EXPORT bool Overload::operator==(const Overload &rhs) const {
   return std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
 
+AtomicOp::Base::Base() = default;
+uint32_t AtomicOp::Any::id() const { return _v->id(); }
+size_t AtomicOp::Any::hash_code() const { return _v->hash_code(); }
+bool AtomicOp::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool AtomicOp::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool AtomicOp::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+AtomicOp::Xchg::Xchg() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Xchg::id() const { return variant_id; };
+size_t AtomicOp::Xchg::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Xchg::operator==(const AtomicOp::Xchg &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Xchg::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Xchg::operator<(const AtomicOp::Xchg &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Xchg::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Xchg::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Xchg>(*this)); }
+AtomicOp::Any AtomicOp::Xchg::widen() const { return Any(*this); };
+
+AtomicOp::Add::Add() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Add::id() const { return variant_id; };
+size_t AtomicOp::Add::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Add::operator==(const AtomicOp::Add &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Add::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Add::operator<(const AtomicOp::Add &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Add::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Add::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
+AtomicOp::Any AtomicOp::Add::widen() const { return Any(*this); };
+
+AtomicOp::Sub::Sub() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Sub::id() const { return variant_id; };
+size_t AtomicOp::Sub::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Sub::operator==(const AtomicOp::Sub &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Sub::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Sub::operator<(const AtomicOp::Sub &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Sub::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Sub::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sub>(*this)); }
+AtomicOp::Any AtomicOp::Sub::widen() const { return Any(*this); };
+
+AtomicOp::And::And() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::And::id() const { return variant_id; };
+size_t AtomicOp::And::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::And::operator==(const AtomicOp::And &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::And::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::And::operator<(const AtomicOp::And &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::And::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::And::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<And>(*this)); }
+AtomicOp::Any AtomicOp::And::widen() const { return Any(*this); };
+
+AtomicOp::Or::Or() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Or::id() const { return variant_id; };
+size_t AtomicOp::Or::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Or::operator==(const AtomicOp::Or &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Or::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Or::operator<(const AtomicOp::Or &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Or::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Or::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Or>(*this)); }
+AtomicOp::Any AtomicOp::Or::widen() const { return Any(*this); };
+
+AtomicOp::Xor::Xor() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Xor::id() const { return variant_id; };
+size_t AtomicOp::Xor::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Xor::operator==(const AtomicOp::Xor &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Xor::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Xor::operator<(const AtomicOp::Xor &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Xor::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Xor::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Xor>(*this)); }
+AtomicOp::Any AtomicOp::Xor::widen() const { return Any(*this); };
+
+AtomicOp::Min::Min() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Min::id() const { return variant_id; };
+size_t AtomicOp::Min::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Min::operator==(const AtomicOp::Min &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Min::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Min::operator<(const AtomicOp::Min &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Min::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Min::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
+AtomicOp::Any AtomicOp::Min::widen() const { return Any(*this); };
+
+AtomicOp::Max::Max() noexcept : AtomicOp::Base() {}
+uint32_t AtomicOp::Max::id() const { return variant_id; };
+size_t AtomicOp::Max::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool AtomicOp::Max::operator==(const AtomicOp::Max &rhs) const { return true; }
+POLYREGION_EXPORT bool AtomicOp::Max::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool AtomicOp::Max::operator<(const AtomicOp::Max &rhs) const { return false; }
+POLYREGION_EXPORT bool AtomicOp::Max::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+AtomicOp::Max::operator AtomicOp::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Max>(*this)); }
+AtomicOp::Any AtomicOp::Max::widen() const { return Any(*this); };
+
+MemScope::Base::Base() = default;
+uint32_t MemScope::Any::id() const { return _v->id(); }
+size_t MemScope::Any::hash_code() const { return _v->hash_code(); }
+bool MemScope::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool MemScope::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool MemScope::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+MemScope::Subgroup::Subgroup() noexcept : MemScope::Base() {}
+uint32_t MemScope::Subgroup::id() const { return variant_id; };
+size_t MemScope::Subgroup::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemScope::Subgroup::operator==(const MemScope::Subgroup &rhs) const { return true; }
+POLYREGION_EXPORT bool MemScope::Subgroup::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemScope::Subgroup::operator<(const MemScope::Subgroup &rhs) const { return false; }
+POLYREGION_EXPORT bool MemScope::Subgroup::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemScope::Subgroup::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Subgroup>(*this)); }
+MemScope::Any MemScope::Subgroup::widen() const { return Any(*this); };
+
+MemScope::Workgroup::Workgroup() noexcept : MemScope::Base() {}
+uint32_t MemScope::Workgroup::id() const { return variant_id; };
+size_t MemScope::Workgroup::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemScope::Workgroup::operator==(const MemScope::Workgroup &rhs) const { return true; }
+POLYREGION_EXPORT bool MemScope::Workgroup::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemScope::Workgroup::operator<(const MemScope::Workgroup &rhs) const { return false; }
+POLYREGION_EXPORT bool MemScope::Workgroup::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemScope::Workgroup::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Workgroup>(*this)); }
+MemScope::Any MemScope::Workgroup::widen() const { return Any(*this); };
+
+MemScope::Device::Device() noexcept : MemScope::Base() {}
+uint32_t MemScope::Device::id() const { return variant_id; };
+size_t MemScope::Device::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemScope::Device::operator==(const MemScope::Device &rhs) const { return true; }
+POLYREGION_EXPORT bool MemScope::Device::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemScope::Device::operator<(const MemScope::Device &rhs) const { return false; }
+POLYREGION_EXPORT bool MemScope::Device::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemScope::Device::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Device>(*this)); }
+MemScope::Any MemScope::Device::widen() const { return Any(*this); };
+
+MemScope::System::System() noexcept : MemScope::Base() {}
+uint32_t MemScope::System::id() const { return variant_id; };
+size_t MemScope::System::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemScope::System::operator==(const MemScope::System &rhs) const { return true; }
+POLYREGION_EXPORT bool MemScope::System::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemScope::System::operator<(const MemScope::System &rhs) const { return false; }
+POLYREGION_EXPORT bool MemScope::System::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemScope::System::operator MemScope::Any() const { return std::static_pointer_cast<Base>(std::make_shared<System>(*this)); }
+MemScope::Any MemScope::System::widen() const { return Any(*this); };
+
+MemOrder::Base::Base() = default;
+uint32_t MemOrder::Any::id() const { return _v->id(); }
+size_t MemOrder::Any::hash_code() const { return _v->hash_code(); }
+bool MemOrder::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool MemOrder::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool MemOrder::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+MemOrder::Relaxed::Relaxed() noexcept : MemOrder::Base() {}
+uint32_t MemOrder::Relaxed::id() const { return variant_id; };
+size_t MemOrder::Relaxed::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemOrder::Relaxed::operator==(const MemOrder::Relaxed &rhs) const { return true; }
+POLYREGION_EXPORT bool MemOrder::Relaxed::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemOrder::Relaxed::operator<(const MemOrder::Relaxed &rhs) const { return false; }
+POLYREGION_EXPORT bool MemOrder::Relaxed::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemOrder::Relaxed::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Relaxed>(*this)); }
+MemOrder::Any MemOrder::Relaxed::widen() const { return Any(*this); };
+
+MemOrder::Acquire::Acquire() noexcept : MemOrder::Base() {}
+uint32_t MemOrder::Acquire::id() const { return variant_id; };
+size_t MemOrder::Acquire::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemOrder::Acquire::operator==(const MemOrder::Acquire &rhs) const { return true; }
+POLYREGION_EXPORT bool MemOrder::Acquire::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemOrder::Acquire::operator<(const MemOrder::Acquire &rhs) const { return false; }
+POLYREGION_EXPORT bool MemOrder::Acquire::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemOrder::Acquire::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Acquire>(*this)); }
+MemOrder::Any MemOrder::Acquire::widen() const { return Any(*this); };
+
+MemOrder::Release::Release() noexcept : MemOrder::Base() {}
+uint32_t MemOrder::Release::id() const { return variant_id; };
+size_t MemOrder::Release::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemOrder::Release::operator==(const MemOrder::Release &rhs) const { return true; }
+POLYREGION_EXPORT bool MemOrder::Release::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemOrder::Release::operator<(const MemOrder::Release &rhs) const { return false; }
+POLYREGION_EXPORT bool MemOrder::Release::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemOrder::Release::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Release>(*this)); }
+MemOrder::Any MemOrder::Release::widen() const { return Any(*this); };
+
+MemOrder::AcqRel::AcqRel() noexcept : MemOrder::Base() {}
+uint32_t MemOrder::AcqRel::id() const { return variant_id; };
+size_t MemOrder::AcqRel::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemOrder::AcqRel::operator==(const MemOrder::AcqRel &rhs) const { return true; }
+POLYREGION_EXPORT bool MemOrder::AcqRel::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemOrder::AcqRel::operator<(const MemOrder::AcqRel &rhs) const { return false; }
+POLYREGION_EXPORT bool MemOrder::AcqRel::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemOrder::AcqRel::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<AcqRel>(*this)); }
+MemOrder::Any MemOrder::AcqRel::widen() const { return Any(*this); };
+
+MemOrder::SeqCst::SeqCst() noexcept : MemOrder::Base() {}
+uint32_t MemOrder::SeqCst::id() const { return variant_id; };
+size_t MemOrder::SeqCst::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool MemOrder::SeqCst::operator==(const MemOrder::SeqCst &rhs) const { return true; }
+POLYREGION_EXPORT bool MemOrder::SeqCst::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool MemOrder::SeqCst::operator<(const MemOrder::SeqCst &rhs) const { return false; }
+POLYREGION_EXPORT bool MemOrder::SeqCst::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+MemOrder::SeqCst::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<SeqCst>(*this)); }
+MemOrder::Any MemOrder::SeqCst::widen() const { return Any(*this); };
+
 Spec::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept
     : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Spec::Any::id() const { return _v->id(); }
@@ -1677,6 +1970,86 @@ POLYREGION_EXPORT bool Spec::GpuVoteAll::operator==(const Base &rhs_) const {
 }
 Spec::GpuVoteAll::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVoteAll>(*this)); }
 Spec::Any Spec::GpuVoteAll::widen() const { return Any(*this); };
+
+Spec::GpuAtomicRMW::GpuAtomicRMW(AtomicOp::Any op, Term::Any ptr, Term::Any value, MemScope::Any scope, MemOrder::Any order,
+                                 Type::Any rtn) noexcept
+    : Spec::Base({}, {ptr, value}, rtn), op(std::move(op)), ptr(std::move(ptr)), value(std::move(value)), scope(std::move(scope)),
+      order(std::move(order)), rtn(std::move(rtn)) {}
+uint32_t Spec::GpuAtomicRMW::id() const { return variant_id; };
+size_t Spec::GpuAtomicRMW::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(scope)>()(scope) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(order)>()(order) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withOp(const AtomicOp::Any &v_) const {
+  return Spec::GpuAtomicRMW(v_, ptr, value, scope, order, rtn);
+}
+Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withPtr(const Term::Any &v_) const { return Spec::GpuAtomicRMW(op, v_, value, scope, order, rtn); }
+Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withValue(const Term::Any &v_) const { return Spec::GpuAtomicRMW(op, ptr, v_, scope, order, rtn); }
+Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withScope(const MemScope::Any &v_) const {
+  return Spec::GpuAtomicRMW(op, ptr, value, v_, order, rtn);
+}
+Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withOrder(const MemOrder::Any &v_) const {
+  return Spec::GpuAtomicRMW(op, ptr, value, scope, v_, rtn);
+}
+Spec::GpuAtomicRMW Spec::GpuAtomicRMW::withRtn(const Type::Any &v_) const { return Spec::GpuAtomicRMW(op, ptr, value, scope, order, v_); }
+POLYREGION_EXPORT bool Spec::GpuAtomicRMW::operator==(const Spec::GpuAtomicRMW &rhs) const {
+  return (this->op == rhs.op) && (this->ptr == rhs.ptr) && (this->value == rhs.value) && (this->scope == rhs.scope)
+         && (this->order == rhs.order) && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Spec::GpuAtomicRMW::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuAtomicRMW &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuAtomicRMW::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuAtomicRMW>(*this)); }
+Spec::Any Spec::GpuAtomicRMW::widen() const { return Any(*this); };
+
+Spec::GpuVolatileLoad::GpuVolatileLoad(Term::Any ptr, Type::Any rtn) noexcept
+    : Spec::Base({}, {ptr}, rtn), ptr(std::move(ptr)), rtn(std::move(rtn)) {}
+uint32_t Spec::GpuVolatileLoad::id() const { return variant_id; };
+size_t Spec::GpuVolatileLoad::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuVolatileLoad Spec::GpuVolatileLoad::withPtr(const Term::Any &v_) const { return Spec::GpuVolatileLoad(v_, rtn); }
+Spec::GpuVolatileLoad Spec::GpuVolatileLoad::withRtn(const Type::Any &v_) const { return Spec::GpuVolatileLoad(ptr, v_); }
+POLYREGION_EXPORT bool Spec::GpuVolatileLoad::operator==(const Spec::GpuVolatileLoad &rhs) const {
+  return (this->ptr == rhs.ptr) && (this->rtn == rhs.rtn);
+}
+POLYREGION_EXPORT bool Spec::GpuVolatileLoad::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuVolatileLoad &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuVolatileLoad::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVolatileLoad>(*this)); }
+Spec::Any Spec::GpuVolatileLoad::widen() const { return Any(*this); };
+
+Spec::GpuVolatileStore::GpuVolatileStore(Term::Any ptr, Term::Any value) noexcept
+    : Spec::Base({}, {ptr, value}, Type::Unit0()), ptr(std::move(ptr)), value(std::move(value)) {}
+uint32_t Spec::GpuVolatileStore::id() const { return variant_id; };
+size_t Spec::GpuVolatileStore::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::GpuVolatileStore Spec::GpuVolatileStore::withPtr(const Term::Any &v_) const { return Spec::GpuVolatileStore(v_, value); }
+Spec::GpuVolatileStore Spec::GpuVolatileStore::withValue(const Term::Any &v_) const { return Spec::GpuVolatileStore(ptr, v_); }
+POLYREGION_EXPORT bool Spec::GpuVolatileStore::operator==(const Spec::GpuVolatileStore &rhs) const {
+  return (this->ptr == rhs.ptr) && (this->value == rhs.value);
+}
+POLYREGION_EXPORT bool Spec::GpuVolatileStore::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::GpuVolatileStore &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::GpuVolatileStore::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVolatileStore>(*this)); }
+Spec::Any Spec::GpuVolatileStore::widen() const { return Any(*this); };
 
 Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept
     : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
@@ -4055,6 +4428,68 @@ std::size_t std::hash<polyregion::polyast::Expr::SizeOf>::operator()(const polyr
 std::size_t std::hash<polyregion::polyast::Overload>::operator()(const polyregion::polyast::Overload &x) const noexcept {
   return x.hash_code();
 }
+std::size_t std::hash<polyregion::polyast::AtomicOp::Any>::operator()(const polyregion::polyast::AtomicOp::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Xchg>::operator()(const polyregion::polyast::AtomicOp::Xchg &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Add>::operator()(const polyregion::polyast::AtomicOp::Add &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Sub>::operator()(const polyregion::polyast::AtomicOp::Sub &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::And>::operator()(const polyregion::polyast::AtomicOp::And &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Or>::operator()(const polyregion::polyast::AtomicOp::Or &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Xor>::operator()(const polyregion::polyast::AtomicOp::Xor &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Min>::operator()(const polyregion::polyast::AtomicOp::Min &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::AtomicOp::Max>::operator()(const polyregion::polyast::AtomicOp::Max &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemScope::Any>::operator()(const polyregion::polyast::MemScope::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::MemScope::Subgroup>::operator()(const polyregion::polyast::MemScope::Subgroup &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::MemScope::Workgroup>::operator()(const polyregion::polyast::MemScope::Workgroup &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemScope::Device>::operator()(const polyregion::polyast::MemScope::Device &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemScope::System>::operator()(const polyregion::polyast::MemScope::System &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemOrder::Any>::operator()(const polyregion::polyast::MemOrder::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemOrder::Relaxed>::operator()(const polyregion::polyast::MemOrder::Relaxed &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemOrder::Acquire>::operator()(const polyregion::polyast::MemOrder::Acquire &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemOrder::Release>::operator()(const polyregion::polyast::MemOrder::Release &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemOrder::AcqRel>::operator()(const polyregion::polyast::MemOrder::AcqRel &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::MemOrder::SeqCst>::operator()(const polyregion::polyast::MemOrder::SeqCst &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Spec::Any>::operator()(const polyregion::polyast::Spec::Any &x) const noexcept {
   return x.hash_code();
 }
@@ -4140,6 +4575,18 @@ std::size_t std::hash<polyregion::polyast::Spec::GpuVoteAny>::operator()(const p
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Spec::GpuVoteAll>::operator()(const polyregion::polyast::Spec::GpuVoteAll &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuAtomicRMW>::operator()(const polyregion::polyast::Spec::GpuAtomicRMW &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuVolatileLoad>::operator()(const polyregion::polyast::Spec::GpuVolatileLoad &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::GpuVolatileStore>::operator()(const polyregion::polyast::Spec::GpuVolatileStore &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Intr::Any>::operator()(const polyregion::polyast::Intr::Any &x) const noexcept {

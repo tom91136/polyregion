@@ -35,7 +35,10 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return noop(); },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); } //
+      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); },
+      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for CPU"); },
+      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for CPU"); },
+      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for CPU"); } //
   );
 }
 ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {

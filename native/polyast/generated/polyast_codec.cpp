@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "d9da3eb055cfbec98f011c226c2b091e";
+constexpr auto AdtHash = "6d94f200500e9a3312637b392aae70b8";
 
 namespace {
 
@@ -1219,6 +1219,141 @@ json overload_to_json(const Overload &x_) {
   return json::array({args, rtn});
 }
 
+AtomicOp::Xchg AtomicOp::xchg_from_json(const json &j_) { return {}; }
+
+json AtomicOp::xchg_to_json(const AtomicOp::Xchg &x_) { return json::array({}); }
+
+AtomicOp::Add AtomicOp::add_from_json(const json &j_) { return {}; }
+
+json AtomicOp::add_to_json(const AtomicOp::Add &x_) { return json::array({}); }
+
+AtomicOp::Sub AtomicOp::sub_from_json(const json &j_) { return {}; }
+
+json AtomicOp::sub_to_json(const AtomicOp::Sub &x_) { return json::array({}); }
+
+AtomicOp::And AtomicOp::and_from_json(const json &j_) { return {}; }
+
+json AtomicOp::and_to_json(const AtomicOp::And &x_) { return json::array({}); }
+
+AtomicOp::Or AtomicOp::or_from_json(const json &j_) { return {}; }
+
+json AtomicOp::or_to_json(const AtomicOp::Or &x_) { return json::array({}); }
+
+AtomicOp::Xor AtomicOp::xor_from_json(const json &j_) { return {}; }
+
+json AtomicOp::xor_to_json(const AtomicOp::Xor &x_) { return json::array({}); }
+
+AtomicOp::Min AtomicOp::min_from_json(const json &j_) { return {}; }
+
+json AtomicOp::min_to_json(const AtomicOp::Min &x_) { return json::array({}); }
+
+AtomicOp::Max AtomicOp::max_from_json(const json &j_) { return {}; }
+
+json AtomicOp::max_to_json(const AtomicOp::Max &x_) { return json::array({}); }
+
+AtomicOp::Any AtomicOp::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return AtomicOp::xchg_from_json(t_);
+    case 1: return AtomicOp::add_from_json(t_);
+    case 2: return AtomicOp::sub_from_json(t_);
+    case 3: return AtomicOp::and_from_json(t_);
+    case 4: return AtomicOp::or_from_json(t_);
+    case 5: return AtomicOp::xor_from_json(t_);
+    case 6: return AtomicOp::min_from_json(t_);
+    case 7: return AtomicOp::max_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json AtomicOp::any_to_json(const AtomicOp::Any &x_) {
+  return x_.match_total([](const AtomicOp::Xchg &y_) -> json { return {0, AtomicOp::xchg_to_json(y_)}; },
+                        [](const AtomicOp::Add &y_) -> json { return {1, AtomicOp::add_to_json(y_)}; },
+                        [](const AtomicOp::Sub &y_) -> json { return {2, AtomicOp::sub_to_json(y_)}; },
+                        [](const AtomicOp::And &y_) -> json { return {3, AtomicOp::and_to_json(y_)}; },
+                        [](const AtomicOp::Or &y_) -> json { return {4, AtomicOp::or_to_json(y_)}; },
+                        [](const AtomicOp::Xor &y_) -> json { return {5, AtomicOp::xor_to_json(y_)}; },
+                        [](const AtomicOp::Min &y_) -> json { return {6, AtomicOp::min_to_json(y_)}; },
+                        [](const AtomicOp::Max &y_) -> json { return {7, AtomicOp::max_to_json(y_)}; });
+}
+
+MemScope::Subgroup MemScope::subgroup_from_json(const json &j_) { return {}; }
+
+json MemScope::subgroup_to_json(const MemScope::Subgroup &x_) { return json::array({}); }
+
+MemScope::Workgroup MemScope::workgroup_from_json(const json &j_) { return {}; }
+
+json MemScope::workgroup_to_json(const MemScope::Workgroup &x_) { return json::array({}); }
+
+MemScope::Device MemScope::device_from_json(const json &j_) { return {}; }
+
+json MemScope::device_to_json(const MemScope::Device &x_) { return json::array({}); }
+
+MemScope::System MemScope::system_from_json(const json &j_) { return {}; }
+
+json MemScope::system_to_json(const MemScope::System &x_) { return json::array({}); }
+
+MemScope::Any MemScope::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return MemScope::subgroup_from_json(t_);
+    case 1: return MemScope::workgroup_from_json(t_);
+    case 2: return MemScope::device_from_json(t_);
+    case 3: return MemScope::system_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json MemScope::any_to_json(const MemScope::Any &x_) {
+  return x_.match_total([](const MemScope::Subgroup &y_) -> json { return {0, MemScope::subgroup_to_json(y_)}; },
+                        [](const MemScope::Workgroup &y_) -> json { return {1, MemScope::workgroup_to_json(y_)}; },
+                        [](const MemScope::Device &y_) -> json { return {2, MemScope::device_to_json(y_)}; },
+                        [](const MemScope::System &y_) -> json { return {3, MemScope::system_to_json(y_)}; });
+}
+
+MemOrder::Relaxed MemOrder::relaxed_from_json(const json &j_) { return {}; }
+
+json MemOrder::relaxed_to_json(const MemOrder::Relaxed &x_) { return json::array({}); }
+
+MemOrder::Acquire MemOrder::acquire_from_json(const json &j_) { return {}; }
+
+json MemOrder::acquire_to_json(const MemOrder::Acquire &x_) { return json::array({}); }
+
+MemOrder::Release MemOrder::release_from_json(const json &j_) { return {}; }
+
+json MemOrder::release_to_json(const MemOrder::Release &x_) { return json::array({}); }
+
+MemOrder::AcqRel MemOrder::acqrel_from_json(const json &j_) { return {}; }
+
+json MemOrder::acqrel_to_json(const MemOrder::AcqRel &x_) { return json::array({}); }
+
+MemOrder::SeqCst MemOrder::seqcst_from_json(const json &j_) { return {}; }
+
+json MemOrder::seqcst_to_json(const MemOrder::SeqCst &x_) { return json::array({}); }
+
+MemOrder::Any MemOrder::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return MemOrder::relaxed_from_json(t_);
+    case 1: return MemOrder::acquire_from_json(t_);
+    case 2: return MemOrder::release_from_json(t_);
+    case 3: return MemOrder::acqrel_from_json(t_);
+    case 4: return MemOrder::seqcst_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json MemOrder::any_to_json(const MemOrder::Any &x_) {
+  return x_.match_total([](const MemOrder::Relaxed &y_) -> json { return {0, MemOrder::relaxed_to_json(y_)}; },
+                        [](const MemOrder::Acquire &y_) -> json { return {1, MemOrder::acquire_to_json(y_)}; },
+                        [](const MemOrder::Release &y_) -> json { return {2, MemOrder::release_to_json(y_)}; },
+                        [](const MemOrder::AcqRel &y_) -> json { return {3, MemOrder::acqrel_to_json(y_)}; },
+                        [](const MemOrder::SeqCst &y_) -> json { return {4, MemOrder::seqcst_to_json(y_)}; });
+}
+
 Spec::Assert Spec::assert_from_json(const json &j_) {
   auto code = Term::any_from_json(j_.at(0));
   auto message = Term::any_from_json(j_.at(1));
@@ -1441,6 +1576,50 @@ json Spec::gpuvoteall_to_json(const Spec::GpuVoteAll &x_) {
   return json::array({mask, pred});
 }
 
+Spec::GpuAtomicRMW Spec::gpuatomicrmw_from_json(const json &j_) {
+  auto op = AtomicOp::any_from_json(j_.at(0));
+  auto ptr = Term::any_from_json(j_.at(1));
+  auto value = Term::any_from_json(j_.at(2));
+  auto scope = MemScope::any_from_json(j_.at(3));
+  auto order = MemOrder::any_from_json(j_.at(4));
+  auto rtn = Type::any_from_json(j_.at(5));
+  return {op, ptr, value, scope, order, rtn};
+}
+
+json Spec::gpuatomicrmw_to_json(const Spec::GpuAtomicRMW &x_) {
+  auto op = AtomicOp::any_to_json(x_.op);
+  auto ptr = Term::any_to_json(x_.ptr);
+  auto value = Term::any_to_json(x_.value);
+  auto scope = MemScope::any_to_json(x_.scope);
+  auto order = MemOrder::any_to_json(x_.order);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({op, ptr, value, scope, order, rtn});
+}
+
+Spec::GpuVolatileLoad Spec::gpuvolatileload_from_json(const json &j_) {
+  auto ptr = Term::any_from_json(j_.at(0));
+  auto rtn = Type::any_from_json(j_.at(1));
+  return {ptr, rtn};
+}
+
+json Spec::gpuvolatileload_to_json(const Spec::GpuVolatileLoad &x_) {
+  auto ptr = Term::any_to_json(x_.ptr);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({ptr, rtn});
+}
+
+Spec::GpuVolatileStore Spec::gpuvolatilestore_from_json(const json &j_) {
+  auto ptr = Term::any_from_json(j_.at(0));
+  auto value = Term::any_from_json(j_.at(1));
+  return {ptr, value};
+}
+
+json Spec::gpuvolatilestore_to_json(const Spec::GpuVolatileStore &x_) {
+  auto ptr = Term::any_to_json(x_.ptr);
+  auto value = Term::any_to_json(x_.value);
+  return json::array({ptr, value});
+}
+
 Spec::Any Spec::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -1468,6 +1647,9 @@ Spec::Any Spec::any_from_json(const json &j_) {
     case 20: return Spec::gpuballot_from_json(t_);
     case 21: return Spec::gpuvoteany_from_json(t_);
     case 22: return Spec::gpuvoteall_from_json(t_);
+    case 23: return Spec::gpuatomicrmw_from_json(t_);
+    case 24: return Spec::gpuvolatileload_from_json(t_);
+    case 25: return Spec::gpuvolatilestore_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1495,7 +1677,10 @@ json Spec::any_to_json(const Spec::Any &x_) {
                         [](const Spec::GpuSubgroupBarrier &y_) -> json { return {19, Spec::gpusubgroupbarrier_to_json(y_)}; },
                         [](const Spec::GpuBallot &y_) -> json { return {20, Spec::gpuballot_to_json(y_)}; },
                         [](const Spec::GpuVoteAny &y_) -> json { return {21, Spec::gpuvoteany_to_json(y_)}; },
-                        [](const Spec::GpuVoteAll &y_) -> json { return {22, Spec::gpuvoteall_to_json(y_)}; });
+                        [](const Spec::GpuVoteAll &y_) -> json { return {22, Spec::gpuvoteall_to_json(y_)}; },
+                        [](const Spec::GpuAtomicRMW &y_) -> json { return {23, Spec::gpuatomicrmw_to_json(y_)}; },
+                        [](const Spec::GpuVolatileLoad &y_) -> json { return {24, Spec::gpuvolatileload_to_json(y_)}; },
+                        [](const Spec::GpuVolatileStore &y_) -> json { return {25, Spec::gpuvolatilestore_to_json(y_)}; });
 }
 
 Intr::BNot Intr::bnot_from_json(const json &j_) {
@@ -3025,110 +3210,6 @@ json hashed_from_json(const json &j_) {
 
 json hashed_to_json(const json &x_) { return json::array({AdtHash, x_}); }
 
-namespace Intr {
-Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
-void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
-Intr::BNot bnot_from_msgpack(MsgpackReader &);
-void bnot_to_msgpack(MsgpackWriter &, const Intr::BNot &);
-Intr::LogicNot logicnot_fields_from_msgpack(MsgpackReader &, size_t);
-void logicnot_fields_to_msgpack(MsgpackWriter &, const Intr::LogicNot &);
-Intr::LogicNot logicnot_from_msgpack(MsgpackReader &);
-void logicnot_to_msgpack(MsgpackWriter &, const Intr::LogicNot &);
-Intr::Pos pos_fields_from_msgpack(MsgpackReader &, size_t);
-void pos_fields_to_msgpack(MsgpackWriter &, const Intr::Pos &);
-Intr::Pos pos_from_msgpack(MsgpackReader &);
-void pos_to_msgpack(MsgpackWriter &, const Intr::Pos &);
-Intr::Neg neg_fields_from_msgpack(MsgpackReader &, size_t);
-void neg_fields_to_msgpack(MsgpackWriter &, const Intr::Neg &);
-Intr::Neg neg_from_msgpack(MsgpackReader &);
-void neg_to_msgpack(MsgpackWriter &, const Intr::Neg &);
-Intr::Add add_fields_from_msgpack(MsgpackReader &, size_t);
-void add_fields_to_msgpack(MsgpackWriter &, const Intr::Add &);
-Intr::Add add_from_msgpack(MsgpackReader &);
-void add_to_msgpack(MsgpackWriter &, const Intr::Add &);
-Intr::Sub sub_fields_from_msgpack(MsgpackReader &, size_t);
-void sub_fields_to_msgpack(MsgpackWriter &, const Intr::Sub &);
-Intr::Sub sub_from_msgpack(MsgpackReader &);
-void sub_to_msgpack(MsgpackWriter &, const Intr::Sub &);
-Intr::Mul mul_fields_from_msgpack(MsgpackReader &, size_t);
-void mul_fields_to_msgpack(MsgpackWriter &, const Intr::Mul &);
-Intr::Mul mul_from_msgpack(MsgpackReader &);
-void mul_to_msgpack(MsgpackWriter &, const Intr::Mul &);
-Intr::Div div_fields_from_msgpack(MsgpackReader &, size_t);
-void div_fields_to_msgpack(MsgpackWriter &, const Intr::Div &);
-Intr::Div div_from_msgpack(MsgpackReader &);
-void div_to_msgpack(MsgpackWriter &, const Intr::Div &);
-Intr::Rem rem_fields_from_msgpack(MsgpackReader &, size_t);
-void rem_fields_to_msgpack(MsgpackWriter &, const Intr::Rem &);
-Intr::Rem rem_from_msgpack(MsgpackReader &);
-void rem_to_msgpack(MsgpackWriter &, const Intr::Rem &);
-Intr::Min min_fields_from_msgpack(MsgpackReader &, size_t);
-void min_fields_to_msgpack(MsgpackWriter &, const Intr::Min &);
-Intr::Min min_from_msgpack(MsgpackReader &);
-void min_to_msgpack(MsgpackWriter &, const Intr::Min &);
-Intr::Max max_fields_from_msgpack(MsgpackReader &, size_t);
-void max_fields_to_msgpack(MsgpackWriter &, const Intr::Max &);
-Intr::Max max_from_msgpack(MsgpackReader &);
-void max_to_msgpack(MsgpackWriter &, const Intr::Max &);
-Intr::BAnd band_fields_from_msgpack(MsgpackReader &, size_t);
-void band_fields_to_msgpack(MsgpackWriter &, const Intr::BAnd &);
-Intr::BAnd band_from_msgpack(MsgpackReader &);
-void band_to_msgpack(MsgpackWriter &, const Intr::BAnd &);
-Intr::BOr bor_fields_from_msgpack(MsgpackReader &, size_t);
-void bor_fields_to_msgpack(MsgpackWriter &, const Intr::BOr &);
-Intr::BOr bor_from_msgpack(MsgpackReader &);
-void bor_to_msgpack(MsgpackWriter &, const Intr::BOr &);
-Intr::BXor bxor_fields_from_msgpack(MsgpackReader &, size_t);
-void bxor_fields_to_msgpack(MsgpackWriter &, const Intr::BXor &);
-Intr::BXor bxor_from_msgpack(MsgpackReader &);
-void bxor_to_msgpack(MsgpackWriter &, const Intr::BXor &);
-Intr::BSL bsl_fields_from_msgpack(MsgpackReader &, size_t);
-void bsl_fields_to_msgpack(MsgpackWriter &, const Intr::BSL &);
-Intr::BSL bsl_from_msgpack(MsgpackReader &);
-void bsl_to_msgpack(MsgpackWriter &, const Intr::BSL &);
-Intr::BSR bsr_fields_from_msgpack(MsgpackReader &, size_t);
-void bsr_fields_to_msgpack(MsgpackWriter &, const Intr::BSR &);
-Intr::BSR bsr_from_msgpack(MsgpackReader &);
-void bsr_to_msgpack(MsgpackWriter &, const Intr::BSR &);
-Intr::BZSR bzsr_fields_from_msgpack(MsgpackReader &, size_t);
-void bzsr_fields_to_msgpack(MsgpackWriter &, const Intr::BZSR &);
-Intr::BZSR bzsr_from_msgpack(MsgpackReader &);
-void bzsr_to_msgpack(MsgpackWriter &, const Intr::BZSR &);
-Intr::LogicAnd logicand_fields_from_msgpack(MsgpackReader &, size_t);
-void logicand_fields_to_msgpack(MsgpackWriter &, const Intr::LogicAnd &);
-Intr::LogicAnd logicand_from_msgpack(MsgpackReader &);
-void logicand_to_msgpack(MsgpackWriter &, const Intr::LogicAnd &);
-Intr::LogicOr logicor_fields_from_msgpack(MsgpackReader &, size_t);
-void logicor_fields_to_msgpack(MsgpackWriter &, const Intr::LogicOr &);
-Intr::LogicOr logicor_from_msgpack(MsgpackReader &);
-void logicor_to_msgpack(MsgpackWriter &, const Intr::LogicOr &);
-Intr::LogicEq logiceq_fields_from_msgpack(MsgpackReader &, size_t);
-void logiceq_fields_to_msgpack(MsgpackWriter &, const Intr::LogicEq &);
-Intr::LogicEq logiceq_from_msgpack(MsgpackReader &);
-void logiceq_to_msgpack(MsgpackWriter &, const Intr::LogicEq &);
-Intr::LogicNeq logicneq_fields_from_msgpack(MsgpackReader &, size_t);
-void logicneq_fields_to_msgpack(MsgpackWriter &, const Intr::LogicNeq &);
-Intr::LogicNeq logicneq_from_msgpack(MsgpackReader &);
-void logicneq_to_msgpack(MsgpackWriter &, const Intr::LogicNeq &);
-Intr::LogicLte logiclte_fields_from_msgpack(MsgpackReader &, size_t);
-void logiclte_fields_to_msgpack(MsgpackWriter &, const Intr::LogicLte &);
-Intr::LogicLte logiclte_from_msgpack(MsgpackReader &);
-void logiclte_to_msgpack(MsgpackWriter &, const Intr::LogicLte &);
-Intr::LogicGte logicgte_fields_from_msgpack(MsgpackReader &, size_t);
-void logicgte_fields_to_msgpack(MsgpackWriter &, const Intr::LogicGte &);
-Intr::LogicGte logicgte_from_msgpack(MsgpackReader &);
-void logicgte_to_msgpack(MsgpackWriter &, const Intr::LogicGte &);
-Intr::LogicLt logiclt_fields_from_msgpack(MsgpackReader &, size_t);
-void logiclt_fields_to_msgpack(MsgpackWriter &, const Intr::LogicLt &);
-Intr::LogicLt logiclt_from_msgpack(MsgpackReader &);
-void logiclt_to_msgpack(MsgpackWriter &, const Intr::LogicLt &);
-Intr::LogicGt logicgt_fields_from_msgpack(MsgpackReader &, size_t);
-void logicgt_fields_to_msgpack(MsgpackWriter &, const Intr::LogicGt &);
-Intr::LogicGt logicgt_from_msgpack(MsgpackReader &);
-void logicgt_to_msgpack(MsgpackWriter &, const Intr::LogicGt &);
-Intr::Any any_from_msgpack(MsgpackReader &);
-void any_to_msgpack(MsgpackWriter &, const Intr::Any &);
-} // namespace Intr
 namespace FunctionFpMode {
 FunctionFpMode::Relaxed relaxed_fields_from_msgpack(MsgpackReader &, size_t);
 void relaxed_fields_to_msgpack(MsgpackWriter &, const FunctionFpMode::Relaxed &);
@@ -3385,6 +3466,30 @@ void hypot_to_msgpack(MsgpackWriter &, const Math::Hypot &);
 Math::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Math::Any &);
 } // namespace Math
+namespace MemOrder {
+MemOrder::Relaxed relaxed_fields_from_msgpack(MsgpackReader &, size_t);
+void relaxed_fields_to_msgpack(MsgpackWriter &, const MemOrder::Relaxed &);
+MemOrder::Relaxed relaxed_from_msgpack(MsgpackReader &);
+void relaxed_to_msgpack(MsgpackWriter &, const MemOrder::Relaxed &);
+MemOrder::Acquire acquire_fields_from_msgpack(MsgpackReader &, size_t);
+void acquire_fields_to_msgpack(MsgpackWriter &, const MemOrder::Acquire &);
+MemOrder::Acquire acquire_from_msgpack(MsgpackReader &);
+void acquire_to_msgpack(MsgpackWriter &, const MemOrder::Acquire &);
+MemOrder::Release release_fields_from_msgpack(MsgpackReader &, size_t);
+void release_fields_to_msgpack(MsgpackWriter &, const MemOrder::Release &);
+MemOrder::Release release_from_msgpack(MsgpackReader &);
+void release_to_msgpack(MsgpackWriter &, const MemOrder::Release &);
+MemOrder::AcqRel acqrel_fields_from_msgpack(MsgpackReader &, size_t);
+void acqrel_fields_to_msgpack(MsgpackWriter &, const MemOrder::AcqRel &);
+MemOrder::AcqRel acqrel_from_msgpack(MsgpackReader &);
+void acqrel_to_msgpack(MsgpackWriter &, const MemOrder::AcqRel &);
+MemOrder::SeqCst seqcst_fields_from_msgpack(MsgpackReader &, size_t);
+void seqcst_fields_to_msgpack(MsgpackWriter &, const MemOrder::SeqCst &);
+MemOrder::SeqCst seqcst_from_msgpack(MsgpackReader &);
+void seqcst_to_msgpack(MsgpackWriter &, const MemOrder::SeqCst &);
+MemOrder::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const MemOrder::Any &);
+} // namespace MemOrder
 namespace TypeSpace {
 TypeSpace::Global global_fields_from_msgpack(MsgpackReader &, size_t);
 void global_fields_to_msgpack(MsgpackWriter &, const TypeSpace::Global &);
@@ -3510,6 +3615,18 @@ Spec::GpuVoteAll gpuvoteall_fields_from_msgpack(MsgpackReader &, size_t);
 void gpuvoteall_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVoteAll &);
 Spec::GpuVoteAll gpuvoteall_from_msgpack(MsgpackReader &);
 void gpuvoteall_to_msgpack(MsgpackWriter &, const Spec::GpuVoteAll &);
+Spec::GpuAtomicRMW gpuatomicrmw_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuatomicrmw_fields_to_msgpack(MsgpackWriter &, const Spec::GpuAtomicRMW &);
+Spec::GpuAtomicRMW gpuatomicrmw_from_msgpack(MsgpackReader &);
+void gpuatomicrmw_to_msgpack(MsgpackWriter &, const Spec::GpuAtomicRMW &);
+Spec::GpuVolatileLoad gpuvolatileload_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuvolatileload_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileLoad &);
+Spec::GpuVolatileLoad gpuvolatileload_from_msgpack(MsgpackReader &);
+void gpuvolatileload_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileLoad &);
+Spec::GpuVolatileStore gpuvolatilestore_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuvolatilestore_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileStore &);
+Spec::GpuVolatileStore gpuvolatilestore_from_msgpack(MsgpackReader &);
+void gpuvolatilestore_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileStore &);
 Spec::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Spec::Any &);
 } // namespace Spec
@@ -3773,6 +3890,166 @@ CompileResult compileresult_fields_from_msgpack(MsgpackReader &, size_t);
 void compileresult_fields_to_msgpack(MsgpackWriter &, const CompileResult &);
 CompileResult compileresult_from_msgpack(MsgpackReader &);
 void compileresult_to_msgpack(MsgpackWriter &, const CompileResult &);
+namespace Intr {
+Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
+void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
+Intr::BNot bnot_from_msgpack(MsgpackReader &);
+void bnot_to_msgpack(MsgpackWriter &, const Intr::BNot &);
+Intr::LogicNot logicnot_fields_from_msgpack(MsgpackReader &, size_t);
+void logicnot_fields_to_msgpack(MsgpackWriter &, const Intr::LogicNot &);
+Intr::LogicNot logicnot_from_msgpack(MsgpackReader &);
+void logicnot_to_msgpack(MsgpackWriter &, const Intr::LogicNot &);
+Intr::Pos pos_fields_from_msgpack(MsgpackReader &, size_t);
+void pos_fields_to_msgpack(MsgpackWriter &, const Intr::Pos &);
+Intr::Pos pos_from_msgpack(MsgpackReader &);
+void pos_to_msgpack(MsgpackWriter &, const Intr::Pos &);
+Intr::Neg neg_fields_from_msgpack(MsgpackReader &, size_t);
+void neg_fields_to_msgpack(MsgpackWriter &, const Intr::Neg &);
+Intr::Neg neg_from_msgpack(MsgpackReader &);
+void neg_to_msgpack(MsgpackWriter &, const Intr::Neg &);
+Intr::Add add_fields_from_msgpack(MsgpackReader &, size_t);
+void add_fields_to_msgpack(MsgpackWriter &, const Intr::Add &);
+Intr::Add add_from_msgpack(MsgpackReader &);
+void add_to_msgpack(MsgpackWriter &, const Intr::Add &);
+Intr::Sub sub_fields_from_msgpack(MsgpackReader &, size_t);
+void sub_fields_to_msgpack(MsgpackWriter &, const Intr::Sub &);
+Intr::Sub sub_from_msgpack(MsgpackReader &);
+void sub_to_msgpack(MsgpackWriter &, const Intr::Sub &);
+Intr::Mul mul_fields_from_msgpack(MsgpackReader &, size_t);
+void mul_fields_to_msgpack(MsgpackWriter &, const Intr::Mul &);
+Intr::Mul mul_from_msgpack(MsgpackReader &);
+void mul_to_msgpack(MsgpackWriter &, const Intr::Mul &);
+Intr::Div div_fields_from_msgpack(MsgpackReader &, size_t);
+void div_fields_to_msgpack(MsgpackWriter &, const Intr::Div &);
+Intr::Div div_from_msgpack(MsgpackReader &);
+void div_to_msgpack(MsgpackWriter &, const Intr::Div &);
+Intr::Rem rem_fields_from_msgpack(MsgpackReader &, size_t);
+void rem_fields_to_msgpack(MsgpackWriter &, const Intr::Rem &);
+Intr::Rem rem_from_msgpack(MsgpackReader &);
+void rem_to_msgpack(MsgpackWriter &, const Intr::Rem &);
+Intr::Min min_fields_from_msgpack(MsgpackReader &, size_t);
+void min_fields_to_msgpack(MsgpackWriter &, const Intr::Min &);
+Intr::Min min_from_msgpack(MsgpackReader &);
+void min_to_msgpack(MsgpackWriter &, const Intr::Min &);
+Intr::Max max_fields_from_msgpack(MsgpackReader &, size_t);
+void max_fields_to_msgpack(MsgpackWriter &, const Intr::Max &);
+Intr::Max max_from_msgpack(MsgpackReader &);
+void max_to_msgpack(MsgpackWriter &, const Intr::Max &);
+Intr::BAnd band_fields_from_msgpack(MsgpackReader &, size_t);
+void band_fields_to_msgpack(MsgpackWriter &, const Intr::BAnd &);
+Intr::BAnd band_from_msgpack(MsgpackReader &);
+void band_to_msgpack(MsgpackWriter &, const Intr::BAnd &);
+Intr::BOr bor_fields_from_msgpack(MsgpackReader &, size_t);
+void bor_fields_to_msgpack(MsgpackWriter &, const Intr::BOr &);
+Intr::BOr bor_from_msgpack(MsgpackReader &);
+void bor_to_msgpack(MsgpackWriter &, const Intr::BOr &);
+Intr::BXor bxor_fields_from_msgpack(MsgpackReader &, size_t);
+void bxor_fields_to_msgpack(MsgpackWriter &, const Intr::BXor &);
+Intr::BXor bxor_from_msgpack(MsgpackReader &);
+void bxor_to_msgpack(MsgpackWriter &, const Intr::BXor &);
+Intr::BSL bsl_fields_from_msgpack(MsgpackReader &, size_t);
+void bsl_fields_to_msgpack(MsgpackWriter &, const Intr::BSL &);
+Intr::BSL bsl_from_msgpack(MsgpackReader &);
+void bsl_to_msgpack(MsgpackWriter &, const Intr::BSL &);
+Intr::BSR bsr_fields_from_msgpack(MsgpackReader &, size_t);
+void bsr_fields_to_msgpack(MsgpackWriter &, const Intr::BSR &);
+Intr::BSR bsr_from_msgpack(MsgpackReader &);
+void bsr_to_msgpack(MsgpackWriter &, const Intr::BSR &);
+Intr::BZSR bzsr_fields_from_msgpack(MsgpackReader &, size_t);
+void bzsr_fields_to_msgpack(MsgpackWriter &, const Intr::BZSR &);
+Intr::BZSR bzsr_from_msgpack(MsgpackReader &);
+void bzsr_to_msgpack(MsgpackWriter &, const Intr::BZSR &);
+Intr::LogicAnd logicand_fields_from_msgpack(MsgpackReader &, size_t);
+void logicand_fields_to_msgpack(MsgpackWriter &, const Intr::LogicAnd &);
+Intr::LogicAnd logicand_from_msgpack(MsgpackReader &);
+void logicand_to_msgpack(MsgpackWriter &, const Intr::LogicAnd &);
+Intr::LogicOr logicor_fields_from_msgpack(MsgpackReader &, size_t);
+void logicor_fields_to_msgpack(MsgpackWriter &, const Intr::LogicOr &);
+Intr::LogicOr logicor_from_msgpack(MsgpackReader &);
+void logicor_to_msgpack(MsgpackWriter &, const Intr::LogicOr &);
+Intr::LogicEq logiceq_fields_from_msgpack(MsgpackReader &, size_t);
+void logiceq_fields_to_msgpack(MsgpackWriter &, const Intr::LogicEq &);
+Intr::LogicEq logiceq_from_msgpack(MsgpackReader &);
+void logiceq_to_msgpack(MsgpackWriter &, const Intr::LogicEq &);
+Intr::LogicNeq logicneq_fields_from_msgpack(MsgpackReader &, size_t);
+void logicneq_fields_to_msgpack(MsgpackWriter &, const Intr::LogicNeq &);
+Intr::LogicNeq logicneq_from_msgpack(MsgpackReader &);
+void logicneq_to_msgpack(MsgpackWriter &, const Intr::LogicNeq &);
+Intr::LogicLte logiclte_fields_from_msgpack(MsgpackReader &, size_t);
+void logiclte_fields_to_msgpack(MsgpackWriter &, const Intr::LogicLte &);
+Intr::LogicLte logiclte_from_msgpack(MsgpackReader &);
+void logiclte_to_msgpack(MsgpackWriter &, const Intr::LogicLte &);
+Intr::LogicGte logicgte_fields_from_msgpack(MsgpackReader &, size_t);
+void logicgte_fields_to_msgpack(MsgpackWriter &, const Intr::LogicGte &);
+Intr::LogicGte logicgte_from_msgpack(MsgpackReader &);
+void logicgte_to_msgpack(MsgpackWriter &, const Intr::LogicGte &);
+Intr::LogicLt logiclt_fields_from_msgpack(MsgpackReader &, size_t);
+void logiclt_fields_to_msgpack(MsgpackWriter &, const Intr::LogicLt &);
+Intr::LogicLt logiclt_from_msgpack(MsgpackReader &);
+void logiclt_to_msgpack(MsgpackWriter &, const Intr::LogicLt &);
+Intr::LogicGt logicgt_fields_from_msgpack(MsgpackReader &, size_t);
+void logicgt_fields_to_msgpack(MsgpackWriter &, const Intr::LogicGt &);
+Intr::LogicGt logicgt_from_msgpack(MsgpackReader &);
+void logicgt_to_msgpack(MsgpackWriter &, const Intr::LogicGt &);
+Intr::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const Intr::Any &);
+} // namespace Intr
+namespace AtomicOp {
+AtomicOp::Xchg xchg_fields_from_msgpack(MsgpackReader &, size_t);
+void xchg_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Xchg &);
+AtomicOp::Xchg xchg_from_msgpack(MsgpackReader &);
+void xchg_to_msgpack(MsgpackWriter &, const AtomicOp::Xchg &);
+AtomicOp::Add add_fields_from_msgpack(MsgpackReader &, size_t);
+void add_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Add &);
+AtomicOp::Add add_from_msgpack(MsgpackReader &);
+void add_to_msgpack(MsgpackWriter &, const AtomicOp::Add &);
+AtomicOp::Sub sub_fields_from_msgpack(MsgpackReader &, size_t);
+void sub_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Sub &);
+AtomicOp::Sub sub_from_msgpack(MsgpackReader &);
+void sub_to_msgpack(MsgpackWriter &, const AtomicOp::Sub &);
+AtomicOp::And and_fields_from_msgpack(MsgpackReader &, size_t);
+void and_fields_to_msgpack(MsgpackWriter &, const AtomicOp::And &);
+AtomicOp::And and_from_msgpack(MsgpackReader &);
+void and_to_msgpack(MsgpackWriter &, const AtomicOp::And &);
+AtomicOp::Or or_fields_from_msgpack(MsgpackReader &, size_t);
+void or_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Or &);
+AtomicOp::Or or_from_msgpack(MsgpackReader &);
+void or_to_msgpack(MsgpackWriter &, const AtomicOp::Or &);
+AtomicOp::Xor xor_fields_from_msgpack(MsgpackReader &, size_t);
+void xor_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Xor &);
+AtomicOp::Xor xor_from_msgpack(MsgpackReader &);
+void xor_to_msgpack(MsgpackWriter &, const AtomicOp::Xor &);
+AtomicOp::Min min_fields_from_msgpack(MsgpackReader &, size_t);
+void min_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Min &);
+AtomicOp::Min min_from_msgpack(MsgpackReader &);
+void min_to_msgpack(MsgpackWriter &, const AtomicOp::Min &);
+AtomicOp::Max max_fields_from_msgpack(MsgpackReader &, size_t);
+void max_fields_to_msgpack(MsgpackWriter &, const AtomicOp::Max &);
+AtomicOp::Max max_from_msgpack(MsgpackReader &);
+void max_to_msgpack(MsgpackWriter &, const AtomicOp::Max &);
+AtomicOp::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const AtomicOp::Any &);
+} // namespace AtomicOp
+namespace MemScope {
+MemScope::Subgroup subgroup_fields_from_msgpack(MsgpackReader &, size_t);
+void subgroup_fields_to_msgpack(MsgpackWriter &, const MemScope::Subgroup &);
+MemScope::Subgroup subgroup_from_msgpack(MsgpackReader &);
+void subgroup_to_msgpack(MsgpackWriter &, const MemScope::Subgroup &);
+MemScope::Workgroup workgroup_fields_from_msgpack(MsgpackReader &, size_t);
+void workgroup_fields_to_msgpack(MsgpackWriter &, const MemScope::Workgroup &);
+MemScope::Workgroup workgroup_from_msgpack(MsgpackReader &);
+void workgroup_to_msgpack(MsgpackWriter &, const MemScope::Workgroup &);
+MemScope::Device device_fields_from_msgpack(MsgpackReader &, size_t);
+void device_fields_to_msgpack(MsgpackWriter &, const MemScope::Device &);
+MemScope::Device device_from_msgpack(MsgpackReader &);
+void device_to_msgpack(MsgpackWriter &, const MemScope::Device &);
+MemScope::System system_fields_from_msgpack(MsgpackReader &, size_t);
+void system_fields_to_msgpack(MsgpackWriter &, const MemScope::System &);
+MemScope::System system_from_msgpack(MsgpackReader &);
+void system_to_msgpack(MsgpackWriter &, const MemScope::System &);
+MemScope::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const MemScope::Any &);
+} // namespace MemScope
 namespace TypeKind {
 TypeKind::None none_fields_from_msgpack(MsgpackReader &, size_t);
 void none_fields_to_msgpack(MsgpackWriter &, const TypeKind::None &);
@@ -5725,6 +6002,397 @@ void overload_to_msgpack(MsgpackWriter &w_, const Overload &x_) {
   overload_fields_to_msgpack(w_, x_);
 }
 
+AtomicOp::Xchg AtomicOp::xchg_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Xchg with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::xchg_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Xchg &x_) {}
+
+AtomicOp::Xchg AtomicOp::xchg_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::xchg_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::xchg_to_msgpack(MsgpackWriter &w_, const AtomicOp::Xchg &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::xchg_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Add AtomicOp::add_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Add with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::add_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Add &x_) {}
+
+AtomicOp::Add AtomicOp::add_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::add_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::add_to_msgpack(MsgpackWriter &w_, const AtomicOp::Add &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::add_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Sub AtomicOp::sub_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Sub with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::sub_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Sub &x_) {}
+
+AtomicOp::Sub AtomicOp::sub_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::sub_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::sub_to_msgpack(MsgpackWriter &w_, const AtomicOp::Sub &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::sub_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::And AtomicOp::and_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::And with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::and_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::And &x_) {}
+
+AtomicOp::And AtomicOp::and_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::and_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::and_to_msgpack(MsgpackWriter &w_, const AtomicOp::And &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::and_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Or AtomicOp::or_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Or with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::or_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Or &x_) {}
+
+AtomicOp::Or AtomicOp::or_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::or_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::or_to_msgpack(MsgpackWriter &w_, const AtomicOp::Or &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::or_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Xor AtomicOp::xor_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Xor with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::xor_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Xor &x_) {}
+
+AtomicOp::Xor AtomicOp::xor_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::xor_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::xor_to_msgpack(MsgpackWriter &w_, const AtomicOp::Xor &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::xor_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Min AtomicOp::min_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Min with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::min_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Min &x_) {}
+
+AtomicOp::Min AtomicOp::min_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::min_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::min_to_msgpack(MsgpackWriter &w_, const AtomicOp::Min &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::min_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Max AtomicOp::max_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected AtomicOp::Max with 0 field(s)");
+  return {};
+}
+
+void AtomicOp::max_fields_to_msgpack(MsgpackWriter &w_, const AtomicOp::Max &x_) {}
+
+AtomicOp::Max AtomicOp::max_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return AtomicOp::max_fields_from_msgpack(r_, n_);
+}
+
+void AtomicOp::max_to_msgpack(MsgpackWriter &w_, const AtomicOp::Max &x_) {
+  w_.writeArrayHeader(0);
+  AtomicOp::max_fields_to_msgpack(w_, x_);
+}
+
+AtomicOp::Any AtomicOp::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return AtomicOp::xchg_fields_from_msgpack(r_, n_ - 1);
+      case 1: return AtomicOp::add_fields_from_msgpack(r_, n_ - 1);
+      case 2: return AtomicOp::sub_fields_from_msgpack(r_, n_ - 1);
+      case 3: return AtomicOp::and_fields_from_msgpack(r_, n_ - 1);
+      case 4: return AtomicOp::or_fields_from_msgpack(r_, n_ - 1);
+      case 5: return AtomicOp::xor_fields_from_msgpack(r_, n_ - 1);
+      case 6: return AtomicOp::min_fields_from_msgpack(r_, n_ - 1);
+      case 7: return AtomicOp::max_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return AtomicOp::xchg_fields_from_msgpack(r_, 0);
+      case 1: return AtomicOp::add_fields_from_msgpack(r_, 0);
+      case 2: return AtomicOp::sub_fields_from_msgpack(r_, 0);
+      case 3: return AtomicOp::and_fields_from_msgpack(r_, 0);
+      case 4: return AtomicOp::or_fields_from_msgpack(r_, 0);
+      case 5: return AtomicOp::xor_fields_from_msgpack(r_, 0);
+      case 6: return AtomicOp::min_fields_from_msgpack(r_, 0);
+      case 7: return AtomicOp::max_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void AtomicOp::any_to_msgpack(MsgpackWriter &w_, const AtomicOp::Any &x_) {
+  x_.match_total([&](const AtomicOp::Xchg &y_) -> void { w_.writeInt32(0); }, [&](const AtomicOp::Add &y_) -> void { w_.writeInt32(1); },
+                 [&](const AtomicOp::Sub &y_) -> void { w_.writeInt32(2); }, [&](const AtomicOp::And &y_) -> void { w_.writeInt32(3); },
+                 [&](const AtomicOp::Or &y_) -> void { w_.writeInt32(4); }, [&](const AtomicOp::Xor &y_) -> void { w_.writeInt32(5); },
+                 [&](const AtomicOp::Min &y_) -> void { w_.writeInt32(6); }, [&](const AtomicOp::Max &y_) -> void { w_.writeInt32(7); });
+}
+
+MemScope::Subgroup MemScope::subgroup_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemScope::Subgroup with 0 field(s)");
+  return {};
+}
+
+void MemScope::subgroup_fields_to_msgpack(MsgpackWriter &w_, const MemScope::Subgroup &x_) {}
+
+MemScope::Subgroup MemScope::subgroup_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemScope::subgroup_fields_from_msgpack(r_, n_);
+}
+
+void MemScope::subgroup_to_msgpack(MsgpackWriter &w_, const MemScope::Subgroup &x_) {
+  w_.writeArrayHeader(0);
+  MemScope::subgroup_fields_to_msgpack(w_, x_);
+}
+
+MemScope::Workgroup MemScope::workgroup_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemScope::Workgroup with 0 field(s)");
+  return {};
+}
+
+void MemScope::workgroup_fields_to_msgpack(MsgpackWriter &w_, const MemScope::Workgroup &x_) {}
+
+MemScope::Workgroup MemScope::workgroup_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemScope::workgroup_fields_from_msgpack(r_, n_);
+}
+
+void MemScope::workgroup_to_msgpack(MsgpackWriter &w_, const MemScope::Workgroup &x_) {
+  w_.writeArrayHeader(0);
+  MemScope::workgroup_fields_to_msgpack(w_, x_);
+}
+
+MemScope::Device MemScope::device_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemScope::Device with 0 field(s)");
+  return {};
+}
+
+void MemScope::device_fields_to_msgpack(MsgpackWriter &w_, const MemScope::Device &x_) {}
+
+MemScope::Device MemScope::device_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemScope::device_fields_from_msgpack(r_, n_);
+}
+
+void MemScope::device_to_msgpack(MsgpackWriter &w_, const MemScope::Device &x_) {
+  w_.writeArrayHeader(0);
+  MemScope::device_fields_to_msgpack(w_, x_);
+}
+
+MemScope::System MemScope::system_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemScope::System with 0 field(s)");
+  return {};
+}
+
+void MemScope::system_fields_to_msgpack(MsgpackWriter &w_, const MemScope::System &x_) {}
+
+MemScope::System MemScope::system_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemScope::system_fields_from_msgpack(r_, n_);
+}
+
+void MemScope::system_to_msgpack(MsgpackWriter &w_, const MemScope::System &x_) {
+  w_.writeArrayHeader(0);
+  MemScope::system_fields_to_msgpack(w_, x_);
+}
+
+MemScope::Any MemScope::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return MemScope::subgroup_fields_from_msgpack(r_, n_ - 1);
+      case 1: return MemScope::workgroup_fields_from_msgpack(r_, n_ - 1);
+      case 2: return MemScope::device_fields_from_msgpack(r_, n_ - 1);
+      case 3: return MemScope::system_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return MemScope::subgroup_fields_from_msgpack(r_, 0);
+      case 1: return MemScope::workgroup_fields_from_msgpack(r_, 0);
+      case 2: return MemScope::device_fields_from_msgpack(r_, 0);
+      case 3: return MemScope::system_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void MemScope::any_to_msgpack(MsgpackWriter &w_, const MemScope::Any &x_) {
+  x_.match_total(
+      [&](const MemScope::Subgroup &y_) -> void { w_.writeInt32(0); }, [&](const MemScope::Workgroup &y_) -> void { w_.writeInt32(1); },
+      [&](const MemScope::Device &y_) -> void { w_.writeInt32(2); }, [&](const MemScope::System &y_) -> void { w_.writeInt32(3); });
+}
+
+MemOrder::Relaxed MemOrder::relaxed_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemOrder::Relaxed with 0 field(s)");
+  return {};
+}
+
+void MemOrder::relaxed_fields_to_msgpack(MsgpackWriter &w_, const MemOrder::Relaxed &x_) {}
+
+MemOrder::Relaxed MemOrder::relaxed_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemOrder::relaxed_fields_from_msgpack(r_, n_);
+}
+
+void MemOrder::relaxed_to_msgpack(MsgpackWriter &w_, const MemOrder::Relaxed &x_) {
+  w_.writeArrayHeader(0);
+  MemOrder::relaxed_fields_to_msgpack(w_, x_);
+}
+
+MemOrder::Acquire MemOrder::acquire_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemOrder::Acquire with 0 field(s)");
+  return {};
+}
+
+void MemOrder::acquire_fields_to_msgpack(MsgpackWriter &w_, const MemOrder::Acquire &x_) {}
+
+MemOrder::Acquire MemOrder::acquire_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemOrder::acquire_fields_from_msgpack(r_, n_);
+}
+
+void MemOrder::acquire_to_msgpack(MsgpackWriter &w_, const MemOrder::Acquire &x_) {
+  w_.writeArrayHeader(0);
+  MemOrder::acquire_fields_to_msgpack(w_, x_);
+}
+
+MemOrder::Release MemOrder::release_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemOrder::Release with 0 field(s)");
+  return {};
+}
+
+void MemOrder::release_fields_to_msgpack(MsgpackWriter &w_, const MemOrder::Release &x_) {}
+
+MemOrder::Release MemOrder::release_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemOrder::release_fields_from_msgpack(r_, n_);
+}
+
+void MemOrder::release_to_msgpack(MsgpackWriter &w_, const MemOrder::Release &x_) {
+  w_.writeArrayHeader(0);
+  MemOrder::release_fields_to_msgpack(w_, x_);
+}
+
+MemOrder::AcqRel MemOrder::acqrel_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemOrder::AcqRel with 0 field(s)");
+  return {};
+}
+
+void MemOrder::acqrel_fields_to_msgpack(MsgpackWriter &w_, const MemOrder::AcqRel &x_) {}
+
+MemOrder::AcqRel MemOrder::acqrel_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemOrder::acqrel_fields_from_msgpack(r_, n_);
+}
+
+void MemOrder::acqrel_to_msgpack(MsgpackWriter &w_, const MemOrder::AcqRel &x_) {
+  w_.writeArrayHeader(0);
+  MemOrder::acqrel_fields_to_msgpack(w_, x_);
+}
+
+MemOrder::SeqCst MemOrder::seqcst_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected MemOrder::SeqCst with 0 field(s)");
+  return {};
+}
+
+void MemOrder::seqcst_fields_to_msgpack(MsgpackWriter &w_, const MemOrder::SeqCst &x_) {}
+
+MemOrder::SeqCst MemOrder::seqcst_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return MemOrder::seqcst_fields_from_msgpack(r_, n_);
+}
+
+void MemOrder::seqcst_to_msgpack(MsgpackWriter &w_, const MemOrder::SeqCst &x_) {
+  w_.writeArrayHeader(0);
+  MemOrder::seqcst_fields_to_msgpack(w_, x_);
+}
+
+MemOrder::Any MemOrder::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return MemOrder::relaxed_fields_from_msgpack(r_, n_ - 1);
+      case 1: return MemOrder::acquire_fields_from_msgpack(r_, n_ - 1);
+      case 2: return MemOrder::release_fields_from_msgpack(r_, n_ - 1);
+      case 3: return MemOrder::acqrel_fields_from_msgpack(r_, n_ - 1);
+      case 4: return MemOrder::seqcst_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return MemOrder::relaxed_fields_from_msgpack(r_, 0);
+      case 1: return MemOrder::acquire_fields_from_msgpack(r_, 0);
+      case 2: return MemOrder::release_fields_from_msgpack(r_, 0);
+      case 3: return MemOrder::acqrel_fields_from_msgpack(r_, 0);
+      case 4: return MemOrder::seqcst_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void MemOrder::any_to_msgpack(MsgpackWriter &w_, const MemOrder::Any &x_) {
+  x_.match_total(
+      [&](const MemOrder::Relaxed &y_) -> void { w_.writeInt32(0); }, [&](const MemOrder::Acquire &y_) -> void { w_.writeInt32(1); },
+      [&](const MemOrder::Release &y_) -> void { w_.writeInt32(2); }, [&](const MemOrder::AcqRel &y_) -> void { w_.writeInt32(3); },
+      [&](const MemOrder::SeqCst &y_) -> void { w_.writeInt32(4); });
+}
+
 Spec::Assert Spec::assert_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Spec::Assert with 2 field(s)");
   auto code = Term::any_from_msgpack(r_);
@@ -6189,6 +6857,80 @@ void Spec::gpuvoteall_to_msgpack(MsgpackWriter &w_, const Spec::GpuVoteAll &x_) 
   Spec::gpuvoteall_fields_to_msgpack(w_, x_);
 }
 
+Spec::GpuAtomicRMW Spec::gpuatomicrmw_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 6) throw std::runtime_error("Expected Spec::GpuAtomicRMW with 6 field(s)");
+  auto op = AtomicOp::any_from_msgpack(r_);
+  auto ptr = Term::any_from_msgpack(r_);
+  auto value = Term::any_from_msgpack(r_);
+  auto scope = MemScope::any_from_msgpack(r_);
+  auto order = MemOrder::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {op, ptr, value, scope, order, rtn};
+}
+
+void Spec::gpuatomicrmw_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuAtomicRMW &x_) {
+  AtomicOp::any_to_msgpack(w_, x_.op);
+  Term::any_to_msgpack(w_, x_.ptr);
+  Term::any_to_msgpack(w_, x_.value);
+  MemScope::any_to_msgpack(w_, x_.scope);
+  MemOrder::any_to_msgpack(w_, x_.order);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuAtomicRMW Spec::gpuatomicrmw_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuatomicrmw_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuatomicrmw_to_msgpack(MsgpackWriter &w_, const Spec::GpuAtomicRMW &x_) {
+  w_.writeArrayHeader(6);
+  Spec::gpuatomicrmw_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuVolatileLoad Spec::gpuvolatileload_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Spec::GpuVolatileLoad with 2 field(s)");
+  auto ptr = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {ptr, rtn};
+}
+
+void Spec::gpuvolatileload_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuVolatileLoad &x_) {
+  Term::any_to_msgpack(w_, x_.ptr);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuVolatileLoad Spec::gpuvolatileload_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuvolatileload_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuvolatileload_to_msgpack(MsgpackWriter &w_, const Spec::GpuVolatileLoad &x_) {
+  w_.writeArrayHeader(2);
+  Spec::gpuvolatileload_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuVolatileStore Spec::gpuvolatilestore_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Spec::GpuVolatileStore with 2 field(s)");
+  auto ptr = Term::any_from_msgpack(r_);
+  auto value = Term::any_from_msgpack(r_);
+  return {ptr, value};
+}
+
+void Spec::gpuvolatilestore_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuVolatileStore &x_) {
+  Term::any_to_msgpack(w_, x_.ptr);
+  Term::any_to_msgpack(w_, x_.value);
+}
+
+Spec::GpuVolatileStore Spec::gpuvolatilestore_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuvolatilestore_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuvolatilestore_to_msgpack(MsgpackWriter &w_, const Spec::GpuVolatileStore &x_) {
+  w_.writeArrayHeader(2);
+  Spec::gpuvolatilestore_fields_to_msgpack(w_, x_);
+}
+
 Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -6218,6 +6960,9 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 20: return Spec::gpuballot_fields_from_msgpack(r_, n_ - 1);
       case 21: return Spec::gpuvoteany_fields_from_msgpack(r_, n_ - 1);
       case 22: return Spec::gpuvoteall_fields_from_msgpack(r_, n_ - 1);
+      case 23: return Spec::gpuatomicrmw_fields_from_msgpack(r_, n_ - 1);
+      case 24: return Spec::gpuvolatileload_fields_from_msgpack(r_, n_ - 1);
+      case 25: return Spec::gpuvolatilestore_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -6246,6 +6991,9 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 20: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 21: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 22: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 23: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 24: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 25: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -6332,6 +7080,21 @@ void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         w_.writeArrayHeader(3);
         w_.writeInt32(22);
         Spec::gpuvoteall_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuAtomicRMW &y_) -> void {
+        w_.writeArrayHeader(7);
+        w_.writeInt32(23);
+        Spec::gpuatomicrmw_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuVolatileLoad &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(24);
+        Spec::gpuvolatileload_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuVolatileStore &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(25);
+        Spec::gpuvolatilestore_fields_to_msgpack(w_, y_);
       });
 }
 

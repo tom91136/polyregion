@@ -33,6 +33,78 @@ std::string repr(const TypeSpace::Any &t) {
   }();
 }
 
+std::string repr(const AtomicOp::Any &o) {
+  return [&] {
+    if (o.is<AtomicOp::Xchg>()) {
+      return "Xchg"s;
+    }
+    if (o.is<AtomicOp::Add>()) {
+      return "Add"s;
+    }
+    if (o.is<AtomicOp::Sub>()) {
+      return "Sub"s;
+    }
+    if (o.is<AtomicOp::And>()) {
+      return "And"s;
+    }
+    if (o.is<AtomicOp::Or>()) {
+      return "Or"s;
+    }
+    if (o.is<AtomicOp::Xor>()) {
+      return "Xor"s;
+    }
+    if (o.is<AtomicOp::Min>()) {
+      return "Min"s;
+    }
+    if (o.is<AtomicOp::Max>()) {
+      return "Max"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for o (of type AtomicOp::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
+std::string repr(const MemScope::Any &s) {
+  return [&] {
+    if (s.is<MemScope::Subgroup>()) {
+      return "subgroup"s;
+    }
+    if (s.is<MemScope::Workgroup>()) {
+      return "workgroup"s;
+    }
+    if (s.is<MemScope::Device>()) {
+      return "device"s;
+    }
+    if (s.is<MemScope::System>()) {
+      return "system"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for s (of type MemScope::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
+std::string repr(const MemOrder::Any &o) {
+  return [&] {
+    if (o.is<MemOrder::Relaxed>()) {
+      return "relaxed"s;
+    }
+    if (o.is<MemOrder::Acquire>()) {
+      return "acquire"s;
+    }
+    if (o.is<MemOrder::Release>()) {
+      return "release"s;
+    }
+    if (o.is<MemOrder::AcqRel>()) {
+      return "acqrel"s;
+    }
+    if (o.is<MemOrder::SeqCst>()) {
+      return "seqcst"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for o (of type MemOrder::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
 std::string repr(const Region::Any &r) {
   return [&] {
     if (auto _x = r.get<Region::Rooted>()) {
@@ -288,6 +360,16 @@ std::string repr(const Expr::Any &e) {
         }
         if (auto _z = _x->op.get<Spec::GpuVoteAll>()) {
           return fmt::format("'gpuVoteAll({}, {})", repr(_z->mask), repr(_z->pred));
+        }
+        if (auto _z = _x->op.get<Spec::GpuAtomicRMW>()) {
+          return fmt::format("'gpuAtomic{}({}, {}, {}, {})", repr(_z->op), repr(_z->ptr), repr(_z->value), repr(_z->scope),
+                             repr(_z->order));
+        }
+        if (auto _z = _x->op.get<Spec::GpuVolatileLoad>()) {
+          return fmt::format("'gpuVolatileLoad({})", repr(_z->ptr));
+        }
+        if (auto _z = _x->op.get<Spec::GpuVolatileStore>()) {
+          return fmt::format("'gpuVolatileStore({}, {})", repr(_z->ptr), repr(_z->value));
         }
 
         throw std::logic_error(fmt::format("Unhandled match case for _x->op (of type Spec::Any) at {}:{})", __FILE__, __LINE__));

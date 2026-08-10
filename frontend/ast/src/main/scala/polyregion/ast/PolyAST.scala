@@ -180,6 +180,10 @@ object PolyAST {
 
   case class Overload(args: List[Type] = Nil, rtn: Type = Type.Nothing) derives MsgPack.Codec
 
+  enum AtomicOp derives MsgPack.Codec { case Xchg, Add, Sub, And, Or, Xor, Min, Max    }
+  enum MemScope derives MsgPack.Codec { case Subgroup, Workgroup, Device, System       }
+  enum MemOrder derives MsgPack.Codec { case Relaxed, Acquire, Release, AcqRel, SeqCst }
+
   object Spec {
     inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
@@ -219,6 +223,10 @@ object PolyAST {
         extends Spec(List(Overload(List(Type.IntU32, Type.Bool1), Type.Bool1)), List(mask, pred), Type.Bool1)
     case GpuVoteAll(mask: Term, pred: Term)
         extends Spec(List(Overload(List(Type.IntU32, Type.Bool1), Type.Bool1)), List(mask, pred), Type.Bool1)
+    case GpuAtomicRMW(op: AtomicOp, ptr: Term, value: Term, scope: MemScope, order: MemOrder, rtn: Type)
+        extends Spec(Spec.Unchecked, List(ptr, value), rtn)
+    case GpuVolatileLoad(ptr: Term, rtn: Type)    extends Spec(Spec.Unchecked, List(ptr), rtn)
+    case GpuVolatileStore(ptr: Term, value: Term) extends Spec(Spec.Unchecked, List(ptr, value), Type.Unit0)
   }
 
   object Intr {
@@ -764,6 +772,38 @@ object PolyAST {
     }
   }
 
+  extension (o: AtomicOp) {
+    def repr: String = o match {
+      case AtomicOp.Xchg => "Xchg"
+      case AtomicOp.Add  => "Add"
+      case AtomicOp.Sub  => "Sub"
+      case AtomicOp.And  => "And"
+      case AtomicOp.Or   => "Or"
+      case AtomicOp.Xor  => "Xor"
+      case AtomicOp.Min  => "Min"
+      case AtomicOp.Max  => "Max"
+    }
+  }
+
+  extension (s: MemScope) {
+    def repr: String = s match {
+      case MemScope.Subgroup  => "subgroup"
+      case MemScope.Workgroup => "workgroup"
+      case MemScope.Device    => "device"
+      case MemScope.System    => "system"
+    }
+  }
+
+  extension (o: MemOrder) {
+    def repr: String = o match {
+      case MemOrder.Relaxed => "relaxed"
+      case MemOrder.Acquire => "acquire"
+      case MemOrder.Release => "release"
+      case MemOrder.AcqRel  => "acqrel"
+      case MemOrder.SeqCst  => "seqcst"
+    }
+  }
+
   extension (r: Region) {
     def repr: String = r match {
       case Region.Rooted(root) => s"@${root.symbol}"
@@ -878,6 +918,10 @@ object PolyAST {
           case Spec.GpuBallot(m, p)               => s"'gpuBallot(${m.repr}, ${p.repr})"
           case Spec.GpuVoteAny(m, p)              => s"'gpuVoteAny(${m.repr}, ${p.repr})"
           case Spec.GpuVoteAll(m, p)              => s"'gpuVoteAll(${m.repr}, ${p.repr})"
+          case Spec.GpuAtomicRMW(op, p, v, s, o, _) =>
+            s"'gpuAtomic${op.repr}(${p.repr}, ${v.repr}, ${s.repr}, ${o.repr})"
+          case Spec.GpuVolatileLoad(p, _)  => s"'gpuVolatileLoad(${p.repr})"
+          case Spec.GpuVolatileStore(p, v) => s"'gpuVolatileStore(${p.repr}, ${v.repr})"
         }
       case Expr.MathOp(op) =>
         op match {

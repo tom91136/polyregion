@@ -8,6 +8,9 @@ namespace polyregion::polyast {
 [[nodiscard]] std::string repr(const Sym &s);
 [[nodiscard]] std::string repr(const SourcePosition &t);
 [[nodiscard]] std::string repr(const TypeSpace::Any &t);
+[[nodiscard]] std::string repr(const AtomicOp::Any &o);
+[[nodiscard]] std::string repr(const MemScope::Any &s);
+[[nodiscard]] std::string repr(const MemOrder::Any &o);
 [[nodiscard]] std::string repr(const Region::Any &r);
 [[nodiscard]] std::string repr(const TypeKind::Any &k);
 [[nodiscard]] std::string repr(const PathStep::Any &s);

@@ -689,6 +689,191 @@ TEST_CASE("C source isolates struct specialisations between overloaded functions
   CHECK(source.find("Box_asp _v2;") != std::string::npos);
 }
 
+TEST_CASE("MSL lowers 32-bit atomic read-modify-write operations", "[backend][metal][atomic]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto compile = [&](const AtomicOp::Any &op, const MemOrder::Any &order, const Type::Any &tpe, const TypeSpace::Any &space) {
+    const auto ptrTpe = Type::Ptr(tpe, space).widen();
+    const Named ptr("ptr", ptrTpe), result("result", tpe);
+    const auto value = tpe.template is<Type::IntU32>() ? Term::IntU32Const(1).widen() : Term::IntS32Const(1).widen();
+    const Function entry = mkFn(
+        "kernel", {Arg(ptr, {})}, Type::Unit0(),
+        {Var(result, Expr::SpecOp(Spec::GpuAtomicRMW(op, selectNamed(ptr), value, MemScope::Device(), order, tpe)).widen(), false).widen(),
+         Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+    opts.pipelineSpec = "Mirror";
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  };
+
+  const std::vector<std::pair<AtomicOp::Any, std::string>> operations{
+      {AtomicOp::Xchg(), "atomic_exchange_explicit"}, {AtomicOp::Add(), "atomic_fetch_add_explicit"},
+      {AtomicOp::Sub(), "atomic_fetch_sub_explicit"}, {AtomicOp::And(), "atomic_fetch_and_explicit"},
+      {AtomicOp::Or(), "atomic_fetch_or_explicit"},   {AtomicOp::Xor(), "atomic_fetch_xor_explicit"},
+      {AtomicOp::Min(), "atomic_fetch_min_explicit"}, {AtomicOp::Max(), "atomic_fetch_max_explicit"},
+  };
+  for (const auto &[op, name] : operations) {
+    const auto c = compile(op, MemOrder::Relaxed(), Type::IntS32(), TypeSpace::Global());
+    INFO(repr(c));
+    REQUIRE(c.binary);
+    const std::string source(c.binary->begin(), c.binary->end());
+    CHECK(source.find(name + "((device atomic_int*)") != std::string::npos);
+  }
+
+  const auto local = compile(AtomicOp::Add(), MemOrder::Relaxed(), Type::IntU32(), TypeSpace::Local());
+  INFO(repr(local));
+  REQUIRE(local.binary);
+  const std::string source(local.binary->begin(), local.binary->end());
+  CHECK(source.find("atomic_fetch_add_explicit((threadgroup atomic_uint*)") != std::string::npos);
+  CHECK(source.find("metal::memory_order_relaxed") != std::string::npos);
+  for (const auto &order : std::vector<MemOrder::Any>{MemOrder::Acquire(), MemOrder::Release(), MemOrder::AcqRel(), MemOrder::SeqCst()})
+    REQUIRE_THROWS_WITH(compile(AtomicOp::Add(), order, Type::IntU32(), TypeSpace::Local()),
+                        Catch::Matchers::ContainsSubstring("MSL atomic RMW supports only relaxed ordering"));
+}
+
+TEST_CASE("MSL rejects unsupported atomic types", "[backend][metal][atomic]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto compile = [&](const Type::Any &tpe, const Term::Any &value, const TypeSpace::Any &space = TypeSpace::Global().widen()) {
+    const auto ptrTpe = Type::Ptr(tpe, space).widen();
+    const Named ptr("ptr", ptrTpe), result("result", tpe);
+    const Function entry =
+        mkFn("kernel", {Arg(ptr, {})}, Type::Unit0(),
+             {Var(result,
+                  Expr::SpecOp(Spec::GpuAtomicRMW(AtomicOp::Add(), selectNamed(ptr), value, MemScope::Device(), MemOrder::Relaxed(), tpe))
+                      .widen(),
+                  false)
+                  .widen(),
+              Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+             FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+    opts.pipelineSpec = "Mirror";
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  };
+
+  REQUIRE_THROWS_WITH(compile(Type::IntS64(), Term::IntS64Const(1).widen()),
+                      Catch::Matchers::ContainsSubstring("MSL supports only 32-bit integer atomic RMW"));
+  REQUIRE_THROWS_WITH(compile(Type::Float32(), Term::Float32Const(1).widen()),
+                      Catch::Matchers::ContainsSubstring("MSL supports only 32-bit integer atomic RMW"));
+  REQUIRE_THROWS_WITH(compile(Type::IntS32(), Term::IntS32Const(1).widen(), TypeSpace::Private()),
+                      Catch::Matchers::ContainsSubstring("MSL atomic RMW requires device or threadgroup storage"));
+}
+
+TEST_CASE("MSL lowers volatile aggregate access memberwise", "[backend][metal][volatile]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym innerName({"Inner"}), outerName({"Outer"});
+  const auto inner = Type::Struct(innerName, {}).widen();
+  const auto outer = Type::Struct(outerName, {}).widen();
+  const StructDef innerDef(innerName, {}, {Named("x", Type::IntS32())}, {}, false);
+  const StructDef outerDef(outerName, {}, {Named("inner", inner), Named("values", Type::Arr(Type::IntU16(), 2, TypeSpace::Private()))}, {},
+                           false);
+  const auto makeFnFor = [&](const std::string &name, const TypeSpace::Any &space) {
+    const auto ptrTpe = Type::Ptr(outer, space).widen();
+    const Named ptr("ptr", ptrTpe), loaded("loaded", outer), loadedAgain("loadedAgain", outer), stored("stored", Type::Unit0()),
+        storedAgain("storedAgain", Type::Unit0());
+    return mkFn(name, {Arg(ptr, {})}, Type::Unit0(),
+                {Var(loaded, Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), outer)).widen(), false).widen(),
+                 Var(stored, Expr::SpecOp(Spec::GpuVolatileStore(selectNamed(ptr), selectNamed(loaded))).widen(), false).widen(),
+                 Var(loadedAgain, Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), outer)).widen(), false).widen(),
+                 Var(storedAgain, Expr::SpecOp(Spec::GpuVolatileStore(selectNamed(ptr), selectNamed(loadedAgain))).widen(), false).widen(),
+                 Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()});
+  };
+  const Function entry = mkFn("kernel", {}, Type::Unit0(), {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto global = makeFnFor("global_access", TypeSpace::Global());
+  const auto local = makeFnFor("local_access", TypeSpace::Local());
+  const auto priv = makeFnFor("private_access", TypeSpace::Private());
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {global, local, priv}, {innerDef, outerDef}, PassPhase::Initial(), {}), opts,
+                                               OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const std::string source(c.binary->begin(), c.binary->end());
+  for (const auto &space : {"device", "threadgroup", "thread"}) {
+    CHECK(source.find("_pr_vld_" + std::string(space) + "_Outer") != std::string::npos);
+    CHECK(source.find("_pr_vst_" + std::string(space) + "_Outer") != std::string::npos);
+  }
+  CHECK(source.find("r.inner.x = (*p).inner.x;") != std::string::npos);
+  CHECK(source.find("for (int _vc1 = 0; _vc1 < 2; _vc1++)") != std::string::npos);
+  CHECK(source.find("(*p).values[_vc1] = v.values[_vc1];") != std::string::npos);
+  const auto loadDefinition = source.find("Outer _pr_vld_device_Outer(");
+  const auto storeDefinition = source.find("void _pr_vst_device_Outer(");
+  REQUIRE(loadDefinition != std::string::npos);
+  REQUIRE(storeDefinition != std::string::npos);
+  CHECK(source.find("Outer _pr_vld_device_Outer(", loadDefinition + 1) == std::string::npos);
+  CHECK(source.find("void _pr_vst_device_Outer(", storeDefinition + 1) == std::string::npos);
+  const auto again = polyregion::compiler::compile(Program(entry, {global, local, priv}, {innerDef, outerDef}, PassPhase::Initial(), {}),
+                                                   opts, OptLevel::O0);
+  REQUIRE(again.binary);
+  CHECK(source == std::string(again.binary->begin(), again.binary->end()));
+}
+
+TEST_CASE("volatile access respects C source address spaces", "[backend][metal][volatile]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym recordName({"Record"});
+  const auto record = Type::Struct(recordName, {}).widen();
+  const StructDef recordDef(recordName, {}, {Named("value", Type::IntS32())}, {}, false);
+  const auto makeProgram = [&](const TypeSpace::Any &space, const bool store, const Type::Any &tpe = Type::IntS32().widen()) {
+    const auto ptrTpe = Type::Ptr(tpe, space).widen();
+    const Named ptr("ptr", ptrTpe), result("result", store ? Type::Unit0().widen() : tpe);
+    const auto value = tpe.template is<Type::Struct>() ? Term::Poison(tpe).widen() : Term::IntS32Const(1).widen();
+    const auto op = store ? Expr::SpecOp(Spec::GpuVolatileStore(selectNamed(ptr), value)).widen()
+                          : Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), tpe)).widen();
+    const Function entry = mkFn("kernel", {Arg(ptr, {})}, Type::Unit0(),
+                                {Var(result, op, false).widen(), Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    return Program(entry, {}, {recordDef}, PassPhase::Initial(), {});
+  };
+  const auto emit = [&](const Target target, const Program &program) {
+    polyregion::compiler::Options opts{target, ""};
+    opts.pipelineSpec = "Mirror";
+    const auto c = polyregion::compiler::compile(program, opts, OptLevel::O0);
+    REQUIRE(c.binary);
+    return std::string(c.binary->begin(), c.binary->end());
+  };
+
+  const auto scalar = emit(Target::Source_C_Metal1_0, makeProgram(TypeSpace::Global(), false));
+  CHECK(scalar.find("volatile device int32_t*") != std::string::npos);
+  CHECK(scalar.find("_pr_vld_") == std::string::npos);
+
+  const auto constant = emit(Target::Source_C_Metal1_0, makeProgram(TypeSpace::Constant(), false, record));
+  CHECK(constant.find("_pr_vld_constant_Record") != std::string::npos);
+  REQUIRE_THROWS_WITH(emit(Target::Source_C_Metal1_0, makeProgram(TypeSpace::Constant(), true, record)),
+                      Catch::Matchers::ContainsSubstring("volatile store to constant storage is unsupported for MSL"));
+
+  const auto opencl = emit(Target::Source_C_OpenCL1_1, makeProgram(TypeSpace::Global(), false, record));
+  CHECK(opencl.find("volatile global Record*") != std::string::npos);
+  CHECK(opencl.find("_pr_vld_") == std::string::npos);
+  REQUIRE_THROWS_WITH(emit(Target::Source_C_C11, makeProgram(TypeSpace::Global(), false, record)),
+                      Catch::Matchers::ContainsSubstring("Spec::GpuVolatileLoad unsupported for C11"));
+}
+
+TEST_CASE("MSL rejects volatile union access", "[backend][metal][volatile]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym unionName({"Either"});
+  const auto either = Type::Struct(unionName, {}).widen();
+  const StructDef unionDef(unionName, {}, {Named("i", Type::IntS32()), Named("f", Type::Float32())}, {}, true);
+  const auto ptrTpe = Type::Ptr(either, TypeSpace::Global()).widen();
+  const Named ptr("ptr", ptrTpe), loaded("loaded", either);
+  const Function entry = mkFn("kernel", {Arg(ptr, {})}, Type::Unit0(),
+                              {Var(loaded, Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), either)).widen(), false).widen(),
+                               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "Mirror";
+  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {unionDef}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("volatile access to union Either is unsupported for MSL"));
+}
+
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);

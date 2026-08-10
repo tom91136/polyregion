@@ -66,6 +66,10 @@ static std::optional<Term::Select> initSelect(const Expr::Any &e) {
   return std::nullopt;
 }
 
+static std::string volatileHelperName(const bool load, const std::string &space, const std::string &element) {
+  return fmt::format("_pr_v{}_{}_{}", load ? "ld" : "st", space, element);
+}
+
 struct SlotUnion {
   Map<std::string, std::string> parent;
   std::string find(const std::string &key) {
@@ -994,6 +998,14 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
   }
 }
 
+std::string backend::CSource::mslPtrSpace(const Term::Any &ptr) const {
+  const auto tpe = ptr.tpe().template get<Type::Ptr>();
+  if (!tpe) throw BackendException("MSL memory operation requires a pointer operand");
+  return tpe->space.match_total(
+      [](const TypeSpace::Global &) { return "device"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
+      [](const TypeSpace::Local &) { return "threadgroup"s; }, [](const TypeSpace::Private &) { return "thread"s; });
+}
+
 std::string backend::CSource::mkArrayDecl(const Type::Any &element, const TypeSpace::Any &space, const std::string &name,
                                           const std::string &extent) {
   std::string dims = fmt::format("[{}]", extent);
@@ -1154,7 +1166,67 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             },
             [&](const Spec::GpuBallot &) -> std::string { throw BackendException("Spec::GpuBallot requires SubgroupLower"); },
             [&](const Spec::GpuVoteAny &) -> std::string { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
-            [&](const Spec::GpuVoteAll &) -> std::string { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); } //
+            [&](const Spec::GpuVoteAll &) -> std::string { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); },
+            [&](const Spec::GpuAtomicRMW &v) -> std::string {
+              if (dialect != Dialect::MSL1_0) throw BackendException("Spec::GpuAtomicRMW unsupported for this C source dialect");
+              if (!v.rtn.template is<Type::IntS32>() && !v.rtn.template is<Type::IntU32>())
+                throw BackendException("MSL supports only 32-bit integer atomic RMW");
+              const auto space = mslPtrSpace(v.ptr);
+              if (space != "device" && space != "threadgroup")
+                throw BackendException("MSL atomic RMW requires device or threadgroup storage");
+              const auto function = v.op.match_total([](const AtomicOp::Xchg &) { return "atomic_exchange_explicit"s; },
+                                                     [](const AtomicOp::Add &) { return "atomic_fetch_add_explicit"s; },
+                                                     [](const AtomicOp::Sub &) { return "atomic_fetch_sub_explicit"s; },
+                                                     [](const AtomicOp::And &) { return "atomic_fetch_and_explicit"s; },
+                                                     [](const AtomicOp::Or &) { return "atomic_fetch_or_explicit"s; },
+                                                     [](const AtomicOp::Xor &) { return "atomic_fetch_xor_explicit"s; },
+                                                     [](const AtomicOp::Min &) { return "atomic_fetch_min_explicit"s; },
+                                                     [](const AtomicOp::Max &) { return "atomic_fetch_max_explicit"s; });
+              if (!v.order.template is<MemOrder::Relaxed>()) throw BackendException("MSL atomic RMW supports only relaxed ordering");
+              const auto atomic = v.rtn.template is<Type::IntU32>() ? "atomic_uint" : "atomic_int";
+              const auto value = v.rtn.template is<Type::IntU32>() ? "uint32_t" : "int32_t";
+              return fmt::format("{}(({} {}*){}, ({}){}, metal::memory_order_relaxed)", function, space, atomic, mkTerm(v.ptr), value,
+                                 mkTerm(v.value));
+            },
+            [&](const Spec::GpuVolatileLoad &v) -> std::string {
+              const auto ptr = mkTerm(v.ptr), type = mkTpe(v.rtn);
+              if (dialect == Dialect::MSL1_0) {
+                const auto space = mslPtrSpace(v.ptr);
+                if (v.rtn.template is<Type::Struct>())
+                  return fmt::format("{}((volatile {} {}*){})", volatileHelperName(true, space, type), space, type, ptr);
+                return fmt::format("(*((volatile {} {}*){}))", space, type, ptr);
+              }
+              if (dialect == Dialect::OpenCL1_1) {
+                const auto p = v.ptr.tpe().template get<Type::Ptr>();
+                if (!p) throw BackendException("volatile load requires a pointer operand");
+                const auto space = p->space.match_total(
+                    [](const TypeSpace::Global &) { return "global"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
+                    [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
+                return fmt::format("(*((volatile {} {}*){}))", space, type, ptr);
+              }
+              throw BackendException("Spec::GpuVolatileLoad unsupported for C11");
+            },
+            [&](const Spec::GpuVolatileStore &v) -> std::string {
+              const auto ptr = mkTerm(v.ptr), value = mkTerm(v.value), type = mkTpe(v.value.tpe());
+              if (dialect == Dialect::MSL1_0) {
+                const auto space = mslPtrSpace(v.ptr);
+                if (space == "constant") throw BackendException("volatile store to constant storage is unsupported for MSL");
+                if (v.value.tpe().template is<Type::Struct>())
+                  return fmt::format("{}((volatile {} {}*){}, {})", volatileHelperName(false, space, type), space, type, ptr, value);
+                return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
+              }
+              if (dialect == Dialect::OpenCL1_1) {
+                const auto p = v.ptr.tpe().template get<Type::Ptr>();
+                if (!p) throw BackendException("volatile store requires a pointer operand");
+                if (p->space.template is<TypeSpace::Constant>())
+                  throw BackendException("volatile store to constant storage is unsupported for OpenCL");
+                const auto space = p->space.match_total(
+                    [](const TypeSpace::Global &) { return "global"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
+                    [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
+                return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
+              }
+              throw BackendException("Spec::GpuVolatileStore unsupported for C11");
+            } //
         );
       },
       [&](const Expr::IntrOp &x) {
@@ -1321,6 +1393,40 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
              | mk_string(" ");
   }
   return fmt::format("{} = {};", lhs, rhs);
+}
+
+std::string backend::CSource::mkVolatileCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const {
+  if (const auto array = tpe.template get<Type::Arr>()) {
+    const auto index = fmt::format("_vc{}", depth);
+    return fmt::format("for (int {} = 0; {} < {}; {}++) {{ {} }}", index, index, array->length, index,
+                       mkVolatileCopy(fmt::format("{}[{}]", lhs, index), fmt::format("{}[{}]", rhs, index), array->comp, depth + 1));
+  }
+  if (const auto structure = tpe.template get<Type::Struct>()) {
+    const auto name = normalise(structure->name);
+    if (unionDefNames.contains(name))
+      throw BackendException("volatile access to union " + repr(structure->name) + " is unsupported for MSL");
+    const auto members = structDefsByName.find(name);
+    if (members == structDefsByName.end()) throw BackendException("volatile access to undeclared struct " + repr(structure->name));
+    return members->second | filter([&](const auto &member) {
+             return !member.second.template is<Type::FnRef>()
+                    && !(member.second.template get<Type::Struct>()
+                         ^ exists([&](const auto &nested) { return zeroSizeStructNames.contains(normalise(nested.name)); }));
+           })
+           | map([&](const auto &member) {
+               return mkVolatileCopy(fmt::format("{}.{}", lhs, member.first), fmt::format("{}.{}", rhs, member.first), member.second,
+                                     depth + 1);
+             })
+           | mk_string(" ");
+  }
+  return fmt::format("{} = {};", lhs, rhs);
+}
+
+std::string backend::CSource::mkVolatileHelper(const bool load, const Type::Any &tpe, const std::string &space) {
+  const auto element = mkTpe(tpe), name = volatileHelperName(load, space, element);
+  if (load)
+    return fmt::format("{} {}(volatile {} {} *p) {{\n  {} r;\n  {}\n  return r;\n}}", element, name, space, element, element,
+                       mkVolatileCopy("r", "(*p)", tpe, 0));
+  return fmt::format("void {}(volatile {} {} *p, {} v) {{\n  {}\n}}", name, space, element, element, mkVolatileCopy("(*p)", "v", tpe, 0));
 }
 
 std::optional<std::string> backend::CSource::mkZeroInit(const Type::Any &tpe) const {
@@ -1658,11 +1764,26 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       (typeNames ^ concat(allFns | map([&](const auto &fn) { return normalise(fn.name); })) ^ concat(stringConstNames | values()))
       | to<Set>();
 
+  std::vector<std::string> volatileHelpers;
+  if (dialect == Dialect::MSL1_0) {
+    Set<std::string> emitted;
+    const auto add = [&](const bool load, const Type::Any &tpe, const Term::Any &ptr) {
+      if (!tpe.template is<Type::Struct>()) return;
+      const auto space = mslPtrSpace(ptr), name = volatileHelperName(load, space, mkTpe(tpe));
+      if (emitted.insert(name).second) volatileHelpers.push_back(mkVolatileHelper(load, tpe, space));
+    };
+    allFns | for_each([&](const auto &fn) {
+      fn.template collect_all<Spec::GpuVolatileLoad>() | for_each([&](const auto &load) { add(true, load.rtn, load.ptr); });
+      fn.template collect_all<Spec::GpuVolatileStore>() | for_each([&](const auto &store) { add(false, store.value.tpe(), store.ptr); });
+    });
+  }
+
   const auto protos = allFns | mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
   auto code = includes                                                       //
               | concat(typedefs)                                             //
               | concat(structBodies)                                         //
               | concat(stringDecls)                                          //
+              | concat(volatileHelpers)                                      //
               | append(protos)                                               //
               | append(std::string("\n"))                                    //
               | concat(allFns ^ map([&](const auto &f) { return mkFn(f); })) //
