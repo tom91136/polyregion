@@ -147,7 +147,7 @@ class POLYREGION_EXPORT VulkanDeviceQueue final : public DeviceQueue {
   vk::raii::Queue transferQueue;
 
   details::VulkanModuleStore &store;
-  std::function<details::VkMemObject(uintptr_t)> queryMemObject;
+  std::function<detail::MemoryObjects<details::VkMemObject>::Resolved(uintptr_t)> queryMemObject;
   detail::CountedStore<size_t, std::shared_ptr<details::Enqueued>> enqueuedStore;
   detail::BlockingQueue<std::function<void()>> callbackQueue;
   std::thread callbackThread;

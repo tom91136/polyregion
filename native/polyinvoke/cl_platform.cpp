@@ -536,9 +536,10 @@ uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
   // past the buffer (SIGSEGV into dirty host heap); over-allocate zeroed slack to absorb the over-read
   if (const size_t slack = quirks.overReadPad; slack > 0) {
     std::vector<char> zeros(size + slack, 0);
-    return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags | CL_MEM_COPY_HOST_PTR, size + slack, zeros.data(), OUT_ERR)));
+    return memoryObjects.malloc(size + slack,
+                                OUT_CHECKED(clCreateBuffer(*context, flags | CL_MEM_COPY_HOST_PTR, size + slack, zeros.data(), OUT_ERR)));
   }
-  return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
+  return memoryObjects.malloc(size, OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
 }
 
 void ClDevice::freeDevice(uintptr_t ptr) {
@@ -551,7 +552,8 @@ void ClDevice::freeDevice(uintptr_t ptr) {
     return;
   }
   if (auto mem = memoryObjects.query(ptr); mem) {
-    CHECKED(clReleaseMemObject(*mem));
+    if (mem->offset != 0) POLYINVOKE_FATAL(PREFIX, "Illegal free of %" PRIuPTR ", %zu bytes into its allocation", ptr, mem->offset);
+    CHECKED(clReleaseMemObject(mem->value));
     memoryObjects.erase(ptr);
   } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
 }
@@ -573,23 +575,26 @@ void ClDevice::freeShared(void *ptr) {
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
+  cl_uint alignBits = 0;
+  CHECKED(clGetDeviceInfo(*device, CL_DEVICE_MEM_BASE_ADDR_ALIGN, sizeof(alignBits), &alignBits, nullptr));
   return std::make_unique<ClDeviceQueue>(
       timeout, store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)),
-      [this](auto &&ptr) {
+      [this](auto &&ptr) -> detail::MemoryObjects<cl_mem>::Resolved {
         if (auto mem = memoryObjects.query(ptr); mem) {
           return *mem;
         } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
       },
-      svm, svmTracker);
+      alignBits / 8, deviceName, svm, svmTracker);
 }
 ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 
 // ---
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                             decltype(queryMemObject) queryMemObject, std::optional<cl_bitfield> svm,
-                             std::shared_ptr<cl_details::SVMTracker> svmTracker)
-    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), svm(svm), svmTracker(std::move(svmTracker)) {
+                             decltype(queryMemObject) queryMemObject, size_t memBaseAddrAlign, std::string deviceName,
+                             std::optional<cl_bitfield> svm, std::shared_ptr<cl_details::SVMTracker> svmTracker)
+    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), memBaseAddrAlign(memBaseAddrAlign),
+      deviceName(std::move(deviceName)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
 }
 ClDeviceQueue::~ClDeviceQueue() {
@@ -649,7 +654,11 @@ void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, 
     // blocking: src must stay valid until the copy completes
     CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, srcP, size, 0, nullptr, nullptr));
   } else {
-    CHECKED(clEnqueueCopyBuffer(queue, queryMemObject(src), queryMemObject(dst), srcOffset, dstOffset, size, 0, nullptr, &event));
+    const auto srcMem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(src), srcOffset, size);
+    const auto dstMem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(dst), dstOffset, size);
+    if (!srcMem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
+    if (!dstMem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
+    CHECKED(clEnqueueCopyBuffer(queue, srcMem->value, dstMem->value, srcMem->offset, dstMem->offset, size, 0, nullptr, &event));
   }
   enqueueCallback(cb, event);
 }
@@ -663,7 +672,9 @@ void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, siz
     auto *dstP = reinterpret_cast<char *>(dst) + dstOffset;
     CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dstP, src, size, 0, nullptr, nullptr));
   } else {
-    CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, dstOffset, size, src, 0, nullptr, &event));
+    const auto mem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(dst), dstOffset, size);
+    if (!mem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
+    CHECKED(clEnqueueWriteBuffer(queue, mem->value, CL_FALSE, mem->offset, size, src, 0, nullptr, &event));
   }
   enqueueCallback(cb, event);
 }
@@ -685,7 +696,9 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
       CHECKED(clEnqueueSVMMemcpy(queue, CL_TRUE, dst, srcP, size, 0, nullptr, nullptr));
     }
   } else {
-    CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, srcOffset, size, dst, 0, nullptr, &event));
+    const auto mem = detail::MemoryObjects<cl_mem>::subrange(queryMemObject(src), srcOffset, size);
+    if (!mem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
+    CHECKED(clEnqueueReadBuffer(queue, mem->value, CL_FALSE, mem->offset, size, dst, 0, nullptr, &event));
   }
   enqueueCallback(cb, event);
 }
@@ -705,6 +718,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
 
   const auto args = detail::argDataAsPointers(types, argData);
   const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
+  std::vector<cl_mem> subBuffers;
 
   for (cl_uint i = 0; i < types.size() - 1; ++i) {
     const auto rawPtr = args[i];
@@ -716,7 +730,17 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
         if (svm) {
           CHECKED(clSetKernelArgSVMPointer(kernel, i, reinterpret_cast<void *>(ptr)));
         } else {
-          cl_mem mem = queryMemObject(ptr);
+          const auto resolved = queryMemObject(ptr);
+          cl_mem mem = resolved.value;
+          if (resolved.offset != 0) {
+            if (resolved.remaining == 0) POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is at the end of its allocation", ptr);
+            if (memBaseAddrAlign != 0 && resolved.offset % memBaseAddrAlign != 0)
+              POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is %zu bytes into its allocation, not aligned to %zu bytes on %s",
+                               ptr, resolved.offset, memBaseAddrAlign, deviceName.c_str());
+            cl_buffer_region region{resolved.offset, resolved.remaining};
+            mem = OUT_CHECKED(clCreateSubBuffer(resolved.value, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, OUT_ERR));
+            subBuffers.push_back(mem);
+          }
           CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));
         }
       } break;
@@ -789,6 +813,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   }
   CHECKED(result);
+  for (const auto subBuffer : subBuffers)
+    CHECKED(clReleaseMemObject(subBuffer));
   enqueueCallback(cb, event);
   CHECKED(clFlush(queue));
 }

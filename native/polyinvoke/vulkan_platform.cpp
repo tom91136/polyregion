@@ -422,12 +422,13 @@ uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
     POLYINVOKE_FATAL(PREFIX,
                      "device buffer of %zu bytes exceeds maxMemoryAllocationSize (%zu); the marshalling arena is too large for this device",
                      size, deviceMaxAllocSize);
-  return memoryObjects.malloc(std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, size, false)));
+  return memoryObjects.malloc(size, std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, size, false)));
 }
 void VulkanDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
   if (auto obj = memoryObjects.query(ptr); obj) {
-    vmaDestroyBuffer(allocator, VkBuffer((*obj)->buffer), (*obj)->allocation);
+    if (obj->offset != 0) POLYINVOKE_FATAL(PREFIX, "Illegal free of %" PRIuPTR ", %zu bytes into its allocation", ptr, obj->offset);
+    vmaDestroyBuffer(allocator, VkBuffer(obj->value->buffer), obj->value->allocation);
     memoryObjects.erase(ptr);
   } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
 }
@@ -446,7 +447,7 @@ std::unique_ptr<DeviceQueue> VulkanDevice::createQueue(const std::chrono::durati
   return std::make_unique<VulkanDeviceQueue>(ctx, allocator, //
                                              ctx.getQueue(computeQueueId.first, activeComputeQueues++ % computeQueueId.second),
                                              ctx.getQueue(transferQueueId.first, activeTransferQueues++ % transferQueueId.second), store,
-                                             [this](const auto &ptr) {
+                                             [this](const auto &ptr) -> detail::MemoryObjects<details::VkMemObject>::Resolved {
                                                if (auto mem = memoryObjects.query(ptr); mem) {
                                                  return *mem;
                                                } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
@@ -491,24 +492,29 @@ void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
 void VulkanDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                    const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  const auto dstObj = queryMemObject(dst);
-  const auto srcObj = queryMemObject(src);
-  std::memcpy(static_cast<char *>(dstObj->mappedData) + dstOffset, static_cast<char *>(srcObj->mappedData) + srcOffset, size);
-  vmaInvalidateAllocation(allocator, dstObj->allocation, dstOffset, size);
+  const auto dstObj = detail::MemoryObjects<details::VkMemObject>::subrange(queryMemObject(dst), dstOffset, size);
+  const auto srcObj = detail::MemoryObjects<details::VkMemObject>::subrange(queryMemObject(src), srcOffset, size);
+  if (!srcObj) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
+  if (!dstObj) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
+  std::memcpy(static_cast<char *>(dstObj->value->mappedData) + dstObj->offset,
+              static_cast<char *>(srcObj->value->mappedData) + srcObj->offset, size);
+  vmaInvalidateAllocation(allocator, dstObj->value->allocation, dstObj->offset, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  const auto dstObj = queryMemObject(dst);
-  std::memcpy(static_cast<char *>(dstObj->mappedData) + dstOffset, src, size);
-  vmaInvalidateAllocation(allocator, dstObj->allocation, dstOffset, size);
+  const auto dstObj = detail::MemoryObjects<details::VkMemObject>::subrange(queryMemObject(dst), dstOffset, size);
+  if (!dstObj) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
+  std::memcpy(static_cast<char *>(dstObj->value->mappedData) + dstObj->offset, src, size);
+  vmaInvalidateAllocation(allocator, dstObj->value->allocation, dstObj->offset, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  const auto srcObj = queryMemObject(src);
-  std::memcpy(dst, static_cast<char *>(srcObj->mappedData) + srcOffset, size);
-  vmaInvalidateAllocation(allocator, srcObj->allocation, srcOffset, size);
+  const auto srcObj = detail::MemoryObjects<details::VkMemObject>::subrange(queryMemObject(src), srcOffset, size);
+  if (!srcObj) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
+  std::memcpy(dst, static_cast<char *>(srcObj->value->mappedData) + srcObj->offset, size);
+  vmaInvalidateAllocation(allocator, srcObj->value->allocation, srcObj->offset, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -535,7 +541,8 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
       const auto obj = queryMemObject(ptr);
-      infos.emplace_back(vk::DescriptorBufferInfo{obj->buffer, 0, obj->size}, vk::DescriptorType::eStorageBuffer);
+      if (obj.remaining == 0) POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is at the end of its allocation", ptr);
+      infos.emplace_back(vk::DescriptorBufferInfo{obj.value->buffer, obj.offset, obj.remaining}, vk::DescriptorType::eStorageBuffer);
     } else {
       scalarSizes.push_back(byteOfType(tpe));
       scalarSrcs.push_back(args[i]);

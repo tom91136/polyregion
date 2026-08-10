@@ -150,12 +150,13 @@ bool MetalDevice::moduleLoaded(const std::string &name) {
 }
 uintptr_t MetalDevice::mallocDevice(size_t size, Access access) {
   POLYINVOKE_TRACE();
-  return memoryObjects.insert(device->newBuffer(size, MTL::ResourceStorageModeShared));
+  return memoryObjects.insert(size, device->newBuffer(size, MTL::ResourceStorageModeShared));
 }
 void MetalDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
   if (auto mem = memoryObjects.query(ptr); mem) {
-    (*mem)->release();
+    if (mem->offset != 0) POLYINVOKE_FATAL(PREFIX, "Illegal free of %" PRIuPTR ", %zu bytes into its allocation", ptr, mem->offset);
+    mem->value->release();
     memoryObjects.erase(ptr);
   } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
 }
@@ -201,18 +202,26 @@ MetalDeviceQueue::~MetalDeviceQueue() {
 void MetalDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                   const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  std::memcpy(static_cast<char *>(queryMemObject(dst)->contents()) + dstOffset, //
-              static_cast<char *>(queryMemObject(src)->contents()) + srcOffset, size);
+  const auto dstMem = detail::MemoryObjects<MTL::Buffer *>::subrange(queryMemObject(dst), dstOffset, size);
+  const auto srcMem = detail::MemoryObjects<MTL::Buffer *>::subrange(queryMemObject(src), srcOffset, size);
+  if (!srcMem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
+  if (!dstMem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
+  std::memcpy(static_cast<char *>(dstMem->value->contents()) + dstMem->offset,
+              static_cast<char *>(srcMem->value->contents()) + srcMem->offset, size);
   if (cb) (*cb)();
 }
 void MetalDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  std::memcpy(static_cast<char *>(queryMemObject(dst)->contents()) + dstOffset, src, size);
+  const auto dstMem = detail::MemoryObjects<MTL::Buffer *>::subrange(queryMemObject(dst), dstOffset, size);
+  if (!dstMem) POLYINVOKE_FATAL(PREFIX, "Destination range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", dst, dstOffset, size);
+  std::memcpy(static_cast<char *>(dstMem->value->contents()) + dstMem->offset, src, size);
   if (cb) (*cb)();
 }
 void MetalDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  std::memcpy(dst, static_cast<char *>(queryMemObject(src)->contents()) + srcOffset, size);
+  const auto srcMem = detail::MemoryObjects<MTL::Buffer *>::subrange(queryMemObject(src), srcOffset, size);
+  if (!srcMem) POLYINVOKE_FATAL(PREFIX, "Source range exceeds memory object: %" PRIuPTR "+%zu (%zu bytes)", src, srcOffset, size);
+  std::memcpy(dst, static_cast<char *>(srcMem->value->contents()) + srcMem->offset, size);
   if (cb) (*cb)();
 }
 void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -237,7 +246,10 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
         static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
         uintptr_t ptr = {};
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
-        encoder->setBuffer(ptr ? queryMemObject(ptr) : nullptr, 0, i);
+        if (ptr) {
+          const auto mem = queryMemObject(ptr);
+          encoder->setBuffer(mem.value, mem.offset, i);
+        } else encoder->setBuffer(nullptr, 0, i);
       } break;
       case Type::Scratch: {
         encoder->setThreadgroupMemoryLength(sharedMem, i);

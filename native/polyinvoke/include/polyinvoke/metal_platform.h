@@ -2,6 +2,8 @@
 
 #ifdef RUNTIME_ENABLE_METAL
 
+  #include <cinttypes>
+
   #define METALCPP_SYMBOL_VISIBILITY_HIDDEN
   #include "aspartame/all.hpp"
 
@@ -30,32 +32,21 @@ using MetalModuleStore = detail::ModuleStore<MTL::Library *, MTL::ComputePipelin
 }
 
 class MetalMemoryObjects {
-  mutable std::shared_mutex mutex;
-  std::unordered_map<uintptr_t, MTL::Buffer *> map;
-  std::atomic<uintptr_t> counter{1}; // 0 reserved as sentinel
+  using Store = detail::MemoryObjects<MTL::Buffer *>;
+  Store objects;
   bool unified;
 
 public:
   explicit MetalMemoryObjects(bool unified) : unified(unified) {}
-  uintptr_t insert(MTL::Buffer *buf) {
-    auto ptr = unified ? reinterpret_cast<uintptr_t>(buf->contents()) : counter++;
-    std::unique_lock g(mutex);
-    map[ptr] = buf;
-    return ptr;
+  uintptr_t insert(size_t size, MTL::Buffer *buffer) {
+    if (!unified) return objects.malloc(size, buffer);
+    const auto base = reinterpret_cast<uintptr_t>(buffer->contents());
+    if (!objects.insert(base, size, buffer)) POLYINVOKE_FATAL("Metal", "Overlapping memory object at %" PRIuPTR, base);
+    return base;
   }
-  std::optional<MTL::Buffer *> query(uintptr_t p) const {
-    std::shared_lock g(mutex);
-    auto it = map.find(p);
-    return it == map.end() ? std::nullopt : std::optional<MTL::Buffer *>{it->second};
-  }
-  void erase(uintptr_t p) {
-    std::unique_lock g(mutex);
-    map.erase(p);
-  }
-  std::vector<MTL::Buffer *> snapshot() const {
-    std::shared_lock g(mutex);
-    return map ^ values();
-  }
+  std::optional<Store::Resolved> query(uintptr_t ptr) const { return objects.query(ptr); }
+  bool erase(uintptr_t base) { return objects.erase(base); }
+  std::vector<MTL::Buffer *> snapshot() const { return objects.values(); }
 };
 
 class POLYREGION_EXPORT MetalDevice final : public Device {
@@ -92,7 +83,7 @@ class POLYREGION_EXPORT MetalDeviceQueue final : public DeviceQueue {
   NS::AutoreleasePool *pool;
   MetalModuleStore &store;
   MTL::CommandQueue *queue;
-  std::function<MTL::Buffer *(uintptr_t)> queryMemObject;
+  std::function<detail::MemoryObjects<MTL::Buffer *>::Resolved(uintptr_t)> queryMemObject;
   std::function<std::vector<MTL::Buffer *>()> snapshotAllocations;
   bool unified;
 

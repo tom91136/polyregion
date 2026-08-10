@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <queue>
@@ -214,12 +216,86 @@ public:
 };
 
 template <typename T> class MemoryObjects {
-  CountedStore<uintptr_t, T> store;
+  static constexpr uintptr_t Granularity = 4096;
+
+  struct Region {
+    size_t size;
+    T value;
+  };
+
+  mutable std::shared_mutex mutex;
+  uintptr_t next = Granularity;
+  std::map<uintptr_t, Region> regions;
+
+  auto owner(uintptr_t ptr) const {
+    const auto nextRegion = regions.upper_bound(ptr);
+    if (nextRegion == regions.begin()) return regions.end();
+    const auto candidate = std::prev(nextRegion);
+    return ptr - candidate->first <= candidate->second.size ? candidate : regions.end();
+  }
+
+  bool overlaps(uintptr_t base, size_t size) const {
+    if (base == 0 || size > std::numeric_limits<uintptr_t>::max() - base) return true;
+    const auto nextRegion = regions.lower_bound(base);
+    if (nextRegion != regions.end() && (nextRegion->first == base || nextRegion->first - base < size)) return true;
+    if (nextRegion == regions.begin()) return false;
+    const auto previous = std::prev(nextRegion);
+    return base - previous->first < previous->second.size;
+  }
 
 public:
-  uintptr_t malloc(T t) { return store.store(t).first; }
-  std::optional<T> query(uintptr_t ptr) { return store.find(ptr); }
-  void erase(uintptr_t ptr) { store.erase(ptr); }
+  struct Resolved {
+    T value;
+    size_t offset;
+    size_t remaining;
+  };
+
+  static std::optional<Resolved> subrange(const Resolved &resolved, size_t offset, size_t size) {
+    if (offset > resolved.remaining || size > resolved.remaining - offset) return {};
+    return Resolved{resolved.value, resolved.offset + offset, resolved.remaining - offset};
+  }
+
+  uintptr_t malloc(size_t size, T value) {
+    std::unique_lock lock(mutex);
+    const auto base = next;
+    next += (size + Granularity - 1) / Granularity * Granularity + Granularity;
+    regions.emplace(base, Region{size, std::move(value)});
+    return base;
+  }
+
+  bool insert(uintptr_t base, size_t size, T value) {
+    std::unique_lock lock(mutex);
+    if (overlaps(base, size)) return false;
+    regions.emplace(base, Region{size, std::move(value)});
+    return true;
+  }
+
+  std::optional<Resolved> query(uintptr_t ptr) const {
+    std::shared_lock lock(mutex);
+    const auto it = owner(ptr);
+    if (it == regions.end()) return {};
+    const auto offset = static_cast<size_t>(ptr - it->first);
+    return Resolved{it->second.value, offset, it->second.size - offset};
+  }
+
+  std::optional<Resolved> queryRange(uintptr_t ptr, size_t offset, size_t size) const {
+    const auto resolved = query(ptr);
+    return resolved ? subrange(*resolved, offset, size) : std::nullopt;
+  }
+
+  bool erase(uintptr_t base) {
+    std::unique_lock lock(mutex);
+    return regions.erase(base) == 1;
+  }
+
+  std::vector<T> values() const {
+    std::shared_lock lock(mutex);
+    std::vector<T> result;
+    result.reserve(regions.size());
+    for (const auto &[_, region] : regions)
+      result.push_back(region.value);
+    return result;
+  }
 };
 
 template <typename M, typename F> class ModuleStore {

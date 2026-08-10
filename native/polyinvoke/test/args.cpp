@@ -46,11 +46,13 @@ void runArgs(Context &ctx, Backend backend, Platform &platform, Device &device, 
   }
 
   auto q = device.createQueue(std::chrono::seconds(10));
-  auto out_d = device.template mallocDeviceTyped<float>(1, Access::RW);
+  constexpr size_t interiorOffset = 4096;
+  auto out_d = device.template mallocDeviceTyped<float>(interiorOffset / sizeof(float) + 1, Access::RW);
+  auto outAt = out_d + interiorOffset;
 
   for (int args = 0; args < 28; ++args) {
     float out = {};
-    waitAll([&](auto &h) { q->enqueueHostToDeviceAsyncTyped(&out, out_d, 1, h); });
+    waitAll([&](auto &h) { q->enqueueHostToDeviceAsyncTyped(&out, outAt, 1, h); });
     const size_t scalarArgCount = args == 0 ? 0 : args - 1;
     auto values = iota(1.0f) | take(scalarArgCount) | to_vector();
 
@@ -58,12 +60,12 @@ void runArgs(Context &ctx, Backend backend, Platform &platform, Device &device, 
     prependTidArg(platform, buffer);
     for (auto &v : values)
       buffer.append(Type::Float32, &v);
-    if (args != 0) buffer.append(Type::Ptr, &out_d);
+    if (args != 0) buffer.append(Type::Ptr, &outAt);
     buffer.append(Type::Void, {});
 
     const float expected = args == 0 ? 0 : (scalarArgCount == 0 ? 42 : *(values ^ reduce(std::plus<>())));
     waitAll([&](auto &h) { q->enqueueInvokeAsync(moduleName(args), kernelName(args), buffer, {}, h); });
-    waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
+    waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(outAt, &out, 1, h); });
     POLYTEST_CHECK_S(ctx, out == expected, "args={} actual={} expected={}", args, out, expected);
   }
   device.freeDevice(out_d);
