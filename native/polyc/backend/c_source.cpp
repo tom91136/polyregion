@@ -1,6 +1,7 @@
 
 #include "c_source.h"
 
+#include <cctype>
 #include <cmath>
 #include <functional>
 #include <set>
@@ -9,6 +10,7 @@
 #include "fmt/core.h"
 
 #include "polyregion/conventions.h"
+#include "polyregion/env_keys.h"
 
 using namespace aspartame;
 using namespace polyregion;
@@ -327,6 +329,60 @@ std::string backend::CSource::normalise(const std::string &s) const {
 
 std::string backend::CSource::normalise(const Sym &s) const { return normalise(repr(s)); }
 
+static std::string sourceIdent(const Origin &origin) {
+  if (!origin.source) return {};
+  auto s = *origin.source;
+  const auto begin = s.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) return {};
+  s = s.substr(begin, s.find_last_not_of(" \t\r\n") - begin + 1);
+  if (s.empty() || (!std::isalpha(static_cast<unsigned char>(s.front())) && s.front() != '_')) return {};
+  if (s ^ exists([](const char c) { return !std::isalnum(static_cast<unsigned char>(c)) && c != '_'; })) return {};
+  return s;
+}
+
+static std::string denseName(size_t n) {
+  std::string s;
+  do {
+    s.insert(s.begin(), "0123456789abcdefghijklmnopqrstuvwxyz"[n % 36]);
+    n /= 36;
+  } while (n);
+  return "_v" + s;
+}
+
+std::string backend::CSource::localName(const std::string &symbol) {
+  if (const auto it = localNames.find(symbol); it != localNames.end()) return it->second;
+  std::string name;
+  do
+    name = denseName(localNameCounter++);
+  while (fileScopeNames.contains(name));
+  return localNames.emplace(symbol, name).first->second;
+}
+
+void backend::CSource::bindLocalNames(const Function &fn) {
+  localNames.clear();
+  localNameCounter = 0;
+  Set<std::string> used = fileScopeNames;
+  const bool verbose = std::getenv(polyregion::env::PolycVerboseNames) != nullptr;
+  const auto bind = [&](const Named &named) {
+    if (localNames.contains(named.symbol)) return;
+    auto name = verbose ? sourceIdent(named.origin) : std::string{};
+    if (!name.empty()) {
+      const auto base = normalise(name);
+      name = base;
+      for (size_t suffix = 1; used.contains(name); ++suffix)
+        name = base + "_" + std::to_string(suffix);
+    } else {
+      do
+        name = denseName(localNameCounter++);
+      while (used.contains(name));
+    }
+    used.emplace(name);
+    localNames.emplace(named.symbol, name);
+  };
+  fn.args | for_each([&](const auto &arg) { bind(arg.named); });
+  fn.template collect_all<Named>() | for_each(bind);
+}
+
 Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::string &fieldName) const {
   if (auto s = owner.get<Type::Struct>()) {
     if (auto it = structDefsByName.find(normalise(s->name)); it != structDefsByName.end()) {
@@ -493,7 +549,7 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                             return stringConstNames ^ get_or_default(x.value, fmt::format("\"{}\"", escapeCString(x.value)));
                           }, //
                           [&](const Term::Select &x) {
-                            std::string acc = normalise(x.root.symbol);
+                            std::string acc = localName(x.root.symbol);
                             // the AST omits the implicit deref of a Field through a pointer; insert `(*...)` here
                             Type::Any current = x.root.tpe;
                             for (auto &step : x.steps) {
@@ -783,14 +839,14 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         if (!x.expr && isLocalArr(x.name.tpe)) return ""s;
         if (x.expr && isPoisonInit(*x.expr) && (x.name.tpe.is<Type::Struct>() || x.name.tpe.is<Type::Arr>())) {
           if (isLocalArr(x.name.tpe)) return ""s;
-          return fmt::format("{};", mkDecl(x.name.tpe, normalise(x.name.symbol)));
+          return fmt::format("{};", mkDecl(x.name.tpe, localName(x.name.symbol)));
         }
         if (x.expr && memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
-          return fmt::format("{}; {}", mkDecl(x.name.tpe, normalise(x.name.symbol)),
-                             mkValueCopy(normalise(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
+          return fmt::format("{}; {}", mkDecl(x.name.tpe, localName(x.name.symbol)),
+                             mkValueCopy(localName(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0));
         if (!x.expr && x.name.tpe.is<Type::Struct>())
-          if (const auto init = mkZeroInit(x.name.tpe)) return fmt::format("{} = {};", mkDecl(x.name.tpe, normalise(x.name.symbol)), *init);
-        return fmt::format("{}{};", mkDecl(x.name.tpe, normalise(x.name.symbol)), x.expr ? " = " + mkExpr(*x.expr) : "");
+          if (const auto init = mkZeroInit(x.name.tpe)) return fmt::format("{} = {};", mkDecl(x.name.tpe, localName(x.name.symbol)), *init);
+        return fmt::format("{}{};", mkDecl(x.name.tpe, localName(x.name.symbol)), x.expr ? " = " + mkExpr(*x.expr) : "");
       },
       [&](const Stmt::Mut &x) {
         if (x.name.tpe.template is<Type::FnRef>()) return ""s;
@@ -810,7 +866,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       },
       [&](const Stmt::ForRange &x) {
         const auto body = x.body | mk_string("\n", [&](const auto &s) { return mkStmt(s); });
-        const auto induction = normalise(x.induction.symbol);
+        const auto induction = localName(x.induction.symbol);
         return fmt::format("for({} {} = {}; {} < {}; {} += {}) {{\n{}\n}}",     //
                            mkTpe(x.induction.tpe), induction, mkTerm(x.lbIncl), //
                            induction, mkTerm(x.ubExcl), induction, mkTerm(x.step), body ^ indent(2));
@@ -837,6 +893,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
 }
 
 std::string backend::CSource::mkFnProto(const Function &fnTree) {
+  bindLocalNames(fnTree);
 
   const auto entry = fnTree.isEntry;
 
@@ -845,7 +902,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
       | zip_with_index() //
       | map([&](const auto &arg, const auto &idx) {
           auto tpe = mkTpe(arg.named.tpe);
-          auto name = normalise(arg.named.symbol);
+          auto name = localName(arg.named.symbol);
           std::string decl;
           switch (dialect) {
             case Dialect::OpenCL1_1: {
@@ -906,10 +963,11 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 }
 
 std::string backend::CSource::mkFn(const Function &fnTree) {
+  bindLocalNames(fnTree);
   // OpenCL local-AS declarations must sit in the kernel's outermost scope
   const auto allVars = fnTree.body ^ flat_map([](const auto &s) { return s.template collect_all<Stmt::Var>(); });
   const auto localDecls = allVars ^ collect([&](const auto &v) -> std::optional<std::string> {
-                            if (!v.expr && isLocalArr(v.name.tpe)) return fmt::format("{};", mkDecl(v.name.tpe, normalise(v.name.symbol)));
+                            if (!v.expr && isLocalArr(v.name.tpe)) return fmt::format("{};", mkDecl(v.name.tpe, localName(v.name.symbol)));
                             return std::nullopt;
                           });
   const auto stmts = concat(localDecls, fnTree.body ^ map([&](const auto &s) { return mkStmt(s); }));
@@ -1012,6 +1070,15 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
           return fmt::format("{}{} {}[] = \"{}\";", constQual, mkTpe(Type::IntS8()), name, escapeCString(value));
         }) //
       | to_vector();
+
+  const auto typeNames = program.defs | flat_map([&](const auto &def) {
+                           return std::vector<std::string>{normalise(def.name)}
+                                  ^ concat(def.members ^ map([&](const auto &member) { return normalise(member.symbol); }));
+                         })
+                         | to_vector();
+  fileScopeNames =
+      (typeNames ^ concat(allFns | map([&](const auto &fn) { return normalise(fn.name); })) ^ concat(stringConstNames | values()))
+      | to<Set>();
 
   const auto protos = allFns | mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
   auto code = includes                                                       //

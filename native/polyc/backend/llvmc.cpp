@@ -367,6 +367,10 @@ static std::string module2Ir(const llvm::Module &m) {
   return ir;
 }
 
+bool llvmc::captureModuleIr() {
+  return std::getenv(polyregion::env::PolyregionDebug) != nullptr || std::getenv(polyregion::env::PolycVerboseNames) != nullptr;
+}
+
 // XXX getMainExecutable() needs a function address it can dladdr/GetModuleHandleEx against to
 // find the binary; this trivial symbol is that anchor.
 [[maybe_unused]] static void vendorBitcodeAnchor() {}
@@ -793,8 +797,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         PM.run(*m);
       }
       if (emplaceEvent) {
-        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m),
-                            std::vector<polyast::CompileEvent>{});
+        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt",
+                            captureModuleIr() ? module2Ir(*m) : std::string{}, std::vector<polyast::CompileEvent>{});
       }
     }
     return std::make_tuple(std::move(m), objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));

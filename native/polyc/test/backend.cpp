@@ -10,10 +10,13 @@
 #include "catch2/catch_all.hpp"
 #include "fmt/format.h"
 
+#include "polyregion/env_keys.h"
+
 #include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
+#include "scoped_env.h"
 
 using namespace aspartame;
 using namespace polyregion::polyast;
@@ -50,6 +53,67 @@ static Program arenaOffsetCastProgram() {
                         },
                         FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
   return Program(entry, {}, {}, PassPhase::Initial(), {});
+}
+
+TEST_CASE("LLVM IR event payloads are opt-in", "[backend]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv noDebug(polyregion::env::PolyregionDebug, std::nullopt);
+  const ScopedEnv noVerbose(polyregion::env::PolycVerboseNames, std::nullopt);
+  const Program p = arenaOffsetCastProgram();
+  const polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+
+  const auto normal = polyregion::compiler::compile(p, opts, OptLevel::O3);
+  REQUIRE(normal.binary);
+  CHECK(eventDataOf(normal, "ast_to_llvm_ir").empty());
+  CHECK(eventDataOf(normal, "llvm_to_obj_opt").empty());
+
+  {
+    const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+    const auto diagnostic = polyregion::compiler::compile(p, opts, OptLevel::O3);
+    REQUIRE(diagnostic.binary);
+    CHECK_FALSE(eventDataOf(diagnostic, "ast_to_llvm_ir").empty());
+    CHECK_FALSE(eventDataOf(diagnostic, "llvm_to_obj_opt").empty());
+  }
+}
+
+TEST_CASE("C source bounds local names and retains source names on request", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Origin inputOrigin(SourcePosition("bounded.cpp", 4, 7), std::string("input"), Sym({"source"}));
+  const Origin valueOrigin(SourcePosition("bounded.cpp", 5, 3), std::string("value"), Sym({"source"}));
+  const Named input("an_internal_parameter_name_that_can_grow_without_bound", Type::IntS32(), inputOrigin);
+  const Named value("an_internal_local_name_that_can_grow_without_bound", Type::IntS32(), valueOrigin);
+  const Function entry = mkFn(
+      "bounded_kernel_name", {Arg(input, {})}, Type::IntS32(),
+      {Var(value, Expr::Alias(selectNamed(input).widen()).widen(), false).widen(), Return(Expr::Alias(selectNamed(value).widen()).widen())},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  const auto emit = [&] {
+    const auto result = polyregion::compiler::compile(p, opts, OptLevel::O0);
+    REQUIRE(result.binary);
+    return std::string(result.binary->begin(), result.binary->end());
+  };
+
+  const ScopedEnv noVerbose(polyregion::env::PolycVerboseNames, std::nullopt);
+  const auto dense = emit();
+  CHECK(dense == emit());
+  CHECK_THAT(dense, Catch::Matchers::ContainsSubstring("bounded_kernel_name"));
+  CHECK_THAT(dense, Catch::Matchers::ContainsSubstring("_v0"));
+  CHECK_THAT(dense, Catch::Matchers::ContainsSubstring("_v1"));
+  CHECK_THAT(dense, !Catch::Matchers::ContainsSubstring(input.symbol));
+  CHECK_THAT(dense, !Catch::Matchers::ContainsSubstring(value.symbol));
+
+  {
+    const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+    const auto readable = emit();
+    CHECK_THAT(readable, Catch::Matchers::ContainsSubstring("int input"));
+    CHECK_THAT(readable, Catch::Matchers::ContainsSubstring("int value"));
+    CHECK_THAT(readable, !Catch::Matchers::ContainsSubstring(input.symbol));
+    CHECK_THAT(readable, !Catch::Matchers::ContainsSubstring(value.symbol));
+  }
 }
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
@@ -149,6 +213,7 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
 
 TEST_CASE("by-value array initialisation copies contents on by-pointer targets", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const auto arrTpe = Type::Arr(Type::IntS32(), 3, TypeSpace::Global());
@@ -187,8 +252,8 @@ TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer s
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("global char* p = ((global char*) off);") != std::string::npos);
-  CHECK(source.find("private char* p") == std::string::npos);
+  CHECK(source.find("global char* _v1 = ((global char*) _v0);") != std::string::npos);
+  CHECK(source.find("private char* _v1") == std::string::npos);
 }
 
 TEST_CASE("C source zero-initialises struct locals", "[backend]") {
@@ -205,8 +270,8 @@ TEST_CASE("C source zero-initialises struct locals", "[backend]") {
   Program p(entry, {}, {state}, PassPhase::Initial(), {});
 
   for (const auto &[target, expected] : std::vector<std::pair<Target, std::string>>{
-           {Target::Source_C_OpenCL1_1, "State value = {0};"},
-           {Target::Source_C_Metal1_0, "State value = {};"},
+           {Target::Source_C_OpenCL1_1, "State _v0 = {0};"},
+           {Target::Source_C_Metal1_0, "State _v0 = {};"},
        }) {
     polyregion::compiler::Options opts{target, ""};
     opts.pipelineSpec = "FullOpt(level=0)";
@@ -262,8 +327,8 @@ TEST_CASE("C source omits values without a representation", "[backend]") {
                                  Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
                                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
     const auto source = sourceOf(Program(entry, {}, {box}, PassPhase::Initial(), {}));
-    CHECK(source.find("Box record;") != std::string::npos);
-    CHECK(source.find("int values[2];") != std::string::npos);
+    CHECK(source.find("Box _v0;") != std::string::npos);
+    CHECK(source.find("int _v1[2];") != std::string::npos);
     CHECK(source.find("poison") == std::string::npos);
   }
 }
@@ -333,8 +398,8 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
   CHECK(source.find("_empty pad") == std::string::npos);
   CHECK(source.find("_nested nest") == std::string::npos);
-  CHECK(source.find("value._base_middle") == std::string::npos);
-  CHECK(source.find("&(value)") != std::string::npos);
+  CHECK(source.find("_v0._base_middle") == std::string::npos);
+  CHECK(source.find("&(_v0)") != std::string::npos);
   CHECK(source.find("uint8_t tail;") != std::string::npos);
 }
 
@@ -361,8 +426,8 @@ TEST_CASE("metal source canonicalises empty true branches", "[backend]") {
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("if (!(flag))") != std::string::npos);
-  CHECK(source.find("if (flag) {\n\n  } else") == std::string::npos);
+  CHECK(source.find("if (!(_v0))") != std::string::npos);
+  CHECK(source.find("if (_v0) {\n\n  } else") == std::string::npos);
 }
 
 TEST_CASE("opencl source escapes reserved words as whole identifiers only", "[backend]") {
@@ -389,6 +454,7 @@ TEST_CASE("opencl source escapes reserved words as whole identifiers only", "[ba
 
 TEST_CASE("integer comparisons follow operand signedness", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const Named ua("ua", Type::IntU32()), ub("ub", Type::IntU32());
@@ -425,6 +491,7 @@ TEST_CASE("integer comparisons follow operand signedness", "[backend]") {
 
 TEST_CASE("integer division, remainder, min, max and shift follow operand signedness", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const Named ua("ua", Type::IntU32()), ub("ub", Type::IntU32());
@@ -494,6 +561,7 @@ TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[ba
 
 TEST_CASE("struct size and member offset agree on the target layout", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const auto sTpe = Type::Struct(Sym({"S"}), {});
@@ -521,6 +589,7 @@ TEST_CASE("struct size and member offset agree on the target layout", "[backend]
 
 TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global());
@@ -549,6 +618,7 @@ TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]
 
 TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const auto capTpe = Type::Struct(Sym({"Cap"}), {});
@@ -583,6 +653,7 @@ TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backe
 
 TEST_CASE("integral to pointer casts lower to inttoptr", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
 
   const Program p = arenaOffsetCastProgram();
   polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
@@ -597,6 +668,7 @@ TEST_CASE("integral to pointer casts lower to inttoptr", "[backend]") {
 
 TEST_CASE("taking the address of a constant materialises an entry block slot", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const Named ref("p", Type::Ptr(Type::IntU32(), TypeSpace::Private()));
@@ -624,6 +696,7 @@ TEST_CASE("taking the address of a constant materialises an entry block slot", "
 
 TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its address", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
 
   const Named a("a", SInt), b("b", SInt), c("c", SInt);
@@ -692,6 +765,7 @@ static Program absToCaptureProgram(const Type::Any &tpe, const Term::Any &input)
 
 TEST_CASE("integral abs emits llvm.abs with its is_int_min_poison operand", "[backend]") {
   polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
   using Catch::Matchers::ContainsSubstring;
 

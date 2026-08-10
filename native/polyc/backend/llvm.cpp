@@ -1210,18 +1210,21 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
 
   targetHandler->postProcessModule(*this);
 
-  std::string ir;
-  llvm::raw_string_ostream irOut(ir);
-  M.print(irOut, nullptr);
+  const auto moduleIr = [&] {
+    std::string ir;
+    llvm::raw_string_ostream irOut(ir);
+    M.print(irOut, nullptr);
+    return ir;
+  };
 
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (verifyModule(M, &errOut)) {
-    fmt::print(stderr, "Verification failed:\n{}\nIR=\n{}\n", errOut.str(), irOut.str());
-    return {errOut.str(), irOut.str()};
-  } else {
-    return {{}, irOut.str()};
+    auto ir = moduleIr();
+    fmt::print(stderr, "Verification failed:\n{}\nIR=\n{}\n", errOut.str(), ir);
+    return {errOut.str(), ir};
   }
+  return {{}, llvmc::captureModuleIr() ? moduleIr() : std::string{}};
 }
 
 ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn) { //

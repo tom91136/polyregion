@@ -1,10 +1,13 @@
 #include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 
+#include "polyregion/env_keys.h"
+
 #include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
+#include "scoped_env.h"
 
 using namespace polyregion::polyast;
 using namespace polyregion::compiletime;
@@ -116,6 +119,7 @@ Expr::Any generateConstValue(const Tpe::Any &t) {
 
 template <typename P> static auto assertCompile(const P &p) {
   CAPTURE(repr(p));
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
   auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_HOST, "native"}, OptLevel::O3);
   CAPTURE(repr(c));
   CHECK(c.messages == "");

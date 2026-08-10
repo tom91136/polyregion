@@ -25,8 +25,13 @@ private:
   Set<std::string> zeroSizeStructNames;
   Set<std::string> unionDefNames;
   Map<std::string, std::string> stringConstNames;
+  Map<std::string, std::string> localNames;
+  Set<std::string> fileScopeNames;
+  size_t localNameCounter = 0;
   std::string normalise(const std::string &s) const;
   std::string normalise(const Sym &s) const;
+  void bindLocalNames(const Function &fn);
+  std::string localName(const std::string &symbol);
   Type::Any resolveFieldType(const Type::Any &owner, const std::string &fieldName) const;
   std::string mkValueCopy(const std::string &lhs, const std::string &rhs, const Type::Any &tpe, int depth) const;
   std::optional<std::string> mkZeroInit(const Type::Any &tpe) const;

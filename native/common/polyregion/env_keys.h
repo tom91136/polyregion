@@ -13,6 +13,7 @@ inline constexpr auto PolyregionTestTargets = "POLYREGION_TEST_TARGETS";
 inline constexpr auto PolyregionSysroot = "POLYREGION_SYSROOT";
 
 inline constexpr auto PolycDebugLld = "POLYC_DEBUG_LLD";
+inline constexpr auto PolycVerboseNames = "POLYC_VERBOSE_NAMES";
 inline constexpr auto PolypassPlugins = "POLYPASS_PLUGINS";
 
 inline constexpr auto PolyfrontExe = "POLYFRONT_EXE";
