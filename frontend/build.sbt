@@ -178,7 +178,8 @@ lazy val codegen = project
         Seq("-Xmax-inlines", "80"),
     Compile / mainClass := Some("polyregion.ast.CodeGen"),
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %% "pprint" % "0.9.6"
+      "com.lihaoyi"   %% "pprint" % "0.9.6",
+      "org.scalameta" %% "munit"  % munitVersion % Test
     ),
     genCodegen := Def.uncached {
       (Compile / runMain).toTask(" polyregion.ast.CodeGen").value
