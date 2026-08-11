@@ -26,7 +26,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       ),
       moduleCaptures = Nil,
       termCaptures = Nil
-    ).copy(affinity = p.Function.Affinity.Host)
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
   }
 
   test("extracts a nested pointer leaf while retaining scalar capture fields") {
@@ -47,7 +47,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
 
     val in        = program(host(kernel, capture), List(kernel), List(innerDef, capDef))
@@ -94,7 +94,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
       isEntry = true
-    ).copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
     val fired   = named("fired", p.Type.Unit0)
     val caller = entry(
@@ -109,7 +109,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       ),
       moduleCaptures = Nil,
       termCaptures = Nil
-    ).copy(affinity = p.Function.Affinity.Host)
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
 
     val out       = KernelCaptureFlatten(program(caller, List(kernel), List(capDef)), NoopLog)
     val outKernel = out.functions.head
@@ -136,7 +136,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
     val outKernel =
       KernelCaptureFlatten(program(host(kernel, capture), List(kernel), List(capDef)), NoopLog).functions.head
@@ -153,7 +153,8 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     val capDef = p.StructDef(capSym, Nil, List(named("value", p.Type.IntS32)), Nil)
     val self   = named(p.Conventions.ThisReceiver, p.Type.Ptr(capTpe, global))
     val kernel =
-      fn("scalarKernel", isEntry = true).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+      fn("scalarKernel", isEntry = true)
+        .modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
     val in      = program(host(kernel, capture), List(kernel), List(capDef))
 
@@ -175,7 +176,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       body =
         List(p.Stmt.Var(named("h", nodePtr), Some(p.Expr.Alias(head))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
 
     val ex = intercept[RuntimeException] {
@@ -198,7 +199,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       "escapeKernel",
       body = List(p.Stmt.Var(copy, Some(p.Expr.Alias(inner))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
     val outKernel =
       KernelCaptureFlatten(program(host(kernel, capture), List(kernel), List(innerDef, capDef)), NoopLog).functions.head
@@ -253,7 +254,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture   = named("capture", p.Type.Ptr(capTpe, global))
     val out       = KernelCaptureFlatten(program(host(kernel, capture), List(kernel), List(innerDef, capDef)), NoopLog)
     val outKernel = out.functions.head
@@ -302,7 +303,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
 
     val ex = intercept[RuntimeException] {
@@ -323,7 +324,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       body =
         List(p.Stmt.Var(named("p", i32p), Some(p.Expr.Alias(data))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
 
     val ex = intercept[RuntimeException] {
@@ -351,7 +352,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         ret
       ),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
     val addressEx = intercept[RuntimeException] {
       KernelCaptureFlatten(program(host(addressKernel, capture), List(addressKernel), List(capDef)), NoopLog)
@@ -362,7 +363,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       "mutateKernel",
       body = List(p.Stmt.Mut(data, p.Expr.Alias(p.Term.NullPtrConst(p.Type.IntS32, global, p.Region.Opaque))), ret),
       isEntry = true
-    ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val mutationEx = intercept[RuntimeException] {
       KernelCaptureFlatten(program(host(mutateKernel, capture), List(mutateKernel), List(capDef)), NoopLog)
     }
@@ -384,7 +385,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         ),
         isEntry = true
-      ).copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload)
+      ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
       val capture = named("capture", capPtr)
       intercept[RuntimeException] {
         KernelCaptureFlatten(program(host(kernel, capture), List(kernel), defs :+ capDef), NoopLog)

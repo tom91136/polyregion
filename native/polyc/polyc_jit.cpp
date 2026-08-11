@@ -31,7 +31,8 @@ template <typename T> auto ptrView(const T *p, const size_t n) { return view(p, 
 std::string cachePath(const uint8_t *program, size_t programLen, uint8_t target, const char *arch, const char *pipelineSpec, uint8_t opt,
                       const polyc_jit_spec_const_t *specs, size_t nSpecs) {
   const auto meta = ptrView(specs, nSpecs) //
-                    | fold_left(fmt::format("polyc-jit-v2|{}|{}|{}|{}", target, opt, arch ? arch : "", pipelineSpec ? pipelineSpec : ""),
+                    | fold_left(fmt::format("polyc-jit-v{}|{}|{}|{}|{}", POLYC_JIT_ABI_VERSION, target, opt, arch ? arch : "",
+                                            pipelineSpec ? pipelineSpec : ""),
                                 [](std::string acc, const auto &spec) {
                                   return std::move(acc)
                                       .append(fmt::format("|{}={}:", spec.field, spec.repr))
@@ -79,6 +80,8 @@ polyast::Program applySpecialise(const polyast::Program &p, const std::unordered
 }
 
 } // namespace
+
+extern "C" uint32_t polyc_jit_abi_version(void) { return POLYC_JIT_ABI_VERSION; }
 
 extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t programLen, //
                                                 uint32_t target, const char *arch, const char *pipelineSpec, uint32_t opt,

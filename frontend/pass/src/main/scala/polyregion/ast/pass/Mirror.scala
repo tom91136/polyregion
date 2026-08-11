@@ -295,18 +295,20 @@ def sizeAlignOf(program: p.Program, t: p.Type): (Int, Int) = t match {
 
 def hostFn(name: String, rtn: p.Type, body: List[p.Stmt]): p.Function =
   p.Function(
-    p.Sym(List(name)),
-    Nil,
-    None,
-    List(p.Arg(p.Named("capture", BytePtr)), p.Arg(p.Named("size", U64))),
-    Nil,
-    Nil,
-    rtn,
+    p.FunctionDecl(
+      p.Sym(List(name)),
+      Nil,
+      None,
+      List(p.Arg(p.Named("capture", BytePtr)), p.Arg(p.Named("size", U64))),
+      Nil,
+      Nil,
+      rtn,
+      p.Function.Affinity.Host
+    ),
     body,
     p.Function.Visibility.Exported,
     p.Function.FpMode.Relaxed,
-    isEntry = false,
-    affinity = p.Function.Affinity.Host
+    isEntry = false
   )
 
 def selfPtrMembers(sdef: p.StructDef): List[p.Named] = sdef.members.filter { m =>

@@ -471,8 +471,9 @@ void polyfc::Remapper::handleFunc(mlir::func::FuncOp funcOp) {
   const Type::Any rtn = funcOp.getNumResults() > 0 ? handleType(funcOp.getResultTypes()[0]) : Type::Unit0().widen();
 
   const auto mk = [&](const std::vector<Stmt::Any> &body) -> Function {
-    return Function(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{}, std::vector<Arg>{}, rtn, body,
-                    FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false, FunctionAffinity::Offload());
+    return Function(FunctionDecl(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
+                                 std::vector<Arg>{}, rtn, FunctionAffinity::Offload()),
+                    body, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
   };
   userFuncs.insert_or_assign(name, mk({}));
 
@@ -971,7 +972,7 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
             const auto &fn = userFuncs.at(name);
             const auto ivArgs = args | map([&](const auto &arg) { return newVar(handleValueAsScalar(arg)).widen(); }) | to_vector();
             const auto invoke =
-                Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs, fn.rtn);
+                Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs, fn.decl.rtn);
             if (a.getNumResults() > 0) witness(a.getResult(0), Expr::Alias(newVar(invoke.widen())).widen());
             else
               stmts.emplace_back(Stmt::Var(Named(fmt::format("_call_{}", reinterpret_cast<uintptr_t>(a.getOperation())), Type::Unit0()),

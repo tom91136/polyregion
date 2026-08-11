@@ -24,6 +24,22 @@ class ArenaLowerSuite extends munit.FunSuite {
     )
   }
 
+  test("flat arena lowering clears an element boundary after erasing the capture pointee") {
+    val capSym    = sym("Cap")
+    val capStruct = p.Type.Struct(capSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capStruct, p.Type.Space.Global))
+    val boundary = p.Arg.Boundary(
+      p.Arg.Access.Read,
+      p.Arg.Extent.Elements(p.Arg.SizeExpr.Const(1))
+    )
+    val capDef = p.StructDef(capSym, Nil, List(named("x")), Nil)
+    val e      = entry(args = List(p.Arg(cap, boundary = Some(boundary))))
+
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+
+    assertEquals(out.args.head.boundary, None)
+  }
+
   test("address of arena-rooted inline array is kept as an arena offset") {
     val capSym  = sym("Cap")
     val dataTpe = p.Type.Arr(p.Type.IntS8, 4, p.Type.Space.Global)

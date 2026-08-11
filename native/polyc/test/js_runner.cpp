@@ -9,7 +9,7 @@ using namespace polyregion::polypass;
 namespace {
 
 constexpr auto EchoBundle = R"JS(
-    exports.polypass_abi_version = function() { return 1; };
+    exports.polypass_abi_version = function() { return 2; };
     exports.polypass_pass_count = function() { return 1; };
     exports.polypass_pass_name = function(i) { return i === 0 ? "Echo" : null; };
     exports.polypass_pass_descr = function(i) { return null; };
@@ -39,7 +39,7 @@ TEST_CASE("enumerate + runPasses round-trip through CommonJS exports") {
 TEST_CASE("missing runPasses surfaces a clear error") {
   JsPassRunner r;
   REQUIRE(r.loadModule(R"JS(
-    exports.polypass_abi_version = function() { return 1; };
+    exports.polypass_abi_version = function() { return 2; };
     exports.polypass_pass_count = function() { return 0; };
     exports.polypass_pass_name = function(i) { return null; };
   )JS")
@@ -49,4 +49,12 @@ TEST_CASE("missing runPasses surfaces a clear error") {
   REQUIRE(out.empty());
   REQUIRE_FALSE(err.empty());
   REQUIRE((err ^ contains_slice("polypass_run_passes")));
+}
+
+TEST_CASE("reject a plugin built against the previous PolyPass ABI") {
+  JsPassRunner r;
+  const auto error = r.loadModule(R"JS(
+    exports.polypass_abi_version = function() { return 1; };
+  )JS");
+  REQUIRE((error ^ contains_slice("PolyPass ABI mismatch")));
 }

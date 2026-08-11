@@ -15,7 +15,7 @@ class PartialEvalAliasSuite extends munit.FunSuite {
     p.Expr.RefTo(that, None, that.tpe, p.Type.Space.Private, p.Region.Rooted(that.root))
 
   private def pe(body: List[p.Stmt], rtn: p.Type = p.Type.Unit0, args: List[p.Arg] = Nil): List[p.Stmt] =
-    PartialEval()(program(entry(args = args, body = body).copy(rtn = rtn)), NoopLog).entry.body
+    PartialEval()(program(entry(args = args, body = body).modifyDecl(_.copy(rtn = rtn))), NoopLog).entry.body
 
   private def fx(root: p.Named): p.Term.Select = fieldOf(root)("x", p.Type.IntS32)
 
@@ -202,7 +202,10 @@ class PartialEvalAliasSuite extends munit.FunSuite {
       rtn: p.Type,
       args: List[p.Arg]
   ): List[p.Stmt] =
-    PartialEval()(program(entry(args = args, body = body).copy(rtn = rtn), Nil, defs), NoopLog).entry.body
+    PartialEval()(
+      program(entry(args = args, body = body).modifyDecl(_.copy(rtn = rtn)), Nil, defs),
+      NoopLog
+    ).entry.body
 
   private def reinterpret(src: p.Named, dst: p.Named, field: String, srcDef: p.StructDef, dstDef: p.StructDef) = {
     val fieldTpe = dstDef.members.find(_.symbol == field).get.tpe

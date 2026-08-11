@@ -12,14 +12,14 @@
 using json = nlohmann::json;
 
 namespace polyregion::polyast {
-namespace FunctionFpMode {
-[[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Relaxed relaxed_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json relaxed_to_json(const FunctionFpMode::Relaxed &);
-[[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Strict strict_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json strict_to_json(const FunctionFpMode::Strict &);
-[[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Any any_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json any_to_json(const FunctionFpMode::Any &);
-} // namespace FunctionFpMode
+namespace ArgExtent {
+[[nodiscard]] POLYREGION_EXPORT ArgExtent::Elements elements_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json elements_to_json(const ArgExtent::Elements &);
+[[nodiscard]] POLYREGION_EXPORT ArgExtent::Bytes bytes_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bytes_to_json(const ArgExtent::Bytes &);
+[[nodiscard]] POLYREGION_EXPORT ArgExtent::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const ArgExtent::Any &);
+} // namespace ArgExtent
 namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT Expr::Alias alias_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json alias_to_json(const Expr::Alias &);
@@ -56,18 +56,6 @@ namespace Region {
 [[nodiscard]] POLYREGION_EXPORT Region::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Region::Any &);
 } // namespace Region
-namespace PathStep {
-[[nodiscard]] POLYREGION_EXPORT PathStep::Field field_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json field_to_json(const PathStep::Field &);
-[[nodiscard]] POLYREGION_EXPORT PathStep::Deref deref_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json deref_to_json(const PathStep::Deref &);
-[[nodiscard]] POLYREGION_EXPORT PathStep::Index index_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json index_to_json(const PathStep::Index &);
-[[nodiscard]] POLYREGION_EXPORT PathStep::IndexDyn indexdyn_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json indexdyn_to_json(const PathStep::IndexDyn &);
-[[nodiscard]] POLYREGION_EXPORT PathStep::Any any_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json any_to_json(const PathStep::Any &);
-} // namespace PathStep
 namespace Stmt {
 [[nodiscard]] POLYREGION_EXPORT Stmt::Var var_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json var_to_json(const Stmt::Var &);
@@ -350,8 +338,12 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json signature_to_json(const Signature &);
 [[nodiscard]] POLYREGION_EXPORT InvokeSignature invokesignature_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json invokesignature_to_json(const InvokeSignature &);
+[[nodiscard]] POLYREGION_EXPORT Boundary boundary_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json boundary_to_json(const Boundary &);
 [[nodiscard]] POLYREGION_EXPORT Arg arg_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json arg_to_json(const Arg &);
+[[nodiscard]] POLYREGION_EXPORT FunctionDecl functiondecl_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json functiondecl_to_json(const FunctionDecl &);
 [[nodiscard]] POLYREGION_EXPORT Function function_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json function_to_json(const Function &);
 [[nodiscard]] POLYREGION_EXPORT StructDef structdef_from_json(const json &);
@@ -378,6 +370,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json passrunresult_to_json(const PassRunResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
+[[nodiscard]] POLYREGION_EXPORT LibraryDef librarydef_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json librarydef_to_json(const LibraryDef &);
 namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
@@ -464,6 +458,48 @@ namespace MemScope {
 [[nodiscard]] POLYREGION_EXPORT MemScope::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const MemScope::Any &);
 } // namespace MemScope
+namespace FunctionFpMode {
+[[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Relaxed relaxed_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json relaxed_to_json(const FunctionFpMode::Relaxed &);
+[[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Strict strict_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json strict_to_json(const FunctionFpMode::Strict &);
+[[nodiscard]] POLYREGION_EXPORT FunctionFpMode::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const FunctionFpMode::Any &);
+} // namespace FunctionFpMode
+namespace ArgAccess {
+[[nodiscard]] POLYREGION_EXPORT ArgAccess::Read read_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json read_to_json(const ArgAccess::Read &);
+[[nodiscard]] POLYREGION_EXPORT ArgAccess::Write write_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json write_to_json(const ArgAccess::Write &);
+[[nodiscard]] POLYREGION_EXPORT ArgAccess::ReadWrite readwrite_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json readwrite_to_json(const ArgAccess::ReadWrite &);
+[[nodiscard]] POLYREGION_EXPORT ArgAccess::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const ArgAccess::Any &);
+} // namespace ArgAccess
+namespace ArgSizeExpr {
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Param param_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json param_to_json(const ArgSizeExpr::Param &);
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Const const_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json const_to_json(const ArgSizeExpr::Const &);
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Add add_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json add_to_json(const ArgSizeExpr::Add &);
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Mul mul_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json mul_to_json(const ArgSizeExpr::Mul &);
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const ArgSizeExpr::Any &);
+} // namespace ArgSizeExpr
+namespace PathStep {
+[[nodiscard]] POLYREGION_EXPORT PathStep::Field field_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json field_to_json(const PathStep::Field &);
+[[nodiscard]] POLYREGION_EXPORT PathStep::Deref deref_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json deref_to_json(const PathStep::Deref &);
+[[nodiscard]] POLYREGION_EXPORT PathStep::Index index_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json index_to_json(const PathStep::Index &);
+[[nodiscard]] POLYREGION_EXPORT PathStep::IndexDyn indexdyn_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json indexdyn_to_json(const PathStep::IndexDyn &);
+[[nodiscard]] POLYREGION_EXPORT PathStep::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const PathStep::Any &);
+} // namespace PathStep
 namespace TypeKind {
 [[nodiscard]] POLYREGION_EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json none_to_json(const TypeKind::None &);

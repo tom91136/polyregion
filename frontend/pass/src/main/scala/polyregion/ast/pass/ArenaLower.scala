@@ -55,8 +55,14 @@ object ArenaLower extends ProgramPass {
       val arena8      = p.Named("#arena_base", BytePtr)
       val rewritten   = mapStmtsRec(f.body)(rwLeaf(members, derived, offsetRoots, capN, arena8))
       val capDecl     = p.Stmt.Var(capN, Some(p.Expr.Cast(sel(arena8), capN.tpe)), isMutable = false)
-      def replaceCapture(a: p.Arg): p.Arg = if (a.named == capN) a.copy(named = arena8) else a
-      f.copy(receiver = f.receiver.map(replaceCapture), args = f.args.map(replaceCapture), body = capDecl :: rewritten)
+      def replaceCapture(a: p.Arg): p.Arg = if (a.named == capN) a.copy(named = arena8, boundary = None) else a
+      f.copy(
+        decl = f.decl.copy(
+          receiver = f.receiver.map(replaceCapture),
+          args = f.args.map(replaceCapture)
+        ),
+        body = capDecl :: rewritten
+      )
   }
 
   private def arenaOffsetRoots(f: p.Function, derived: Map[p.Named, p.Region], capN: p.Named): Set[String] = {

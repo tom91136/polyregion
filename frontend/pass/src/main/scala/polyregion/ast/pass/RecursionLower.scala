@@ -177,18 +177,11 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
       }
     }
     val merged = p.Function(
-      sccName,
-      Nil,
-      None,
-      mergedParams,
-      Nil,
-      Nil,
-      rtn,
+      p.FunctionDecl(sccName, Nil, None, mergedParams, Nil, Nil, rtn, p.Function.Affinity.Offload),
       body,
       p.Function.Visibility.Internal,
       p.Function.FpMode.Relaxed,
-      isEntry = false,
-      p.Function.Affinity.Offload
+      isEntry = false
     )
     // bind every merged argument to a mutable temp before the call: if the driver is tail-recursive it
     // reassigns its params, and FnInline substitutes a param with the literal call argument - a constant

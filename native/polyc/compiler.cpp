@@ -280,7 +280,7 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   };
 
   const bool isGpuTarget = runtime::targetPlatformKind(options.target) == runtime::PlatformKind::Managed;
-  if (isGpuTarget && !program.entry.affinity.is<polyast::FunctionAffinity::Offload>())
+  if (isGpuTarget && !program.entry.decl.affinity.is<polyast::FunctionAffinity::Offload>())
     throw std::logic_error(
         fmt::format("GPU target {} requires an Offload-affinity entry function; got Host-affinity", magic_enum::enum_name(options.target)));
 
@@ -295,14 +295,14 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   if (options.hostMirroring) {
     auto hostFns = std::vector<polyast::Function>{effective.entry} //
                    ^ concat(effective.functions)                   //
-                   ^ filter([](const auto &f) { return f.affinity.template is<polyast::FunctionAffinity::Host>(); });
+                   ^ filter([](const auto &f) { return f.decl.affinity.template is<polyast::FunctionAffinity::Host>(); });
     if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions", {}};
     effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
                                  effective.phase, effective.metadata);
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
-  c.entryArgs = effective.entry.args ^ map([](const auto &a) { return a.named; });
+  c.entryArgs = effective.entry.decl.args ^ map([](const auto &a) { return a.named; });
   c.events ^= concat(preEvents);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;

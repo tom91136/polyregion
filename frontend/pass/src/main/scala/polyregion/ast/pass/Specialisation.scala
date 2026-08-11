@@ -39,7 +39,7 @@ object Specialisation extends ProgramPass {
         val fnImpl = fnLUT(ivk.calleeName)
         val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs.take(fnImpl.tpeVars.size)).toMap
         val specialisedFnImpl = fnImpl
-          .copy(name = newName, tpeVars = Nil)
+          .copy(decl = fnImpl.decl.copy(name = newName, tpeVars = Nil))
           .modifyAll[p.Type] {
             case v @ p.Type.Var(name) => tpeLut.getOrElse(name, v)
             case x                    => x

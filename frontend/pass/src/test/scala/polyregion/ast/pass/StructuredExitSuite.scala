@@ -88,6 +88,20 @@ class StructuredExitSuite extends munit.FunSuite {
     assert(out.entry.body.lastOption.exists(_.isInstanceOf[p.Stmt.Return]), "drains to a return")
   }
 
+  test("a leading error-buffer arg rebases boundary extents") {
+    val count = p.Arg(named("count", i32))
+    val output = p.Arg(
+      outArg,
+      boundary = Some(p.Arg.Boundary(p.Arg.Access.Write, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(1))))
+    )
+    val out = lower(List(output, count), List(assertStmt(), ret))
+
+    assertEquals(
+      out.entry.args(1).boundary.map(_.extent),
+      Some(p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2)))
+    )
+  }
+
   test("round-trip: the 4cc code (little-endian) and the message land in the error buffer") {
     val code = p.Enums.AssertCode.Assert.value
     val out  = lower(Nil, List(assertStmt(code, "out of bounds"), ret))

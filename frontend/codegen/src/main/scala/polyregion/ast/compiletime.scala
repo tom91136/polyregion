@@ -127,25 +127,33 @@ private[polyregion] object compiletime {
       val mapped = r.asType match {
         case '[String] => "std::string"
         case '[Int]    => "int32_t"
+        case '[Long]   => "int64_t"
         case _ =>
-          val fqcnTail = List
-            .unfold(r.typeSymbol)(s => if (s.isNoSymbol) None else Some((s, s.maybeOwner)))
-            .takeWhile(x => x != tpe.typeSymbol)
-            .reverse
+          val sumParent = r.baseClasses.tail.find(s => s.flags.is(Flags.Enum) || s.flags.is(Flags.Sealed))
+          sumParent match {
+            case Some(parent) =>
+              s"${retype(r.baseType(parent)).stripSuffix("::Any")}::${r.typeSymbol.name}"
+            case None if r.typeSymbol.flags.is(Flags.Case) => r.typeSymbol.name
+            case None =>
+              val fqcnTail = List
+                .unfold(r.typeSymbol)(s => if (s.isNoSymbol) None else Some((s, s.maybeOwner)))
+                .takeWhile(x => x != tpe.typeSymbol)
+                .reverse
 
-          val (_, cppName) = fqcnTail
-            .map(s => s.flags.is(Flags.Module) -> s.name.replace("$", ""))
-            .foldLeft((true, "")) {
-              case ((true, acc), (m, x))  => m -> s"$acc$x"
-              case ((false, acc), (m, x)) => m -> s"$acc.$x"
-            }
+              val (_, cppName) = fqcnTail
+                .map(s => s.flags.is(Flags.Module) -> s.name.replace("$", ""))
+                .foldLeft((true, "")) {
+                  case ((true, acc), (m, x))  => m -> s"$acc$x"
+                  case ((false, acc), (m, x)) => m -> s"$acc.$x"
+                }
 
-          val isBase    = r.widen == r
-          val singleton = r.typeSymbol.caseFields.isEmpty
+              val isBase    = r.widen == r
+              val singleton = r.typeSymbol.caseFields.isEmpty
 
-          if (isBase && singleton) s"$cppName::Any" // is base of an enum
-          else if (singleton) s"${cppName}::${r.termSymbol.name}"
-          else s"${fqcnTail.map(_.name.replace("$", "")).mkString("::")}"
+              if (isBase && singleton) s"$cppName::Any"
+              else if (singleton) s"${cppName}::${r.termSymbol.name}"
+              else s"${fqcnTail.map(_.name.replace("$", "")).mkString("::")}"
+          }
 
       }
       if (const) s"const ${mapped}&" else mapped

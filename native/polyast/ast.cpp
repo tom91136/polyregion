@@ -244,8 +244,9 @@ Expr::SpecOp dsl::call(const Spec::Any &intr) { return Expr::SpecOp(intr); }
 std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, const Vector<Arg> &args, const Type::Any &rtn,
                                                          FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode, bool isEntry) {
   return [=](const auto &stmts) {
-    return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, visibility, fpMode,
-                    isEntry, FunctionAffinity::Offload());
+    return Function(
+        FunctionDecl(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, FunctionAffinity::Offload()),
+        stmts, visibility, fpMode, isEntry);
   };
 }
 

@@ -3696,32 +3696,32 @@ POLYREGION_EXPORT bool Signature::operator==(const Signature &rhs) const {
          && (rtn == rhs.rtn);
 }
 
-InvokeSignature::InvokeSignature(Sym name, std::vector<Type::Any> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args,
+InvokeSignature::InvokeSignature(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Type::Any> receiver, std::vector<Type::Any> args,
                                  Type::Any rtn) noexcept
-    : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+    : name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
 size_t InvokeSignature::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-InvokeSignature InvokeSignature::withName(const Sym &v_) const { return InvokeSignature(v_, tpeVars, receiver, args, rtn); }
-InvokeSignature InvokeSignature::withTpeVars(const std::vector<Type::Any> &v_) const {
+InvokeSignature InvokeSignature::withName(const Sym &v_) const { return InvokeSignature(v_, tpeArgs, receiver, args, rtn); }
+InvokeSignature InvokeSignature::withTpeArgs(const std::vector<Type::Any> &v_) const {
   return InvokeSignature(name, v_, receiver, args, rtn);
 }
 InvokeSignature InvokeSignature::withReceiver(const std::optional<Type::Any> &v_) const {
-  return InvokeSignature(name, tpeVars, v_, args, rtn);
+  return InvokeSignature(name, tpeArgs, v_, args, rtn);
 }
 InvokeSignature InvokeSignature::withArgs(const std::vector<Type::Any> &v_) const {
-  return InvokeSignature(name, tpeVars, receiver, v_, rtn);
+  return InvokeSignature(name, tpeArgs, receiver, v_, rtn);
 }
-InvokeSignature InvokeSignature::withRtn(const Type::Any &v_) const { return InvokeSignature(name, tpeVars, receiver, args, v_); }
+InvokeSignature InvokeSignature::withRtn(const Type::Any &v_) const { return InvokeSignature(name, tpeArgs, receiver, args, v_); }
 POLYREGION_EXPORT bool InvokeSignature::operator!=(const InvokeSignature &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool InvokeSignature::operator==(const InvokeSignature &rhs) const {
-  return (name == rhs.name) && std::equal(tpeVars.begin(), tpeVars.end(), rhs.tpeVars.begin(), [](auto &&l, auto &&r) { return l == r; })
+  return (name == rhs.name) && std::equal(tpeArgs.begin(), tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; })
          && ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver))
          && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
@@ -3849,25 +3849,229 @@ POLYREGION_EXPORT bool FunctionAffinity::Host::operator<(const Base &rhs_) const
 FunctionAffinity::Host::operator FunctionAffinity::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Host>(*this)); }
 FunctionAffinity::Any FunctionAffinity::Host::widen() const { return Any(*this); };
 
-Arg::Arg(Named named, std::optional<SourcePosition> pos) noexcept : named(std::move(named)), pos(std::move(pos)) {}
+ArgAccess::Base::Base() = default;
+uint32_t ArgAccess::Any::id() const { return _v->id(); }
+size_t ArgAccess::Any::hash_code() const { return _v->hash_code(); }
+bool ArgAccess::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool ArgAccess::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool ArgAccess::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+ArgAccess::Read::Read() noexcept : ArgAccess::Base() {}
+uint32_t ArgAccess::Read::id() const { return variant_id; };
+size_t ArgAccess::Read::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool ArgAccess::Read::operator==(const ArgAccess::Read &rhs) const { return true; }
+POLYREGION_EXPORT bool ArgAccess::Read::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool ArgAccess::Read::operator<(const ArgAccess::Read &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgAccess::Read::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgAccess::Read::operator ArgAccess::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Read>(*this)); }
+ArgAccess::Any ArgAccess::Read::widen() const { return Any(*this); };
+
+ArgAccess::Write::Write() noexcept : ArgAccess::Base() {}
+uint32_t ArgAccess::Write::id() const { return variant_id; };
+size_t ArgAccess::Write::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool ArgAccess::Write::operator==(const ArgAccess::Write &rhs) const { return true; }
+POLYREGION_EXPORT bool ArgAccess::Write::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool ArgAccess::Write::operator<(const ArgAccess::Write &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgAccess::Write::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgAccess::Write::operator ArgAccess::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Write>(*this)); }
+ArgAccess::Any ArgAccess::Write::widen() const { return Any(*this); };
+
+ArgAccess::ReadWrite::ReadWrite() noexcept : ArgAccess::Base() {}
+uint32_t ArgAccess::ReadWrite::id() const { return variant_id; };
+size_t ArgAccess::ReadWrite::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool ArgAccess::ReadWrite::operator==(const ArgAccess::ReadWrite &rhs) const { return true; }
+POLYREGION_EXPORT bool ArgAccess::ReadWrite::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool ArgAccess::ReadWrite::operator<(const ArgAccess::ReadWrite &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgAccess::ReadWrite::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgAccess::ReadWrite::operator ArgAccess::Any() const { return std::static_pointer_cast<Base>(std::make_shared<ReadWrite>(*this)); }
+ArgAccess::Any ArgAccess::ReadWrite::widen() const { return Any(*this); };
+
+ArgSizeExpr::Base::Base() = default;
+uint32_t ArgSizeExpr::Any::id() const { return _v->id(); }
+size_t ArgSizeExpr::Any::hash_code() const { return _v->hash_code(); }
+bool ArgSizeExpr::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool ArgSizeExpr::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool ArgSizeExpr::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+ArgSizeExpr::Param::Param(int32_t index) noexcept : ArgSizeExpr::Base(), index(index) {}
+uint32_t ArgSizeExpr::Param::id() const { return variant_id; };
+size_t ArgSizeExpr::Param::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgSizeExpr::Param ArgSizeExpr::Param::withIndex(const int32_t &v_) const { return ArgSizeExpr::Param(v_); }
+POLYREGION_EXPORT bool ArgSizeExpr::Param::operator==(const ArgSizeExpr::Param &rhs) const { return (this->index == rhs.index); }
+POLYREGION_EXPORT bool ArgSizeExpr::Param::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgSizeExpr::Param &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Param::operator<(const ArgSizeExpr::Param &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgSizeExpr::Param::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgSizeExpr::Param::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Param>(*this)); }
+ArgSizeExpr::Any ArgSizeExpr::Param::widen() const { return Any(*this); };
+
+ArgSizeExpr::Const::Const(int64_t value) noexcept : ArgSizeExpr::Base(), value(value) {}
+uint32_t ArgSizeExpr::Const::id() const { return variant_id; };
+size_t ArgSizeExpr::Const::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgSizeExpr::Const ArgSizeExpr::Const::withValue(const int64_t &v_) const { return ArgSizeExpr::Const(v_); }
+POLYREGION_EXPORT bool ArgSizeExpr::Const::operator==(const ArgSizeExpr::Const &rhs) const { return (this->value == rhs.value); }
+POLYREGION_EXPORT bool ArgSizeExpr::Const::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgSizeExpr::Const &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Const::operator<(const ArgSizeExpr::Const &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgSizeExpr::Const::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgSizeExpr::Const::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Const>(*this)); }
+ArgSizeExpr::Any ArgSizeExpr::Const::widen() const { return Any(*this); };
+
+ArgSizeExpr::Add::Add(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept
+    : ArgSizeExpr::Base(), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+uint32_t ArgSizeExpr::Add::id() const { return variant_id; };
+size_t ArgSizeExpr::Add::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgSizeExpr::Add ArgSizeExpr::Add::withLhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Add(v_, rhs); }
+ArgSizeExpr::Add ArgSizeExpr::Add::withRhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Add(lhs, v_); }
+POLYREGION_EXPORT bool ArgSizeExpr::Add::operator==(const ArgSizeExpr::Add &rhs) const {
+  return (this->lhs == rhs.lhs) && (this->rhs == rhs.rhs);
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Add::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgSizeExpr::Add &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Add::operator<(const ArgSizeExpr::Add &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgSizeExpr::Add::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgSizeExpr::Add::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
+ArgSizeExpr::Any ArgSizeExpr::Add::widen() const { return Any(*this); };
+
+ArgSizeExpr::Mul::Mul(ArgSizeExpr::Any lhs, ArgSizeExpr::Any rhs) noexcept
+    : ArgSizeExpr::Base(), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+uint32_t ArgSizeExpr::Mul::id() const { return variant_id; };
+size_t ArgSizeExpr::Mul::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(lhs)>()(lhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rhs)>()(rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgSizeExpr::Mul ArgSizeExpr::Mul::withLhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Mul(v_, rhs); }
+ArgSizeExpr::Mul ArgSizeExpr::Mul::withRhs(const ArgSizeExpr::Any &v_) const { return ArgSizeExpr::Mul(lhs, v_); }
+POLYREGION_EXPORT bool ArgSizeExpr::Mul::operator==(const ArgSizeExpr::Mul &rhs) const {
+  return (this->lhs == rhs.lhs) && (this->rhs == rhs.rhs);
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Mul::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgSizeExpr::Mul &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgSizeExpr::Mul::operator<(const ArgSizeExpr::Mul &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgSizeExpr::Mul::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgSizeExpr::Mul::operator ArgSizeExpr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mul>(*this)); }
+ArgSizeExpr::Any ArgSizeExpr::Mul::widen() const { return Any(*this); };
+
+ArgExtent::Base::Base() = default;
+uint32_t ArgExtent::Any::id() const { return _v->id(); }
+size_t ArgExtent::Any::hash_code() const { return _v->hash_code(); }
+bool ArgExtent::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool ArgExtent::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool ArgExtent::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+ArgExtent::Elements::Elements(ArgSizeExpr::Any size) noexcept : ArgExtent::Base(), size(std::move(size)) {}
+uint32_t ArgExtent::Elements::id() const { return variant_id; };
+size_t ArgExtent::Elements::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgExtent::Elements ArgExtent::Elements::withSize(const ArgSizeExpr::Any &v_) const { return ArgExtent::Elements(v_); }
+POLYREGION_EXPORT bool ArgExtent::Elements::operator==(const ArgExtent::Elements &rhs) const { return (this->size == rhs.size); }
+POLYREGION_EXPORT bool ArgExtent::Elements::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgExtent::Elements &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgExtent::Elements::operator<(const ArgExtent::Elements &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgExtent::Elements::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgExtent::Elements::operator ArgExtent::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Elements>(*this)); }
+ArgExtent::Any ArgExtent::Elements::widen() const { return Any(*this); };
+
+ArgExtent::Bytes::Bytes(ArgSizeExpr::Any size) noexcept : ArgExtent::Base(), size(std::move(size)) {}
+uint32_t ArgExtent::Bytes::id() const { return variant_id; };
+size_t ArgExtent::Bytes::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ArgExtent::Bytes ArgExtent::Bytes::withSize(const ArgSizeExpr::Any &v_) const { return ArgExtent::Bytes(v_); }
+POLYREGION_EXPORT bool ArgExtent::Bytes::operator==(const ArgExtent::Bytes &rhs) const { return (this->size == rhs.size); }
+POLYREGION_EXPORT bool ArgExtent::Bytes::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const ArgExtent::Bytes &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool ArgExtent::Bytes::operator<(const ArgExtent::Bytes &rhs) const { return false; }
+POLYREGION_EXPORT bool ArgExtent::Bytes::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+ArgExtent::Bytes::operator ArgExtent::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bytes>(*this)); }
+ArgExtent::Any ArgExtent::Bytes::widen() const { return Any(*this); };
+
+Boundary::Boundary(ArgAccess::Any access, ArgExtent::Any extent) noexcept : access(std::move(access)), extent(std::move(extent)) {}
+size_t Boundary::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(access)>()(access) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(extent)>()(extent) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Boundary Boundary::withAccess(const ArgAccess::Any &v_) const { return Boundary(v_, extent); }
+Boundary Boundary::withExtent(const ArgExtent::Any &v_) const { return Boundary(access, v_); }
+POLYREGION_EXPORT bool Boundary::operator!=(const Boundary &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool Boundary::operator==(const Boundary &rhs) const { return (access == rhs.access) && (extent == rhs.extent); }
+
+Arg::Arg(Named named, std::optional<SourcePosition> pos, std::optional<Boundary> boundary) noexcept
+    : named(std::move(named)), pos(std::move(pos)), boundary(std::move(boundary)) {}
 size_t Arg::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(named)>()(named) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(pos)>()(pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(boundary)>()(boundary) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Arg Arg::withNamed(const Named &v_) const { return Arg(v_, pos); }
-Arg Arg::withPos(const std::optional<SourcePosition> &v_) const { return Arg(named, v_); }
+Arg Arg::withNamed(const Named &v_) const { return Arg(v_, pos, boundary); }
+Arg Arg::withPos(const std::optional<SourcePosition> &v_) const { return Arg(named, v_, boundary); }
+Arg Arg::withBoundary(const std::optional<Boundary> &v_) const { return Arg(named, pos, v_); }
 POLYREGION_EXPORT bool Arg::operator!=(const Arg &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool Arg::operator==(const Arg &rhs) const { return (named == rhs.named) && (pos == rhs.pos); }
+POLYREGION_EXPORT bool Arg::operator==(const Arg &rhs) const {
+  return (named == rhs.named) && (pos == rhs.pos) && (boundary == rhs.boundary);
+}
 
-Function::Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args,
-                   std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body,
-                   FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode, bool isEntry, FunctionAffinity::Any affinity) noexcept
+FunctionDecl::FunctionDecl(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args,
+                           std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn,
+                           FunctionAffinity::Any affinity) noexcept
     : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)),
-      moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)), body(std::move(body)),
-      visibility(std::move(visibility)), fpMode(std::move(fpMode)), isEntry(isEntry), affinity(std::move(affinity)) {}
-size_t Function::hash_code() const {
+      moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)), affinity(std::move(affinity)) {
+}
+size_t FunctionDecl::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(tpeVars)>()(tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -3876,55 +4080,60 @@ size_t Function::hash_code() const {
   seed ^= std::hash<decltype(moduleCaptures)>()(moduleCaptures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(termCaptures)>()(termCaptures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(affinity)>()(affinity) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+FunctionDecl FunctionDecl::withName(const Sym &v_) const {
+  return FunctionDecl(v_, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, affinity);
+}
+FunctionDecl FunctionDecl::withTpeVars(const std::vector<std::string> &v_) const {
+  return FunctionDecl(name, v_, receiver, args, moduleCaptures, termCaptures, rtn, affinity);
+}
+FunctionDecl FunctionDecl::withReceiver(const std::optional<Arg> &v_) const {
+  return FunctionDecl(name, tpeVars, v_, args, moduleCaptures, termCaptures, rtn, affinity);
+}
+FunctionDecl FunctionDecl::withArgs(const std::vector<Arg> &v_) const {
+  return FunctionDecl(name, tpeVars, receiver, v_, moduleCaptures, termCaptures, rtn, affinity);
+}
+FunctionDecl FunctionDecl::withModuleCaptures(const std::vector<Arg> &v_) const {
+  return FunctionDecl(name, tpeVars, receiver, args, v_, termCaptures, rtn, affinity);
+}
+FunctionDecl FunctionDecl::withTermCaptures(const std::vector<Arg> &v_) const {
+  return FunctionDecl(name, tpeVars, receiver, args, moduleCaptures, v_, rtn, affinity);
+}
+FunctionDecl FunctionDecl::withRtn(const Type::Any &v_) const {
+  return FunctionDecl(name, tpeVars, receiver, args, moduleCaptures, termCaptures, v_, affinity);
+}
+FunctionDecl FunctionDecl::withAffinity(const FunctionAffinity::Any &v_) const {
+  return FunctionDecl(name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, v_);
+}
+POLYREGION_EXPORT bool FunctionDecl::operator!=(const FunctionDecl &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool FunctionDecl::operator==(const FunctionDecl &rhs) const {
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (receiver == rhs.receiver) && (args == rhs.args)
+         && (moduleCaptures == rhs.moduleCaptures) && (termCaptures == rhs.termCaptures) && (rtn == rhs.rtn) && (affinity == rhs.affinity);
+}
+
+Function::Function(FunctionDecl decl, std::vector<Stmt::Any> body, FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode,
+                   bool isEntry) noexcept
+    : decl(std::move(decl)), body(std::move(body)), visibility(std::move(visibility)), fpMode(std::move(fpMode)), isEntry(isEntry) {}
+size_t Function::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(decl)>()(decl) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(visibility)>()(visibility) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(fpMode)>()(fpMode) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(isEntry)>()(isEntry) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(affinity)>()(affinity) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Function Function::withName(const Sym &v_) const {
-  return Function(v_, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withTpeVars(const std::vector<std::string> &v_) const {
-  return Function(name, v_, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withReceiver(const std::optional<Arg> &v_) const {
-  return Function(name, tpeVars, v_, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withArgs(const std::vector<Arg> &v_) const {
-  return Function(name, tpeVars, receiver, v_, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withModuleCaptures(const std::vector<Arg> &v_) const {
-  return Function(name, tpeVars, receiver, args, v_, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withTermCaptures(const std::vector<Arg> &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, v_, rtn, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withRtn(const Type::Any &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, termCaptures, v_, body, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withBody(const std::vector<Stmt::Any> &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, v_, visibility, fpMode, isEntry, affinity);
-}
-Function Function::withVisibility(const FunctionVisibility::Any &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, v_, fpMode, isEntry, affinity);
-}
-Function Function::withFpMode(const FunctionFpMode::Any &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, v_, isEntry, affinity);
-}
-Function Function::withIsEntry(const bool &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, v_, affinity);
-}
-Function Function::withAffinity(const FunctionAffinity::Any &v_) const {
-  return Function(name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, v_);
-}
+Function Function::withDecl(const FunctionDecl &v_) const { return Function(v_, body, visibility, fpMode, isEntry); }
+Function Function::withBody(const std::vector<Stmt::Any> &v_) const { return Function(decl, v_, visibility, fpMode, isEntry); }
+Function Function::withVisibility(const FunctionVisibility::Any &v_) const { return Function(decl, body, v_, fpMode, isEntry); }
+Function Function::withFpMode(const FunctionFpMode::Any &v_) const { return Function(decl, body, visibility, v_, isEntry); }
+Function Function::withIsEntry(const bool &v_) const { return Function(decl, body, visibility, fpMode, v_); }
 POLYREGION_EXPORT bool Function::operator!=(const Function &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Function::operator==(const Function &rhs) const {
-  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (receiver == rhs.receiver) && (args == rhs.args)
-         && (moduleCaptures == rhs.moduleCaptures) && (termCaptures == rhs.termCaptures) && (rtn == rhs.rtn)
-         && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; })
-         && (visibility == rhs.visibility) && (fpMode == rhs.fpMode) && (isEntry == rhs.isEntry) && (affinity == rhs.affinity);
+  return (decl == rhs.decl) && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && (visibility == rhs.visibility) && (fpMode == rhs.fpMode) && (isEntry == rhs.isEntry);
 }
 
 StructDef::StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Type::Struct> parents,
@@ -4194,6 +4403,23 @@ POLYREGION_EXPORT bool CompileResult::operator!=(const CompileResult &rhs) const
 POLYREGION_EXPORT bool CompileResult::operator==(const CompileResult &rhs) const {
   return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts)
          && (messages == rhs.messages) && (entryArgs == rhs.entryArgs);
+}
+
+LibraryDef::LibraryDef(Sym name, std::vector<FunctionDecl> decls, std::vector<MetaEntry> metadata) noexcept
+    : name(std::move(name)), decls(std::move(decls)), metadata(std::move(metadata)) {}
+size_t LibraryDef::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(decls)>()(decls) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+LibraryDef LibraryDef::withName(const Sym &v_) const { return LibraryDef(v_, decls, metadata); }
+LibraryDef LibraryDef::withDecls(const std::vector<FunctionDecl> &v_) const { return LibraryDef(name, v_, metadata); }
+LibraryDef LibraryDef::withMetadata(const std::vector<MetaEntry> &v_) const { return LibraryDef(name, decls, v_); }
+POLYREGION_EXPORT bool LibraryDef::operator!=(const LibraryDef &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool LibraryDef::operator==(const LibraryDef &rhs) const {
+  return (name == rhs.name) && (decls == rhs.decls) && (metadata == rhs.metadata);
 }
 
 } // namespace polyregion::polyast
@@ -4835,7 +5061,53 @@ std::size_t
 std::hash<polyregion::polyast::FunctionAffinity::Host>::operator()(const polyregion::polyast::FunctionAffinity::Host &x) const noexcept {
   return x.hash_code();
 }
+std::size_t std::hash<polyregion::polyast::ArgAccess::Any>::operator()(const polyregion::polyast::ArgAccess::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgAccess::Read>::operator()(const polyregion::polyast::ArgAccess::Read &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgAccess::Write>::operator()(const polyregion::polyast::ArgAccess::Write &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ArgAccess::ReadWrite>::operator()(const polyregion::polyast::ArgAccess::ReadWrite &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgSizeExpr::Any>::operator()(const polyregion::polyast::ArgSizeExpr::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ArgSizeExpr::Param>::operator()(const polyregion::polyast::ArgSizeExpr::Param &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ArgSizeExpr::Const>::operator()(const polyregion::polyast::ArgSizeExpr::Const &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgSizeExpr::Add>::operator()(const polyregion::polyast::ArgSizeExpr::Add &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgSizeExpr::Mul>::operator()(const polyregion::polyast::ArgSizeExpr::Mul &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgExtent::Any>::operator()(const polyregion::polyast::ArgExtent::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ArgExtent::Elements>::operator()(const polyregion::polyast::ArgExtent::Elements &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::ArgExtent::Bytes>::operator()(const polyregion::polyast::ArgExtent::Bytes &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Boundary>::operator()(const polyregion::polyast::Boundary &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Arg>::operator()(const polyregion::polyast::Arg &x) const noexcept { return x.hash_code(); }
+std::size_t std::hash<polyregion::polyast::FunctionDecl>::operator()(const polyregion::polyast::FunctionDecl &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregion::polyast::Function &x) const noexcept {
   return x.hash_code();
 }
@@ -4885,5 +5157,8 @@ std::size_t std::hash<polyregion::polyast::PassRunResult>::operator()(const poly
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::CompileResult>::operator()(const polyregion::polyast::CompileResult &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::LibraryDef>::operator()(const polyregion::polyast::LibraryDef &x) const noexcept {
   return x.hash_code();
 }

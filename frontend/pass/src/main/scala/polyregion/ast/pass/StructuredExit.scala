@@ -864,7 +864,9 @@ object StructuredExit extends ProgramPass {
         val args =
           if (!needsError || e.args.exists(_.named.symbol == ErrorSym)) e.args
           else p.Arg(p.Named(ErrorSym, ErrorPtr)) +: e.args
-        program.copy(entry = e.copy(args = args, body = decls ::: lowered ::: epilogue))
+        program.copy(
+          entry = e.copy(decl = e.decl.remapArgs(args), body = decls ::: lowered ::: epilogue)
+        )
       }
     }
   }

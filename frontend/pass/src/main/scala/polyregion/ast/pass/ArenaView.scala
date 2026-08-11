@@ -112,10 +112,13 @@ object ArenaView extends ProgramPass {
       val keptArgs    = f.args.filterNot(_.named == capN)
       val newReceiver = if (f.receiver.exists(_.named == capN)) None else f.receiver
       f.copy(
-        receiver = newReceiver,
-        moduleCaptures = Nil,
-        termCaptures = Nil,
-        args = keptArgs ++ pinnedViews.map(p.Arg(_)),
+        decl = f.decl
+          .remapArgs(keptArgs ++ pinnedViews.map(p.Arg(_)))
+          .copy(
+            receiver = newReceiver,
+            moduleCaptures = Nil,
+            termCaptures = Nil
+          ),
         body = body
       )
   }

@@ -40,7 +40,7 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   llvm::SmallVector<llvm::Metadata *, 8> argTypeQuals;     // MDNode for the kernel argument type qualifiers.
   llvm::SmallVector<llvm::Metadata *, 8> argNames;         // MDNode for the kernel argument names.
 
-  for (auto arg : source.args) {
+  for (auto arg : source.decl.args) {
     const auto ty = cg.resolveType(arg.named.tpe, true, /*kernelEntryArg*/ true);
     addressQuals.push_back(llvm::ConstantAsMetadata::get( //
         cg.B.getInt32(ty->isPointerTy() ? ty->getPointerAddressSpace() : 0)));

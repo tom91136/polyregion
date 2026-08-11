@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define POLYC_JIT_ABI_VERSION 2u
+#define POLYC_JIT_ABI_VERSION 3u
 
 typedef enum polyc_jit_status { POLYC_JIT_OK = 0, POLYC_JIT_FAILED = 1 } polyc_jit_status_t;
 
@@ -28,6 +28,11 @@ typedef struct polyc_jit_spec_const {
   const uint8_t *data;
   size_t dataLen;
 } polyc_jit_spec_const_t;
+
+/**
+ * ABI version the JIT compiler was built against; the runtime refuses mismatched compilers.
+ */
+POLYC_JIT_EXPORT uint32_t polyc_jit_abi_version(void);
 
 /**
  * Compile a msgpack Program. Free the result with polyc_jit_free.
@@ -46,6 +51,7 @@ POLYC_JIT_EXPORT const char *polyc_jit_last_error(void);
  */
 POLYC_JIT_EXPORT void polyc_jit_free(void *ptr);
 
+typedef uint32_t (*polyc_jit_abi_version_fn)(void);
 typedef polyc_jit_status_t (*polyc_jit_compile_fn)(const uint8_t *, size_t, uint32_t, const char *, const char *, uint32_t,
                                                    const polyc_jit_spec_const_t *, size_t, uint8_t **, size_t *);
 typedef const char *(*polyc_jit_last_error_fn)(void);

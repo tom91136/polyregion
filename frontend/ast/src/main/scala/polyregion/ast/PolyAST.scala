@@ -384,13 +384,31 @@ object PolyAST {
 
   case class InvokeSignature(
       name: Sym,
-      tpeVars: List[Type],
+      tpeArgs: List[Type],
       receiver: Option[Type],
       args: List[Type],
       rtn: Type
   ) derives MsgPack.Codec
 
-  case class Arg(named: Named, pos: Option[SourcePosition] = None) derives MsgPack.Codec
+  object Arg {
+    enum Access derives MsgPack.Codec { case Read, Write, ReadWrite }
+
+    enum SizeExpr derives MsgPack.Codec {
+      case Param(index: Int)
+      case Const(value: Long)
+      case Add(lhs: SizeExpr, rhs: SizeExpr)
+      case Mul(lhs: SizeExpr, rhs: SizeExpr)
+    }
+
+    enum Extent derives MsgPack.Codec {
+      case Elements(size: SizeExpr)
+      case Bytes(size: SizeExpr)
+    }
+
+    case class Boundary(access: Access, extent: Extent) derives MsgPack.Codec
+  }
+  case class Arg(named: Named, pos: Option[SourcePosition] = None, boundary: Option[Arg.Boundary] = None)
+      derives MsgPack.Codec
   case class StructDef(
       name: Sym,
       tpeVars: List[String],
@@ -412,7 +430,7 @@ object PolyAST {
     enum FpMode derives MsgPack.Codec     { case Relaxed, Strict    }
     enum Affinity derives MsgPack.Codec   { case Offload, Host      }
   }
-  case class Function(
+  case class FunctionDecl(
       name: Sym,
       tpeVars: List[String],
       receiver: Option[Arg],
@@ -420,16 +438,23 @@ object PolyAST {
       moduleCaptures: List[Arg],
       termCaptures: List[Arg],
       rtn: Type,
+      affinity: Function.Affinity
+  ) derives MsgPack.Codec
+
+  case class Function(
+      decl: FunctionDecl,
       body: List[Stmt],
       visibility: Function.Visibility,
       fpMode: Function.FpMode,
-      isEntry: Boolean,
-      affinity: Function.Affinity = Function.Affinity.Offload
-  ) derives MsgPack.Codec
+      isEntry: Boolean
+  ) derives MsgPack.Codec {
+    export decl.{affinity, args, moduleCaptures, name, receiver, rtn, termCaptures, tpeVars}
+  }
 
   enum PassPhase derives MsgPack.Codec { case Initial, PostMono }
 
   case class MetaEntry(key: String, value: String) derives MsgPack.Codec
+  case class LibraryDef(name: Sym, decls: List[FunctionDecl], metadata: List[MetaEntry] = Nil) derives MsgPack.Codec
 
   case class Program(
       entry: Function,
@@ -475,7 +500,7 @@ object PolyAST {
 
   object PolyPassAbi {
 
-    inline val Version    = 1
+    inline val Version    = 2
     inline val Prefix     = "polypass_"
     inline val EnvPlugins = "POLYPASS_PLUGINS"
 
@@ -534,7 +559,7 @@ object PolyAST {
 
   object PolyJitAbi {
 
-    inline val Version = 2
+    inline val Version = 3
     inline val Prefix  = "polyc_jit_"
 
     object Status {
@@ -542,6 +567,13 @@ object PolyAST {
       inline val Failed = 1
     }
     def docs(d: String): Nothing = ???
+
+    object AbiVersion {
+      def apply(): Int = docs(
+        "ABI version the JIT compiler was built against; the runtime refuses mismatched compilers."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
 
     // Runtime capture constant keyed by #this field path and Type.repr.
     case class SpecConst(field: String, repr: String, data: Array[Byte])
@@ -1043,7 +1075,33 @@ object PolyAST {
 
   extension (a: Arg) {
     def repr: String =
-      s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/* ${s.repr} */").getOrElse("")}"
+      s"${a.named.symbol}: ${a.named.tpe.repr}${a.boundary.map(b => s" /* ${b.access.repr} ${b.extent.repr} */").getOrElse("")}${a.pos
+          .map(s => s" /* ${s.repr} */")
+          .getOrElse("")}"
+  }
+
+  extension (a: Arg.Access) {
+    def repr: String = a match {
+      case Arg.Access.Read      => "read"
+      case Arg.Access.Write     => "write"
+      case Arg.Access.ReadWrite => "read-write"
+    }
+  }
+
+  extension (s: Arg.SizeExpr) {
+    def repr: String = s match {
+      case Arg.SizeExpr.Param(index)  => s"arg[$index]"
+      case Arg.SizeExpr.Const(value)  => value.toString
+      case Arg.SizeExpr.Add(lhs, rhs) => s"(${lhs.repr} + ${rhs.repr})"
+      case Arg.SizeExpr.Mul(lhs, rhs) => s"(${lhs.repr} * ${rhs.repr})"
+    }
+  }
+
+  extension (e: Arg.Extent) {
+    def repr: String = e match {
+      case Arg.Extent.Elements(size) => s"elements(${size.repr})"
+      case Arg.Extent.Bytes(size)    => s"bytes(${size.repr})"
+    }
   }
 
   extension (v: Function.Visibility) {
@@ -1060,6 +1118,13 @@ object PolyAST {
     }
   }
 
+  extension (a: Function.Affinity) {
+    def repr: String = a match {
+      case Function.Affinity.Offload => "Offload"
+      case Function.Affinity.Host    => "Host"
+    }
+  }
+
   extension (f: Signature) {
     def repr: String =
       s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars
@@ -1070,13 +1135,31 @@ object PolyAST {
 
   extension (f: Function) {
     def repr: String =
+      s"${f.decl.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} entry=${f.isEntry} */ ${"{"}\n${f.body
+          .map(_.repr)
+          .mkString("\n")
+          .indent(2)}\n${"}"}"
+  }
+
+  extension (f: FunctionDecl) {
+    def repr: String =
       s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.mkString(",")}>(${f.args
-          .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}")
-          .mkString(", ")}): ${f.rtn.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} entry=${f.isEntry} mod=${f.moduleCaptures
           .map(_.repr)
-          .mkString(",")} term=${f.termCaptures
+          .mkString(", ")}): ${f.rtn.repr} /* affinity=${f.affinity.repr} mod=${f.moduleCaptures
           .map(_.repr)
-          .mkString(",")} */ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+          .mkString(",")} term=${f.termCaptures.map(_.repr).mkString(",")} */"
+  }
+
+  extension (m: MetaEntry) {
+    def repr: String = s"${m.key}=${m.value}"
+  }
+
+  extension (l: LibraryDef) {
+    def repr: String =
+      s"library ${l.name.repr} ${"{"}\n${l.decls.map(_.repr).mkString("\n").indent(2)}\n${l.metadata
+          .map(_.repr)
+          .mkString("\n")
+          .indent(2)}\n${"}"}"
   }
 
   extension (s: StructDef) {

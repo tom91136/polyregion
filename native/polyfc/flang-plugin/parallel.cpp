@@ -71,9 +71,10 @@ Function parallel_ops::forEach(const std::string &fnName, const Named &capture, 
                body.emplace_back(Stmt::ForRange(Named("#i", Long), begin, end, Term::IntS64Const(1),
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
                body.emplace_back(ret());
-               return Function(Sym({fnName}), {}, std::optional<Arg>{},
-                               std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit, body,
-                               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+               return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{},
+                                            std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit,
+                                            FunctionAffinity::Offload()),
+                               body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
              },
              [&](const GPUParams &p) {
                Stmts body;
@@ -84,9 +85,10 @@ Function parallel_ops::forEach(const std::string &fnName, const Named &capture, 
                body.emplace_back(Stmt::ForRange(Named("#i", Long), gid, p.tripCount, gs,
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
                body.emplace_back(ret());
-               return Function(Sym({fnName}), {}, std::optional<Arg>{},
-                               std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit, body,
-                               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+               return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{},
+                                            std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, {}, {}, Unit,
+                                            FunctionAffinity::Offload()),
+                               body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
              });
 }
 
@@ -103,9 +105,9 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                                                 splice(mappedInductionStmts(p.induction, p.lowerBound, p.step), p.body)));
                reductions ^ for_each([&](const auto &r) { body.emplace_back(r.drainPartial("__tid"_(Long))); });
                body.emplace_back(ret());
-               return Function(Sym({fnName}), {}, std::optional<Arg>{}, std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {})}, {}, {},
-                               Unit, body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true,
-                               FunctionAffinity::Offload());
+               return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{}, std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {})},
+                                            {}, {}, Unit, FunctionAffinity::Offload()),
+                               body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
              },
              [&](const GPUParams &p) {
                // GPU tree reduction: per-thread accumulate into target, drain to local memory, tree-reduce, drain group result.
@@ -125,9 +127,10 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                if (reductions.empty()) {
                  // XXX Skip the tree-reduce barrier loop: miscompiles on some SPIR-V targets at small workgroup sizes.
                  body.emplace_back(ret());
-                 return Function(Sym({fnName}), {}, std::optional<Arg>{},
-                                 std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(localMemArg, {})}, {}, {}, Unit, body,
-                                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+                 return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{},
+                                              std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(localMemArg, {})}, {}, {}, Unit,
+                                              FunctionAffinity::Offload()),
+                                 body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
                }
 
                const auto liU = letBind(body, "liU", call(Spec::GpuLocalIdx(0_(UInt))));
@@ -203,8 +206,9 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                body.emplace_back(Stmt::Cond(liEqZero, drainBody, {}));
                body.emplace_back(ret());
 
-               return Function(Sym({fnName}), {}, std::optional<Arg>{},
-                               std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(localMemArg, {})}, {}, {}, Unit, body,
-                               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+               return Function(FunctionDecl(Sym({fnName}), {}, std::optional<Arg>{},
+                                            std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(localMemArg, {})}, {}, {}, Unit,
+                                            FunctionAffinity::Offload()),
+                               body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
              });
 }

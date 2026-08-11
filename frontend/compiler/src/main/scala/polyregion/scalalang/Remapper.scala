@@ -107,7 +107,7 @@ object Remapper {
               allCaptureNames.map(arg => p.Term.Select(arg.named, Nil, arg.named.tpe))
             )
             .updateDeps(_ |+| c0.deps)
-            .updateDeps(_.witness(fn.copy(termCaptures = allCaptureNames)))
+            .updateDeps(_.witness(fn.copy(decl = fn.decl.copy(termCaptures = allCaptureNames))))
             .success
 
         } yield (
@@ -174,14 +174,16 @@ object Remapper {
         }
 
         fn = p.Function(
-          name = p.Sym(f.symbol.fullName),
-          tpeVars = allTpeArgs,
-          receiver = receiver.map(p.Arg(_)),
-          args = fnArgs.map(_._2).map(p.Arg(_)),
-          moduleCaptures = deriveModuleStructCaptures(c.deps).map(p.Arg(_)),
-          termCaptures = Nil, // filled by Compiler.patchFn from the call sites
-
-          rtn = fnRtnTpe,
+          decl = p.FunctionDecl(
+            name = p.Sym(f.symbol.fullName),
+            tpeVars = allTpeArgs,
+            receiver = receiver.map(p.Arg(_)),
+            args = fnArgs.map(_._2).map(p.Arg(_)),
+            moduleCaptures = deriveModuleStructCaptures(c.deps).map(p.Arg(_)),
+            termCaptures = Nil, // filled by Compiler.patchFn from the call sites
+            rtn = fnRtnTpe,
+            affinity = p.Function.Affinity.Offload
+          ),
           body = fnStmts,
           visibility = p.Function.Visibility.Exported,
           fpMode = p.Function.FpMode.Relaxed,

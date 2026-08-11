@@ -26,8 +26,8 @@ using namespace polyast::dsl;
 static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body,
                      FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
                      FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
-  return Function(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), std::move(body), std::move(visibility), std::move(fpMode),
-                  isEntry, FunctionAffinity::Offload());
+  return Function(FunctionDecl(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), FunctionAffinity::Offload()), std::move(body),
+                  std::move(visibility), std::move(fpMode), isEntry);
 }
 
 static Expr::Invoke mkInvoke(const std::string &name, std::vector<Term::Any> args, Type::Any rtn) {

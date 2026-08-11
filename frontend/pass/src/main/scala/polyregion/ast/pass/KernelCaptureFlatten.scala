@@ -209,7 +209,10 @@ object KernelCaptureFlatten extends ProgramPass {
         }
         copy :: patches
       }
-      kernel.copy(args = kernel.args ::: plan.bindings.map(_.arg), body = prelude ::: rewritten)
+      kernel.copy(
+        decl = kernel.decl.remapArgs(kernel.args ::: plan.bindings.map(_.arg)),
+        body = prelude ::: rewritten
+      )
     }
 
     def rewriteCalls(owner: p.Function): p.Function = owner.modifyAll[p.Expr] {

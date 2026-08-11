@@ -5,6 +5,9 @@
 
 namespace polyregion::polyc_jit::abi {
 
+// ABI version the JIT compiler was built against; the runtime refuses mismatched compilers.
+inline constexpr auto AbiVersion = "polyc_jit_abi_version";
+
 // Compile a msgpack Program. Free the result with polyc_jit_free.
 inline constexpr auto Compile = "polyc_jit_compile";
 
@@ -14,6 +17,7 @@ inline constexpr auto LastError = "polyc_jit_last_error";
 // Release a buffer returned by polyc_jit_compile.
 inline constexpr auto Free = "polyc_jit_free";
 
+using AbiVersionFn = polyc_jit_abi_version_fn;
 using CompileFn = polyc_jit_compile_fn;
 using LastErrorFn = polyc_jit_last_error_fn;
 using FreeFn = polyc_jit_free_fn;

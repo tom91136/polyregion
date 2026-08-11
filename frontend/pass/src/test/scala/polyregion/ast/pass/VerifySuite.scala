@@ -12,7 +12,8 @@ class VerifySuite extends munit.FunSuite {
 
   test("well-formed entry yields no errors") {
     val a = arg("a")
-    val e = entry(args = List(a), body = List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))).copy(rtn = p.Type.Unit0)
+    val e = entry(args = List(a), body = List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
+      .modifyDecl(_.copy(rtn = p.Type.Unit0))
     val errs = Verify(program(e), NoopLog, verifyFunction = true)
     assert(errs.forall(_._2.isEmpty), s"expected no errors, got: $errs")
   }

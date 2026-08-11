@@ -70,9 +70,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
               | append(recv)                                                                                       //
               | to_vector();
 
-  auto f0 = std::make_shared<Function>(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args,
-                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, stmts, FunctionVisibility::Exported(),
-                                       FunctionFpMode::Relaxed(), true, FunctionAffinity::Offload());
+  auto f0 = std::make_shared<Function>(FunctionDecl(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args,
+                                                    std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, FunctionAffinity::Offload()),
+                                       stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
 
   auto program = Program(*f0, r.functions | values() | map([&](const auto &x) { return *x; }) | to_vector(),
                          r.structs | values() | map([&](const auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
@@ -222,7 +222,7 @@ void polystl::compileLibrary(const polyfront::Options &opts,                    
       llvm::raw_string_ostream os(qn);
       decl->getNameForDiagnostic(os, C.getPrintingPolicy(), /*Qualified*/ true);
     }
-    fn->name = Sym({qn});
+    fn->decl.name = Sym({qn});
     if (opts.verbose)
       emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Exporting library symbol: %0",
            name);

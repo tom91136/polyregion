@@ -263,7 +263,7 @@ struct CLAddressSpaceTracePass {
 
   Function mapFn(const Function &fn, MemberStores *memberStores = nullptr) {
 
-    StackScope scope{.vars = fn.args                                                                        //
+    StackScope scope{.vars = fn.decl.args                                                                   //
                              | flat_map([&](const auto &arg) { return arg.template collect_all<Named>(); }) //
                              | filter([](const auto &n) { return n.tpe.template is<Type::Ptr>(); })         //
                              | map([](const auto &n) { return std::pair(n.symbol, n); })                    //
@@ -379,8 +379,7 @@ struct CLAddressSpaceTracePass {
                                | map([&](const auto &r) { return r.value.tpe(); })                               //
                                | distinct()                                                                      //
                                | to_vector();
-    return Function(fn.name, fn.tpeVars, fn.receiver, fn.args, fn.moduleCaptures, fn.termCaptures, tracedRtnTpes[0], body, fn.visibility,
-                    fn.fpMode, fn.isEntry, fn.affinity);
+    return Function(fn.decl.withRtn(tracedRtnTpes[0]), body, fn.visibility, fn.fpMode, fn.isEntry);
   }
 
   struct ConflictSplit {
@@ -398,8 +397,9 @@ struct CLAddressSpaceTracePass {
       return result;
     };
     std::optional<Type::Any> receiver;
-    if (fn.receiver) receiver = fn.receiver->named.tpe;
-    return repr(Signature(fn.name, fn.tpeVars, receiver, types(fn.args), types(fn.moduleCaptures), types(fn.termCaptures), Type::Unit0()));
+    if (fn.decl.receiver) receiver = fn.decl.receiver->named.tpe;
+    return repr(Signature(fn.decl.name, fn.decl.tpeVars, receiver, types(fn.decl.args), types(fn.decl.moduleCaptures),
+                          types(fn.decl.termCaptures), Type::Unit0()));
   }
 
   static Type::Any retypeStructOccurrence(const Type::Any &tpe, const Sym &clone) {
@@ -671,7 +671,8 @@ struct CLAddressSpaceTracePass {
             [&](const TypeSpace::Local &x) { return x.widen(); }, //
             [&](const TypeSpace::Private &x) { return x.widen(); });
       };
-      return f.withArgs(f.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); }));
+      return f.withDecl(
+          f.decl.withArgs(f.decl.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
     };
 
     auto seeds = std::vector<Function>{argRespace(p.entry)} ^ concat(p.functions ^ map(argRespace));
@@ -759,8 +760,9 @@ struct CLAddressSpaceTracePass {
 
     Map<Signature, std::shared_ptr<Function>> functionTable;
     fns | for_each([&](const auto &f) {
-      const Signature sig(f.name, /*tpeVars*/ {}, /*receiver*/ {}, f.args ^ map([](const auto &e) { return e.named.tpe; }),
-                          /*moduleCaptures*/ {}, /*termCaptures*/ {}, f.rtn);
+      const Signature sig(f.decl.name, /*tpeVars*/ {}, /*receiver*/ {}, f.decl.args ^ map([](const auto &e) { return e.named.tpe; }),
+                          /*moduleCaptures*/ {},
+                          /*termCaptures*/ {}, f.decl.rtn);
       functionTable[sig] = std::make_shared<Function>(f);
     });
 
@@ -774,12 +776,12 @@ struct CLAddressSpaceTracePass {
                                                      })) {
                                        const auto fn = *spec->second;
                                        const auto args =
-                                           fn.args                                                                                       //
+                                           fn.decl.args                                                                                  //
                                            | zip(sig.args)                                                                               //
                                            | map([](const auto &arg, const auto &tpe) { return arg.withNamed(arg.named.withTpe(tpe)); }) //
                                            | to_vector();
 
-                                       return std::pair{sig, std::make_shared<Function>(pass.mapFn(fn.withArgs(args)))};
+                                       return std::pair{sig, std::make_shared<Function>(pass.mapFn(fn.withDecl(fn.decl.withArgs(args))))};
                                      }
                                    }
                                    return {};
@@ -810,7 +812,9 @@ struct CLAddressSpaceTracePass {
         functionTable                          //
         | values()                             //
         | map([&](const auto &f) -> Function { //
-            return renameInvokes(*f).withName(f->isEntry ? f->name : spaceSpecialisedName(f->name, f->args ^ flat_map(spaces)));
+            const auto name = f->isEntry ? f->decl.name : spaceSpecialisedName(f->decl.name, f->decl.args ^ flat_map(spaces));
+            const auto renamed = renameInvokes(*f);
+            return renamed.withDecl(renamed.decl.withName(name));
           }) //
         | to_vector();
 
@@ -889,7 +893,7 @@ void backend::CSource::bindLocalNames(const Function &fn) {
     used.emplace(name);
     localNames.emplace(named.symbol, name);
   };
-  fn.args | for_each([&](const auto &arg) { bind(arg.named); });
+  fn.decl.args | for_each([&](const auto &arg) { bind(arg.named); });
   fn.template collect_all<Named>() | for_each(bind);
 }
 
@@ -1525,7 +1529,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
   const auto entry = fnTree.isEntry;
 
   std::vector<std::string> argExprs =
-      fnTree.args        //
+      fnTree.decl.args   //
       | zip_with_index() //
       | map([&](const auto &arg, const auto &idx) {
           auto tpe = mkTpe(arg.named.tpe);
@@ -1583,9 +1587,9 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
   }
 
   return fmt::format("{}{} {}({})",
-                     fnPrefix,               //
-                     mkTpe(fnTree.rtn),      //
-                     normalise(fnTree.name), //
+                     fnPrefix,                    //
+                     mkTpe(fnTree.decl.rtn),      //
+                     normalise(fnTree.decl.name), //
                      argExprs | mk_string(", "));
 }
 
@@ -1761,7 +1765,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                          })
                          | to_vector();
   fileScopeNames =
-      (typeNames ^ concat(allFns | map([&](const auto &fn) { return normalise(fn.name); })) ^ concat(stringConstNames | values()))
+      (typeNames ^ concat(allFns | map([&](const auto &fn) { return normalise(fn.decl.name); })) ^ concat(stringConstNames | values()))
       | to<Set>();
 
   std::vector<std::string> volatileHelpers;

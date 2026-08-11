@@ -315,9 +315,11 @@ void polyregion::polyrt::log(const DebugLevel level, const char *fmt, ...) {
 }
 
 struct JitAbi {
+  polyregion::polyc_jit::abi::AbiVersionFn abiVersion = nullptr;
   polyregion::polyc_jit::abi::CompileFn compile = nullptr;
   polyregion::polyc_jit::abi::LastErrorFn lastError = nullptr;
   polyregion::polyc_jit::abi::FreeFn free = nullptr;
+  std::optional<uint32_t> reportedVersion;
 };
 
 // Prefer linked symbols; fall back to POLYRT_JIT_LIB or the platform default.
@@ -325,14 +327,23 @@ static const JitAbi &resolveJitAbi() {
   static JitAbi abi = []() -> JitAbi {
     namespace a = polyregion::polyc_jit::abi;
     const auto from = [](polyregion_dl_handle h) {
-      return JitAbi{reinterpret_cast<a::CompileFn>(polyregion_dl_find(h, a::Compile)),
+      const auto abiVersion = reinterpret_cast<a::AbiVersionFn>(polyregion_dl_find(h, a::AbiVersion));
+      return JitAbi{abiVersion, reinterpret_cast<a::CompileFn>(polyregion_dl_find(h, a::Compile)),
                     reinterpret_cast<a::LastErrorFn>(polyregion_dl_find(h, a::LastError)),
-                    reinterpret_cast<a::FreeFn>(polyregion_dl_find(h, a::Free))};
+                    reinterpret_cast<a::FreeFn>(polyregion_dl_find(h, a::Free)),
+                    abiVersion ? std::optional<uint32_t>{abiVersion()} : std::nullopt};
+    };
+    std::optional<JitAbi> incompatible;
+    const auto select = [&](JitAbi r) -> std::optional<JitAbi> {
+      if (!r.compile || !r.free) return std::nullopt;
+      if (r.reportedVersion == POLYC_JIT_ABI_VERSION) return r;
+      if (!incompatible) incompatible = r;
+      return std::nullopt;
     };
 #if defined(_WIN32)
-    if (auto r = from(GetModuleHandleW(nullptr)); r.compile && r.free) return r;
+    if (auto r = select(from(GetModuleHandleW(nullptr)))) return *r;
 #else
-    if (auto r = from(RTLD_DEFAULT); r.compile && r.free) return r;
+    if (auto r = select(from(RTLD_DEFAULT))) return *r;
 #endif
 #if defined(_WIN32)
     constexpr auto defaultJitLib = "polyc.dll";
@@ -341,14 +352,13 @@ static const JitAbi &resolveJitAbi() {
 #else
     constexpr auto defaultJitLib = "libpolyc.so";
 #endif
-    return std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib} //
-           | collect_first([&](const auto &name) -> std::optional<JitAbi> {
-               if (!name || !name[0]) return std::nullopt;
-               if (auto h = polyregion_dl_open(name))
-                 if (auto r = from(h); r.compile && r.free) return r;
-               return std::nullopt;
-             }) //
-           | get_or_else(JitAbi{});
+    const auto resolved = std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib} //
+                          | collect_first([&](const auto &name) -> std::optional<JitAbi> {
+                              if (!name || !name[0]) return std::nullopt;
+                              if (auto h = polyregion_dl_open(name)) return select(from(h));
+                              return std::nullopt;
+                            });
+    return resolved ? *resolved : incompatible.value_or(JitAbi{});
   }();
   return abi;
 }
@@ -431,6 +441,13 @@ static std::mutex &jitPolicyMutex() {
 static bool jitCompileObject(const char *moduleName, const polyregion::runtime::KernelObject &object,
                              const std::vector<polyc_jit_spec_const_t> &specialise, std::string &out) {
   const auto &abi = resolveJitAbi();
+  if (abi.compile && abi.free && abi.reportedVersion != POLYC_JIT_ABI_VERSION) {
+    if (abi.reportedVersion)
+      polyregion::polyrt::log(DebugLevel::None, "JIT compiler ABI mismatch: expected %u, got %u", POLYC_JIT_ABI_VERSION,
+                              *abi.reportedVersion);
+    else polyregion::polyrt::log(DebugLevel::None, "JIT compiler does not report an ABI version; expected %u", POLYC_JIT_ABI_VERSION);
+    return false;
+  }
   if (!abi.compile || !abi.free) {
     polyregion::polyrt::log(DebugLevel::None, "JIT program for `%s` but no compiler available; link with -fstdpar-jit or set %s",
                             moduleName, polyregion::env::PolyrtJitLib);

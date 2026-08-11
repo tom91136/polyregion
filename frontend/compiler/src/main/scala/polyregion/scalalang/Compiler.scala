@@ -158,7 +158,7 @@ object Compiler {
                             // `_$$anon` classes from given declarations) so each compiled override
                             // gets a unique IR name.
                             fn0 = renameMap.get(actualDefDef.symbol) match {
-                              case Some(unique) => fn0Raw.copy(name = unique)
+                              case Some(unique) => fn0Raw.copy(decl = fn0Raw.decl.copy(name = unique))
                               case None         => fn0Raw
                             }
                             (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
@@ -191,7 +191,7 @@ object Compiler {
                             )
                           // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
                         } yield (
-                          fn.copy(name = target.calleeName) :: xs,
+                          fn.copy(decl = fn.decl.copy(name = target.calleeName)) :: xs,
                           depss,
                           clsDeps ++ clsDepss,
                           moduleSymDepss
@@ -290,13 +290,16 @@ object Compiler {
       deps = rhsDeps.copy(classes = rhsDeps.classes |+| fnRtnWit |+| fnArgsWit)
 
       compiledFn = p.Function(
-        name = p.Sym(f.symbol.fullName),
-        tpeVars = allTypeVars,
-        receiver = receiver.map(p.Arg(_)),
-        args = fnArgs.map(_._2).map(p.Arg(_)),
-        moduleCaptures = deriveModuleStructCaptures(deps).map(p.Arg(_)),
-        termCaptures = Nil,
-        rtn = fnRtnTpe,
+        decl = p.FunctionDecl(
+          name = p.Sym(f.symbol.fullName),
+          tpeVars = allTypeVars,
+          receiver = receiver.map(p.Arg(_)),
+          args = fnArgs.map(_._2).map(p.Arg(_)),
+          moduleCaptures = deriveModuleStructCaptures(deps).map(p.Arg(_)),
+          termCaptures = Nil,
+          rtn = fnRtnTpe,
+          affinity = p.Function.Affinity.Offload
+        ),
         body = rhsStmts,
         visibility = p.Function.Visibility.Exported,
         fpMode = p.Function.FpMode.Relaxed,
@@ -453,14 +456,17 @@ object Compiler {
     )
 
     exprFn = p.Function(
-      name = p.Sym(exprName),
-      tpeVars = Nil,
-      receiver = None,
-      args = Nil,
-      moduleCaptures = deriveModuleStructCaptures(exprDeps).map(p.Arg(_)),
-      termCaptures = (capturedNames.map(_._1) ++
-        exprThisCls.map((_, tpe) => p.Named("this", tpe))).map(p.Arg(_)),
-      rtn = exprTpe,
+      decl = p.FunctionDecl(
+        name = p.Sym(exprName),
+        tpeVars = Nil,
+        receiver = None,
+        args = Nil,
+        moduleCaptures = deriveModuleStructCaptures(exprDeps).map(p.Arg(_)),
+        termCaptures = (capturedNames.map(_._1) ++
+          exprThisCls.map((_, tpe) => p.Named("this", tpe))).map(p.Arg(_)),
+        rtn = exprTpe,
+        affinity = p.Function.Affinity.Offload
+      ),
       body = exprStmts,
       visibility = p.Function.Visibility.Exported,
       fpMode = p.Function.FpMode.Relaxed,
@@ -572,13 +578,16 @@ object Compiler {
 
     abstractFnsWithAssertBody <- abstractDefs.traverse(deriveSignature(_).map { sig =>
       val fn = p.Function(
-        name = sig.name,
-        tpeVars = sig.tpeVars,
-        receiver = sig.receiver.map(p.Named("this", _)).map(p.Arg(_)),
-        args = sig.args.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
-        moduleCaptures = sig.moduleCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
-        termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
-        rtn = sig.rtn,
+        decl = p.FunctionDecl(
+          name = sig.name,
+          tpeVars = sig.tpeVars,
+          receiver = sig.receiver.map(p.Named("this", _)).map(p.Arg(_)),
+          args = sig.args.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
+          moduleCaptures = sig.moduleCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
+          termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
+          rtn = sig.rtn,
+          affinity = p.Function.Affinity.Offload
+        ),
         // Trait/abstract method body: synthesise a single Return of poison so the function is
         // well-formed. Actual implementation is dispatched dynamically; this body only matters
         // for the verifier (requires at least one statement and a Return).
@@ -846,7 +855,7 @@ object Compiler {
       }
       val transitive   = computeTransitiveModuleCaps()
       val entryAllCaps = transitive.getOrElse(opt.entry.name, opt.entry.moduleCaptures)
-      val newEntry     = opt.entry.copy(moduleCaptures = entryAllCaps)
+      val newEntry     = opt.entry.copy(decl = opt.entry.decl.copy(moduleCaptures = entryAllCaps))
       val entryCapByTpe: Map[p.Type, p.Named] =
         (newEntry.moduleCaptures ++ newEntry.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
 
@@ -855,7 +864,7 @@ object Compiler {
       def updateFnCaps(fn: p.Function): p.Function = {
         val transitiveCaps = transitive.getOrElse(fn.name, fn.moduleCaptures)
         if (transitiveCaps == fn.moduleCaptures) fn
-        else fn.copy(moduleCaptures = transitiveCaps)
+        else fn.copy(decl = fn.decl.copy(moduleCaptures = transitiveCaps))
       }
 
       // Rebuild the LUT from post-updateFnCaps functions so callee.moduleCaptures reflects

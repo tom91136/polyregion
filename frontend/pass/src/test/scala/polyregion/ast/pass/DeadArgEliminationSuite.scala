@@ -27,7 +27,7 @@ class DeadArgEliminationSuite extends munit.FunSuite {
   test("non-entry function: receiver and args are not swept") {
     val recv   = arg("self")
     val unused = arg("p")
-    val helper = fn("h", args = List(unused)).copy(receiver = Some(recv))
+    val helper = fn("h", args = List(unused)).modifyDecl(_.copy(receiver = Some(recv)))
     val out    = DeadArgElimination(program(entry(), List(helper)), NoopLog)
     val h      = out.functions.head
     assertEquals(h.args.map(_.named.symbol), List("p"))

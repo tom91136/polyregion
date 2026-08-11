@@ -237,7 +237,7 @@ object compiletime {
 
       prog: p.Program = prog0.copy(entry =
         prog0.entry.copy(
-          name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")
+          decl = prog0.entry.decl.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}"))
         )
       )
 

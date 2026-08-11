@@ -28,8 +28,8 @@ using namespace Intr;
 static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body,
                      FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
                      FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
-  return Function(Sym({name}), {}, std::optional<Arg>{}, std::move(args), {}, {}, std::move(rtn), std::move(body), std::move(visibility),
-                  std::move(fpMode), isEntry, FunctionAffinity::Offload());
+  return Function(FunctionDecl(Sym({name}), {}, std::optional<Arg>{}, std::move(args), {}, {}, std::move(rtn), FunctionAffinity::Offload()),
+                  std::move(body), std::move(visibility), std::move(fpMode), isEntry);
 }
 
 template <typename C> static const std::string &eventDataOf(const C &c, const std::string &name) {
@@ -927,13 +927,13 @@ TEST_CASE("host prelude with foreign calls compiles to host object", "[backend]"
   const Named remote("remote", Type::IntU64());
 
   std::vector<Term::Any> allocArgs{selectNamed(capture).widen(), selectNamed(size).widen(), Term::IntS32Const(0).widen()};
-  Function prelude(Sym({"__polyregion_mirror_prelude"}), {}, std::optional<Arg>{}, {Arg(capture, {}), Arg(size, {})}, {}, {},
-                   Type::IntU64(),
+  Function prelude(FunctionDecl(Sym({"__polyregion_mirror_prelude"}), {}, std::optional<Arg>{}, {Arg(capture, {}), Arg(size, {})}, {}, {},
+                                Type::IntU64(), FunctionAffinity::Host()),
                    {
                        Var(remote, Expr::ForeignCall("polyrt_sma_alloc", allocArgs, Type::IntU64()).widen(), false).widen(),
                        Return(Expr::Alias(selectNamed(remote).widen()).widen()).widen(),
                    },
-                   FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Host());
+                   FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
 
   Program p(prelude, {}, {}, PassPhase::Initial(), {});
   INFO(repr(p));
@@ -956,8 +956,9 @@ TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[
       Stmt::Mut(Select({capture}, xField), Expr::Alias(Term::Float32Const(1.0f)).widen()).widen(),
       Stmt::Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
   };
-  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {Arg(capture, {})}, {}, {}, Type::Unit0(), body, FunctionVisibility::Exported(),
-                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Function entry(
+      FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {Arg(capture, {})}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()), body,
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
   Program p(entry, {}, {capDef}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV_GLCompute, ""};
@@ -987,8 +988,8 @@ TEST_CASE("by-value array initialisation copies contents on by-pointer targets",
       Stmt::Update(Select({}, src), Term::IntS32Const(1).widen(), selectNamed(readBack).widen()).widen(),
       Stmt::Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
   };
-  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(), body, FunctionVisibility::Exported(),
-                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+  Function entry(FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()), body,
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
   Program p(entry, {}, {}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV64_Kernel, ""};
@@ -1132,7 +1133,7 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
                           {Type::Struct(middleSym, {}), Type::Struct(nestedSym, {})}, false);
   const Named value("value", Type::Struct(derivedSym, {}));
   const Named base("base", Type::Ptr(Type::Struct(nestedSym, {}), TypeSpace::Private()));
-  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
+  Function entry(FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
                  {
                      Var(value, std::optional<Expr::Any>{}, true).widen(),
                      Var(base,
@@ -1145,7 +1146,7 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
                          .widen(),
                      Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
                  },
-                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
   Program p(entry, {}, {empty, nested, middle, owner, derived}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
@@ -1166,7 +1167,7 @@ TEST_CASE("metal source canonicalises empty true branches", "[backend]") {
 
   const Named flag("flag", Type::Bool1());
   const Named value("value", Type::IntS32());
-  Function entry(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
+  Function entry(FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
                  {
                      Var(flag, Expr::Alias(Term::Bool1Const(false).widen()).widen(), true).widen(),
                      Var(value, Expr::Alias(Term::IntS32Const(0).widen()).widen(), true).widen(),
@@ -1175,7 +1176,7 @@ TEST_CASE("metal source canonicalises empty true branches", "[backend]") {
                          .widen(),
                      Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
                  },
-                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
   Program p(entry, {}, {}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
@@ -1193,9 +1194,9 @@ TEST_CASE("opencl source escapes reserved words as whole identifiers only", "[ba
 
   const auto vecSym = Sym({"Vecs"});
   const StructDef vecs(vecSym, {}, {Named("long4", Type::IntS32()), Named("kernels", Type::IntS32())}, {}, false);
-  Function entry(Sym({"my_kernel_agent"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(),
+  Function entry(FunctionDecl(Sym({"my_kernel_agent"}), {}, std::optional<Arg>{}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
                  {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Exported(),
-                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+                 FunctionFpMode::Relaxed(), /*isEntry*/ true);
   Program p(entry, {}, {vecs}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
@@ -1291,9 +1292,10 @@ TEST_CASE("host-mirroring compile emits bitcode for the generated prelude", "[ba
   using namespace polyregion::polyast::dsl;
 
   const auto bytePtr = Type::Ptr(Type::IntS8(), TypeSpace::Global());
-  Function entry(Sym({"_main"}), {}, std::optional<Arg>{}, {Arg(Named("capture", bytePtr), {})}, {}, {}, Type::Unit0(),
+  Function entry(FunctionDecl(Sym({"_main"}), {}, std::optional<Arg>{}, {Arg(Named("capture", bytePtr), {})}, {}, {}, Type::Unit0(),
+                              FunctionAffinity::Offload()),
                  {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()}, FunctionVisibility::Exported(),
-                 FunctionFpMode::Relaxed(), /*isEntry*/ true, FunctionAffinity::Offload());
+                 FunctionFpMode::Relaxed(), /*isEntry*/ true);
   Program p(entry, {}, {}, PassPhase::Initial(), {});
 
   polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};

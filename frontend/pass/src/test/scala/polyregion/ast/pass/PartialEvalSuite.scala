@@ -7,7 +7,7 @@ import PassTest.*
 class PartialEvalSuite extends munit.FunSuite {
 
   private def pe(body: List[p.Stmt], rtn: p.Type = p.Type.Unit0, args: List[p.Arg] = Nil): List[p.Stmt] =
-    PartialEval()(program(entry(args = args, body = body).copy(rtn = rtn)), NoopLog).entry.body
+    PartialEval()(program(entry(args = args, body = body).modifyDecl(_.copy(rtn = rtn))), NoopLog).entry.body
 
   private def aliasOf(s: p.Stmt): Option[p.Term] = s match {
     case p.Stmt.Var(_, Some(p.Expr.Alias(t)), _) => Some(t)
@@ -373,7 +373,7 @@ class PartialEvalSuite extends munit.FunSuite {
   // --- canonicaliseAddresses mode: whole-value (&lvalue) field-alias canonicalisation ---
 
   private def peThenCanonicalise(body: List[p.Stmt], rtn: p.Type, args: List[p.Arg]): (List[p.Stmt], List[p.Stmt]) = {
-    val peProg   = PartialEval()(program(entry(args = args, body = body).copy(rtn = rtn)), NoopLog)
+    val peProg   = PartialEval()(program(entry(args = args, body = body).modifyDecl(_.copy(rtn = rtn))), NoopLog)
     val anchored = PartialEval(canonicaliseAddresses = true)(peProg, NoopLog)
     (peProg.entry.body, anchored.entry.body)
   }
@@ -446,7 +446,7 @@ class PartialEvalSuite extends munit.FunSuite {
           p.Stmt.Var(v, Some(addrOf(selectT(x)))),
           p.Stmt.Return(p.Expr.Index(selectT(v), p.Term.IntS32Const(0), p.Type.IntS32))
         )
-      ).copy(rtn = p.Type.IntS32)
+      ).modifyDecl(_.copy(rtn = p.Type.IntS32))
     )
     val out = PartialEval(canonicaliseAddresses = true)(prog, NoopLog)
     assertEquals(out.entry.body, List(p.Stmt.Return(p.Expr.Alias(selectT(x)))))
@@ -464,7 +464,8 @@ class PartialEvalSuite extends munit.FunSuite {
   private def interpU64(op: p.Expr): Long = {
     val v = named("v", p.Type.IntU64)
     val prog = program(
-      entry(body = List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v))))).copy(rtn = p.Type.IntU64)
+      entry(body = List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v)))))
+        .modifyDecl(_.copy(rtn = p.Type.IntU64))
     )
     new Interpreter.Vm(prog).call(p.Conventions.EntryName, Nil) match {
       case Interpreter.V.I(x) => x
@@ -503,7 +504,8 @@ class PartialEvalSuite extends munit.FunSuite {
   private def interpU64Bool(op: p.Expr): Boolean = {
     val v = named("v", p.Type.Bool1)
     val prog = program(
-      entry(body = List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v))))).copy(rtn = p.Type.Bool1)
+      entry(body = List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v)))))
+        .modifyDecl(_.copy(rtn = p.Type.Bool1))
     )
     new Interpreter.Vm(prog).call(p.Conventions.EntryName, Nil) match {
       case Interpreter.V.I(x) => x != 0
@@ -854,7 +856,7 @@ class PartialEvalSuite extends munit.FunSuite {
       p.Stmt.Var(v, Some(p.Expr.IntrOp(p.Intr.Add(p.Term.IntS32Const(1), p.Term.IntS32Const(2), p.Type.IntS32)))),
       p.Stmt.Return(p.Expr.Alias(selectT(v)))
     )
-    val once  = PartialEval()(program(entry(body = body).copy(rtn = p.Type.IntS32)), NoopLog)
+    val once  = PartialEval()(program(entry(body = body).modifyDecl(_.copy(rtn = p.Type.IntS32))), NoopLog)
     val twice = PartialEval()(once, NoopLog)
     assertEquals(once.entry.body, twice.entry.body)
   }

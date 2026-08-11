@@ -1,3 +1,4 @@
+polyc_jit_abi_version
 polyc_jit_compile
 polyc_jit_last_error
 polyc_jit_free

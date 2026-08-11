@@ -76,7 +76,7 @@ TEST_CASE("Origin survives a msgpack round trip") {
   const auto decoded = program_from_msgpack(program_to_msgpack(program({}, {entry})));
 
   // any Origin compares equal to any other, so assert on the fields rather than the value
-  const auto &decodedOrigin = decoded.entry.args[0].named.origin;
+  const auto &decodedOrigin = decoded.entry.decl.args[0].named.origin;
   REQUIRE(decodedOrigin.pos);
   CHECK(*decodedOrigin.pos == *origin.pos);
   CHECK(decodedOrigin.source == origin.source);

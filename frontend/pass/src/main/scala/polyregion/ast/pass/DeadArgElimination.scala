@@ -13,7 +13,7 @@ object DeadArgElimination extends ProgramPass {
 
   private def cleanModuleCaptures(f: p.Function): p.Function = {
     val roots = selectRoots(f.body)
-    f.copy(moduleCaptures = f.moduleCaptures.filter(arg => roots.contains(arg.named)))
+    f.copy(decl = f.decl.copy(moduleCaptures = f.moduleCaptures.filter(arg => roots.contains(arg.named))))
   }
 
   // XXX The entry's params are the kernel ABI seen by the JVM macro, which packs fnValues

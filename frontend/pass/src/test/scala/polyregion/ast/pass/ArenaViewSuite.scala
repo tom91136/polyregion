@@ -54,6 +54,21 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(staleFieldSelects, Nil, result.entry.body.map(_.repr).mkString("\n"))
   }
 
+  test("removing the capture argument rebases boundary extents") {
+    val base = buildEntry()
+    val output = arg("output", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)).copy(
+      boundary = Some(p.Arg.Boundary(p.Arg.Access.Write, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))))
+    )
+    val count  = arg("count", p.Type.IntS32)
+    val entry  = base.copy(decl = base.decl.copy(args = base.args ::: List(output, count)))
+    val result = ArenaView(p.Program(entry, Nil, defs), NoopLog)
+
+    assertEquals(
+      result.entry.args.find(_.named.symbol == output.named.symbol).flatMap(_.boundary).map(_.extent),
+      Some(p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(1)))
+    )
+  }
+
   test("a private pointer field in a stack-local closure stays a pointer") {
     val closureSym    = p.Sym("Closure")
     val privatePtr    = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private)

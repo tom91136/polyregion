@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define POLYPASS_ABI_VERSION 1u
+#define POLYPASS_ABI_VERSION 2u
 #define POLYPASS_ENV_PLUGINS "POLYPASS_PLUGINS"
 
 typedef enum polypass_status {

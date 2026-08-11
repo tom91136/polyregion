@@ -47,7 +47,22 @@ object PassTest {
       fpMode: p.Function.FpMode = p.Function.FpMode.Relaxed,
       isEntry: Boolean = false
   ): p.Function =
-    p.Function(sym(name), tpeVars, None, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry)
+    p.Function(
+      p.FunctionDecl(
+        sym(name),
+        tpeVars,
+        None,
+        args,
+        moduleCaptures,
+        termCaptures,
+        rtn,
+        p.Function.Affinity.Offload
+      ),
+      body,
+      visibility,
+      fpMode,
+      isEntry
+    )
 
   def entry(
       args: List[p.Arg] = Nil,

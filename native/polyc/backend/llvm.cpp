@@ -1087,14 +1087,14 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
 
 // SPIR-V: struct-by-value returns get coerced to a single i32 by the pre-legaliser. Convert
 // to sret form (leading out-pointer, void return) so no struct crosses a function boundary.
-static bool shouldUseSret(const CodeGen &cg, const Function &fn) { return fn.rtn.is<Type::Struct>() && cg.C.isSpirv(); }
+static bool shouldUseSret(const CodeGen &cg, const Function &fn) { return fn.decl.rtn.is<Type::Struct>() && cg.C.isSpirv(); }
 
 static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) {
   // CPU HostThreaded kernels receive `tid` as a leading arg from the runtime; GPU launches
   // provide it via intrinsics, so adding `__tid` there would off-by-one the kernel ABI.
   const auto cpuTarget = LLVMBackend::isCpuTarget(cg.C.options.target);
-  auto allArgs = fn.moduleCaptures | concat(fn.termCaptures) | concat(fn.args) | to_vector();
-  if (fn.receiver) allArgs ^= prepend(*fn.receiver);
+  auto allArgs = fn.decl.moduleCaptures | concat(fn.decl.termCaptures) | concat(fn.decl.args) | to_vector();
+  if (fn.decl.receiver) allArgs ^= prepend(*fn.decl.receiver);
   if (fn.isEntry && cpuTarget) allArgs ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));
 
   // Drop Unit0/Nothing args: both lower to void, which FunctionType::get's isValidArgumentType asserts.
@@ -1107,9 +1107,9 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   const bool useSret = shouldUseSret(cg, fn);
 
   // Structs are returned by-value (functionBoundary=false); other args travel as opaque pointers.
-  const auto rtnTpe = (fn.rtn.is<Type::Unit0>() || useSret) ? llvm::Type::getVoidTy(cg.C.actual)
-                      : fn.rtn.is<Type::Struct>()           ? cg.resolveType(fn.rtn, false)
-                                                            : cg.resolveType(fn.rtn, true);
+  const auto rtnTpe = (fn.decl.rtn.is<Type::Unit0>() || useSret) ? llvm::Type::getVoidTy(cg.C.actual)
+                      : fn.decl.rtn.is<Type::Struct>()           ? cg.resolveType(fn.decl.rtn, false)
+                                                                 : cg.resolveType(fn.decl.rtn, true);
 
   auto argTys = argsNoUnit | map([&](const auto &arg) { return cg.resolveType(arg.named.tpe, true, fn.isEntry); }) | to_vector();
 
@@ -1117,13 +1117,13 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   if (cg.C.isVulkan() && fn.isEntry) argTys.clear();
 
   if (useSret) argTys.insert(argTys.begin(), llvm::PointerType::get(cg.C.actual, cg.C.AllocaAS));
-  llvm::Type *sretStructTy = useSret ? cg.resolveType(fn.rtn, /*functionBoundary*/ false) : nullptr;
+  llvm::Type *sretStructTy = useSret ? cg.resolveType(fn.decl.rtn, /*functionBoundary*/ false) : nullptr;
 
   // XXX Normalise names as NVPTX has a relatively limiting range of supported characters in symbols
-  const auto normalisedName = repr(fn.name) ^ map([](const auto &c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+  const auto normalisedName = repr(fn.decl.name) ^ map([](const auto &c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
 
-  Signature sig(fn.name, /*tpeVars*/ {}, /*receiver*/ {}, argsNoUnit ^ map([](const auto &x) { return x.named.tpe; }),
-                /*moduleCaptures*/ {}, /*termCaptures*/ {}, fn.rtn);
+  Signature sig(fn.decl.name, /*tpeVars*/ {}, /*receiver*/ {}, argsNoUnit ^ map([](const auto &x) { return x.named.tpe; }),
+                /*moduleCaptures*/ {}, /*termCaptures*/ {}, fn.decl.rtn);
   llvm::Function *llvmFn = llvm::Function::Create(llvm::FunctionType::get(/*Result*/ rtnTpe, /*Params*/ argTys, /*isVarArg*/ false), //
                                                   fn.visibility.is<FunctionVisibility::Exported>()                                   //
                                                       ? llvm::Function::ExternalLinkage
@@ -1131,7 +1131,7 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
                                                   normalisedName, //
                                                   mod);
 
-  if (fn.affinity.is<FunctionAffinity::Host>()) llvmFn->addFnAttr(POLYREFLECT_RT_PROTECT_ANNOTATION);
+  if (fn.decl.affinity.is<FunctionAffinity::Host>()) llvmFn->addFnAttr(POLYREFLECT_RT_PROTECT_ANNOTATION);
 
   // Attach sret attributes here, before any other prototype's body emission can look this
   // function up via Expr::Invoke. Deferring until the body loop would let the first caller see

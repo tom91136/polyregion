@@ -27,7 +27,12 @@ given Traversal[p.Term, p.Stmt] = Traversal.derived
 given Traversal[p.Expr, p.Stmt] = Traversal.derived
 given Traversal[p.Stmt, p.Stmt] = Traversal.derived
 
-given Traversal[p.Signature, p.Type] = Traversal.derived
+given Traversal[p.Signature, p.Type]    = Traversal.derived
+given Traversal[p.Arg.Boundary, p.Type] = Traversal.empty
+given Traversal[p.FunctionDecl, p.Type] = Traversal.derived
+given Traversal[p.FunctionDecl, p.Term] = Traversal.empty
+given Traversal[p.FunctionDecl, p.Expr] = Traversal.empty
+given Traversal[p.FunctionDecl, p.Stmt] = Traversal.empty
 
 given Traversal[p.Function, p.Type] = Traversal.derived
 given Traversal[p.Function, p.Term] = Traversal.derived
@@ -161,20 +166,491 @@ extension (e: p.Type) {
   }
 }
 
+private def validateCallableBinders(tpe: p.Type, path: String): List[String] = {
+  val errors = List.newBuilder[String]
+  def loop(tpe: p.Type, path: String): Unit = tpe match {
+    case p.Type.Struct(_, args) => args.zipWithIndex.foreach((tpe, index) => loop(tpe, s"$path type argument $index"))
+    case p.Type.Ptr(comp, _)    => loop(comp, s"$path pointee")
+    case p.Type.Arr(comp, _, _) => loop(comp, s"$path element")
+    case p.Type.Exec(tpeVars, args, rtn) =>
+      tpeVars
+        .groupMapReduce(identity)(_ => 1)(_ + _)
+        .collect { case (name, n) if n > 1 => name }
+        .toList
+        .sorted
+        .foreach(name => errors += s"$path has duplicate callable type variable `$name`")
+      tpeVars.zipWithIndex.foreach { case (name, index) =>
+        if (name.trim.isEmpty) errors += s"$path callable type variable $index is empty"
+      }
+      args.zipWithIndex.foreach((tpe, index) => loop(tpe, s"$path callable argument $index"))
+      loop(rtn, s"$path callable return")
+    case _ => ()
+  }
+  loop(tpe, path)
+  errors.result()
+}
+
+extension (decl: p.FunctionDecl) {
+  def validate: List[String] = {
+    val errors = List.newBuilder[String]
+
+    decl.tpeVars
+      .groupMapReduce(identity)(_ => 1)(_ + _)
+      .collect { case (name, n) if n > 1 => name }
+      .toList
+      .sorted
+      .foreach(name => errors += s"duplicate type variable `$name`")
+    decl.tpeVars.zipWithIndex.foreach { case (name, index) =>
+      if (name.trim.isEmpty) errors += s"type variable $index is empty"
+    }
+
+    (decl.receiver.toList ::: decl.args ::: decl.moduleCaptures ::: decl.termCaptures)
+      .map(_.named.symbol)
+      .groupMapReduce(identity)(_ => 1)(_ + _)
+      .collect { case (name, n) if n > 1 => name }
+      .toList
+      .sorted
+      .foreach(name => errors += s"duplicate parameter `$name`")
+
+    def freeVars(tpe: p.Type, bound: Set[String] = Set.empty): List[String] = tpe match {
+      case p.Type.Var(name) if !bound(name) => List(name)
+      case p.Type.Struct(_, args)           => args.flatMap(freeVars(_, bound))
+      case p.Type.Ptr(comp, _)              => freeVars(comp, bound)
+      case p.Type.Arr(comp, _, _)           => freeVars(comp, bound)
+      case p.Type.Exec(tpeVars, args, rtn) =>
+        val inner = bound ++ tpeVars
+        args.flatMap(freeVars(_, inner)) ::: freeVars(rtn, inner)
+      case _ => Nil
+    }
+
+    val declared = decl.tpeVars.toSet
+    val allTypes = decl.receiver.toList.map(_.named.tpe) :::
+      decl.args.map(_.named.tpe) :::
+      decl.moduleCaptures.map(_.named.tpe) :::
+      decl.termCaptures.map(_.named.tpe) :::
+      List(decl.rtn)
+    allTypes.flatMap(freeVars(_)).distinct.sorted.filterNot(declared).foreach { name =>
+      errors += s"undeclared type variable `$name`"
+    }
+
+    decl.receiver.foreach(arg => errors ++= validateCallableBinders(arg.named.tpe, "receiver"))
+    decl.args.zipWithIndex.foreach((arg, index) =>
+      errors ++= validateCallableBinders(arg.named.tpe, s"argument $index")
+    )
+    decl.moduleCaptures.zipWithIndex.foreach((arg, index) =>
+      errors ++= validateCallableBinders(arg.named.tpe, s"module capture $index")
+    )
+    decl.termCaptures.zipWithIndex.foreach((arg, index) =>
+      errors ++= validateCallableBinders(arg.named.tpe, s"term capture $index")
+    )
+    errors ++= validateCallableBinders(decl.rtn, "return")
+
+    def validateSize(expr: p.Arg.SizeExpr, owner: String): Unit = expr match {
+      case p.Arg.SizeExpr.Param(index) if index < 0 || index >= decl.args.size =>
+        errors += s"$owner extent parameter $index is out of range for ${decl.args.size} arguments"
+      case p.Arg.SizeExpr.Param(index) =>
+        val tpe = decl.args(index).named.tpe
+        if (tpe.kind != p.Type.Kind.Integral || tpe == p.Type.Bool1)
+          errors += s"$owner extent parameter $index `${decl.args(index).named.symbol}` is not an integral scalar"
+      case p.Arg.SizeExpr.Const(value) if value < 0 =>
+        errors += s"$owner extent constant is negative: $value"
+      case p.Arg.SizeExpr.Const(_) => ()
+      case p.Arg.SizeExpr.Add(lhs, rhs) =>
+        validateSize(lhs, owner)
+        validateSize(rhs, owner)
+      case p.Arg.SizeExpr.Mul(lhs, rhs) =>
+        validateSize(lhs, owner)
+        validateSize(rhs, owner)
+    }
+
+    def validateBoundary(arg: p.Arg): Unit = arg.boundary.foreach { boundary =>
+      arg.named.tpe match {
+        case p.Type.Ptr(_, p.Type.Space.Constant) if boundary.access != p.Arg.Access.Read =>
+          errors += s"argument `${arg.named.symbol}` writes through a constant pointer"
+        case p.Type.Ptr(_, _) => ()
+        case other            => errors += s"argument `${arg.named.symbol}` has a boundary but is not a pointer: $other"
+      }
+      boundary.extent match {
+        case p.Arg.Extent.Elements(size) => validateSize(size, s"argument `${arg.named.symbol}`")
+        case p.Arg.Extent.Bytes(size)    => validateSize(size, s"argument `${arg.named.symbol}`")
+      }
+    }
+
+    decl.receiver.foreach(validateBoundary)
+    decl.args.foreach(validateBoundary)
+    decl.moduleCaptures.foreach(validateBoundary)
+    decl.termCaptures.foreach(validateBoundary)
+    errors.result().distinct
+  }
+
+  def classifyArguments: Either[List[String], List[LibraryBinding.ArgumentKind]] = {
+    def parameters(expr: p.Arg.SizeExpr): Set[Int] = expr match {
+      case p.Arg.SizeExpr.Param(index)  => Set(index)
+      case p.Arg.SizeExpr.Const(_)      => Set.empty
+      case p.Arg.SizeExpr.Add(lhs, rhs) => parameters(lhs) ++ parameters(rhs)
+      case p.Arg.SizeExpr.Mul(lhs, rhs) => parameters(lhs) ++ parameters(rhs)
+    }
+    def extentParameters(extent: p.Arg.Extent): Set[Int] = extent match {
+      case p.Arg.Extent.Elements(size) => parameters(size)
+      case p.Arg.Extent.Bytes(size)    => parameters(size)
+    }
+
+    val errors       = List.newBuilder[String]
+    val boundaryArgs = decl.receiver.toList ::: decl.args ::: decl.moduleCaptures ::: decl.termCaptures
+    errors ++= decl.validate
+    val referenced =
+      boundaryArgs.flatMap(_.boundary.toList.flatMap(boundary => extentParameters(boundary.extent))).toSet
+    val kinds = decl.args.zipWithIndex.map { case (arg, index) =>
+      arg.named.tpe match {
+        case signature: p.Type.Exec => LibraryBinding.ArgumentKind.Callable(signature)
+        case p.Type.Ptr(_, _) =>
+          arg.boundary match {
+            case Some(boundary) => LibraryBinding.ArgumentKind.Buffer(boundary.access, boundary.extent)
+            case None =>
+              errors += s"pointer argument `${arg.named.symbol}` has no boundary"
+              LibraryBinding.ArgumentKind.Scalar
+          }
+        case _ if referenced(index) => LibraryBinding.ArgumentKind.ExtentScalar
+        case _                      => LibraryBinding.ArgumentKind.Scalar
+      }
+    }
+    val distinct = errors.result().distinct
+    if (distinct.isEmpty) Right(kinds) else Left(distinct)
+  }
+
+  def bind(
+      call: p.InvokeSignature,
+      callableDecls: List[p.FunctionDecl]
+  ): Either[List[String], LibraryBinding.Binding] = {
+    val errors = List.newBuilder[String]
+    errors ++= decl.validate
+    call.tpeArgs.zipWithIndex.foreach((tpe, index) =>
+      errors ++= validateCallableBinders(tpe, s"call type argument $index")
+    )
+    call.receiver.foreach(tpe => errors ++= validateCallableBinders(tpe, "call receiver"))
+    call.args.zipWithIndex.foreach((tpe, index) => errors ++= validateCallableBinders(tpe, s"call argument $index"))
+    errors ++= validateCallableBinders(call.rtn, "call return")
+
+    val matcher       = TypeMatcher(decl.tpeVars.toSet, reconcileAliases = true)
+    val deferred      = List.newBuilder[(p.Type.Exec, p.Type, String, Option[Int])]
+    var callableBinds = Map.empty[Int, p.Sym]
+
+    def matchCall(expected: p.Type, actual: p.Type, path: String, callableIndex: Option[Int] = None): Unit =
+      (expected, actual) match {
+        case (expected: p.Type.Exec, actual: (p.Type.Exec | p.Type.FnRef)) =>
+          deferred += ((expected, actual, path, callableIndex))
+        case _ => matcher.unify(expected, actual, path)
+      }
+
+    if (decl.name != call.name)
+      errors += s"symbol differs: expected ${decl.name.fqn.mkString(".")}, got ${call.name.fqn.mkString(".")}"
+
+    if (call.tpeArgs.nonEmpty && call.tpeArgs.size != decl.tpeVars.size)
+      errors += s"type-argument count differs: expected ${decl.tpeVars.size}, got ${call.tpeArgs.size}"
+    decl.tpeVars.zip(call.tpeArgs).foreach { case (name, actual) =>
+      matcher.bind(name, actual, s"type argument `$name`")
+    }
+
+    if (decl.moduleCaptures.nonEmpty || decl.termCaptures.nonEmpty)
+      errors += "public declarations with explicit captures cannot be called directly"
+
+    (decl.receiver, call.receiver) match {
+      case (Some(expected), Some(actual)) => matchCall(expected.named.tpe, actual, "receiver")
+      case (None, None)                   => ()
+      case _                              => errors += "receiver presence differs"
+    }
+
+    if (decl.args.size != call.args.size)
+      errors += s"argument count differs: expected ${decl.args.size}, got ${call.args.size}"
+    decl.args.zip(call.args).zipWithIndex.foreach { case ((expected, actual), index) =>
+      matchCall(expected.named.tpe, actual, s"argument $index `${expected.named.symbol}`", Some(index))
+    }
+    matchCall(decl.rtn, call.rtn, "return")
+    errors ++= matcher.errors
+
+    val resolvedTypes = Map.newBuilder[String, p.Type]
+    decl.tpeVars.foreach { name =>
+      matcher.bindings.get(name) match {
+        case None => errors += s"declaration type variable `$name` is not bound by the call"
+        case Some(tpe) =>
+          substituteType(tpe, matcher.bindings, resolving = Set(name)) match {
+            case Left(reason) => errors += s"declaration type variable `$name` is not concrete: $reason"
+            case Right(value) => resolvedTypes += name -> value
+          }
+      }
+    }
+    val publicTypes   = resolvedTypes.result()
+    val callableIndex = callableDecls.groupBy(_.name).view.mapValues(_.sortBy(_.toString)).toMap
+
+    def compareCallable(expected: p.Type.Exec, actual: p.Type, path: String, argumentIndex: Option[Int]): Unit =
+      substituteType(expected, publicTypes) match {
+        case Left(reason) => errors += s"$path is not concrete: $reason"
+        case Right(concreteExpected: p.Type.Exec) =>
+          actual match {
+            case concreteActual: p.Type.Exec =>
+              val exact = TypeMatcher(Set.empty)
+              exact.unify(concreteExpected, concreteActual, path)
+              errors ++= exact.errors
+            case p.Type.FnRef(name) =>
+              val candidates = callableIndex.getOrElse(name, Nil)
+              if (candidates.isEmpty)
+                errors += s"$path references callable `${name.fqn.mkString(".")}` without a declaration"
+              else {
+                val attempts = candidates.map { candidate =>
+                  val candidateErrors = List.newBuilder[String]
+                  candidate.validate.foreach(error =>
+                    candidateErrors += s"$path callable `${name.fqn.mkString(".")}`: $error"
+                  )
+                  if (concreteExpected.tpeVars.nonEmpty)
+                    candidateErrors +=
+                      s"$path generic callable declarations are not supported yet: ${concreteExpected.tpeVars.mkString(", ")}"
+                  if (candidate.tpeVars.nonEmpty)
+                    candidateErrors += s"$path callable `${name.fqn.mkString(".")}` is still generic"
+                  if (
+                    candidate.receiver.nonEmpty || candidate.moduleCaptures.nonEmpty || candidate.termCaptures.nonEmpty
+                  )
+                    candidateErrors +=
+                      s"$path callable `${name.fqn.mkString(".")}` has an unsupported receiver or explicit captures"
+                  val exact = TypeMatcher(Set.empty)
+                  exact.unify(
+                    concreteExpected,
+                    p.Type.Exec(candidate.tpeVars, candidate.args.map(_.named.tpe), candidate.rtn),
+                    path
+                  )
+                  candidateErrors ++= exact.errors
+                  candidate -> candidateErrors.result().distinct
+                }
+                attempts.filter(_._2.isEmpty) match {
+                  case List((_, _)) => argumentIndex.foreach(index => callableBinds += index -> name)
+                  case Nil =>
+                    errors += s"$path has no matching declaration for callable `${name.fqn.mkString(".")}`"
+                    attempts.flatMap(_._2).distinct.foreach(errors += _)
+                  case matches =>
+                    errors += s"$path has ${matches.size} matching declarations for callable `${name.fqn.mkString(".")}`"
+                }
+              }
+            case other => errors += s"$path callable differs: expected $concreteExpected, got $other"
+          }
+        case Right(other) => errors += s"$path did not resolve to a callable: $other"
+      }
+
+    deferred.result().foreach(compareCallable.tupled)
+    val distinct = errors.result().distinct
+    if (distinct.isEmpty) Right(LibraryBinding.Binding(publicTypes, callableBinds)) else Left(distinct)
+  }
+
+  def conformsTo(
+      publicDecl: p.FunctionDecl
+  ): Either[List[String], LibraryBinding.ImplementationBinding] = {
+    val errors  = List.newBuilder[String]
+    val matcher = TypeMatcher(decl.tpeVars.toSet)
+    errors ++= publicDecl.validate.map(error => s"public declaration: $error")
+    errors ++= decl.validate.map(error => s"implementation declaration: $error")
+
+    def compareArg(expected: p.Arg, actual: p.Arg, path: String): Unit = {
+      matcher.unify(expected.named.tpe, actual.named.tpe, path)
+      if (expected.boundary != actual.boundary)
+        errors += s"$path boundary differs: expected ${expected.boundary}, got ${actual.boundary}"
+    }
+
+    def compareArgs(expected: List[p.Arg], actual: List[p.Arg], path: String): Unit = {
+      if (expected.size != actual.size)
+        errors += s"$path count differs: expected ${expected.size}, got ${actual.size}"
+      expected.zip(actual).zipWithIndex.foreach { case ((e, a), index) => compareArg(e, a, s"$path $index") }
+    }
+
+    if (publicDecl.affinity != decl.affinity)
+      errors += s"affinity differs: expected ${publicDecl.affinity}, got ${decl.affinity}"
+
+    (decl.receiver, publicDecl.receiver) match {
+      case (Some(expected), Some(actual)) => compareArg(expected, actual, "receiver")
+      case (None, None)                   => ()
+      case _                              => errors += "receiver presence differs"
+    }
+    compareArgs(decl.moduleCaptures, publicDecl.moduleCaptures, "module capture")
+    compareArgs(decl.termCaptures, publicDecl.termCaptures, "term capture")
+
+    val result =
+      if (decl.args.size == publicDecl.args.size) {
+        compareArgs(decl.args, publicDecl.args, "argument")
+        matcher.unify(decl.rtn, publicDecl.rtn, "return")
+        LibraryBinding.ResultBinding.Direct
+      } else if (
+        decl.args.size == publicDecl.args.size + 1 &&
+        decl.rtn == p.Type.Unit0 &&
+        publicDecl.rtn != p.Type.Unit0
+      ) {
+        compareArgs(decl.args.init, publicDecl.args, "argument")
+        val resultIndex = publicDecl.args.size
+        val resultArg   = decl.args.last
+        resultArg.named.tpe match {
+          case p.Type.Ptr(comp, p.Type.Space.Global) => matcher.unify(comp, publicDecl.rtn, "trailing result pointee")
+          case p.Type.Ptr(_, space)                  => errors += s"trailing result pointer is not global: $space"
+          case other                                 => errors += s"trailing result is not a pointer: $other"
+        }
+        val expectedBoundary = p.Arg.Boundary(
+          p.Arg.Access.Write,
+          p.Arg.Extent.Elements(p.Arg.SizeExpr.Const(1))
+        )
+        if (!resultArg.boundary.contains(expectedBoundary))
+          errors += s"trailing result boundary differs: expected $expectedBoundary, got ${resultArg.boundary}"
+        LibraryBinding.ResultBinding.TrailingOutput(resultIndex)
+      } else {
+        errors +=
+          s"argument/result shape differs: public has ${publicDecl.args.size} arguments and returns ${publicDecl.rtn}; " +
+            s"implementation has ${decl.args.size} arguments and returns ${decl.rtn}"
+        LibraryBinding.ResultBinding.Direct
+      }
+
+    errors ++= matcher.errors
+    decl.tpeVars
+      .filterNot(matcher.bindings.contains)
+      .foreach(name => errors += s"implementation type variable `$name` is not bound by the public declaration")
+
+    val distinct = errors.result().distinct
+    if (distinct.isEmpty) Right(LibraryBinding.ImplementationBinding(matcher.bindings, result)) else Left(distinct)
+  }
+
+  def signature: p.Signature = p.Signature(
+    decl.name,
+    decl.tpeVars,
+    decl.receiver.map(_.named.tpe),
+    decl.args.map(_.named.tpe),
+    decl.moduleCaptures.map(_.named.tpe),
+    decl.termCaptures.map(_.named.tpe),
+    decl.rtn
+  )
+
+  def remapArgs(args: List[p.Arg]): p.FunctionDecl = {
+    val newIndices = args.zipWithIndex.map((arg, index) => arg.named.symbol -> index).toMap
+
+    def remapSize(size: p.Arg.SizeExpr): p.Arg.SizeExpr = size match {
+      case p.Arg.SizeExpr.Param(index) =>
+        val target = for {
+          oldArg   <- decl.args.lift(index)
+          newIndex <- newIndices.get(oldArg.named.symbol)
+        } yield newIndex
+        p.Arg.SizeExpr.Param(target.getOrElse(throw IllegalArgumentException(s"removed extent parameter $index")))
+      case p.Arg.SizeExpr.Const(_)      => size
+      case p.Arg.SizeExpr.Add(lhs, rhs) => p.Arg.SizeExpr.Add(remapSize(lhs), remapSize(rhs))
+      case p.Arg.SizeExpr.Mul(lhs, rhs) => p.Arg.SizeExpr.Mul(remapSize(lhs), remapSize(rhs))
+    }
+
+    def remapArg(arg: p.Arg): p.Arg = arg.copy(boundary = arg.boundary.map { boundary =>
+      val extent = boundary.extent match {
+        case p.Arg.Extent.Elements(size) => p.Arg.Extent.Elements(remapSize(size))
+        case p.Arg.Extent.Bytes(size)    => p.Arg.Extent.Bytes(remapSize(size))
+      }
+      boundary.copy(extent = extent)
+    })
+
+    decl.copy(
+      receiver = decl.receiver.map(remapArg),
+      args = args.map(remapArg),
+      moduleCaptures = decl.moduleCaptures.map(remapArg),
+      termCaptures = decl.termCaptures.map(remapArg)
+    )
+  }
+}
+
+extension (index: LibraryBinding.PackageIndex) {
+  def resolve(
+      call: p.InvokeSignature,
+      callableDecls: List[p.FunctionDecl],
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int]
+  ): Either[List[String], LibraryBinding.Resolution] = {
+    val decls = index.interface.decls.filter(_.name == call.name)
+    if (decls.isEmpty)
+      return Left(List(s"no public declaration `${call.name.fqn.mkString(".")}`"))
+    val boundDecls = decls.map(decl => decl -> decl.bind(call, callableDecls))
+    val matchingDecls = boundDecls.collect { case (decl, Right(binding)) =>
+      decl -> binding
+    }
+    val (decl, callBinding) = matchingDecls match {
+      case List(result) => result
+      case Nil =>
+        return Left(
+          "no matching public declaration" :: boundDecls.flatMap { case (decl, result) =>
+            result.left.toOption.toList.flatten.map(error => s"`${decl.toString}`: $error")
+          }
+        )
+      case matches =>
+        return Left(List(s"ambiguous public declaration `${call.name.fqn.mkString(".")}`: ${matches.size} matches"))
+    }
+    def candidateKey(candidate: LibraryBinding.ImplementationCandidate) = (
+      candidate.implementation.name.fqn.mkString("."),
+      candidate.implementation.toString,
+      candidate.requiredCapabilities.sorted.mkString("\u0000"),
+      candidate.typeSizes.sortBy(c => (c.typeVariable, c.sizeInBytes)).mkString("\u0000")
+    )
+
+    val candidates = index.candidates.filter(_.publicName == decl.name).sortBy(candidateKey)
+    if (candidates.isEmpty)
+      return Left(List(s"no implementations for `${decl.name.fqn.mkString(".")}`"))
+
+    val compatible = List.newBuilder[(LibraryBinding.ImplementationCandidate, LibraryBinding.ImplementationBinding)]
+    val rejected   = List.newBuilder[String]
+    candidates.foreach { candidate =>
+      val label  = candidate.implementation.name.fqn.mkString(".")
+      val errors = List.newBuilder[String]
+      candidate.requiredCapabilities.distinct.sorted.filterNot(capabilities).foreach { capability =>
+        errors += s"requires capability `$capability`"
+      }
+      val implementationBinding = candidate.implementation.conformsTo(decl)
+      implementationBinding.left.foreach(_.foreach(errors += _))
+      implementationBinding.foreach { binding =>
+        candidate.typeSizes.sortBy(c => (c.typeVariable, c.sizeInBytes)).foreach { constraint =>
+          binding.types.get(constraint.typeVariable) match {
+            case None => errors += s"type-size constraint references unbound variable `${constraint.typeVariable}`"
+            case Some(bound) =>
+              substituteType(bound, callBinding.types) match {
+                case Left(reason) => errors += s"cannot resolve `${constraint.typeVariable}`: $reason"
+                case Right(tpe) =>
+                  typeSizes.get(tpe) match {
+                    case None => errors += s"has no layout for `${tpe.repr}`"
+                    case Some(actual) if actual != constraint.sizeInBytes =>
+                      errors +=
+                        s"requires `${constraint.typeVariable}` size ${constraint.sizeInBytes}, got $actual for `${tpe.repr}`"
+                    case _ => ()
+                  }
+              }
+          }
+        }
+      }
+      val distinct = errors.result().distinct
+      implementationBinding match {
+        case Right(binding) if distinct.isEmpty => compatible += candidate -> binding
+        case _                                  => distinct.foreach(error => rejected += s"`$label`: $error")
+      }
+    }
+
+    compatible.result() match {
+      case List((candidate, implementation)) =>
+        Right(LibraryBinding.Resolution(decl, callBinding, candidate, implementation))
+      case Nil =>
+        Left(s"no compatible implementation for `${decl.name.fqn.mkString(".")}`" :: rejected.result())
+      case matches =>
+        Left(
+          List(
+            s"ambiguous implementations for `${decl.name.fqn.mkString(".")}`: ${matches
+                .map(_._1.implementation.name.fqn.mkString("."))
+                .mkString(", ")}"
+          )
+        )
+    }
+  }
+}
+
 extension (fn: p.Function) {
+
+  def modifyDecl(f: p.FunctionDecl => p.FunctionDecl): p.Function =
+    fn.copy(decl = f(fn.decl))
 
   def mangledName = fn.receiver.map(_.named.tpe.monomorphicName).getOrElse("") + "!" + fn.name.fqn
     .mkString("_") + "!" + fn.args.map(_.named.tpe.monomorphicName).mkString("_") + "!" + fn.rtn.monomorphicName
 
-  def signature = p.Signature(
-    fn.name,
-    fn.tpeVars,
-    fn.receiver.map(_.named.tpe),
-    fn.args.map(_.named.tpe),
-    fn.moduleCaptures.map(_.named.tpe),
-    fn.termCaptures.map(_.named.tpe),
-    fn.rtn
-  )
+  def signature: p.Signature = fn.decl.signature
 
   def signatureRepr = {
     import p.repr as _
@@ -321,4 +797,127 @@ def captureRoot(entry: p.Function): Option[(p.Named, p.Type.Struct)] =
   (entry.receiver.toList ::: entry.args).map(_.named).collectFirst {
     case n @ p.Named(p.Conventions.ThisReceiver | p.Conventions.CaptureArg, p.Type.Ptr(s: p.Type.Struct, _), _) =>
       (n, s)
+  }
+
+private def containsType(tpe: p.Type, variables: Set[String]): Boolean = tpe match {
+  case p.Type.Var(name)            => variables(name)
+  case p.Type.Struct(_, args)      => args.exists(containsType(_, variables))
+  case p.Type.Ptr(component, _)    => containsType(component, variables)
+  case p.Type.Arr(component, _, _) => containsType(component, variables)
+  case p.Type.Exec(tpeVars, args, rtn) =>
+    val unshadowed = variables -- tpeVars
+    args.exists(containsType(_, unshadowed)) || containsType(rtn, unshadowed)
+  case _ => false
+}
+
+private final class TypeMatcher(bindable: Set[String], reconcileAliases: Boolean = false) {
+  private var env                           = Map.empty[String, p.Type]
+  private var binding                       = Set.empty[String]
+  private val diagnostics                   = List.newBuilder[String]
+  private val defaultReport: String => Unit = diagnostics += _
+
+  def bindings: Map[String, p.Type] = env
+  def errors: List[String]          = diagnostics.result().distinct
+
+  def bind(name: String, actual: p.Type, path: String, report: String => Unit = defaultReport): Unit =
+    env.get(name) match {
+      case None                                 => env += name -> actual
+      case Some(existing) if existing == actual => ()
+      case Some(existing) if binding(name) =>
+        report(s"$path conflicts for `$name`: cyclic binding through $existing and $actual")
+      case Some(existing) if !reconcileAliases =>
+        TypeMatcher(Set.empty).unify(existing, actual, path, report = report)
+      case Some(existing) =>
+        binding += name
+        try unify(existing, actual, path, report = report)
+        finally binding -= name
+    }
+
+  def unify(
+      expected: p.Type,
+      actual: p.Type,
+      path: String,
+      localVariables: Map[String, String] = Map.empty,
+      actualBoundVariables: Set[String] = Set.empty,
+      report: String => Unit = defaultReport
+  ): Unit = (expected, actual) match {
+    case (p.Type.Var(name), p.Type.Var(actualName)) if localVariables.contains(name) =>
+      val expectedName = localVariables(name)
+      if (expectedName != actualName)
+        report(s"$path callable type variable differs: expected `$expectedName`, got `$actualName`")
+    case (p.Type.Var(name), _) if localVariables.contains(name) =>
+      report(s"$path callable type variable `${localVariables(name)}` is not preserved by $actual")
+    case (p.Type.Var(name), actual) if bindable(name) =>
+      if (containsType(actual, actualBoundVariables))
+        report(s"$path cannot bind `$name` to a type containing a callable-local type variable")
+      else bind(name, actual, path, report)
+    case (p.Type.Ptr(ec, es), p.Type.Ptr(ac, as)) =>
+      if (es != as) report(s"$path pointer space differs: expected $es, got $as")
+      unify(ec, ac, s"$path pointee", localVariables, actualBoundVariables, report)
+    case (p.Type.Arr(ec, en, es), p.Type.Arr(ac, an, as)) =>
+      if (en != an) report(s"$path array length differs: expected $en, got $an")
+      if (es != as) report(s"$path array space differs: expected $es, got $as")
+      unify(ec, ac, s"$path element", localVariables, actualBoundVariables, report)
+    case (p.Type.Struct(en, ea), p.Type.Struct(an, aa)) =>
+      if (en != an) report(s"$path struct differs: expected $en, got $an")
+      if (ea.size != aa.size)
+        report(s"$path struct type-argument count differs: expected ${ea.size}, got ${aa.size}")
+      ea.zip(aa).zipWithIndex.foreach { case ((e, a), index) =>
+        unify(e, a, s"$path type argument $index", localVariables, actualBoundVariables, report)
+      }
+    case (p.Type.Exec(etv, eargs, eret), p.Type.Exec(atv, aargs, aret)) =>
+      if (etv.size != atv.size)
+        report(s"$path callable type-parameter count differs: expected ${etv.size}, got ${atv.size}")
+      val nestedVariables = localVariables ++ etv.zip(atv)
+      val nestedActual    = actualBoundVariables ++ atv
+      if (eargs.size != aargs.size)
+        report(s"$path callable argument count differs: expected ${eargs.size}, got ${aargs.size}")
+      eargs.zip(aargs).zipWithIndex.foreach { case ((e, a), index) =>
+        unify(e, a, s"$path callable argument $index", nestedVariables, nestedActual, report)
+      }
+      unify(eret, aret, s"$path callable return", nestedVariables, nestedActual, report)
+    case _ =>
+      if (expected != actual) report(s"$path type differs: expected $expected, got $actual")
+  }
+}
+
+private def substituteType(
+    tpe: p.Type,
+    bindings: Map[String, p.Type],
+    boundVariables: Set[String] = Set.empty,
+    resolving: Set[String] = Set.empty
+): Either[String, p.Type] = tpe match {
+  case p.Type.Var(name) if boundVariables(name) => Right(tpe)
+  case p.Type.Var(name) if resolving(name)      => Left(s"cyclic reference to `$name`")
+  case p.Type.Var(name) =>
+    bindings.get(name) match {
+      case Some(value) => substituteType(value, bindings, boundVariables, resolving + name)
+      case None        => Left(s"unresolved type variable `$name`")
+    }
+  case p.Type.Struct(name, args) =>
+    substituteAll(args, bindings, boundVariables, resolving).map(p.Type.Struct(name, _))
+  case p.Type.Ptr(component, space) =>
+    substituteType(component, bindings, boundVariables, resolving).map(p.Type.Ptr(_, space))
+  case p.Type.Arr(component, length, space) =>
+    substituteType(component, bindings, boundVariables, resolving).map(p.Type.Arr(_, length, space))
+  case p.Type.Exec(typeVariables, args, rtn) =>
+    val nested = boundVariables ++ typeVariables
+    for {
+      resolvedArgs <- substituteAll(args, bindings, nested, resolving)
+      resolvedRtn  <- substituteType(rtn, bindings, nested, resolving)
+    } yield p.Type.Exec(typeVariables, resolvedArgs, resolvedRtn)
+  case other => Right(other)
+}
+
+private def substituteAll(
+    values: List[p.Type],
+    bindings: Map[String, p.Type],
+    boundVariables: Set[String],
+    resolving: Set[String]
+): Either[String, List[p.Type]] =
+  values.foldRight[Either[String, List[p.Type]]](Right(Nil)) { (value, result) =>
+    for {
+      head <- substituteType(value, bindings, boundVariables, resolving)
+      tail <- result
+    } yield head :: tail
   }

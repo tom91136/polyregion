@@ -55,13 +55,11 @@ object FnInline extends ProgramPass {
         case x                      => x
       }
     p.Function(
-      f.name,
-      f.tpeVars,
-      f.receiver.map(arg => arg.copy(rename(arg.named))),
-      f.args.map(arg => arg.copy(rename(arg.named))),
-      f.moduleCaptures,
-      f.termCaptures.map(arg => arg.copy(rename(arg.named))),
-      f.rtn,
+      f.decl.copy(
+        receiver = f.receiver.map(arg => arg.copy(rename(arg.named))),
+        args = f.args.map(arg => arg.copy(rename(arg.named))),
+        termCaptures = f.termCaptures.map(arg => arg.copy(rename(arg.named)))
+      ),
       body,
       f.visibility,
       f.fpMode,
@@ -334,7 +332,10 @@ object FnInline extends ProgramPass {
     val ctr = new java.util.concurrent.atomic.AtomicLong(0L)
     val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
       val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, program, ctr))
-      f.copy(body = stmts, moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct)
+      f.copy(
+        decl = f.decl.copy(moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct),
+        body = stmts
+      )
     }
 
     log.info(s"converged in $n iteration(s)")

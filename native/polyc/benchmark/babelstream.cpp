@@ -232,7 +232,7 @@ int main() {
         auto c = compiler::compile(program(fn), {target, arch}, compiletime::OptLevel::Ofast);
         fmt::print(stderr, "{}\n", repr(c));
         std::fflush(stderr);
-        if (!c.binary) throw std::logic_error("No binary produced for " + fn.name.fqn.front());
+        if (!c.binary) throw std::logic_error("No binary produced for " + fn.decl.name.fqn.front());
         return std::string(reinterpret_cast<char *>(c.binary->data()), c.binary->size());
       };
       auto images = stream::Kernels<std::string>{.copy = compileOne(fns.copy),

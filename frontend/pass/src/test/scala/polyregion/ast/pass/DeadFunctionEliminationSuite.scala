@@ -64,8 +64,8 @@ class DeadFunctionEliminationSuite extends munit.FunSuite {
   test("every overload of a reached name survives") {
     val all = List(
       exported("a", List(callTo("shared"))),
-      internal("shared").copy(args = List(arg("x", p.Type.IntS32))),
-      internal("shared").copy(args = List(arg("x", p.Type.Float32))),
+      internal("shared").modifyDecl(_.copy(args = List(arg("x", p.Type.IntS32)))),
+      internal("shared").modifyDecl(_.copy(args = List(arg("x", p.Type.Float32)))),
       internal("orphan")
     )
     val out = DeadFunctionElimination(program(entry(), functions = all), NoopLog).functions

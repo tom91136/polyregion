@@ -645,8 +645,58 @@ std::string repr(const Handler &h) {
 }
 
 std::string repr(const Arg &a) {
-  return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe),
-                     a.pos ^ map([&](const SourcePosition &s) { return fmt::format("/* {} */", repr(s)); }) ^ get_or_else(""s));
+  return fmt::format("{}: {}{}{}", a.named.symbol, repr(a.named.tpe), a.boundary ^ map([&](const Boundary &b) {
+                                                                        return fmt::format(" /* {} {} */", repr(b.access), repr(b.extent));
+                                                                      }) ^ get_or_else(""s),
+                     a.pos ^ map([&](const SourcePosition &s) { return fmt::format(" /* {} */", repr(s)); }) ^ get_or_else(""s));
+}
+
+std::string repr(const ArgAccess::Any &a) {
+  return [&] {
+    if (a.is<ArgAccess::Read>()) {
+      return "read"s;
+    }
+    if (a.is<ArgAccess::Write>()) {
+      return "write"s;
+    }
+    if (a.is<ArgAccess::ReadWrite>()) {
+      return "read-write"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for a (of type ArgAccess::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
+std::string repr(const ArgSizeExpr::Any &s) {
+  return [&] {
+    if (auto _x = s.get<ArgSizeExpr::Param>()) {
+      return fmt::format("arg[{}]", _x->index);
+    }
+    if (auto _x = s.get<ArgSizeExpr::Const>()) {
+      return std::to_string(_x->value);
+    }
+    if (auto _x = s.get<ArgSizeExpr::Add>()) {
+      return fmt::format("({} + {})", repr(_x->lhs), repr(_x->rhs));
+    }
+    if (auto _x = s.get<ArgSizeExpr::Mul>()) {
+      return fmt::format("({} * {})", repr(_x->lhs), repr(_x->rhs));
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for s (of type ArgSizeExpr::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
+std::string repr(const ArgExtent::Any &e) {
+  return [&] {
+    if (auto _x = e.get<ArgExtent::Elements>()) {
+      return fmt::format("elements({})", repr(_x->size));
+    }
+    if (auto _x = e.get<ArgExtent::Bytes>()) {
+      return fmt::format("bytes({})", repr(_x->size));
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for e (of type ArgExtent::Any) at {}:{})", __FILE__, __LINE__));
+  }();
 }
 
 std::string repr(const FunctionVisibility::Any &v) {
@@ -675,6 +725,19 @@ std::string repr(const FunctionFpMode::Any &m) {
   }();
 }
 
+std::string repr(const FunctionAffinity::Any &a) {
+  return [&] {
+    if (a.is<FunctionAffinity::Offload>()) {
+      return "Offload"s;
+    }
+    if (a.is<FunctionAffinity::Host>()) {
+      return "Host"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for a (of type FunctionAffinity::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
 std::string repr(const Signature &f) {
   return fmt::format("def {}{}<{}>({}): {} /* mod={} term={} */",
                      f.receiver ^ map([&](const Type::Any &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s), repr(f.name),
@@ -684,15 +747,25 @@ std::string repr(const Signature &f) {
 }
 
 std::string repr(const Function &f) {
-  return fmt::format(
-      "def {}{}<{}>({}): {} /* vis={} fp={} entry={} mod={} term={} */ {}\n{}\n{}",
-      f.receiver ^ map([&](const Arg &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s), repr(f.name),
-      (f.tpeVars | mk_string(","s)),
-      (f.args | map([&](const Arg &a) { return fmt::format("{}: {}", a.named.symbol, repr(a.named.tpe)); }) | mk_string(", "s)),
-      repr(f.rtn), repr(f.visibility), repr(f.fpMode), f.isEntry,
-      (f.moduleCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
-      (f.termCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)), "{"s,
-      (f.body | map([&](const Stmt::Any &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+  return fmt::format("{} /* vis={} fp={} entry={} */ {}\n{}\n{}", repr(f.decl), repr(f.visibility), repr(f.fpMode), f.isEntry, "{"s,
+                     (f.body | map([&](const Stmt::Any &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+}
+
+std::string repr(const FunctionDecl &f) {
+  return fmt::format("def {}{}<{}>({}): {} /* affinity={} mod={} term={} */",
+                     f.receiver ^ map([&](const Arg &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s), repr(f.name),
+                     (f.tpeVars | mk_string(","s)), (f.args | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)),
+                     repr(f.rtn), repr(f.affinity),
+                     (f.moduleCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
+                     (f.termCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)));
+}
+
+std::string repr(const MetaEntry &m) { return fmt::format("{}={}", m.key, m.value); }
+
+std::string repr(const LibraryDef &l) {
+  return fmt::format("library {} {}\n{}\n{}\n{}", repr(l.name), "{"s,
+                     (l.decls | map([&](const FunctionDecl &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2),
+                     (l.metadata | map([&](const MetaEntry &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 }
 
 std::string repr(const StructDef &s) {

@@ -633,9 +633,10 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   };
 
   // stub before lowering the body so a recursive call resolves here, not into endless plugin recursion
-  auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args),
-                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnType, Vector<Stmt::Any>{}, FunctionVisibility::Internal(),
-                                       FunctionFpMode::Relaxed(), false, FunctionAffinity::Offload());
+  auto fn = std::make_shared<Function>(FunctionDecl(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{},
+                                                    receiver ^ to_vector() ^ concat(args), std::vector<Arg>{}, std::vector<Arg>{}, rtnType,
+                                                    FunctionAffinity::Offload()),
+                                       Vector<Stmt::Any>{}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
   r.functions.emplace(name, fn);
 
   auto fnBody = r.scoped(
@@ -756,16 +757,16 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                                 // `using Base::Base;`: forward this synthesised ctor's `args` to the
                                 // inherited base ctor (none are on the node); conform bridges Derived*->Base*
                                 const auto [baseName, baseFn] = handleCall(inh->getConstructor(), r);
-                                if (baseFn->args.size() == args.size() + 1 && receiver) {
-                                  auto thisArg =
-                                      r.newVar(conform(r, Expr::Alias(select(r, {}, receiver->named)), baseFn->args.front().named.tpe));
-                                  const auto fwd =
-                                      args                       //
-                                      | zip_with_index<size_t>() //
-                                      | map([&](const auto &a, const auto &i) -> Term::Any {
-                                          return r.newVar(conform(r, Expr::Alias(select(r, {}, a.named)), baseFn->args[i + 1].named.tpe));
-                                        }) //
-                                      | to_vector();
+                                if (baseFn->decl.args.size() == args.size() + 1 && receiver) {
+                                  auto thisArg = r.newVar(
+                                      conform(r, Expr::Alias(select(r, {}, receiver->named)), baseFn->decl.args.front().named.tpe));
+                                  const auto fwd = args                       //
+                                                   | zip_with_index<size_t>() //
+                                                   | map([&](const auto &a, const auto &i) -> Term::Any {
+                                                       return r.newVar(conform(r, Expr::Alias(select(r, {}, a.named)),
+                                                                               baseFn->decl.args[i + 1].named.tpe));
+                                                     }) //
+                                                   | to_vector();
                                   auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({baseName})), {}, {},
                                                                  Vector<Term::Any>{thisArg} ^ concat(fwd), Type::Unit0()));
                                 }
@@ -2505,8 +2506,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         const auto [name, fn] = handleCall(expr->getConstructor(), r);
 
-        if (fn->args.size() - 1 != expr->getNumArgs()) // -1 for implicit this as arg 0
-          raise("Arg count mismatch, expected " + std::to_string(fn->args.size() - 1) + " but was " + std::to_string(expr->getNumArgs()));
+        if (fn->decl.args.size() - 1 != expr->getNumArgs()) // -1 for implicit this as arg 0
+          raise("Arg count mismatch, expected " + std::to_string(fn->decl.args.size() - 1) + " but was "
+                + std::to_string(expr->getNumArgs()));
 
         if (const auto tpe = ctorTpe.get<Type::Struct>()) {
 
@@ -2529,7 +2531,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           auto ivArgs = expr->arguments()                                        //
                         | zip_with_index<size_t>()                               //
                         | map([&](const auto &arg, const auto &i) -> Term::Any { //
-                            return r.newVar(conform(r, handleExpr(arg, r), fn->args[i + 1].named.tpe));
+                            return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i + 1].named.tpe));
                           }) //
                         | to_vector();
           auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
@@ -2603,18 +2605,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto [name, fn] = handleCall(calleeFn, r);
         const auto receiver = r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
 
-        if (fn->args.size() != expr->getNumArgs() + 1) {
-          raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs() + 1));
+        if (fn->decl.args.size() != expr->getNumArgs() + 1) {
+          raise("Arg count mismatch, expected " + std::to_string(fn->decl.args.size()) + " but was "
+                + std::to_string(expr->getNumArgs() + 1));
         }
-        // fn->args[0] is the implicit `this`; explicit args are offset by 1.
+        // Declaration arg 0 is the implicit `this`; explicit args are offset by 1.
         auto ivArgs = expr->arguments()                                        //
                       | zip_with_index<size_t>()                               //
                       | map([&](const auto &arg, const auto &i) -> Term::Any { //
-                          return r.newVar(conform(r, handleExpr(arg, r), fn->args[i + 1].named.tpe));
+                          return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i + 1].named.tpe));
                         }) //
                       | to_vector();
 
-        const auto actualReceiverTpe = fn->args | collect_first([&](const auto &arg) -> Opt<Type::Any> {
+        const auto actualReceiverTpe = fn->decl.args | collect_first([&](const auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
                                        });
@@ -2634,25 +2637,25 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             return *lowered;
         const auto [name, fn] = handleCall(calleeFn, r);
 
-        if (fn->args.size() != expr->getNumArgs())
-          raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
+        if (fn->decl.args.size() != expr->getNumArgs())
+          raise("Arg count mismatch, expected " + std::to_string(fn->decl.args.size()) + " but was " + std::to_string(expr->getNumArgs()));
         auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
-        // arg 0 is the receiver (handled above); explicit args line up with fn->args[i] directly
+        // Arg 0 is the receiver (handled above); explicit args line up with declaration args directly.
         auto ivArgs = expr->arguments()                                        //
                       | zip_with_index<size_t>()                               //
                       | drop(1)                                                //
                       | map([&](const auto &arg, const auto &i) -> Term::Any { //
-                          return r.newVar(conform(r, handleExpr(arg, r), fn->args[i].named.tpe));
+                          return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i].named.tpe));
                         }) //
                       | to_vector();
 
         // XXX member operators carry an implicit `this` (a Ptr arg); free/friend operators do not - arg 0 is the
-        // receiver itself, so conform it to fn->args[0]
-        const auto actualReceiverTpe = fn->args | collect_first([&](const auto &arg) -> Opt<Type::Any> {
+        // receiver itself, so conform it to the first declaration argument.
+        const auto actualReceiverTpe = fn->decl.args | collect_first([&](const auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
                                        });
-        const auto recvTpe = actualReceiverTpe ? *actualReceiverTpe : fn->args[0].named.tpe;
+        const auto recvTpe = actualReceiverTpe ? *actualReceiverTpe : fn->decl.args[0].named.tpe;
         auto recvTerm = r.newVar(conform(r, ref(receiver), recvTpe));
         return Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs ^ prepend(recvTerm),
                             handleType(expr->getCallReturnType(context), r));
@@ -2718,13 +2721,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (target->getBuiltinID() == clang::Builtin::BI__builtin_constant_p)
             return integralConstOfType(handleType(expr->getType(), r), 0);
           auto [name, fn] = handleCall(target, r);
-          if (fn->args.size() != expr->getNumArgs())
-            raise("Arg count mismatch for " + qualifiedName + ", expected " + std::to_string(fn->args.size()) + " but was "
+          if (fn->decl.args.size() != expr->getNumArgs())
+            raise("Arg count mismatch for " + qualifiedName + ", expected " + std::to_string(fn->decl.args.size()) + " but was "
                   + std::to_string(expr->getNumArgs()));
           auto ivArgs = expr->arguments()                                        //
                         | zip_with_index<size_t>()                               //
                         | map([&](const auto &arg, const auto &i) -> Term::Any { //
-                            return r.newVar(conform(r, handleExpr(arg, r), fn->args[i].named.tpe));
+                            return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i].named.tpe));
                           }) //
                         | to_vector();
           return Expr::Any(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
@@ -2815,7 +2818,7 @@ void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record
   if (!record || record->hasTrivialDestructor() || isStdExceptionRecord(record)) return;
   if (const auto dtor = record->getDestructor(); dtor && dtor->getBody()) {
     const auto [name, fn] = handleCall(dtor, r);
-    const auto self = r.newVar(conform(r, Expr::Alias(instance), fn->args.front().named.tpe));
+    const auto self = r.newVar(conform(r, Expr::Alias(instance), fn->decl.args.front().named.tpe));
     (void)r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), {}, {}, {self}, Type::Unit0()));
   }
   if (record->isUnion()) return;

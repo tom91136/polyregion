@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "6d94f200500e9a3312637b392aae70b8";
+constexpr auto AdtHash = "fcb3ca1a54939d8834a531d0b9c813ed";
 
 namespace {
 
@@ -2742,9 +2742,9 @@ json signature_to_json(const Signature &x_) {
 
 InvokeSignature invokesignature_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
-  std::vector<Type::Any> tpeVars;
+  std::vector<Type::Any> tpeArgs;
   for (const auto &v_ : j_.at(1)) {
-    tpeVars.emplace_back(Type::any_from_json(v_));
+    tpeArgs.emplace_back(Type::any_from_json(v_));
   }
   auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j_.at(2)));
   std::vector<Type::Any> args;
@@ -2752,14 +2752,14 @@ InvokeSignature invokesignature_from_json(const json &j_) {
     args.emplace_back(Type::any_from_json(v_));
   }
   auto rtn = Type::any_from_json(j_.at(4));
-  return {name, tpeVars, receiver, args, rtn};
+  return {name, tpeArgs, receiver, args, rtn};
 }
 
 json invokesignature_to_json(const InvokeSignature &x_) {
   auto name = sym_to_json(x_.name);
-  std::vector<json> tpeVars;
-  for (const auto &v_ : x_.tpeVars) {
-    tpeVars.emplace_back(Type::any_to_json(v_));
+  std::vector<json> tpeArgs;
+  for (const auto &v_ : x_.tpeArgs) {
+    tpeArgs.emplace_back(Type::any_to_json(v_));
   }
   auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
@@ -2767,7 +2767,7 @@ json invokesignature_to_json(const InvokeSignature &x_) {
     args.emplace_back(Type::any_to_json(v_));
   }
   auto rtn = Type::any_to_json(x_.rtn);
-  return json::array({name, tpeVars, receiver, args, rtn});
+  return json::array({name, tpeArgs, receiver, args, rtn});
 }
 
 FunctionVisibility::Internal FunctionVisibility::internal_from_json(const json &j_) { return {}; }
@@ -2839,19 +2839,160 @@ json FunctionAffinity::any_to_json(const FunctionAffinity::Any &x_) {
                         [](const FunctionAffinity::Host &y_) -> json { return {1, FunctionAffinity::host_to_json(y_)}; });
 }
 
+ArgAccess::Read ArgAccess::read_from_json(const json &j_) { return {}; }
+
+json ArgAccess::read_to_json(const ArgAccess::Read &x_) { return json::array({}); }
+
+ArgAccess::Write ArgAccess::write_from_json(const json &j_) { return {}; }
+
+json ArgAccess::write_to_json(const ArgAccess::Write &x_) { return json::array({}); }
+
+ArgAccess::ReadWrite ArgAccess::readwrite_from_json(const json &j_) { return {}; }
+
+json ArgAccess::readwrite_to_json(const ArgAccess::ReadWrite &x_) { return json::array({}); }
+
+ArgAccess::Any ArgAccess::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return ArgAccess::read_from_json(t_);
+    case 1: return ArgAccess::write_from_json(t_);
+    case 2: return ArgAccess::readwrite_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json ArgAccess::any_to_json(const ArgAccess::Any &x_) {
+  return x_.match_total([](const ArgAccess::Read &y_) -> json { return {0, ArgAccess::read_to_json(y_)}; },
+                        [](const ArgAccess::Write &y_) -> json { return {1, ArgAccess::write_to_json(y_)}; },
+                        [](const ArgAccess::ReadWrite &y_) -> json { return {2, ArgAccess::readwrite_to_json(y_)}; });
+}
+
+ArgSizeExpr::Param ArgSizeExpr::param_from_json(const json &j_) {
+  auto index = j_.at(0).get<int32_t>();
+  return ArgSizeExpr::Param(index);
+}
+
+json ArgSizeExpr::param_to_json(const ArgSizeExpr::Param &x_) {
+  auto index = x_.index;
+  return json::array({index});
+}
+
+ArgSizeExpr::Const ArgSizeExpr::const_from_json(const json &j_) {
+  auto value = j_.at(0).get<int64_t>();
+  return ArgSizeExpr::Const(value);
+}
+
+json ArgSizeExpr::const_to_json(const ArgSizeExpr::Const &x_) {
+  auto value = x_.value;
+  return json::array({value});
+}
+
+ArgSizeExpr::Add ArgSizeExpr::add_from_json(const json &j_) {
+  auto lhs = ArgSizeExpr::any_from_json(j_.at(0));
+  auto rhs = ArgSizeExpr::any_from_json(j_.at(1));
+  return {lhs, rhs};
+}
+
+json ArgSizeExpr::add_to_json(const ArgSizeExpr::Add &x_) {
+  auto lhs = ArgSizeExpr::any_to_json(x_.lhs);
+  auto rhs = ArgSizeExpr::any_to_json(x_.rhs);
+  return json::array({lhs, rhs});
+}
+
+ArgSizeExpr::Mul ArgSizeExpr::mul_from_json(const json &j_) {
+  auto lhs = ArgSizeExpr::any_from_json(j_.at(0));
+  auto rhs = ArgSizeExpr::any_from_json(j_.at(1));
+  return {lhs, rhs};
+}
+
+json ArgSizeExpr::mul_to_json(const ArgSizeExpr::Mul &x_) {
+  auto lhs = ArgSizeExpr::any_to_json(x_.lhs);
+  auto rhs = ArgSizeExpr::any_to_json(x_.rhs);
+  return json::array({lhs, rhs});
+}
+
+ArgSizeExpr::Any ArgSizeExpr::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return ArgSizeExpr::param_from_json(t_);
+    case 1: return ArgSizeExpr::const_from_json(t_);
+    case 2: return ArgSizeExpr::add_from_json(t_);
+    case 3: return ArgSizeExpr::mul_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json ArgSizeExpr::any_to_json(const ArgSizeExpr::Any &x_) {
+  return x_.match_total([](const ArgSizeExpr::Param &y_) -> json { return {0, ArgSizeExpr::param_to_json(y_)}; },
+                        [](const ArgSizeExpr::Const &y_) -> json { return {1, ArgSizeExpr::const_to_json(y_)}; },
+                        [](const ArgSizeExpr::Add &y_) -> json { return {2, ArgSizeExpr::add_to_json(y_)}; },
+                        [](const ArgSizeExpr::Mul &y_) -> json { return {3, ArgSizeExpr::mul_to_json(y_)}; });
+}
+
+ArgExtent::Elements ArgExtent::elements_from_json(const json &j_) {
+  auto size = ArgSizeExpr::any_from_json(j_.at(0));
+  return ArgExtent::Elements(size);
+}
+
+json ArgExtent::elements_to_json(const ArgExtent::Elements &x_) {
+  auto size = ArgSizeExpr::any_to_json(x_.size);
+  return json::array({size});
+}
+
+ArgExtent::Bytes ArgExtent::bytes_from_json(const json &j_) {
+  auto size = ArgSizeExpr::any_from_json(j_.at(0));
+  return ArgExtent::Bytes(size);
+}
+
+json ArgExtent::bytes_to_json(const ArgExtent::Bytes &x_) {
+  auto size = ArgSizeExpr::any_to_json(x_.size);
+  return json::array({size});
+}
+
+ArgExtent::Any ArgExtent::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return ArgExtent::elements_from_json(t_);
+    case 1: return ArgExtent::bytes_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json ArgExtent::any_to_json(const ArgExtent::Any &x_) {
+  return x_.match_total([](const ArgExtent::Elements &y_) -> json { return {0, ArgExtent::elements_to_json(y_)}; },
+                        [](const ArgExtent::Bytes &y_) -> json { return {1, ArgExtent::bytes_to_json(y_)}; });
+}
+
+Boundary boundary_from_json(const json &j_) {
+  auto access = ArgAccess::any_from_json(j_.at(0));
+  auto extent = ArgExtent::any_from_json(j_.at(1));
+  return {access, extent};
+}
+
+json boundary_to_json(const Boundary &x_) {
+  auto access = ArgAccess::any_to_json(x_.access);
+  auto extent = ArgExtent::any_to_json(x_.extent);
+  return json::array({access, extent});
+}
+
 Arg arg_from_json(const json &j_) {
   auto named = named_from_json(j_.at(0));
   auto pos = j_.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j_.at(1)));
-  return {named, pos};
+  auto boundary = j_.at(2).is_null() ? std::nullopt : std::make_optional(boundary_from_json(j_.at(2)));
+  return {named, pos, boundary};
 }
 
 json arg_to_json(const Arg &x_) {
   auto named = named_to_json(x_.named);
   auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json();
-  return json::array({named, pos});
+  auto boundary = x_.boundary ? boundary_to_json(*x_.boundary) : json();
+  return json::array({named, pos, boundary});
 }
 
-Function function_from_json(const json &j_) {
+FunctionDecl functiondecl_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
   auto tpeVars = j_.at(1).get<std::vector<std::string>>();
   auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(arg_from_json(j_.at(2)));
@@ -2868,18 +3009,11 @@ Function function_from_json(const json &j_) {
     termCaptures.emplace_back(arg_from_json(v_));
   }
   auto rtn = Type::any_from_json(j_.at(6));
-  std::vector<Stmt::Any> body;
-  for (const auto &v_ : j_.at(7)) {
-    body.emplace_back(Stmt::any_from_json(v_));
-  }
-  auto visibility = FunctionVisibility::any_from_json(j_.at(8));
-  auto fpMode = FunctionFpMode::any_from_json(j_.at(9));
-  auto isEntry = j_.at(10).get<bool>();
-  auto affinity = FunctionAffinity::any_from_json(j_.at(11));
-  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity};
+  auto affinity = FunctionAffinity::any_from_json(j_.at(7));
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, affinity};
 }
 
-json function_to_json(const Function &x_) {
+json functiondecl_to_json(const FunctionDecl &x_) {
   auto name = sym_to_json(x_.name);
   auto tpeVars = x_.tpeVars;
   auto receiver = x_.receiver ? arg_to_json(*x_.receiver) : json();
@@ -2896,6 +3030,24 @@ json function_to_json(const Function &x_) {
     termCaptures.emplace_back(arg_to_json(v_));
   }
   auto rtn = Type::any_to_json(x_.rtn);
+  auto affinity = FunctionAffinity::any_to_json(x_.affinity);
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, affinity});
+}
+
+Function function_from_json(const json &j_) {
+  auto decl = functiondecl_from_json(j_.at(0));
+  std::vector<Stmt::Any> body;
+  for (const auto &v_ : j_.at(1)) {
+    body.emplace_back(Stmt::any_from_json(v_));
+  }
+  auto visibility = FunctionVisibility::any_from_json(j_.at(2));
+  auto fpMode = FunctionFpMode::any_from_json(j_.at(3));
+  auto isEntry = j_.at(4).get<bool>();
+  return {decl, body, visibility, fpMode, isEntry};
+}
+
+json function_to_json(const Function &x_) {
+  auto decl = functiondecl_to_json(x_.decl);
   std::vector<json> body;
   for (const auto &v_ : x_.body) {
     body.emplace_back(Stmt::any_to_json(v_));
@@ -2903,8 +3055,7 @@ json function_to_json(const Function &x_) {
   auto visibility = FunctionVisibility::any_to_json(x_.visibility);
   auto fpMode = FunctionFpMode::any_to_json(x_.fpMode);
   auto isEntry = x_.isEntry;
-  auto affinity = FunctionAffinity::any_to_json(x_.affinity);
-  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity});
+  return json::array({decl, body, visibility, fpMode, isEntry});
 }
 
 StructDef structdef_from_json(const json &j_) {
@@ -3199,6 +3350,32 @@ json compileresult_to_json(const CompileResult &x_) {
   }
   return json::array({binary, features, events, layouts, messages, entryArgs});
 }
+
+LibraryDef librarydef_from_json(const json &j_) {
+  auto name = sym_from_json(j_.at(0));
+  std::vector<FunctionDecl> decls;
+  for (const auto &v_ : j_.at(1)) {
+    decls.emplace_back(functiondecl_from_json(v_));
+  }
+  std::vector<MetaEntry> metadata;
+  for (const auto &v_ : j_.at(2)) {
+    metadata.emplace_back(metaentry_from_json(v_));
+  }
+  return {name, decls, metadata};
+}
+
+json librarydef_to_json(const LibraryDef &x_) {
+  auto name = sym_to_json(x_.name);
+  std::vector<json> decls;
+  for (const auto &v_ : x_.decls) {
+    decls.emplace_back(functiondecl_to_json(v_));
+  }
+  std::vector<json> metadata;
+  for (const auto &v_ : x_.metadata) {
+    metadata.emplace_back(metaentry_to_json(v_));
+  }
+  return json::array({name, decls, metadata});
+}
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
@@ -3210,18 +3387,18 @@ json hashed_from_json(const json &j_) {
 
 json hashed_to_json(const json &x_) { return json::array({AdtHash, x_}); }
 
-namespace FunctionFpMode {
-FunctionFpMode::Relaxed relaxed_fields_from_msgpack(MsgpackReader &, size_t);
-void relaxed_fields_to_msgpack(MsgpackWriter &, const FunctionFpMode::Relaxed &);
-FunctionFpMode::Relaxed relaxed_from_msgpack(MsgpackReader &);
-void relaxed_to_msgpack(MsgpackWriter &, const FunctionFpMode::Relaxed &);
-FunctionFpMode::Strict strict_fields_from_msgpack(MsgpackReader &, size_t);
-void strict_fields_to_msgpack(MsgpackWriter &, const FunctionFpMode::Strict &);
-FunctionFpMode::Strict strict_from_msgpack(MsgpackReader &);
-void strict_to_msgpack(MsgpackWriter &, const FunctionFpMode::Strict &);
-FunctionFpMode::Any any_from_msgpack(MsgpackReader &);
-void any_to_msgpack(MsgpackWriter &, const FunctionFpMode::Any &);
-} // namespace FunctionFpMode
+namespace ArgExtent {
+ArgExtent::Elements elements_fields_from_msgpack(MsgpackReader &, size_t);
+void elements_fields_to_msgpack(MsgpackWriter &, const ArgExtent::Elements &);
+ArgExtent::Elements elements_from_msgpack(MsgpackReader &);
+void elements_to_msgpack(MsgpackWriter &, const ArgExtent::Elements &);
+ArgExtent::Bytes bytes_fields_from_msgpack(MsgpackReader &, size_t);
+void bytes_fields_to_msgpack(MsgpackWriter &, const ArgExtent::Bytes &);
+ArgExtent::Bytes bytes_from_msgpack(MsgpackReader &);
+void bytes_to_msgpack(MsgpackWriter &, const ArgExtent::Bytes &);
+ArgExtent::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const ArgExtent::Any &);
+} // namespace ArgExtent
 namespace Expr {
 Expr::Alias alias_fields_from_msgpack(MsgpackReader &, size_t);
 void alias_fields_to_msgpack(MsgpackWriter &, const Expr::Alias &);
@@ -3286,26 +3463,6 @@ void opaque_to_msgpack(MsgpackWriter &, const Region::Opaque &);
 Region::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Region::Any &);
 } // namespace Region
-namespace PathStep {
-PathStep::Field field_fields_from_msgpack(MsgpackReader &, size_t);
-void field_fields_to_msgpack(MsgpackWriter &, const PathStep::Field &);
-PathStep::Field field_from_msgpack(MsgpackReader &);
-void field_to_msgpack(MsgpackWriter &, const PathStep::Field &);
-PathStep::Deref deref_fields_from_msgpack(MsgpackReader &, size_t);
-void deref_fields_to_msgpack(MsgpackWriter &, const PathStep::Deref &);
-PathStep::Deref deref_from_msgpack(MsgpackReader &);
-void deref_to_msgpack(MsgpackWriter &, const PathStep::Deref &);
-PathStep::Index index_fields_from_msgpack(MsgpackReader &, size_t);
-void index_fields_to_msgpack(MsgpackWriter &, const PathStep::Index &);
-PathStep::Index index_from_msgpack(MsgpackReader &);
-void index_to_msgpack(MsgpackWriter &, const PathStep::Index &);
-PathStep::IndexDyn indexdyn_fields_from_msgpack(MsgpackReader &, size_t);
-void indexdyn_fields_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
-PathStep::IndexDyn indexdyn_from_msgpack(MsgpackReader &);
-void indexdyn_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
-PathStep::Any any_from_msgpack(MsgpackReader &);
-void any_to_msgpack(MsgpackWriter &, const PathStep::Any &);
-} // namespace PathStep
 namespace Stmt {
 Stmt::Var var_fields_from_msgpack(MsgpackReader &, size_t);
 void var_fields_to_msgpack(MsgpackWriter &, const Stmt::Var &);
@@ -3834,10 +3991,18 @@ InvokeSignature invokesignature_fields_from_msgpack(MsgpackReader &, size_t);
 void invokesignature_fields_to_msgpack(MsgpackWriter &, const InvokeSignature &);
 InvokeSignature invokesignature_from_msgpack(MsgpackReader &);
 void invokesignature_to_msgpack(MsgpackWriter &, const InvokeSignature &);
+Boundary boundary_fields_from_msgpack(MsgpackReader &, size_t);
+void boundary_fields_to_msgpack(MsgpackWriter &, const Boundary &);
+Boundary boundary_from_msgpack(MsgpackReader &);
+void boundary_to_msgpack(MsgpackWriter &, const Boundary &);
 Arg arg_fields_from_msgpack(MsgpackReader &, size_t);
 void arg_fields_to_msgpack(MsgpackWriter &, const Arg &);
 Arg arg_from_msgpack(MsgpackReader &);
 void arg_to_msgpack(MsgpackWriter &, const Arg &);
+FunctionDecl functiondecl_fields_from_msgpack(MsgpackReader &, size_t);
+void functiondecl_fields_to_msgpack(MsgpackWriter &, const FunctionDecl &);
+FunctionDecl functiondecl_from_msgpack(MsgpackReader &);
+void functiondecl_to_msgpack(MsgpackWriter &, const FunctionDecl &);
 Function function_fields_from_msgpack(MsgpackReader &, size_t);
 void function_fields_to_msgpack(MsgpackWriter &, const Function &);
 Function function_from_msgpack(MsgpackReader &);
@@ -3890,6 +4055,10 @@ CompileResult compileresult_fields_from_msgpack(MsgpackReader &, size_t);
 void compileresult_fields_to_msgpack(MsgpackWriter &, const CompileResult &);
 CompileResult compileresult_from_msgpack(MsgpackReader &);
 void compileresult_to_msgpack(MsgpackWriter &, const CompileResult &);
+LibraryDef librarydef_fields_from_msgpack(MsgpackReader &, size_t);
+void librarydef_fields_to_msgpack(MsgpackWriter &, const LibraryDef &);
+LibraryDef librarydef_from_msgpack(MsgpackReader &);
+void librarydef_to_msgpack(MsgpackWriter &, const LibraryDef &);
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
 void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
@@ -4050,6 +4219,74 @@ void system_to_msgpack(MsgpackWriter &, const MemScope::System &);
 MemScope::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const MemScope::Any &);
 } // namespace MemScope
+namespace FunctionFpMode {
+FunctionFpMode::Relaxed relaxed_fields_from_msgpack(MsgpackReader &, size_t);
+void relaxed_fields_to_msgpack(MsgpackWriter &, const FunctionFpMode::Relaxed &);
+FunctionFpMode::Relaxed relaxed_from_msgpack(MsgpackReader &);
+void relaxed_to_msgpack(MsgpackWriter &, const FunctionFpMode::Relaxed &);
+FunctionFpMode::Strict strict_fields_from_msgpack(MsgpackReader &, size_t);
+void strict_fields_to_msgpack(MsgpackWriter &, const FunctionFpMode::Strict &);
+FunctionFpMode::Strict strict_from_msgpack(MsgpackReader &);
+void strict_to_msgpack(MsgpackWriter &, const FunctionFpMode::Strict &);
+FunctionFpMode::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const FunctionFpMode::Any &);
+} // namespace FunctionFpMode
+namespace ArgAccess {
+ArgAccess::Read read_fields_from_msgpack(MsgpackReader &, size_t);
+void read_fields_to_msgpack(MsgpackWriter &, const ArgAccess::Read &);
+ArgAccess::Read read_from_msgpack(MsgpackReader &);
+void read_to_msgpack(MsgpackWriter &, const ArgAccess::Read &);
+ArgAccess::Write write_fields_from_msgpack(MsgpackReader &, size_t);
+void write_fields_to_msgpack(MsgpackWriter &, const ArgAccess::Write &);
+ArgAccess::Write write_from_msgpack(MsgpackReader &);
+void write_to_msgpack(MsgpackWriter &, const ArgAccess::Write &);
+ArgAccess::ReadWrite readwrite_fields_from_msgpack(MsgpackReader &, size_t);
+void readwrite_fields_to_msgpack(MsgpackWriter &, const ArgAccess::ReadWrite &);
+ArgAccess::ReadWrite readwrite_from_msgpack(MsgpackReader &);
+void readwrite_to_msgpack(MsgpackWriter &, const ArgAccess::ReadWrite &);
+ArgAccess::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const ArgAccess::Any &);
+} // namespace ArgAccess
+namespace ArgSizeExpr {
+ArgSizeExpr::Param param_fields_from_msgpack(MsgpackReader &, size_t);
+void param_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Param &);
+ArgSizeExpr::Param param_from_msgpack(MsgpackReader &);
+void param_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Param &);
+ArgSizeExpr::Const const_fields_from_msgpack(MsgpackReader &, size_t);
+void const_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Const &);
+ArgSizeExpr::Const const_from_msgpack(MsgpackReader &);
+void const_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Const &);
+ArgSizeExpr::Add add_fields_from_msgpack(MsgpackReader &, size_t);
+void add_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Add &);
+ArgSizeExpr::Add add_from_msgpack(MsgpackReader &);
+void add_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Add &);
+ArgSizeExpr::Mul mul_fields_from_msgpack(MsgpackReader &, size_t);
+void mul_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Mul &);
+ArgSizeExpr::Mul mul_from_msgpack(MsgpackReader &);
+void mul_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Mul &);
+ArgSizeExpr::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Any &);
+} // namespace ArgSizeExpr
+namespace PathStep {
+PathStep::Field field_fields_from_msgpack(MsgpackReader &, size_t);
+void field_fields_to_msgpack(MsgpackWriter &, const PathStep::Field &);
+PathStep::Field field_from_msgpack(MsgpackReader &);
+void field_to_msgpack(MsgpackWriter &, const PathStep::Field &);
+PathStep::Deref deref_fields_from_msgpack(MsgpackReader &, size_t);
+void deref_fields_to_msgpack(MsgpackWriter &, const PathStep::Deref &);
+PathStep::Deref deref_from_msgpack(MsgpackReader &);
+void deref_to_msgpack(MsgpackWriter &, const PathStep::Deref &);
+PathStep::Index index_fields_from_msgpack(MsgpackReader &, size_t);
+void index_fields_to_msgpack(MsgpackWriter &, const PathStep::Index &);
+PathStep::Index index_from_msgpack(MsgpackReader &);
+void index_to_msgpack(MsgpackWriter &, const PathStep::Index &);
+PathStep::IndexDyn indexdyn_fields_from_msgpack(MsgpackReader &, size_t);
+void indexdyn_fields_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
+PathStep::IndexDyn indexdyn_from_msgpack(MsgpackReader &);
+void indexdyn_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
+PathStep::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const PathStep::Any &);
+} // namespace PathStep
 namespace TypeKind {
 TypeKind::None none_fields_from_msgpack(MsgpackReader &, size_t);
 void none_fields_to_msgpack(MsgpackWriter &, const TypeKind::None &);
@@ -9271,13 +9508,13 @@ void signature_to_msgpack(MsgpackWriter &w_, const Signature &x_) {
 InvokeSignature invokesignature_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 5) throw std::runtime_error("Expected InvokeSignature with 5 field(s)");
   auto name = sym_from_msgpack(r_);
-  std::vector<Type::Any> tpeVars;
+  std::vector<Type::Any> tpeArgs;
   {
-    auto tpeVars_size = r_.readArrayHeader();
-    tpeVars.reserve(tpeVars_size);
-    for (size_t tpeVars_idx = 0; tpeVars_idx < tpeVars_size; ++tpeVars_idx) {
-      auto tpeVars_elem = Type::any_from_msgpack(r_);
-      tpeVars.emplace_back(std::move(tpeVars_elem));
+    auto tpeArgs_size = r_.readArrayHeader();
+    tpeArgs.reserve(tpeArgs_size);
+    for (size_t tpeArgs_idx = 0; tpeArgs_idx < tpeArgs_size; ++tpeArgs_idx) {
+      auto tpeArgs_elem = Type::any_from_msgpack(r_);
+      tpeArgs.emplace_back(std::move(tpeArgs_elem));
     }
   }
   std::optional<Type::Any> receiver;
@@ -9295,13 +9532,13 @@ InvokeSignature invokesignature_fields_from_msgpack(MsgpackReader &r_, size_t n_
     }
   }
   auto rtn = Type::any_from_msgpack(r_);
-  return {name, tpeVars, receiver, args, rtn};
+  return {name, tpeArgs, receiver, args, rtn};
 }
 
 void invokesignature_fields_to_msgpack(MsgpackWriter &w_, const InvokeSignature &x_) {
   sym_to_msgpack(w_, x_.name);
-  w_.writeArrayHeader(x_.tpeVars.size());
-  for (const auto &v0_ : x_.tpeVars) {
+  w_.writeArrayHeader(x_.tpeArgs.size());
+  for (const auto &v0_ : x_.tpeArgs) {
     Type::any_to_msgpack(w_, v0_);
   }
   if (x_.receiver) {
@@ -9503,21 +9740,332 @@ void FunctionAffinity::any_to_msgpack(MsgpackWriter &w_, const FunctionAffinity:
                  [&](const FunctionAffinity::Host &y_) -> void { w_.writeInt32(1); });
 }
 
+ArgAccess::Read ArgAccess::read_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected ArgAccess::Read with 0 field(s)");
+  return {};
+}
+
+void ArgAccess::read_fields_to_msgpack(MsgpackWriter &w_, const ArgAccess::Read &x_) {}
+
+ArgAccess::Read ArgAccess::read_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgAccess::read_fields_from_msgpack(r_, n_);
+}
+
+void ArgAccess::read_to_msgpack(MsgpackWriter &w_, const ArgAccess::Read &x_) {
+  w_.writeArrayHeader(0);
+  ArgAccess::read_fields_to_msgpack(w_, x_);
+}
+
+ArgAccess::Write ArgAccess::write_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected ArgAccess::Write with 0 field(s)");
+  return {};
+}
+
+void ArgAccess::write_fields_to_msgpack(MsgpackWriter &w_, const ArgAccess::Write &x_) {}
+
+ArgAccess::Write ArgAccess::write_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgAccess::write_fields_from_msgpack(r_, n_);
+}
+
+void ArgAccess::write_to_msgpack(MsgpackWriter &w_, const ArgAccess::Write &x_) {
+  w_.writeArrayHeader(0);
+  ArgAccess::write_fields_to_msgpack(w_, x_);
+}
+
+ArgAccess::ReadWrite ArgAccess::readwrite_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected ArgAccess::ReadWrite with 0 field(s)");
+  return {};
+}
+
+void ArgAccess::readwrite_fields_to_msgpack(MsgpackWriter &w_, const ArgAccess::ReadWrite &x_) {}
+
+ArgAccess::ReadWrite ArgAccess::readwrite_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgAccess::readwrite_fields_from_msgpack(r_, n_);
+}
+
+void ArgAccess::readwrite_to_msgpack(MsgpackWriter &w_, const ArgAccess::ReadWrite &x_) {
+  w_.writeArrayHeader(0);
+  ArgAccess::readwrite_fields_to_msgpack(w_, x_);
+}
+
+ArgAccess::Any ArgAccess::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return ArgAccess::read_fields_from_msgpack(r_, n_ - 1);
+      case 1: return ArgAccess::write_fields_from_msgpack(r_, n_ - 1);
+      case 2: return ArgAccess::readwrite_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return ArgAccess::read_fields_from_msgpack(r_, 0);
+      case 1: return ArgAccess::write_fields_from_msgpack(r_, 0);
+      case 2: return ArgAccess::readwrite_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void ArgAccess::any_to_msgpack(MsgpackWriter &w_, const ArgAccess::Any &x_) {
+  x_.match_total([&](const ArgAccess::Read &y_) -> void { w_.writeInt32(0); },
+                 [&](const ArgAccess::Write &y_) -> void { w_.writeInt32(1); },
+                 [&](const ArgAccess::ReadWrite &y_) -> void { w_.writeInt32(2); });
+}
+
+ArgSizeExpr::Param ArgSizeExpr::param_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected ArgSizeExpr::Param with 1 field(s)");
+  auto index = static_cast<int32_t>(r_.readInt32());
+  return ArgSizeExpr::Param(index);
+}
+
+void ArgSizeExpr::param_fields_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Param &x_) {
+  w_.writeInt32(static_cast<int32_t>(x_.index));
+}
+
+ArgSizeExpr::Param ArgSizeExpr::param_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgSizeExpr::param_fields_from_msgpack(r_, n_);
+}
+
+void ArgSizeExpr::param_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Param &x_) {
+  w_.writeArrayHeader(1);
+  ArgSizeExpr::param_fields_to_msgpack(w_, x_);
+}
+
+ArgSizeExpr::Const ArgSizeExpr::const_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected ArgSizeExpr::Const with 1 field(s)");
+  auto value = r_.readInt64();
+  return ArgSizeExpr::Const(value);
+}
+
+void ArgSizeExpr::const_fields_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Const &x_) { w_.writeInt64(x_.value); }
+
+ArgSizeExpr::Const ArgSizeExpr::const_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgSizeExpr::const_fields_from_msgpack(r_, n_);
+}
+
+void ArgSizeExpr::const_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Const &x_) {
+  w_.writeArrayHeader(1);
+  ArgSizeExpr::const_fields_to_msgpack(w_, x_);
+}
+
+ArgSizeExpr::Add ArgSizeExpr::add_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected ArgSizeExpr::Add with 2 field(s)");
+  auto lhs = ArgSizeExpr::any_from_msgpack(r_);
+  auto rhs = ArgSizeExpr::any_from_msgpack(r_);
+  return {lhs, rhs};
+}
+
+void ArgSizeExpr::add_fields_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Add &x_) {
+  ArgSizeExpr::any_to_msgpack(w_, x_.lhs);
+  ArgSizeExpr::any_to_msgpack(w_, x_.rhs);
+}
+
+ArgSizeExpr::Add ArgSizeExpr::add_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgSizeExpr::add_fields_from_msgpack(r_, n_);
+}
+
+void ArgSizeExpr::add_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Add &x_) {
+  w_.writeArrayHeader(2);
+  ArgSizeExpr::add_fields_to_msgpack(w_, x_);
+}
+
+ArgSizeExpr::Mul ArgSizeExpr::mul_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected ArgSizeExpr::Mul with 2 field(s)");
+  auto lhs = ArgSizeExpr::any_from_msgpack(r_);
+  auto rhs = ArgSizeExpr::any_from_msgpack(r_);
+  return {lhs, rhs};
+}
+
+void ArgSizeExpr::mul_fields_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Mul &x_) {
+  ArgSizeExpr::any_to_msgpack(w_, x_.lhs);
+  ArgSizeExpr::any_to_msgpack(w_, x_.rhs);
+}
+
+ArgSizeExpr::Mul ArgSizeExpr::mul_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgSizeExpr::mul_fields_from_msgpack(r_, n_);
+}
+
+void ArgSizeExpr::mul_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Mul &x_) {
+  w_.writeArrayHeader(2);
+  ArgSizeExpr::mul_fields_to_msgpack(w_, x_);
+}
+
+ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return ArgSizeExpr::param_fields_from_msgpack(r_, n_ - 1);
+      case 1: return ArgSizeExpr::const_fields_from_msgpack(r_, n_ - 1);
+      case 2: return ArgSizeExpr::add_fields_from_msgpack(r_, n_ - 1);
+      case 3: return ArgSizeExpr::mul_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 1: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 2: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 3: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void ArgSizeExpr::any_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Any &x_) {
+  x_.match_total(
+      [&](const ArgSizeExpr::Param &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(0);
+        ArgSizeExpr::param_fields_to_msgpack(w_, y_);
+      },
+      [&](const ArgSizeExpr::Const &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(1);
+        ArgSizeExpr::const_fields_to_msgpack(w_, y_);
+      },
+      [&](const ArgSizeExpr::Add &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(2);
+        ArgSizeExpr::add_fields_to_msgpack(w_, y_);
+      },
+      [&](const ArgSizeExpr::Mul &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(3);
+        ArgSizeExpr::mul_fields_to_msgpack(w_, y_);
+      });
+}
+
+ArgExtent::Elements ArgExtent::elements_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected ArgExtent::Elements with 1 field(s)");
+  auto size = ArgSizeExpr::any_from_msgpack(r_);
+  return ArgExtent::Elements(size);
+}
+
+void ArgExtent::elements_fields_to_msgpack(MsgpackWriter &w_, const ArgExtent::Elements &x_) { ArgSizeExpr::any_to_msgpack(w_, x_.size); }
+
+ArgExtent::Elements ArgExtent::elements_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgExtent::elements_fields_from_msgpack(r_, n_);
+}
+
+void ArgExtent::elements_to_msgpack(MsgpackWriter &w_, const ArgExtent::Elements &x_) {
+  w_.writeArrayHeader(1);
+  ArgExtent::elements_fields_to_msgpack(w_, x_);
+}
+
+ArgExtent::Bytes ArgExtent::bytes_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected ArgExtent::Bytes with 1 field(s)");
+  auto size = ArgSizeExpr::any_from_msgpack(r_);
+  return ArgExtent::Bytes(size);
+}
+
+void ArgExtent::bytes_fields_to_msgpack(MsgpackWriter &w_, const ArgExtent::Bytes &x_) { ArgSizeExpr::any_to_msgpack(w_, x_.size); }
+
+ArgExtent::Bytes ArgExtent::bytes_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgExtent::bytes_fields_from_msgpack(r_, n_);
+}
+
+void ArgExtent::bytes_to_msgpack(MsgpackWriter &w_, const ArgExtent::Bytes &x_) {
+  w_.writeArrayHeader(1);
+  ArgExtent::bytes_fields_to_msgpack(w_, x_);
+}
+
+ArgExtent::Any ArgExtent::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return ArgExtent::elements_fields_from_msgpack(r_, n_ - 1);
+      case 1: return ArgExtent::bytes_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 1: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void ArgExtent::any_to_msgpack(MsgpackWriter &w_, const ArgExtent::Any &x_) {
+  x_.match_total(
+      [&](const ArgExtent::Elements &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(0);
+        ArgExtent::elements_fields_to_msgpack(w_, y_);
+      },
+      [&](const ArgExtent::Bytes &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(1);
+        ArgExtent::bytes_fields_to_msgpack(w_, y_);
+      });
+}
+
+Boundary boundary_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Boundary with 2 field(s)");
+  auto access = ArgAccess::any_from_msgpack(r_);
+  auto extent = ArgExtent::any_from_msgpack(r_);
+  return {access, extent};
+}
+
+void boundary_fields_to_msgpack(MsgpackWriter &w_, const Boundary &x_) {
+  ArgAccess::any_to_msgpack(w_, x_.access);
+  ArgExtent::any_to_msgpack(w_, x_.extent);
+}
+
+Boundary boundary_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return boundary_fields_from_msgpack(r_, n_);
+}
+
+void boundary_to_msgpack(MsgpackWriter &w_, const Boundary &x_) {
+  w_.writeArrayHeader(2);
+  boundary_fields_to_msgpack(w_, x_);
+}
+
 Arg arg_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Arg with 2 field(s)");
+  if (n_ != 3) throw std::runtime_error("Expected Arg with 3 field(s)");
   auto named = named_from_msgpack(r_);
   std::optional<SourcePosition> pos;
   if (!r_.tryReadNil()) {
     auto pos_value = sourceposition_from_msgpack(r_);
     pos = std::move(pos_value);
   }
-  return {named, pos};
+  std::optional<Boundary> boundary;
+  if (!r_.tryReadNil()) {
+    auto boundary_value = boundary_from_msgpack(r_);
+    boundary = std::move(boundary_value);
+  }
+  return {named, pos, boundary};
 }
 
 void arg_fields_to_msgpack(MsgpackWriter &w_, const Arg &x_) {
   named_to_msgpack(w_, x_.named);
   if (x_.pos) {
     sourceposition_to_msgpack(w_, (*x_.pos));
+  } else {
+    w_.writeNil();
+  }
+  if (x_.boundary) {
+    boundary_to_msgpack(w_, (*x_.boundary));
   } else {
     w_.writeNil();
   }
@@ -9529,12 +10077,12 @@ Arg arg_from_msgpack(MsgpackReader &r_) {
 }
 
 void arg_to_msgpack(MsgpackWriter &w_, const Arg &x_) {
-  w_.writeArrayHeader(2);
+  w_.writeArrayHeader(3);
   arg_fields_to_msgpack(w_, x_);
 }
 
-Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 12) throw std::runtime_error("Expected Function with 12 field(s)");
+FunctionDecl functiondecl_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 8) throw std::runtime_error("Expected FunctionDecl with 8 field(s)");
   auto name = sym_from_msgpack(r_);
   std::vector<std::string> tpeVars;
   {
@@ -9578,23 +10126,11 @@ Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
     }
   }
   auto rtn = Type::any_from_msgpack(r_);
-  std::vector<Stmt::Any> body;
-  {
-    auto body_size = r_.readArrayHeader();
-    body.reserve(body_size);
-    for (size_t body_idx = 0; body_idx < body_size; ++body_idx) {
-      auto body_elem = Stmt::any_from_msgpack(r_);
-      body.emplace_back(std::move(body_elem));
-    }
-  }
-  auto visibility = FunctionVisibility::any_from_msgpack(r_);
-  auto fpMode = FunctionFpMode::any_from_msgpack(r_);
-  auto isEntry = r_.readBoolean();
   auto affinity = FunctionAffinity::any_from_msgpack(r_);
-  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, visibility, fpMode, isEntry, affinity};
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, affinity};
 }
 
-void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
+void functiondecl_fields_to_msgpack(MsgpackWriter &w_, const FunctionDecl &x_) {
   sym_to_msgpack(w_, x_.name);
   w_.writeArrayHeader(x_.tpeVars.size());
   for (const auto &v0_ : x_.tpeVars) {
@@ -9618,6 +10154,39 @@ void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
     arg_to_msgpack(w_, v0_);
   }
   Type::any_to_msgpack(w_, x_.rtn);
+  FunctionAffinity::any_to_msgpack(w_, x_.affinity);
+}
+
+FunctionDecl functiondecl_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return functiondecl_fields_from_msgpack(r_, n_);
+}
+
+void functiondecl_to_msgpack(MsgpackWriter &w_, const FunctionDecl &x_) {
+  w_.writeArrayHeader(8);
+  functiondecl_fields_to_msgpack(w_, x_);
+}
+
+Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected Function with 5 field(s)");
+  auto decl = functiondecl_from_msgpack(r_);
+  std::vector<Stmt::Any> body;
+  {
+    auto body_size = r_.readArrayHeader();
+    body.reserve(body_size);
+    for (size_t body_idx = 0; body_idx < body_size; ++body_idx) {
+      auto body_elem = Stmt::any_from_msgpack(r_);
+      body.emplace_back(std::move(body_elem));
+    }
+  }
+  auto visibility = FunctionVisibility::any_from_msgpack(r_);
+  auto fpMode = FunctionFpMode::any_from_msgpack(r_);
+  auto isEntry = r_.readBoolean();
+  return {decl, body, visibility, fpMode, isEntry};
+}
+
+void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
+  functiondecl_to_msgpack(w_, x_.decl);
   w_.writeArrayHeader(x_.body.size());
   for (const auto &v0_ : x_.body) {
     Stmt::any_to_msgpack(w_, v0_);
@@ -9625,7 +10194,6 @@ void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
   FunctionVisibility::any_to_msgpack(w_, x_.visibility);
   FunctionFpMode::any_to_msgpack(w_, x_.fpMode);
   w_.writeBoolean(x_.isEntry);
-  FunctionAffinity::any_to_msgpack(w_, x_.affinity);
 }
 
 Function function_from_msgpack(MsgpackReader &r_) {
@@ -9634,7 +10202,7 @@ Function function_from_msgpack(MsgpackReader &r_) {
 }
 
 void function_to_msgpack(MsgpackWriter &w_, const Function &x_) {
-  w_.writeArrayHeader(12);
+  w_.writeArrayHeader(5);
   function_fields_to_msgpack(w_, x_);
 }
 
@@ -10201,6 +10769,52 @@ CompileResult compileresult_from_msgpack(MsgpackReader &r_) {
 void compileresult_to_msgpack(MsgpackWriter &w_, const CompileResult &x_) {
   w_.writeArrayHeader(6);
   compileresult_fields_to_msgpack(w_, x_);
+}
+
+LibraryDef librarydef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected LibraryDef with 3 field(s)");
+  auto name = sym_from_msgpack(r_);
+  std::vector<FunctionDecl> decls;
+  {
+    auto decls_size = r_.readArrayHeader();
+    decls.reserve(decls_size);
+    for (size_t decls_idx = 0; decls_idx < decls_size; ++decls_idx) {
+      auto decls_elem = functiondecl_from_msgpack(r_);
+      decls.emplace_back(std::move(decls_elem));
+    }
+  }
+  std::vector<MetaEntry> metadata;
+  {
+    auto metadata_size = r_.readArrayHeader();
+    metadata.reserve(metadata_size);
+    for (size_t metadata_idx = 0; metadata_idx < metadata_size; ++metadata_idx) {
+      auto metadata_elem = metaentry_from_msgpack(r_);
+      metadata.emplace_back(std::move(metadata_elem));
+    }
+  }
+  return {name, decls, metadata};
+}
+
+void librarydef_fields_to_msgpack(MsgpackWriter &w_, const LibraryDef &x_) {
+  sym_to_msgpack(w_, x_.name);
+  w_.writeArrayHeader(x_.decls.size());
+  for (const auto &v0_ : x_.decls) {
+    functiondecl_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.metadata.size());
+  for (const auto &v0_ : x_.metadata) {
+    metaentry_to_msgpack(w_, v0_);
+  }
+}
+
+LibraryDef librarydef_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return librarydef_fields_from_msgpack(r_, n_);
+}
+
+void librarydef_to_msgpack(MsgpackWriter &w_, const LibraryDef &x_) {
+  w_.writeArrayHeader(3);
+  librarydef_fields_to_msgpack(w_, x_);
 }
 
 static void structdefs_value_to_msgpack(MsgpackWriter &w_, const std::vector<StructDef> &xs_) {

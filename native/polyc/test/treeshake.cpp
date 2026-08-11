@@ -33,7 +33,7 @@ Program library(const Vector<Function> &fns, const Vector<StructDef> &defs = {})
 }
 
 Vector<std::string> namesOf(const Vector<Function> &fns) {
-  return fns ^ map([](const auto &f) { return repr(f.name); }) ^ distinct() ^ sort();
+  return fns ^ map([](const auto &f) { return repr(f.decl.name); }) ^ distinct() ^ sort();
 }
 
 Vector<std::string> shake(const Program &p) { return namesOf(compiler::runPipeline(p, Treeshake).functions); }
@@ -73,5 +73,5 @@ TEST_CASE("a treeshaken library round-trips through msgpack") {
   const auto decoded = hashed_program_from_msgpack(hashed_program_to_msgpack(compiler::runPipeline(lib, Treeshake)));
   CHECK(namesOf(decoded.functions) == Vector<std::string>{"a", "shared"});
   CHECK((decoded.functions //
-         ^ exists([](const auto &f) { return repr(f.name) == "a" && f.visibility.template is<FunctionVisibility::Exported>(); })));
+         ^ exists([](const auto &f) { return repr(f.decl.name) == "a" && f.visibility.template is<FunctionVisibility::Exported>(); })));
 }

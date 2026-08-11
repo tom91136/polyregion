@@ -20,6 +20,8 @@ using namespace polyregion::compiletime;
 using namespace polyregion::polyast;
 using namespace polyregion::polyast::dsl;
 
+TEST_CASE("polyc JIT reports its wire ABI", "[jit]") { CHECK(polyc_jit_abi_version() == POLYC_JIT_ABI_VERSION); }
+
 TEST_CASE("polyc JIT C ABI compiles and owns its result", "[jit]") {
   const auto entry =
       function("jit_test", {}, Type::Unit0(), FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true)({ret(Term::Unit0Const())});

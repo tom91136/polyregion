@@ -173,7 +173,7 @@ object compiletime {
 
           rewrittenMirror =
             fn.copy(
-              name = sourceSignature.name
+              decl = fn.decl.copy(name = sourceSignature.name)
               // Note: previously filtered out the intrinsic$ moduleCapture, but the function body
               // still references intrinsics$ until Intrinsify runs in opt passes. Keeping the
               // capture allows the unopt verifier (which runs before intrinsify) to pass. After
@@ -313,13 +313,16 @@ object compiletime {
         Compiler.compileAndReplaceStructDependencies(
           sink,
           p.Function(
-            p.Sym("_dummy_"),
-            Nil,
-            None,
-            Nil,
-            Nil,
-            Nil,
-            p.Type.Nothing,
+            p.FunctionDecl(
+              p.Sym("_dummy_"),
+              Nil,
+              None,
+              Nil,
+              Nil,
+              Nil,
+              p.Type.Nothing,
+              p.Function.Affinity.Offload
+            ),
             Nil,
             p.Function.Visibility.Exported,
             p.Function.FpMode.Relaxed,

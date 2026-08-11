@@ -271,8 +271,10 @@ object Traversal {
     }
   }
 
+  def empty[A, B]: Traversal[A, B] = nullTraversal.asInstanceOf[Traversal[A, B]]
+
   given [A, B](using NotGiven[A <:< Product]): Traversal[A, B] =
-    nullTraversal.asInstanceOf[Traversal[A, B]]
+    empty
 
   given [A, B](using t: Traversal[A, B]): Traversal[List[A], B] = new Traversal[List[A], B] {
     extension (xs: List[A]) {
