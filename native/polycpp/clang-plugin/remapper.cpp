@@ -35,6 +35,7 @@ using namespace aspartame;
 const static auto EmptyStructMarker = Named(polyregion::conventions::EmptyStructStorageField, Type::IntU8());
 const static std::string This = polyregion::conventions::ThisReceiver;
 const static std::string Empty = "#empty";
+const static std::string CapturedThis = "#captured_this";
 
 [[nodiscard]] static Expr::Any defaultValue(const Type::Any &tpe) {
   return tpe.match_total(                                                                     //
@@ -459,10 +460,38 @@ std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
   return decl->getDeclName().getAsString();
 }
 
+static std::string packCaptureName(const clang::ValueDecl *var) {
+  if (const auto *param = llvm::dyn_cast<clang::ParmVarDecl>(var))
+    return fmt::format("{}_{}", var->getName().str(), param->getFunctionScopeIndex());
+  return declName(var);
+}
+
+static std::string lambdaCaptureName(const clang::CXXRecordDecl *lambda, const clang::ValueDecl *var) {
+  const auto sameName = lambda->captures() | count([&](const auto &capture) {
+                          return capture.capturesVariable() && capture.getCapturedVar()->getName() == var->getName();
+                        });
+  return sameName > 1 ? packCaptureName(var) : var->getName().str();
+}
+
 [[nodiscard]] static std::string fieldDeclName(const clang::FieldDecl *field) {
+  if (const auto *lambda = llvm::dyn_cast<clang::CXXRecordDecl>(field->getParent()); lambda && lambda->isLambda()) {
+    const auto captureName =
+        lambda->fields() | zip(lambda->captures()) | collect_first([&](const auto &candidate, const auto &capture) -> Opt<std::string> {
+          if (candidate != field) return {};
+          if (capture.capturesVariable()) return lambdaCaptureName(lambda, capture.getCapturedVar());
+          return capture.capturesThis() ? Opt<std::string>{CapturedThis} : std::nullopt;
+        });
+    if (captureName) return *captureName;
+  }
   // two unnamed anonymous struct/union members in one record would otherwise collide on the empty symbol
   if (field->isAnonymousStructOrUnion()) return fmt::format("#anon_{}", field->getFieldIndex());
   return field->getName().str();
+}
+
+[[nodiscard]] static std::string fieldSymbolName(const clang::FieldDecl *field, const std::string &ownerName) {
+  const auto name = fieldDeclName(field);
+  const auto *owner = llvm::dyn_cast<clang::CXXRecordDecl>(field->getParent());
+  return owner && owner->isLambda() ? name : fmt::format("{}::{}", ownerName, name);
 }
 
 static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
@@ -732,7 +761,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       auto fieldNamed = [&](const clang::FieldDecl *field) {
                         const auto owner = handleType(context.getCanonicalTagType(field->getParent()), r).template get<Type::Struct>();
                         if (!owner) raise("Field owner is not a struct: " + field->getNameAsString());
-                        return Named(fmt::format("{}::{}", repr(owner->name), fieldDeclName(field)), handleType(field->getType(), r));
+                        return Named(fieldSymbolName(field, repr(owner->name)), handleType(field->getType(), r));
                       };
                       // an anonymous struct/union member initialises indirectly, so the leaf is reached through every
                       // enclosing anonymous record rather than named on the ctor's own struct
@@ -960,7 +989,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     Vector<StructLayoutMember> all;
     Map<std::string, size_t> bitfieldStorageIndices;
     for (auto *field : decl->fields()) {
-      const auto fieldName = fmt::format("{}::{}", name, fieldDeclName(field));
+      const auto fieldName = fieldSymbolName(field, name);
       if (!field->isBitField()) {
         if (field->isZeroSize(context)) {
           const auto e = emptyStruct();
@@ -1053,13 +1082,18 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
           | zip(cxxRecord->captures()) //
           | collect([&](const auto &field, const auto &capture) -> Opt<StructLayoutMember> {
               const auto var = capture.getCapturedVar();
-              if (var->getType().isConstQualified()) readOnlyMembers[name].emplace(var->getName().str());
+              if (!var) {
+                if (capture.capturesThis()) return resolveField(field, CapturedThis, handleType(field->getType(), r));
+                return {};
+              }
+              const auto captureName = lambdaCaptureName(cxxRecord, var);
+              if (var->getType().isConstQualified()) readOnlyMembers[name].emplace(captureName);
               switch (capture.getCaptureKind()) {
                 case clang::LCK_ByCopy: {
                   if (const auto captured = field->getType()->getAsCXXRecordDecl(); captured && captured->isLambda() && globalCapture)
                     r.globalCaptures.emplace(captured->getCanonicalDecl());
                   const auto tpe = handleType(field->getType(), r);
-                  return resolveField(field, var->getName().str(), tpe);
+                  return resolveField(field, captureName, tpe);
                 }
                 case clang::LCK_ByRef: {
                   const auto varTpe = var->getType();
@@ -1068,7 +1102,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                   const auto inferred = r.valueTypes ^ get_maybe(var);
                   const auto capturedTpe = inferred ? *inferred : handleType(varTpe, r);
                   const auto tpe = varTpe->isReferenceType() ? capturedTpe : Type::Ptr(capturedTpe, space).widen();
-                  return resolveField(field, var->getName().str(), tpe);
+                  return resolveField(field, captureName, tpe);
                 }
                 default: return {};
               }
@@ -1585,7 +1619,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     };
 
     auto sourceNamed = [&](const clang::FieldDecl *field) {
-      return Named(fmt::format("{}::{}", fieldOwnerName(field), fieldDeclName(field)), handleType(field->getType(), r));
+      return Named(fieldSymbolName(field, fieldOwnerName(field)), handleType(field->getType(), r));
     };
 
     auto storageNamed = [&](const clang::FieldDecl *field) {
@@ -1738,7 +1772,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               const auto *init = expr->getInit(i++);
               if (llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
               const auto ftpe = handleType(field->getType(), r);
-              const auto member = select(r, {allocated}, Named(repr(structTpe->name) + "::" + fieldDeclName(field), ftpe));
+              const auto member = select(r, {allocated}, Named(fieldSymbolName(field, repr(structTpe->name)), ftpe));
               if (const auto arrTpe = ftpe.get<Type::Arr>()) {
                 if (const auto elems = llvm::dyn_cast<clang::InitListExpr>(init)) {
                   initArray(member, *arrTpe, elems);
@@ -2104,7 +2138,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const auto fieldName = decl->getDeclName().isEmpty() //
                                      ? refDeclName
                                      : decl->getDeclName().getAsString();
-          if (const auto field = r.parent->members | find([&](const auto &m) { return m.symbol == fieldName; })) {
+          const auto field = Vector<std::string>{fieldName, packCaptureName(decl), refDeclName} | collect_first([&](const auto &candidate) {
+                               return r.parent->members | find([&](const auto &member) { return member.symbol == candidate; });
+                             });
+          if (field) {
             return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, *field));
           } else {
             const auto declName = Named(fieldName, handleType(decl->getType(), r));
@@ -2369,15 +2406,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto def = r.findStruct(repr(structTpe->name), "lambda captures");
         for (auto &&[capture, init] : expr->getLambdaClass()->captures() | zip(expr->capture_inits())) {
           const auto var = capture.getCapturedVar();
-          if (!var) continue;
-          const auto name = var->getName().str();
+          if (!var && !capture.capturesThis()) continue;
+          const auto name = var ? lambdaCaptureName(expr->getLambdaClass(), var) : CapturedThis;
           const auto field = def->members | find([&](const auto &m) { return m.symbol == name; });
           if (!field) continue;
           const auto member = select(r, {instance}, *field);
           if (const auto arr = field->tpe.get<Type::Arr>()) copyArray(r, member, r.newVar(handleExpr(init, r)), *arr);
           else {
             const auto value = [&]() -> Expr::Any {
-              if (capture.getCaptureKind() != clang::LCK_ByRef) return handleExpr(init, r);
+              if (!var || capture.getCaptureKind() != clang::LCK_ByRef) return handleExpr(init, r);
               const auto initValue = r.newVar(handleExpr(init, r));
               if (var->getType()->isReferenceType()) return Expr::Alias(initValue);
               const auto ptr = field->tpe.get<Type::Ptr>();
@@ -2545,7 +2582,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                             return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i + 1].named.tpe));
                           }) //
                         | to_vector();
-          auto thisArg = r.newVar(conform(r, instance, ptrTo(ctorTpe)));
+          auto thisArg = r.newVar(conform(r, instance, fn->decl.args.front().named.tpe));
           auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
                                          std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
           if (defaultStdBase) {
@@ -2745,8 +2782,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                                         handleType(expr->getCallReturnType(context), r)));
         }
       },
-      [&](const clang::CXXThisExpr *expr) -> Expr::Any { //  method(...)
-        return Expr::Alias(select(r, {}, Named(This, handleType(expr->getType(), r))));
+      [&](const clang::CXXThisExpr *expr) -> Expr::Any {
+        const auto thisTpe = handleType(expr->getType(), r);
+        if (r.parent)
+          if (const auto ptr = thisTpe.get<Type::Ptr>())
+            if (const auto owner = ptr->comp.get<Type::Struct>(); owner && owner->name != r.parent->name)
+              if (const auto field = r.parent->members | find([&](const auto &member) { return member.symbol == CapturedThis; })) {
+                const auto tpeVars = r.parent->tpeVars | map([](const auto &v) { return Type::Var(v).widen(); }) | to_vector();
+                return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, tpeVars), r.thisSpace))}, *field));
+              }
+        return Expr::Alias(select(r, {}, Named(This, thisTpe)));
       },
       [&](const clang::MemberExpr *expr) -> Expr::Any { //  instance.member; instance->member
         const auto baseExpr = handleExpr(expr->getBase(), r);
@@ -2839,7 +2884,7 @@ void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record
     if (!memberRecord || memberRecord->hasTrivialDestructor()) continue;
     auto steps = instance.steps;
     const auto owner = handleRecord(record, r);
-    steps.emplace_back(PathStep::Field(fmt::format("{}::{}", repr(owner->name), fieldDeclName(field))));
+    steps.emplace_back(PathStep::Field(fieldSymbolName(field, repr(owner->name))));
     destroyValue(r, field->getType(), Term::Select(instance.root, steps, handleType(field->getType(), r)));
   }
   for (auto base = record->bases_end(); base != record->bases_begin();) {
