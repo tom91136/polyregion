@@ -2371,8 +2371,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_GT: return Expr::IntrOp(Intr::LogicGt(rl(), rr()));
           case clang::BO_LE: return Expr::IntrOp(Intr::LogicLte(rl(), rr()));
           case clang::BO_GE: return Expr::IntrOp(Intr::LogicGte(rl(), rr()));
-          case clang::BO_EQ: return Expr::IntrOp(Intr::LogicEq(rl(), rr()));
-          case clang::BO_NE: return Expr::IntrOp(Intr::LogicNeq(rl(), rr()));
+          case clang::BO_EQ:
+            if (lhs.tpe().is<Type::Ptr>() && rhs.tpe().is<Type::Ptr>())
+              return Expr::IntrOp(Intr::LogicEq(lhs, r.newVar(conform(r, Expr::Alias(rhs), lhs.tpe()))));
+            return Expr::IntrOp(Intr::LogicEq(rl(), rr()));
+          case clang::BO_NE:
+            if (lhs.tpe().is<Type::Ptr>() && rhs.tpe().is<Type::Ptr>())
+              return Expr::IntrOp(Intr::LogicNeq(lhs, r.newVar(conform(r, Expr::Alias(rhs), lhs.tpe()))));
+            return Expr::IntrOp(Intr::LogicNeq(rl(), rr()));
           case clang::BO_And: return Expr::IntrOp(Intr::BAnd(dl(), dr(), tpe_));
           case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(dl(), dr(), tpe_));
           case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl(), dr(), tpe_));
