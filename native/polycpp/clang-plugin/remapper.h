@@ -37,6 +37,8 @@ struct Remapper {
     Set<const clang::CXXRecordDecl *> globalCaptures{};
     TypeSpace::Any thisSpace = TypeSpace::Global();
     bool ctorChain = false;
+    Opt<Named> constructInto{};
+    Opt<Term::Select> constructArrayInto{};
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
     Vector<Stmt::Any> stmts{};
@@ -67,6 +69,8 @@ struct Remapper {
       RemapContext r = *this;
       r.parent = scopeStructName ? scopeStructName : parent;
       r.ctorChain = scopeCtorChain.value_or(ctorChain);
+      r.constructInto.reset();
+      r.constructArrayInto.reset();
       r.rtnType = scopeRtnType.value_or(rtnType);
       r.stmts.clear();
       if (!persistFunctionState) {

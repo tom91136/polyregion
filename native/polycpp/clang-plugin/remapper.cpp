@@ -37,6 +37,8 @@ const static std::string This = polyregion::conventions::ThisReceiver;
 const static std::string Empty = "#empty";
 const static std::string CapturedThis = "#captured_this";
 
+[[nodiscard]] static const clang::Expr *transparentExceptionExpr(const clang::Stmt *stmt);
+
 [[nodiscard]] static Expr::Any defaultValue(const Type::Any &tpe) {
   return tpe.match_total(                                                                     //
       [&](const Type::Float16 &) -> Expr::Any { return Expr::Alias(Term::Float16Const(0)); }, //
@@ -777,9 +779,23 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       const auto tpe = leaf.tpe;
                       const auto prefix = chain | take(chain.size() - 1) | map(fieldNamed) | prepend(receiver->named) | to_vector();
                       auto member = select(r, prefix, leaf);
-                      if (const auto arr = tpe.template get<Type::Arr>())
-                        copyArray(r, member, r.newVar(handleExpr(init->getInit(), r)), *arr);
-                      else r.push(Stmt::Mut(member, conform(r, handleExpr(init->getInit(), r), tpe)));
+                      const clang::Expr *memberInit = init->getInit();
+                      while (const auto next = transparentExceptionExpr(memberInit))
+                        memberInit = next;
+                      if (const auto arr = tpe.template get<Type::Arr>()) {
+                        if (llvm::isa<clang::CXXConstructExpr>(memberInit)) {
+                          r.constructArrayInto = member;
+                          (void)r.newVar(handleExpr(init->getInit(), r));
+                          r.constructArrayInto.reset();
+                        } else copyArray(r, member, r.newVar(handleExpr(init->getInit(), r)), *arr);
+                      } else if (tpe.template is<Type::Struct>() && llvm::isa<clang::CXXConstructExpr>(memberInit)) {
+                        const auto destination = r.newName(Type::Ptr(tpe, storageSpace(member)));
+                        r.push(Stmt::Var(destination, Expr::RefTo(member, {}, tpe, storageSpace(member), Region::Opaque()),
+                                         /*isMutable*/ false));
+                        r.constructInto = destination;
+                        (void)r.newVar(handleExpr(init->getInit(), r));
+                        r.constructInto.reset();
+                      } else r.push(Stmt::Mut(member, conform(r, handleExpr(init->getInit(), r), tpe)));
                     } else if (init->isBaseInitializer()) {
 
                       auto baseTpe = handleType(init->getInit()->getType(), r);
@@ -1310,8 +1326,6 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   const auto caught = decl->getType().getNonReferenceType()->getAsCXXRecordDecl();
   return caught && recordDerivesFrom(record, caught);
 }
-
-[[nodiscard]] static const clang::Expr *transparentExceptionExpr(const clang::Stmt *stmt);
 
 [[nodiscard]] static bool carriesComposedStdExceptionWhat(const clang::Expr *expr, Set<const clang::VarDecl *> &seen) {
   while (const auto next = transparentExceptionExpr(expr))
@@ -2427,6 +2441,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         return Expr::Alias(select(r, {}, instance));
       },
       [&](const clang::CXXConstructExpr *expr) {
+        const auto destination = r.constructInto;
+        r.constructInto.reset();
+        const auto arrayDestination = r.constructArrayInto;
+        r.constructArrayInto.reset();
         const auto ctorTpe = handleType(expr->getType(), r);
         const auto record = expr->getType()->getAsCXXRecordDecl();
         const auto customStdException = derivesStdException(record) && !isStdExceptionRecord(record);
@@ -2564,12 +2582,17 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           } else {
           }
 
-          auto instance = r.parent && r.ctorChain //
-              ? [&]() -> Expr::Any {
-            Named instance(This, ptrTo(Type::Struct(r.parent->name, {})));
-            defaultInitialiseStruct(r, *tpe, instance);
-            return Expr::Alias(select(r, {}, instance));
+          auto instance = destination ? [&]() -> Expr::Any {
+            if (expr->requiresZeroInitialization()) defaultInitialiseStruct(r, *tpe, *destination);
+            if (destination->tpe.template is<Type::Ptr>()) return Expr::Alias(select(r, {}, *destination));
+            return Expr::RefTo(select(r, {}, *destination), {}, ctorTpe, storageSpace(select(r, {}, *destination)), Region::Opaque());
           }()
+              : r.parent &&r.ctorChain //
+              ? [&]() -> Expr::Any {
+                  Named instance(This, ptrTo(Type::Struct(r.parent->name, {})));
+                  defaultInitialiseStruct(r, *tpe, instance);
+                  return Expr::Alias(select(r, {}, instance));
+                }()
               : [&]() -> Expr::Any {
                   auto allocated = r.newVar(ctorTpe);
                   defaultInitialiseStruct(r, *tpe, allocated);
@@ -2590,10 +2613,26 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             r.exceptionWhats.emplace(exceptionMetadataKey(expr), stored);
           }
           return instance;
-        } else if (ctorTpe.template is<Type::Arr>()) {
-          // XXX std::array<T,N> lowers to Type::Arr; default/value ctor is a no-op, allocate and let assignments init.
-          auto allocated = r.newVar(ctorTpe);
-          return Expr::Any(Expr::Alias(select(r, {}, allocated).widen()));
+        } else if (const auto arr = ctorTpe.template get<Type::Arr>()) {
+          const auto target = arrayDestination ^ fold([](const auto &x) { return x; }, [&] { return select(r, {}, r.newVar(ctorTpe)); });
+          iota(int32_t{0}, arr->length) | for_each([&](const auto &i) {
+            const auto idx = Term::IntU64Const(static_cast<uint64_t>(i));
+            const auto element = r.newName(Type::Ptr(arr->comp, storageSpace(target)));
+            r.push(Stmt::Var(element, Expr::RefTo(target, idx, arr->comp, storageSpace(target), Region::Opaque()), /*isMutable*/ false));
+            if (expr->requiresZeroInitialization()) {
+              if (const auto elementStruct = arr->comp.template get<Type::Struct>()) defaultInitialiseStruct(r, *elementStruct, element);
+            }
+            auto ivArgs = expr->arguments()                                        //
+                          | zip_with_index<size_t>()                               //
+                          | map([&](const auto &arg, const auto &j) -> Term::Any { //
+                              return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[j + 1].named.tpe));
+                            }) //
+                          | to_vector();
+            auto thisArg = r.newVar(conform(r, Expr::Alias(select(r, {}, element)), fn->decl.args.front().named.tpe));
+            auto _ = r.newVar(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{},
+                                           std::vector<Term::Any>{thisArg} ^ concat(ivArgs), Type::Unit0()));
+          });
+          return Expr::Any(Expr::Alias(target.widen()));
         } else {
           raise("CXX ctor resulted in a non-struct type: " + repr(ctorTpe));
         }
@@ -3061,6 +3100,14 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             }
 
             auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
+            const clang::Expr *directInit = var->getInit();
+            while (directInit)
+              if (const auto next = transparentExceptionExpr(directInit)) directInit = next;
+              else break;
+            const auto directConstruct = llvm::dyn_cast_if_present<clang::CXXConstructExpr>(directInit);
+            const auto directConstructRecord = directConstruct ? directConstruct->getType()->getAsCXXRecordDecl() : nullptr;
+            const auto directlyConstructible =
+                directConstruct && !derivesStdException(directConstructRecord) && !stdRecordNamed(directConstructRecord, "error_code");
             if (initList && !name.tpe.is<Type::Struct>()) {
               auto initExpr = createInit(var->getType(), name.tpe);
               r.push(Stmt::Var(name, initExpr, /*isMutable*/ true));
@@ -3084,6 +3131,11 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
                   r.push(Stmt::Update(select(r, {}, name), idx, val));
                 }
               }
+            } else if (directlyConstructible && name.tpe.is<Type::Struct>()) {
+              r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ !var->getType().isConstQualified()));
+              r.constructInto = name;
+              (void)r.newVar(handleExpr(var->getInit(), r));
+              r.constructInto.reset();
             } else if (var->hasInit()) {
               const bool isMutable = !var->getType().isConstQualified();
               r.push(Stmt::Var(name, pointerInit ? *pointerInit : conform(r, handleExpr(var->getInit(), r), name.tpe), isMutable));
