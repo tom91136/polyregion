@@ -70,8 +70,19 @@ const static std::string Empty = "#empty";
   const auto parents = r.parents ^ get_maybe(repr(derived.name));
   if (!parents) return false;
 
-  if (const auto directBases = *parents ^ filter([&](const auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
-    return *parents ^ exists([&](const auto &p) { return walkParents(r, Type::Struct(p->name, {}), predicate, chain); });
+  if (const auto directBases = *parents ^ filter([&](const auto &p) { return predicate(*p); }); directBases.empty()) {
+    const auto path = *parents ^ collect_first([&](const auto &parent) -> Opt<Vector<std::shared_ptr<StructDef>>> {
+      Vector<std::shared_ptr<StructDef>> tail;
+      if (!walkParents(r, Type::Struct(parent->name, {}), predicate, tail)) return {};
+      Vector<std::shared_ptr<StructDef>> result{parent};
+      result.insert(result.end(), tail.begin(), tail.end());
+      return result;
+    });
+    if (path) {
+      chain.insert(chain.end(), path->begin(), path->end());
+      return true;
+    }
+    return false;
   } else if (directBases.size() != 1) {
     // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
     raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
