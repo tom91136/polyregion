@@ -577,9 +577,23 @@ object ArenaView extends ProgramPass {
       if (selectedIdentityField(x) || selectedIdentityField(y)) {
         (identityComparable(x), identityComparable(y)) match {
           case (Some(a), Some(b)) => p.Expr.IntrOp(eq(a, b))
-          case _                  => p.Expr.IntrOp(eq(rwTerm(x), rwTerm(y)))
+          case _                  => rewrittenEquality(x, y, eq)
         }
-      } else p.Expr.IntrOp(eq(rwTerm(x), rwTerm(y)))
+      } else rewrittenEquality(x, y, eq)
+
+    def rewrittenEquality(x: p.Term, y: p.Term, eq: (p.Term, p.Term) => p.Intr): p.Expr = {
+      val a = rwTerm(x)
+      val b = rwTerm(y)
+      val aa = x match {
+        case _: p.Term.NullPtrConst if b.tpe == I64 => i64(0)
+        case _                                      => a
+      }
+      val bb = y match {
+        case _: p.Term.NullPtrConst if a.tpe == I64 => i64(0)
+        case _                                      => b
+      }
+      p.Expr.IntrOp(eq(aa, bb))
+    }
 
     def rwExpr(e: p.Expr): p.Expr = e match {
       case p.Expr.Alias(t) => p.Expr.Alias(rwTerm(t))

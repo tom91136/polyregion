@@ -482,6 +482,10 @@ struct CLAddressSpaceTracePass {
       std::string destination, member, source;
     };
     std::vector<NestedCopy> nestedCopies;
+    struct AggregateCopy {
+      std::string function, destination, source;
+    };
+    std::vector<AggregateCopy> aggregateCopies;
     for (const auto &function : functions) {
       const auto fn = functionKey(function);
       eachStmt(function.body, [&](const Stmt::Any &stmt) {
@@ -495,6 +499,9 @@ struct CLAddressSpaceTracePass {
               else valid = false;
             }
           }
+          if (var->name.tpe.template is<Type::Struct>() && var->expr && !isPoisonInit(*var->expr))
+            if (const auto source = initSelect(*var->expr); source && source->steps.empty() && source->root.tpe == var->name.tpe)
+              aggregateCopies.push_back({fn, var->name.symbol, source->root.symbol});
           return;
         }
         const auto mut = stmt.template get<Stmt::Mut>();
@@ -507,6 +514,9 @@ struct CLAddressSpaceTracePass {
             if (src) slots.unite(registerVariable(fn, select.root.symbol, *structure), *src);
             else valid = false;
           }
+          if (select.root.tpe.template is<Type::Struct>())
+            if (const auto source = aliasSelect(mut->expr); source && source->steps.empty() && source->root.tpe == select.root.tpe)
+              aggregateCopies.push_back({fn, select.root.symbol, source->root.symbol});
           return;
         }
         const auto field = select.steps.back().template get<PathStep::Field>();
@@ -634,6 +644,17 @@ struct CLAddressSpaceTracePass {
           const auto current = function->second.find(copies.front().destination);
           if (current == function->second.end() || current->second != *clone) {
             function->second.insert_or_assign(copies.front().destination, *clone);
+            changed = true;
+          }
+        }
+        for (const auto &copy : aggregateCopies) {
+          const auto function = plan.fnVarRetype.find(copy.function);
+          if (function == plan.fnVarRetype.end()) continue;
+          const auto source = function->second.find(copy.source);
+          if (source == function->second.end()) continue;
+          const auto destination = function->second.find(copy.destination);
+          if (destination == function->second.end() || destination->second != source->second) {
+            function->second.insert_or_assign(copy.destination, source->second);
             changed = true;
           }
         }

@@ -193,4 +193,36 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(loadedVar.map(_.name.tpe), Some(p.Type.IntS64))
     assertEquals(loadedVar.flatMap(_.expr).map(_.tpe), Some(p.Type.IntS64))
   }
+
+  test("an arena pointer compares with null as an offset") {
+    val capArg = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val isNull = named("isNull", p.Type.Bool1)
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(
+            isNull,
+            Some(
+              p.Expr.IntrOp(
+                p.Intr.LogicEq(
+                  selectT(capArg.named),
+                  p.Term.NullPtrConst(capTpe, p.Type.Space.Global, p.Region.Opaque)
+                )
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(p.StructDef(capSym, Nil, Nil, Nil))
+    )
+
+    val result     = ArenaView(program, NoopLog)
+    val comparison = result.entry.collectAll[p.Expr].collectFirst { case p.Expr.IntrOp(x: p.Intr.LogicEq) => x }
+    assertEquals(comparison.map(_.x.tpe), Some(p.Type.IntS64))
+    assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
+  }
 }

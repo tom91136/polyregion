@@ -332,27 +332,33 @@ TEST_CASE("C source propagates address-space specialisation through stored struc
   const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
   const StructDef wrapperDef(wrapperSym, {}, {Named("#base_Box", box)}, {Type::Struct(boxSym, {})}, false);
   const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
-      globalWrapper("globalWrapper", wrapper), privateWrapper("privateWrapper", wrapper);
+      globalWrapper("globalWrapper", wrapper), privateWrapper("privateWrapper", wrapper), privateWrapperCopy("privateWrapperCopy", wrapper),
+      privateWrapperAssigned("privateWrapperAssigned", wrapper);
   const auto ptrMember = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
   const auto boxMember = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("#base_Box").widen()}, box); };
   const auto poison = [](const Type::Any &tpe) { return Expr::Alias(Term::Poison(tpe).widen()).widen(); };
-  const Function entry = mkFn("kernel", {Arg(input, {})}, Type::Unit0(),
-                              {
-                                  Var(value, std::optional<Expr::Any>{}, true).widen(),
-                                  Var(globalBox, poison(box), true).widen(),
-                                  Mut(ptrMember(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
-                                  Var(privateBox, poison(box), true).widen(),
-                                  Mut(ptrMember(privateBox), Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {},
-                                                                         Type::IntS32(), TypeSpace::Private(), Region::Opaque())
-                                                                 .widen())
-                                      .widen(),
-                                  Var(globalWrapper, poison(wrapper), true).widen(),
-                                  Mut(boxMember(globalWrapper), Expr::Alias(Term::Select(globalBox, {}, box).widen()).widen()).widen(),
-                                  Var(privateWrapper, poison(wrapper), true).widen(),
-                                  Mut(boxMember(privateWrapper), Expr::Alias(Term::Select(privateBox, {}, box).widen()).widen()).widen(),
-                                  Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
-                              },
-                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {
+          Var(value, std::optional<Expr::Any>{}, true).widen(),
+          Var(globalBox, poison(box), true).widen(),
+          Mut(ptrMember(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+          Var(privateBox, poison(box), true).widen(),
+          Mut(ptrMember(privateBox),
+              Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque())
+                  .widen())
+              .widen(),
+          Var(globalWrapper, poison(wrapper), true).widen(),
+          Mut(boxMember(globalWrapper), Expr::Alias(Term::Select(globalBox, {}, box).widen()).widen()).widen(),
+          Var(privateWrapper, poison(wrapper), true).widen(),
+          Mut(boxMember(privateWrapper), Expr::Alias(Term::Select(privateBox, {}, box).widen()).widen()).widen(),
+          Var(privateWrapperCopy, Expr::Alias(Term::Select(privateWrapper, {}, wrapper).widen()).widen(), true).widen(),
+          Var(privateWrapperAssigned, poison(wrapper), true).widen(),
+          Mut(Term::Select(privateWrapperAssigned, {}, wrapper), Expr::Alias(Term::Select(privateWrapperCopy, {}, wrapper).widen()).widen())
+              .widen(),
+          Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
   opts.pipelineSpec = "Mirror";
   const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef, wrapperDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
@@ -362,6 +368,18 @@ TEST_CASE("C source propagates address-space specialisation through stored struc
   CHECK(source.find("typedef struct Wrapper_asp Wrapper_asp;") != std::string::npos);
   CHECK(source.find("Box_asp _base_Box;") != std::string::npos);
   CHECK(source.find("Wrapper_asp _v5;") != std::string::npos);
+  CHECK(source.find("Wrapper_asp _v6;") != std::string::npos);
+  CHECK(source.find("Wrapper_asp _v7;") != std::string::npos);
+
+  opts.target = Target::Source_C_Metal1_0;
+  const auto metal = polyregion::compiler::compile(Program(entry, {}, {boxDef, wrapperDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(metal));
+  REQUIRE(metal.binary != std::nullopt);
+  const std::string metalSource(reinterpret_cast<const char *>(metal.binary->data()), metal.binary->size());
+  CHECK(metalSource.find("Wrapper_asp _v5;") != std::string::npos);
+  CHECK(metalSource.find("Wrapper_asp _v6 = _v5;") != std::string::npos);
+  CHECK(metalSource.find("Wrapper_asp _v7;") != std::string::npos);
+  CHECK(metalSource.find("_v7 = _v6;") != std::string::npos);
 }
 
 TEST_CASE("C source combines nested struct specialisations deterministically", "[backend]") {
