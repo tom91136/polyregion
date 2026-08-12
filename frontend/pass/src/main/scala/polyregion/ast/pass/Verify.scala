@@ -166,11 +166,63 @@ object Verify {
       case _                => c
     }
 
+    def validateSpec(c: Context, op: p.Spec): Context = {
+      val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
+      def requireTpe(context: Context, term: p.Term, valid: p.Type => Boolean, message: String): Context =
+        if (valid(term.tpe)) context else context ~ s"$message; got ${term.tpe.repr}"
+      def u32(tpe: p.Type): Boolean = tpe == p.Type.IntU32
+      def u64(tpe: p.Type): Boolean = tpe == p.Type.IntU64
+      def globalPointer(tpe: p.Type): Boolean = tpe match {
+        case p.Type.Ptr(_, p.Type.Space.Global) => true
+        case _                                  => false
+      }
+
+      op match {
+        case x: p.Spec.RemoteLaunch =>
+          val dimensions = List(
+            "gridX"  -> x.gridX,
+            "gridY"  -> x.gridY,
+            "gridZ"  -> x.gridZ,
+            "blockX" -> x.blockX,
+            "blockY" -> x.blockY,
+            "blockZ" -> x.blockZ,
+            "shmem"  -> x.shmem
+          )
+          val kernelChecked =
+            requireTpe(c0, x.kernel, _.isInstanceOf[p.Type.FnRef], "kernel must be a function reference")
+          val dimensionsChecked = dimensions.foldLeft(kernelChecked) { case (context, (name, term)) =>
+            requireTpe(context, term, u32, s"launch dimension $name must be U32")
+          }
+          requireTpe(
+            dimensionsChecked,
+            x.stream,
+            tpe => globalPointer(tpe) || u32(tpe) || u64(tpe),
+            "stream handle must be a global pointer, U32, or U64"
+          )
+        case x: p.Spec.RemoteAlloc =>
+          requireTpe(c0, x.bytes, u64, "allocation byte count must be U64")
+        case x: p.Spec.RemoteFree =>
+          requireTpe(c0, x.ptr, globalPointer, "free operand must be a global pointer")
+        case x: p.Spec.RemoteMemcpy =>
+          val dstChecked = requireTpe(c0, x.dst, globalPointer, "copy destination must be a global pointer")
+          val srcChecked = requireTpe(dstChecked, x.src, globalPointer, "copy source must be a global pointer")
+          requireTpe(srcChecked, x.bytes, u64, "copy byte count must be U64")
+        case x: p.Spec.RemoteSync =>
+          requireTpe(
+            c0,
+            x.stream,
+            tpe => globalPointer(tpe) || u32(tpe) || u64(tpe),
+            "stream handle must be a global pointer, U32, or U64"
+          )
+        case _ => c0
+      }
+    }
+
     def validateExpr(c: Context, e: p.Expr): Context = e match {
-      case p.Expr.Alias(t)  => validateTerm(c, t)
-      case p.Expr.SpecOp(_) => c
-      case p.Expr.MathOp(_) => c
-      case p.Expr.IntrOp(_) => c
+      case p.Expr.Alias(t)   => validateTerm(c, t)
+      case p.Expr.SpecOp(op) => validateSpec(c, op)
+      case p.Expr.MathOp(_)  => c
+      case p.Expr.IntrOp(_)  => c
       case p.Expr.Cast(from, as) =>
         val c0                   = validateTerm(c, from)
         def isNumeric(t: p.Type) = t.kind == p.Type.Kind.Integral || t.kind == p.Type.Kind.Fractional
@@ -304,7 +356,47 @@ object Verify {
           }
         }.flatten
 
-    varCollisionErrors ++ referenceAndTypeErrors ++ badReturnErrors ++ badFnInvokeErrors
+    val badLaunchErrors =
+      if (!verifyFunction) Nil
+      else
+        f.collectWhere[p.Expr] { case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) =>
+          launch.kernel.tpe match {
+            case p.Type.FnRef(name) =>
+              allFnLUT.get(name) match {
+                case None | Some(Nil) => s"launch references an undefined kernel `${name.repr}`" :: Nil
+                case Some(candidates) =>
+                  def resolve(tpe: p.Type, bindings: Map[String, p.Type]): p.Type = tpe match {
+                    case p.Type.Var(name)                     => bindings.getOrElse(name, tpe)
+                    case p.Type.Struct(name, args)            => p.Type.Struct(name, args.map(resolve(_, bindings)))
+                    case p.Type.Ptr(component, space)         => p.Type.Ptr(resolve(component, bindings), space)
+                    case p.Type.Arr(component, length, space) => p.Type.Arr(resolve(component, bindings), length, space)
+                    case p.Type.Exec(vars, args, rtn) =>
+                      val nested = bindings -- vars
+                      p.Type.Exec(vars, args.map(resolve(_, nested)), resolve(rtn, nested))
+                    case other => other
+                  }
+                  val matching = candidates.exists { candidate =>
+                    val bindings = candidate.tpeVars.zip(launch.tpeArgs).toMap
+                    val parameters = (candidate.moduleCaptures ::: candidate.termCaptures ::: candidate.args)
+                      .map(arg => resolve(arg.named.tpe, bindings))
+                      .filterNot(tpe => tpe == p.Type.Unit0 || tpe == p.Type.Nothing)
+                    candidate.affinity == p.Function.Affinity.Offload &&
+                    candidate.receiver.isEmpty &&
+                    candidate.rtn == p.Type.Unit0 &&
+                    candidate.tpeVars.size == launch.tpeArgs.size &&
+                    parameters.size == launch.args.size &&
+                    parameters.zip(launch.args).forall { case (expected, actual) =>
+                      expected == actual.tpe
+                    }
+                  }
+                  if (matching) Nil
+                  else s"launch does not match any kernel overload of `${name.repr}`" :: Nil
+              }
+            case _ => Nil
+          }
+        }.flatten
+
+    varCollisionErrors ++ referenceAndTypeErrors ++ badReturnErrors ++ badFnInvokeErrors ++ badLaunchErrors
   }
 
   def apply(program: p.Program, log: Log, verifyFunction: Boolean): List[(p.Function, List[String])] = {

@@ -180,9 +180,10 @@ object PolyAST {
 
   case class Overload(args: List[Type] = Nil, rtn: Type = Type.Nothing) derives MsgPack.Codec
 
-  enum AtomicOp derives MsgPack.Codec { case Xchg, Add, Sub, And, Or, Xor, Min, Max    }
-  enum MemScope derives MsgPack.Codec { case Subgroup, Workgroup, Device, System       }
-  enum MemOrder derives MsgPack.Codec { case Relaxed, Acquire, Release, AcqRel, SeqCst }
+  enum AtomicOp derives MsgPack.Codec  { case Xchg, Add, Sub, And, Or, Xor, Min, Max       }
+  enum MemScope derives MsgPack.Codec  { case Subgroup, Workgroup, Device, System          }
+  enum MemOrder derives MsgPack.Codec  { case Relaxed, Acquire, Release, AcqRel, SeqCst    }
+  enum Direction derives MsgPack.Codec { case LocalToRemote, RemoteToLocal, RemoteToRemote }
 
   object Spec {
     inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
@@ -227,6 +228,28 @@ object PolyAST {
         extends Spec(Spec.Unchecked, List(ptr, value), rtn)
     case GpuVolatileLoad(ptr: Term, rtn: Type)    extends Spec(Spec.Unchecked, List(ptr), rtn)
     case GpuVolatileStore(ptr: Term, value: Term) extends Spec(Spec.Unchecked, List(ptr, value), Type.Unit0)
+    case RemoteLaunch(
+        kernel: Term,
+        tpeArgs: List[Type],
+        gridX: Term,
+        gridY: Term,
+        gridZ: Term,
+        blockX: Term,
+        blockY: Term,
+        blockZ: Term,
+        shmem: Term,
+        stream: Term,
+        args: List[Term]
+    ) extends Spec(
+          Spec.Unchecked,
+          kernel :: gridX :: gridY :: gridZ :: blockX :: blockY :: blockZ :: shmem :: stream :: args,
+          Type.Unit0
+        )
+    case RemoteAlloc(bytes: Term) extends Spec(Spec.Unchecked, List(bytes), Type.Ptr(Type.IntU8, Type.Space.Global))
+    case RemoteFree(ptr: Term)    extends Spec(Spec.Unchecked, List(ptr), Type.Unit0)
+    case RemoteMemcpy(dst: Term, src: Term, bytes: Term, direction: Direction)
+        extends Spec(Spec.Unchecked, List(dst, src, bytes), Type.Unit0)
+    case RemoteSync(stream: Term) extends Spec(Spec.Unchecked, List(stream), Type.Unit0)
   }
 
   object Intr {
@@ -836,6 +859,14 @@ object PolyAST {
     }
   }
 
+  extension (d: Direction) {
+    def repr: String = d match {
+      case Direction.LocalToRemote  => "localToRemote"
+      case Direction.RemoteToLocal  => "remoteToLocal"
+      case Direction.RemoteToRemote => "remoteToRemote"
+    }
+  }
+
   extension (r: Region) {
     def repr: String = r match {
       case Region.Rooted(root) => s"@${root.symbol}"
@@ -952,8 +983,16 @@ object PolyAST {
           case Spec.GpuVoteAll(m, p)              => s"'gpuVoteAll(${m.repr}, ${p.repr})"
           case Spec.GpuAtomicRMW(op, p, v, s, o, _) =>
             s"'gpuAtomic${op.repr}(${p.repr}, ${v.repr}, ${s.repr}, ${o.repr})"
-          case Spec.GpuVolatileLoad(p, _)  => s"'gpuVolatileLoad(${p.repr})"
-          case Spec.GpuVolatileStore(p, v) => s"'gpuVolatileStore(${p.repr}, ${v.repr})"
+          case Spec.RemoteLaunch(k, ts, gx, gy, gz, bx, by, bz, sh, st, as) =>
+            s"'remoteLaunch(${k.repr}[${ts
+                .map(_.repr)
+                .mkString(", ")}], <${gx.repr}, ${gy.repr}, ${gz.repr}>, <${bx.repr}, ${by.repr}, ${bz.repr}>, ${sh.repr}, ${st.repr}, [${as.map(_.repr).mkString(", ")}])"
+          case Spec.RemoteAlloc(b)           => s"'remoteAlloc(${b.repr})"
+          case Spec.RemoteFree(p)            => s"'remoteFree(${p.repr})"
+          case Spec.RemoteMemcpy(d, s, b, k) => s"'remoteMemcpy(${d.repr}, ${s.repr}, ${b.repr}, ${k.repr})"
+          case Spec.RemoteSync(s)            => s"'remoteSync(${s.repr})"
+          case Spec.GpuVolatileLoad(p, _)    => s"'gpuVolatileLoad(${p.repr})"
+          case Spec.GpuVolatileStore(p, v)   => s"'gpuVolatileStore(${p.repr}, ${v.repr})"
         }
       case Expr.MathOp(op) =>
         op match {

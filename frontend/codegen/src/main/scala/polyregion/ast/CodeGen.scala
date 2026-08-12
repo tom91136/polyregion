@@ -135,6 +135,7 @@ private[polyregion] object CodeGen {
       :: deriveStruct[AtomicOp]()
       :: deriveStruct[MemScope]()
       :: deriveStruct[MemOrder]()
+      :: deriveStruct[Direction]()
       :: deriveStruct[Spec]()
       :: deriveStruct[Intr]()
       :: deriveStruct[Math]()

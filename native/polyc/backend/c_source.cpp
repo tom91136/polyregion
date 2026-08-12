@@ -1192,6 +1192,17 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
               return fmt::format("{}(({} {}*){}, ({}){}, metal::memory_order_relaxed)", function, space, atomic, mkTerm(v.ptr), value,
                                  mkTerm(v.value));
             },
+            [&](const Spec::RemoteLaunch &) -> std::string {
+              throw BackendException("Spec::RemoteLaunch is a local orchestration operation");
+            },
+            [&](const Spec::RemoteAlloc &) -> std::string {
+              throw BackendException("Spec::RemoteAlloc is a local orchestration operation");
+            },
+            [&](const Spec::RemoteFree &) -> std::string { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
+            [&](const Spec::RemoteMemcpy &) -> std::string {
+              throw BackendException("Spec::RemoteMemcpy is a local orchestration operation");
+            },
+            [&](const Spec::RemoteSync &) -> std::string { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
             [&](const Spec::GpuVolatileLoad &v) -> std::string {
               const auto ptr = mkTerm(v.ptr), type = mkTpe(v.rtn);
               if (dialect == Dialect::MSL1_0) {

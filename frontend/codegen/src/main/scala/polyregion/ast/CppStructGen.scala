@@ -307,7 +307,7 @@ private[polyregion] object CppStructGen {
             case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
               s"( (!$lhs$n && !$rhs$n) || ($lhs$n && $rhs$n && *$lhs$n == *$rhs$n) )"
             case (CppType.Kind.StdLib, "std" :: ("vector" | "set") :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-              s"std::equal($lhs$n.begin(), $lhs$n.end(), $rhs$n.begin(), [](auto &&l, auto &&r) { return l == r; })"
+              s"std::equal($lhs$n.begin(), $lhs$n.end(), $rhs$n.begin(), $rhs$n.end(), [](auto &&l, auto &&r) { return l == r; })"
             case _ => s"($lhs$n == $rhs$n)"
           }
 
@@ -945,7 +945,15 @@ private[polyregion] object CppStructGen {
         case compiletime.Value.CtorAp(tpe, args) =>
           if (!tpe.initialiser) tpe.ref(qualified = true) + s"(${args.map(write(_)).mkString(",")})"
           else s"{${args.map(write(_)).mkString(",")}}"
-        case _ => ???
+        case compiletime.Value.Prepend(_, _) =>
+          @annotation.tailrec
+          def parts(value: ToCppTerm.Value, prefix: List[ToCppTerm.Value]): (List[ToCppTerm.Value], ToCppTerm.Value) =
+            value match {
+              case compiletime.Value.Prepend(head, tail) => parts(tail, head :: prefix)
+              case tail                                  => prefix.reverse -> tail
+            }
+          val (prefix, tail) = parts(x, Nil)
+          s"([&] { auto _xs = ${write(tail)}; _xs.insert(_xs.begin(), {${prefix.map(write).mkString(", ")}}); return _xs; }())"
       }
 
     val ctorTerms =

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "fcb3ca1a54939d8834a531d0b9c813ed";
+constexpr auto AdtHash = "547fdf1f8e09544533ed52bc647322a1";
 
 namespace {
 
@@ -1354,6 +1354,35 @@ json MemOrder::any_to_json(const MemOrder::Any &x_) {
                         [](const MemOrder::SeqCst &y_) -> json { return {4, MemOrder::seqcst_to_json(y_)}; });
 }
 
+Direction::LocalToRemote Direction::localtoremote_from_json(const json &j_) { return {}; }
+
+json Direction::localtoremote_to_json(const Direction::LocalToRemote &x_) { return json::array({}); }
+
+Direction::RemoteToLocal Direction::remotetolocal_from_json(const json &j_) { return {}; }
+
+json Direction::remotetolocal_to_json(const Direction::RemoteToLocal &x_) { return json::array({}); }
+
+Direction::RemoteToRemote Direction::remotetoremote_from_json(const json &j_) { return {}; }
+
+json Direction::remotetoremote_to_json(const Direction::RemoteToRemote &x_) { return json::array({}); }
+
+Direction::Any Direction::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return Direction::localtoremote_from_json(t_);
+    case 1: return Direction::remotetolocal_from_json(t_);
+    case 2: return Direction::remotetoremote_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json Direction::any_to_json(const Direction::Any &x_) {
+  return x_.match_total([](const Direction::LocalToRemote &y_) -> json { return {0, Direction::localtoremote_to_json(y_)}; },
+                        [](const Direction::RemoteToLocal &y_) -> json { return {1, Direction::remotetolocal_to_json(y_)}; },
+                        [](const Direction::RemoteToRemote &y_) -> json { return {2, Direction::remotetoremote_to_json(y_)}; });
+}
+
 Spec::Assert Spec::assert_from_json(const json &j_) {
   auto code = Term::any_from_json(j_.at(0));
   auto message = Term::any_from_json(j_.at(1));
@@ -1620,6 +1649,94 @@ json Spec::gpuvolatilestore_to_json(const Spec::GpuVolatileStore &x_) {
   return json::array({ptr, value});
 }
 
+Spec::RemoteLaunch Spec::remotelaunch_from_json(const json &j_) {
+  auto kernel = Term::any_from_json(j_.at(0));
+  std::vector<Type::Any> tpeArgs;
+  for (const auto &v_ : j_.at(1)) {
+    tpeArgs.emplace_back(Type::any_from_json(v_));
+  }
+  auto gridX = Term::any_from_json(j_.at(2));
+  auto gridY = Term::any_from_json(j_.at(3));
+  auto gridZ = Term::any_from_json(j_.at(4));
+  auto blockX = Term::any_from_json(j_.at(5));
+  auto blockY = Term::any_from_json(j_.at(6));
+  auto blockZ = Term::any_from_json(j_.at(7));
+  auto shmem = Term::any_from_json(j_.at(8));
+  auto stream = Term::any_from_json(j_.at(9));
+  std::vector<Term::Any> args;
+  for (const auto &v_ : j_.at(10)) {
+    args.emplace_back(Term::any_from_json(v_));
+  }
+  return {kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args};
+}
+
+json Spec::remotelaunch_to_json(const Spec::RemoteLaunch &x_) {
+  auto kernel = Term::any_to_json(x_.kernel);
+  std::vector<json> tpeArgs;
+  for (const auto &v_ : x_.tpeArgs) {
+    tpeArgs.emplace_back(Type::any_to_json(v_));
+  }
+  auto gridX = Term::any_to_json(x_.gridX);
+  auto gridY = Term::any_to_json(x_.gridY);
+  auto gridZ = Term::any_to_json(x_.gridZ);
+  auto blockX = Term::any_to_json(x_.blockX);
+  auto blockY = Term::any_to_json(x_.blockY);
+  auto blockZ = Term::any_to_json(x_.blockZ);
+  auto shmem = Term::any_to_json(x_.shmem);
+  auto stream = Term::any_to_json(x_.stream);
+  std::vector<json> args;
+  for (const auto &v_ : x_.args) {
+    args.emplace_back(Term::any_to_json(v_));
+  }
+  return json::array({kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args});
+}
+
+Spec::RemoteAlloc Spec::remotealloc_from_json(const json &j_) {
+  auto bytes = Term::any_from_json(j_.at(0));
+  return Spec::RemoteAlloc(bytes);
+}
+
+json Spec::remotealloc_to_json(const Spec::RemoteAlloc &x_) {
+  auto bytes = Term::any_to_json(x_.bytes);
+  return json::array({bytes});
+}
+
+Spec::RemoteFree Spec::remotefree_from_json(const json &j_) {
+  auto ptr = Term::any_from_json(j_.at(0));
+  return Spec::RemoteFree(ptr);
+}
+
+json Spec::remotefree_to_json(const Spec::RemoteFree &x_) {
+  auto ptr = Term::any_to_json(x_.ptr);
+  return json::array({ptr});
+}
+
+Spec::RemoteMemcpy Spec::remotememcpy_from_json(const json &j_) {
+  auto dst = Term::any_from_json(j_.at(0));
+  auto src = Term::any_from_json(j_.at(1));
+  auto bytes = Term::any_from_json(j_.at(2));
+  auto direction = Direction::any_from_json(j_.at(3));
+  return {dst, src, bytes, direction};
+}
+
+json Spec::remotememcpy_to_json(const Spec::RemoteMemcpy &x_) {
+  auto dst = Term::any_to_json(x_.dst);
+  auto src = Term::any_to_json(x_.src);
+  auto bytes = Term::any_to_json(x_.bytes);
+  auto direction = Direction::any_to_json(x_.direction);
+  return json::array({dst, src, bytes, direction});
+}
+
+Spec::RemoteSync Spec::remotesync_from_json(const json &j_) {
+  auto stream = Term::any_from_json(j_.at(0));
+  return Spec::RemoteSync(stream);
+}
+
+json Spec::remotesync_to_json(const Spec::RemoteSync &x_) {
+  auto stream = Term::any_to_json(x_.stream);
+  return json::array({stream});
+}
+
 Spec::Any Spec::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -1650,6 +1767,11 @@ Spec::Any Spec::any_from_json(const json &j_) {
     case 23: return Spec::gpuatomicrmw_from_json(t_);
     case 24: return Spec::gpuvolatileload_from_json(t_);
     case 25: return Spec::gpuvolatilestore_from_json(t_);
+    case 26: return Spec::remotelaunch_from_json(t_);
+    case 27: return Spec::remotealloc_from_json(t_);
+    case 28: return Spec::remotefree_from_json(t_);
+    case 29: return Spec::remotememcpy_from_json(t_);
+    case 30: return Spec::remotesync_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1680,7 +1802,12 @@ json Spec::any_to_json(const Spec::Any &x_) {
                         [](const Spec::GpuVoteAll &y_) -> json { return {22, Spec::gpuvoteall_to_json(y_)}; },
                         [](const Spec::GpuAtomicRMW &y_) -> json { return {23, Spec::gpuatomicrmw_to_json(y_)}; },
                         [](const Spec::GpuVolatileLoad &y_) -> json { return {24, Spec::gpuvolatileload_to_json(y_)}; },
-                        [](const Spec::GpuVolatileStore &y_) -> json { return {25, Spec::gpuvolatilestore_to_json(y_)}; });
+                        [](const Spec::GpuVolatileStore &y_) -> json { return {25, Spec::gpuvolatilestore_to_json(y_)}; },
+                        [](const Spec::RemoteLaunch &y_) -> json { return {26, Spec::remotelaunch_to_json(y_)}; },
+                        [](const Spec::RemoteAlloc &y_) -> json { return {27, Spec::remotealloc_to_json(y_)}; },
+                        [](const Spec::RemoteFree &y_) -> json { return {28, Spec::remotefree_to_json(y_)}; },
+                        [](const Spec::RemoteMemcpy &y_) -> json { return {29, Spec::remotememcpy_to_json(y_)}; },
+                        [](const Spec::RemoteSync &y_) -> json { return {30, Spec::remotesync_to_json(y_)}; });
 }
 
 Intr::BNot Intr::bnot_from_json(const json &j_) {
@@ -3784,6 +3911,26 @@ Spec::GpuVolatileStore gpuvolatilestore_fields_from_msgpack(MsgpackReader &, siz
 void gpuvolatilestore_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileStore &);
 Spec::GpuVolatileStore gpuvolatilestore_from_msgpack(MsgpackReader &);
 void gpuvolatilestore_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileStore &);
+Spec::RemoteLaunch remotelaunch_fields_from_msgpack(MsgpackReader &, size_t);
+void remotelaunch_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteLaunch &);
+Spec::RemoteLaunch remotelaunch_from_msgpack(MsgpackReader &);
+void remotelaunch_to_msgpack(MsgpackWriter &, const Spec::RemoteLaunch &);
+Spec::RemoteAlloc remotealloc_fields_from_msgpack(MsgpackReader &, size_t);
+void remotealloc_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteAlloc &);
+Spec::RemoteAlloc remotealloc_from_msgpack(MsgpackReader &);
+void remotealloc_to_msgpack(MsgpackWriter &, const Spec::RemoteAlloc &);
+Spec::RemoteFree remotefree_fields_from_msgpack(MsgpackReader &, size_t);
+void remotefree_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteFree &);
+Spec::RemoteFree remotefree_from_msgpack(MsgpackReader &);
+void remotefree_to_msgpack(MsgpackWriter &, const Spec::RemoteFree &);
+Spec::RemoteMemcpy remotememcpy_fields_from_msgpack(MsgpackReader &, size_t);
+void remotememcpy_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteMemcpy &);
+Spec::RemoteMemcpy remotememcpy_from_msgpack(MsgpackReader &);
+void remotememcpy_to_msgpack(MsgpackWriter &, const Spec::RemoteMemcpy &);
+Spec::RemoteSync remotesync_fields_from_msgpack(MsgpackReader &, size_t);
+void remotesync_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteSync &);
+Spec::RemoteSync remotesync_from_msgpack(MsgpackReader &);
+void remotesync_to_msgpack(MsgpackWriter &, const Spec::RemoteSync &);
 Spec::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const Spec::Any &);
 } // namespace Spec
@@ -3799,90 +3946,6 @@ void host_to_msgpack(MsgpackWriter &, const FunctionAffinity::Host &);
 FunctionAffinity::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const FunctionAffinity::Any &);
 } // namespace FunctionAffinity
-namespace Type {
-Type::Float16 float16_fields_from_msgpack(MsgpackReader &, size_t);
-void float16_fields_to_msgpack(MsgpackWriter &, const Type::Float16 &);
-Type::Float16 float16_from_msgpack(MsgpackReader &);
-void float16_to_msgpack(MsgpackWriter &, const Type::Float16 &);
-Type::Float32 float32_fields_from_msgpack(MsgpackReader &, size_t);
-void float32_fields_to_msgpack(MsgpackWriter &, const Type::Float32 &);
-Type::Float32 float32_from_msgpack(MsgpackReader &);
-void float32_to_msgpack(MsgpackWriter &, const Type::Float32 &);
-Type::Float64 float64_fields_from_msgpack(MsgpackReader &, size_t);
-void float64_fields_to_msgpack(MsgpackWriter &, const Type::Float64 &);
-Type::Float64 float64_from_msgpack(MsgpackReader &);
-void float64_to_msgpack(MsgpackWriter &, const Type::Float64 &);
-Type::IntU8 intu8_fields_from_msgpack(MsgpackReader &, size_t);
-void intu8_fields_to_msgpack(MsgpackWriter &, const Type::IntU8 &);
-Type::IntU8 intu8_from_msgpack(MsgpackReader &);
-void intu8_to_msgpack(MsgpackWriter &, const Type::IntU8 &);
-Type::IntU16 intu16_fields_from_msgpack(MsgpackReader &, size_t);
-void intu16_fields_to_msgpack(MsgpackWriter &, const Type::IntU16 &);
-Type::IntU16 intu16_from_msgpack(MsgpackReader &);
-void intu16_to_msgpack(MsgpackWriter &, const Type::IntU16 &);
-Type::IntU32 intu32_fields_from_msgpack(MsgpackReader &, size_t);
-void intu32_fields_to_msgpack(MsgpackWriter &, const Type::IntU32 &);
-Type::IntU32 intu32_from_msgpack(MsgpackReader &);
-void intu32_to_msgpack(MsgpackWriter &, const Type::IntU32 &);
-Type::IntU64 intu64_fields_from_msgpack(MsgpackReader &, size_t);
-void intu64_fields_to_msgpack(MsgpackWriter &, const Type::IntU64 &);
-Type::IntU64 intu64_from_msgpack(MsgpackReader &);
-void intu64_to_msgpack(MsgpackWriter &, const Type::IntU64 &);
-Type::IntS8 ints8_fields_from_msgpack(MsgpackReader &, size_t);
-void ints8_fields_to_msgpack(MsgpackWriter &, const Type::IntS8 &);
-Type::IntS8 ints8_from_msgpack(MsgpackReader &);
-void ints8_to_msgpack(MsgpackWriter &, const Type::IntS8 &);
-Type::IntS16 ints16_fields_from_msgpack(MsgpackReader &, size_t);
-void ints16_fields_to_msgpack(MsgpackWriter &, const Type::IntS16 &);
-Type::IntS16 ints16_from_msgpack(MsgpackReader &);
-void ints16_to_msgpack(MsgpackWriter &, const Type::IntS16 &);
-Type::IntS32 ints32_fields_from_msgpack(MsgpackReader &, size_t);
-void ints32_fields_to_msgpack(MsgpackWriter &, const Type::IntS32 &);
-Type::IntS32 ints32_from_msgpack(MsgpackReader &);
-void ints32_to_msgpack(MsgpackWriter &, const Type::IntS32 &);
-Type::IntS64 ints64_fields_from_msgpack(MsgpackReader &, size_t);
-void ints64_fields_to_msgpack(MsgpackWriter &, const Type::IntS64 &);
-Type::IntS64 ints64_from_msgpack(MsgpackReader &);
-void ints64_to_msgpack(MsgpackWriter &, const Type::IntS64 &);
-Type::Nothing nothing_fields_from_msgpack(MsgpackReader &, size_t);
-void nothing_fields_to_msgpack(MsgpackWriter &, const Type::Nothing &);
-Type::Nothing nothing_from_msgpack(MsgpackReader &);
-void nothing_to_msgpack(MsgpackWriter &, const Type::Nothing &);
-Type::Unit0 unit0_fields_from_msgpack(MsgpackReader &, size_t);
-void unit0_fields_to_msgpack(MsgpackWriter &, const Type::Unit0 &);
-Type::Unit0 unit0_from_msgpack(MsgpackReader &);
-void unit0_to_msgpack(MsgpackWriter &, const Type::Unit0 &);
-Type::Bool1 bool1_fields_from_msgpack(MsgpackReader &, size_t);
-void bool1_fields_to_msgpack(MsgpackWriter &, const Type::Bool1 &);
-Type::Bool1 bool1_from_msgpack(MsgpackReader &);
-void bool1_to_msgpack(MsgpackWriter &, const Type::Bool1 &);
-Type::Struct struct_fields_from_msgpack(MsgpackReader &, size_t);
-void struct_fields_to_msgpack(MsgpackWriter &, const Type::Struct &);
-Type::Struct struct_from_msgpack(MsgpackReader &);
-void struct_to_msgpack(MsgpackWriter &, const Type::Struct &);
-Type::Ptr ptr_fields_from_msgpack(MsgpackReader &, size_t);
-void ptr_fields_to_msgpack(MsgpackWriter &, const Type::Ptr &);
-Type::Ptr ptr_from_msgpack(MsgpackReader &);
-void ptr_to_msgpack(MsgpackWriter &, const Type::Ptr &);
-Type::Arr arr_fields_from_msgpack(MsgpackReader &, size_t);
-void arr_fields_to_msgpack(MsgpackWriter &, const Type::Arr &);
-Type::Arr arr_from_msgpack(MsgpackReader &);
-void arr_to_msgpack(MsgpackWriter &, const Type::Arr &);
-Type::Var var_fields_from_msgpack(MsgpackReader &, size_t);
-void var_fields_to_msgpack(MsgpackWriter &, const Type::Var &);
-Type::Var var_from_msgpack(MsgpackReader &);
-void var_to_msgpack(MsgpackWriter &, const Type::Var &);
-Type::Exec exec_fields_from_msgpack(MsgpackReader &, size_t);
-void exec_fields_to_msgpack(MsgpackWriter &, const Type::Exec &);
-Type::Exec exec_from_msgpack(MsgpackReader &);
-void exec_to_msgpack(MsgpackWriter &, const Type::Exec &);
-Type::FnRef fnref_fields_from_msgpack(MsgpackReader &, size_t);
-void fnref_fields_to_msgpack(MsgpackWriter &, const Type::FnRef &);
-Type::FnRef fnref_from_msgpack(MsgpackReader &);
-void fnref_to_msgpack(MsgpackWriter &, const Type::FnRef &);
-Type::Any any_from_msgpack(MsgpackReader &);
-void any_to_msgpack(MsgpackWriter &, const Type::Any &);
-} // namespace Type
 namespace Term {
 Term::Float16Const float16const_fields_from_msgpack(MsgpackReader &, size_t);
 void float16const_fields_to_msgpack(MsgpackWriter &, const Term::Float16Const &);
@@ -4319,6 +4382,106 @@ void exported_to_msgpack(MsgpackWriter &, const FunctionVisibility::Exported &);
 FunctionVisibility::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const FunctionVisibility::Any &);
 } // namespace FunctionVisibility
+namespace Type {
+Type::Float16 float16_fields_from_msgpack(MsgpackReader &, size_t);
+void float16_fields_to_msgpack(MsgpackWriter &, const Type::Float16 &);
+Type::Float16 float16_from_msgpack(MsgpackReader &);
+void float16_to_msgpack(MsgpackWriter &, const Type::Float16 &);
+Type::Float32 float32_fields_from_msgpack(MsgpackReader &, size_t);
+void float32_fields_to_msgpack(MsgpackWriter &, const Type::Float32 &);
+Type::Float32 float32_from_msgpack(MsgpackReader &);
+void float32_to_msgpack(MsgpackWriter &, const Type::Float32 &);
+Type::Float64 float64_fields_from_msgpack(MsgpackReader &, size_t);
+void float64_fields_to_msgpack(MsgpackWriter &, const Type::Float64 &);
+Type::Float64 float64_from_msgpack(MsgpackReader &);
+void float64_to_msgpack(MsgpackWriter &, const Type::Float64 &);
+Type::IntU8 intu8_fields_from_msgpack(MsgpackReader &, size_t);
+void intu8_fields_to_msgpack(MsgpackWriter &, const Type::IntU8 &);
+Type::IntU8 intu8_from_msgpack(MsgpackReader &);
+void intu8_to_msgpack(MsgpackWriter &, const Type::IntU8 &);
+Type::IntU16 intu16_fields_from_msgpack(MsgpackReader &, size_t);
+void intu16_fields_to_msgpack(MsgpackWriter &, const Type::IntU16 &);
+Type::IntU16 intu16_from_msgpack(MsgpackReader &);
+void intu16_to_msgpack(MsgpackWriter &, const Type::IntU16 &);
+Type::IntU32 intu32_fields_from_msgpack(MsgpackReader &, size_t);
+void intu32_fields_to_msgpack(MsgpackWriter &, const Type::IntU32 &);
+Type::IntU32 intu32_from_msgpack(MsgpackReader &);
+void intu32_to_msgpack(MsgpackWriter &, const Type::IntU32 &);
+Type::IntU64 intu64_fields_from_msgpack(MsgpackReader &, size_t);
+void intu64_fields_to_msgpack(MsgpackWriter &, const Type::IntU64 &);
+Type::IntU64 intu64_from_msgpack(MsgpackReader &);
+void intu64_to_msgpack(MsgpackWriter &, const Type::IntU64 &);
+Type::IntS8 ints8_fields_from_msgpack(MsgpackReader &, size_t);
+void ints8_fields_to_msgpack(MsgpackWriter &, const Type::IntS8 &);
+Type::IntS8 ints8_from_msgpack(MsgpackReader &);
+void ints8_to_msgpack(MsgpackWriter &, const Type::IntS8 &);
+Type::IntS16 ints16_fields_from_msgpack(MsgpackReader &, size_t);
+void ints16_fields_to_msgpack(MsgpackWriter &, const Type::IntS16 &);
+Type::IntS16 ints16_from_msgpack(MsgpackReader &);
+void ints16_to_msgpack(MsgpackWriter &, const Type::IntS16 &);
+Type::IntS32 ints32_fields_from_msgpack(MsgpackReader &, size_t);
+void ints32_fields_to_msgpack(MsgpackWriter &, const Type::IntS32 &);
+Type::IntS32 ints32_from_msgpack(MsgpackReader &);
+void ints32_to_msgpack(MsgpackWriter &, const Type::IntS32 &);
+Type::IntS64 ints64_fields_from_msgpack(MsgpackReader &, size_t);
+void ints64_fields_to_msgpack(MsgpackWriter &, const Type::IntS64 &);
+Type::IntS64 ints64_from_msgpack(MsgpackReader &);
+void ints64_to_msgpack(MsgpackWriter &, const Type::IntS64 &);
+Type::Nothing nothing_fields_from_msgpack(MsgpackReader &, size_t);
+void nothing_fields_to_msgpack(MsgpackWriter &, const Type::Nothing &);
+Type::Nothing nothing_from_msgpack(MsgpackReader &);
+void nothing_to_msgpack(MsgpackWriter &, const Type::Nothing &);
+Type::Unit0 unit0_fields_from_msgpack(MsgpackReader &, size_t);
+void unit0_fields_to_msgpack(MsgpackWriter &, const Type::Unit0 &);
+Type::Unit0 unit0_from_msgpack(MsgpackReader &);
+void unit0_to_msgpack(MsgpackWriter &, const Type::Unit0 &);
+Type::Bool1 bool1_fields_from_msgpack(MsgpackReader &, size_t);
+void bool1_fields_to_msgpack(MsgpackWriter &, const Type::Bool1 &);
+Type::Bool1 bool1_from_msgpack(MsgpackReader &);
+void bool1_to_msgpack(MsgpackWriter &, const Type::Bool1 &);
+Type::Struct struct_fields_from_msgpack(MsgpackReader &, size_t);
+void struct_fields_to_msgpack(MsgpackWriter &, const Type::Struct &);
+Type::Struct struct_from_msgpack(MsgpackReader &);
+void struct_to_msgpack(MsgpackWriter &, const Type::Struct &);
+Type::Ptr ptr_fields_from_msgpack(MsgpackReader &, size_t);
+void ptr_fields_to_msgpack(MsgpackWriter &, const Type::Ptr &);
+Type::Ptr ptr_from_msgpack(MsgpackReader &);
+void ptr_to_msgpack(MsgpackWriter &, const Type::Ptr &);
+Type::Arr arr_fields_from_msgpack(MsgpackReader &, size_t);
+void arr_fields_to_msgpack(MsgpackWriter &, const Type::Arr &);
+Type::Arr arr_from_msgpack(MsgpackReader &);
+void arr_to_msgpack(MsgpackWriter &, const Type::Arr &);
+Type::Var var_fields_from_msgpack(MsgpackReader &, size_t);
+void var_fields_to_msgpack(MsgpackWriter &, const Type::Var &);
+Type::Var var_from_msgpack(MsgpackReader &);
+void var_to_msgpack(MsgpackWriter &, const Type::Var &);
+Type::Exec exec_fields_from_msgpack(MsgpackReader &, size_t);
+void exec_fields_to_msgpack(MsgpackWriter &, const Type::Exec &);
+Type::Exec exec_from_msgpack(MsgpackReader &);
+void exec_to_msgpack(MsgpackWriter &, const Type::Exec &);
+Type::FnRef fnref_fields_from_msgpack(MsgpackReader &, size_t);
+void fnref_fields_to_msgpack(MsgpackWriter &, const Type::FnRef &);
+Type::FnRef fnref_from_msgpack(MsgpackReader &);
+void fnref_to_msgpack(MsgpackWriter &, const Type::FnRef &);
+Type::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const Type::Any &);
+} // namespace Type
+namespace Direction {
+Direction::LocalToRemote localtoremote_fields_from_msgpack(MsgpackReader &, size_t);
+void localtoremote_fields_to_msgpack(MsgpackWriter &, const Direction::LocalToRemote &);
+Direction::LocalToRemote localtoremote_from_msgpack(MsgpackReader &);
+void localtoremote_to_msgpack(MsgpackWriter &, const Direction::LocalToRemote &);
+Direction::RemoteToLocal remotetolocal_fields_from_msgpack(MsgpackReader &, size_t);
+void remotetolocal_fields_to_msgpack(MsgpackWriter &, const Direction::RemoteToLocal &);
+Direction::RemoteToLocal remotetolocal_from_msgpack(MsgpackReader &);
+void remotetolocal_to_msgpack(MsgpackWriter &, const Direction::RemoteToLocal &);
+Direction::RemoteToRemote remotetoremote_fields_from_msgpack(MsgpackReader &, size_t);
+void remotetoremote_fields_to_msgpack(MsgpackWriter &, const Direction::RemoteToRemote &);
+Direction::RemoteToRemote remotetoremote_from_msgpack(MsgpackReader &);
+void remotetoremote_to_msgpack(MsgpackWriter &, const Direction::RemoteToRemote &);
+Direction::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const Direction::Any &);
+} // namespace Direction
 
 Sym sym_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 1) throw std::runtime_error("Expected Sym with 1 field(s)");
@@ -6630,6 +6793,85 @@ void MemOrder::any_to_msgpack(MsgpackWriter &w_, const MemOrder::Any &x_) {
       [&](const MemOrder::SeqCst &y_) -> void { w_.writeInt32(4); });
 }
 
+Direction::LocalToRemote Direction::localtoremote_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Direction::LocalToRemote with 0 field(s)");
+  return {};
+}
+
+void Direction::localtoremote_fields_to_msgpack(MsgpackWriter &w_, const Direction::LocalToRemote &x_) {}
+
+Direction::LocalToRemote Direction::localtoremote_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Direction::localtoremote_fields_from_msgpack(r_, n_);
+}
+
+void Direction::localtoremote_to_msgpack(MsgpackWriter &w_, const Direction::LocalToRemote &x_) {
+  w_.writeArrayHeader(0);
+  Direction::localtoremote_fields_to_msgpack(w_, x_);
+}
+
+Direction::RemoteToLocal Direction::remotetolocal_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Direction::RemoteToLocal with 0 field(s)");
+  return {};
+}
+
+void Direction::remotetolocal_fields_to_msgpack(MsgpackWriter &w_, const Direction::RemoteToLocal &x_) {}
+
+Direction::RemoteToLocal Direction::remotetolocal_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Direction::remotetolocal_fields_from_msgpack(r_, n_);
+}
+
+void Direction::remotetolocal_to_msgpack(MsgpackWriter &w_, const Direction::RemoteToLocal &x_) {
+  w_.writeArrayHeader(0);
+  Direction::remotetolocal_fields_to_msgpack(w_, x_);
+}
+
+Direction::RemoteToRemote Direction::remotetoremote_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected Direction::RemoteToRemote with 0 field(s)");
+  return {};
+}
+
+void Direction::remotetoremote_fields_to_msgpack(MsgpackWriter &w_, const Direction::RemoteToRemote &x_) {}
+
+Direction::RemoteToRemote Direction::remotetoremote_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Direction::remotetoremote_fields_from_msgpack(r_, n_);
+}
+
+void Direction::remotetoremote_to_msgpack(MsgpackWriter &w_, const Direction::RemoteToRemote &x_) {
+  w_.writeArrayHeader(0);
+  Direction::remotetoremote_fields_to_msgpack(w_, x_);
+}
+
+Direction::Any Direction::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return Direction::localtoremote_fields_from_msgpack(r_, n_ - 1);
+      case 1: return Direction::remotetolocal_fields_from_msgpack(r_, n_ - 1);
+      case 2: return Direction::remotetoremote_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return Direction::localtoremote_fields_from_msgpack(r_, 0);
+      case 1: return Direction::remotetolocal_fields_from_msgpack(r_, 0);
+      case 2: return Direction::remotetoremote_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void Direction::any_to_msgpack(MsgpackWriter &w_, const Direction::Any &x_) {
+  x_.match_total([&](const Direction::LocalToRemote &y_) -> void { w_.writeInt32(0); },
+                 [&](const Direction::RemoteToLocal &y_) -> void { w_.writeInt32(1); },
+                 [&](const Direction::RemoteToRemote &y_) -> void { w_.writeInt32(2); });
+}
+
 Spec::Assert Spec::assert_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Spec::Assert with 2 field(s)");
   auto code = Term::any_from_msgpack(r_);
@@ -7168,6 +7410,148 @@ void Spec::gpuvolatilestore_to_msgpack(MsgpackWriter &w_, const Spec::GpuVolatil
   Spec::gpuvolatilestore_fields_to_msgpack(w_, x_);
 }
 
+Spec::RemoteLaunch Spec::remotelaunch_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 11) throw std::runtime_error("Expected Spec::RemoteLaunch with 11 field(s)");
+  auto kernel = Term::any_from_msgpack(r_);
+  std::vector<Type::Any> tpeArgs;
+  {
+    auto tpeArgs_size = r_.readArrayHeader();
+    tpeArgs.reserve(tpeArgs_size);
+    for (size_t tpeArgs_idx = 0; tpeArgs_idx < tpeArgs_size; ++tpeArgs_idx) {
+      auto tpeArgs_elem = Type::any_from_msgpack(r_);
+      tpeArgs.emplace_back(std::move(tpeArgs_elem));
+    }
+  }
+  auto gridX = Term::any_from_msgpack(r_);
+  auto gridY = Term::any_from_msgpack(r_);
+  auto gridZ = Term::any_from_msgpack(r_);
+  auto blockX = Term::any_from_msgpack(r_);
+  auto blockY = Term::any_from_msgpack(r_);
+  auto blockZ = Term::any_from_msgpack(r_);
+  auto shmem = Term::any_from_msgpack(r_);
+  auto stream = Term::any_from_msgpack(r_);
+  std::vector<Term::Any> args;
+  {
+    auto args_size = r_.readArrayHeader();
+    args.reserve(args_size);
+    for (size_t args_idx = 0; args_idx < args_size; ++args_idx) {
+      auto args_elem = Term::any_from_msgpack(r_);
+      args.emplace_back(std::move(args_elem));
+    }
+  }
+  return {kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args};
+}
+
+void Spec::remotelaunch_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteLaunch &x_) {
+  Term::any_to_msgpack(w_, x_.kernel);
+  w_.writeArrayHeader(x_.tpeArgs.size());
+  for (const auto &v0_ : x_.tpeArgs) {
+    Type::any_to_msgpack(w_, v0_);
+  }
+  Term::any_to_msgpack(w_, x_.gridX);
+  Term::any_to_msgpack(w_, x_.gridY);
+  Term::any_to_msgpack(w_, x_.gridZ);
+  Term::any_to_msgpack(w_, x_.blockX);
+  Term::any_to_msgpack(w_, x_.blockY);
+  Term::any_to_msgpack(w_, x_.blockZ);
+  Term::any_to_msgpack(w_, x_.shmem);
+  Term::any_to_msgpack(w_, x_.stream);
+  w_.writeArrayHeader(x_.args.size());
+  for (const auto &v0_ : x_.args) {
+    Term::any_to_msgpack(w_, v0_);
+  }
+}
+
+Spec::RemoteLaunch Spec::remotelaunch_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::remotelaunch_fields_from_msgpack(r_, n_);
+}
+
+void Spec::remotelaunch_to_msgpack(MsgpackWriter &w_, const Spec::RemoteLaunch &x_) {
+  w_.writeArrayHeader(11);
+  Spec::remotelaunch_fields_to_msgpack(w_, x_);
+}
+
+Spec::RemoteAlloc Spec::remotealloc_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Spec::RemoteAlloc with 1 field(s)");
+  auto bytes = Term::any_from_msgpack(r_);
+  return Spec::RemoteAlloc(bytes);
+}
+
+void Spec::remotealloc_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteAlloc &x_) { Term::any_to_msgpack(w_, x_.bytes); }
+
+Spec::RemoteAlloc Spec::remotealloc_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::remotealloc_fields_from_msgpack(r_, n_);
+}
+
+void Spec::remotealloc_to_msgpack(MsgpackWriter &w_, const Spec::RemoteAlloc &x_) {
+  w_.writeArrayHeader(1);
+  Spec::remotealloc_fields_to_msgpack(w_, x_);
+}
+
+Spec::RemoteFree Spec::remotefree_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Spec::RemoteFree with 1 field(s)");
+  auto ptr = Term::any_from_msgpack(r_);
+  return Spec::RemoteFree(ptr);
+}
+
+void Spec::remotefree_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteFree &x_) { Term::any_to_msgpack(w_, x_.ptr); }
+
+Spec::RemoteFree Spec::remotefree_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::remotefree_fields_from_msgpack(r_, n_);
+}
+
+void Spec::remotefree_to_msgpack(MsgpackWriter &w_, const Spec::RemoteFree &x_) {
+  w_.writeArrayHeader(1);
+  Spec::remotefree_fields_to_msgpack(w_, x_);
+}
+
+Spec::RemoteMemcpy Spec::remotememcpy_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 4) throw std::runtime_error("Expected Spec::RemoteMemcpy with 4 field(s)");
+  auto dst = Term::any_from_msgpack(r_);
+  auto src = Term::any_from_msgpack(r_);
+  auto bytes = Term::any_from_msgpack(r_);
+  auto direction = Direction::any_from_msgpack(r_);
+  return {dst, src, bytes, direction};
+}
+
+void Spec::remotememcpy_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteMemcpy &x_) {
+  Term::any_to_msgpack(w_, x_.dst);
+  Term::any_to_msgpack(w_, x_.src);
+  Term::any_to_msgpack(w_, x_.bytes);
+  Direction::any_to_msgpack(w_, x_.direction);
+}
+
+Spec::RemoteMemcpy Spec::remotememcpy_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::remotememcpy_fields_from_msgpack(r_, n_);
+}
+
+void Spec::remotememcpy_to_msgpack(MsgpackWriter &w_, const Spec::RemoteMemcpy &x_) {
+  w_.writeArrayHeader(4);
+  Spec::remotememcpy_fields_to_msgpack(w_, x_);
+}
+
+Spec::RemoteSync Spec::remotesync_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Spec::RemoteSync with 1 field(s)");
+  auto stream = Term::any_from_msgpack(r_);
+  return Spec::RemoteSync(stream);
+}
+
+void Spec::remotesync_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteSync &x_) { Term::any_to_msgpack(w_, x_.stream); }
+
+Spec::RemoteSync Spec::remotesync_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::remotesync_fields_from_msgpack(r_, n_);
+}
+
+void Spec::remotesync_to_msgpack(MsgpackWriter &w_, const Spec::RemoteSync &x_) {
+  w_.writeArrayHeader(1);
+  Spec::remotesync_fields_to_msgpack(w_, x_);
+}
+
 Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -7200,6 +7584,11 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 23: return Spec::gpuatomicrmw_fields_from_msgpack(r_, n_ - 1);
       case 24: return Spec::gpuvolatileload_fields_from_msgpack(r_, n_ - 1);
       case 25: return Spec::gpuvolatilestore_fields_from_msgpack(r_, n_ - 1);
+      case 26: return Spec::remotelaunch_fields_from_msgpack(r_, n_ - 1);
+      case 27: return Spec::remotealloc_fields_from_msgpack(r_, n_ - 1);
+      case 28: return Spec::remotefree_fields_from_msgpack(r_, n_ - 1);
+      case 29: return Spec::remotememcpy_fields_from_msgpack(r_, n_ - 1);
+      case 30: return Spec::remotesync_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -7231,6 +7620,11 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 23: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 24: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 25: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 26: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 27: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 28: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 29: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 30: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -7332,6 +7726,31 @@ void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         w_.writeArrayHeader(3);
         w_.writeInt32(25);
         Spec::gpuvolatilestore_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteLaunch &y_) -> void {
+        w_.writeArrayHeader(12);
+        w_.writeInt32(26);
+        Spec::remotelaunch_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteAlloc &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(27);
+        Spec::remotealloc_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteFree &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(28);
+        Spec::remotefree_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteMemcpy &y_) -> void {
+        w_.writeArrayHeader(5);
+        w_.writeInt32(29);
+        Spec::remotememcpy_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteSync &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(30);
+        Spec::remotesync_fields_to_msgpack(w_, y_);
       });
 }
 

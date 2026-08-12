@@ -37,6 +37,11 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); },
       [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for CPU"); },
+      [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch requires local orchestration lowering"); },
+      [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc requires local orchestration lowering"); },
+      [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree requires local orchestration lowering"); },
+      [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy requires local orchestration lowering"); },
+      [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync requires local orchestration lowering"); },
       [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for CPU"); },
       [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for CPU"); } //
   );

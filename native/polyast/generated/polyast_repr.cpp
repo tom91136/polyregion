@@ -105,6 +105,22 @@ std::string repr(const MemOrder::Any &o) {
   }();
 }
 
+std::string repr(const Direction::Any &d) {
+  return [&] {
+    if (d.is<Direction::LocalToRemote>()) {
+      return "localToRemote"s;
+    }
+    if (d.is<Direction::RemoteToLocal>()) {
+      return "remoteToLocal"s;
+    }
+    if (d.is<Direction::RemoteToRemote>()) {
+      return "remoteToRemote"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for d (of type Direction::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
 std::string repr(const Region::Any &r) {
   return [&] {
     if (auto _x = r.get<Region::Rooted>()) {
@@ -364,6 +380,24 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Spec::GpuAtomicRMW>()) {
           return fmt::format("'gpuAtomic{}({}, {}, {}, {})", repr(_z->op), repr(_z->ptr), repr(_z->value), repr(_z->scope),
                              repr(_z->order));
+        }
+        if (auto _z = _x->op.get<Spec::RemoteLaunch>()) {
+          return fmt::format("'remoteLaunch({}[{}], <{}, {}, {}>, <{}, {}, {}>, {}, {}, [{}])", repr(_z->kernel),
+                             (_z->tpeArgs | map([&](const Type::Any &_v9_0) { return repr(_v9_0); }) | mk_string(", "s)), repr(_z->gridX),
+                             repr(_z->gridY), repr(_z->gridZ), repr(_z->blockX), repr(_z->blockY), repr(_z->blockZ), repr(_z->shmem),
+                             repr(_z->stream), (_z->args | map([&](const Term::Any &_v9_0) { return repr(_v9_0); }) | mk_string(", "s)));
+        }
+        if (auto _z = _x->op.get<Spec::RemoteAlloc>()) {
+          return fmt::format("'remoteAlloc({})", repr(_z->bytes));
+        }
+        if (auto _z = _x->op.get<Spec::RemoteFree>()) {
+          return fmt::format("'remoteFree({})", repr(_z->ptr));
+        }
+        if (auto _z = _x->op.get<Spec::RemoteMemcpy>()) {
+          return fmt::format("'remoteMemcpy({}, {}, {}, {})", repr(_z->dst), repr(_z->src), repr(_z->bytes), repr(_z->direction));
+        }
+        if (auto _z = _x->op.get<Spec::RemoteSync>()) {
+          return fmt::format("'remoteSync({})", repr(_z->stream));
         }
         if (auto _z = _x->op.get<Spec::GpuVolatileLoad>()) {
           return fmt::format("'gpuVolatileLoad({})", repr(_z->ptr));

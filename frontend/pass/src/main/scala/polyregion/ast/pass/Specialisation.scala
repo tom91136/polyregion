@@ -15,29 +15,42 @@ import polyregion.ast.{PolyAST as p, *, given}
 //   Invoke of an unknown / non-generic name      -> left untouched (no tpeArgs -> not rewritten)
 object Specialisation extends ProgramPass {
 
-  def monomorphicName(ivk: p.Expr.Invoke): p.Sym = {
-    val monomorphicToken = ivk.tpeArgs.map(_.monomorphicName).mkString("_")
-    ivk.calleeName.fqn match {
+  private case class Callsite(calleeName: p.Sym, tpeArgs: List[p.Type])
+
+  private def callsites(fn: p.Function): List[Callsite] =
+    fn.collectWhere[p.Expr] {
+      case ivk: p.Expr.Invoke => Callsite(ivk.calleeName, ivk.tpeArgs) :: Nil
+      case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) =>
+        launch.kernel.tpe match {
+          case p.Type.FnRef(name) => Callsite(name, launch.tpeArgs) :: Nil
+          case _                  => Nil
+        }
+    }.flatten
+
+  def monomorphicName(calleeName: p.Sym, tpeArgs: List[p.Type]): p.Sym = {
+    val monomorphicToken = tpeArgs.map(_.monomorphicName).mkString("_")
+    calleeName.fqn match {
       case xs :+ x => p.Sym(xs :+ monomorphicToken :+ x)
       case xs      => p.Sym(monomorphicToken :: xs)
     }
   }
 
+  def monomorphicName(ivk: p.Expr.Invoke): p.Sym = monomorphicName(ivk.calleeName, ivk.tpeArgs)
+
   def recursiveSpecialise(
       fnLUT: Map[p.Sym, p.Function],
       entry: p.Function,
       done: Map[p.Sym, p.Function] = Map.empty
-  ): Map[p.Sym, p.Function] = entry
-    .collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk }
+  ): Map[p.Sym, p.Function] = callsites(entry)
     .filter(_.tpeArgs.nonEmpty)
     .distinct
-    .foldLeft(done) { case (acc, ivk) =>
-      val newName = monomorphicName(ivk)
-      if (done.contains(newName)) acc
-      else if (!fnLUT.contains(ivk.calleeName)) acc
+    .foldLeft(done) { case (acc, callsite) =>
+      val newName = monomorphicName(callsite.calleeName, callsite.tpeArgs)
+      if (acc.contains(newName)) acc
+      else if (!fnLUT.contains(callsite.calleeName)) acc
       else {
-        val fnImpl = fnLUT(ivk.calleeName)
-        val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs.take(fnImpl.tpeVars.size)).toMap
+        val fnImpl = fnLUT(callsite.calleeName)
+        val tpeLut = fnImpl.tpeVars.zip(callsite.tpeArgs.take(fnImpl.tpeVars.size)).toMap
         val specialisedFnImpl = fnImpl
           .copy(decl = fnImpl.decl.copy(name = newName, tpeVars = Nil))
           .modifyAll[p.Type] {
@@ -50,16 +63,20 @@ object Specialisation extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {
 
-    val callsites = (program.entry :: program.functions)
-      .collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk }
-      .distinct
+    val allCallsites = (program.entry :: program.functions).flatMap(callsites).distinct
 
     val fnLUT = program.functions.map(f => f.name -> f).toMap
 
     log.info("functions", fnLUT.keys.toSeq.map(_.repr)*)
-    log.info("callsites", callsites.map(_.repr)*)
+    log.info(
+      "callsites",
+      allCallsites.map(x => s"${x.calleeName.repr}[${x.tpeArgs.map(_.repr).mkString(", ")}]")*
+    )
 
-    val specialisations = recursiveSpecialise(fnLUT, program.entry)
+    val specialisations =
+      (program.entry :: program.functions.filter(_.tpeVars.isEmpty)).foldLeft(Map.empty[p.Sym, p.Function]) {
+        case (done, root) => recursiveSpecialise(fnLUT, root, done)
+      }
 
     log.info("Specialisations", specialisations.values.map(_.signatureRepr).toList.sorted*)
 
@@ -67,6 +84,17 @@ object Specialisation extends ProgramPass {
       case ivk: p.Expr.Invoke =>
         if (ivk.tpeArgs.isEmpty) ivk
         else ivk.copy(callee = p.Type.FnRef(monomorphicName(ivk)), tpeArgs = Nil)
+      case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) if launch.tpeArgs.nonEmpty =>
+        launch.kernel.tpe match {
+          case p.Type.FnRef(name) =>
+            val newName = monomorphicName(name, launch.tpeArgs)
+            val kernel = launch.kernel.modifyAll[p.Type] {
+              case p.Type.FnRef(`name`) => p.Type.FnRef(newName)
+              case x                    => x
+            }
+            p.Expr.SpecOp(launch.copy(kernel = kernel, tpeArgs = Nil))
+          case _ => p.Expr.SpecOp(launch)
+        }
       case x => x
     }
 

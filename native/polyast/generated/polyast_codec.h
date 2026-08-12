@@ -227,6 +227,16 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT json gpuvolatileload_to_json(const Spec::GpuVolatileLoad &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuVolatileStore gpuvolatilestore_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json gpuvolatilestore_to_json(const Spec::GpuVolatileStore &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch remotelaunch_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotelaunch_to_json(const Spec::RemoteLaunch &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteAlloc remotealloc_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotealloc_to_json(const Spec::RemoteAlloc &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteFree remotefree_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotefree_to_json(const Spec::RemoteFree &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy remotememcpy_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotememcpy_to_json(const Spec::RemoteMemcpy &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteSync remotesync_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotesync_to_json(const Spec::RemoteSync &);
 [[nodiscard]] POLYREGION_EXPORT Spec::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const Spec::Any &);
 } // namespace Spec
@@ -238,50 +248,6 @@ namespace FunctionAffinity {
 [[nodiscard]] POLYREGION_EXPORT FunctionAffinity::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const FunctionAffinity::Any &);
 } // namespace FunctionAffinity
-namespace Type {
-[[nodiscard]] POLYREGION_EXPORT Type::Float16 float16_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json float16_to_json(const Type::Float16 &);
-[[nodiscard]] POLYREGION_EXPORT Type::Float32 float32_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json float32_to_json(const Type::Float32 &);
-[[nodiscard]] POLYREGION_EXPORT Type::Float64 float64_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json float64_to_json(const Type::Float64 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntU8 intu8_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json intu8_to_json(const Type::IntU8 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntU16 intu16_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json intu16_to_json(const Type::IntU16 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntU32 intu32_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json intu32_to_json(const Type::IntU32 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntU64 intu64_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json intu64_to_json(const Type::IntU64 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntS8 ints8_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json ints8_to_json(const Type::IntS8 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntS16 ints16_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json ints16_to_json(const Type::IntS16 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntS32 ints32_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json ints32_to_json(const Type::IntS32 &);
-[[nodiscard]] POLYREGION_EXPORT Type::IntS64 ints64_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json ints64_to_json(const Type::IntS64 &);
-[[nodiscard]] POLYREGION_EXPORT Type::Nothing nothing_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json nothing_to_json(const Type::Nothing &);
-[[nodiscard]] POLYREGION_EXPORT Type::Unit0 unit0_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json unit0_to_json(const Type::Unit0 &);
-[[nodiscard]] POLYREGION_EXPORT Type::Bool1 bool1_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json bool1_to_json(const Type::Bool1 &);
-[[nodiscard]] POLYREGION_EXPORT Type::Struct struct_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json struct_to_json(const Type::Struct &);
-[[nodiscard]] POLYREGION_EXPORT Type::Ptr ptr_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json ptr_to_json(const Type::Ptr &);
-[[nodiscard]] POLYREGION_EXPORT Type::Arr arr_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json arr_to_json(const Type::Arr &);
-[[nodiscard]] POLYREGION_EXPORT Type::Var var_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json var_to_json(const Type::Var &);
-[[nodiscard]] POLYREGION_EXPORT Type::Exec exec_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json exec_to_json(const Type::Exec &);
-[[nodiscard]] POLYREGION_EXPORT Type::FnRef fnref_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json fnref_to_json(const Type::FnRef &);
-[[nodiscard]] POLYREGION_EXPORT Type::Any any_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json any_to_json(const Type::Any &);
-} // namespace Type
 namespace Term {
 [[nodiscard]] POLYREGION_EXPORT Term::Float16Const float16const_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json float16const_to_json(const Term::Float16Const &);
@@ -520,6 +486,60 @@ namespace FunctionVisibility {
 [[nodiscard]] POLYREGION_EXPORT FunctionVisibility::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const FunctionVisibility::Any &);
 } // namespace FunctionVisibility
+namespace Type {
+[[nodiscard]] POLYREGION_EXPORT Type::Float16 float16_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json float16_to_json(const Type::Float16 &);
+[[nodiscard]] POLYREGION_EXPORT Type::Float32 float32_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json float32_to_json(const Type::Float32 &);
+[[nodiscard]] POLYREGION_EXPORT Type::Float64 float64_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json float64_to_json(const Type::Float64 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntU8 intu8_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json intu8_to_json(const Type::IntU8 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntU16 intu16_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json intu16_to_json(const Type::IntU16 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntU32 intu32_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json intu32_to_json(const Type::IntU32 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntU64 intu64_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json intu64_to_json(const Type::IntU64 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntS8 ints8_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json ints8_to_json(const Type::IntS8 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntS16 ints16_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json ints16_to_json(const Type::IntS16 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntS32 ints32_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json ints32_to_json(const Type::IntS32 &);
+[[nodiscard]] POLYREGION_EXPORT Type::IntS64 ints64_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json ints64_to_json(const Type::IntS64 &);
+[[nodiscard]] POLYREGION_EXPORT Type::Nothing nothing_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json nothing_to_json(const Type::Nothing &);
+[[nodiscard]] POLYREGION_EXPORT Type::Unit0 unit0_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json unit0_to_json(const Type::Unit0 &);
+[[nodiscard]] POLYREGION_EXPORT Type::Bool1 bool1_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bool1_to_json(const Type::Bool1 &);
+[[nodiscard]] POLYREGION_EXPORT Type::Struct struct_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json struct_to_json(const Type::Struct &);
+[[nodiscard]] POLYREGION_EXPORT Type::Ptr ptr_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json ptr_to_json(const Type::Ptr &);
+[[nodiscard]] POLYREGION_EXPORT Type::Arr arr_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json arr_to_json(const Type::Arr &);
+[[nodiscard]] POLYREGION_EXPORT Type::Var var_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json var_to_json(const Type::Var &);
+[[nodiscard]] POLYREGION_EXPORT Type::Exec exec_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json exec_to_json(const Type::Exec &);
+[[nodiscard]] POLYREGION_EXPORT Type::FnRef fnref_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json fnref_to_json(const Type::FnRef &);
+[[nodiscard]] POLYREGION_EXPORT Type::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const Type::Any &);
+} // namespace Type
+namespace Direction {
+[[nodiscard]] POLYREGION_EXPORT Direction::LocalToRemote localtoremote_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json localtoremote_to_json(const Direction::LocalToRemote &);
+[[nodiscard]] POLYREGION_EXPORT Direction::RemoteToLocal remotetolocal_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotetolocal_to_json(const Direction::RemoteToLocal &);
+[[nodiscard]] POLYREGION_EXPORT Direction::RemoteToRemote remotetoremote_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotetoremote_to_json(const Direction::RemoteToRemote &);
+[[nodiscard]] POLYREGION_EXPORT Direction::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const Direction::Any &);
+} // namespace Direction
 [[nodiscard]] POLYREGION_EXPORT json hashed_to_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json hashed_from_json(const json &);
 

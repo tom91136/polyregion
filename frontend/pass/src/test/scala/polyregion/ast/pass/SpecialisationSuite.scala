@@ -37,4 +37,82 @@ class SpecialisationSuite extends munit.FunSuite {
     val specialised = out.functions.filter(_.tpeVars.isEmpty)
     assert(specialised.nonEmpty, "expected at least one specialised function with no tpeVars")
   }
+
+  test("generic remote launch produces and references a specialised function") {
+    val generic = fn(
+      "generic.kernel",
+      args = List(arg("value", p.Type.Var("T"))),
+      tpeVars = List("T")
+    )
+    val one = p.Term.IntU32Const(1)
+    val launch = p.Spec.RemoteLaunch(
+      p.Term.Poison(p.Type.FnRef(generic.name)),
+      List(p.Type.IntS32),
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      p.Term.IntU32Const(0),
+      List(p.Term.IntS32Const(1))
+    )
+    val e = entry(
+      body = List(
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out         = Specialisation(program(e, List(generic)), NoopLog)
+    val specialised = out.functions.filter(_.tpeVars.isEmpty)
+    val launches    = out.entry.collectAll[p.Expr].collect { case p.Expr.SpecOp(x: p.Spec.RemoteLaunch) => x }
+
+    assertEquals(specialised.size, 1)
+    assertEquals(launches.size, 1)
+    assertEquals(launches.head.kernel.tpe, p.Type.FnRef(specialised.head.name))
+    assertEquals(launches.head.tpeArgs, Nil)
+  }
+
+  test("generic remote launch in a retained helper produces its specialised function") {
+    val generic = fn(
+      "helper.generic.kernel",
+      args = List(arg("value", p.Type.Var("T"))),
+      tpeVars = List("T")
+    )
+    val one = p.Term.IntU32Const(1)
+    val launch = p.Spec.RemoteLaunch(
+      p.Term.Poison(p.Type.FnRef(generic.name)),
+      List(p.Type.IntS32),
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      p.Term.IntU32Const(0),
+      List(p.Term.IntS32Const(1))
+    )
+    val helper = fn(
+      "helper",
+      body = List(
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val helperCall = p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, Nil, p.Type.Unit0)
+    val e = entry(
+      body = List(
+        p.Stmt.Var(named("helperCall", p.Type.Unit0), Some(helperCall)),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out          = Specialisation(program(e, List(helper, generic)), NoopLog)
+    val expectedName = Specialisation.monomorphicName(generic.name, List(p.Type.IntS32))
+
+    assert(out.functions.exists(_.name == expectedName), out.functions.map(_.name).mkString(", "))
+  }
 }

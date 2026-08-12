@@ -81,6 +81,7 @@ private[polyregion] object compiletime {
     case Const(value: String)
     case TermSelect(arg: (String, A), rest: List[(String, A)])
     case CtorAp(tpe: A, args: List[Value[A]])
+    case Prepend(head: Value[A], tail: Value[A])
   }
 
   private inline def findPrimaryCtorParams[T: Type](using
@@ -304,8 +305,12 @@ private[polyregion] object compiletime {
     val symbol = tpe.typeSymbol
 
     def liftTermToValue(term: Term): Expr[Value[Tpe]] = term match {
-      case Typed(x, _)                                                                         => liftTermToValue(x)
-      case TypeApply(x, _)                                                                     => liftTermToValue(x)
+      case Typed(x, _)     => liftTermToValue(x)
+      case TypeApply(x, _) => liftTermToValue(x)
+      case Apply(Select(tail, "::"), head :: Nil) =>
+        '{ Value.Prepend[Tpe](${ liftTermToValue(head) }, ${ liftTermToValue(tail) }) }
+      case Apply(TypeApply(Select(tail, "::"), _), head :: Nil) =>
+        '{ Value.Prepend[Tpe](${ liftTermToValue(head) }, ${ liftTermToValue(tail) }) }
       case Apply(TypeApply(Select(Ident("List"), "apply"), _), x :: Nil)                       => liftTermToValue(x)
       case Apply(Select(Apply(Ident("List"), List()), "apply"), x :: Nil)                      => liftTermToValue(x)
       case Apply(Select(Ident("ScalaRunTime"), "wrapRefArray" | "genericWrapArray"), x :: Nil) => liftTermToValue(x)

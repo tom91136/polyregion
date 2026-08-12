@@ -416,7 +416,7 @@ Type::Struct Type::Struct::withName(const Sym &v_) const { return Type::Struct(v
 Type::Struct Type::Struct::withArgs(const std::vector<Type::Any> &v_) const { return Type::Struct(name, v_); }
 POLYREGION_EXPORT bool Type::Struct::operator==(const Type::Struct &rhs) const {
   return (this->name == rhs.name)
-         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Type::Struct::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -498,7 +498,7 @@ Type::Exec Type::Exec::withArgs(const std::vector<Type::Any> &v_) const { return
 Type::Exec Type::Exec::withRtn(const Type::Any &v_) const { return Type::Exec(tpeVars, args, v_); }
 POLYREGION_EXPORT bool Type::Exec::operator==(const Type::Exec &rhs) const {
   return (this->tpeVars == rhs.tpeVars)
-         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
          && (this->rtn == rhs.rtn);
 }
 POLYREGION_EXPORT bool Type::Exec::operator==(const Base &rhs_) const {
@@ -926,7 +926,8 @@ Term::Select Term::Select::withSteps(const std::vector<PathStep::Any> &v_) const
 Term::Select Term::Select::withTpe(const Type::Any &v_) const { return Term::Select(root, steps, v_); }
 POLYREGION_EXPORT bool Term::Select::operator==(const Term::Select &rhs) const {
   return (this->root == rhs.root)
-         && std::equal(this->steps.begin(), this->steps.end(), rhs.steps.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->steps.begin(), this->steps.end(), rhs.steps.begin(), rhs.steps.end(),
+                       [](auto &&l, auto &&r) { return l == r; })
          && (this->tpe == rhs.tpe);
 }
 POLYREGION_EXPORT bool Term::Select::operator==(const Base &rhs_) const {
@@ -1124,9 +1125,10 @@ Expr::Invoke Expr::Invoke::withArgs(const std::vector<Term::Any> &v_) const { re
 Expr::Invoke Expr::Invoke::withRtn(const Type::Any &v_) const { return Expr::Invoke(callee, tpeArgs, receiver, args, v_); }
 POLYREGION_EXPORT bool Expr::Invoke::operator==(const Expr::Invoke &rhs) const {
   return (this->callee == rhs.callee)
-         && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), rhs.tpeArgs.end(),
+                       [](auto &&l, auto &&r) { return l == r; })
          && ((!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver))
-         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
          && (this->rtn == rhs.rtn);
 }
 POLYREGION_EXPORT bool Expr::Invoke::operator==(const Base &rhs_) const {
@@ -1151,7 +1153,7 @@ Expr::ForeignCall Expr::ForeignCall::withArgs(const std::vector<Term::Any> &v_) 
 Expr::ForeignCall Expr::ForeignCall::withRtn(const Type::Any &v_) const { return Expr::ForeignCall(name, args, v_); }
 POLYREGION_EXPORT bool Expr::ForeignCall::operator==(const Expr::ForeignCall &rhs) const {
   return (this->name == rhs.name)
-         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
          && (this->rtn == rhs.rtn);
 }
 POLYREGION_EXPORT bool Expr::ForeignCall::operator==(const Base &rhs_) const {
@@ -1209,7 +1211,8 @@ Overload Overload::withArgs(const std::vector<Type::Any> &v_) const { return Ove
 Overload Overload::withRtn(const Type::Any &v_) const { return Overload(args, v_); }
 POLYREGION_EXPORT bool Overload::operator!=(const Overload &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Overload::operator==(const Overload &rhs) const {
-  return std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
+  return std::equal(args.begin(), args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
+         && (rtn == rhs.rtn);
 }
 
 AtomicOp::Base::Base() = default;
@@ -1504,6 +1507,63 @@ POLYREGION_EXPORT bool MemOrder::SeqCst::operator<(const MemOrder::SeqCst &rhs) 
 POLYREGION_EXPORT bool MemOrder::SeqCst::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
 MemOrder::SeqCst::operator MemOrder::Any() const { return std::static_pointer_cast<Base>(std::make_shared<SeqCst>(*this)); }
 MemOrder::Any MemOrder::SeqCst::widen() const { return Any(*this); };
+
+Direction::Base::Base() = default;
+uint32_t Direction::Any::id() const { return _v->id(); }
+size_t Direction::Any::hash_code() const { return _v->hash_code(); }
+bool Direction::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
+bool Direction::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
+bool Direction::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
+
+Direction::LocalToRemote::LocalToRemote() noexcept : Direction::Base() {}
+uint32_t Direction::LocalToRemote::id() const { return variant_id; };
+size_t Direction::LocalToRemote::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool Direction::LocalToRemote::operator==(const Direction::LocalToRemote &rhs) const { return true; }
+POLYREGION_EXPORT bool Direction::LocalToRemote::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool Direction::LocalToRemote::operator<(const Direction::LocalToRemote &rhs) const { return false; }
+POLYREGION_EXPORT bool Direction::LocalToRemote::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+Direction::LocalToRemote::operator Direction::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LocalToRemote>(*this)); }
+Direction::Any Direction::LocalToRemote::widen() const { return Any(*this); };
+
+Direction::RemoteToLocal::RemoteToLocal() noexcept : Direction::Base() {}
+uint32_t Direction::RemoteToLocal::id() const { return variant_id; };
+size_t Direction::RemoteToLocal::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool Direction::RemoteToLocal::operator==(const Direction::RemoteToLocal &rhs) const { return true; }
+POLYREGION_EXPORT bool Direction::RemoteToLocal::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool Direction::RemoteToLocal::operator<(const Direction::RemoteToLocal &rhs) const { return false; }
+POLYREGION_EXPORT bool Direction::RemoteToLocal::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+Direction::RemoteToLocal::operator Direction::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteToLocal>(*this)); }
+Direction::Any Direction::RemoteToLocal::widen() const { return Any(*this); };
+
+Direction::RemoteToRemote::RemoteToRemote() noexcept : Direction::Base() {}
+uint32_t Direction::RemoteToRemote::id() const { return variant_id; };
+size_t Direction::RemoteToRemote::hash_code() const {
+  size_t seed = variant_id;
+  return seed;
+}
+POLYREGION_EXPORT bool Direction::RemoteToRemote::operator==(const Direction::RemoteToRemote &rhs) const { return true; }
+POLYREGION_EXPORT bool Direction::RemoteToRemote::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return true;
+}
+POLYREGION_EXPORT bool Direction::RemoteToRemote::operator<(const Direction::RemoteToRemote &rhs) const { return false; }
+POLYREGION_EXPORT bool Direction::RemoteToRemote::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
+Direction::RemoteToRemote::operator Direction::Any() const {
+  return std::static_pointer_cast<Base>(std::make_shared<RemoteToRemote>(*this));
+}
+Direction::Any Direction::RemoteToRemote::widen() const { return Any(*this); };
 
 Spec::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept
     : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
@@ -2050,6 +2110,157 @@ POLYREGION_EXPORT bool Spec::GpuVolatileStore::operator==(const Base &rhs_) cons
 }
 Spec::GpuVolatileStore::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVolatileStore>(*this)); }
 Spec::Any Spec::GpuVolatileStore::widen() const { return Any(*this); };
+
+Spec::RemoteLaunch::RemoteLaunch(Term::Any kernel, std::vector<Type::Any> tpeArgs, Term::Any gridX, Term::Any gridY, Term::Any gridZ,
+                                 Term::Any blockX, Term::Any blockY, Term::Any blockZ, Term::Any shmem, Term::Any stream,
+                                 std::vector<Term::Any> args) noexcept
+    : Spec::Base({}, ([&] {
+                   auto _xs = args;
+                   _xs.insert(_xs.begin(), {kernel, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream});
+                   return _xs;
+                 }()),
+                 Type::Unit0()),
+      kernel(std::move(kernel)), tpeArgs(std::move(tpeArgs)), gridX(std::move(gridX)), gridY(std::move(gridY)), gridZ(std::move(gridZ)),
+      blockX(std::move(blockX)), blockY(std::move(blockY)), blockZ(std::move(blockZ)), shmem(std::move(shmem)), stream(std::move(stream)),
+      args(std::move(args)) {}
+uint32_t Spec::RemoteLaunch::id() const { return variant_id; };
+size_t Spec::RemoteLaunch::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(kernel)>()(kernel) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(gridX)>()(gridX) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(gridY)>()(gridY) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(gridZ)>()(gridZ) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(blockX)>()(blockX) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(blockY)>()(blockY) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(blockZ)>()(blockZ) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(shmem)>()(shmem) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(stream)>()(stream) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withKernel(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(v_, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withTpeArgs(const std::vector<Type::Any> &v_) const {
+  return Spec::RemoteLaunch(kernel, v_, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withGridX(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, v_, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withGridY(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, v_, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withGridZ(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, v_, blockX, blockY, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withBlockX(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, v_, blockY, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withBlockY(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, v_, blockZ, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withBlockZ(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, v_, shmem, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withShmem(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, v_, stream, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withStream(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, v_, args);
+}
+Spec::RemoteLaunch Spec::RemoteLaunch::withArgs(const std::vector<Term::Any> &v_) const {
+  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, v_);
+}
+POLYREGION_EXPORT bool Spec::RemoteLaunch::operator==(const Spec::RemoteLaunch &rhs) const {
+  return (this->kernel == rhs.kernel)
+         && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), rhs.tpeArgs.end(),
+                       [](auto &&l, auto &&r) { return l == r; })
+         && (this->gridX == rhs.gridX) && (this->gridY == rhs.gridY) && (this->gridZ == rhs.gridZ) && (this->blockX == rhs.blockX)
+         && (this->blockY == rhs.blockY) && (this->blockZ == rhs.blockZ) && (this->shmem == rhs.shmem) && (this->stream == rhs.stream)
+         && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; });
+}
+POLYREGION_EXPORT bool Spec::RemoteLaunch::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteLaunch &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteLaunch::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteLaunch>(*this)); }
+Spec::Any Spec::RemoteLaunch::widen() const { return Any(*this); };
+
+Spec::RemoteAlloc::RemoteAlloc(Term::Any bytes) noexcept
+    : Spec::Base({}, {bytes}, Type::Ptr(Type::IntU8(), TypeSpace::Global())), bytes(std::move(bytes)) {}
+uint32_t Spec::RemoteAlloc::id() const { return variant_id; };
+size_t Spec::RemoteAlloc::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::RemoteAlloc Spec::RemoteAlloc::withBytes(const Term::Any &v_) const { return Spec::RemoteAlloc(v_); }
+POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Spec::RemoteAlloc &rhs) const { return (this->bytes == rhs.bytes); }
+POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteAlloc &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteAlloc::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteAlloc>(*this)); }
+Spec::Any Spec::RemoteAlloc::widen() const { return Any(*this); };
+
+Spec::RemoteFree::RemoteFree(Term::Any ptr) noexcept : Spec::Base({}, {ptr}, Type::Unit0()), ptr(std::move(ptr)) {}
+uint32_t Spec::RemoteFree::id() const { return variant_id; };
+size_t Spec::RemoteFree::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::RemoteFree Spec::RemoteFree::withPtr(const Term::Any &v_) const { return Spec::RemoteFree(v_); }
+POLYREGION_EXPORT bool Spec::RemoteFree::operator==(const Spec::RemoteFree &rhs) const { return (this->ptr == rhs.ptr); }
+POLYREGION_EXPORT bool Spec::RemoteFree::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteFree &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteFree::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteFree>(*this)); }
+Spec::Any Spec::RemoteFree::widen() const { return Any(*this); };
+
+Spec::RemoteMemcpy::RemoteMemcpy(Term::Any dst, Term::Any src, Term::Any bytes, Direction::Any direction) noexcept
+    : Spec::Base({}, {dst, src, bytes}, Type::Unit0()), dst(std::move(dst)), src(std::move(src)), bytes(std::move(bytes)),
+      direction(std::move(direction)) {}
+uint32_t Spec::RemoteMemcpy::id() const { return variant_id; };
+size_t Spec::RemoteMemcpy::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(dst)>()(dst) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(src)>()(src) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(direction)>()(direction) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withDst(const Term::Any &v_) const { return Spec::RemoteMemcpy(v_, src, bytes, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withSrc(const Term::Any &v_) const { return Spec::RemoteMemcpy(dst, v_, bytes, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withBytes(const Term::Any &v_) const { return Spec::RemoteMemcpy(dst, src, v_, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withDirection(const Direction::Any &v_) const { return Spec::RemoteMemcpy(dst, src, bytes, v_); }
+POLYREGION_EXPORT bool Spec::RemoteMemcpy::operator==(const Spec::RemoteMemcpy &rhs) const {
+  return (this->dst == rhs.dst) && (this->src == rhs.src) && (this->bytes == rhs.bytes) && (this->direction == rhs.direction);
+}
+POLYREGION_EXPORT bool Spec::RemoteMemcpy::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteMemcpy &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteMemcpy::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteMemcpy>(*this)); }
+Spec::Any Spec::RemoteMemcpy::widen() const { return Any(*this); };
+
+Spec::RemoteSync::RemoteSync(Term::Any stream) noexcept : Spec::Base({}, {stream}, Type::Unit0()), stream(std::move(stream)) {}
+uint32_t Spec::RemoteSync::id() const { return variant_id; };
+size_t Spec::RemoteSync::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(stream)>()(stream) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::RemoteSync Spec::RemoteSync::withStream(const Term::Any &v_) const { return Spec::RemoteSync(v_); }
+POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Spec::RemoteSync &rhs) const { return (this->stream == rhs.stream); }
+POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteSync &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteSync::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteSync>(*this)); }
+Spec::Any Spec::RemoteSync::widen() const { return Any(*this); };
 
 Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept
     : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
@@ -3344,7 +3555,7 @@ Handler Handler::withBody(const std::vector<Stmt::Any> &v_) const { return Handl
 POLYREGION_EXPORT bool Handler::operator!=(const Handler &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Handler::operator==(const Handler &rhs) const {
   return (caught == rhs.caught) && (binder == rhs.binder)
-         && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(body.begin(), body.end(), rhs.body.begin(), rhs.body.end(), [](auto &&l, auto &&r) { return l == r; });
 }
 
 Stmt::Base::Base() = default;
@@ -3437,7 +3648,7 @@ Stmt::While Stmt::While::withCond(const Term::Any &v_) const { return Stmt::Whil
 Stmt::While Stmt::While::withBody(const std::vector<Stmt::Any> &v_) const { return Stmt::While(cond, v_); }
 POLYREGION_EXPORT bool Stmt::While::operator==(const Stmt::While &rhs) const {
   return (this->cond == rhs.cond)
-         && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), rhs.body.end(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::While::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3470,7 +3681,7 @@ Stmt::ForRange Stmt::ForRange::withBody(const std::vector<Stmt::Any> &v_) const 
 }
 POLYREGION_EXPORT bool Stmt::ForRange::operator==(const Stmt::ForRange &rhs) const {
   return (this->induction == rhs.induction) && (this->lbIncl == rhs.lbIncl) && (this->ubExcl == rhs.ubExcl) && (this->step == rhs.step)
-         && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), rhs.body.end(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::ForRange::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3528,8 +3739,10 @@ Stmt::Cond Stmt::Cond::withTrueBr(const std::vector<Stmt::Any> &v_) const { retu
 Stmt::Cond Stmt::Cond::withFalseBr(const std::vector<Stmt::Any> &v_) const { return Stmt::Cond(cond, trueBr, v_); }
 POLYREGION_EXPORT bool Stmt::Cond::operator==(const Stmt::Cond &rhs) const {
   return (this->cond == rhs.cond)
-         && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; })
-         && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), rhs.trueBr.end(),
+                       [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), rhs.falseBr.end(),
+                       [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::Cond::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3597,9 +3810,9 @@ Stmt::Try Stmt::Try::withBody(const std::vector<Stmt::Any> &v_) const { return S
 Stmt::Try Stmt::Try::withHandlers(const std::vector<Handler> &v_) const { return Stmt::Try(body, v_, fin); }
 Stmt::Try Stmt::Try::withFin(const std::vector<Stmt::Any> &v_) const { return Stmt::Try(body, handlers, v_); }
 POLYREGION_EXPORT bool Stmt::Try::operator==(const Stmt::Try &rhs) const {
-  return std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; })
+  return std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), rhs.body.end(), [](auto &&l, auto &&r) { return l == r; })
          && (this->handlers == rhs.handlers)
-         && std::equal(this->fin.begin(), this->fin.end(), rhs.fin.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(this->fin.begin(), this->fin.end(), rhs.fin.begin(), rhs.fin.end(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::Try::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3625,7 +3838,8 @@ Stmt::Raise Stmt::Raise::withExceptionKind(const ExceptionKind &v_) const { retu
 Stmt::Raise Stmt::Raise::withCleanup(const std::vector<Stmt::Any> &v_) const { return Stmt::Raise(value, exceptionKind, v_); }
 POLYREGION_EXPORT bool Stmt::Raise::operator==(const Stmt::Raise &rhs) const {
   return (this->value == rhs.value) && (this->exceptionKind == rhs.exceptionKind)
-         && std::equal(this->cleanup.begin(), this->cleanup.end(), rhs.cleanup.begin(), [](auto &&l, auto &&r) { return l == r; });
+         && std::equal(this->cleanup.begin(), this->cleanup.end(), rhs.cleanup.begin(), rhs.cleanup.end(),
+                       [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Stmt::Raise::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -3690,9 +3904,11 @@ POLYREGION_EXPORT bool Signature::operator!=(const Signature &rhs) const { retur
 POLYREGION_EXPORT bool Signature::operator==(const Signature &rhs) const {
   return (name == rhs.name) && (tpeVars == rhs.tpeVars)
          && ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver))
-         && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; })
-         && std::equal(moduleCaptures.begin(), moduleCaptures.end(), rhs.moduleCaptures.begin(), [](auto &&l, auto &&r) { return l == r; })
-         && std::equal(termCaptures.begin(), termCaptures.end(), rhs.termCaptures.begin(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(args.begin(), args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(moduleCaptures.begin(), moduleCaptures.end(), rhs.moduleCaptures.begin(), rhs.moduleCaptures.end(),
+                       [](auto &&l, auto &&r) { return l == r; })
+         && std::equal(termCaptures.begin(), termCaptures.end(), rhs.termCaptures.begin(), rhs.termCaptures.end(),
+                       [](auto &&l, auto &&r) { return l == r; })
          && (rtn == rhs.rtn);
 }
 
@@ -3721,9 +3937,11 @@ InvokeSignature InvokeSignature::withArgs(const std::vector<Type::Any> &v_) cons
 InvokeSignature InvokeSignature::withRtn(const Type::Any &v_) const { return InvokeSignature(name, tpeArgs, receiver, args, v_); }
 POLYREGION_EXPORT bool InvokeSignature::operator!=(const InvokeSignature &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool InvokeSignature::operator==(const InvokeSignature &rhs) const {
-  return (name == rhs.name) && std::equal(tpeArgs.begin(), tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; })
+  return (name == rhs.name)
+         && std::equal(tpeArgs.begin(), tpeArgs.end(), rhs.tpeArgs.begin(), rhs.tpeArgs.end(), [](auto &&l, auto &&r) { return l == r; })
          && ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver))
-         && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
+         && std::equal(args.begin(), args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
+         && (rtn == rhs.rtn);
 }
 
 FunctionVisibility::Base::Base() = default;
@@ -4132,7 +4350,8 @@ Function Function::withFpMode(const FunctionFpMode::Any &v_) const { return Func
 Function Function::withIsEntry(const bool &v_) const { return Function(decl, body, visibility, fpMode, v_); }
 POLYREGION_EXPORT bool Function::operator!=(const Function &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Function::operator==(const Function &rhs) const {
-  return (decl == rhs.decl) && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; })
+  return (decl == rhs.decl)
+         && std::equal(body.begin(), body.end(), rhs.body.begin(), rhs.body.end(), [](auto &&l, auto &&r) { return l == r; })
          && (visibility == rhs.visibility) && (fpMode == rhs.fpMode) && (isEntry == rhs.isEntry);
 }
 
@@ -4716,6 +4935,21 @@ std::size_t std::hash<polyregion::polyast::MemOrder::AcqRel>::operator()(const p
 std::size_t std::hash<polyregion::polyast::MemOrder::SeqCst>::operator()(const polyregion::polyast::MemOrder::SeqCst &x) const noexcept {
   return x.hash_code();
 }
+std::size_t std::hash<polyregion::polyast::Direction::Any>::operator()(const polyregion::polyast::Direction::Any &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Direction::LocalToRemote>::operator()(
+    const polyregion::polyast::Direction::LocalToRemote &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Direction::RemoteToLocal>::operator()(
+    const polyregion::polyast::Direction::RemoteToLocal &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Direction::RemoteToRemote>::operator()(
+    const polyregion::polyast::Direction::RemoteToRemote &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Spec::Any>::operator()(const polyregion::polyast::Spec::Any &x) const noexcept {
   return x.hash_code();
 }
@@ -4813,6 +5047,23 @@ std::hash<polyregion::polyast::Spec::GpuVolatileLoad>::operator()(const polyregi
 }
 std::size_t
 std::hash<polyregion::polyast::Spec::GpuVolatileStore>::operator()(const polyregion::polyast::Spec::GpuVolatileStore &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::RemoteLaunch>::operator()(const polyregion::polyast::Spec::RemoteLaunch &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::RemoteAlloc>::operator()(const polyregion::polyast::Spec::RemoteAlloc &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::RemoteFree>::operator()(const polyregion::polyast::Spec::RemoteFree &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::Spec::RemoteMemcpy>::operator()(const polyregion::polyast::Spec::RemoteMemcpy &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Spec::RemoteSync>::operator()(const polyregion::polyast::Spec::RemoteSync &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Intr::Any>::operator()(const polyregion::polyast::Intr::Any &x) const noexcept {
