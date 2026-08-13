@@ -63,6 +63,7 @@ struct DriverConfig {
   std::string defaultsVar;
   std::string defaultsLabelVar;
   std::vector<std::pair<std::string, std::string>> defaultsVariants;
+  std::vector<std::pair<std::string, std::string>> extraVars;
   std::pair<std::string, std::string> stdpar;
   std::string driverEnvVar;
   std::vector<std::string> passthroughEnvs;
@@ -467,6 +468,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                             const std::string &label, const std::string &value) {
     const auto varsWithLabel = vars ^ append(std::pair{cfg.defaultsLabelVar, label});
     const auto augmented = varsWithLabel //
+                           ^ concat(cfg.extraVars)
                            ^ concat(std::vector<std::pair<std::string, std::string>>{
                                {cfg.defaultsVar, value},
                                {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))},

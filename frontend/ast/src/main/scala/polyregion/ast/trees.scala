@@ -507,8 +507,17 @@ extension (decl: p.FunctionDecl) {
       .filterNot(matcher.bindings.contains)
       .foreach(name => errors += s"implementation type variable `$name` is not bound by the public declaration")
 
+    val callables = decl.args
+      .zip(publicDecl.args)
+      .zipWithIndex
+      .collect {
+        case ((p.Arg(p.Named(_, p.Type.Var(name), _), _, _), p.Arg(p.Named(_, _: p.Type.Exec, _), _, _)), index) =>
+          name -> index
+      }
+      .toMap
     val distinct = errors.result().distinct
-    if (distinct.isEmpty) Right(LibraryBinding.ImplementationBinding(matcher.bindings, result)) else Left(distinct)
+    if (distinct.isEmpty) Right(LibraryBinding.ImplementationBinding(matcher.bindings, callables, result))
+    else Left(distinct)
   }
 
   def signature: p.Signature = p.Signature(
@@ -553,7 +562,7 @@ extension (decl: p.FunctionDecl) {
   }
 }
 
-extension (index: LibraryBinding.PackageIndex) {
+extension (index: p.PackageIndex) {
   def resolve(
       call: p.InvokeSignature,
       callableDecls: List[p.FunctionDecl],
@@ -578,7 +587,7 @@ extension (index: LibraryBinding.PackageIndex) {
       case matches =>
         return Left(List(s"ambiguous public declaration `${call.name.fqn.mkString(".")}`: ${matches.size} matches"))
     }
-    def candidateKey(candidate: LibraryBinding.ImplementationCandidate) = (
+    def candidateKey(candidate: p.ImplementationCandidate) = (
       candidate.implementation.name.fqn.mkString("."),
       candidate.implementation.toString,
       candidate.requiredCapabilities.sorted.mkString("\u0000"),
@@ -589,7 +598,7 @@ extension (index: LibraryBinding.PackageIndex) {
     if (candidates.isEmpty)
       return Left(List(s"no implementations for `${decl.name.fqn.mkString(".")}`"))
 
-    val compatible = List.newBuilder[(LibraryBinding.ImplementationCandidate, LibraryBinding.ImplementationBinding)]
+    val compatible = List.newBuilder[(p.ImplementationCandidate, LibraryBinding.ImplementationBinding)]
     val rejected   = List.newBuilder[String]
     candidates.foreach { candidate =>
       val label  = candidate.implementation.name.fqn.mkString(".")

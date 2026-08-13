@@ -338,6 +338,12 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
 [[nodiscard]] POLYREGION_EXPORT LibraryDef librarydef_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json librarydef_to_json(const LibraryDef &);
+[[nodiscard]] POLYREGION_EXPORT TypeSizeConstraint typesizeconstraint_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json typesizeconstraint_to_json(const TypeSizeConstraint &);
+[[nodiscard]] POLYREGION_EXPORT ImplementationCandidate implementationcandidate_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json implementationcandidate_to_json(const ImplementationCandidate &);
+[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packageindex_to_json(const PackageIndex &);
 namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
@@ -549,6 +555,10 @@ namespace Direction {
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> hashed_program_to_msgpack(const Program &);
 [[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const std::vector<uint8_t> &);
+
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex &);
+[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const std::vector<uint8_t> &);
 
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const uint8_t *, const uint8_t *);

@@ -104,4 +104,34 @@ clang::VarDecl *mkStaticVarDecl(clang::ASTContext &C, clang::DeclContext *callee
   return decl;
 }
 
+clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
+                                 const std::vector<clang::QualType> &paramTys) {
+  auto *tu = C.getTranslationUnitDecl();
+  auto *linkage = clang::LinkageSpecDecl::Create(C, tu, {}, {}, clang::LinkageSpecLanguageIDs::C, false);
+  const auto fnTy = C.getFunctionType(retTy, paramTys, clang::FunctionProtoType::ExtProtoInfo());
+  auto *fn = clang::FunctionDecl::Create(C, linkage, {}, {}, clang::DeclarationName(&C.Idents.get(name)), fnTy,
+                                         C.getTrivialTypeSourceInfo(fnTy), clang::SC_Extern);
+  std::vector<clang::ParmVarDecl *> params;
+  for (const auto &paramTy : paramTys)
+    params.emplace_back(
+        clang::ParmVarDecl::Create(C, fn, {}, {}, nullptr, paramTy, C.getTrivialTypeSourceInfo(paramTy), clang::SC_None, nullptr));
+  fn->setParams(params);
+  linkage->addDecl(fn);
+  tu->addDecl(linkage);
+  return fn;
+}
+
+clang::CallExpr *mkCall(clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args) {
+  auto *ref = clang::DeclRefExpr::Create(C, {}, {}, fn, false, clang::SourceLocation{}, fn->getType(), clang::VK_LValue);
+  auto *decay = clang::ImplicitCastExpr::Create(C, C.getPointerType(fn->getType()), clang::CK_FunctionToPointerDecay, ref, nullptr,
+                                                clang::VK_PRValue, {});
+  return clang::CallExpr::Create(C, decay, args, fn->getReturnType(), clang::VK_PRValue, {}, {});
+}
+
+clang::Expr *mkLoad(clang::ASTContext &C, clang::VarDecl *var) {
+  auto *ref = mkDeclRef(C, var);
+  if (var->getType()->getAsCXXRecordDecl()) return ref;
+  return clang::ImplicitCastExpr::Create(C, var->getType(), clang::CK_LValueToRValue, ref, nullptr, clang::VK_PRValue, {});
+}
+
 } // namespace polyregion::polystl

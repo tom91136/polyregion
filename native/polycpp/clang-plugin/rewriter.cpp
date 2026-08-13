@@ -12,13 +12,16 @@
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/MD5.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
+#include "polyfront/library_driver.hpp"
 #include "polyfront/library_emit.hpp"
+#include "polyfront/library_package.hpp"
 #include "polyregion/conventions.h"
 
 #include "ast.h"
@@ -65,6 +68,195 @@ struct Failure {
 };
 
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
+constexpr static llvm::StringLiteral importAnnotation = "polyregion_import:";
+
+struct ImportSite {
+  clang::CallExpr *call;
+  clang::FunctionDecl *callee;
+  std::string library;
+  std::string declaration;
+};
+
+static std::optional<std::pair<std::string, std::string>> importIdentity(const clang::FunctionDecl *decl) {
+  for (const auto *attr : decl->attrs()) {
+    const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+    if (!annotation || !annotation->getAnnotation().starts_with(importAnnotation)) continue;
+    const auto payload = annotation->getAnnotation().drop_front(importAnnotation.size());
+    const auto [library, declaration] = payload.split(':');
+    if (!library.empty() && !declaration.empty() && !declaration.contains(':')) return std::pair(library.str(), declaration.str());
+  }
+  return std::nullopt;
+}
+
+static Vector<ImportSite> libraryImports(clang::ASTContext &context) {
+  using namespace clang::ast_matchers;
+  Vector<ImportSite> results;
+  runMatch(
+      context,
+      [&](const MatchFinder::MatchResult &result) {
+        const auto *call = result.Nodes.getNodeAs<clang::CallExpr>("libraryImportCall");
+        const auto *callee = result.Nodes.getNodeAs<clang::FunctionDecl>("libraryImportDecl");
+        if (call && callee)
+          if (const auto identity = importIdentity(callee))
+            results.emplace_back(ImportSite{const_cast<clang::CallExpr *>(call), const_cast<clang::FunctionDecl *>(callee), identity->first,
+                                            identity->second});
+      },
+      callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("libraryImportDecl"))).bind("libraryImportCall"));
+  std::set<const clang::FunctionDecl *> seen;
+  return results | filter([&](const auto &site) { return seen.emplace(site.callee->getCanonicalDecl()).second; }) | to_vector();
+}
+
+static std::string importKey(const clang::CompilerInstance &CI, const clang::ASTContext &C, const ImportSite &site) {
+  llvm::MD5 md5;
+  md5.update(CI.getFrontendOpts().Inputs.empty() ? llvm::StringRef{} : CI.getFrontendOpts().Inputs.front().getFile());
+  md5.update(site.library);
+  md5.update(site.declaration);
+  md5.update(site.callee->getQualifiedNameAsString());
+  md5.update(site.callee->getType().getAsString(C.getPrintingPolicy()));
+  const auto location = C.getSourceManager().getExpansionLoc(site.callee->getLocation());
+  md5.update(std::to_string(C.getSourceManager().getFileOffset(location)));
+  return md5.final().digest().str().str();
+}
+
+static void bindLibraryImport(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C, const ImportSite &site,
+                              const polyfront::library::Package &package, LibraryBitcode &libraryBitcode) {
+  using namespace polyfront::library;
+  auto &D = CI.getDiagnostics();
+  Remapper remapper(C);
+  Remapper::RemapContext context;
+  std::vector<Type::Any> argumentTypes;
+  std::vector<FunctionDecl> callableDecls;
+  std::map<std::string, int32_t> typeSizes;
+  for (const auto *parameter : site.callee->parameters()) {
+    const auto type = remapper.handleType(parameter->getType(), context);
+    argumentTypes.emplace_back(type);
+    const auto sized = parameter->getType()->isPointerType() ? parameter->getType()->getPointeeType() : parameter->getType();
+    const auto sizeKey = type.get<Type::Ptr>() ? type.get<Type::Ptr>()->comp : type;
+    typeSizes.emplace(repr(sizeKey), static_cast<int32_t>(C.getTypeSize(sized) / 8));
+  }
+  for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
+    const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
+    const auto *record = argument->getType()->getAsCXXRecordDecl();
+    const clang::FunctionDecl *callable = nullptr;
+    if (record) {
+      if (record->isLambda()) callable = record->getLambdaCallOperator();
+      else
+        for (const auto *method : record->methods())
+          if (method->getOverloadedOperator() == clang::OO_Call && method->doesThisDeclarationHaveABody()) {
+            if (callable) {
+              emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
+                   POLYREGION_DIAG_POLYSTL "library callable has an ambiguous operator()");
+              return;
+            }
+            callable = method;
+          }
+    } else if (argument->getType()->isFunctionPointerType()) {
+      const clang::Expr *referenced = argument->IgnoreParenImpCasts();
+      if (const auto *address = llvm::dyn_cast<clang::UnaryOperator>(referenced); address && address->getOpcode() == clang::UO_AddrOf)
+        referenced = address->getSubExpr()->IgnoreParenImpCasts();
+      if (const auto *ref = llvm::dyn_cast<clang::DeclRefExpr>(referenced)) callable = llvm::dyn_cast<clang::FunctionDecl>(ref->getDecl());
+    }
+    if (!callable) continue;
+    if (record && record->isLambda() && record->capture_size() != 0) {
+      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
+           POLYREGION_DIAG_POLYSTL "capturing library callables are not supported");
+      return;
+    }
+    if (callable->isTemplated()) {
+      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
+           POLYREGION_DIAG_POLYSTL "generic library callables require a concrete operator() specialization");
+      return;
+    }
+    auto [name, function] = remapper.handleCall(callable, context);
+    auto args = function->decl.args;
+    if (!args.empty() && args.front().named.symbol == conventions::ThisReceiver) args.erase(args.begin());
+    function->decl = function->decl.withArgs(args).withAffinity(FunctionAffinity::Offload());
+    argumentTypes[i] = Type::FnRef(function->decl.name);
+    callableDecls.emplace_back(function->decl);
+  }
+  const auto returnType = remapper.handleType(site.callee->getReturnType(), context);
+  if (!site.callee->getReturnType()->isVoidType())
+    typeSizes.emplace(repr(returnType), static_cast<int32_t>(C.getTypeSize(site.callee->getReturnType()) / 8));
+  const auto call = InvokeSignature(Sym(site.declaration ^ split('.')), {}, {}, argumentTypes, returnType);
+  const auto resolution = resolve(package.index, call, callableDecls, opts.libraryCapabilities, typeSizes);
+  if (!resolution) {
+    for (const auto &error : resolution.errors)
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    return;
+  }
+  const auto implementationFn = implementation(package, *resolution.value);
+  if (!implementationFn) {
+    for (const auto &error : implementationFn.errors)
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    return;
+  }
+
+  const auto suffix = importKey(CI, C, site);
+  const auto driverName = "__polyregion_import_driver_" + suffix;
+  const auto plan = buildDriver(driverName, *resolution.value, typeSizes);
+  if (!plan) {
+    for (const auto &error : plan.errors)
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    return;
+  }
+  const auto callableFunctions = context.functions | values() | map([](const auto &function) { return *function; }) | to_vector();
+  const auto closure = bindImplementationClosure(package, *resolution.value, callableFunctions);
+  if (!closure) {
+    for (const auto &error : closure.errors)
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    return;
+  }
+  const auto callerDefs = context.structs | values() | map([](const auto &definition) { return *definition; }) | to_vector();
+  const auto defs = bindStructClosure(package, *closure.value, callerDefs);
+  if (!defs) {
+    for (const auto &error : defs.errors)
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    return;
+  }
+  const Program program(plan.value->driver, *closure.value, *defs.value, PassPhase::Initial(), {});
+  const auto compiled = polyfront::compileProgram(opts, program, compiletime::Target::Object_LLVM_HOST, "native",
+                                                  {"--host-mirroring", "--passes", "FullOpt(level=2)"});
+  if (const auto *error = std::get_if<std::string>(&compiled)) {
+    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", *error);
+    return;
+  }
+  const auto &result = std::get<CompileResult>(compiled);
+  if (!result.binary) {
+    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "library host driver compilation failed: %0",
+         result.messages);
+    return;
+  }
+
+  libraryBitcode.emplace_back(*result.binary);
+
+  auto &S = CI.getSema();
+  std::vector<clang::QualType> driverTypes;
+  std::vector<clang::Expr *> driverArgs;
+  for (const auto index : plan.value->runtimeArguments) {
+    auto *parameter = site.callee->getParamDecl(index);
+    if (argumentTypes[index].is<Type::Ptr>()) {
+      driverTypes.emplace_back(parameter->getType());
+      driverArgs.emplace_back(mkLoad(C, parameter));
+    } else {
+      driverTypes.emplace_back(C.getPointerType(parameter->getType()));
+      driverArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, parameter)).get());
+    }
+  }
+  clang::VarDecl *resultDecl = nullptr;
+  if (plan.value->hasResult) {
+    const auto type = site.callee->getReturnType();
+    resultDecl = clang::VarDecl::Create(C, site.callee, {}, {}, &C.Idents.get("__polyregion_import_result"), type,
+                                        C.getTrivialTypeSourceInfo(type), clang::SC_None);
+    driverTypes.emplace_back(C.getPointerType(type));
+    driverArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, resultDecl)).get());
+  }
+  auto *driver = mkExternCFn(C, driverName, C.VoidTy, driverTypes);
+  std::vector<clang::Stmt *> statements;
+  if (resultDecl) statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(resultDecl), {}, {}));
+  statements.emplace_back(mkCall(C, driver, driverArgs));
+  if (resultDecl) statements.emplace_back(clang::ReturnStmt::Create(C, {}, mkLoad(C, resultDecl), nullptr));
+  site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
+}
 
 static Vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
   using namespace clang::ast_matchers;
@@ -381,8 +573,9 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   c.calleeDecl->setBody(clang::CompoundStmt::Create(C, newStmts, {}, {}, {}));
 }
 
-OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts)
-    : clang::ASTConsumer(), CI(CI), opts(opts) {}
+OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
+                                               std::shared_ptr<LibraryBitcode> libraryBitcode)
+    : clang::ASTConsumer(), CI(CI), opts(opts), libraryBitcode(std::move(libraryBitcode)) {}
 
 namespace {
 struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
@@ -451,4 +644,19 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
               insertKernelImage(D, CI.getSema(), C, c, bundle);
 
             });
+
+  const auto action = CI.getFrontendOpts().ProgramAction;
+  const bool emitsCode = action == clang::frontend::EmitAssembly || action == clang::frontend::EmitBC || action == clang::frontend::EmitLLVM
+                         || action == clang::frontend::EmitLLVMOnly || action == clang::frontend::EmitCodeGenOnly
+                         || action == clang::frontend::EmitObj;
+  if (!emitsCode) return;
+  for (const auto &site : libraryImports(C)) {
+    const auto package =
+        polyfront::library::loadPackage(site.library, opts.libraryPath.empty() ? polyfront::library::packageRoots()
+                                                                               : polyfront::library::splitPackageRoots(opts.libraryPath));
+    if (!package)
+      for (const auto &error : package.errors)
+        emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    else bindLibraryImport(opts, CI, C, site, *package.value, *libraryBitcode);
+  }
 }

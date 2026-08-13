@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -70,16 +71,22 @@ struct Options {
   std::vector<Target> targets;
   std::optional<int> stackDepth = {};
   std::string emitLibraryPath;
+  std::string libraryPath;
+  std::set<std::string> libraryCapabilities;
 
   static std::variant<std::vector<std::string>, Options>
   parseArgs(std::optional<std::string> maybeExe, std::optional<std::string> maybeVerbose, std::optional<std::string> maybeTargets,
             std::optional<std::string> maybeStackDepth = {}, std::optional<std::string> maybeJit = {},
-            std::optional<std::string> maybeEmitLibrary = {}) {
+            std::optional<std::string> maybeEmitLibrary = {}, std::optional<std::string> maybeLibraryPath = {},
+            std::optional<std::string> maybeLibraryCapabilities = {}) {
     Options opts;
     std::vector<std::string> errors;
     if (auto verbose = maybeVerbose) opts.verbose = *verbose == "1";
     if (auto jit = maybeJit) opts.jit = *jit == "1";
     if (auto emit = maybeEmitLibrary) opts.emitLibraryPath = *emit;
+    if (auto path = maybeLibraryPath) opts.libraryPath = *path;
+    if (auto capabilities = maybeLibraryCapabilities)
+      opts.libraryCapabilities = *capabilities ^ split(',') ^ filter([](const auto &x) { return !x.empty(); }) ^ to<std::set>();
     if (auto exe = maybeExe) opts.executable = *exe;
     else errors.emplace_back("exe argument missing");
     if (auto depth = maybeStackDepth) {
@@ -116,7 +123,8 @@ struct Options {
              });
     };
     return parseArgs(parseSuffix(PolyfrontExe), parseSuffix(PolyfrontVerbose), parseSuffix(PolyfrontTargets),
-                     parseSuffix(PolyfrontStackDepth), parseSuffix(PolyfrontJit), parseSuffix(PolyfrontEmitLibrary));
+                     parseSuffix(PolyfrontStackDepth), parseSuffix(PolyfrontJit), parseSuffix(PolyfrontEmitLibrary),
+                     parseSuffix(PolyfrontLibraryPath), parseSuffix(PolyfrontLibraryCapabilities));
   }
 
   static std::variant<std::vector<std::string>, Options> parseArgsFromEnv() {
@@ -125,7 +133,8 @@ struct Options {
       else return {};
     };
     return parseArgs(readEnv(PolyfrontExe), readEnv(PolyfrontVerbose), readEnv(PolyfrontTargets), readEnv(PolyfrontStackDepth),
-                     readEnv(PolyfrontJit), readEnv(PolyfrontEmitLibrary));
+                     readEnv(PolyfrontJit), readEnv(PolyfrontEmitLibrary), readEnv(PolyfrontLibraryPath),
+                     readEnv(PolyfrontLibraryCapabilities));
   }
 };
 

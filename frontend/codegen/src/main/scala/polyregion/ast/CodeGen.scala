@@ -173,11 +173,18 @@ private[polyregion] object CodeGen {
       :: deriveStruct[LibraryDef]()
       :: Nil
 
+  private def astPackageStructs: List[StructNode] =
+    deriveStruct[TypeSizeConstraint]()
+      :: deriveStruct[ImplementationCandidate]()
+      :: deriveStruct[PackageIndex]()
+      :: Nil
+
   private def generateAstBindings() = {
 
     println("Generating C++ mirror for PolyAST...")
 
-    val structs = astCoreStructs ::: astProgramStructs
+    val programStructs = astCoreStructs ::: astProgramStructs
+    val structs        = programStructs ::: astPackageStructs
 
     val (reprProtos, reprImpls): (String, String) = compiletime.generateReprSource[PolyAST.type]
 
@@ -251,10 +258,19 @@ private[polyregion] object CodeGen {
                         |}
                         |""".stripMargin
 
-    val adtHash = md5(adtFingerprint(structs))
+    val adtHash     = md5(adtFingerprint(structs))
+    val programHash = md5(adtFingerprint(programStructs))
+    val packageHash = adtHash
 
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
-    val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, adtHash, jsonCodecSources)
+    val jsonCodecImpl = CppNlohmannJsonCodecGen.emitImpl(
+      namespace,
+      jsonCodecFileName,
+      adtHash,
+      programHash,
+      packageHash,
+      jsonCodecSources
+    )
 
     println(
       s"Generated ${(adtHeader + adtImpl + jsonCodecHeader + jsonCodecImpl + reprHeader + reprImpl).count(_ == '\n')} lines"

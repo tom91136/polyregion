@@ -478,6 +478,14 @@ object PolyAST {
 
   case class MetaEntry(key: String, value: String) derives MsgPack.Codec
   case class LibraryDef(name: Sym, decls: List[FunctionDecl], metadata: List[MetaEntry] = Nil) derives MsgPack.Codec
+  case class TypeSizeConstraint(typeVariable: String, sizeInBytes: Int) derives MsgPack.Codec
+  case class ImplementationCandidate(
+      publicName: Sym,
+      implementation: FunctionDecl,
+      requiredCapabilities: List[String],
+      typeSizes: List[TypeSizeConstraint]
+  ) derives MsgPack.Codec
+  case class PackageIndex(interface: LibraryDef, candidates: List[ImplementationCandidate]) derives MsgPack.Codec
 
   case class Program(
       entry: Function,

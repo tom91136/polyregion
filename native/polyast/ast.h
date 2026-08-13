@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <variant>
 
 #include "polyregion/aliases.h"
 #include "polyregion/compat.h"
@@ -32,6 +33,9 @@ Term::Select selectField(const Term::Select &select, const Named &field);
 Type::Struct typeOf(const StructDef &def);
 
 std::string repr(const CompileResult &);
+
+std::variant<std::string, PackageIndex> decodePackageIndex(const uint8_t *begin, const uint8_t *end) noexcept;
+std::variant<std::string, Program> decodeHashedProgram(const uint8_t *begin, const uint8_t *end) noexcept;
 
 Opt<Type::Any> extractComponent(const Type::Any &t);
 

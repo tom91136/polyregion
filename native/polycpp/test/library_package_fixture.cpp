@@ -1,0 +1,103 @@
+#include <string>
+#include <system_error>
+
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include "polyfront/library_emit.hpp"
+#include "polyfront/library_package.hpp"
+
+#include "ast.h"
+#include "polyast_codec.h"
+
+int main(int argc, char **argv) {
+  using namespace polyregion::polyast;
+  using namespace polyregion::polyast::dsl;
+  if (argc == 3 && std::string(argv[1]) == "--remove-prefix") {
+    llvm::SmallString<256> directory(argv[2]);
+    llvm::sys::path::remove_filename(directory);
+    const auto prefix = llvm::sys::path::filename(argv[2]);
+    const auto path = directory.empty() ? std::string{"."} : directory.str().str();
+    std::error_code ec;
+    for (llvm::sys::fs::directory_iterator it(path, ec), end; it != end && !ec; it.increment(ec))
+      if (llvm::sys::path::filename(it->path()).starts_with(prefix)) llvm::sys::fs::remove(it->path());
+    return ec ? 6 : 0;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-no-prefix") {
+    llvm::SmallString<256> directory(argv[2]);
+    llvm::sys::path::remove_filename(directory);
+    const auto prefix = llvm::sys::path::filename(argv[2]);
+    const auto path = directory.empty() ? std::string{"."} : directory.str().str();
+    std::error_code ec;
+    for (llvm::sys::fs::directory_iterator it(path, ec), end; it != end && !ec; it.increment(ec))
+      if (llvm::sys::path::filename(it->path()).starts_with(prefix)) return 7;
+    return ec ? 6 : 0;
+  }
+  if (argc != 2) return 2;
+
+  llvm::SmallString<256> directory(argv[1]);
+  llvm::sys::path::append(directory, "foo");
+  if (llvm::sys::fs::create_directories(directory)) return 3;
+
+  const auto publicName = Sym({"bar", "increment"});
+  const auto implementationName = Sym({"bar", "implementation", "increment"});
+  const auto applyName = Sym({"bar", "apply"});
+  const auto applyImplementationName = Sym({"bar", "implementation", "apply"});
+  const auto i32 = Type::IntS32().widen();
+  const auto publicDecl = FunctionDecl(publicName, {}, {}, {Arg(Named("x", i32), {})}, {}, {}, i32, FunctionAffinity::Host());
+  const auto implementationDecl =
+      FunctionDecl(implementationName, {}, {}, {Arg(Named("x", i32), {})}, {}, {}, i32, FunctionAffinity::Host());
+  const auto x = NamedBuilder(Named("x", i32));
+  const auto implementation = Function(implementationDecl, {ret(call(Intr::Add(x, Term::IntS32Const(1).widen(), i32)))},
+                                       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  const auto t = Type::Var("T").widen();
+  const auto op = Type::Exec({}, {t}, t).widen();
+  const auto applyDecl =
+      FunctionDecl(applyName, {"T"}, {}, {Arg(Named("x", t), {}), Arg(Named("op", op), {})}, {}, {}, t, FunctionAffinity::Host());
+  const auto element = Type::Var("Element").widen();
+  const auto applyImplementationDecl =
+      FunctionDecl(applyImplementationName, {"Element", "Op"}, {}, {Arg(Named("x", element), {}), Arg(Named("op", Type::Var("Op")), {})},
+                   {}, {}, element, FunctionAffinity::Host());
+  const auto applyX = NamedBuilder(Named("x", element));
+  const auto applyImplementation =
+      Function(applyImplementationDecl, {ret(Expr::Invoke(Type::Var("Op"), {}, {}, {applyX}, element).widen())},
+               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  const auto combineName = Sym({"bar", "combine"});
+  const auto combineImplementationName = Sym({"bar", "implementation", "combine"});
+  const auto combineDecl =
+      FunctionDecl(combineName, {"T"}, {}, {Arg(Named("x", t), {}), Arg(Named("left", op), {}), Arg(Named("right", op), {})}, {}, {}, t,
+                   FunctionAffinity::Host());
+  const auto combineImplementationDecl =
+      FunctionDecl(combineImplementationName, {"Element", "Left", "Right"}, {},
+                   {Arg(Named("x", element), {}), Arg(Named("left", Type::Var("Left")), {}), Arg(Named("right", Type::Var("Right")), {})},
+                   {}, {}, element, FunctionAffinity::Host());
+  const auto first = NamedBuilder(Named("first", element));
+  const auto combineImplementation = Function(combineImplementationDecl,
+                                              {let("first") = Expr::Invoke(Type::Var("Left"), {}, {}, {applyX}, element).widen(),
+                                               ret(Expr::Invoke(Type::Var("Right"), {}, {}, {first}, element).widen())},
+                                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  const auto capableName = Sym({"bar", "capable_increment"});
+  const auto capableImplementationDecl = implementationDecl.withName(Sym({"bar", "implementation", "capable_increment"}));
+  const auto capableImplementation = implementation.withDecl(capableImplementationDecl);
+  const auto capableDecl = publicDecl.withName(capableName);
+  const auto index = PackageIndex(LibraryDef(Sym({"foo"}), {publicDecl, applyDecl, combineDecl, capableDecl}, {}),
+                                  {ImplementationCandidate(publicName, implementationDecl, {}, {}),
+                                   ImplementationCandidate(applyName, applyImplementationDecl, {}, {}),
+                                   ImplementationCandidate(combineName, combineImplementationDecl, {}, {}),
+                                   ImplementationCandidate(capableName, capableImplementationDecl, {"demo"}, {})});
+  const auto program =
+      polyregion::polyfront::libraryProgram({implementation, applyImplementation, combineImplementation, capableImplementation}, {});
+
+  llvm::SmallString<256> indexPath(directory), programPath(directory);
+  llvm::sys::path::append(indexPath, polyregion::polyfront::library::PackageIndexName);
+  llvm::sys::path::append(programPath, polyregion::polyfront::library::PackageProgramName);
+  const auto bytes = packageindex_to_msgpack(index);
+  std::error_code ec;
+  llvm::raw_fd_ostream out(indexPath, ec, llvm::sys::fs::OF_None);
+  if (ec) return 4;
+  out.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+  out.close();
+  return std::holds_alternative<std::error_code>(polyregion::polyfront::writeProgramMsgpack(program, programPath.str().str())) ? 5 : 0;
+}

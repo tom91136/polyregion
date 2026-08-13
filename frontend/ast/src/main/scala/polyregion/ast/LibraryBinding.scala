@@ -11,23 +11,12 @@ object LibraryBinding {
     case TrailingOutput(index: Int)
   }
 
-  case class ImplementationBinding(types: Map[String, p.Type], result: ResultBinding)
-
-  case class TypeSizeConstraint(typeVariable: String, sizeInBytes: Int) derives MsgPack.Codec
-
-  case class ImplementationCandidate(
-      publicName: p.Sym,
-      implementation: p.FunctionDecl,
-      requiredCapabilities: List[String],
-      typeSizes: List[TypeSizeConstraint]
-  ) derives MsgPack.Codec
-
-  case class PackageIndex(interface: p.LibraryDef, candidates: List[ImplementationCandidate]) derives MsgPack.Codec
+  case class ImplementationBinding(types: Map[String, p.Type], callables: Map[String, Int], result: ResultBinding)
 
   case class Resolution(
       publicDecl: p.FunctionDecl,
       callBinding: Binding,
-      candidate: ImplementationCandidate,
+      candidate: p.ImplementationCandidate,
       implementationBinding: ImplementationBinding
   )
 

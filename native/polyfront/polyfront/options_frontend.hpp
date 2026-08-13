@@ -233,6 +233,8 @@ struct StdParOptions {
   LinkKind jit = LinkKind::Disabled;
   std::optional<int> stackDepth = {};
   std::string emitLibrary{};
+  std::string libraryPath{};
+  std::string libraryCapabilities{};
 
   static std::variant<std::vector<std::string>, std::optional<StdParOptions>> parse(CliArgs &args) {
     const std::string fStdParFlag = "-fstdpar";
@@ -244,6 +246,8 @@ struct StdParOptions {
     const std::string fStdParJitFlag = "-fstdpar-jit";
     const std::string fStdParStackFlag = "-fstdpar-stack";
     const std::string fStdParEmitLibraryFlag = "-fstdpar-emit-library";
+    const std::string fStdParLibraryPathFlag = "-fstdpar-library-path";
+    const std::string fStdParLibraryCapabilitiesFlag = "-fstdpar-library-capabilities";
 
     auto fStdPar = false, fStdParDependents = false;
     StdParOptions options;
@@ -286,6 +290,14 @@ struct StdParOptions {
     if (auto emit = args.popValue(fStdParEmitLibraryFlag)) {
       fStdParDependents = true;
       options.emitLibrary = *emit;
+    }
+    if (auto path = args.popValue(fStdParLibraryPathFlag)) {
+      fStdParDependents = true;
+      options.libraryPath = *path;
+    }
+    if (auto capabilities = args.popValue(fStdParLibraryCapabilitiesFlag)) {
+      fStdParDependents = true;
+      options.libraryCapabilities = *capabilities;
     }
 
     if (!fStdPar && fStdParDependents)

@@ -41,7 +41,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
     )
     val op = p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), t)))
     p.FunctionDecl(
-      p.Sym(List("example", "transform")),
+      p.Sym(List("foo", "transform")),
       List("T"),
       None,
       List(in, out, n, op),
@@ -59,7 +59,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
     assertEquals(MsgPack.decode[p.FunctionDecl](MsgPack.encode(decl)), Right(decl))
 
-    val library = p.LibraryDef(p.Sym(List("example")), List(decl), Nil)
+    val library = p.LibraryDef(p.Sym(List("foo")), List(decl), Nil)
     assertEquals(MsgPack.decode[p.LibraryDef](MsgPack.encode(library)), Right(library))
     assertEquals(library.decls, List(decl))
     assertNotEquals(
@@ -79,7 +79,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       p.Function.FpMode.Relaxed,
       false
     )
-    val renamed = fn.modifyDecl(_.copy(name = p.Sym(List("example", "renamed"))))
+    val renamed = fn.modifyDecl(_.copy(name = p.Sym(List("foo", "renamed"))))
     val call = p.InvokeSignature(
       decl.name,
       List(p.Type.Float32),
@@ -90,7 +90,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
     assertEquals(fn.decl, decl)
     assertEquals(fn.signature, decl.signature)
-    assertEquals(renamed.name, p.Sym(List("example", "renamed")))
+    assertEquals(renamed.name, p.Sym(List("foo", "renamed")))
     assertEquals(renamed.decl.args, decl.args)
     assertEquals(call.tpeArgs, List(p.Type.Float32))
     assertEquals(MsgPack.decode[p.Function](MsgPack.encode(fn)), Right(fn))
@@ -174,7 +174,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
   test("declaration validation rejects duplicate parameter symbols across parameter kinds") {
     val receiver = p.Arg(p.Named("x", p.Type.IntS32))
     val decl = p.FunctionDecl(
-      p.Sym("example.duplicate"),
+      p.Sym("foo.duplicate"),
       Nil,
       Some(receiver),
       List(p.Arg(p.Named("x", p.Type.IntS32))),
@@ -250,7 +250,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
     val t    = p.Type.Var("T")
     val name = p.Sym(List("caller", "overloaded"))
     val decl = p.FunctionDecl(
-      p.Sym(List("example", "apply")),
+      p.Sym(List("foo", "apply")),
       List("T"),
       None,
       List(
@@ -291,7 +291,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
     val first = p.Sym(List("caller", "first"))
     val last  = p.Sym(List("caller", "last"))
     val decl = p.FunctionDecl(
-      p.Sym(List("example", "zip")),
+      p.Sym(List("foo", "zip")),
       List("T"),
       None,
       List(
@@ -341,7 +341,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
     val first = p.Sym(List("caller", "first"))
     val last  = p.Sym(List("caller", "last"))
     val decl = p.FunctionDecl(
-      p.Sym(List("example", "zip")),
+      p.Sym(List("foo", "zip")),
       List("T"),
       None,
       List(
@@ -513,7 +513,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
   test("binding resolves consistent chained type substitutions") {
     val decl = p.FunctionDecl(
-      p.Sym("example.chain"),
+      p.Sym("foo.chain"),
       List("T", "U"),
       None,
       List(p.Arg(p.Named("x", p.Type.Var("T")))),
@@ -548,7 +548,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       p.Function.Affinity.Host
     )
     val decl = p.FunctionDecl(
-      p.Sym("example.factory"),
+      p.Sym("foo.factory"),
       Nil,
       None,
       Nil,
@@ -574,7 +574,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       p.Type.Unit0
     )
     val decl = p.FunctionDecl(
-      p.Sym("example.callable"),
+      p.Sym("foo.callable"),
       Nil,
       None,
       List(p.Arg(p.Named("op", expected))),
@@ -619,7 +619,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       )
     )
     val decl = p.FunctionDecl(
-      p.Sym("example.member"),
+      p.Sym("foo.member"),
       Nil,
       Some(receiver),
       List(p.Arg(p.Named("n", p.Type.IntS32))),
@@ -651,6 +651,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       Right(
         LibraryBinding.ImplementationBinding(
           Map("Element" -> p.Type.Var("T")),
+          Map.empty,
           LibraryBinding.ResultBinding.Direct
         )
       )
@@ -659,7 +660,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
   test("implementation conformance keeps public type variables rigid") {
     val public = p.FunctionDecl(
-      p.Sym("example.rigid"),
+      p.Sym("foo.rigid"),
       List("T"),
       None,
       List(
@@ -684,7 +685,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
   test("implementation conformance does not capture public callable binders") {
     val public = p.FunctionDecl(
-      p.Sym("example.poly"),
+      p.Sym("foo.poly"),
       Nil,
       None,
       List(
@@ -722,7 +723,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
   test("implementation conformance keeps stored public variables rigid") {
     val public = p.FunctionDecl(
-      p.Sym("example.namespaces"),
+      p.Sym("foo.namespaces"),
       List("B"),
       None,
       List(
@@ -755,7 +756,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       )
     )
     val public = transformDecl.copy(
-      name = p.Sym(List("example", "reduce")),
+      name = p.Sym(List("foo", "reduce")),
       args = List(input, p.Arg(p.Named("n", p.Type.IntS32))),
       rtn = p.Type.Var("T")
     )
@@ -791,6 +792,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
       Right(
         LibraryBinding.ImplementationBinding(
           Map("Element" -> p.Type.Var("T")),
+          Map.empty,
           LibraryBinding.ResultBinding.TrailingOutput(2)
         )
       )
@@ -811,7 +813,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
 
   test("implementation conformance rejects a non-global trailing result") {
     val public = p.FunctionDecl(
-      p.Sym("example.value"),
+      p.Sym("foo.value"),
       Nil,
       None,
       Nil,
@@ -866,24 +868,24 @@ class LibraryDeclarationSuite extends munit.FunSuite {
         case other           => other
       })
     )
-    val w4 = LibraryBinding.ImplementationCandidate(
+    val w4 = p.ImplementationCandidate(
       public.name,
       implementation("transform_w4"),
       List("gpu"),
-      List(LibraryBinding.TypeSizeConstraint("Element", 4))
+      List(p.TypeSizeConstraint("Element", 4))
     )
-    val w8 = LibraryBinding.ImplementationCandidate(
+    val w8 = p.ImplementationCandidate(
       public.name,
       implementation("transform_w8"),
       List("gpu"),
-      List(LibraryBinding.TypeSizeConstraint("Element", 8))
+      List(p.TypeSizeConstraint("Element", 8))
     )
-    val index = LibraryBinding.PackageIndex(
-      p.LibraryDef(p.Sym("example"), List(public)),
+    val index = p.PackageIndex(
+      p.LibraryDef(p.Sym("foo"), List(public)),
       List(w8, w4)
     )
     assertEquals(
-      MsgPack.decode[LibraryBinding.PackageIndex](MsgPack.encode(index)),
+      MsgPack.decode[p.PackageIndex](MsgPack.encode(index)),
       Right(index)
     )
 
@@ -924,7 +926,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
     assertEquals(ambiguousReversed, ambiguous)
 
     val wrongSymbol = index.resolve(
-      call.copy(name = p.Sym("example.other")),
+      call.copy(name = p.Sym("foo.other")),
       List(lambda),
       Set("gpu"),
       Map(p.Type.Float32 -> 4)
@@ -933,7 +935,7 @@ class LibraryDeclarationSuite extends munit.FunSuite {
   }
 
   test("package resolution selects a public overload by call structure") {
-    val name = p.Sym(List("example", "overloaded"))
+    val name = p.Sym(List("foo", "overloaded"))
     def declaration(tpe: p.Type) = p.FunctionDecl(
       name,
       Nil,
@@ -947,8 +949,8 @@ class LibraryDeclarationSuite extends munit.FunSuite {
     val f32            = declaration(p.Type.Float32)
     val f64            = declaration(p.Type.Float64)
     val implementation = f32.copy(name = p.Sym(List("implementation", "overloaded_f32")))
-    val candidate      = LibraryBinding.ImplementationCandidate(name, implementation, Nil, Nil)
-    val index          = LibraryBinding.PackageIndex(p.LibraryDef(p.Sym("example"), List(f64, f32)), List(candidate))
+    val candidate      = p.ImplementationCandidate(name, implementation, Nil, Nil)
+    val index          = p.PackageIndex(p.LibraryDef(p.Sym("foo"), List(f64, f32)), List(candidate))
     val call           = p.InvokeSignature(name, Nil, None, List(p.Type.Float32), p.Type.Float32)
 
     assertEquals(
@@ -988,14 +990,14 @@ class LibraryDeclarationSuite extends munit.FunSuite {
         case other           => other
       })
     )
-    val candidate = LibraryBinding.ImplementationCandidate(
+    val candidate = p.ImplementationCandidate(
       public.name,
       implementation,
       Nil,
-      List(LibraryBinding.TypeSizeConstraint("Element", 4))
+      List(p.TypeSizeConstraint("Element", 4))
     )
-    val result = LibraryBinding
-      .PackageIndex(p.LibraryDef(p.Sym("example"), List(public)), List(candidate))
+    val result = p
+      .PackageIndex(p.LibraryDef(p.Sym("foo"), List(public)), List(candidate))
       .resolve(call, Nil, Set.empty, Map.empty)
 
     assert(result.left.exists(_.exists(_.contains("not concrete"))))

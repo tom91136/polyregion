@@ -8,7 +8,9 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "547fdf1f8e09544533ed52bc647322a1";
+constexpr auto AdtHash = "f7909dedfa2561b4fd13faa812777c36";
+constexpr auto ProgramHash = "547fdf1f8e09544533ed52bc647322a1";
+constexpr auto PackageIndexHash = "f7909dedfa2561b4fd13faa812777c36";
 
 namespace {
 
@@ -3503,6 +3505,58 @@ json librarydef_to_json(const LibraryDef &x_) {
   }
   return json::array({name, decls, metadata});
 }
+
+TypeSizeConstraint typesizeconstraint_from_json(const json &j_) {
+  auto typeVariable = j_.at(0).get<std::string>();
+  auto sizeInBytes = j_.at(1).get<int32_t>();
+  return {typeVariable, sizeInBytes};
+}
+
+json typesizeconstraint_to_json(const TypeSizeConstraint &x_) {
+  auto typeVariable = x_.typeVariable;
+  auto sizeInBytes = x_.sizeInBytes;
+  return json::array({typeVariable, sizeInBytes});
+}
+
+ImplementationCandidate implementationcandidate_from_json(const json &j_) {
+  auto publicName = sym_from_json(j_.at(0));
+  auto implementation = functiondecl_from_json(j_.at(1));
+  auto requiredCapabilities = j_.at(2).get<std::vector<std::string>>();
+  std::vector<TypeSizeConstraint> typeSizes;
+  for (const auto &v_ : j_.at(3)) {
+    typeSizes.emplace_back(typesizeconstraint_from_json(v_));
+  }
+  return {publicName, implementation, requiredCapabilities, typeSizes};
+}
+
+json implementationcandidate_to_json(const ImplementationCandidate &x_) {
+  auto publicName = sym_to_json(x_.publicName);
+  auto implementation = functiondecl_to_json(x_.implementation);
+  auto requiredCapabilities = x_.requiredCapabilities;
+  std::vector<json> typeSizes;
+  for (const auto &v_ : x_.typeSizes) {
+    typeSizes.emplace_back(typesizeconstraint_to_json(v_));
+  }
+  return json::array({publicName, implementation, requiredCapabilities, typeSizes});
+}
+
+PackageIndex packageindex_from_json(const json &j_) {
+  auto interface = librarydef_from_json(j_.at(0));
+  std::vector<ImplementationCandidate> candidates;
+  for (const auto &v_ : j_.at(1)) {
+    candidates.emplace_back(implementationcandidate_from_json(v_));
+  }
+  return {interface, candidates};
+}
+
+json packageindex_to_json(const PackageIndex &x_) {
+  auto interface = librarydef_to_json(x_.interface);
+  std::vector<json> candidates;
+  for (const auto &v_ : x_.candidates) {
+    candidates.emplace_back(implementationcandidate_to_json(v_));
+  }
+  return json::array({interface, candidates});
+}
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
@@ -4122,6 +4176,18 @@ LibraryDef librarydef_fields_from_msgpack(MsgpackReader &, size_t);
 void librarydef_fields_to_msgpack(MsgpackWriter &, const LibraryDef &);
 LibraryDef librarydef_from_msgpack(MsgpackReader &);
 void librarydef_to_msgpack(MsgpackWriter &, const LibraryDef &);
+TypeSizeConstraint typesizeconstraint_fields_from_msgpack(MsgpackReader &, size_t);
+void typesizeconstraint_fields_to_msgpack(MsgpackWriter &, const TypeSizeConstraint &);
+TypeSizeConstraint typesizeconstraint_from_msgpack(MsgpackReader &);
+void typesizeconstraint_to_msgpack(MsgpackWriter &, const TypeSizeConstraint &);
+ImplementationCandidate implementationcandidate_fields_from_msgpack(MsgpackReader &, size_t);
+void implementationcandidate_fields_to_msgpack(MsgpackWriter &, const ImplementationCandidate &);
+ImplementationCandidate implementationcandidate_from_msgpack(MsgpackReader &);
+void implementationcandidate_to_msgpack(MsgpackWriter &, const ImplementationCandidate &);
+PackageIndex packageindex_fields_from_msgpack(MsgpackReader &, size_t);
+void packageindex_fields_to_msgpack(MsgpackWriter &, const PackageIndex &);
+PackageIndex packageindex_from_msgpack(MsgpackReader &);
+void packageindex_to_msgpack(MsgpackWriter &, const PackageIndex &);
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
 void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
@@ -11236,6 +11302,109 @@ void librarydef_to_msgpack(MsgpackWriter &w_, const LibraryDef &x_) {
   librarydef_fields_to_msgpack(w_, x_);
 }
 
+TypeSizeConstraint typesizeconstraint_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected TypeSizeConstraint with 2 field(s)");
+  auto typeVariable = r_.readString();
+  auto sizeInBytes = static_cast<int32_t>(r_.readInt32());
+  return {typeVariable, sizeInBytes};
+}
+
+void typesizeconstraint_fields_to_msgpack(MsgpackWriter &w_, const TypeSizeConstraint &x_) {
+  w_.writeString(x_.typeVariable);
+  w_.writeInt32(static_cast<int32_t>(x_.sizeInBytes));
+}
+
+TypeSizeConstraint typesizeconstraint_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return typesizeconstraint_fields_from_msgpack(r_, n_);
+}
+
+void typesizeconstraint_to_msgpack(MsgpackWriter &w_, const TypeSizeConstraint &x_) {
+  w_.writeArrayHeader(2);
+  typesizeconstraint_fields_to_msgpack(w_, x_);
+}
+
+ImplementationCandidate implementationcandidate_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 4) throw std::runtime_error("Expected ImplementationCandidate with 4 field(s)");
+  auto publicName = sym_from_msgpack(r_);
+  auto implementation = functiondecl_from_msgpack(r_);
+  std::vector<std::string> requiredCapabilities;
+  {
+    auto requiredCapabilities_size = r_.readArrayHeader();
+    requiredCapabilities.reserve(requiredCapabilities_size);
+    for (size_t requiredCapabilities_idx = 0; requiredCapabilities_idx < requiredCapabilities_size; ++requiredCapabilities_idx) {
+      auto requiredCapabilities_elem = r_.readString();
+      requiredCapabilities.emplace_back(std::move(requiredCapabilities_elem));
+    }
+  }
+  std::vector<TypeSizeConstraint> typeSizes;
+  {
+    auto typeSizes_size = r_.readArrayHeader();
+    typeSizes.reserve(typeSizes_size);
+    for (size_t typeSizes_idx = 0; typeSizes_idx < typeSizes_size; ++typeSizes_idx) {
+      auto typeSizes_elem = typesizeconstraint_from_msgpack(r_);
+      typeSizes.emplace_back(std::move(typeSizes_elem));
+    }
+  }
+  return {publicName, implementation, requiredCapabilities, typeSizes};
+}
+
+void implementationcandidate_fields_to_msgpack(MsgpackWriter &w_, const ImplementationCandidate &x_) {
+  sym_to_msgpack(w_, x_.publicName);
+  functiondecl_to_msgpack(w_, x_.implementation);
+  w_.writeArrayHeader(x_.requiredCapabilities.size());
+  for (const auto &v0_ : x_.requiredCapabilities) {
+    w_.writeString(v0_);
+  }
+  w_.writeArrayHeader(x_.typeSizes.size());
+  for (const auto &v0_ : x_.typeSizes) {
+    typesizeconstraint_to_msgpack(w_, v0_);
+  }
+}
+
+ImplementationCandidate implementationcandidate_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return implementationcandidate_fields_from_msgpack(r_, n_);
+}
+
+void implementationcandidate_to_msgpack(MsgpackWriter &w_, const ImplementationCandidate &x_) {
+  w_.writeArrayHeader(4);
+  implementationcandidate_fields_to_msgpack(w_, x_);
+}
+
+PackageIndex packageindex_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PackageIndex with 2 field(s)");
+  auto interface = librarydef_from_msgpack(r_);
+  std::vector<ImplementationCandidate> candidates;
+  {
+    auto candidates_size = r_.readArrayHeader();
+    candidates.reserve(candidates_size);
+    for (size_t candidates_idx = 0; candidates_idx < candidates_size; ++candidates_idx) {
+      auto candidates_elem = implementationcandidate_from_msgpack(r_);
+      candidates.emplace_back(std::move(candidates_elem));
+    }
+  }
+  return {interface, candidates};
+}
+
+void packageindex_fields_to_msgpack(MsgpackWriter &w_, const PackageIndex &x_) {
+  librarydef_to_msgpack(w_, x_.interface);
+  w_.writeArrayHeader(x_.candidates.size());
+  for (const auto &v0_ : x_.candidates) {
+    implementationcandidate_to_msgpack(w_, v0_);
+  }
+}
+
+PackageIndex packageindex_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packageindex_fields_from_msgpack(r_, n_);
+}
+
+void packageindex_to_msgpack(MsgpackWriter &w_, const PackageIndex &x_) {
+  w_.writeArrayHeader(2);
+  packageindex_fields_to_msgpack(w_, x_);
+}
+
 static void structdefs_value_to_msgpack(MsgpackWriter &w_, const std::vector<StructDef> &xs_) {
   w_.writeArrayHeader(xs_.size());
   for (const auto &x_ : xs_)
@@ -11264,7 +11433,7 @@ Program program_from_msgpack(const std::vector<uint8_t> &xs_) { return program_f
 std::vector<uint8_t> hashed_program_to_msgpack(const Program &x_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string(AdtHash));
+    w_.writeString(std::string(ProgramHash));
     program_to_msgpack(w_, x_);
   });
 }
@@ -11274,13 +11443,36 @@ Program hashed_program_from_msgpack(const uint8_t *begin_, const uint8_t *end_) 
     auto n_ = r_.readArrayHeader();
     if (n_ != 2) throw std::runtime_error("Expected versioned Program array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
+    if (hash_ != ProgramHash) throw std::runtime_error("Expecting Program hash to be " + std::string(ProgramHash) + ", but was " + hash_);
     return program_from_msgpack(r_);
   });
 }
 
 Program hashed_program_from_msgpack(const std::vector<uint8_t> &xs_) {
   return hashed_program_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageIndexHash));
+    packageindex_to_msgpack(w_, x_);
+  });
+}
+
+PackageIndex packageindex_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned PackageIndex array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageIndexHash)
+      throw std::runtime_error("Expecting PackageIndex hash to be " + std::string(PackageIndexHash) + ", but was " + hash_);
+    return packageindex_from_msgpack(r_);
+  });
+}
+
+PackageIndex packageindex_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return packageindex_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
 
 std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
@@ -11298,7 +11490,7 @@ std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t> &xs_) 
 std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string(AdtHash));
+    w_.writeString(std::string(ProgramHash));
     structdefs_value_to_msgpack(w_, xs_);
   });
 }
@@ -11308,7 +11500,7 @@ std::vector<StructDef> hashed_structdefs_from_msgpack(const uint8_t *begin_, con
     auto n_ = r_.readArrayHeader();
     if (n_ != 2) throw std::runtime_error("Expected versioned StructDef list array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
+    if (hash_ != ProgramHash) throw std::runtime_error("Expecting Program hash to be " + std::string(ProgramHash) + ", but was " + hash_);
     return structdefs_value_from_msgpack(r_);
   });
 }

@@ -320,6 +320,10 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |[[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const uint8_t*, const uint8_t*);
           |[[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const std::vector<uint8_t>&);
           |
+          |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex&);
+          |[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const uint8_t*, const uint8_t*);
+          |[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const std::vector<uint8_t>&);
+          |
           |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef>&);
           |[[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const uint8_t*, const uint8_t*);
           |[[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t>&);
@@ -339,7 +343,14 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |""".stripMargin
   }
 
-  def emitImpl(namespace: String, headerName: String, hash: String, xs: List[CppNlohmannJsonCodecGen]) = {
+  def emitImpl(
+      namespace: String,
+      headerName: String,
+      hash: String,
+      programHash: String,
+      packageHash: String,
+      xs: List[CppNlohmannJsonCodecGen]
+  ) = {
     val msgpackForwardDecls = xs
       .groupMapReduce(_.namespace.mkString("::"))(_.msgpackForwardDecls)(_ ::: _)
       .toList
@@ -360,6 +371,8 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |#include <utility>
           |
           |constexpr auto AdtHash = "$hash";
+          |constexpr auto ProgramHash = "$programHash";
+          |constexpr auto PackageIndexHash = "$packageHash";
           |
           |namespace {
           |
@@ -752,7 +765,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |std::vector<uint8_t> hashed_program_to_msgpack(const Program& x_) {
           |  return encodeInterned([&](MsgpackWriter& w_) {
           |    w_.writeArrayHeader(2);
-          |    w_.writeString(std::string(AdtHash));
+          |    w_.writeString(std::string(ProgramHash));
           |    program_to_msgpack(w_, x_);
           |  });
           |}
@@ -762,13 +775,35 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |    auto n_ = r_.readArrayHeader();
           |    if(n_ != 2) throw std::runtime_error("Expected versioned Program array of size 2");
           |    auto hash_ = r_.readString();
-          |    if(hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
+          |    if(hash_ != ProgramHash) throw std::runtime_error("Expecting Program hash to be " + std::string(ProgramHash) + ", but was " + hash_);
           |    return program_from_msgpack(r_);
           |  });
           |}
           |
           |Program hashed_program_from_msgpack(const std::vector<uint8_t>& xs_) {
           |  return hashed_program_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+          |}
+          |
+          |std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex& x_) {
+          |  return encodeInterned([&](MsgpackWriter& w_) {
+          |    w_.writeArrayHeader(2);
+          |    w_.writeString(std::string(PackageIndexHash));
+          |    packageindex_to_msgpack(w_, x_);
+          |  });
+          |}
+          |
+          |PackageIndex packageindex_from_msgpack(const uint8_t* begin_, const uint8_t* end_) {
+          |  return decodeMaybeInterned(begin_, end_, [](MsgpackReader& r_) {
+          |    auto n_ = r_.readArrayHeader();
+          |    if(n_ != 2) throw std::runtime_error("Expected versioned PackageIndex array of size 2");
+          |    auto hash_ = r_.readString();
+          |    if(hash_ != PackageIndexHash) throw std::runtime_error("Expecting PackageIndex hash to be " + std::string(PackageIndexHash) + ", but was " + hash_);
+          |    return packageindex_from_msgpack(r_);
+          |  });
+          |}
+          |
+          |PackageIndex packageindex_from_msgpack(const std::vector<uint8_t>& xs_) {
+          |  return packageindex_from_msgpack(xs_.data(), xs_.data() + xs_.size());
           |}
           |
           |std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef>& xs_) {
@@ -786,7 +821,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef>& xs_) {
           |  return encodeInterned([&](MsgpackWriter& w_) {
           |    w_.writeArrayHeader(2);
-          |    w_.writeString(std::string(AdtHash));
+          |    w_.writeString(std::string(ProgramHash));
           |    structdefs_value_to_msgpack(w_, xs_);
           |  });
           |}
@@ -796,7 +831,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |    auto n_ = r_.readArrayHeader();
           |    if(n_ != 2) throw std::runtime_error("Expected versioned StructDef list array of size 2");
           |    auto hash_ = r_.readString();
-          |    if(hash_ != AdtHash) throw std::runtime_error("Expecting ADT hash to be " + std::string(AdtHash) + ", but was " + hash_);
+          |    if(hash_ != ProgramHash) throw std::runtime_error("Expecting Program hash to be " + std::string(ProgramHash) + ", but was " + hash_);
           |    return structdefs_value_from_msgpack(r_);
           |  });
           |}

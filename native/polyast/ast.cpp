@@ -5,12 +5,30 @@
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
+#include "polyast_codec.h"
+
 using namespace std::string_literals;
 using namespace polyregion::polyast;
 using namespace polyregion;
 using std::string;
 
 using namespace aspartame;
+
+std::variant<std::string, PackageIndex> polyregion::polyast::decodePackageIndex(const uint8_t *begin, const uint8_t *end) noexcept {
+  try {
+    return packageindex_from_msgpack(begin, end);
+  } catch (const std::exception &e) {
+    return std::string(e.what());
+  }
+}
+
+std::variant<std::string, Program> polyregion::polyast::decodeHashedProgram(const uint8_t *begin, const uint8_t *end) noexcept {
+  try {
+    return hashed_program_from_msgpack(begin, end);
+  } catch (const std::exception &e) {
+    return std::string(e.what());
+  }
+}
 
 static void renderCompileEvent(std::string &out, const CompileEvent &e, size_t depth) {
   const std::string prefix(4 + depth * 2, ' ');

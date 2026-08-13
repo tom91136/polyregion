@@ -4641,6 +4641,66 @@ POLYREGION_EXPORT bool LibraryDef::operator==(const LibraryDef &rhs) const {
   return (name == rhs.name) && (decls == rhs.decls) && (metadata == rhs.metadata);
 }
 
+TypeSizeConstraint::TypeSizeConstraint(std::string typeVariable, int32_t sizeInBytes) noexcept
+    : typeVariable(std::move(typeVariable)), sizeInBytes(sizeInBytes) {}
+size_t TypeSizeConstraint::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(typeVariable)>()(typeVariable) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+TypeSizeConstraint TypeSizeConstraint::withTypeVariable(const std::string &v_) const { return TypeSizeConstraint(v_, sizeInBytes); }
+TypeSizeConstraint TypeSizeConstraint::withSizeInBytes(const int32_t &v_) const { return TypeSizeConstraint(typeVariable, v_); }
+POLYREGION_EXPORT bool TypeSizeConstraint::operator!=(const TypeSizeConstraint &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool TypeSizeConstraint::operator==(const TypeSizeConstraint &rhs) const {
+  return (typeVariable == rhs.typeVariable) && (sizeInBytes == rhs.sizeInBytes);
+}
+
+ImplementationCandidate::ImplementationCandidate(Sym publicName, FunctionDecl implementation, std::vector<std::string> requiredCapabilities,
+                                                 std::vector<TypeSizeConstraint> typeSizes) noexcept
+    : publicName(std::move(publicName)), implementation(std::move(implementation)), requiredCapabilities(std::move(requiredCapabilities)),
+      typeSizes(std::move(typeSizes)) {}
+size_t ImplementationCandidate::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(publicName)>()(publicName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(implementation)>()(implementation) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(requiredCapabilities)>()(requiredCapabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(typeSizes)>()(typeSizes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ImplementationCandidate ImplementationCandidate::withPublicName(const Sym &v_) const {
+  return ImplementationCandidate(v_, implementation, requiredCapabilities, typeSizes);
+}
+ImplementationCandidate ImplementationCandidate::withImplementation(const FunctionDecl &v_) const {
+  return ImplementationCandidate(publicName, v_, requiredCapabilities, typeSizes);
+}
+ImplementationCandidate ImplementationCandidate::withRequiredCapabilities(const std::vector<std::string> &v_) const {
+  return ImplementationCandidate(publicName, implementation, v_, typeSizes);
+}
+ImplementationCandidate ImplementationCandidate::withTypeSizes(const std::vector<TypeSizeConstraint> &v_) const {
+  return ImplementationCandidate(publicName, implementation, requiredCapabilities, v_);
+}
+POLYREGION_EXPORT bool ImplementationCandidate::operator!=(const ImplementationCandidate &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool ImplementationCandidate::operator==(const ImplementationCandidate &rhs) const {
+  return (publicName == rhs.publicName) && (implementation == rhs.implementation) && (requiredCapabilities == rhs.requiredCapabilities)
+         && (typeSizes == rhs.typeSizes);
+}
+
+PackageIndex::PackageIndex(LibraryDef interface, std::vector<ImplementationCandidate> candidates) noexcept
+    : interface(std::move(interface)), candidates(std::move(candidates)) {}
+size_t PackageIndex::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(interface)>()(interface) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(candidates)>()(candidates) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+PackageIndex PackageIndex::withInterface(const LibraryDef &v_) const { return PackageIndex(v_, candidates); }
+PackageIndex PackageIndex::withCandidates(const std::vector<ImplementationCandidate> &v_) const { return PackageIndex(interface, v_); }
+POLYREGION_EXPORT bool PackageIndex::operator!=(const PackageIndex &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PackageIndex::operator==(const PackageIndex &rhs) const {
+  return (interface == rhs.interface) && (candidates == rhs.candidates);
+}
+
 } // namespace polyregion::polyast
 
 std::size_t std::hash<polyregion::polyast::Sym>::operator()(const polyregion::polyast::Sym &x) const noexcept { return x.hash_code(); }
@@ -5411,5 +5471,16 @@ std::size_t std::hash<polyregion::polyast::CompileResult>::operator()(const poly
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::LibraryDef>::operator()(const polyregion::polyast::LibraryDef &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::TypeSizeConstraint>::operator()(const polyregion::polyast::TypeSizeConstraint &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ImplementationCandidate>::operator()(const polyregion::polyast::ImplementationCandidate &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PackageIndex>::operator()(const polyregion::polyast::PackageIndex &x) const noexcept {
   return x.hash_code();
 }
