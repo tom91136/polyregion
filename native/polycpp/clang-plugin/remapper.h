@@ -124,6 +124,11 @@ struct Remapper {
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
   [[nodiscard]] Pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   [[nodiscard]] Type::Any handleType(clang::QualType qual, RemapContext &r) const;
+  [[nodiscard]] Expr::Any conform(RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe);
+  [[nodiscard]] Expr::Any zeroInitialise(RemapContext &r, const Type::Any &tpe);
+  void recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r) const;
+  [[nodiscard]] Opt<Expr::Any> lowerCoreStdCall(const clang::CallExpr &call, const clang::FunctionDecl &decl, RemapContext &r);
+  [[nodiscard]] bool coreStdCallPreservesExceptionMetadata(const clang::CallExpr &call, const clang::FunctionDecl &decl) const;
   [[nodiscard]] Type::Any annotateLocalSpace(const clang::ValueDecl *decl, RemapContext &r) const;
   [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);

@@ -8,6 +8,7 @@ include(AddLLVM)
 add_llvm_library(polycpp-clang-plugin
         MODULE
         plugin.cpp
+        call_prism.cpp
         remapper.cpp
         clang_utils.cpp
         ast_visitors.cpp

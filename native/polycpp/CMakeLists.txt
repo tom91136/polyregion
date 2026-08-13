@@ -74,6 +74,7 @@ if (POLYREGION_FUSED_DRIVER)
             ${POLYCPP_CLANG_DRIVER_DIR}/cc1as_main.cpp
             ${POLYCPP_CLANG_DRIVER_DIR}/cc1gen_reproducer_main.cpp
             clang-plugin/plugin.cpp
+            clang-plugin/call_prism.cpp
             clang-plugin/remapper.cpp
             clang-plugin/clang_utils.cpp
             clang-plugin/ast_visitors.cpp

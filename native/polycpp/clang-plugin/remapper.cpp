@@ -193,7 +193,7 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
   }
 }
 
-[[nodiscard]] static Expr::Any zeroInitialise(Remapper::RemapContext &r, const Type::Any &tpe) {
+Expr::Any Remapper::zeroInitialise(RemapContext &r, const Type::Any &tpe) {
   if (const auto structTpe = tpe.get<Type::Struct>()) {
     const auto allocated = r.newVar(tpe);
     defaultInitialiseStruct(r, *structTpe, allocated);
@@ -496,7 +496,7 @@ static std::string lambdaCaptureName(const clang::CXXRecordDecl *lambda, const c
   return owner && owner->isLambda() ? name : fmt::format("{}::{}", ownerName, name);
 }
 
-static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
+Expr::Any Remapper::conform(RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
   auto rhsTpe = expr.tpe();
 
   if (rhsTpe == targetTpe) {
@@ -1421,6 +1421,10 @@ static void mergeComposedStdExceptions(ComposedStdExceptions &into, const Compos
   return fmt::format("#exception_expr_{:x}", reinterpret_cast<uintptr_t>(stmt));
 }
 
+void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r) const {
+  r.exceptionCodes.emplace(exceptionMetadataKey(&stmt), code);
+}
+
 [[nodiscard]] static const clang::Expr *transparentExceptionExpr(const clang::Stmt *stmt) {
   if (const auto x = llvm::dyn_cast<clang::ParenExpr>(stmt)) return x->getSubExpr();
   if (const auto x = llvm::dyn_cast<clang::ExprWithCleanups>(stmt)) return x->getSubExpr();
@@ -1462,14 +1466,14 @@ static void mergeComposedStdExceptions(ComposedStdExceptions &into, const Compos
          && (stdExceptionNamed(method->getParent(), "future_error") || stdExceptionNamed(method->getParent(), "system_error"));
 }
 
-[[nodiscard]] static const clang::CallExpr *unsupportedExceptionMetadataCall(const clang::Expr *expr) {
+[[nodiscard]] static const clang::CallExpr *unsupportedExceptionMetadataCall(const Remapper &self, const clang::Expr *expr) {
   while (const auto next = transparentExceptionExpr(expr))
     expr = next;
   const auto call = llvm::dyn_cast<clang::CallExpr>(expr);
   if (!call) return nullptr;
   const auto callee = call->getDirectCallee();
   if (identityExceptionWrapper(call)) return nullptr;
-  if (callee && callee->getQualifiedNameAsString() == "std::make_error_code") return nullptr;
+  if (callee && self.coreStdCallPreservesExceptionMetadata(*call, *callee)) return nullptr;
   if (returnsErrorCode(llvm::dyn_cast_or_null<clang::CXXMethodDecl>(callee))) return nullptr;
   return call;
 }
@@ -2469,7 +2473,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           Opt<Term::Any> value;
           for (const auto *arg : expr->arguments()) {
             if (stdRecordNamed(arg->getType().getNonReferenceType()->getAsCXXRecordDecl(), "error_code"))
-              if (const auto *call = unsupportedExceptionMetadataCall(arg))
+              if (const auto *call = unsupportedExceptionMetadataCall(*this, arg))
                 raise(fmt::format("Unsupported std::error_code construction without metadata: {}", pretty_string(call, context)));
             const auto evaluated = r.newVar(handleExpr(arg, r));
             if (arg->getType()->isIntegralOrEnumerationType()) value = evaluated;
@@ -2522,7 +2526,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           for (const auto *arg : expr->arguments()) {
             const auto argRecord = arg->getType().getNonReferenceType()->getAsCXXRecordDecl();
             if (derivesStdException(argRecord) || stdRecordNamed(argRecord, "error_code"))
-              if (const auto *call = unsupportedExceptionMetadataCall(arg))
+              if (const auto *call = unsupportedExceptionMetadataCall(*this, arg))
                 raise(
                     fmt::format("Unsupported standard exception constructor argument without metadata: {}", pretty_string(call, context)));
             evaluated.push_back(stdRecordNamed(argRecord, "basic_string") ? lowerStringMessage(arg) : r.newVar(handleExpr(arg, r)));
@@ -2759,25 +2763,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           return Expr::Any(Expr::Alias(Term::Unit0Const()));
         const auto target = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (!target) raise(fmt::format("Call with no resolvable callee: {}", pretty_string(expr, context)));
-        const auto qualifiedName = target->getQualifiedNameAsString();
-        const auto category = Map<std::string, uint64_t>{
-            {"std::generic_category", 1}, {"std::system_category", 2}, {"std::iostream_category", 3}, {"std::future_category", 4}};
-        if (const auto it = category.find(qualifiedName); it != category.end())
-          return Expr::Any(Expr::Cast(Term::IntU64Const(it->second), handleType(expr->getType(), r)));
-        if (qualifiedName == "std::make_error_code" && expr->getNumArgs() == 1) {
-          const auto value = r.newVar(conform(r, handleExpr(expr->getArg(0), r), Type::IntS32()));
-          const auto code = r.newName(Type::IntS32());
-          r.push(Stmt::Var(code, Expr::Alias(value), /*isMutable*/ true));
-          r.exceptionCodes.emplace(exceptionMetadataKey(expr), code);
-          return zeroInitialise(r, handleType(expr->getType(), r));
-        }
-        if ((qualifiedName == "std::addressof" || qualifiedName == "std::__addressof" || qualifiedName == "__builtin_addressof")
-            && expr->getNumArgs() == 1) {
-          return ref(r.newVar(handleExpr(expr->getArg(0), r)));
-        }
+        if (const auto lowered = lowerCoreStdCall(*expr, *target, r)) return *lowered;
         // XXX host-only error sinks (__glibcxx_assert_fail, abort, __assert_fail) are [[noreturn]] with no
         // device body; elide the call rather than lift its string-literal args into the kernel
         if (target->isNoReturn() && !target->hasBody() && expr->getType()->isVoidType()) return Expr::Any(Expr::Alias(Term::Unit0Const()));
+        const auto qualifiedName = target->getQualifiedNameAsString();
         if (qualifiedName ^ starts_with(builtinPrefix)) { // builtins are unqualified free functions
           auto builtinName = qualifiedName.substr(builtinPrefix.size());
 
