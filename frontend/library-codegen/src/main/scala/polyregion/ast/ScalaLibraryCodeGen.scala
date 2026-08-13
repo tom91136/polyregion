@@ -88,10 +88,17 @@ private[ast] object ScalaLibraryCodeGen {
       decl: p.FunctionDecl,
       config: LibraryCodeGen.ScalaConfig
   ): String = {
-    val tpeVars = if (decl.tpeVars.nonEmpty) decl.tpeVars.mkString("[", ", ", "]") else ""
-    val args    = decl.args.map(arg => s"${arg.named.symbol}: ${tpe(arg.named.tpe)}").mkString(", ")
+    val tpeVars    = if (decl.tpeVars.nonEmpty) decl.tpeVars.mkString("[", ", ", "]") else ""
+    val parameters = decl.args.map(arg => s"${arg.named.symbol}: ${tpe(arg.named.tpe)}")
+    val prefix     = s"  def ${decl.name.last}$tpeVars("
+    val suffix     = s"): ${tpe(decl.rtn)} ="
+    val signature = {
+      val inline = s"$prefix${parameters.mkString(", ")}$suffix"
+      if (inline.length <= 120) inline
+      else s"$prefix\n${parameters.map("      " + _).mkString(",\n")}\n  $suffix"
+    }
     s"""  @${config.traitName}.PolyregionImport("${library.name.fqn.mkString(".")}", "${decl.name.fqn.mkString(".")}")
-       |  def ${decl.name.last}$tpeVars($args): ${tpe(decl.rtn)} =
+       |$signature
        |    throw ${config.traitName}.PolyregionImportFailure("compiler did not replace ${decl.name.fqn.mkString(
         "."
       )}")""".stripMargin
@@ -119,6 +126,7 @@ private[ast] object ScalaLibraryCodeGen {
        |
        |object ${config.traitName} {
        |  final class PolyregionImport(val library: String, val declaration: String) extends StaticAnnotation
+       |
        |  final class PolyregionImportFailure(message: String) extends RuntimeException(message)
        |}
        |

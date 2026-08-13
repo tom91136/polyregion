@@ -51,6 +51,9 @@ jobs:
       - name: Fail if regenerated sources drift
         run: just _codegen-diff
 
+      - name: Test Spectra language surfaces
+        run: just test-spectra
+
   pass-js:
     runs-on: ubuntu-24.04
     steps:

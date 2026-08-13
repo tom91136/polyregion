@@ -7,8 +7,7 @@ import polyregion.ast.PolyAST as p
 
 object LibraryCodeGen {
 
-  case class FortranVariant(suffix: String, tpeVars: Map[String, String], imports: List[String])
-  case class FortranConfig(moduleName: String, variants: List[FortranVariant])
+  case class FortranConfig(moduleName: String)
   case class ScalaConfig(packageName: String, traitName: String)
 
   def cppHeader(library: p.LibraryDef): String =

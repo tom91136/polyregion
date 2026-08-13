@@ -12,9 +12,10 @@ class LibraryCodeGenSuite extends munit.FunSuite {
     Using.resource(Source.fromResource(s"library-codegen/$name"))(_.mkString)
 
   private val t = p.Type.Var("T")
+  private val u = p.Type.Var("U")
   private val transform = p.FunctionDecl(
     p.Sym("example.transform"),
-    List("T"),
+    List("T", "U"),
     None,
     List(
       p.Arg(
@@ -22,11 +23,11 @@ class LibraryCodeGenSuite extends munit.FunSuite {
         boundary = Some(p.Arg.Boundary(p.Arg.Access.Read, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))))
       ),
       p.Arg(
-        p.Named("out", p.Type.Ptr(t, p.Type.Space.Global)),
+        p.Named("out", p.Type.Ptr(u, p.Type.Space.Global)),
         boundary = Some(p.Arg.Boundary(p.Arg.Access.Write, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))))
       ),
       p.Arg(p.Named("n", p.Type.IntS32)),
-      p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), t)))
+      p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), u)))
     ),
     Nil,
     Nil,
@@ -51,11 +52,8 @@ class LibraryCodeGenSuite extends munit.FunSuite {
   )
   private val countValue = count.copy(args = count.args :+ p.Arg(p.Named("value", t)))
   private val library    = p.LibraryDef(p.Sym("example"), List(transform, count))
-  private val fortran = LibraryCodeGen.FortranConfig(
-    "example_ffi",
-    List(LibraryCodeGen.FortranVariant("r4", Map("T" -> "real(c_float)"), List("c_float")))
-  )
-  private val scala = LibraryCodeGen.ScalaConfig("example.bindings", "ExampleImport")
+  private val fortran    = LibraryCodeGen.FortranConfig("example_ffi")
+  private val scala      = LibraryCodeGen.ScalaConfig("example.bindings", "ExampleImport")
 
   test("library declarations project exact identities into C++, Fortran and Scala") {
     val cpp = LibraryCodeGen.cppHeader(library)
@@ -66,19 +64,119 @@ class LibraryCodeGenSuite extends munit.FunSuite {
     assertEquals(f90, golden("example.f90"))
     assertEquals(sc, golden("ExampleImport.scala"))
 
-    assert(cpp.contains("template <class T, class Op>"))
+    assert(cpp.contains("template <class T, class U, class Op>"))
     assert(cpp.contains("clang::annotate(\"polyregion_import:example:example.transform\")"))
-    assert(cpp.contains("inline void transform(const T *in, T *out, std::int32_t n, Op op)"))
+    assert(cpp.contains("inline void transform(const T *in, U *out, std::int32_t n, Op op)"))
 
     assert(f90.contains("module example_ffi"))
-    assert(f90.contains("polyregion_import:example:example.transform:r4"))
-    assert(f90.contains("real(c_float), intent(in) :: in(*)"))
-    assert(f90.contains("procedure(polyregion_transform_op_r4) :: op"))
+    assert(f90.contains("polyregion_import:example:example.transform"))
+    assert(f90.contains("type(*), dimension(*), intent(in) :: in"))
+    assert(f90.contains("type(*), dimension(*), intent(inout) :: out"))
+    assert(f90.contains("procedure() :: op"))
+    assert(!f90.contains("polyregion_transform_r4"))
 
     assert(sc.contains("package example.bindings"))
     assert(sc.contains("@ExampleImport.PolyregionImport(\"example\", \"example.transform\")"))
-    assert(sc.contains("def transform[T](in: Array[T], out: Array[T], n: Int, op: T => T): Unit"))
+    assert(sc.contains("def transform[T, U](in: Array[T], out: Array[U], n: Int, op: T => U): Unit"))
     assert(!(cpp + f90 + sc).toLowerCase.contains("spectra"))
+  }
+
+  test("Fortran adapts erased generic results to output arguments") {
+    val reduce = p.FunctionDecl(
+      p.Sym("example.reduce"),
+      List("T"),
+      None,
+      List(
+        transform.args.head.copy(
+          boundary = Some(p.Arg.Boundary(p.Arg.Access.Read, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(1))))
+        ),
+        p.Arg(p.Named("n", p.Type.IntS32)),
+        p.Arg(p.Named("init", t)),
+        p.Arg(p.Named("op", p.Type.Exec(Nil, List(t, t), t)))
+      ),
+      Nil,
+      Nil,
+      t,
+      p.Function.Affinity.Host
+    )
+    val f90 = LibraryCodeGen.fortranModule(library.copy(decls = List(reduce)), fortran)
+
+    assert(f90.contains("subroutine polyregion_reduce(in, n, init, op, polyregion_result)"))
+    assert(f90.contains("type(*), intent(in) :: init"))
+    assert(f90.contains("procedure() :: op"))
+    assert(f90.contains("type(*), intent(inout) :: polyregion_result"))
+    assert(!f90.contains("function polyregion_reduce"))
+
+    val collision = reduce.copy(args = reduce.args :+ p.Arg(p.Named("polyregion_result", p.Type.IntS32)))
+    val renamed   = LibraryCodeGen.fortranModule(library.copy(decls = List(collision)), fortran)
+    assert(renamed.contains("polyregion_result, polyregion_result_)"))
+    assert(renamed.contains("type(*), intent(inout) :: polyregion_result_"))
+  }
+
+  test("Fortran rejects overloads that collide after generic result adaptation") {
+    val returned = p.FunctionDecl(
+      p.Sym("example.select"),
+      List("T"),
+      None,
+      List(p.Arg(p.Named("value", t))),
+      Nil,
+      Nil,
+      t,
+      p.Function.Affinity.Host
+    )
+    val unit = returned.copy(args = List(p.Arg(p.Named("lhs", t)), p.Arg(p.Named("rhs", t))), rtn = p.Type.Unit0)
+    val error = intercept[IllegalArgumentException](
+      LibraryCodeGen.fortranModule(library.copy(decls = List(returned, unit)), fortran)
+    )
+
+    assert(error.getMessage.contains("after result adaptation with 2 arguments"))
+  }
+
+  test("Fortran rejects overloads that mix projected functions and subroutines") {
+    val function = p.FunctionDecl(
+      p.Sym("example.select"),
+      Nil,
+      None,
+      List(p.Arg(p.Named("value", p.Type.IntS32))),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val subroutine = function.copy(
+      args = List(p.Arg(p.Named("lhs", p.Type.IntS32)), p.Arg(p.Named("rhs", p.Type.IntS32))),
+      rtn = p.Type.Unit0
+    )
+    val error = intercept[IllegalArgumentException](
+      LibraryCodeGen.fortranModule(library.copy(decls = List(function, subroutine)), fortran)
+    )
+
+    assert(error.getMessage.contains("cannot combine function and subroutine overloads"))
+  }
+
+  test("Fortran erases explicitly named struct values") {
+    val point = p.Type.Struct(p.Sym("model.Point"), Nil)
+    val inspect = p.FunctionDecl(
+      p.Sym("example.inspect_point"),
+      Nil,
+      None,
+      List(
+        p.Arg(
+          p.Named("points", p.Type.Ptr(point, p.Type.Space.Global)),
+          boundary = Some(p.Arg.Boundary(p.Arg.Access.Read, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(1))))
+        ),
+        p.Arg(p.Named("n", p.Type.IntS32)),
+        p.Arg(p.Named("point", point))
+      ),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val f90 = LibraryCodeGen.fortranModule(library.copy(decls = List(inspect)), fortran)
+
+    assert(f90.contains("type(*), dimension(*), intent(in) :: points"))
+    assert(f90.contains("type(*), intent(in) :: point"))
   }
 
   test("projection order and stale-output checks are deterministic") {
@@ -101,8 +199,8 @@ class LibraryCodeGenSuite extends munit.FunSuite {
     val overloaded = library.copy(decls = countValue :: library.decls)
     val f90        = LibraryCodeGen.fortranModule(overloaded, fortran)
 
-    assert(f90.contains("module procedure polyregion_count_o0_r4"))
-    assert(f90.contains("module procedure polyregion_count_o1_r4"))
+    assert(f90.contains("module procedure polyregion_count_o0"))
+    assert(f90.contains("module procedure polyregion_count_o1"))
     assertEquals(LibraryCodeGen.fortranModule(overloaded.copy(decls = overloaded.decls.reverse), fortran), f90)
   }
 
@@ -129,6 +227,22 @@ class LibraryCodeGenSuite extends munit.FunSuite {
 
     assertEquals(cpp, golden("example-array.hpp"))
     assert(cpp.contains("inline void array(std::int32_t (&values)[4])"))
+  }
+
+  test("C++ callables are checked against const lvalue arguments") {
+    val inspect = p.FunctionDecl(
+      p.Sym("example.inspect"),
+      List("T"),
+      None,
+      List(p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), t)))),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val cpp = LibraryCodeGen.cppHeader(library.copy(decls = List(inspect)))
+
+    assert(cpp.contains("std::invoke_result_t<Op &, const T &>"))
   }
 
   test("Scala preserves nested callable structure and qualifies struct types from the root") {

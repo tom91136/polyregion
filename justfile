@@ -97,7 +97,7 @@ _format mode sbt_task_a sbt_task_b:
     esac
     echo "Native:  clang-format {{ mode }} via $CF"
     git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' \
-        | grep -zvE '^native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)' \
+        | grep -zvE '^(native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)|spectra/generated/cpp/include/polyregion/spectra_api\.hpp$)' \
         | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
     if [ -f frontend/sbtx ]; then
@@ -108,11 +108,20 @@ _format mode sbt_task_a sbt_task_b:
         echo "frontend/sbtx not found - skipping Scala format" >&2
         pid_s=
     fi
+    if [ -f spectra/build.sbt ]; then
+        echo "Spectra: sbt {{ sbt_task_a }} ; {{ sbt_task_b }}"
+        (cd spectra && bash ../frontend/sbtx -no-colors '{{ sbt_task_a }} ; {{ sbt_task_b }}') &
+        pid_p=$!
+    else
+        pid_p=
+    fi
     wait $pid_n; rc_n=$?
     rc_s=0
+    rc_p=0
     [ -n "$pid_s" ] && { wait $pid_s; rc_s=$?; }
-    if [ "$rc_n" -ne 0 ] || [ "$rc_s" -ne 0 ]; then
-        echo "{{ mode }} failed (native=$rc_n sbt=$rc_s)" >&2
+    [ -n "$pid_p" ] && { wait $pid_p; rc_p=$?; }
+    if [ "$rc_n" -ne 0 ] || [ "$rc_s" -ne 0 ] || [ "$rc_p" -ne 0 ]; then
+        echo "{{ mode }} failed (native=$rc_n frontend=$rc_s spectra=$rc_p)" >&2
         exit 1
     fi
 
@@ -134,6 +143,14 @@ codegen-kernels:
 
 _codegen-sbt:
     cd frontend && {{ sbt }} 'codegen/genCodegen'
+    cd spectra && bash ../frontend/sbtx -no-colors 'genSpectra'
+
+# Validate Spectra's IDL and generated Scala, C++ and Fortran consumer surfaces.
+test-spectra:
+    cd frontend && {{ sbt }} 'library-codegen / Test / testOnly polyregion.ast.LibraryCodeGenSuite'
+    cd spectra && bash ../frontend/sbtx -no-colors 'testOnly polyregion.spectra.SpectraSuite; spectraApi/compile'
+    cmake -S spectra -B spectra/target/cmake -DCMAKE_BUILD_TYPE=Release
+    cmake --build spectra/target/cmake -j "$(nproc 2>/dev/null || echo 4)"
 
 _codegen-format:
     find native/polyast/generated native/bindings/jvm/generated native/common/generated \
@@ -144,9 +161,9 @@ _codegen-diff:
     #!/usr/bin/env bash
     set -euo pipefail
     # `git diff` does not report newly generated, untracked outputs.
-    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm)
+    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated)
     [ -z "$untracked" ] || { echo "untracked generated files:" >&2; echo "$untracked" >&2; exit 1; }
-    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm
+    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated
 
 # === Pass bundles ===
 
@@ -682,7 +699,7 @@ clean-all: clean-llvm clean-dist clean-sysroot clean-vcpkg clean-build
 # === Aggregate ===
 
 # Local mirror of the CI checks.
-ci: check-codegen check-format check-ci
+ci: check-codegen check-format check-ci test-spectra
 
 # === Internal ===
 

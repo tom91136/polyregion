@@ -131,7 +131,8 @@ lazy val `runtime-scala` = project
 lazy val ast = (projectMatrix in file("ast"))
   .settings(
     commonSettings,
-    name := "ast",
+    name                      := "ast",
+    Compile / sourceDirectory := (ThisBuild / baseDirectory).value / "ast" / "src" / "main",
     scalacOptions ++=
       Seq("-Yretain-trees") ++
         Seq("-Xmax-inlines", "80"),
@@ -167,6 +168,15 @@ lazy val ewgen = project
     }
   )
 
+lazy val `library-codegen` = project
+  .in(file("library-codegen"))
+  .settings(
+    commonSettings,
+    name                                   := "library-codegen",
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+  )
+  .dependsOn(ast.jvm(scala3Version))
+
 lazy val codegen = project
   .in(file("codegen"))
   .settings(
@@ -176,16 +186,13 @@ lazy val codegen = project
     scalacOptions ++=
       Seq("-Yretain-trees") ++
         Seq("-Xmax-inlines", "80"),
-    Compile / mainClass := Some("polyregion.ast.CodeGen"),
-    libraryDependencies ++= Seq(
-      "com.lihaoyi"   %% "pprint" % "0.9.6",
-      "org.scalameta" %% "munit"  % munitVersion % Test
-    ),
+    Compile / mainClass                  := Some("polyregion.ast.CodeGen"),
+    libraryDependencies += "com.lihaoyi" %% "pprint" % "0.9.6",
     genCodegen := Def.uncached {
       (Compile / runMain).toTask(" polyregion.ast.CodeGen").value
     }
   )
-  .dependsOn(ast.jvm(scala3Version), `binding-jvm`)
+  .dependsOn(ast.jvm(scala3Version), `binding-jvm`, `library-codegen`)
 
 lazy val pass = (projectMatrix in file("pass"))
   .settings(
@@ -511,6 +518,7 @@ lazy val root = project
   .settings(commonSettings)
   .aggregate(
     `binding-jvm`,
+    `library-codegen`,
     codegen,
     ewgen,
     `runtime-scala`,

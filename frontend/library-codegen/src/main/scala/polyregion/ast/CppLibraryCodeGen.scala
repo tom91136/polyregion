@@ -141,7 +141,8 @@ private[ast] object CppLibraryCodeGen {
     case p.Type.Exec(tpeVars, _, _) if tpeVars.nonEmpty =>
       fail(s"generic callable argument `${arg.named.symbol}` is not supported yet")
     case p.Type.Exec(_, args, rtn) =>
-      val invokeArgs = (s"${pascalCase(arg.named.symbol)} &" :: args.map(tpe)).mkString(", ")
+      val invokeArgs =
+        (s"${pascalCase(arg.named.symbol)} &" :: args.map(tpe(_)).map("const " + _ + " &")).mkString(", ")
       List(
         s"static_assert(std::is_same_v<std::invoke_result_t<$invokeArgs>, ${tpe(rtn)}>, \"callable signature mismatch\");"
       )
