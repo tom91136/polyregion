@@ -245,7 +245,7 @@ object compiletime {
       _ = debug(prog.entry.repr)
       _ = debug(prog.functions.map(_.repr).mkString("\n"))
 
-      serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.polyASTVersioned(prog)))
+      serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.programVersioned(prog)))
       compiler = ct.Compiler.create()
 
       compilations <-
@@ -258,7 +258,7 @@ object compiletime {
           )
       perConfigLayouts <-
         if (jit)
-          Either.catchNonFatal(MsgPack.encode(CodeGen.polyASTVersioned(prog.defs))).flatMap { structDefsAst =>
+          Either.catchNonFatal(MsgPack.encode(CodeGen.structDefsVersioned(prog.defs))).flatMap { structDefsAst =>
             configs.traverse(c =>
               Either.catchNonFatal(c -> compiler.layoutOf(structDefsAst, ct.Options.of(c.target, c.arch)))
             )

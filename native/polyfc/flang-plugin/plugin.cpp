@@ -29,6 +29,7 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned CodePage, unsig
 #include "flang/Frontend/FrontendActions.h"
 #include "flang/Frontend/FrontendPluginRegistry.h"
 #include "llvm/Option/ArgList.h"
+#include "llvm/Support/FileSystem.h"
 
 #include "aspartame/all.hpp"
 
@@ -86,9 +87,9 @@ public:
 #endif
   }
 
-  template <typename F>
+  template <typename FH, typename FF>
   static bool executeInterposedMLIRAction(FrontendAction &parent, const Fortran::frontend::BackendActionTy ty, //
-                                          F witnessHLFIR, F witnessFIR) {
+                                          FH witnessHLFIR, FF witnessFIR) {
 
     auto &ci = parent.getInstance();
     if (ty == Fortran::frontend::BackendActionTy::Backend_EmitHLFIR) {
@@ -110,7 +111,8 @@ public:
       action.setInstance(&ci);
       action.setCurrentInput(parent.getCurrentInput());
       action.lowerHLFIRToFIR();
-      if (auto m = action.getMLIRModule()) witnessFIR(ci.getDiagnostics(), m);
+      std::vector<std::string> bitcodeFiles;
+      if (auto m = action.getMLIRModule()) witnessFIR(ci.getDiagnostics(), m, bitcodeFiles);
       else {
         llvm::errs() << "Lower to FIR resulted null MLIR module\n";
         std::abort();
@@ -125,10 +127,27 @@ public:
       //  Fortran doesn't have support complex ctor on module-load, so nothing lowers to the llvm.global_ctor
       parent.getInstance().getTargetMachine().Options.UseInitArray = true;
 
-      if (llvm::Error err = action.execute()) {
-        llvm::consumeError(std::move(err));
+      auto &builtinBitcode = ci.getInvocation().getCodeGenOpts().BuiltinBCLibs;
+      const auto builtinBitcodeSize = builtinBitcode.size();
+      builtinBitcode.insert(builtinBitcode.end(), bitcodeFiles.begin(), bitcodeFiles.end());
+      const auto cleanup = [&] {
+        builtinBitcode.resize(builtinBitcodeSize);
+        bitcodeFiles ^ for_each([](const auto &path) { llvm::sys::fs::remove(path); });
+      };
+
+      if (ty == Fortran::frontend::BackendActionTy::Backend_EmitFIR && !bitcodeFiles.empty()) {
+        ci.getDiagnostics().Report(ci.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                                                       "FIR emission does not support PolyAST library interfaces"));
+        cleanup();
         return false;
       }
+
+      if (llvm::Error err = action.execute()) {
+        llvm::consumeError(std::move(err));
+        cleanup();
+        return false;
+      }
+      cleanup();
       return true;
     }
   }

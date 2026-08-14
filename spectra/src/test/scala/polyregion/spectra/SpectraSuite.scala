@@ -10,11 +10,11 @@ class SpectraSuite extends munit.FunSuite {
   private val root = Paths.get(sys.props("user.dir")).toAbsolutePath.normalize
 
   test("declarations are structurally valid") {
-    val library = Spectra.library
+    val interfaceDef = Spectra.interfaceDef
 
-    assertEquals(library.name, p.Sym("spectra"))
-    assertEquals(library.decls.flatMap(_.validate), Nil)
-    assertEquals(library.decls.flatMap(_.classifyArguments.left.toOption.toList.flatten), Nil)
+    assertEquals(interfaceDef.name, p.Sym("spectra"))
+    assertEquals(interfaceDef.decls.flatMap(_.validate), Nil)
+    assertEquals(interfaceDef.decls.flatMap(_.classifyArguments.left.toOption.toList.flatten), Nil)
   }
 
   test("generated APIs are current") {

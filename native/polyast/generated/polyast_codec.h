@@ -336,8 +336,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json passrunresult_to_json(const PassRunResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
-[[nodiscard]] POLYREGION_EXPORT LibraryDef librarydef_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json librarydef_to_json(const LibraryDef &);
+[[nodiscard]] POLYREGION_EXPORT InterfaceDef interfacedef_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json interfacedef_to_json(const InterfaceDef &);
 [[nodiscard]] POLYREGION_EXPORT TypeSizeConstraint typesizeconstraint_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json typesizeconstraint_to_json(const TypeSizeConstraint &);
 [[nodiscard]] POLYREGION_EXPORT ImplementationCandidate implementationcandidate_from_json(const json &);

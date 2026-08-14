@@ -38,6 +38,7 @@
 
 #include "codegen.h"
 #include "ftypes.h"
+#include "interface_resolution.h"
 #include "mirrors.h"
 #include "mlir_utils.h"
 #include "polydco_abi.h"
@@ -1100,7 +1101,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   deadReductions ^ for_each([](auto op) { op.erase(); });
 }
 
-void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
+void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector<std::string> &bitcodeFiles) {
   polyfront::Options opts;
   polyfront::Options::parseArgsFromEnv() //
       ^ foreach_total([&](const polyfront::Options &x) { opts = x; },
@@ -1113,6 +1114,8 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     compileLibrary(diag, opts, m, L, opts.emitLibraryPath);
     return;
   }
+
+  interface_resolution::resolveInterfaces(diag, m, opts, bitcodeFiles);
 
   doRewrite(m);
   OpBuilder B(m);

@@ -32,7 +32,7 @@ namespace polyregion::polyast {
 [[nodiscard]] std::string repr(const Function &f);
 [[nodiscard]] std::string repr(const FunctionDecl &f);
 [[nodiscard]] std::string repr(const MetaEntry &m);
-[[nodiscard]] std::string repr(const LibraryDef &l);
+[[nodiscard]] std::string repr(const InterfaceDef &l);
 [[nodiscard]] std::string repr(const StructDef &s);
 [[nodiscard]] std::string repr(const Program &s);
 [[nodiscard]] std::string repr(const StructLayout &l);

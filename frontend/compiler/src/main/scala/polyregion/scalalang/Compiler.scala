@@ -15,6 +15,33 @@ object Compiler {
   import Remapper.*
   import Retyper.*
 
+  private[scalalang] def interfaceIdentity(using q: Quoted)(symbol: q.Symbol): Option[(String, String)] = {
+    import q.underlying.reflect.*
+    symbol.annotations.collectFirst(Function.unlift { annotation =>
+      val annotationType = annotation.tpe
+      if (annotationType.typeSymbol.fullName != "scala.annotation.compileTimeOnly") None
+      else {
+        def arguments(term: Term): List[Term] = term match {
+          case Apply(_, args)           => args
+          case Inlined(_, _, expansion) => arguments(expansion)
+          case Typed(inner, _)          => arguments(inner)
+          case _                        => Nil
+        }
+        arguments(annotation).collectFirst { case Literal(StringConstant(value)) => value }.flatMap { value =>
+          value.stripPrefix("polyregion_interface:") match {
+            case unchanged if unchanged == value => None
+            case identity =>
+              identity.split(":", 2).toList match {
+                case packageName :: declaration :: Nil if packageName.nonEmpty && declaration.nonEmpty =>
+                  Some(packageName -> declaration)
+                case _ => None
+              }
+          }
+        }
+      }
+    })
+  }
+
   // This derives the signature based on the *owning* symbol only!
   // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
   def deriveSignature(using q: Quoted)(f: q.DefDef): Result[p.Signature] = for {
@@ -128,53 +155,68 @@ object Compiler {
                       case Nil => // We found no replacement, log it and keep going.
                         val actualDefDef = missingDefDefs.getOrElse(sym, defDef)
 
-                        if (actualDefDef.rhs.isEmpty) {
-                          log.info(
-                            s"No implementation: ${target.repr} (${actualDefDef.symbol.flags.show}); ${actualDefDef.symbol
-                                .hashCode()}",
-                            fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
-                          )
+                        interfaceIdentity(actualDefDef.symbol) match {
+                          case Some((packageName, declaration)) =>
+                            for {
+                              pack <- InterfaceResolver
+                                .loadPackage(packageName)
+                                .leftMap(errors => CompilerException(errors.mkString("\n")))
+                              linked <- InterfaceResolver
+                                .link(pack, declaration, target, (existing ::: xs).map(_.decl))
+                                .leftMap(errors => CompilerException(errors.mkString("\n")))
+                            } yield (
+                              linked._1 ::: xs,
+                              depss,
+                              linked._2 ++ clsDepss,
+                              moduleSymDepss
+                            )
+                          case None if actualDefDef.rhs.isEmpty =>
+                            log.info(
+                              s"No implementation: ${target.repr} (${actualDefDef.symbol.flags.show}); ${actualDefDef.symbol
+                                  .hashCode()}",
+                              fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
+                            )
 
-                          // if (actualDefDef.symbol.flags.is(q.Flags.Abstract)) {
+                            // if (actualDefDef.symbol.flags.is(q.Flags.Abstract)) {
 
-                          // } else {
-                          (
-                            xs,
-                            depss,
-                            clsDepss,
-                            moduleSymDepss
-                          ).success
+                            // } else {
+                            (
+                              xs,
+                              depss,
+                              clsDepss,
+                              moduleSymDepss
+                            ).success
                           // }
 
-                        } else {
-                          // see if function is already there
+                          case None =>
+                            // see if function is already there
 
-                          for {
-                            log <- log
-                              .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
-                              .success
-                            (fn0Raw, deps) <- compileFn(log, actualDefDef, Map.empty)
-                            // Apply rename for symbols that collide on fullName (e.g. multiple
-                            // `_$$anon` classes from given declarations) so each compiled override
-                            // gets a unique IR name.
-                            fn0 = renameMap.get(actualDefDef.symbol) match {
-                              case Some(unique) => fn0Raw.copy(decl = fn0Raw.decl.copy(name = unique))
-                              case None         => fn0Raw
-                            }
-                            (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
-                              StdLib.StructDefs
+                            for {
+                              log <- log
+                                .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
+                                .success
+                              (fn0Raw, deps) <- compileFn(log, actualDefDef, Map.empty)
+                              // Apply rename for symbols that collide on fullName (e.g. multiple
+                              // `_$$anon` classes from given declarations) so each compiled override
+                              // gets a unique IR name.
+                              fn0 = renameMap.get(actualDefDef.symbol) match {
+                                case Some(unique) => fn0Raw.copy(decl = fn0Raw.decl.copy(name = unique))
+                                case None         => fn0Raw
+                              }
+                              (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
+                                StdLib.StructDefs
+                              )
+                            } yield (
+                              fn1 :: xs ::: deps.resolvedFunctions,
+                              // Add this function's body-discovered deps to next iteration's queue.
+                              // Avoid duplicates: skip if already in `remaining` (this-iteration queue)
+                              // or `depss` (already-queued-for-next-iter). Importantly, do NOT filter
+                              // against `deps.functions` itself - that's the SOURCE of wit0, so
+                              // filtering against it would empty wit0 entirely and starve the loop.
+                              depss ++ wit0.filterNot(x => remaining.contains(x._1) || depss.contains(x._1)),
+                              clsDeps ++ clsDepss,
+                              moduleDeps ++ moduleSymDepss
                             )
-                          } yield (
-                            fn1 :: xs ::: deps.resolvedFunctions,
-                            // Add this function's body-discovered deps to next iteration's queue.
-                            // Avoid duplicates: skip if already in `remaining` (this-iteration queue)
-                            // or `depss` (already-queued-for-next-iter). Importantly, do NOT filter
-                            // against `deps.functions` itself - that's the SOURCE of wit0, so
-                            // filtering against it would empty wit0 entirely and starve the loop.
-                            depss ++ wit0.filterNot(x => remaining.contains(x._1) || depss.contains(x._1)),
-                            clsDeps ++ clsDepss,
-                            moduleDeps ++ moduleSymDepss
-                          )
                         }
                       case (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
                         for {

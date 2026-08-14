@@ -15,15 +15,16 @@ lazy val commonSettings = Seq(
   publish / skip := true
 )
 
-lazy val libraryCodegen = ProjectRef(file("../frontend").toURI, "library-codegen")
+lazy val interfaceCodegen = ProjectRef(file("../frontend").toURI, "interface-codegen")
 
 lazy val api = Project("spectraApi", file("test/scala"))
   .settings(
     commonSettings,
     name := "spectra-api",
     Compile / unmanagedSources ++= Seq(
-      file("generated/scala/polyregion/spectra/SpectraApi.scala"),
-      file("test/scala/polyregion/spectra/check_surface.scala")
+      file("generated/scala/polyregion/spectra.scala"),
+      file("test/scala/polyregion/InterfaceSurfaceCheck.scala"),
+      file("test/scala/polyregion/check_surface.scala")
     )
   )
 
@@ -39,5 +40,5 @@ lazy val spectra = Project("spectra", file("."))
       }.value
     }
   )
-  .dependsOn(libraryCodegen)
+  .dependsOn(interfaceCodegen)
   .aggregate(api)

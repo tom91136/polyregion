@@ -186,6 +186,7 @@ object PolyAST {
   enum Direction derives MsgPack.Codec { case LocalToRemote, RemoteToLocal, RemoteToRemote }
 
   object Spec {
+    inline def ContextType = Type.Ptr(Type.IntU8, Type.Space.Global)
     inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
     inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
     inline def NullaryU32  = List(Overload(List[Type](), Type.IntU32))
@@ -229,6 +230,7 @@ object PolyAST {
     case GpuVolatileLoad(ptr: Term, rtn: Type)    extends Spec(Spec.Unchecked, List(ptr), rtn)
     case GpuVolatileStore(ptr: Term, value: Term) extends Spec(Spec.Unchecked, List(ptr, value), Type.Unit0)
     case RemoteLaunch(
+        context: Term,
         kernel: Term,
         tpeArgs: List[Type],
         gridX: Term,
@@ -238,18 +240,18 @@ object PolyAST {
         blockY: Term,
         blockZ: Term,
         shmem: Term,
-        stream: Term,
         args: List[Term]
     ) extends Spec(
           Spec.Unchecked,
-          kernel :: gridX :: gridY :: gridZ :: blockX :: blockY :: blockZ :: shmem :: stream :: args,
+          context :: kernel :: gridX :: gridY :: gridZ :: blockX :: blockY :: blockZ :: shmem :: args,
           Type.Unit0
         )
-    case RemoteAlloc(bytes: Term) extends Spec(Spec.Unchecked, List(bytes), Type.Ptr(Type.IntU8, Type.Space.Global))
-    case RemoteFree(ptr: Term)    extends Spec(Spec.Unchecked, List(ptr), Type.Unit0)
-    case RemoteMemcpy(dst: Term, src: Term, bytes: Term, direction: Direction)
-        extends Spec(Spec.Unchecked, List(dst, src, bytes), Type.Unit0)
-    case RemoteSync(stream: Term) extends Spec(Spec.Unchecked, List(stream), Type.Unit0)
+    case RemoteAlloc(context: Term, bytes: Term)
+        extends Spec(Spec.Unchecked, List(context, bytes), Type.Ptr(Type.IntU8, Type.Space.Global))
+    case RemoteFree(context: Term, ptr: Term) extends Spec(Spec.Unchecked, List(context, ptr), Type.Unit0)
+    case RemoteMemcpy(context: Term, dst: Term, src: Term, bytes: Term, direction: Direction)
+        extends Spec(Spec.Unchecked, List(context, dst, src, bytes), Type.Unit0)
+    case RemoteSync(context: Term) extends Spec(Spec.Unchecked, List(context), Type.Unit0)
   }
 
   object Intr {
@@ -477,7 +479,7 @@ object PolyAST {
   enum PassPhase derives MsgPack.Codec { case Initial, PostMono }
 
   case class MetaEntry(key: String, value: String) derives MsgPack.Codec
-  case class LibraryDef(name: Sym, decls: List[FunctionDecl], metadata: List[MetaEntry] = Nil) derives MsgPack.Codec
+  case class InterfaceDef(name: Sym, decls: List[FunctionDecl], metadata: List[MetaEntry] = Nil) derives MsgPack.Codec
   case class TypeSizeConstraint(typeVariable: String, sizeInBytes: Int) derives MsgPack.Codec
   case class ImplementationCandidate(
       publicName: Sym,
@@ -485,7 +487,7 @@ object PolyAST {
       requiredCapabilities: List[String],
       typeSizes: List[TypeSizeConstraint]
   ) derives MsgPack.Codec
-  case class PackageIndex(interface: LibraryDef, candidates: List[ImplementationCandidate]) derives MsgPack.Codec
+  case class PackageIndex(interface: InterfaceDef, candidates: List[ImplementationCandidate]) derives MsgPack.Codec
 
   case class Program(
       entry: Function,
@@ -991,16 +993,17 @@ object PolyAST {
           case Spec.GpuVoteAll(m, p)              => s"'gpuVoteAll(${m.repr}, ${p.repr})"
           case Spec.GpuAtomicRMW(op, p, v, s, o, _) =>
             s"'gpuAtomic${op.repr}(${p.repr}, ${v.repr}, ${s.repr}, ${o.repr})"
-          case Spec.RemoteLaunch(k, ts, gx, gy, gz, bx, by, bz, sh, st, as) =>
-            s"'remoteLaunch(${k.repr}[${ts
+          case Spec.RemoteLaunch(c, k, ts, gx, gy, gz, bx, by, bz, sh, as) =>
+            s"'remoteLaunch(${c.repr}, ${k.repr}[${ts
                 .map(_.repr)
-                .mkString(", ")}], <${gx.repr}, ${gy.repr}, ${gz.repr}>, <${bx.repr}, ${by.repr}, ${bz.repr}>, ${sh.repr}, ${st.repr}, [${as.map(_.repr).mkString(", ")}])"
-          case Spec.RemoteAlloc(b)           => s"'remoteAlloc(${b.repr})"
-          case Spec.RemoteFree(p)            => s"'remoteFree(${p.repr})"
-          case Spec.RemoteMemcpy(d, s, b, k) => s"'remoteMemcpy(${d.repr}, ${s.repr}, ${b.repr}, ${k.repr})"
-          case Spec.RemoteSync(s)            => s"'remoteSync(${s.repr})"
-          case Spec.GpuVolatileLoad(p, _)    => s"'gpuVolatileLoad(${p.repr})"
-          case Spec.GpuVolatileStore(p, v)   => s"'gpuVolatileStore(${p.repr}, ${v.repr})"
+                .mkString(", ")}], <${gx.repr}, ${gy.repr}, ${gz.repr}>, <${bx.repr}, ${by.repr}, ${bz.repr}>, ${sh.repr}, [${as.map(_.repr).mkString(", ")}])"
+          case Spec.RemoteAlloc(c, b) => s"'remoteAlloc(${c.repr}, ${b.repr})"
+          case Spec.RemoteFree(c, p)  => s"'remoteFree(${c.repr}, ${p.repr})"
+          case Spec.RemoteMemcpy(c, d, s, b, k) =>
+            s"'remoteMemcpy(${c.repr}, ${d.repr}, ${s.repr}, ${b.repr}, ${k.repr})"
+          case Spec.RemoteSync(c)          => s"'remoteSync(${c.repr})"
+          case Spec.GpuVolatileLoad(p, _)  => s"'gpuVolatileLoad(${p.repr})"
+          case Spec.GpuVolatileStore(p, v) => s"'gpuVolatileStore(${p.repr}, ${v.repr})"
         }
       case Expr.MathOp(op) =>
         op match {
@@ -1201,9 +1204,9 @@ object PolyAST {
     def repr: String = s"${m.key}=${m.value}"
   }
 
-  extension (l: LibraryDef) {
+  extension (l: InterfaceDef) {
     def repr: String =
-      s"library ${l.name.repr} ${"{"}\n${l.decls.map(_.repr).mkString("\n").indent(2)}\n${l.metadata
+      s"interface ${l.name.repr} ${"{"}\n${l.decls.map(_.repr).mkString("\n").indent(2)}\n${l.metadata
           .map(_.repr)
           .mkString("\n")
           .indent(2)}\n${"}"}"

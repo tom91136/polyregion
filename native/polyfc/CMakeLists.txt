@@ -46,6 +46,7 @@ if (POLYREGION_FUSED_DRIVER)
             flang-plugin/parallel.cpp
             flang-plugin/mirrors.cpp
             flang-plugin/fexpr.cpp)
+    target_sources(polyfc PRIVATE flang-plugin/interface_resolution.cpp)
     # XXX Mixed C++ standard: polyfc plugin sources (remapper, rewriter, parallel, ...) use
     # C++20 designated initializers and concepts. Files that pull in flang/Evaluate headers
     # must stay on C++17 because the C++20 stdlib eagerly instantiates
@@ -136,7 +137,7 @@ else ()
 endif ()
 
 add_executable(polyfc-tests test/test_all.cpp)
-add_dependencies(polyfc-tests polyfc polydco)
+add_dependencies(polyfc-tests polyfc polydco polycpp-library-package-fixture)
 target_include_directories(polyfc-tests PRIVATE
         ../include
         polydco
@@ -168,6 +169,7 @@ polytest_configure_suite(polyfc-tests
         LIBRARY_PATH "$<TARGET_FILE_DIR:polydco>"
         INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyfc>/$<TARGET_NAME:polydco>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
         GLOB "check_*.*"
+        PACKAGE_FIXTURE "$<TARGET_FILE:polycpp-library-package-fixture>"
         TEST_FILES_OUT _polyfc_test_files)
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.

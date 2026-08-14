@@ -848,7 +848,7 @@ struct PassSpec;
 struct PassPipeline;
 struct PassRunResult;
 struct CompileResult;
-struct LibraryDef;
+struct InterfaceDef;
 struct TypeSizeConstraint;
 struct ImplementationCandidate;
 struct PackageIndex;
@@ -5337,6 +5337,7 @@ struct POLYREGION_EXPORT GpuVolatileStore : Spec::Base {
 };
 
 struct POLYREGION_EXPORT RemoteLaunch : Spec::Base {
+  Term::Any context;
   Term::Any kernel;
   std::vector<Type::Any> tpeArgs;
   Term::Any gridX;
@@ -5346,11 +5347,11 @@ struct POLYREGION_EXPORT RemoteLaunch : Spec::Base {
   Term::Any blockY;
   Term::Any blockZ;
   Term::Any shmem;
-  Term::Any stream;
   std::vector<Term::Any> args;
   constexpr static uint32_t variant_id = 26;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withContext(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withKernel(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withTpeArgs(const std::vector<Type::Any> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withGridX(const Term::Any &v_) const;
@@ -5360,7 +5361,6 @@ struct POLYREGION_EXPORT RemoteLaunch : Spec::Base {
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withBlockY(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withBlockZ(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withShmem(const Term::Any &v_) const;
-  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withStream(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteLaunch withArgs(const std::vector<Term::Any> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
@@ -5369,6 +5369,7 @@ struct POLYREGION_EXPORT RemoteLaunch : Spec::Base {
         results_.emplace_back(*x_);
       }
     }
+    context.collect_where<T, U>(results_, f);
     kernel.collect_where<T, U>(results_, f);
     for (auto it = tpeArgs.begin(); it != tpeArgs.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
@@ -5380,7 +5381,6 @@ struct POLYREGION_EXPORT RemoteLaunch : Spec::Base {
     blockY.collect_where<T, U>(results_, f);
     blockZ.collect_where<T, U>(results_, f);
     shmem.collect_where<T, U>(results_, f);
-    stream.collect_where<T, U>(results_, f);
     for (auto it = args.begin(); it != args.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
@@ -5406,23 +5406,25 @@ struct POLYREGION_EXPORT RemoteLaunch : Spec::Base {
     for (auto it = args.begin(); it != args.end(); ++it) {
       args__.emplace_back((*it).modify_all<T>(f));
     }
-    return Spec::RemoteLaunch(kernel.modify_all<T>(f), tpeArgs__, gridX.modify_all<T>(f), gridY.modify_all<T>(f), gridZ.modify_all<T>(f),
-                              blockX.modify_all<T>(f), blockY.modify_all<T>(f), blockZ.modify_all<T>(f), shmem.modify_all<T>(f),
-                              stream.modify_all<T>(f), args__);
+    return Spec::RemoteLaunch(context.modify_all<T>(f), kernel.modify_all<T>(f), tpeArgs__, gridX.modify_all<T>(f), gridY.modify_all<T>(f),
+                              gridZ.modify_all<T>(f), blockX.modify_all<T>(f), blockY.modify_all<T>(f), blockZ.modify_all<T>(f),
+                              shmem.modify_all<T>(f), args__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::RemoteLaunch &) const;
-  RemoteLaunch(Term::Any kernel, std::vector<Type::Any> tpeArgs, Term::Any gridX, Term::Any gridY, Term::Any gridZ, Term::Any blockX,
-               Term::Any blockY, Term::Any blockZ, Term::Any shmem, Term::Any stream, std::vector<Term::Any> args) noexcept;
+  RemoteLaunch(Term::Any context, Term::Any kernel, std::vector<Type::Any> tpeArgs, Term::Any gridX, Term::Any gridY, Term::Any gridZ,
+               Term::Any blockX, Term::Any blockY, Term::Any blockZ, Term::Any shmem, std::vector<Term::Any> args) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
 struct POLYREGION_EXPORT RemoteAlloc : Spec::Base {
+  Term::Any context;
   Term::Any bytes;
   constexpr static uint32_t variant_id = 27;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteAlloc withContext(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteAlloc withBytes(const Term::Any &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
@@ -5431,6 +5433,7 @@ struct POLYREGION_EXPORT RemoteAlloc : Spec::Base {
         results_.emplace_back(*x_);
       }
     }
+    context.collect_where<T, U>(results_, f);
     bytes.collect_where<T, U>(results_, f);
   }
   template <typename T, typename U>
@@ -5446,20 +5449,22 @@ struct POLYREGION_EXPORT RemoteAlloc : Spec::Base {
     if constexpr (std::is_same_v<T, RemoteAlloc>) {
       return f(*this);
     }
-    return Spec::RemoteAlloc(bytes.modify_all<T>(f));
+    return Spec::RemoteAlloc(context.modify_all<T>(f), bytes.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::RemoteAlloc &) const;
-  explicit RemoteAlloc(Term::Any bytes) noexcept;
+  RemoteAlloc(Term::Any context, Term::Any bytes) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
 struct POLYREGION_EXPORT RemoteFree : Spec::Base {
+  Term::Any context;
   Term::Any ptr;
   constexpr static uint32_t variant_id = 28;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteFree withContext(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteFree withPtr(const Term::Any &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
@@ -5468,6 +5473,7 @@ struct POLYREGION_EXPORT RemoteFree : Spec::Base {
         results_.emplace_back(*x_);
       }
     }
+    context.collect_where<T, U>(results_, f);
     ptr.collect_where<T, U>(results_, f);
   }
   template <typename T, typename U>
@@ -5483,16 +5489,17 @@ struct POLYREGION_EXPORT RemoteFree : Spec::Base {
     if constexpr (std::is_same_v<T, RemoteFree>) {
       return f(*this);
     }
-    return Spec::RemoteFree(ptr.modify_all<T>(f));
+    return Spec::RemoteFree(context.modify_all<T>(f), ptr.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::RemoteFree &) const;
-  explicit RemoteFree(Term::Any ptr) noexcept;
+  RemoteFree(Term::Any context, Term::Any ptr) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
 struct POLYREGION_EXPORT RemoteMemcpy : Spec::Base {
+  Term::Any context;
   Term::Any dst;
   Term::Any src;
   Term::Any bytes;
@@ -5500,6 +5507,7 @@ struct POLYREGION_EXPORT RemoteMemcpy : Spec::Base {
   constexpr static uint32_t variant_id = 29;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy withContext(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy withDst(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy withSrc(const Term::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy withBytes(const Term::Any &v_) const;
@@ -5511,6 +5519,7 @@ struct POLYREGION_EXPORT RemoteMemcpy : Spec::Base {
         results_.emplace_back(*x_);
       }
     }
+    context.collect_where<T, U>(results_, f);
     dst.collect_where<T, U>(results_, f);
     src.collect_where<T, U>(results_, f);
     bytes.collect_where<T, U>(results_, f);
@@ -5529,21 +5538,22 @@ struct POLYREGION_EXPORT RemoteMemcpy : Spec::Base {
     if constexpr (std::is_same_v<T, RemoteMemcpy>) {
       return f(*this);
     }
-    return Spec::RemoteMemcpy(dst.modify_all<T>(f), src.modify_all<T>(f), bytes.modify_all<T>(f), direction.modify_all<T>(f));
+    return Spec::RemoteMemcpy(context.modify_all<T>(f), dst.modify_all<T>(f), src.modify_all<T>(f), bytes.modify_all<T>(f),
+                              direction.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::RemoteMemcpy &) const;
-  RemoteMemcpy(Term::Any dst, Term::Any src, Term::Any bytes, Direction::Any direction) noexcept;
+  RemoteMemcpy(Term::Any context, Term::Any dst, Term::Any src, Term::Any bytes, Direction::Any direction) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
 struct POLYREGION_EXPORT RemoteSync : Spec::Base {
-  Term::Any stream;
+  Term::Any context;
   constexpr static uint32_t variant_id = 30;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
-  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteSync withStream(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteSync withContext(const Term::Any &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, RemoteSync>) {
@@ -5551,7 +5561,7 @@ struct POLYREGION_EXPORT RemoteSync : Spec::Base {
         results_.emplace_back(*x_);
       }
     }
-    stream.collect_where<T, U>(results_, f);
+    context.collect_where<T, U>(results_, f);
   }
   template <typename T, typename U>
   [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
@@ -5566,11 +5576,11 @@ struct POLYREGION_EXPORT RemoteSync : Spec::Base {
     if constexpr (std::is_same_v<T, RemoteSync>) {
       return f(*this);
     }
-    return Spec::RemoteSync(stream.modify_all<T>(f));
+    return Spec::RemoteSync(context.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::RemoteSync &) const;
-  explicit RemoteSync(Term::Any stream) noexcept;
+  explicit RemoteSync(Term::Any context) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
@@ -10001,17 +10011,17 @@ struct POLYREGION_EXPORT CompileResult {
                 std::vector<StructLayout> layouts, std::string messages, std::vector<Named> entryArgs) noexcept;
 };
 
-struct POLYREGION_EXPORT LibraryDef {
+struct POLYREGION_EXPORT InterfaceDef {
   Sym name;
   std::vector<FunctionDecl> decls;
   std::vector<MetaEntry> metadata;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
-  [[nodiscard]] POLYREGION_EXPORT LibraryDef withName(const Sym &v_) const;
-  [[nodiscard]] POLYREGION_EXPORT LibraryDef withDecls(const std::vector<FunctionDecl> &v_) const;
-  [[nodiscard]] POLYREGION_EXPORT LibraryDef withMetadata(const std::vector<MetaEntry> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InterfaceDef withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InterfaceDef withDecls(const std::vector<FunctionDecl> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InterfaceDef withMetadata(const std::vector<MetaEntry> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
-    if constexpr (std::is_same_v<T, LibraryDef>) {
+    if constexpr (std::is_same_v<T, InterfaceDef>) {
       if (auto x_ = f(*this)) {
         results_.emplace_back(*x_);
       }
@@ -10033,8 +10043,8 @@ struct POLYREGION_EXPORT LibraryDef {
   template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
     return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
   }
-  template <typename T> [[nodiscard]] POLYREGION_EXPORT LibraryDef modify_all(const std::function<T(const T &)> &f) const {
-    if constexpr (std::is_same_v<T, LibraryDef>) {
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT InterfaceDef modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, InterfaceDef>) {
       return f(*this);
     }
     std::vector<FunctionDecl> decls__;
@@ -10045,11 +10055,11 @@ struct POLYREGION_EXPORT LibraryDef {
     for (auto it = metadata.begin(); it != metadata.end(); ++it) {
       metadata__.emplace_back((*it).modify_all<T>(f));
     }
-    return LibraryDef(name.modify_all<T>(f), decls__, metadata__);
+    return InterfaceDef(name.modify_all<T>(f), decls__, metadata__);
   }
-  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const LibraryDef &) const;
-  [[nodiscard]] POLYREGION_EXPORT bool operator==(const LibraryDef &) const;
-  LibraryDef(Sym name, std::vector<FunctionDecl> decls, std::vector<MetaEntry> metadata) noexcept;
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const InterfaceDef &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const InterfaceDef &) const;
+  InterfaceDef(Sym name, std::vector<FunctionDecl> decls, std::vector<MetaEntry> metadata) noexcept;
 };
 
 struct POLYREGION_EXPORT TypeSizeConstraint {
@@ -10135,10 +10145,10 @@ struct POLYREGION_EXPORT ImplementationCandidate {
 };
 
 struct POLYREGION_EXPORT PackageIndex {
-  LibraryDef interface;
+  InterfaceDef interface;
   std::vector<ImplementationCandidate> candidates;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
-  [[nodiscard]] POLYREGION_EXPORT PackageIndex withInterface(const LibraryDef &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageIndex withInterface(const InterfaceDef &v_) const;
   [[nodiscard]] POLYREGION_EXPORT PackageIndex withCandidates(const std::vector<ImplementationCandidate> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
@@ -10173,7 +10183,7 @@ struct POLYREGION_EXPORT PackageIndex {
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PackageIndex &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const PackageIndex &) const;
-  PackageIndex(LibraryDef interface, std::vector<ImplementationCandidate> candidates) noexcept;
+  PackageIndex(InterfaceDef interface, std::vector<ImplementationCandidate> candidates) noexcept;
 };
 
 } // namespace polyregion::polyast
@@ -12856,8 +12866,8 @@ template <> struct hash<polyregion::polyast::PassRunResult> {
 template <> struct hash<polyregion::polyast::CompileResult> {
   std::size_t operator()(const polyregion::polyast::CompileResult &) const noexcept;
 };
-template <> struct hash<polyregion::polyast::LibraryDef> {
-  std::size_t operator()(const polyregion::polyast::LibraryDef &) const noexcept;
+template <> struct hash<polyregion::polyast::InterfaceDef> {
+  std::size_t operator()(const polyregion::polyast::InterfaceDef &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::TypeSizeConstraint> {
   std::size_t operator()(const polyregion::polyast::TypeSizeConstraint &) const noexcept;

@@ -603,5 +603,5 @@ object Spectra {
     )
   )
 
-  val library: p.LibraryDef = p.LibraryDef(p.Sym("spectra"), declarations)
+  val interfaceDef: p.InterfaceDef = p.InterfaceDef(p.Sym("spectra"), declarations)
 }

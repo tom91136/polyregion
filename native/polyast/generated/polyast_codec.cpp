@@ -8,9 +8,9 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "f7909dedfa2561b4fd13faa812777c36";
-constexpr auto ProgramHash = "547fdf1f8e09544533ed52bc647322a1";
-constexpr auto PackageIndexHash = "f7909dedfa2561b4fd13faa812777c36";
+constexpr auto AdtHash = "1003764515119cfd2b763a8b72998bce";
+constexpr auto ProgramHash = "1330d953c1f1fc11b41203660d349da7";
+constexpr auto PackageIndexHash = "785ab7aa7a56bde2f46122ba401780aa";
 
 namespace {
 
@@ -1652,27 +1652,28 @@ json Spec::gpuvolatilestore_to_json(const Spec::GpuVolatileStore &x_) {
 }
 
 Spec::RemoteLaunch Spec::remotelaunch_from_json(const json &j_) {
-  auto kernel = Term::any_from_json(j_.at(0));
+  auto context = Term::any_from_json(j_.at(0));
+  auto kernel = Term::any_from_json(j_.at(1));
   std::vector<Type::Any> tpeArgs;
-  for (const auto &v_ : j_.at(1)) {
+  for (const auto &v_ : j_.at(2)) {
     tpeArgs.emplace_back(Type::any_from_json(v_));
   }
-  auto gridX = Term::any_from_json(j_.at(2));
-  auto gridY = Term::any_from_json(j_.at(3));
-  auto gridZ = Term::any_from_json(j_.at(4));
-  auto blockX = Term::any_from_json(j_.at(5));
-  auto blockY = Term::any_from_json(j_.at(6));
-  auto blockZ = Term::any_from_json(j_.at(7));
-  auto shmem = Term::any_from_json(j_.at(8));
-  auto stream = Term::any_from_json(j_.at(9));
+  auto gridX = Term::any_from_json(j_.at(3));
+  auto gridY = Term::any_from_json(j_.at(4));
+  auto gridZ = Term::any_from_json(j_.at(5));
+  auto blockX = Term::any_from_json(j_.at(6));
+  auto blockY = Term::any_from_json(j_.at(7));
+  auto blockZ = Term::any_from_json(j_.at(8));
+  auto shmem = Term::any_from_json(j_.at(9));
   std::vector<Term::Any> args;
   for (const auto &v_ : j_.at(10)) {
     args.emplace_back(Term::any_from_json(v_));
   }
-  return {kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args};
+  return {context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, args};
 }
 
 json Spec::remotelaunch_to_json(const Spec::RemoteLaunch &x_) {
+  auto context = Term::any_to_json(x_.context);
   auto kernel = Term::any_to_json(x_.kernel);
   std::vector<json> tpeArgs;
   for (const auto &v_ : x_.tpeArgs) {
@@ -1685,58 +1686,63 @@ json Spec::remotelaunch_to_json(const Spec::RemoteLaunch &x_) {
   auto blockY = Term::any_to_json(x_.blockY);
   auto blockZ = Term::any_to_json(x_.blockZ);
   auto shmem = Term::any_to_json(x_.shmem);
-  auto stream = Term::any_to_json(x_.stream);
   std::vector<json> args;
   for (const auto &v_ : x_.args) {
     args.emplace_back(Term::any_to_json(v_));
   }
-  return json::array({kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args});
+  return json::array({context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, args});
 }
 
 Spec::RemoteAlloc Spec::remotealloc_from_json(const json &j_) {
-  auto bytes = Term::any_from_json(j_.at(0));
-  return Spec::RemoteAlloc(bytes);
+  auto context = Term::any_from_json(j_.at(0));
+  auto bytes = Term::any_from_json(j_.at(1));
+  return {context, bytes};
 }
 
 json Spec::remotealloc_to_json(const Spec::RemoteAlloc &x_) {
+  auto context = Term::any_to_json(x_.context);
   auto bytes = Term::any_to_json(x_.bytes);
-  return json::array({bytes});
+  return json::array({context, bytes});
 }
 
 Spec::RemoteFree Spec::remotefree_from_json(const json &j_) {
-  auto ptr = Term::any_from_json(j_.at(0));
-  return Spec::RemoteFree(ptr);
+  auto context = Term::any_from_json(j_.at(0));
+  auto ptr = Term::any_from_json(j_.at(1));
+  return {context, ptr};
 }
 
 json Spec::remotefree_to_json(const Spec::RemoteFree &x_) {
+  auto context = Term::any_to_json(x_.context);
   auto ptr = Term::any_to_json(x_.ptr);
-  return json::array({ptr});
+  return json::array({context, ptr});
 }
 
 Spec::RemoteMemcpy Spec::remotememcpy_from_json(const json &j_) {
-  auto dst = Term::any_from_json(j_.at(0));
-  auto src = Term::any_from_json(j_.at(1));
-  auto bytes = Term::any_from_json(j_.at(2));
-  auto direction = Direction::any_from_json(j_.at(3));
-  return {dst, src, bytes, direction};
+  auto context = Term::any_from_json(j_.at(0));
+  auto dst = Term::any_from_json(j_.at(1));
+  auto src = Term::any_from_json(j_.at(2));
+  auto bytes = Term::any_from_json(j_.at(3));
+  auto direction = Direction::any_from_json(j_.at(4));
+  return {context, dst, src, bytes, direction};
 }
 
 json Spec::remotememcpy_to_json(const Spec::RemoteMemcpy &x_) {
+  auto context = Term::any_to_json(x_.context);
   auto dst = Term::any_to_json(x_.dst);
   auto src = Term::any_to_json(x_.src);
   auto bytes = Term::any_to_json(x_.bytes);
   auto direction = Direction::any_to_json(x_.direction);
-  return json::array({dst, src, bytes, direction});
+  return json::array({context, dst, src, bytes, direction});
 }
 
 Spec::RemoteSync Spec::remotesync_from_json(const json &j_) {
-  auto stream = Term::any_from_json(j_.at(0));
-  return Spec::RemoteSync(stream);
+  auto context = Term::any_from_json(j_.at(0));
+  return Spec::RemoteSync(context);
 }
 
 json Spec::remotesync_to_json(const Spec::RemoteSync &x_) {
-  auto stream = Term::any_to_json(x_.stream);
-  return json::array({stream});
+  auto context = Term::any_to_json(x_.context);
+  return json::array({context});
 }
 
 Spec::Any Spec::any_from_json(const json &j_) {
@@ -3480,7 +3486,7 @@ json compileresult_to_json(const CompileResult &x_) {
   return json::array({binary, features, events, layouts, messages, entryArgs});
 }
 
-LibraryDef librarydef_from_json(const json &j_) {
+InterfaceDef interfacedef_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
   std::vector<FunctionDecl> decls;
   for (const auto &v_ : j_.at(1)) {
@@ -3493,7 +3499,7 @@ LibraryDef librarydef_from_json(const json &j_) {
   return {name, decls, metadata};
 }
 
-json librarydef_to_json(const LibraryDef &x_) {
+json interfacedef_to_json(const InterfaceDef &x_) {
   auto name = sym_to_json(x_.name);
   std::vector<json> decls;
   for (const auto &v_ : x_.decls) {
@@ -3541,7 +3547,7 @@ json implementationcandidate_to_json(const ImplementationCandidate &x_) {
 }
 
 PackageIndex packageindex_from_json(const json &j_) {
-  auto interface = librarydef_from_json(j_.at(0));
+  auto interface = interfacedef_from_json(j_.at(0));
   std::vector<ImplementationCandidate> candidates;
   for (const auto &v_ : j_.at(1)) {
     candidates.emplace_back(implementationcandidate_from_json(v_));
@@ -3550,7 +3556,7 @@ PackageIndex packageindex_from_json(const json &j_) {
 }
 
 json packageindex_to_json(const PackageIndex &x_) {
-  auto interface = librarydef_to_json(x_.interface);
+  auto interface = interfacedef_to_json(x_.interface);
   std::vector<json> candidates;
   for (const auto &v_ : x_.candidates) {
     candidates.emplace_back(implementationcandidate_to_json(v_));
@@ -4172,10 +4178,10 @@ CompileResult compileresult_fields_from_msgpack(MsgpackReader &, size_t);
 void compileresult_fields_to_msgpack(MsgpackWriter &, const CompileResult &);
 CompileResult compileresult_from_msgpack(MsgpackReader &);
 void compileresult_to_msgpack(MsgpackWriter &, const CompileResult &);
-LibraryDef librarydef_fields_from_msgpack(MsgpackReader &, size_t);
-void librarydef_fields_to_msgpack(MsgpackWriter &, const LibraryDef &);
-LibraryDef librarydef_from_msgpack(MsgpackReader &);
-void librarydef_to_msgpack(MsgpackWriter &, const LibraryDef &);
+InterfaceDef interfacedef_fields_from_msgpack(MsgpackReader &, size_t);
+void interfacedef_fields_to_msgpack(MsgpackWriter &, const InterfaceDef &);
+InterfaceDef interfacedef_from_msgpack(MsgpackReader &);
+void interfacedef_to_msgpack(MsgpackWriter &, const InterfaceDef &);
 TypeSizeConstraint typesizeconstraint_fields_from_msgpack(MsgpackReader &, size_t);
 void typesizeconstraint_fields_to_msgpack(MsgpackWriter &, const TypeSizeConstraint &);
 TypeSizeConstraint typesizeconstraint_from_msgpack(MsgpackReader &);
@@ -7478,6 +7484,7 @@ void Spec::gpuvolatilestore_to_msgpack(MsgpackWriter &w_, const Spec::GpuVolatil
 
 Spec::RemoteLaunch Spec::remotelaunch_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 11) throw std::runtime_error("Expected Spec::RemoteLaunch with 11 field(s)");
+  auto context = Term::any_from_msgpack(r_);
   auto kernel = Term::any_from_msgpack(r_);
   std::vector<Type::Any> tpeArgs;
   {
@@ -7495,7 +7502,6 @@ Spec::RemoteLaunch Spec::remotelaunch_fields_from_msgpack(MsgpackReader &r_, siz
   auto blockY = Term::any_from_msgpack(r_);
   auto blockZ = Term::any_from_msgpack(r_);
   auto shmem = Term::any_from_msgpack(r_);
-  auto stream = Term::any_from_msgpack(r_);
   std::vector<Term::Any> args;
   {
     auto args_size = r_.readArrayHeader();
@@ -7505,10 +7511,11 @@ Spec::RemoteLaunch Spec::remotelaunch_fields_from_msgpack(MsgpackReader &r_, siz
       args.emplace_back(std::move(args_elem));
     }
   }
-  return {kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args};
+  return {context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, args};
 }
 
 void Spec::remotelaunch_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteLaunch &x_) {
+  Term::any_to_msgpack(w_, x_.context);
   Term::any_to_msgpack(w_, x_.kernel);
   w_.writeArrayHeader(x_.tpeArgs.size());
   for (const auto &v0_ : x_.tpeArgs) {
@@ -7521,7 +7528,6 @@ void Spec::remotelaunch_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteL
   Term::any_to_msgpack(w_, x_.blockY);
   Term::any_to_msgpack(w_, x_.blockZ);
   Term::any_to_msgpack(w_, x_.shmem);
-  Term::any_to_msgpack(w_, x_.stream);
   w_.writeArrayHeader(x_.args.size());
   for (const auto &v0_ : x_.args) {
     Term::any_to_msgpack(w_, v0_);
@@ -7539,12 +7545,16 @@ void Spec::remotelaunch_to_msgpack(MsgpackWriter &w_, const Spec::RemoteLaunch &
 }
 
 Spec::RemoteAlloc Spec::remotealloc_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 1) throw std::runtime_error("Expected Spec::RemoteAlloc with 1 field(s)");
+  if (n_ != 2) throw std::runtime_error("Expected Spec::RemoteAlloc with 2 field(s)");
+  auto context = Term::any_from_msgpack(r_);
   auto bytes = Term::any_from_msgpack(r_);
-  return Spec::RemoteAlloc(bytes);
+  return {context, bytes};
 }
 
-void Spec::remotealloc_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteAlloc &x_) { Term::any_to_msgpack(w_, x_.bytes); }
+void Spec::remotealloc_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteAlloc &x_) {
+  Term::any_to_msgpack(w_, x_.context);
+  Term::any_to_msgpack(w_, x_.bytes);
+}
 
 Spec::RemoteAlloc Spec::remotealloc_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
@@ -7552,17 +7562,21 @@ Spec::RemoteAlloc Spec::remotealloc_from_msgpack(MsgpackReader &r_) {
 }
 
 void Spec::remotealloc_to_msgpack(MsgpackWriter &w_, const Spec::RemoteAlloc &x_) {
-  w_.writeArrayHeader(1);
+  w_.writeArrayHeader(2);
   Spec::remotealloc_fields_to_msgpack(w_, x_);
 }
 
 Spec::RemoteFree Spec::remotefree_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 1) throw std::runtime_error("Expected Spec::RemoteFree with 1 field(s)");
+  if (n_ != 2) throw std::runtime_error("Expected Spec::RemoteFree with 2 field(s)");
+  auto context = Term::any_from_msgpack(r_);
   auto ptr = Term::any_from_msgpack(r_);
-  return Spec::RemoteFree(ptr);
+  return {context, ptr};
 }
 
-void Spec::remotefree_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteFree &x_) { Term::any_to_msgpack(w_, x_.ptr); }
+void Spec::remotefree_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteFree &x_) {
+  Term::any_to_msgpack(w_, x_.context);
+  Term::any_to_msgpack(w_, x_.ptr);
+}
 
 Spec::RemoteFree Spec::remotefree_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
@@ -7570,20 +7584,22 @@ Spec::RemoteFree Spec::remotefree_from_msgpack(MsgpackReader &r_) {
 }
 
 void Spec::remotefree_to_msgpack(MsgpackWriter &w_, const Spec::RemoteFree &x_) {
-  w_.writeArrayHeader(1);
+  w_.writeArrayHeader(2);
   Spec::remotefree_fields_to_msgpack(w_, x_);
 }
 
 Spec::RemoteMemcpy Spec::remotememcpy_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected Spec::RemoteMemcpy with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected Spec::RemoteMemcpy with 5 field(s)");
+  auto context = Term::any_from_msgpack(r_);
   auto dst = Term::any_from_msgpack(r_);
   auto src = Term::any_from_msgpack(r_);
   auto bytes = Term::any_from_msgpack(r_);
   auto direction = Direction::any_from_msgpack(r_);
-  return {dst, src, bytes, direction};
+  return {context, dst, src, bytes, direction};
 }
 
 void Spec::remotememcpy_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteMemcpy &x_) {
+  Term::any_to_msgpack(w_, x_.context);
   Term::any_to_msgpack(w_, x_.dst);
   Term::any_to_msgpack(w_, x_.src);
   Term::any_to_msgpack(w_, x_.bytes);
@@ -7596,17 +7612,17 @@ Spec::RemoteMemcpy Spec::remotememcpy_from_msgpack(MsgpackReader &r_) {
 }
 
 void Spec::remotememcpy_to_msgpack(MsgpackWriter &w_, const Spec::RemoteMemcpy &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   Spec::remotememcpy_fields_to_msgpack(w_, x_);
 }
 
 Spec::RemoteSync Spec::remotesync_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 1) throw std::runtime_error("Expected Spec::RemoteSync with 1 field(s)");
-  auto stream = Term::any_from_msgpack(r_);
-  return Spec::RemoteSync(stream);
+  auto context = Term::any_from_msgpack(r_);
+  return Spec::RemoteSync(context);
 }
 
-void Spec::remotesync_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteSync &x_) { Term::any_to_msgpack(w_, x_.stream); }
+void Spec::remotesync_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteSync &x_) { Term::any_to_msgpack(w_, x_.context); }
 
 Spec::RemoteSync Spec::remotesync_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
@@ -7799,17 +7815,17 @@ void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         Spec::remotelaunch_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteAlloc &y_) -> void {
-        w_.writeArrayHeader(2);
+        w_.writeArrayHeader(3);
         w_.writeInt32(27);
         Spec::remotealloc_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteFree &y_) -> void {
-        w_.writeArrayHeader(2);
+        w_.writeArrayHeader(3);
         w_.writeInt32(28);
         Spec::remotefree_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteMemcpy &y_) -> void {
-        w_.writeArrayHeader(5);
+        w_.writeArrayHeader(6);
         w_.writeInt32(29);
         Spec::remotememcpy_fields_to_msgpack(w_, y_);
       },
@@ -11256,8 +11272,8 @@ void compileresult_to_msgpack(MsgpackWriter &w_, const CompileResult &x_) {
   compileresult_fields_to_msgpack(w_, x_);
 }
 
-LibraryDef librarydef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected LibraryDef with 3 field(s)");
+InterfaceDef interfacedef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected InterfaceDef with 3 field(s)");
   auto name = sym_from_msgpack(r_);
   std::vector<FunctionDecl> decls;
   {
@@ -11280,7 +11296,7 @@ LibraryDef librarydef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   return {name, decls, metadata};
 }
 
-void librarydef_fields_to_msgpack(MsgpackWriter &w_, const LibraryDef &x_) {
+void interfacedef_fields_to_msgpack(MsgpackWriter &w_, const InterfaceDef &x_) {
   sym_to_msgpack(w_, x_.name);
   w_.writeArrayHeader(x_.decls.size());
   for (const auto &v0_ : x_.decls) {
@@ -11292,14 +11308,14 @@ void librarydef_fields_to_msgpack(MsgpackWriter &w_, const LibraryDef &x_) {
   }
 }
 
-LibraryDef librarydef_from_msgpack(MsgpackReader &r_) {
+InterfaceDef interfacedef_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
-  return librarydef_fields_from_msgpack(r_, n_);
+  return interfacedef_fields_from_msgpack(r_, n_);
 }
 
-void librarydef_to_msgpack(MsgpackWriter &w_, const LibraryDef &x_) {
+void interfacedef_to_msgpack(MsgpackWriter &w_, const InterfaceDef &x_) {
   w_.writeArrayHeader(3);
-  librarydef_fields_to_msgpack(w_, x_);
+  interfacedef_fields_to_msgpack(w_, x_);
 }
 
 TypeSizeConstraint typesizeconstraint_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -11374,7 +11390,7 @@ void implementationcandidate_to_msgpack(MsgpackWriter &w_, const ImplementationC
 
 PackageIndex packageindex_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected PackageIndex with 2 field(s)");
-  auto interface = librarydef_from_msgpack(r_);
+  auto interface = interfacedef_from_msgpack(r_);
   std::vector<ImplementationCandidate> candidates;
   {
     auto candidates_size = r_.readArrayHeader();
@@ -11388,7 +11404,7 @@ PackageIndex packageindex_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
 }
 
 void packageindex_fields_to_msgpack(MsgpackWriter &w_, const PackageIndex &x_) {
-  librarydef_to_msgpack(w_, x_.interface);
+  interfacedef_to_msgpack(w_, x_.interface);
   w_.writeArrayHeader(x_.candidates.size());
   for (const auto &v0_ : x_.candidates) {
     implementationcandidate_to_msgpack(w_, v0_);

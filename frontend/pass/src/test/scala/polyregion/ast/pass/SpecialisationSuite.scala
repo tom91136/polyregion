@@ -44,8 +44,10 @@ class SpecialisationSuite extends munit.FunSuite {
       args = List(arg("value", p.Type.Var("T"))),
       tpeVars = List("T")
     )
-    val one = p.Term.IntU32Const(1)
+    val one     = p.Term.IntU32Const(1)
+    val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     val launch = p.Spec.RemoteLaunch(
+      context,
       p.Term.Poison(p.Type.FnRef(generic.name)),
       List(p.Type.IntS32),
       one,
@@ -54,7 +56,6 @@ class SpecialisationSuite extends munit.FunSuite {
       one,
       one,
       one,
-      p.Term.IntU32Const(0),
       p.Term.IntU32Const(0),
       List(p.Term.IntS32Const(1))
     )
@@ -81,8 +82,10 @@ class SpecialisationSuite extends munit.FunSuite {
       args = List(arg("value", p.Type.Var("T"))),
       tpeVars = List("T")
     )
-    val one = p.Term.IntU32Const(1)
+    val one     = p.Term.IntU32Const(1)
+    val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     val launch = p.Spec.RemoteLaunch(
+      context,
       p.Term.Poison(p.Type.FnRef(generic.name)),
       List(p.Type.IntS32),
       one,
@@ -91,7 +94,6 @@ class SpecialisationSuite extends munit.FunSuite {
       one,
       one,
       one,
-      p.Term.IntU32Const(0),
       p.Term.IntU32Const(0),
       List(p.Term.IntS32Const(1))
     )

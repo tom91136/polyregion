@@ -170,11 +170,23 @@ private[polyregion] object CodeGen {
       :: deriveStruct[PassPipeline]()
       :: deriveStruct[PassRunResult]()
       :: deriveStruct[CompileResult]()
-      :: deriveStruct[LibraryDef]()
+      :: Nil
+
+  private def astPackageDependencies: List[StructNode] =
+    deriveStruct[Function.Visibility]()
+      :: deriveStruct[Function.Affinity]()
+      :: deriveStruct[Arg.Access]()
+      :: deriveStruct[Arg.SizeExpr]()
+      :: deriveStruct[Arg.Extent]()
+      :: deriveStruct[Arg.Boundary]()
+      :: deriveStruct[Arg]()
+      :: deriveStruct[FunctionDecl]()
+      :: deriveStruct[MetaEntry]()
       :: Nil
 
   private def astPackageStructs: List[StructNode] =
-    deriveStruct[TypeSizeConstraint]()
+    deriveStruct[InterfaceDef]()
+      :: deriveStruct[TypeSizeConstraint]()
       :: deriveStruct[ImplementationCandidate]()
       :: deriveStruct[PackageIndex]()
       :: Nil
@@ -184,6 +196,7 @@ private[polyregion] object CodeGen {
     println("Generating C++ mirror for PolyAST...")
 
     val programStructs = astCoreStructs ::: astProgramStructs
+    val packageStructs = astCoreStructs ::: astPackageDependencies ::: astPackageStructs
     val structs        = programStructs ::: astPackageStructs
 
     val (reprProtos, reprImpls): (String, String) = compiletime.generateReprSource[PolyAST.type]
@@ -260,7 +273,7 @@ private[polyregion] object CodeGen {
 
     val adtHash     = md5(adtFingerprint(structs))
     val programHash = md5(adtFingerprint(programStructs))
-    val packageHash = adtHash
+    val packageHash = md5(adtFingerprint(packageStructs))
 
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
     val jsonCodecImpl = CppNlohmannJsonCodecGen.emitImpl(
@@ -277,8 +290,12 @@ private[polyregion] object CodeGen {
     )
     println(s"MD5=${adtHash}")
 
-    adtHash -> (() => {
+    (programHash, packageHash) -> (() => {
       val target = Paths.get("../native/polyast/generated/").toAbsolutePath.normalize
+      val scalaTarget = Paths
+        .get("compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala")
+        .toAbsolutePath
+        .normalize
       println(s"Writing to $target")
       Files.createDirectories(target)
       overwrite(target.resolve("polyast.h"))(adtHeader)
@@ -288,13 +305,27 @@ private[polyregion] object CodeGen {
       overwrite(target.resolve("polyast_repr.h"))(reprHeader)
       overwrite(target.resolve("polyast_repr.cpp"))(reprImpl)
       overwrite(target.resolve("polyast_jit.h"))(jitHeader)
+      overwrite(scalaTarget)(
+        s"""package polyregion.scalalang.generated
+           |
+           |import javax.annotation.processing.Generated
+           |
+           |@Generated(Array("polyregion.ast.CodeGen"))
+           |private[scalalang] object PolyASTWireSchema {
+           |  inline val ProgramHash      = "$programHash"
+           |  inline val PackageIndexHash = "$packageHash"
+           |}
+           |""".stripMargin
+      )
       println("Done")
     })
   }
 
-  private val (polyASTHash, writePolyASTSources) = generateAstBindings()
+  private val ((programHash, packageHash), writePolyASTSources) = generateAstBindings()
 
-  def polyASTVersioned[A](x: A) = MsgPack.Versioned(polyASTHash, x)
+  def programVersioned(x: Program)            = MsgPack.Versioned(programHash, x)
+  def structDefsVersioned(x: List[StructDef]) = MsgPack.Versioned(programHash, x)
+  def packageVersioned(x: PackageIndex)       = MsgPack.Versioned(packageHash, x)
 
   private def writeConventions(): Unit = {
     val target = Paths.get("../native/common/generated/polyregion/conventions.h").toAbsolutePath.normalize

@@ -382,22 +382,23 @@ std::string repr(const Expr::Any &e) {
                              repr(_z->order));
         }
         if (auto _z = _x->op.get<Spec::RemoteLaunch>()) {
-          return fmt::format("'remoteLaunch({}[{}], <{}, {}, {}>, <{}, {}, {}>, {}, {}, [{}])", repr(_z->kernel),
+          return fmt::format("'remoteLaunch({}, {}[{}], <{}, {}, {}>, <{}, {}, {}>, {}, [{}])", repr(_z->context), repr(_z->kernel),
                              (_z->tpeArgs | map([&](const Type::Any &_v9_0) { return repr(_v9_0); }) | mk_string(", "s)), repr(_z->gridX),
                              repr(_z->gridY), repr(_z->gridZ), repr(_z->blockX), repr(_z->blockY), repr(_z->blockZ), repr(_z->shmem),
-                             repr(_z->stream), (_z->args | map([&](const Term::Any &_v9_0) { return repr(_v9_0); }) | mk_string(", "s)));
+                             (_z->args | map([&](const Term::Any &_v9_0) { return repr(_v9_0); }) | mk_string(", "s)));
         }
         if (auto _z = _x->op.get<Spec::RemoteAlloc>()) {
-          return fmt::format("'remoteAlloc({})", repr(_z->bytes));
+          return fmt::format("'remoteAlloc({}, {})", repr(_z->context), repr(_z->bytes));
         }
         if (auto _z = _x->op.get<Spec::RemoteFree>()) {
-          return fmt::format("'remoteFree({})", repr(_z->ptr));
+          return fmt::format("'remoteFree({}, {})", repr(_z->context), repr(_z->ptr));
         }
         if (auto _z = _x->op.get<Spec::RemoteMemcpy>()) {
-          return fmt::format("'remoteMemcpy({}, {}, {}, {})", repr(_z->dst), repr(_z->src), repr(_z->bytes), repr(_z->direction));
+          return fmt::format("'remoteMemcpy({}, {}, {}, {}, {})", repr(_z->context), repr(_z->dst), repr(_z->src), repr(_z->bytes),
+                             repr(_z->direction));
         }
         if (auto _z = _x->op.get<Spec::RemoteSync>()) {
-          return fmt::format("'remoteSync({})", repr(_z->stream));
+          return fmt::format("'remoteSync({})", repr(_z->context));
         }
         if (auto _z = _x->op.get<Spec::GpuVolatileLoad>()) {
           return fmt::format("'gpuVolatileLoad({})", repr(_z->ptr));
@@ -796,8 +797,8 @@ std::string repr(const FunctionDecl &f) {
 
 std::string repr(const MetaEntry &m) { return fmt::format("{}={}", m.key, m.value); }
 
-std::string repr(const LibraryDef &l) {
-  return fmt::format("library {} {}\n{}\n{}\n{}", repr(l.name), "{"s,
+std::string repr(const InterfaceDef &l) {
+  return fmt::format("interface {} {}\n{}\n{}\n{}", repr(l.name), "{"s,
                      (l.decls | map([&](const FunctionDecl &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2),
                      (l.metadata | map([&](const MetaEntry &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 }

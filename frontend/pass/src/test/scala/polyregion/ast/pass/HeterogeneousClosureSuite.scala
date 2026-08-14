@@ -14,6 +14,7 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
     val bytes  = p.Term.IntU64Const(64)
     val ptr    = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     val launch: p.Spec.RemoteLaunch = p.Spec.RemoteLaunch(
+      ptr,
       kernel,
       List(p.Type.Float32),
       one,
@@ -23,41 +24,42 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
       one,
       one,
       zero,
-      zero,
       List(ptr)
     )
     val operations: List[p.Spec] = List(
       launch,
-      p.Spec.RemoteAlloc(bytes),
-      p.Spec.RemoteMemcpy(ptr, ptr, bytes, p.Direction.LocalToRemote),
-      p.Spec.RemoteSync(zero),
-      p.Spec.RemoteFree(ptr)
+      p.Spec.RemoteAlloc(ptr, bytes),
+      p.Spec.RemoteMemcpy(ptr, ptr, ptr, bytes, p.Direction.LocalToRemote),
+      p.Spec.RemoteSync(ptr),
+      p.Spec.RemoteFree(ptr, ptr)
     )
 
     operations.foreach(operation => assertEquals(MsgPack.decode[p.Spec](MsgPack.encode(operation)), Right(operation)))
     assertEquals(
       launch.terms,
-      List(kernel, one, one, one, one, one, one, zero, zero, ptr)
+      List(ptr, kernel, one, one, one, one, one, one, zero, ptr)
     )
     assertEquals(launch.tpeArgs, List(p.Type.Float32))
     assertEquals(launch.tpe, p.Type.Unit0)
     assert(p.Expr.SpecOp(launch).repr.contains("example.kernel"))
-    assert(p.Expr.SpecOp(p.Spec.RemoteAlloc(bytes)).repr.contains("remoteAlloc"))
+    assert(p.Expr.SpecOp(p.Spec.RemoteAlloc(ptr, bytes)).repr.contains("remoteAlloc"))
     assert(
       p.Expr
-        .SpecOp(p.Spec.RemoteMemcpy(ptr, ptr, bytes, p.Direction.LocalToRemote))
+        .SpecOp(p.Spec.RemoteMemcpy(ptr, ptr, ptr, bytes, p.Direction.LocalToRemote))
         .repr
         .contains("localToRemote")
     )
-    assert(p.Expr.SpecOp(p.Spec.RemoteSync(zero)).repr.contains("remoteSync"))
-    assert(p.Expr.SpecOp(p.Spec.RemoteFree(ptr)).repr.contains("remoteFree"))
+    assert(p.Expr.SpecOp(p.Spec.RemoteSync(ptr)).repr.contains("remoteSync"))
+    assert(p.Expr.SpecOp(p.Spec.RemoteFree(ptr, ptr)).repr.contains("remoteFree"))
     assertEquals(p.Direction.LocalToRemote.repr, "localToRemote")
     assertEquals(p.Direction.RemoteToLocal.repr, "remoteToLocal")
     assertEquals(p.Direction.RemoteToRemote.repr, "remoteToRemote")
   }
 
   test("heterogeneous orchestration operands are verified") {
+    val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     def launch(kernel: p.Term, args: List[p.Term] = Nil) = p.Spec.RemoteLaunch(
+      context,
       kernel,
       Nil,
       p.Term.IntU32Const(1),
@@ -67,12 +69,12 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
       p.Term.IntU32Const(1),
       p.Term.IntU32Const(1),
       p.Term.IntU32Const(0),
-      p.Term.IntU32Const(0),
       args
     )
     val existingKernel = fn("existing.kernel", args = List(arg("value", p.Type.IntU32)))
     val badOps: List[p.Spec] = List(
       p.Spec.RemoteLaunch(
+        p.Term.Bool1Const(false),
         p.Term.IntU32Const(0),
         Nil,
         p.Term.Bool1Const(false),
@@ -82,14 +84,14 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
         p.Term.IntU32Const(1),
         p.Term.IntU32Const(1),
         p.Term.IntU32Const(0),
-        p.Term.IntU32Const(0),
         Nil
       ),
       launch(p.Term.Poison(p.Type.FnRef(p.Sym("missing.kernel")))),
       launch(p.Term.Poison(p.Type.FnRef(existingKernel.name))),
-      p.Spec.RemoteAlloc(p.Term.Bool1Const(false)),
-      p.Spec.RemoteFree(p.Term.IntU64Const(0)),
+      p.Spec.RemoteAlloc(context, p.Term.Bool1Const(false)),
+      p.Spec.RemoteFree(context, p.Term.IntU64Const(0)),
       p.Spec.RemoteMemcpy(
+        context,
         p.Term.IntU64Const(0),
         p.Term.IntU64Const(0),
         p.Term.Bool1Const(false),
@@ -112,10 +114,11 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
     assert(failures.exists(_.contains("copy destination must be a global pointer")), failures.mkString("\n"))
     assert(failures.exists(_.contains("copy source must be a global pointer")), failures.mkString("\n"))
     assert(failures.exists(_.contains("copy byte count must be U64")), failures.mkString("\n"))
-    assert(failures.exists(_.contains("stream handle must be a global pointer, U32, or U64")), failures.mkString("\n"))
+    assert(failures.exists(_.contains("execution context has the wrong type")), failures.mkString("\n"))
   }
 
   test("launch verification follows the physical capture ABI") {
+    val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     val kernel = fn(
       "captured.kernel",
       args = List(arg("value", p.Type.Float32), arg("erased", p.Type.Unit0)),
@@ -123,6 +126,7 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
       termCaptures = List(arg("term", p.Type.IntU64))
     )
     val launch = p.Spec.RemoteLaunch(
+      context,
       p.Term.Poison(p.Type.FnRef(kernel.name)),
       Nil,
       p.Term.IntU32Const(1),
@@ -131,7 +135,6 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
       p.Term.IntU32Const(1),
       p.Term.IntU32Const(1),
       p.Term.IntU32Const(1),
-      p.Term.IntU32Const(0),
       p.Term.IntU32Const(0),
       List(p.Term.IntU32Const(1), p.Term.IntU64Const(2), p.Term.Float32Const(3))
     )
@@ -145,8 +148,10 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
   }
 
   test("launch verification erases generic unit parameters after substitution") {
-    val kernel = fn("generic.kernel", args = List(arg("erased", p.Type.Var("T"))), tpeVars = List("T"))
+    val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
+    val kernel  = fn("generic.kernel", args = List(arg("erased", p.Type.Var("T"))), tpeVars = List("T"))
     val launch = p.Spec.RemoteLaunch(
+      context,
       p.Term.Poison(p.Type.FnRef(kernel.name)),
       List(p.Type.Unit0),
       p.Term.IntU32Const(1),
@@ -155,7 +160,6 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
       p.Term.IntU32Const(1),
       p.Term.IntU32Const(1),
       p.Term.IntU32Const(1),
-      p.Term.IntU32Const(0),
       p.Term.IntU32Const(0),
       Nil
     )

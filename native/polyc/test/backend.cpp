@@ -961,6 +961,32 @@ TEST_CASE("host prelude with foreign calls compiles to host object", "[backend]"
   CHECK(c.binary != std::nullopt);
 }
 
+TEST_CASE("host orchestration lowers remote launches through the context ABI", "[backend]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+  const Named context("context", contextType);
+  const auto kernel = mkFn("remote.kernel", {}, Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto one = Term::IntU32Const(1).widen();
+  const auto zero = Term::IntU32Const(0).widen();
+  const auto launch = Spec::RemoteLaunch(selectNamed(context).widen(), Term::Poison(Type::FnRef(kernel.decl.name)).widen(), {}, one, one,
+                                         one, one, one, one, zero, {});
+  const Named launched("launched", Type::Unit0());
+  const Function driver(FunctionDecl(Sym({"driver"}), {}, {}, {Arg(context, {})}, {}, {}, Type::Unit0(), FunctionAffinity::Host()),
+                        {Var(launched, Expr::SpecOp(launch).widen(), false).widen(), ret()}, FunctionVisibility::Exported(),
+                        FunctionFpMode::Relaxed(), false);
+  const Program program(driver, {kernel}, {}, PassPhase::Initial(), {});
+  polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
+  options.pipelineSpec = "FullOpt(level=0)";
+
+  const auto compiled = polyregion::compiler::compile(program, options, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK(llvmIrOf(compiled).find("polyrt_remote_launch") != std::string::npos);
+}
+
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

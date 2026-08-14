@@ -1,5 +1,7 @@
 #include "llvm_cpu.h"
 
+#include "polyregion/enums.h"
+
 using namespace polyregion::backend::details;
 
 void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const Function &source) {
@@ -10,6 +12,36 @@ void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const
 ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   const auto noop = [&] { return cg.mkTermVal(Term::Unit0Const()); };
   const auto k = [&](const auto &v, uint64_t n) -> ValPtr { return llvm::ConstantInt::get(cg.resolveType(v.tpe), n); };
+  auto &ctx = cg.C.actual;
+  auto *i64 = llvm::Type::getInt64Ty(ctx);
+  auto *i32 = llvm::Type::getInt32Ty(ctx);
+  auto *i8 = llvm::Type::getInt8Ty(ctx);
+  auto *ptr = llvm::PointerType::get(ctx, 0);
+  auto *unit = llvm::Type::getVoidTy(ctx);
+  const auto external = [&](const std::string &name, llvm::Type *result, llvm::ArrayRef<llvm::Type *> args) {
+    return cg.M.getOrInsertFunction(name, llvm::FunctionType::get(result, args, false));
+  };
+  const auto asI64 = [&](const Term::Any &term) -> ValPtr {
+    auto *value = cg.mkTermVal(term);
+    return value->getType()->isPointerTy() ? cg.B.CreatePtrToInt(value, i64) : cg.B.CreateZExtOrTrunc(value, i64);
+  };
+  const auto runtimeType = [](const Type::Any &tpe) -> uint8_t {
+    using RuntimeType = polyregion::runtime::Type;
+    const auto value = [](const RuntimeType x) { return static_cast<uint8_t>(x); };
+    if (tpe.is<Type::Bool1>()) return value(RuntimeType::Bool1);
+    if (tpe.is<Type::IntU8>()) return value(RuntimeType::IntU8);
+    if (tpe.is<Type::IntU16>()) return value(RuntimeType::IntU16);
+    if (tpe.is<Type::IntU32>()) return value(RuntimeType::IntU32);
+    if (tpe.is<Type::IntU64>()) return value(RuntimeType::IntU64);
+    if (tpe.is<Type::IntS8>()) return value(RuntimeType::IntS8);
+    if (tpe.is<Type::IntS16>()) return value(RuntimeType::IntS16);
+    if (tpe.is<Type::IntS32>()) return value(RuntimeType::IntS32);
+    if (tpe.is<Type::IntS64>()) return value(RuntimeType::IntS64);
+    if (tpe.is<Type::Float16>()) return value(RuntimeType::Float16);
+    if (tpe.is<Type::Float32>()) return value(RuntimeType::Float32);
+    if (tpe.is<Type::Float64>()) return value(RuntimeType::Float64);
+    return value(RuntimeType::Ptr);
+  };
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr {
         throw BackendException("assert reached codegen; the StructuredExit pass must run before the backend");
@@ -37,11 +69,78 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); },
       [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for CPU"); },
-      [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch requires local orchestration lowering"); },
-      [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc requires local orchestration lowering"); },
-      [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree requires local orchestration lowering"); },
-      [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy requires local orchestration lowering"); },
-      [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync requires local orchestration lowering"); },
+      [&](const Spec::RemoteLaunch &v) -> ValPtr {
+        const auto count = v.args.size();
+        const auto zero = llvm::ConstantInt::get(i64, 0);
+        auto *argPointersType = llvm::ArrayType::get(ptr, count ? count : 1);
+        auto *argTypesType = llvm::ArrayType::get(i8, count ? count : 1);
+        auto *argPointers = cg.B.CreateAlloca(argPointersType, nullptr, "remote_argptrs");
+        auto *argTypes = cg.B.CreateAlloca(argTypesType, nullptr, "remote_argtypes");
+        std::vector<ValPtr> mirrored;
+        const auto mirror = [&](llvm::Type *type, auto &&source) -> ValPtr {
+          const auto allocationSize = cg.M.getDataLayout().getTypeAllocSize(type).getFixedValue();
+          const auto bytes = llvm::ConstantInt::get(i64, allocationSize == 0 ? 1 : allocationSize);
+          auto *remote = cg.B.CreateCall(external("polyrt_remote_malloc", i64, {ptr, i64}), {cg.mkTermVal(v.context), bytes});
+          if (allocationSize > 0)
+            cg.B.CreateCall(
+                external("polyrt_remote_memcpy", unit, {ptr, i64, i64, i64, i32}),
+                {cg.mkTermVal(v.context), remote, source(), llvm::ConstantInt::get(i64, allocationSize), llvm::ConstantInt::get(i32, 0)});
+          mirrored.emplace_back(remote);
+          return cg.B.CreateIntToPtr(remote, ptr);
+        };
+        for (size_t index = 0; index < count; ++index) {
+          ValPtr value;
+          if (const auto pointer = v.args[index].tpe().get<Type::Ptr>(); pointer && pointer->comp.is<Type::Struct>()) {
+            value = mirror(cg.resolveType(pointer->comp), [&] { return asI64(v.args[index]); });
+          } else if (v.args[index].tpe().is<Type::Struct>()) {
+            auto *type = cg.resolveType(v.args[index].tpe());
+            auto *local = cg.B.CreateAlloca(type, nullptr, "remote_closure");
+            cg.B.CreateStore(cg.mkTermVal(v.args[index]), local);
+            value = mirror(type, [&] { return cg.B.CreatePtrToInt(local, i64); });
+          } else value = cg.mkTermVal(v.args[index]);
+          auto *slot = cg.B.CreateAlloca(value->getType(), nullptr, "remote_arg");
+          cg.B.CreateStore(value, slot);
+          auto *offset = llvm::ConstantInt::get(i64, index);
+          cg.B.CreateStore(cg.B.CreatePointerCast(slot, ptr), cg.B.CreateGEP(argPointersType, argPointers, {zero, offset}));
+          cg.B.CreateStore(llvm::ConstantInt::get(i8, runtimeType(v.args[index].tpe())),
+                           cg.B.CreateGEP(argTypesType, argTypes, {zero, offset}));
+        }
+        std::string kernelName = "_kernel";
+        if (const auto fn = v.kernel.tpe().get<Type::FnRef>()) {
+          kernelName = repr(fn->name);
+          for (auto &c : kernelName)
+            if (!std::isalnum(c) && c != '_') c = '_';
+        }
+        auto *module = cg.B.CreateGlobalString(kernelName, "remote_module", 0, &cg.M);
+        auto *kernel = cg.B.CreateGlobalString(kernelName, "remote_kernel", 0, &cg.M);
+        cg.B.CreateCall(external("polyrt_remote_launch", unit, {ptr, ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i64, ptr, ptr}),
+                        {cg.mkTermVal(v.context), module, kernel, asI64(v.gridX), asI64(v.gridY), asI64(v.gridZ), asI64(v.blockX),
+                         asI64(v.blockY), asI64(v.blockZ), asI64(v.shmem), llvm::ConstantInt::get(i64, count),
+                         cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero})});
+        for (auto *remote : mirrored)
+          cg.B.CreateCall(external("polyrt_remote_free", unit, {ptr, i64}), {cg.mkTermVal(v.context), remote});
+        return noop();
+      },
+      [&](const Spec::RemoteAlloc &v) -> ValPtr {
+        auto *value = cg.B.CreateCall(external("polyrt_remote_malloc", i64, {ptr, i64}), {cg.mkTermVal(v.context), asI64(v.bytes)});
+        return cg.B.CreateIntToPtr(value, cg.resolveType(v.tpe));
+      },
+      [&](const Spec::RemoteFree &v) -> ValPtr {
+        cg.B.CreateCall(external("polyrt_remote_free", unit, {ptr, i64}), {cg.mkTermVal(v.context), asI64(v.ptr)});
+        return noop();
+      },
+      [&](const Spec::RemoteMemcpy &v) -> ValPtr {
+        const auto direction =
+            v.direction.match_total([](const Direction::LocalToRemote &) { return 0; }, [](const Direction::RemoteToLocal &) { return 1; },
+                                    [](const Direction::RemoteToRemote &) { return 2; });
+        cg.B.CreateCall(external("polyrt_remote_memcpy", unit, {ptr, i64, i64, i64, i32}),
+                        {cg.mkTermVal(v.context), asI64(v.dst), asI64(v.src), asI64(v.bytes), llvm::ConstantInt::get(i32, direction)});
+        return noop();
+      },
+      [&](const Spec::RemoteSync &v) -> ValPtr {
+        cg.B.CreateCall(external("polyrt_remote_sync", unit, {ptr}), {cg.mkTermVal(v.context)});
+        return noop();
+      },
       [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for CPU"); },
       [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for CPU"); } //
   );

@@ -2111,21 +2111,22 @@ POLYREGION_EXPORT bool Spec::GpuVolatileStore::operator==(const Base &rhs_) cons
 Spec::GpuVolatileStore::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuVolatileStore>(*this)); }
 Spec::Any Spec::GpuVolatileStore::widen() const { return Any(*this); };
 
-Spec::RemoteLaunch::RemoteLaunch(Term::Any kernel, std::vector<Type::Any> tpeArgs, Term::Any gridX, Term::Any gridY, Term::Any gridZ,
-                                 Term::Any blockX, Term::Any blockY, Term::Any blockZ, Term::Any shmem, Term::Any stream,
+Spec::RemoteLaunch::RemoteLaunch(Term::Any context, Term::Any kernel, std::vector<Type::Any> tpeArgs, Term::Any gridX, Term::Any gridY,
+                                 Term::Any gridZ, Term::Any blockX, Term::Any blockY, Term::Any blockZ, Term::Any shmem,
                                  std::vector<Term::Any> args) noexcept
     : Spec::Base({}, ([&] {
                    auto _xs = args;
-                   _xs.insert(_xs.begin(), {kernel, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream});
+                   _xs.insert(_xs.begin(), {context, kernel, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem});
                    return _xs;
                  }()),
                  Type::Unit0()),
-      kernel(std::move(kernel)), tpeArgs(std::move(tpeArgs)), gridX(std::move(gridX)), gridY(std::move(gridY)), gridZ(std::move(gridZ)),
-      blockX(std::move(blockX)), blockY(std::move(blockY)), blockZ(std::move(blockZ)), shmem(std::move(shmem)), stream(std::move(stream)),
+      context(std::move(context)), kernel(std::move(kernel)), tpeArgs(std::move(tpeArgs)), gridX(std::move(gridX)), gridY(std::move(gridY)),
+      gridZ(std::move(gridZ)), blockX(std::move(blockX)), blockY(std::move(blockY)), blockZ(std::move(blockZ)), shmem(std::move(shmem)),
       args(std::move(args)) {}
 uint32_t Spec::RemoteLaunch::id() const { return variant_id; };
 size_t Spec::RemoteLaunch::hash_code() const {
   size_t seed = variant_id;
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(kernel)>()(kernel) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(gridX)>()(gridX) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -2135,49 +2136,48 @@ size_t Spec::RemoteLaunch::hash_code() const {
   seed ^= std::hash<decltype(blockY)>()(blockY) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(blockZ)>()(blockZ) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(shmem)>()(shmem) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(stream)>()(stream) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
+Spec::RemoteLaunch Spec::RemoteLaunch::withContext(const Term::Any &v_) const {
+  return Spec::RemoteLaunch(v_, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, args);
+}
 Spec::RemoteLaunch Spec::RemoteLaunch::withKernel(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(v_, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, v_, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withTpeArgs(const std::vector<Type::Any> &v_) const {
-  return Spec::RemoteLaunch(kernel, v_, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, v_, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withGridX(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, v_, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, v_, gridY, gridZ, blockX, blockY, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withGridY(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, v_, gridZ, blockX, blockY, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, v_, gridZ, blockX, blockY, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withGridZ(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, v_, blockX, blockY, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, gridY, v_, blockX, blockY, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withBlockX(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, v_, blockY, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, gridY, gridZ, v_, blockY, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withBlockY(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, v_, blockZ, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, v_, blockZ, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withBlockZ(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, v_, shmem, stream, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, v_, shmem, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withShmem(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, v_, stream, args);
-}
-Spec::RemoteLaunch Spec::RemoteLaunch::withStream(const Term::Any &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, v_, args);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, v_, args);
 }
 Spec::RemoteLaunch Spec::RemoteLaunch::withArgs(const std::vector<Term::Any> &v_) const {
-  return Spec::RemoteLaunch(kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, stream, v_);
+  return Spec::RemoteLaunch(context, kernel, tpeArgs, gridX, gridY, gridZ, blockX, blockY, blockZ, shmem, v_);
 }
 POLYREGION_EXPORT bool Spec::RemoteLaunch::operator==(const Spec::RemoteLaunch &rhs) const {
-  return (this->kernel == rhs.kernel)
+  return (this->context == rhs.context) && (this->kernel == rhs.kernel)
          && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), rhs.tpeArgs.end(),
                        [](auto &&l, auto &&r) { return l == r; })
          && (this->gridX == rhs.gridX) && (this->gridY == rhs.gridY) && (this->gridZ == rhs.gridZ) && (this->blockX == rhs.blockX)
-         && (this->blockY == rhs.blockY) && (this->blockZ == rhs.blockZ) && (this->shmem == rhs.shmem) && (this->stream == rhs.stream)
+         && (this->blockY == rhs.blockY) && (this->blockZ == rhs.blockZ) && (this->shmem == rhs.shmem)
          && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; });
 }
 POLYREGION_EXPORT bool Spec::RemoteLaunch::operator==(const Base &rhs_) const {
@@ -2187,16 +2187,21 @@ POLYREGION_EXPORT bool Spec::RemoteLaunch::operator==(const Base &rhs_) const {
 Spec::RemoteLaunch::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteLaunch>(*this)); }
 Spec::Any Spec::RemoteLaunch::widen() const { return Any(*this); };
 
-Spec::RemoteAlloc::RemoteAlloc(Term::Any bytes) noexcept
-    : Spec::Base({}, {bytes}, Type::Ptr(Type::IntU8(), TypeSpace::Global())), bytes(std::move(bytes)) {}
+Spec::RemoteAlloc::RemoteAlloc(Term::Any context, Term::Any bytes) noexcept
+    : Spec::Base({}, {context, bytes}, Type::Ptr(Type::IntU8(), TypeSpace::Global())), context(std::move(context)),
+      bytes(std::move(bytes)) {}
 uint32_t Spec::RemoteAlloc::id() const { return variant_id; };
 size_t Spec::RemoteAlloc::hash_code() const {
   size_t seed = variant_id;
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Spec::RemoteAlloc Spec::RemoteAlloc::withBytes(const Term::Any &v_) const { return Spec::RemoteAlloc(v_); }
-POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Spec::RemoteAlloc &rhs) const { return (this->bytes == rhs.bytes); }
+Spec::RemoteAlloc Spec::RemoteAlloc::withContext(const Term::Any &v_) const { return Spec::RemoteAlloc(v_, bytes); }
+Spec::RemoteAlloc Spec::RemoteAlloc::withBytes(const Term::Any &v_) const { return Spec::RemoteAlloc(context, v_); }
+POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Spec::RemoteAlloc &rhs) const {
+  return (this->context == rhs.context) && (this->bytes == rhs.bytes);
+}
 POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
   return this->operator==(static_cast<const Spec::RemoteAlloc &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
@@ -2204,15 +2209,20 @@ POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Base &rhs_) const {
 Spec::RemoteAlloc::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteAlloc>(*this)); }
 Spec::Any Spec::RemoteAlloc::widen() const { return Any(*this); };
 
-Spec::RemoteFree::RemoteFree(Term::Any ptr) noexcept : Spec::Base({}, {ptr}, Type::Unit0()), ptr(std::move(ptr)) {}
+Spec::RemoteFree::RemoteFree(Term::Any context, Term::Any ptr) noexcept
+    : Spec::Base({}, {context, ptr}, Type::Unit0()), context(std::move(context)), ptr(std::move(ptr)) {}
 uint32_t Spec::RemoteFree::id() const { return variant_id; };
 size_t Spec::RemoteFree::hash_code() const {
   size_t seed = variant_id;
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(ptr)>()(ptr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Spec::RemoteFree Spec::RemoteFree::withPtr(const Term::Any &v_) const { return Spec::RemoteFree(v_); }
-POLYREGION_EXPORT bool Spec::RemoteFree::operator==(const Spec::RemoteFree &rhs) const { return (this->ptr == rhs.ptr); }
+Spec::RemoteFree Spec::RemoteFree::withContext(const Term::Any &v_) const { return Spec::RemoteFree(v_, ptr); }
+Spec::RemoteFree Spec::RemoteFree::withPtr(const Term::Any &v_) const { return Spec::RemoteFree(context, v_); }
+POLYREGION_EXPORT bool Spec::RemoteFree::operator==(const Spec::RemoteFree &rhs) const {
+  return (this->context == rhs.context) && (this->ptr == rhs.ptr);
+}
 POLYREGION_EXPORT bool Spec::RemoteFree::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
   return this->operator==(static_cast<const Spec::RemoteFree &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
@@ -2220,24 +2230,29 @@ POLYREGION_EXPORT bool Spec::RemoteFree::operator==(const Base &rhs_) const {
 Spec::RemoteFree::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteFree>(*this)); }
 Spec::Any Spec::RemoteFree::widen() const { return Any(*this); };
 
-Spec::RemoteMemcpy::RemoteMemcpy(Term::Any dst, Term::Any src, Term::Any bytes, Direction::Any direction) noexcept
-    : Spec::Base({}, {dst, src, bytes}, Type::Unit0()), dst(std::move(dst)), src(std::move(src)), bytes(std::move(bytes)),
-      direction(std::move(direction)) {}
+Spec::RemoteMemcpy::RemoteMemcpy(Term::Any context, Term::Any dst, Term::Any src, Term::Any bytes, Direction::Any direction) noexcept
+    : Spec::Base({}, {context, dst, src, bytes}, Type::Unit0()), context(std::move(context)), dst(std::move(dst)), src(std::move(src)),
+      bytes(std::move(bytes)), direction(std::move(direction)) {}
 uint32_t Spec::RemoteMemcpy::id() const { return variant_id; };
 size_t Spec::RemoteMemcpy::hash_code() const {
   size_t seed = variant_id;
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(dst)>()(dst) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(src)>()(src) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(direction)>()(direction) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Spec::RemoteMemcpy Spec::RemoteMemcpy::withDst(const Term::Any &v_) const { return Spec::RemoteMemcpy(v_, src, bytes, direction); }
-Spec::RemoteMemcpy Spec::RemoteMemcpy::withSrc(const Term::Any &v_) const { return Spec::RemoteMemcpy(dst, v_, bytes, direction); }
-Spec::RemoteMemcpy Spec::RemoteMemcpy::withBytes(const Term::Any &v_) const { return Spec::RemoteMemcpy(dst, src, v_, direction); }
-Spec::RemoteMemcpy Spec::RemoteMemcpy::withDirection(const Direction::Any &v_) const { return Spec::RemoteMemcpy(dst, src, bytes, v_); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withContext(const Term::Any &v_) const { return Spec::RemoteMemcpy(v_, dst, src, bytes, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withDst(const Term::Any &v_) const { return Spec::RemoteMemcpy(context, v_, src, bytes, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withSrc(const Term::Any &v_) const { return Spec::RemoteMemcpy(context, dst, v_, bytes, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withBytes(const Term::Any &v_) const { return Spec::RemoteMemcpy(context, dst, src, v_, direction); }
+Spec::RemoteMemcpy Spec::RemoteMemcpy::withDirection(const Direction::Any &v_) const {
+  return Spec::RemoteMemcpy(context, dst, src, bytes, v_);
+}
 POLYREGION_EXPORT bool Spec::RemoteMemcpy::operator==(const Spec::RemoteMemcpy &rhs) const {
-  return (this->dst == rhs.dst) && (this->src == rhs.src) && (this->bytes == rhs.bytes) && (this->direction == rhs.direction);
+  return (this->context == rhs.context) && (this->dst == rhs.dst) && (this->src == rhs.src) && (this->bytes == rhs.bytes)
+         && (this->direction == rhs.direction);
 }
 POLYREGION_EXPORT bool Spec::RemoteMemcpy::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
@@ -2246,15 +2261,15 @@ POLYREGION_EXPORT bool Spec::RemoteMemcpy::operator==(const Base &rhs_) const {
 Spec::RemoteMemcpy::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteMemcpy>(*this)); }
 Spec::Any Spec::RemoteMemcpy::widen() const { return Any(*this); };
 
-Spec::RemoteSync::RemoteSync(Term::Any stream) noexcept : Spec::Base({}, {stream}, Type::Unit0()), stream(std::move(stream)) {}
+Spec::RemoteSync::RemoteSync(Term::Any context) noexcept : Spec::Base({}, {context}, Type::Unit0()), context(std::move(context)) {}
 uint32_t Spec::RemoteSync::id() const { return variant_id; };
 size_t Spec::RemoteSync::hash_code() const {
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(stream)>()(stream) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-Spec::RemoteSync Spec::RemoteSync::withStream(const Term::Any &v_) const { return Spec::RemoteSync(v_); }
-POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Spec::RemoteSync &rhs) const { return (this->stream == rhs.stream); }
+Spec::RemoteSync Spec::RemoteSync::withContext(const Term::Any &v_) const { return Spec::RemoteSync(v_); }
+POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Spec::RemoteSync &rhs) const { return (this->context == rhs.context); }
 POLYREGION_EXPORT bool Spec::RemoteSync::operator==(const Base &rhs_) const {
   if (rhs_.id() != variant_id) return false;
   return this->operator==(static_cast<const Spec::RemoteSync &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
@@ -4624,20 +4639,20 @@ POLYREGION_EXPORT bool CompileResult::operator==(const CompileResult &rhs) const
          && (messages == rhs.messages) && (entryArgs == rhs.entryArgs);
 }
 
-LibraryDef::LibraryDef(Sym name, std::vector<FunctionDecl> decls, std::vector<MetaEntry> metadata) noexcept
+InterfaceDef::InterfaceDef(Sym name, std::vector<FunctionDecl> decls, std::vector<MetaEntry> metadata) noexcept
     : name(std::move(name)), decls(std::move(decls)), metadata(std::move(metadata)) {}
-size_t LibraryDef::hash_code() const {
+size_t InterfaceDef::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(decls)>()(decls) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(metadata)>()(metadata) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-LibraryDef LibraryDef::withName(const Sym &v_) const { return LibraryDef(v_, decls, metadata); }
-LibraryDef LibraryDef::withDecls(const std::vector<FunctionDecl> &v_) const { return LibraryDef(name, v_, metadata); }
-LibraryDef LibraryDef::withMetadata(const std::vector<MetaEntry> &v_) const { return LibraryDef(name, decls, v_); }
-POLYREGION_EXPORT bool LibraryDef::operator!=(const LibraryDef &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool LibraryDef::operator==(const LibraryDef &rhs) const {
+InterfaceDef InterfaceDef::withName(const Sym &v_) const { return InterfaceDef(v_, decls, metadata); }
+InterfaceDef InterfaceDef::withDecls(const std::vector<FunctionDecl> &v_) const { return InterfaceDef(name, v_, metadata); }
+InterfaceDef InterfaceDef::withMetadata(const std::vector<MetaEntry> &v_) const { return InterfaceDef(name, decls, v_); }
+POLYREGION_EXPORT bool InterfaceDef::operator!=(const InterfaceDef &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool InterfaceDef::operator==(const InterfaceDef &rhs) const {
   return (name == rhs.name) && (decls == rhs.decls) && (metadata == rhs.metadata);
 }
 
@@ -4686,7 +4701,7 @@ POLYREGION_EXPORT bool ImplementationCandidate::operator==(const ImplementationC
          && (typeSizes == rhs.typeSizes);
 }
 
-PackageIndex::PackageIndex(LibraryDef interface, std::vector<ImplementationCandidate> candidates) noexcept
+PackageIndex::PackageIndex(InterfaceDef interface, std::vector<ImplementationCandidate> candidates) noexcept
     : interface(std::move(interface)), candidates(std::move(candidates)) {}
 size_t PackageIndex::hash_code() const {
   size_t seed = 0;
@@ -4694,7 +4709,7 @@ size_t PackageIndex::hash_code() const {
   seed ^= std::hash<decltype(candidates)>()(candidates) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-PackageIndex PackageIndex::withInterface(const LibraryDef &v_) const { return PackageIndex(v_, candidates); }
+PackageIndex PackageIndex::withInterface(const InterfaceDef &v_) const { return PackageIndex(v_, candidates); }
 PackageIndex PackageIndex::withCandidates(const std::vector<ImplementationCandidate> &v_) const { return PackageIndex(interface, v_); }
 POLYREGION_EXPORT bool PackageIndex::operator!=(const PackageIndex &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool PackageIndex::operator==(const PackageIndex &rhs) const {
@@ -5470,7 +5485,7 @@ std::size_t std::hash<polyregion::polyast::PassRunResult>::operator()(const poly
 std::size_t std::hash<polyregion::polyast::CompileResult>::operator()(const polyregion::polyast::CompileResult &x) const noexcept {
   return x.hash_code();
 }
-std::size_t std::hash<polyregion::polyast::LibraryDef>::operator()(const polyregion::polyast::LibraryDef &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::InterfaceDef>::operator()(const polyregion::polyast::InterfaceDef &x) const noexcept {
   return x.hash_code();
 }
 std::size_t

@@ -1,11 +1,20 @@
 #include "test_all.h"
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+
 #include "polyregion/env_keys.h"
 
 #include "polytest/driver.hpp"
 
 int main(int argc, const char **argv) {
   using namespace polyregion::polytest;
+  llvm::SmallString<256> siblingFixture(argv[0]);
+  llvm::sys::fs::make_absolute(siblingFixture);
+  llvm::sys::path::remove_filename(siblingFixture);
+  llvm::sys::path::append(siblingFixture, llvm::sys::path::filename(PackageFixture));
+  const auto packageFixture = llvm::sys::fs::exists(siblingFixture) ? siblingFixture.str().str() : std::string(PackageFixture);
   return runMain(
       argc, argv,
       DriverConfig{
@@ -19,7 +28,7 @@ int main(int argc, const char **argv) {
           .defaultsLabelVar = "opt",
           .defaultsVariants = {{"O0", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O0 -g3 -Wall -Wextra -pedantic -std=c++17"},
                                {"O3", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O3 -g3 -Wall -Wextra -pedantic -std=c++17"}},
-          .extraVars = {{"package_fixture", PackageFixture}},
+          .extraVars = {{"package_fixture", packageFixture}},
           .stdpar = {"polycpp_stdpar",
 #ifdef _WIN32
                      "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"

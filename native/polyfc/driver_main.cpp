@@ -102,6 +102,8 @@ int main(int argc, const char *argv[]) {
                    if (opts->stackDepth) envs.emplace_back(PolyfrontStackDepth, std::to_string(*opts->stackDepth));
                    envs.emplace_back(PolyfrontJit, opts->jit != StdParOptions::LinkKind::Disabled ? "1" : "0");
                    if (!opts->emitLibrary.empty()) envs.emplace_back(PolyfrontEmitLibrary, opts->emitLibrary);
+                   if (!opts->libraryPath.empty()) envs.emplace_back(PolyfrontLibraryPath, opts->libraryPath);
+                   if (!opts->libraryCapabilities.empty()) envs.emplace_back(PolyfrontLibraryCapabilities, opts->libraryCapabilities);
                  }
 
                  const auto compileOnly =

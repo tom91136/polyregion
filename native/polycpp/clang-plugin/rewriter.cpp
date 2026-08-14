@@ -28,6 +28,7 @@
 #include "ast_visitors.h"
 #include "clang_utils.h"
 #include "codegen.h"
+#include "remapper.h"
 
 using namespace polyregion::polystl;
 using namespace polyregion;
@@ -68,48 +69,48 @@ struct Failure {
 };
 
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
-constexpr static llvm::StringLiteral importAnnotation = "polyregion_import:";
+constexpr static llvm::StringLiteral interfaceAnnotation = "polyregion_interface:";
 
-struct ImportSite {
+struct InterfaceSite {
   clang::CallExpr *call;
   clang::FunctionDecl *callee;
-  std::string library;
+  std::string packageName;
   std::string declaration;
 };
 
-static std::optional<std::pair<std::string, std::string>> importIdentity(const clang::FunctionDecl *decl) {
+static std::optional<std::pair<std::string, std::string>> interfaceIdentity(const clang::FunctionDecl *decl) {
   for (const auto *attr : decl->attrs()) {
     const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
-    if (!annotation || !annotation->getAnnotation().starts_with(importAnnotation)) continue;
-    const auto payload = annotation->getAnnotation().drop_front(importAnnotation.size());
-    const auto [library, declaration] = payload.split(':');
-    if (!library.empty() && !declaration.empty() && !declaration.contains(':')) return std::pair(library.str(), declaration.str());
+    if (!annotation || !annotation->getAnnotation().starts_with(interfaceAnnotation)) continue;
+    const auto payload = annotation->getAnnotation().drop_front(interfaceAnnotation.size());
+    const auto [packageName, declaration] = payload.split(':');
+    if (!packageName.empty() && !declaration.empty() && !declaration.contains(':')) return std::pair(packageName.str(), declaration.str());
   }
   return std::nullopt;
 }
 
-static Vector<ImportSite> libraryImports(clang::ASTContext &context) {
+static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
   using namespace clang::ast_matchers;
-  Vector<ImportSite> results;
+  Vector<InterfaceSite> results;
   runMatch(
       context,
       [&](const MatchFinder::MatchResult &result) {
-        const auto *call = result.Nodes.getNodeAs<clang::CallExpr>("libraryImportCall");
-        const auto *callee = result.Nodes.getNodeAs<clang::FunctionDecl>("libraryImportDecl");
+        const auto *call = result.Nodes.getNodeAs<clang::CallExpr>("interfaceCall");
+        const auto *callee = result.Nodes.getNodeAs<clang::FunctionDecl>("interfaceDecl");
         if (call && callee)
-          if (const auto identity = importIdentity(callee))
-            results.emplace_back(ImportSite{const_cast<clang::CallExpr *>(call), const_cast<clang::FunctionDecl *>(callee), identity->first,
-                                            identity->second});
+          if (const auto identity = interfaceIdentity(callee))
+            results.emplace_back(InterfaceSite{const_cast<clang::CallExpr *>(call), const_cast<clang::FunctionDecl *>(callee),
+                                               identity->first, identity->second});
       },
-      callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("libraryImportDecl"))).bind("libraryImportCall"));
+      callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("interfaceDecl"))).bind("interfaceCall"));
   std::set<const clang::FunctionDecl *> seen;
   return results | filter([&](const auto &site) { return seen.emplace(site.callee->getCanonicalDecl()).second; }) | to_vector();
 }
 
-static std::string importKey(const clang::CompilerInstance &CI, const clang::ASTContext &C, const ImportSite &site) {
+static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::ASTContext &C, const InterfaceSite &site) {
   llvm::MD5 md5;
   md5.update(CI.getFrontendOpts().Inputs.empty() ? llvm::StringRef{} : CI.getFrontendOpts().Inputs.front().getFile());
-  md5.update(site.library);
+  md5.update(site.packageName);
   md5.update(site.declaration);
   md5.update(site.callee->getQualifiedNameAsString());
   md5.update(site.callee->getType().getAsString(C.getPrintingPolicy()));
@@ -118,7 +119,7 @@ static std::string importKey(const clang::CompilerInstance &CI, const clang::AST
   return md5.final().digest().str().str();
 }
 
-static void bindLibraryImport(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C, const ImportSite &site,
+static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C, const InterfaceSite &site,
                               const polyfront::library::Package &package, LibraryBitcode &libraryBitcode) {
   using namespace polyfront::library;
   auto &D = CI.getDiagnostics();
@@ -191,8 +192,8 @@ static void bindLibraryImport(const polyfront::Options &opts, clang::CompilerIns
     return;
   }
 
-  const auto suffix = importKey(CI, C, site);
-  const auto driverName = "__polyregion_import_driver_" + suffix;
+  const auto suffix = interfaceKey(CI, C, site);
+  const auto driverName = "__polyregion_interface_driver_" + suffix;
   const auto plan = buildDriver(driverName, *resolution.value, typeSizes);
   if (!plan) {
     for (const auto &error : plan.errors)
@@ -232,6 +233,9 @@ static void bindLibraryImport(const polyfront::Options &opts, clang::CompilerIns
   auto &S = CI.getSema();
   std::vector<clang::QualType> driverTypes;
   std::vector<clang::Expr *> driverArgs;
+  auto *contextFn = mkExternCFn(C, "polyrt_context_current", C.VoidPtrTy, {});
+  driverTypes.emplace_back(C.VoidPtrTy);
+  driverArgs.emplace_back(mkCall(C, contextFn, {}));
   for (const auto index : plan.value->runtimeArguments) {
     auto *parameter = site.callee->getParamDecl(index);
     if (argumentTypes[index].is<Type::Ptr>()) {
@@ -245,15 +249,19 @@ static void bindLibraryImport(const polyfront::Options &opts, clang::CompilerIns
   clang::VarDecl *resultDecl = nullptr;
   if (plan.value->hasResult) {
     const auto type = site.callee->getReturnType();
-    resultDecl = clang::VarDecl::Create(C, site.callee, {}, {}, &C.Idents.get("__polyregion_import_result"), type,
+    resultDecl = clang::VarDecl::Create(C, site.callee, {}, {}, &C.Idents.get("__polyregion_interface_result"), type,
                                         C.getTrivialTypeSourceInfo(type), clang::SC_None);
     driverTypes.emplace_back(C.getPointerType(type));
     driverArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, resultDecl)).get());
   }
   auto *driver = mkExternCFn(C, driverName, C.VoidTy, driverTypes);
+  auto *contextAcquire = mkExternCFn(C, "polyrt_context_acquire", C.VoidTy, {C.VoidPtrTy});
+  auto *contextRelease = mkExternCFn(C, "polyrt_context_release", C.VoidTy, {C.VoidPtrTy});
   std::vector<clang::Stmt *> statements;
   if (resultDecl) statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(resultDecl), {}, {}));
+  statements.emplace_back(mkCall(C, contextAcquire, {driverArgs.front()}));
   statements.emplace_back(mkCall(C, driver, driverArgs));
+  statements.emplace_back(mkCall(C, contextRelease, {driverArgs.front()}));
   if (resultDecl) statements.emplace_back(clang::ReturnStmt::Create(C, {}, mkLoad(C, resultDecl), nullptr));
   site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
 }
@@ -650,13 +658,13 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                          || action == clang::frontend::EmitLLVMOnly || action == clang::frontend::EmitCodeGenOnly
                          || action == clang::frontend::EmitObj;
   if (!emitsCode) return;
-  for (const auto &site : libraryImports(C)) {
-    const auto package =
-        polyfront::library::loadPackage(site.library, opts.libraryPath.empty() ? polyfront::library::packageRoots()
+  for (const auto &site : interfaceSites(C)) {
+    const auto package = polyfront::library::loadPackage(site.packageName, opts.libraryPath.empty()
+                                                                               ? polyfront::library::packageRoots()
                                                                                : polyfront::library::splitPackageRoots(opts.libraryPath));
     if (!package)
       for (const auto &error : package.errors)
         emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
-    else bindLibraryImport(opts, CI, C, site, *package.value, *libraryBitcode);
+    else bindInterfaceCall(opts, CI, C, site, *package.value, *libraryBitcode);
   }
 }

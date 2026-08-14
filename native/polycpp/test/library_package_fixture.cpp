@@ -43,6 +43,8 @@ int main(int argc, char **argv) {
 
   const auto publicName = Sym({"bar", "increment"});
   const auto implementationName = Sym({"bar", "implementation", "increment"});
+  const auto copyName = Sym({"bar", "copy"});
+  const auto copyImplementationName = Sym({"bar", "implementation", "copy"});
   const auto applyName = Sym({"bar", "apply"});
   const auto applyImplementationName = Sym({"bar", "implementation", "apply"});
   const auto i32 = Type::IntS32().widen();
@@ -52,6 +54,15 @@ int main(int argc, char **argv) {
   const auto x = NamedBuilder(Named("x", i32));
   const auto implementation = Function(implementationDecl, {ret(call(Intr::Add(x, Term::IntS32Const(1).widen(), i32)))},
                                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  const auto i32p = Type::Ptr(i32, TypeSpace::Global()).widen();
+  const auto copyExtent = ArgExtent::Elements(ArgSizeExpr::Param(2));
+  const auto copyDecl = FunctionDecl(copyName, {}, {},
+                                     {Arg(Named("in", i32p), {}, Boundary(ArgAccess::Read(), copyExtent)),
+                                      Arg(Named("out", i32p), {}, Boundary(ArgAccess::Write(), copyExtent)), Arg(Named("n", i32), {}, {})},
+                                     {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto copyImplementationDecl = copyDecl.withName(copyImplementationName);
+  const auto copyImplementation =
+      Function(copyImplementationDecl, {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
   const auto t = Type::Var("T").widen();
   const auto op = Type::Exec({}, {t}, t).widen();
   const auto applyDecl =
@@ -82,13 +93,14 @@ int main(int argc, char **argv) {
   const auto capableImplementationDecl = implementationDecl.withName(Sym({"bar", "implementation", "capable_increment"}));
   const auto capableImplementation = implementation.withDecl(capableImplementationDecl);
   const auto capableDecl = publicDecl.withName(capableName);
-  const auto index = PackageIndex(LibraryDef(Sym({"foo"}), {publicDecl, applyDecl, combineDecl, capableDecl}, {}),
+  const auto index = PackageIndex(InterfaceDef(Sym({"foo"}), {publicDecl, copyDecl, applyDecl, combineDecl, capableDecl}, {}),
                                   {ImplementationCandidate(publicName, implementationDecl, {}, {}),
+                                   ImplementationCandidate(copyName, copyImplementationDecl, {}, {}),
                                    ImplementationCandidate(applyName, applyImplementationDecl, {}, {}),
                                    ImplementationCandidate(combineName, combineImplementationDecl, {}, {}),
                                    ImplementationCandidate(capableName, capableImplementationDecl, {"demo"}, {})});
-  const auto program =
-      polyregion::polyfront::libraryProgram({implementation, applyImplementation, combineImplementation, capableImplementation}, {});
+  const auto program = polyregion::polyfront::libraryProgram(
+      {implementation, copyImplementation, applyImplementation, combineImplementation, capableImplementation}, {});
 
   llvm::SmallString<256> indexPath(directory), programPath(directory);
   llvm::sys::path::append(indexPath, polyregion::polyfront::library::PackageIndexName);

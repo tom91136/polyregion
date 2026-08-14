@@ -3,31 +3,31 @@ package polyregion.spectra
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths}
 
-import polyregion.ast.LibraryCodeGen
+import polyregion.ast.InterfaceCodeGen
 
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 object SpectraCodeGen {
 
-  private val fortran = LibraryCodeGen.FortranConfig("spectra_api")
-  private val scala   = LibraryCodeGen.ScalaConfig("polyregion.spectra", "SpectraApi")
+  private val fortran = InterfaceCodeGen.FortranConfig("spectra_api")
+  private val scala   = InterfaceCodeGen.ScalaConfig("polyregion", "spectra")
 
-  val cppHeader: String     = LibraryCodeGen.cppHeader(Spectra.library)
-  val fortranModule: String = LibraryCodeGen.fortranModule(Spectra.library, fortran)
-  val scalaTrait: String    = LibraryCodeGen.scalaTrait(Spectra.library, scala)
+  val cppHeader: String     = InterfaceCodeGen.cppHeader(Spectra.interfaceDef)
+  val fortranModule: String = InterfaceCodeGen.fortranModule(Spectra.interfaceDef, fortran)
+  val scalaObject: String   = InterfaceCodeGen.scalaObject(Spectra.interfaceDef, scala)
 
   private def outputs(root: Path): List[(Path, String)] = List(
-    root.resolve("generated/cpp/include/polyregion/spectra_api.hpp")    -> cppHeader,
-    root.resolve("generated/fortran/spectra_api.f90")                   -> fortranModule,
-    root.resolve("generated/scala/polyregion/spectra/SpectraApi.scala") -> scalaTrait
+    root.resolve("generated/cpp/include/polyregion/spectra_api.hpp") -> cppHeader,
+    root.resolve("generated/fortran/spectra_api.f90")                -> fortranModule,
+    root.resolve("generated/scala/polyregion/spectra.scala")         -> scalaObject
   )
 
   def checkGenerated(root: Path): List[String] = {
     val normalized = root.toAbsolutePath.normalize
     val expected   = outputs(normalized)
     val current = expected.flatMap { case (path, source) =>
-      LibraryCodeGen.checkCurrent(path, source).left.toOption
+      InterfaceCodeGen.checkCurrent(path, source).left.toOption
     }
     val generated     = normalized.resolve("generated")
     val expectedPaths = expected.map(_._1).toSet

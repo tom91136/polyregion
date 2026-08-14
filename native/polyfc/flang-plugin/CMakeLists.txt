@@ -15,6 +15,7 @@ add_llvm_library(polyfc-flang-plugin
         parallel.cpp
         mirrors.cpp
         fexpr.cpp
+        interface_resolution.cpp
         PLUGIN_TOOL flang
         PARTIAL_SOURCES_INTENDED)
 set_property(TARGET polyfc-flang-plugin PROPERTY CXX_STANDARD 17)

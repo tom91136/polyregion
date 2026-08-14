@@ -283,7 +283,7 @@ extension (decl: p.FunctionDecl) {
     errors.result().distinct
   }
 
-  def classifyArguments: Either[List[String], List[LibraryBinding.ArgumentKind]] = {
+  def classifyArguments: Either[List[String], List[InterfaceBinding.ArgumentKind]] = {
     def parameters(expr: p.Arg.SizeExpr): Set[Int] = expr match {
       case p.Arg.SizeExpr.Param(index)  => Set(index)
       case p.Arg.SizeExpr.Const(_)      => Set.empty
@@ -302,16 +302,16 @@ extension (decl: p.FunctionDecl) {
       boundaryArgs.flatMap(_.boundary.toList.flatMap(boundary => extentParameters(boundary.extent))).toSet
     val kinds = decl.args.zipWithIndex.map { case (arg, index) =>
       arg.named.tpe match {
-        case signature: p.Type.Exec => LibraryBinding.ArgumentKind.Callable(signature)
+        case signature: p.Type.Exec => InterfaceBinding.ArgumentKind.Callable(signature)
         case p.Type.Ptr(_, _) =>
           arg.boundary match {
-            case Some(boundary) => LibraryBinding.ArgumentKind.Buffer(boundary.access, boundary.extent)
+            case Some(boundary) => InterfaceBinding.ArgumentKind.Buffer(boundary.access, boundary.extent)
             case None =>
               errors += s"pointer argument `${arg.named.symbol}` has no boundary"
-              LibraryBinding.ArgumentKind.Scalar
+              InterfaceBinding.ArgumentKind.Scalar
           }
-        case _ if referenced(index) => LibraryBinding.ArgumentKind.ExtentScalar
-        case _                      => LibraryBinding.ArgumentKind.Scalar
+        case _ if referenced(index) => InterfaceBinding.ArgumentKind.ExtentScalar
+        case _                      => InterfaceBinding.ArgumentKind.Scalar
       }
     }
     val distinct = errors.result().distinct
@@ -321,7 +321,7 @@ extension (decl: p.FunctionDecl) {
   def bind(
       call: p.InvokeSignature,
       callableDecls: List[p.FunctionDecl]
-  ): Either[List[String], LibraryBinding.Binding] = {
+  ): Either[List[String], InterfaceBinding.Binding] = {
     val errors = List.newBuilder[String]
     errors ++= decl.validate
     call.tpeArgs.zipWithIndex.foreach((tpe, index) =>
@@ -436,12 +436,12 @@ extension (decl: p.FunctionDecl) {
 
     deferred.result().foreach(compareCallable.tupled)
     val distinct = errors.result().distinct
-    if (distinct.isEmpty) Right(LibraryBinding.Binding(publicTypes, callableBinds)) else Left(distinct)
+    if (distinct.isEmpty) Right(InterfaceBinding.Binding(publicTypes, callableBinds)) else Left(distinct)
   }
 
   def conformsTo(
       publicDecl: p.FunctionDecl
-  ): Either[List[String], LibraryBinding.ImplementationBinding] = {
+  ): Either[List[String], InterfaceBinding.ImplementationBinding] = {
     val errors  = List.newBuilder[String]
     val matcher = TypeMatcher(decl.tpeVars.toSet)
     errors ++= publicDecl.validate.map(error => s"public declaration: $error")
@@ -474,7 +474,7 @@ extension (decl: p.FunctionDecl) {
       if (decl.args.size == publicDecl.args.size) {
         compareArgs(decl.args, publicDecl.args, "argument")
         matcher.unify(decl.rtn, publicDecl.rtn, "return")
-        LibraryBinding.ResultBinding.Direct
+        InterfaceBinding.ResultBinding.Direct
       } else if (
         decl.args.size == publicDecl.args.size + 1 &&
         decl.rtn == p.Type.Unit0 &&
@@ -494,12 +494,12 @@ extension (decl: p.FunctionDecl) {
         )
         if (!resultArg.boundary.contains(expectedBoundary))
           errors += s"trailing result boundary differs: expected $expectedBoundary, got ${resultArg.boundary}"
-        LibraryBinding.ResultBinding.TrailingOutput(resultIndex)
+        InterfaceBinding.ResultBinding.TrailingOutput(resultIndex)
       } else {
         errors +=
           s"argument/result shape differs: public has ${publicDecl.args.size} arguments and returns ${publicDecl.rtn}; " +
             s"implementation has ${decl.args.size} arguments and returns ${decl.rtn}"
-        LibraryBinding.ResultBinding.Direct
+        InterfaceBinding.ResultBinding.Direct
       }
 
     errors ++= matcher.errors
@@ -516,7 +516,7 @@ extension (decl: p.FunctionDecl) {
       }
       .toMap
     val distinct = errors.result().distinct
-    if (distinct.isEmpty) Right(LibraryBinding.ImplementationBinding(matcher.bindings, callables, result))
+    if (distinct.isEmpty) Right(InterfaceBinding.ImplementationBinding(matcher.bindings, callables, result))
     else Left(distinct)
   }
 
@@ -568,7 +568,7 @@ extension (index: p.PackageIndex) {
       callableDecls: List[p.FunctionDecl],
       capabilities: Set[String],
       typeSizes: Map[p.Type, Int]
-  ): Either[List[String], LibraryBinding.Resolution] = {
+  ): Either[List[String], InterfaceBinding.Resolution] = {
     val decls = index.interface.decls.filter(_.name == call.name)
     if (decls.isEmpty)
       return Left(List(s"no public declaration `${call.name.fqn.mkString(".")}`"))
@@ -598,7 +598,7 @@ extension (index: p.PackageIndex) {
     if (candidates.isEmpty)
       return Left(List(s"no implementations for `${decl.name.fqn.mkString(".")}`"))
 
-    val compatible = List.newBuilder[(p.ImplementationCandidate, LibraryBinding.ImplementationBinding)]
+    val compatible = List.newBuilder[(p.ImplementationCandidate, InterfaceBinding.ImplementationBinding)]
     val rejected   = List.newBuilder[String]
     candidates.foreach { candidate =>
       val label  = candidate.implementation.name.fqn.mkString(".")
@@ -636,7 +636,7 @@ extension (index: p.PackageIndex) {
 
     compatible.result() match {
       case List((candidate, implementation)) =>
-        Right(LibraryBinding.Resolution(decl, callBinding, candidate, implementation))
+        Right(InterfaceBinding.Resolution(decl, callBinding, candidate, implementation))
       case Nil =>
         Left(s"no compatible implementation for `${decl.name.fqn.mkString(".")}`" :: rejected.result())
       case matches =>

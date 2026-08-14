@@ -168,11 +168,11 @@ lazy val ewgen = project
     }
   )
 
-lazy val `library-codegen` = project
-  .in(file("library-codegen"))
+lazy val `interface-codegen` = project
+  .in(file("interface-codegen"))
   .settings(
     commonSettings,
-    name                                   := "library-codegen",
+    name                                   := "interface-codegen",
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
   )
   .dependsOn(ast.jvm(scala3Version))
@@ -192,7 +192,7 @@ lazy val codegen = project
       (Compile / runMain).toTask(" polyregion.ast.CodeGen").value
     }
   )
-  .dependsOn(ast.jvm(scala3Version), `binding-jvm`, `library-codegen`)
+  .dependsOn(ast.jvm(scala3Version), `binding-jvm`, `interface-codegen`)
 
 lazy val pass = (projectMatrix in file("pass"))
   .settings(
@@ -518,7 +518,7 @@ lazy val root = project
   .settings(commonSettings)
   .aggregate(
     `binding-jvm`,
-    `library-codegen`,
+    `interface-codegen`,
     codegen,
     ewgen,
     `runtime-scala`,

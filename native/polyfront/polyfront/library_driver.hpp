@@ -38,6 +38,9 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   std::map<size_t, NamedBuilder> scalarValues;
 
   const auto named = [](const std::string &symbol, const Type::Any &tpe) { return NamedBuilder(Named(symbol, tpe)); };
+  const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+  const auto context = named("#context", contextType);
+  driverArgs.emplace_back(context());
   for (size_t i = 0; i < publicDecl.args.size(); ++i) {
     if (resolution.call.callables.count(i)) continue;
     const auto argName = "a" + std::to_string(i);
@@ -106,17 +109,18 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
           },
           [&](const ArgExtent::Bytes &x) -> Term::Any { return extent(x.size); });
       const auto remoteName = "remote" + std::to_string(i);
-      body.emplace_back(var(remoteName) = call(Spec::RemoteAlloc(count)));
+      body.emplace_back(var(remoteName) = call(Spec::RemoteAlloc(context, count)));
       const auto remote = named(remoteName, Type::Ptr(Type::IntU8(), TypeSpace::Global()));
       const auto typedName = "p" + std::to_string(i);
       body.emplace_back(let(typedName) = Expr::Cast(remote, concrete).widen());
       invokeArgs.emplace_back(named(typedName, concrete));
       if (boundary.access.is<ArgAccess::Read>() || boundary.access.is<ArgAccess::ReadWrite>())
-        body.emplace_back(var("upload" + std::to_string(i)) = call(Spec::RemoteMemcpy(remote, source, count, Direction::LocalToRemote())));
+        body.emplace_back(var("upload" + std::to_string(i)) =
+                              call(Spec::RemoteMemcpy(context, remote, source, count, Direction::LocalToRemote())));
       if (boundary.access.is<ArgAccess::Write>() || boundary.access.is<ArgAccess::ReadWrite>())
         downloads.emplace_back(var("download" + std::to_string(i)) =
-                                   call(Spec::RemoteMemcpy(source, remote, count, Direction::RemoteToLocal())));
-      frees.emplace_back(var("free" + std::to_string(i)) = call(Spec::RemoteFree(remote)));
+                                   call(Spec::RemoteMemcpy(context, source, remote, count, Direction::RemoteToLocal())));
+      frees.emplace_back(var("free" + std::to_string(i)) = call(Spec::RemoteFree(context, remote)));
     } else {
       invokeArgs.emplace_back(scalarValues.at(i));
     }

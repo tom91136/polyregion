@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 #include "polyinvoke/runtime.h"
@@ -20,6 +21,13 @@ using invoke::Platform;
 using invoke::ModuleFormat;
 using invoke::PlatformKind;
 
+struct ExecutionContext {
+  Platform *platform;
+  Device *device;
+  DeviceQueue *queue;
+  std::recursive_mutex transaction;
+};
+
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Platform> currentPlatform;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Device> currentDevice;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> currentQueue;
@@ -36,6 +44,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void initialise();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool hostFallback();
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void ensureRoSegmentsRecorded();
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ExecutionContext *currentContext();
 
 // XXX Exits with code 77 (autotools "skipped") so test runners can distinguish "no compatible
 // target on this device" from a real wrong-output / crash failure.
@@ -51,6 +60,19 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *module
 #undef POLYREGION_PRINTF_FORMAT
 
 extern "C" {
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_acquire(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_release(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT uintptr_t polyrt_remote_malloc(void *context, size_t bytes);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_free(void *context, uintptr_t ptr);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
+                                                                  int32_t direction);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_sync(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName,
+                                                                  size_t gridX, size_t gridY, size_t gridZ, size_t blockX, size_t blockY,
+                                                                  size_t blockZ, size_t localMemBytes, size_t argCount,
+                                                                  const uint8_t *argTypes, void *const *argPtrs);
+
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_read(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_write(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_readwrite(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);

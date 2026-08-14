@@ -176,6 +176,8 @@ object Verify {
         case p.Type.Ptr(_, p.Type.Space.Global) => true
         case _                                  => false
       }
+      def context(c: Context, term: p.Term): Context =
+        requireTpe(c, term, _ == p.Spec.ContextType, "execution context has the wrong type")
 
       op match {
         case x: p.Spec.RemoteLaunch =>
@@ -189,31 +191,27 @@ object Verify {
             "shmem"  -> x.shmem
           )
           val kernelChecked =
-            requireTpe(c0, x.kernel, _.isInstanceOf[p.Type.FnRef], "kernel must be a function reference")
+            requireTpe(
+              context(c0, x.context),
+              x.kernel,
+              _.isInstanceOf[p.Type.FnRef],
+              "kernel must be a function reference"
+            )
           val dimensionsChecked = dimensions.foldLeft(kernelChecked) { case (context, (name, term)) =>
             requireTpe(context, term, u32, s"launch dimension $name must be U32")
           }
-          requireTpe(
-            dimensionsChecked,
-            x.stream,
-            tpe => globalPointer(tpe) || u32(tpe) || u64(tpe),
-            "stream handle must be a global pointer, U32, or U64"
-          )
+          dimensionsChecked
         case x: p.Spec.RemoteAlloc =>
-          requireTpe(c0, x.bytes, u64, "allocation byte count must be U64")
+          requireTpe(context(c0, x.context), x.bytes, u64, "allocation byte count must be U64")
         case x: p.Spec.RemoteFree =>
-          requireTpe(c0, x.ptr, globalPointer, "free operand must be a global pointer")
+          requireTpe(context(c0, x.context), x.ptr, globalPointer, "free operand must be a global pointer")
         case x: p.Spec.RemoteMemcpy =>
-          val dstChecked = requireTpe(c0, x.dst, globalPointer, "copy destination must be a global pointer")
+          val dstChecked =
+            requireTpe(context(c0, x.context), x.dst, globalPointer, "copy destination must be a global pointer")
           val srcChecked = requireTpe(dstChecked, x.src, globalPointer, "copy source must be a global pointer")
           requireTpe(srcChecked, x.bytes, u64, "copy byte count must be U64")
         case x: p.Spec.RemoteSync =>
-          requireTpe(
-            c0,
-            x.stream,
-            tpe => globalPointer(tpe) || u32(tpe) || u64(tpe),
-            "stream handle must be a global pointer, U32, or U64"
-          )
+          context(c0, x.context)
         case _ => c0
       }
     }

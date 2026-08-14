@@ -264,6 +264,64 @@ void polyregion::polyrt::initialise() {
   });
 }
 
+polyregion::polyrt::ExecutionContext *polyregion::polyrt::currentContext() {
+  initialise();
+  static ExecutionContext context{currentPlatform.get(), currentDevice.get(), currentQueue.get(), {}};
+  return context.platform && context.device && context.queue ? &context : nullptr;
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_context_current() { return polyregion::polyrt::currentContext(); }
+
+namespace {
+polyregion::polyrt::ExecutionContext &requireContext(void *context, const char *site) {
+  if (auto *value = static_cast<polyregion::polyrt::ExecutionContext *>(context)) return *value;
+  polyregion::polyrt::skipExit(fmt::format("{}: no execution context", site).c_str());
+}
+} // namespace
+
+POLYREGION_EXPORT extern "C" void polyrt_context_acquire(void *context) { requireContext(context, __func__).transaction.lock(); }
+POLYREGION_EXPORT extern "C" void polyrt_context_release(void *context) { requireContext(context, __func__).transaction.unlock(); }
+
+POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) {
+  if (bytes == 0) return 0;
+  return requireContext(context, __func__).device->mallocDevice(bytes, Access::RW);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_remote_free(void *context, const uintptr_t ptr) {
+  if (ptr != 0) requireContext(context, __func__).device->freeDevice(ptr);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_remote_memcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
+                                                       const int32_t direction) {
+  if (bytes == 0 || src == 0 || dst == 0) return;
+  auto &queue = *requireContext(context, __func__).queue;
+  switch (direction) {
+    case 0: queue.enqueueHostToDeviceAsync(reinterpret_cast<const void *>(src), dst, 0, bytes, {}); break;
+    case 1: queue.enqueueDeviceToHostAsync(src, 0, reinterpret_cast<void *>(dst), bytes, {}); break;
+    default: queue.enqueueDeviceToDeviceAsync(src, 0, dst, 0, bytes, {}); break;
+  }
+  queue.enqueueWaitBlocking();
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_remote_sync(void *context) { requireContext(context, __func__).queue->enqueueWaitBlocking(); }
+
+POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName, const size_t gridX,
+                                                       const size_t gridY, const size_t gridZ, const size_t blockX, const size_t blockY,
+                                                       const size_t blockZ, const size_t localMemBytes, const size_t argCount,
+                                                       const uint8_t *argTypes, void *const *argPtrs) {
+  auto &value = requireContext(context, __func__);
+  ArgBuffer buffer{};
+  if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
+  for (size_t i = 0; i < argCount; ++i)
+    buffer.append(static_cast<Type>(argTypes[i]), argPtrs[i]);
+  buffer.append(Type::Void, nullptr);
+  value.queue->enqueueInvokeAsync(
+      moduleName, kernelName, buffer,
+      Policy{Dim3{gridX, gridY, gridZ}, blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
+      {});
+  value.queue->enqueueWaitBlocking();
+}
+
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
   std::fprintf(stderr, "[PolyRT] %s: no kernel object matched any enumerated device, exiting 77 (skip)\n", site);
   std::fflush(stderr);

@@ -142,12 +142,12 @@ codegen-kernels:
     cmake --build "$BUILD" --target polyinvoke-regen-kernels
 
 _codegen-sbt:
-    cd frontend && {{ sbt }} 'codegen/genCodegen'
-    cd spectra && bash ../frontend/sbtx -no-colors 'genSpectra'
+    cd frontend && {{ sbt }} -batch -J-Dsbt.server.autostart=false 'codegen/genCodegen'
+    cd spectra && bash ../frontend/sbtx -no-colors -batch -J-Dsbt.server.autostart=false 'genSpectra'
 
 # Validate Spectra's IDL and generated Scala, C++ and Fortran consumer surfaces.
 test-spectra:
-    cd frontend && {{ sbt }} 'library-codegen / Test / testOnly polyregion.ast.LibraryCodeGenSuite'
+    cd frontend && {{ sbt }} 'interface-codegen / Test / testOnly polyregion.ast.InterfaceCodeGenSuite'
     cd spectra && bash ../frontend/sbtx -no-colors 'testOnly polyregion.spectra.SpectraSuite; spectraApi/compile'
     cmake -S spectra -B spectra/target/cmake -DCMAKE_BUILD_TYPE=Release
     cmake --build spectra/target/cmake -j "$(nproc 2>/dev/null || echo 4)"
@@ -161,9 +161,9 @@ _codegen-diff:
     #!/usr/bin/env bash
     set -euo pipefail
     # `git diff` does not report newly generated, untracked outputs.
-    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated)
+    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated)
     [ -z "$untracked" ] || { echo "untracked generated files:" >&2; echo "$untracked" >&2; exit 1; }
-    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated
+    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated
 
 # === Pass bundles ===
 
