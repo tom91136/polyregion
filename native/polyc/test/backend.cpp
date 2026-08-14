@@ -76,6 +76,60 @@ TEST_CASE("LLVM IR event payloads are opt-in", "[backend]") {
   }
 }
 
+TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+  const Named context("context", contextType);
+  const Named bytes("bytes", Type::IntU64());
+  const Named extent("extent", Type::IntU32());
+  const Named remote("remote", contextType);
+  const Named copied("copied", Type::Unit0());
+  const Named launched("launched", Type::Unit0());
+  const Named freed("freed", Type::Unit0());
+  const auto kernel = Term::Poison(Type::FnRef(Sym({"kernel"}))).widen();
+  const Function entry = mkFn(
+      "orchestrate", {Arg(context, {}), Arg(bytes, {}), Arg(extent, {})}, Type::Unit0(),
+      {Var(remote, Expr::SpecOp(Spec::RemoteAlloc(selectNamed(context).widen(), selectNamed(bytes).widen())).widen(), false).widen(),
+       Var(copied,
+           Expr::SpecOp(Spec::RemoteMemcpy(selectNamed(context).widen(), selectNamed(remote).widen(), selectNamed(remote).widen(),
+                                           selectNamed(bytes).widen(), Direction::RemoteToRemote()))
+               .widen(),
+           false)
+           .widen(),
+       Var(launched,
+           Expr::SpecOp(Spec::RemoteLaunch(selectNamed(context).widen(), kernel, {}, selectNamed(extent).widen(),
+                                           selectNamed(extent).widen(), selectNamed(extent).widen(), selectNamed(extent).widen(),
+                                           selectNamed(extent).widen(), selectNamed(extent).widen(), selectNamed(extent).widen(), {}))
+               .widen(),
+           false)
+           .widen(),
+       Var(freed, Expr::SpecOp(Spec::RemoteFree(selectNamed(context).widen(), selectNamed(remote).widen())).widen(), false).widen(), ret()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {}, {}, PassPhase::Initial(), {});
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+
+  const auto result = polyregion::compiler::compile(p, {Target::Object_LLVM_ARM, "cortex-a7"}, OptLevel::O0);
+  REQUIRE(result.binary);
+  const auto &ir = llvmIrOf(result);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare i32 @polyrt_remote_malloc(ptr, i32)"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_memcpy(ptr, i32, i32, i32, i32)"));
+  CHECK_THAT(
+      ir, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_launch(ptr, ptr, ptr, i32, i32, i32, i32, i32, i32, i32, i32"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_free(ptr, i32)"));
+
+  const auto result64 = polyregion::compiler::compile(p, {Target::Object_LLVM_x86_64, "x86-64"}, OptLevel::O0);
+  REQUIRE(result64.binary);
+  const auto &ir64 = llvmIrOf(result64);
+  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("declare i64 @polyrt_remote_malloc(ptr, i64)"));
+  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_memcpy(ptr, i64, i64, i64, i32)"));
+  CHECK_THAT(
+      ir64, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_launch(ptr, ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i64"));
+  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_free(ptr, i64)"));
+  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("zext i32"));
+}
+
 TEST_CASE("C source bounds local names and retains source names on request", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -368,18 +422,18 @@ TEST_CASE("C source propagates address-space specialisation through stored struc
   CHECK(source.find("typedef struct Wrapper_asp Wrapper_asp;") != std::string::npos);
   CHECK(source.find("Box_asp _base_Box;") != std::string::npos);
   CHECK(source.find("Wrapper_asp _v5;") != std::string::npos);
-  CHECK(source.find("Wrapper_asp _v6;") != std::string::npos);
-  CHECK(source.find("Wrapper_asp _v7;") != std::string::npos);
+  CHECK(source ^ contains_slice("Wrapper_asp _v6;"));
+  CHECK(source ^ contains_slice("Wrapper_asp _v7;"));
 
   opts.target = Target::Source_C_Metal1_0;
   const auto metal = polyregion::compiler::compile(Program(entry, {}, {boxDef, wrapperDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   INFO(repr(metal));
   REQUIRE(metal.binary != std::nullopt);
   const std::string metalSource(reinterpret_cast<const char *>(metal.binary->data()), metal.binary->size());
-  CHECK(metalSource.find("Wrapper_asp _v5;") != std::string::npos);
-  CHECK(metalSource.find("Wrapper_asp _v6 = _v5;") != std::string::npos);
-  CHECK(metalSource.find("Wrapper_asp _v7;") != std::string::npos);
-  CHECK(metalSource.find("_v7 = _v6;") != std::string::npos);
+  CHECK(metalSource ^ contains_slice("Wrapper_asp _v5;"));
+  CHECK(metalSource ^ contains_slice("Wrapper_asp _v6 = _v5;"));
+  CHECK(metalSource ^ contains_slice("Wrapper_asp _v7;"));
+  CHECK(metalSource ^ contains_slice("_v7 = _v6;"));
 }
 
 TEST_CASE("C source combines nested struct specialisations deterministically", "[backend]") {
@@ -984,7 +1038,7 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
   const auto compiled = polyregion::compiler::compile(program, options, OptLevel::O0);
   INFO(repr(compiled));
   REQUIRE(compiled.binary);
-  CHECK(llvmIrOf(compiled).find("polyrt_remote_launch") != std::string::npos);
+  CHECK(llvmIrOf(compiled) ^ contains_slice("polyrt_remote_launch"));
 }
 
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {

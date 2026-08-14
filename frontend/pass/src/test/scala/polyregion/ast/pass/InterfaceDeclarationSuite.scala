@@ -897,6 +897,46 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     assertEquals(resolved.map(_.candidate), Right(w4))
 
+    val fallback = w4.copy(
+      implementation = implementation("transform_fallback"),
+      typeSizes = Nil
+    )
+    assertEquals(
+      index
+        .copy(candidates = List(fallback, w4))
+        .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 4))
+        .map(_.candidate),
+      Right(w4)
+    )
+    assertEquals(
+      index
+        .copy(candidates = List(w4, fallback))
+        .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
+        .map(_.candidate),
+      Right(fallback)
+    )
+    assert(
+      index
+        .copy(candidates = List(w4))
+        .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
+        .isLeft
+    )
+    assert(
+      index
+        .copy(candidates = List(fallback, fallback.copy(implementation = implementation("transform_fallback_alt"))))
+        .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
+        .left
+        .exists(_.exists(_.contains("ambiguous")))
+    )
+    val nonPositive = w4.copy(typeSizes = List(p.TypeSizeConstraint("Element", 0)))
+    assertEquals(
+      index
+        .copy(candidates = List(nonPositive, fallback))
+        .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 0))
+        .map(_.candidate),
+      Right(fallback)
+    )
+
     val unavailable = index.resolve(
       call,
       List(lambda),

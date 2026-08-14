@@ -129,7 +129,7 @@ public:
 
       auto &builtinBitcode = ci.getInvocation().getCodeGenOpts().BuiltinBCLibs;
       const auto builtinBitcodeSize = builtinBitcode.size();
-      builtinBitcode.insert(builtinBitcode.end(), bitcodeFiles.begin(), bitcodeFiles.end());
+      builtinBitcode ^= concat(bitcodeFiles);
       const auto cleanup = [&] {
         builtinBitcode.resize(builtinBitcodeSize);
         bitcodeFiles ^ for_each([](const auto &path) { llvm::sys::fs::remove(path); });

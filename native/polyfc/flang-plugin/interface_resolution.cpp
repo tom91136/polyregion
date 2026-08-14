@@ -81,7 +81,7 @@ Checked<Identity> interfaceIdentity(ModuleOp module, fir::CallOp call) {
         if (destination == value) pending.emplace_back(operation.getOperand(1));
       }
     } else {
-      pending.insert(pending.end(), definition->getOperands().begin(), definition->getOperands().end());
+      pending ^= concat(definition->getOperands());
     }
   }
   if (identities.size() == 1) result.value = identities.front();

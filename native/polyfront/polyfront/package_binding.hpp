@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cctype>
 #include <functional>
 #include <map>
 #include <optional>
@@ -15,7 +14,15 @@
 
 namespace polyregion::polyfront::package {
 
+using namespace aspartame;
+
 using TypeBindings = std::map<std::string, polyast::Type::Any>;
+
+template <typename T> struct Checked {
+  std::optional<T> value;
+  std::vector<std::string> errors;
+  explicit operator bool() const { return value.has_value(); }
+};
 
 struct CallBinding {
   TypeBindings types;
@@ -35,34 +42,54 @@ struct Resolution {
   ImplementationBinding implementation;
 };
 
-template <typename T> struct Checked {
-  std::optional<T> value;
-  std::vector<std::string> errors;
-  explicit operator bool() const { return value.has_value(); }
-};
+inline std::string symbol(const polyast::Sym &sym) { return sym.fqn | mk_string("."); }
 
-inline std::string symbol(const polyast::Sym &sym) { return sym.fqn | aspartame::mk_string("."); }
-
-inline polyast::Type::Any substitute(const polyast::Type::Any &tpe, const TypeBindings &bindings) {
+inline Checked<polyast::Type::Any> substituteChecked(const polyast::Type::Any &tpe, const TypeBindings &bindings,
+                                                     std::set<std::string> resolving = {}) {
   using namespace polyast;
   if (const auto x = tpe.get<Type::Var>()) {
-    const auto it = bindings.find(x->name);
-    return it == bindings.end() ? tpe : substitute(it->second, bindings);
+    const auto binding = bindings ^ get_maybe(x->name);
+    if (!binding) return {{tpe}, {}};
+    if (!resolving.emplace(x->name).second) return {{}, {"cyclic substitution for `" + x->name + "`"}};
+    return substituteChecked(*binding, bindings, std::move(resolving));
   }
-  if (const auto x = tpe.get<Type::Ptr>()) return Type::Ptr(substitute(x->comp, bindings), x->space).widen();
-  if (const auto x = tpe.get<Type::Arr>()) return Type::Arr(substitute(x->comp, bindings), x->length, x->space).widen();
+  const auto nested = [&](const auto &value) { return substituteChecked(value, bindings, resolving); };
+  const auto nestedAll = [&](const auto &values, const auto &nestedBindings) {
+    const auto results = values | map([&](const auto &value) { return substituteChecked(value, nestedBindings, resolving); }) | to_vector();
+    auto errors = results | flat_map([](const auto &result) { return result.errors; }) | to_vector();
+    auto substituted = results | collect([](const auto &result) { return result.value; }) | to_vector();
+    return errors.empty() ? Checked<std::vector<Type::Any>>{{std::move(substituted)}, {}}
+                          : Checked<std::vector<Type::Any>>{{}, std::move(errors)};
+  };
+  if (const auto x = tpe.get<Type::Ptr>()) {
+    auto component = nested(x->comp);
+    return component ? Checked<Type::Any>{{Type::Ptr(*component.value, x->space).widen()}, {}} : Checked<Type::Any>{{}, component.errors};
+  }
+  if (const auto x = tpe.get<Type::Arr>()) {
+    auto component = nested(x->comp);
+    return component ? Checked<Type::Any>{{Type::Arr(*component.value, x->length, x->space).widen()}, {}}
+                     : Checked<Type::Any>{{}, component.errors};
+  }
   if (const auto x = tpe.get<Type::Struct>()) {
-    auto args = x->args | aspartame::map([&](const auto &arg) { return substitute(arg, bindings); }) | aspartame::to_vector();
-    return Type::Struct(x->name, std::move(args)).widen();
+    auto args = nestedAll(x->args, bindings);
+    return args ? Checked<Type::Any>{{Type::Struct(x->name, std::move(*args.value)).widen()}, {}}
+                : Checked<Type::Any>{{}, std::move(args.errors)};
   }
   if (const auto x = tpe.get<Type::Exec>()) {
-    auto nested = bindings;
-    for (const auto &name : x->tpeVars)
-      nested.erase(name);
-    auto args = x->args | aspartame::map([&](const auto &arg) { return substitute(arg, nested); }) | aspartame::to_vector();
-    return Type::Exec(x->tpeVars, std::move(args), substitute(x->rtn, nested)).widen();
+    auto bindings_ = bindings;
+    x->tpeVars | for_each([&](const auto &name) { bindings_.erase(name); });
+    auto args = nestedAll(x->args, bindings_);
+    auto rtn = substituteChecked(x->rtn, bindings_, resolving);
+    auto errors = args.errors ^ concat(rtn.errors);
+    return errors.empty() ? Checked<Type::Any>{{Type::Exec(x->tpeVars, std::move(*args.value), *rtn.value).widen()}, {}}
+                          : Checked<Type::Any>{{}, std::move(errors)};
   }
-  return tpe;
+  return {{tpe}, {}};
+}
+
+inline polyast::Type::Any substitute(const polyast::Type::Any &tpe, const TypeBindings &bindings) {
+  const auto result = substituteChecked(tpe, bindings);
+  return result.value.value_or(tpe);
 }
 
 class TypeMatcher {
@@ -76,7 +103,7 @@ public:
 
   void unify(const polyast::Type::Any &expected, const polyast::Type::Any &actual, const std::string &path) {
     using namespace polyast;
-    if (const auto v = expected.get<Type::Var>(); v && variables.count(v->name)) {
+    if (const auto v = expected.get<Type::Var>(); v && (variables ^ contains(v->name))) {
       if (const auto it = bindings.find(v->name); it == bindings.end()) bindings.emplace(v->name, actual);
       else if (substitute(it->second, bindings) != substitute(actual, bindings))
         errors.emplace_back(path + " binds `" + v->name + "` inconsistently: " + repr(it->second) + " and " + repr(actual));
@@ -113,16 +140,13 @@ public:
 };
 
 inline polyast::Type::Exec callableType(const polyast::FunctionDecl &decl) {
-  return polyast::Type::Exec(decl.tpeVars,
-                             decl.args | aspartame::map([](const auto &arg) { return arg.named.tpe; }) | aspartame::to_vector(), decl.rtn);
+  return polyast::Type::Exec(decl.tpeVars, decl.args | map([](const auto &arg) { return arg.named.tpe; }) | to_vector(), decl.rtn);
 }
 
 inline std::vector<std::string> validate(const polyast::FunctionDecl &decl) {
   using namespace polyast;
   std::vector<std::string> errors;
-  const auto blank = [](const std::string &name) {
-    return name.empty() || std::all_of(name.begin(), name.end(), [](const unsigned char ch) { return std::isspace(ch); });
-  };
+  const auto blank = [](const std::string &name) { return name ^ is_blank(); };
   std::set<std::string> typeVariables;
   for (size_t i = 0; i < decl.tpeVars.size(); ++i) {
     const auto &name = decl.tpeVars[i];
@@ -144,7 +168,7 @@ inline std::vector<std::string> validate(const polyast::FunctionDecl &decl) {
   std::function<void(const Type::Any &, const std::set<std::string> &, const std::string &)> validateType =
       [&](const Type::Any &tpe, const std::set<std::string> &bound, const std::string &path) {
         if (const auto x = tpe.get<Type::Var>()) {
-          if (!bound.count(x->name)) errors.emplace_back("undeclared type variable `" + x->name + "`");
+          if (!(bound ^ contains(x->name))) errors.emplace_back("undeclared type variable `" + x->name + "`");
         } else if (const auto x = tpe.get<Type::Struct>()) {
           for (size_t i = 0; i < x->args.size(); ++i)
             validateType(x->args[i], bound, path + " type argument " + std::to_string(i));
@@ -239,38 +263,56 @@ inline Checked<CallBinding> bindCall(const polyast::FunctionDecl &decl, const po
     const auto path = "argument " + std::to_string(i) + " `" + decl.args[i].named.symbol + "`";
     if (decl.args[i].named.tpe.is<Type::Exec>()) {
       if (const auto ref = call.args[i].get<Type::FnRef>()) {
-        const auto matches =
-            callables | aspartame::filter([&](const auto &candidate) { return candidate.name == ref->name; }) | aspartame::to_vector();
-        if (matches.size() != 1) out.errors.emplace_back(path + " has " + std::to_string(matches.size()) + " callable declarations");
-        else {
-          for (const auto &error : validate(matches.front()))
-            out.errors.emplace_back(path + " callable `" + symbol(matches.front().name) + "`: " + error);
-          if (!matches.front().tpeVars.empty())
-            out.errors.emplace_back(path + " callable `" + symbol(matches.front().name) + "` is generic");
-          if (matches.front().receiver || !matches.front().moduleCaptures.empty() || !matches.front().termCaptures.empty())
-            out.errors.emplace_back(path + " callable `" + symbol(matches.front().name)
-                                    + "` has an unsupported receiver or explicit captures");
-          matcher.unify(decl.args[i].named.tpe, callableType(matches.front()).widen(), path);
+        const auto matches = callables | filter([&](const auto &candidate) { return candidate.name == ref->name; }) | to_vector();
+        std::vector<TypeMatcher> successful;
+        std::vector<std::string> rejected;
+        for (const auto &candidate : matches) {
+          auto attempt = matcher;
+          auto errors = validate(candidate);
+          if (!candidate.tpeVars.empty()) errors.emplace_back("callable is generic");
+          if (candidate.receiver || !candidate.moduleCaptures.empty() || !candidate.termCaptures.empty())
+            errors.emplace_back("callable has an unsupported receiver or explicit captures");
+          const auto previous = attempt.errors.size();
+          attempt.unify(decl.args[i].named.tpe, callableType(candidate).widen(), path);
+          errors ^= concat(attempt.errors | drop(previous));
+          if (errors.empty()) successful.emplace_back(std::move(attempt));
+          else
+            rejected ^=
+                concat(errors | map([&](const auto &error) { return path + " callable `" + symbol(candidate.name) + "`: " + error; }));
+        }
+        if (successful.size() == 1) {
+          matcher = std::move(successful.front());
           callableBindings.emplace(i, ref->name);
+        } else {
+          out.errors.emplace_back(path + " has " + std::to_string(successful.size()) + " matching callable declarations");
+          if (successful.empty()) out.errors ^= concat(rejected);
         }
       } else matcher.unify(decl.args[i].named.tpe, call.args[i], path);
     } else matcher.unify(decl.args[i].named.tpe, call.args[i], path);
   }
   matcher.unify(decl.rtn, call.rtn, "return");
-  out.errors.insert(out.errors.end(), matcher.errors.begin(), matcher.errors.end());
-  for (const auto &name : decl.tpeVars)
-    if (!matcher.bindings.count(name)) out.errors.emplace_back("declaration type variable `" + name + "` is not bound by the call");
-  if (out.errors.empty()) out.value = CallBinding{std::move(matcher.bindings), std::move(callableBindings)};
+  out.errors ^= concat(matcher.errors);
+  TypeBindings resolved;
+  for (const auto &name : decl.tpeVars) {
+    if (!(matcher.bindings ^ get_maybe(name)).has_value())
+      out.errors.emplace_back("declaration type variable `" + name + "` is not bound by the call");
+    else {
+      auto result = substituteChecked(Type::Var(name).widen(), matcher.bindings);
+      if (result) resolved.emplace(name, std::move(*result.value));
+      else
+        out.errors ^= concat(
+            result.errors | map([&](const auto &error) { return "declaration type variable `" + name + "` is not concrete: " + error; }));
+    }
+  }
+  if (out.errors.empty()) out.value = CallBinding{std::move(resolved), std::move(callableBindings)};
   return out;
 }
 
 inline Checked<ImplementationBinding> bindImplementation(const polyast::FunctionDecl &implementation,
                                                          const polyast::FunctionDecl &publicDecl) {
   Checked<ImplementationBinding> out;
-  for (const auto &error : validate(publicDecl))
-    out.errors.emplace_back("public declaration: " + error);
-  for (const auto &error : validate(implementation))
-    out.errors.emplace_back("implementation declaration: " + error);
+  out.errors ^= concat(validate(publicDecl) | map([](const auto &error) { return "public declaration: " + error; }));
+  out.errors ^= concat(validate(implementation) | map([](const auto &error) { return "implementation declaration: " + error; }));
   TypeMatcher matcher(implementation.tpeVars);
   if (implementation.affinity != publicDecl.affinity) out.errors.emplace_back("affinity differs");
   if (implementation.receiver.has_value() != publicDecl.receiver.has_value()) out.errors.emplace_back("receiver presence differs");
@@ -297,9 +339,10 @@ inline Checked<ImplementationBinding> bindImplementation(const polyast::Function
     if (implementation.args[i].boundary != publicDecl.args[i].boundary)
       out.errors.emplace_back("argument " + std::to_string(i) + " boundary differs");
   }
-  out.errors.insert(out.errors.end(), matcher.errors.begin(), matcher.errors.end());
+  out.errors ^= concat(matcher.errors);
   for (const auto &name : implementation.tpeVars)
-    if (!matcher.bindings.count(name)) out.errors.emplace_back("implementation type variable `" + name + "` is not bound");
+    if (!(matcher.bindings ^ get_maybe(name)).has_value())
+      out.errors.emplace_back("implementation type variable `" + name + "` is not bound");
   std::map<std::string, size_t> callables;
   for (size_t i = 0; i < std::min(comparable, publicDecl.args.size()); ++i)
     if (const auto variable = implementation.args[i].named.tpe.get<polyast::Type::Var>();
@@ -313,14 +356,12 @@ inline Checked<Resolution> resolve(const polyast::PackageIndex &index, const pol
                                    const std::vector<polyast::FunctionDecl> &callables, const std::set<std::string> &capabilities,
                                    const std::map<std::string, int32_t> &typeSizes) {
   Checked<Resolution> out;
-  const auto decls = index.interface.decls | aspartame::filter([&](const auto &decl) { return decl.name == call.name; });
+  const auto decls = index.interface.decls | filter([&](const auto &decl) { return decl.name == call.name; });
   std::vector<std::pair<polyast::FunctionDecl, CallBinding>> bound;
   for (const auto &decl : decls) {
     auto attempt = bindCall(decl, call, callables);
     if (attempt) bound.emplace_back(decl, std::move(*attempt.value));
-    else
-      for (const auto &error : attempt.errors)
-        out.errors.emplace_back("`" + polyast::repr(decl) + "`: " + error);
+    else out.errors ^= concat(attempt.errors | map([&](const auto &error) { return "`" + polyast::repr(decl) + "`: " + error; }));
   }
   if (bound.size() != 1) {
     out.errors.insert(out.errors.begin(), bound.empty() ? "no matching public declaration" : "ambiguous public declaration");
@@ -328,31 +369,41 @@ inline Checked<Resolution> resolve(const polyast::PackageIndex &index, const pol
   }
   const auto &[publicDecl, callBinding] = bound.front();
   std::vector<std::pair<polyast::ImplementationCandidate, ImplementationBinding>> compatible;
-  for (const auto &candidate : index.candidates | aspartame::filter([&](const auto &x) { return x.publicName == publicDecl.name; })) {
-    std::vector<std::string> rejected;
-    for (const auto &capability : candidate.requiredCapabilities)
-      if (!capabilities.count(capability)) rejected.emplace_back("requires capability `" + capability + "`");
+  for (const auto &candidate : index.candidates | filter([&](const auto &x) { return x.publicName == publicDecl.name; })) {
+    auto rejected = candidate.requiredCapabilities | filter([&](const auto &capability) { return !(capabilities ^ contains(capability)); })
+                    | map([](const auto &capability) { return "requires capability `" + capability + "`"; }) | to_vector();
     auto implementation = bindImplementation(candidate.implementation, publicDecl);
-    rejected.insert(rejected.end(), implementation.errors.begin(), implementation.errors.end());
+    rejected ^= concat(implementation.errors);
     if (implementation) {
+      const auto constraintNames = candidate.typeSizes | map([](const auto &constraint) { return constraint.typeVariable; }) | to_vector();
+      if ((constraintNames | distinct() | to_vector()).size() != constraintNames.size())
+        rejected.emplace_back("type-size constraints must be distinct");
+      const auto constrained = constraintNames | to<std::set>();
+      const auto sizeable = implementation.value->types | keys()
+                            | filter([&](const auto &name) { return !(implementation.value->callables ^ get_maybe(name)).has_value(); })
+                            | to<std::set>();
+      if (!constrained.empty() && constrained != sizeable) rejected.emplace_back("type-size constraints must cover all type variables");
       for (const auto &constraint : candidate.typeSizes) {
-        const auto it = implementation.value->types.find(constraint.typeVariable);
-        if (it == implementation.value->types.end()) rejected.emplace_back("unbound size variable `" + constraint.typeVariable + "`");
+        if (constraint.sizeInBytes <= 0) rejected.emplace_back("type-size constraints must be positive");
+        const auto bound = implementation.value->types ^ get_maybe(constraint.typeVariable);
+        if (!bound) rejected.emplace_back("unbound size variable `" + constraint.typeVariable + "`");
         else {
-          const auto concrete = substitute(substitute(it->second, callBinding.types), callBinding.types);
-          const auto size = typeSizes.find(polyast::repr(concrete));
-          if (size == typeSizes.end()) rejected.emplace_back("has no layout for `" + polyast::repr(concrete) + "`");
-          else if (size->second != constraint.sizeInBytes)
+          const auto concrete = substitute(substitute(*bound, callBinding.types), callBinding.types);
+          const auto size = typeSizes ^ get_maybe(polyast::repr(concrete));
+          if (!size) rejected.emplace_back("has no layout for `" + polyast::repr(concrete) + "`");
+          else if (*size != constraint.sizeInBytes)
             rejected.emplace_back("requires `" + constraint.typeVariable + "` size " + std::to_string(constraint.sizeInBytes) + ", got "
-                                  + std::to_string(size->second));
+                                  + std::to_string(*size));
         }
       }
     }
     if (implementation && rejected.empty()) compatible.emplace_back(candidate, std::move(*implementation.value));
     else
-      for (const auto &error : rejected)
-        out.errors.emplace_back("`" + symbol(candidate.implementation.name) + "`: " + error);
+      out.errors ^= concat(rejected | map([&](const auto &error) { return "`" + symbol(candidate.implementation.name) + "`: " + error; }));
   }
+  const auto specialised =
+      compatible | filter([](const auto &candidate, const auto &) { return !candidate.typeSizes.empty(); }) | to_vector();
+  if (!specialised.empty()) compatible = specialised;
   if (compatible.size() != 1) {
     out.errors.insert(out.errors.begin(), compatible.empty() ? "no compatible implementation for `" + symbol(publicDecl.name) + "`"
                                                              : "ambiguous implementations for `" + symbol(publicDecl.name) + "`");

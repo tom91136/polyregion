@@ -4,6 +4,13 @@ import polyregion.ast.PolyAST as p
 
 object Spectra {
 
+  final case class ImplementationVariants(
+      name: String,
+      requiredCapabilities: List[String],
+      widths: List[Int],
+      includeFallback: Boolean = false
+  )
+
   private val t = p.Type.Var("T")
   private val u = p.Type.Var("U")
   private val k = p.Type.Var("K")
@@ -604,4 +611,10 @@ object Spectra {
   )
 
   val interfaceDef: p.InterfaceDef = p.InterfaceDef(p.Sym("spectra"), declarations)
+
+  def implementationCandidates(variants: ImplementationVariants): List[p.ImplementationCandidate] =
+    SpectraImplementations.candidates(interfaceDef, variants)
+
+  def packageIndex(variants: List[ImplementationVariants]): p.PackageIndex =
+    SpectraImplementations.index(interfaceDef, variants)
 }

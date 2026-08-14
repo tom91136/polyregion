@@ -609,7 +609,15 @@ extension (index: p.PackageIndex) {
       val implementationBinding = candidate.implementation.conformsTo(decl)
       implementationBinding.left.foreach(_.foreach(errors += _))
       implementationBinding.foreach { binding =>
+        val constrained = candidate.typeSizes.map(_.typeVariable)
+        val sizeable    = binding.types.keySet -- binding.callables.keySet
+        if (constrained.distinct.size != constrained.size)
+          errors += "type-size constraints must be distinct"
+        if (constrained.nonEmpty && constrained.toSet != sizeable)
+          errors += s"type-size constraints must cover `${sizeable.toList.sorted.mkString(", ")}`"
         candidate.typeSizes.sortBy(c => (c.typeVariable, c.sizeInBytes)).foreach { constraint =>
+          if (constraint.sizeInBytes <= 0)
+            errors += s"type-size constraint for `${constraint.typeVariable}` must be positive"
           binding.types.get(constraint.typeVariable) match {
             case None => errors += s"type-size constraint references unbound variable `${constraint.typeVariable}`"
             case Some(bound) =>
@@ -634,7 +642,10 @@ extension (index: p.PackageIndex) {
       }
     }
 
-    compatible.result() match {
+    val matches     = compatible.result()
+    val specialised = matches.filter(_._1.typeSizes.nonEmpty)
+    val selected    = if specialised.nonEmpty then specialised else matches
+    selected match {
       case List((candidate, implementation)) =>
         Right(InterfaceBinding.Resolution(decl, callBinding, candidate, implementation))
       case Nil =>

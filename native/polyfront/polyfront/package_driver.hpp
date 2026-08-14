@@ -10,6 +10,8 @@
 
 namespace polyregion::polyfront::package {
 
+using namespace aspartame;
+
 struct DriverPlan {
   polyast::Function driver;
   std::vector<size_t> runtimeArguments;
@@ -24,9 +26,10 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   const auto &publicDecl = resolution.publicDecl;
   const auto &implementation = resolution.candidate.implementation;
 
-  std::map<size_t, Type::Any> concreteTypes;
-  for (size_t i = 0; i < publicDecl.args.size(); ++i)
-    concreteTypes.emplace(i, substitute(publicDecl.args[i].named.tpe, resolution.call.types));
+  const auto concreteTypes =
+      publicDecl.args             //
+      | zip_with_index(size_t{0}) //
+      | map([&](const auto &arg, const auto i) { return std::pair{i, substitute(arg.named.tpe, resolution.call.types)}; }) | to<std::map>();
 
   std::vector<Arg> driverArgs;
   std::vector<size_t> runtimeArguments;
@@ -42,7 +45,7 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   const auto context = named("#context", contextType);
   driverArgs.emplace_back(context());
   for (size_t i = 0; i < publicDecl.args.size(); ++i) {
-    if (resolution.call.callables.count(i)) continue;
+    if ((resolution.call.callables ^ get_maybe(i)).has_value()) continue;
     const auto argName = "a" + std::to_string(i);
     const auto concrete = concreteTypes.at(i);
     const auto abiType = concrete.get<Type::Ptr>() ? concrete : Type::Ptr(concrete, TypeSpace::Global()).widen();
@@ -52,7 +55,7 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   }
 
   for (size_t i = 0; i < publicDecl.args.size(); ++i) {
-    if (resolution.call.callables.count(i) || concreteTypes.at(i).is<Type::Ptr>()) continue;
+    if ((resolution.call.callables ^ get_maybe(i)).has_value() || concreteTypes.at(i).is<Type::Ptr>()) continue;
     const auto valueName = "v" + std::to_string(i);
     body.emplace_back(let(valueName) = driverNames.at(i)[Term::IntS32Const(0).widen()]);
     scalarValues.emplace(i, named(valueName, concreteTypes.at(i)));
@@ -61,13 +64,13 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   std::function<Term::Any(const ArgSizeExpr::Any &)> extent = [&](const ArgSizeExpr::Any &expr) -> Term::Any {
     if (const auto x = expr.get<ArgSizeExpr::Param>()) {
       const auto i = static_cast<size_t>(x->index);
-      const auto source = scalarValues.find(i);
-      if (source == scalarValues.end()) {
+      const auto source = scalarValues ^ get_maybe(i);
+      if (!source) {
         out.errors.emplace_back("extent references unavailable argument " + std::to_string(i));
         return Term::IntU64Const(0).widen();
       }
       const auto tmp = "extentParam" + std::to_string(i);
-      body.emplace_back(let(tmp) = Expr::Cast(source->second, Type::IntU64()).widen());
+      body.emplace_back(let(tmp) = Expr::Cast(*source, Type::IntU64()).widen());
       return named(tmp, Type::IntU64());
     }
     if (const auto x = expr.get<ArgSizeExpr::Const>()) return Term::IntU64Const(static_cast<uint64_t>(x->value)).widen();
@@ -85,7 +88,7 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   };
 
   for (size_t i = 0; i < publicDecl.args.size(); ++i) {
-    if (resolution.call.callables.count(i)) continue;
+    if ((resolution.call.callables ^ get_maybe(i)).has_value()) continue;
     const auto concrete = concreteTypes.at(i);
     const auto source = driverNames.at(i);
     if (const auto ptr = concrete.get<Type::Ptr>()) {
@@ -96,13 +99,13 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
       const auto boundary = *publicDecl.args[i].boundary;
       Term::Any count = boundary.extent.match_total(
           [&](const ArgExtent::Elements &x) -> Term::Any {
-            const auto bytes = typeSizes.find(repr(ptr->comp));
-            if (bytes == typeSizes.end()) {
+            const auto bytes = typeSizes ^ get_maybe(repr(ptr->comp));
+            if (!bytes) {
               out.errors.emplace_back("has no layout for `" + repr(ptr->comp) + "`");
               return Term::IntU64Const(0).widen();
             }
             const auto elements = extent(x.size);
-            const auto width = Term::IntU64Const(static_cast<uint64_t>(bytes->second)).widen();
+            const auto width = Term::IntU64Const(static_cast<uint64_t>(*bytes)).widen();
             const auto tmp = "bytes" + std::to_string(i);
             body.emplace_back(let(tmp) = call(Intr::Mul(elements, width, Type::IntU64())));
             return named(tmp, Type::IntU64());
@@ -128,17 +131,16 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
 
   std::vector<Type::Any> tpeArgs;
   for (const auto &name : implementation.tpeVars) {
-    const auto binding = resolution.implementation.types.find(name);
-    if (binding == resolution.implementation.types.end()) {
+    const auto binding = resolution.implementation.types ^ get_maybe(name);
+    if (!binding) {
       out.errors.emplace_back("implementation type variable `" + name + "` is not bound");
       continue;
     }
-    const auto publicType = substitute(binding->second, resolution.call.types);
+    const auto publicType = substitute(*binding, resolution.call.types);
     if (publicType.is<Type::Exec>()) {
-      const auto argument = resolution.implementation.callables.find(name);
-      const auto match = argument == resolution.implementation.callables.end() ? resolution.call.callables.end()
-                                                                               : resolution.call.callables.find(argument->second);
-      if (match != resolution.call.callables.end()) tpeArgs.emplace_back(Type::FnRef(match->second));
+      const auto callable = resolution.implementation.callables ^ get_maybe(name)
+                            ^ flat_map([&](const auto index) { return resolution.call.callables ^ get_maybe(index); });
+      if (callable) tpeArgs.emplace_back(Type::FnRef(*callable));
       else out.errors.emplace_back("callable type variable `" + name + "` has no bound function");
     } else tpeArgs.emplace_back(publicType);
   }
@@ -157,8 +159,8 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
     body.emplace_back(let("callResult") = invoke);
     body.emplace_back((*result)[Term::IntS32Const(0).widen()] = named("callResult", concreteResult));
   } else body.emplace_back(var("call") = invoke);
-  body.insert(body.end(), downloads.begin(), downloads.end());
-  body.insert(body.end(), frees.begin(), frees.end());
+  body ^= concat(downloads);
+  body ^= concat(frees);
   body.emplace_back(ret());
 
   if (!out.errors.empty()) return out;

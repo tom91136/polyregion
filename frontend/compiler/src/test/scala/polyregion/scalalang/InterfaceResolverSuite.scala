@@ -175,6 +175,123 @@ class InterfaceResolverSuite extends munit.FunSuite {
     })
   }
 
+  test("link an exact pointer-element width specialisation") {
+    val element    = p.Type.Var("Element")
+    val publicName = p.Sym("bar.copy")
+    val publicDecl = p.FunctionDecl(
+      publicName,
+      List("T"),
+      None,
+      List(p.Arg(p.Named("in", p.Type.Ptr(p.Type.Var("T"), p.Type.Space.Global)), None)),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val implementationDecl = publicDecl.copy(
+      name = p.Sym("bar.implementation.copy_w4"),
+      tpeVars = List("Element"),
+      args = List(p.Arg(p.Named("in", p.Type.Ptr(element, p.Type.Space.Global)), None))
+    )
+    val implementation = p.Function(
+      implementationDecl,
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      true
+    )
+    val pack = p.Package(
+      p.PackageIndex(
+        p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
+        List(
+          p.ImplementationCandidate(
+            publicName,
+            implementationDecl,
+            Nil,
+            List(p.TypeSizeConstraint("Element", 4))
+          )
+        )
+      ),
+      p.Program(implementation, List(implementation), Nil)
+    )
+    val pointer = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
+    val target: p.Expr.Invoke = p.Expr.Invoke(
+      p.Type.FnRef(p.Sym("foo.bindings.copy")),
+      Nil,
+      None,
+      List(p.Term.Select(p.Named("in", pointer), Nil, pointer)),
+      p.Type.Unit0
+    )
+
+    assert(InterfaceResolver.link(pack, "bar.copy", target).isRight)
+  }
+
+  test("link exact pointer-width specialisations") {
+    val publicVar         = p.Type.Var("T")
+    val implementationVar = p.Type.Var("Element")
+    val pointerWidth =
+      System.getProperty("sun.arch.data.model", "64").toIntOption.filter(_ > 0).getOrElse(64) / 8
+
+    def assertLinked(publicArg: p.Type, implementationArg: p.Type, targetArg: p.Type, name: String): Unit = {
+      val publicName = p.Sym(s"bar.$name")
+      val publicDecl = p.FunctionDecl(
+        publicName,
+        List("T"),
+        None,
+        List(p.Arg(p.Named("value", publicArg), None)),
+        Nil,
+        Nil,
+        p.Type.Unit0,
+        p.Function.Affinity.Host
+      )
+      val implementationDecl = publicDecl.copy(
+        name = p.Sym(s"bar.implementation.$name"),
+        tpeVars = List("Element"),
+        args = List(p.Arg(p.Named("value", implementationArg), None))
+      )
+      val implementation = p.Function(
+        implementationDecl,
+        List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
+        p.Function.Visibility.Exported,
+        p.Function.FpMode.Relaxed,
+        true
+      )
+      val pack = p.Package(
+        p.PackageIndex(
+          p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
+          List(
+            p.ImplementationCandidate(
+              publicName,
+              implementationDecl,
+              Nil,
+              List(p.TypeSizeConstraint("Element", pointerWidth))
+            )
+          )
+        ),
+        p.Program(implementation, List(implementation), Nil)
+      )
+      val target: p.Expr.Invoke = p.Expr.Invoke(
+        p.Type.FnRef(p.Sym(s"foo.bindings.$name")),
+        Nil,
+        None,
+        List(p.Term.Select(p.Named("value", targetArg), Nil, targetArg)),
+        p.Type.Unit0
+      )
+
+      assert(InterfaceResolver.link(pack, publicName.repr, target).isRight)
+    }
+
+    val pointer       = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
+    val nestedPointer = p.Type.Ptr(pointer, p.Type.Space.Global)
+    assertLinked(publicVar, implementationVar, pointer, "pointer_value")
+    assertLinked(
+      p.Type.Ptr(publicVar, p.Type.Space.Global),
+      p.Type.Ptr(implementationVar, p.Type.Space.Global),
+      nestedPointer,
+      "nested_pointer"
+    )
+  }
+
   test("reject explicit generic interface calls until call sites can be specialized") {
     val i32 = p.Type.IntS32
     val tpe = p.Type.Var("T")

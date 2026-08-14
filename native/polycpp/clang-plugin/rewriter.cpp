@@ -79,14 +79,15 @@ struct InterfaceSite {
 };
 
 static std::optional<std::pair<std::string, std::string>> interfaceIdentity(const clang::FunctionDecl *decl) {
-  for (const auto *attr : decl->attrs()) {
-    const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
-    if (!annotation || !annotation->getAnnotation().starts_with(interfaceAnnotation)) continue;
-    const auto payload = annotation->getAnnotation().drop_front(interfaceAnnotation.size());
-    const auto [packageName, declaration] = payload.split(':');
-    if (!packageName.empty() && !declaration.empty() && !declaration.contains(':')) return std::pair(packageName.str(), declaration.str());
-  }
-  return std::nullopt;
+  return decl->attrs() | collect_first([](const auto *attr) -> std::optional<std::pair<std::string, std::string>> {
+           const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+           if (!annotation || !annotation->getAnnotation().starts_with(interfaceAnnotation)) return {};
+           const auto payload = annotation->getAnnotation().drop_front(interfaceAnnotation.size());
+           const auto [packageName, declaration] = payload.split(':');
+           if (!packageName.empty() && !declaration.empty() && !declaration.contains(':'))
+             return std::pair(packageName.str(), declaration.str());
+           return {};
+         });
 }
 
 static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
@@ -123,6 +124,11 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
                               const polyast::Package &package, DriverBitcode &driverBitcode) {
   using namespace polyfront::package;
   auto &D = CI.getDiagnostics();
+  const auto emitErrors = [&](const auto &errors) {
+    errors | for_each([&](const auto &error) {
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    });
+  };
   Remapper remapper(C);
   Remapper::RemapContext context;
   std::vector<Type::Any> argumentTypes;
@@ -141,16 +147,18 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
     const clang::FunctionDecl *callable = nullptr;
     if (record) {
       if (record->isLambda()) callable = record->getLambdaCallOperator();
-      else
-        for (const auto *method : record->methods())
-          if (method->getOverloadedOperator() == clang::OO_Call && method->doesThisDeclarationHaveABody()) {
-            if (callable) {
-              emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
-                   POLYREGION_DIAG_POLYSTL "library callable has an ambiguous operator()");
-              return;
-            }
-            callable = method;
-          }
+      else {
+        const auto methods = record->methods() | filter([](const auto *method) {
+                               return method->getOverloadedOperator() == clang::OO_Call && method->doesThisDeclarationHaveABody();
+                             })
+                             | to_vector();
+        if (methods.size() > 1) {
+          emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
+               POLYREGION_DIAG_POLYSTL "library callable has an ambiguous operator()");
+          return;
+        }
+        callable = methods ^ head_maybe() ^ get_or_else(static_cast<clang::CXXMethodDecl *>(nullptr));
+      }
     } else if (argument->getType()->isFunctionPointerType()) {
       const clang::Expr *referenced = argument->IgnoreParenImpCasts();
       if (const auto *address = llvm::dyn_cast<clang::UnaryOperator>(referenced); address && address->getOpcode() == clang::UO_AddrOf)
@@ -181,14 +189,12 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
   const auto call = InvokeSignature(Sym(site.declaration ^ split('.')), {}, {}, argumentTypes, returnType);
   const auto resolution = resolve(package.index, call, callableDecls, opts.libraryCapabilities, typeSizes);
   if (!resolution) {
-    for (const auto &error : resolution.errors)
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    emitErrors(resolution.errors);
     return;
   }
   const auto implementationFn = implementation(package, *resolution.value);
   if (!implementationFn) {
-    for (const auto &error : implementationFn.errors)
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    emitErrors(implementationFn.errors);
     return;
   }
 
@@ -196,28 +202,32 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
   const auto driverName = "__polyregion_interface_driver_" + suffix;
   const auto plan = buildDriver(driverName, *resolution.value, typeSizes);
   if (!plan) {
-    for (const auto &error : plan.errors)
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    emitErrors(plan.errors);
     return;
   }
   const auto callableFunctions = context.functions | values() | map([](const auto &function) { return *function; }) | to_vector();
   const auto closure = bindImplementationClosure(package, *resolution.value, callableFunctions);
   if (!closure) {
-    for (const auto &error : closure.errors)
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    emitErrors(closure.errors);
     return;
   }
   const auto callerDefs = context.structs | values() | map([](const auto &definition) { return *definition; }) | to_vector();
   const auto defs = bindStructClosure(package, *closure.value, callerDefs);
   if (!defs) {
-    for (const auto &error : defs.errors)
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+    emitErrors(defs.errors);
     return;
   }
   const Program program(plan.value->driver, *closure.value, *defs.value, PassPhase::Initial(), {});
+  const auto driverTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
+  if (!driverTarget) {
+    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
+         POLYREGION_DIAG_POLYSTL "interface host driver does not support target architecture: %0",
+         CI.getTarget().getTriple().getArchName());
+    return;
+  }
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
   const auto compiled =
-      polyfront::compileProgram(opts, program, compiletime::Target::Object_LLVM_HOST, targetCPU.empty() ? "native" : targetCPU,
+      polyfront::compileProgram(opts, program, *driverTarget, polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU),
                                 {"--host-mirroring", "--passes", "FullOpt(level=2)"});
   if (const auto *error = std::get_if<std::string>(&compiled)) {
     emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", *error);
@@ -660,13 +670,14 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                          || action == clang::frontend::EmitLLVMOnly || action == clang::frontend::EmitCodeGenOnly
                          || action == clang::frontend::EmitObj;
   if (!emitsCode) return;
-  for (const auto &site : interfaceSites(C)) {
+  interfaceSites(C) | for_each([&](const auto &site) {
     const auto package = polyfront::package::loadPackage(site.packageName, opts.libraryPath.empty()
                                                                                ? polyfront::package::packageRoots()
                                                                                : polyfront::package::splitPackageRoots(opts.libraryPath));
-    if (!package)
-      for (const auto &error : package.errors)
+    if (!package) {
+      package.errors | for_each([&](const auto &error) {
         emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
-    else bindInterfaceCall(opts, CI, C, site, *package.value, *driverBitcode);
-  }
+      });
+    } else bindInterfaceCall(opts, CI, C, site, *package.value, *driverBitcode);
+  });
 }

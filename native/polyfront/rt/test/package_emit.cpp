@@ -18,6 +18,7 @@ using namespace polyregion::polyast;
 using namespace polyregion::polyast::dsl;
 using namespace polyregion::polyfront;
 using namespace polyregion::polyfront::package;
+using namespace aspartame;
 
 Package fixture(int32_t increment) {
   const auto i32 = Type::IntS32().widen();
@@ -86,13 +87,12 @@ TEST_CASE("package readers tolerate concurrent replacement") {
   std::vector<std::string> readerErrors;
   std::thread emitter([&] {
     for (int32_t increment = 1; increment <= 50; ++increment)
-      if (const auto result = emitPackage(fixture(increment), root.path.str().str()); !result)
-        emitterErrors ^= aspartame::concat(result.errors);
+      if (const auto result = emitPackage(fixture(increment), root.path.str().str()); !result) emitterErrors ^= concat(result.errors);
     done = true;
   });
   std::thread reader([&] {
     do {
-      if (const auto result = loadPackage("foo", {root.path.str().str()}); !result) readerErrors ^= aspartame::concat(result.errors);
+      if (const auto result = loadPackage("foo", {root.path.str().str()}); !result) readerErrors ^= concat(result.errors);
     } while (!done);
   });
   emitter.join();
@@ -157,6 +157,25 @@ TEST_CASE("package emission rejects invalid type-size constraints") {
       == std::vector<std::string>{"implementation `foo.implementation.apply` type-size constraint references unbound variable `Missing`"});
 }
 
+TEST_CASE("package emission rejects partial type-size constraints") {
+  TemporaryDirectory root;
+  const auto name = Sym({"foo", "bar", "transform"});
+  const auto publicDecl = FunctionDecl(name, {"T", "U"}, {}, {Arg(Named("in", Type::Var("T")), {}), Arg(Named("out", Type::Var("U")), {})},
+                                       {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto implementationDecl = FunctionDecl(Sym({"foo", "implementation", "transform"}), {"Input", "Output"}, {},
+                                               {Arg(Named("in", Type::Var("Input")), {}), Arg(Named("out", Type::Var("Output")), {})}, {},
+                                               {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto implementation = Function(implementationDecl, {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  const auto candidate = ImplementationCandidate(name, implementationDecl, {}, {TypeSizeConstraint("Input", 4)});
+  const auto package =
+      Package(PackageIndex(InterfaceDef(Sym({"foo"}), {publicDecl}, {}), {candidate}), packageProgram({implementation}, {}));
+
+  const auto result = emitPackage(package, root.path.str().str());
+  REQUIRE_FALSE(result);
+  CHECK(result.errors
+        == std::vector<std::string>{"implementation `foo.implementation.transform` type-size constraints must cover all type variables"});
+}
+
 TEST_CASE("package emission rejects an incomplete implementation closure") {
   TemporaryDirectory root;
   auto incomplete = fixture(1);
@@ -200,8 +219,7 @@ TEST_CASE("package emission validates helper declarations") {
   invalid.program = packageProgram({implementation, helper}, {});
   const auto result = emitPackage(invalid, root.path.str().str());
   REQUIRE_FALSE(result);
-  CHECK(result.errors
-        | aspartame::exists([](const auto &error) { return error.find("undeclared type variable `Missing`") != std::string::npos; }));
+  CHECK(result.errors | exists([](const auto &error) { return error ^ contains_slice("undeclared type variable `Missing`"); }));
 }
 
 TEST_CASE("package emission distinguishes structural symbols in implementation closure") {

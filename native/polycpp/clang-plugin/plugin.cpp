@@ -71,16 +71,16 @@ bool linkDriverModule(llvm::Module &module, std::unique_ptr<llvm::Module> driver
   context.setDiagnosticHandler(std::make_unique<LinkDiagnosticHandler>(previous.get(), diagnostics));
   const bool failed = llvm::Linker(module).linkInModule(std::move(driver));
   context.setDiagnosticHandler(std::move(previous));
-  for (const auto &diagnostic : diagnostics) {
+  diagnostics | for_each([&](const auto &diagnostic) {
     unsigned id;
     switch (diagnostic.severity) {
       case llvm::DS_Error: id = clang::diag::err_fe_linking_module; break;
       case llvm::DS_Warning: id = clang::diag::warn_fe_linking_module; break;
       case llvm::DS_Note: id = clang::diag::note_fe_linking_module; break;
-      case llvm::DS_Remark: continue;
+      case llvm::DS_Remark: return;
     }
     clangDiagnostics.Report(id) << identifier << diagnostic.message;
-  }
+  });
   return failed;
 }
 
@@ -102,12 +102,13 @@ public:
       }
       auto driver = std::move(*parsed);
       const llvm::Triple sourceTriple(driver->getTargetTriple()), targetTriple(module.getTargetTriple());
-      if (sourceTriple.getArch() != targetTriple.getArch() || sourceTriple.getOS() != targetTriple.getOS()
-          || sourceTriple.getEnvironment() != targetTriple.getEnvironment() || driver->getDataLayout() != module.getDataLayout()) {
+      if (!polyfront::objectTargetsCompatible(sourceTriple, targetTriple)
+          || !polyfront::objectLayoutsCompatible(*driver, module.getDataLayout())) {
         module.getContext().emitError("PolyAST interface driver target is incompatible with the translation unit");
         return llvm::PreservedAnalyses::none();
       }
       driver->setTargetTriple(module.getTargetTriple());
+      driver->setDataLayout(module.getDataLayout());
       if (linkDriverModule(module, std::move(driver), diagnostics)) {
         module.getContext().emitError("cannot link PolyAST interface driver");
         return llvm::PreservedAnalyses::none();
@@ -144,8 +145,9 @@ protected:
         ^ foreach_total([&](const polyfront::Options &x) { opts = x; },
                         [&](const std::vector<std::string> &errors) {
                           auto &diag = CI.getDiagnostics();
-                          for (auto error : errors)
+                          errors | for_each([&](const auto &error) {
                             diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "%0")) << error;
+                          });
                         });
     return true;
   }

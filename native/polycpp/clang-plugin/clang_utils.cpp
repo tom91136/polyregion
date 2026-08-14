@@ -111,10 +111,11 @@ clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, 
   const auto fnTy = C.getFunctionType(retTy, paramTys, clang::FunctionProtoType::ExtProtoInfo());
   auto *fn = clang::FunctionDecl::Create(C, linkage, {}, {}, clang::DeclarationName(&C.Idents.get(name)), fnTy,
                                          C.getTrivialTypeSourceInfo(fnTy), clang::SC_Extern);
-  std::vector<clang::ParmVarDecl *> params;
-  for (const auto &paramTy : paramTys)
-    params.emplace_back(
-        clang::ParmVarDecl::Create(C, fn, {}, {}, nullptr, paramTy, C.getTrivialTypeSourceInfo(paramTy), clang::SC_None, nullptr));
+  const auto params =
+      paramTys | map([&](const auto &paramTy) {
+        return clang::ParmVarDecl::Create(C, fn, {}, {}, nullptr, paramTy, C.getTrivialTypeSourceInfo(paramTy), clang::SC_None, nullptr);
+      })
+      | to_vector();
   fn->setParams(params);
   linkage->addDecl(fn);
   tu->addDecl(linkage);

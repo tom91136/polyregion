@@ -78,11 +78,11 @@ const static std::string CapturedThis = "#captured_this";
       Vector<std::shared_ptr<StructDef>> tail;
       if (!walkParents(r, Type::Struct(parent->name, {}), predicate, tail)) return {};
       Vector<std::shared_ptr<StructDef>> result{parent};
-      result.insert(result.end(), tail.begin(), tail.end());
+      result ^= concat(tail);
       return result;
     });
     if (path) {
-      chain.insert(chain.end(), path->begin(), path->end());
+      chain ^= concat(*path);
       return true;
     }
     return false;

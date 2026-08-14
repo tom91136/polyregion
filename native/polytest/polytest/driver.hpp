@@ -130,7 +130,7 @@ inline std::string archFor(const Task &t, const DriverConfig &cfg) {
          ^ get_or_else(std::string{});
 }
 
-inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg, bool runStep) {
+inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg, bool preloadSanitizer) {
   std::vector<std::pair<std::string, std::string>> kvs;
   auto put = [&](std::string_view k, std::string_view v) {
     for (auto &e : kvs)
@@ -242,10 +242,9 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
     if (auto v = std::getenv(name)) put(name, v);
   }
 #endif
-  // XXX run-only: the child loads the instrumented runtime late, so force asan in first; compile steps
-  // must not (would reach the arm64e system ld / 3rd-party ctest, which cannot load the runtime)
+  // XXX the generated executable loads the instrumented runtime late, so force asan in first
 #if defined(__APPLE__) || defined(__linux__)
-  if (runStep)
+  if (preloadSanitizer)
     if (const char *rt = std::getenv(polyregion::env::PolytestAsanPreload); rt && *rt) {
   #if defined(__APPLE__)
       put("DYLD_INSERT_LIBRARIES", rt);
@@ -289,13 +288,16 @@ struct StepResult {
   std::string cmdline;
 };
 
-inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command, bool isRunStep) {
-  auto fragments = command ^ split(' ');
+inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {
+  auto fragments = command ^ words();
   auto [envBits, args] = fragments ^ span([](const auto &x) { return x ^ contains('='); });
 
-  auto envs = baseEnvs(task, cfg, isRunStep) ^ filter([&](const auto &e) {
-                return !(envBits ^ exists([&](const auto &kv) { return e ^ starts_with(kv.substr(0, kv.find('=') + 1)); }));
-              });
+  auto envs =
+      baseEnvs(task, cfg, args ^ head_maybe() ^ exists([&](const auto &arg) { return arg == task.output; })) ^ filter([&](const auto &e) {
+        return !(envBits ^ exists([&](const auto &kv) {
+                   return kv ^ split_once('=') ^ exists([&](const auto &entry) { return e ^ starts_with(entry.first + "="); });
+                 }));
+      });
   envs ^= concat(envBits);
 
   const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
@@ -365,7 +367,7 @@ inline bool checkExpect(const TestCase::Run::Expect &e, const std::vector<std::s
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
   const auto start = std::chrono::steady_clock::now();
-  auto r = runStep(task, cfg, task.runs[0].command, /*isRunStep=*/false);
+  auto r = runStep(task, cfg, task.runs[0].command);
   const auto exit = r.exitCode;
   if (std::getenv(polyregion::env::PolyregionPassLog) && !r.stderrText.empty())
     std::fprintf(stderr, "[%s]\n%s\n", task.display().c_str(), r.stderrText.c_str());
@@ -393,9 +395,9 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
         constexpr const char *reproFlags = " -c";
 #endif
         const auto objCmd = (toks ^ mk_string(" ", [&](const auto &t) { return t == out ? obj : t; })) + reproFlags;
-        const auto r1 = runStep(task, cfg, objCmd, /*isRunStep=*/false);
+        const auto r1 = runStep(task, cfg, objCmd);
         const auto first = r1.exitCode == 0 ? polyregion::read_string(obj) : std::string{};
-        const auto r2 = runStep(task, cfg, objCmd, /*isRunStep=*/false);
+        const auto r2 = runStep(task, cfg, objCmd);
         if (r1.exitCode != 0 || r2.exitCode != 0)
           reproReason = fmt::format("repro -c compile failed (exit {}/{})", r1.exitCode, r2.exitCode);
         else if (first != polyregion::read_string(obj))
@@ -420,7 +422,7 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
   TaskOutcome o;
   const auto start = std::chrono::steady_clock::now();
   for (std::size_t i = 1; i < task.runs.size(); ++i) {
-    auto r = runStep(task, cfg, task.runs[i].command, /*isRunStep=*/true);
+    auto r = runStep(task, cfg, task.runs[i].command);
     const auto exit = r.exitCode;
     absorbStep(o, std::move(r));
     if (exit == 77) {

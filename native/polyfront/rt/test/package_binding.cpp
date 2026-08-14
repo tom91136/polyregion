@@ -1,8 +1,8 @@
-#include <algorithm>
 #include <cctype>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "polyfront/options_backend.hpp"
 #include "polyfront/package.hpp"
 #include "polyfront/package_driver.hpp"
 #include "polyfront/package_program.hpp"
@@ -10,6 +10,7 @@
 #include "polyast_codec.h"
 
 using namespace polyregion;
+using namespace aspartame;
 
 namespace {
 
@@ -26,6 +27,35 @@ polyast::FunctionDecl transform(const polyast::Sym &name, const std::string &var
 
 } // namespace
 
+TEST_CASE("object driver targets follow the consumer architecture") {
+  using polyregion::compiletime::Target;
+  const llvm::Triple x86("x86_64-unknown-linux-gnu"), riscv("riscv64-unknown-linux-gnu"), ppc("powerpc64le-unknown-linux-gnu");
+  CHECK(polyfront::objectTargetFor(llvm::Triple("x86_64-apple-darwin")) == Target::Object_LLVM_x86_64);
+  CHECK(polyfront::objectTargetFor(llvm::Triple("aarch64-apple-darwin")) == Target::Object_LLVM_AArch64);
+  CHECK(polyfront::objectTargetFor(llvm::Triple("armv7-unknown-linux-gnueabihf")) == Target::Object_LLVM_ARM);
+  CHECK(polyfront::objectTargetFor(riscv, riscv) == Target::Object_LLVM_HOST);
+  CHECK(polyfront::objectTargetFor(ppc, ppc) == Target::Object_LLVM_HOST);
+  CHECK_FALSE(polyfront::objectTargetFor(riscv, x86));
+
+  CHECK(polyfront::objectCPUFor(llvm::Triple("aarch64-unknown-linux-gnu"), "", x86) == "generic");
+  CHECK(polyfront::objectCPUFor(x86, "", x86) == "native");
+  CHECK(polyfront::objectCPUFor(x86, "haswell", x86) == "haswell");
+
+  CHECK(polyfront::objectTargetsCompatible(llvm::Triple("aarch64-apple-darwin"), llvm::Triple("arm64-apple-macosx26.0.0")));
+  CHECK_FALSE(polyfront::objectTargetsCompatible(llvm::Triple("aarch64-unknown-linux-gnu"), llvm::Triple("arm64-apple-macosx26.0.0")));
+  CHECK_FALSE(polyfront::objectTargetsCompatible(llvm::Triple("x86_64-unknown-linux"), llvm::Triple("x86_64-unknown-freebsd")));
+  CHECK_FALSE(
+      polyfront::objectTargetsCompatible(llvm::Triple("armv7-unknown-linux-gnueabi"), llvm::Triple("armv7-unknown-linux-gnueabihf")));
+
+  llvm::LLVMContext context;
+  llvm::Module driver("driver", context);
+  driver.setDataLayout("e-p:64:64");
+  llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::PointerType::get(context, 0)}, false),
+                         llvm::GlobalValue::ExternalLinkage, "entry", driver);
+  CHECK(polyfront::objectLayoutsCompatible(driver, llvm::DataLayout("e-p:64:64-p270:32:32")));
+  CHECK_FALSE(polyfront::objectLayoutsCompatible(driver, llvm::DataLayout("e-p:32:32")));
+}
+
 TEST_CASE("native package resolution selects an exact typed implementation") {
   using namespace polyast;
   const auto publicName = Sym({"bar", "transform"});
@@ -37,14 +67,11 @@ TEST_CASE("native package resolution selects an exact typed implementation") {
   const auto bytes = package_to_msgpack(package);
   REQUIRE(package_from_msgpack(bytes) == package);
   auto incompatible = bytes;
-  auto hashAt = incompatible.end();
-  for (auto it = incompatible.begin(); std::distance(it, incompatible.end()) >= 32; ++it)
-    if (std::all_of(it, it + 32, [](const auto ch) { return std::isxdigit(ch); })) {
-      hashAt = it;
-      break;
-    }
-  REQUIRE(hashAt != incompatible.end());
-  *hashAt = *hashAt == '0' ? '1' : '0';
+  const auto hashAt = incompatible | sliding(32, 1) | index_where([](auto window) {
+                        return window | forall([](const auto ch) { return std::isxdigit(static_cast<unsigned char>(ch)) != 0; });
+                      });
+  REQUIRE(hashAt >= 0);
+  incompatible[static_cast<size_t>(hashAt)] = incompatible[static_cast<size_t>(hashAt)] == '0' ? '1' : '0';
   CHECK(std::holds_alternative<std::string>(polyast::decodePackage(incompatible.data(), incompatible.data() + incompatible.size())));
 
   const auto f32 = Type::Float32().widen();
@@ -53,6 +80,37 @@ TEST_CASE("native package resolution selects an exact typed implementation") {
   const auto resolved = polyfront::package::resolve(index, call, {}, {}, {{repr(f32), 4}});
   REQUIRE(resolved);
   CHECK(resolved.value->candidate == candidate);
+
+  const auto fallback = candidate.withImplementation(implementation.withName(Sym({"implementation", "fallback"}))).withTypeSizes({});
+  const auto exactResolution = polyfront::package::resolve(index.withCandidates({fallback, candidate}), call, {}, {}, {{repr(f32), 4}});
+  REQUIRE(exactResolution);
+  CHECK(exactResolution.value->candidate == candidate);
+  const auto fallbackResolution = polyfront::package::resolve(index.withCandidates({candidate, fallback}), call, {}, {}, {{repr(f32), 2}});
+  REQUIRE(fallbackResolution);
+  CHECK(fallbackResolution.value->candidate == fallback);
+  CHECK_FALSE(polyfront::package::resolve(index, call, {}, {}, {{repr(f32), 2}}));
+  CHECK_FALSE(polyfront::package::resolve(
+      index.withCandidates({fallback, fallback.withImplementation(implementation.withName(Sym({"implementation", "fallback_alt"})))}), call,
+      {}, {}, {{repr(f32), 2}}));
+  const auto nonPositive = candidate.withTypeSizes({TypeSizeConstraint("Element", 0)});
+  const auto nonPositiveResolution =
+      polyfront::package::resolve(index.withCandidates({nonPositive, fallback}), call, {}, {}, {{repr(f32), 0}});
+  REQUIRE(nonPositiveResolution);
+  CHECK(nonPositiveResolution.value->candidate == fallback);
+}
+
+TEST_CASE("native package resolution rejects cyclic call substitutions") {
+  using namespace polyast;
+  const auto name = Sym({"bar", "cycle"});
+  const auto publicDecl = FunctionDecl(name, {"T", "U"}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto implementation = publicDecl.withName(Sym({"implementation", "cycle"}));
+  const auto candidate = ImplementationCandidate(name, implementation, {}, {TypeSizeConstraint("T", 4), TypeSizeConstraint("U", 4)});
+  const auto index = PackageIndex(InterfaceDef(Sym({"foo"}), {publicDecl}, {}), {candidate});
+  const auto call = InvokeSignature(name, {Type::Var("U"), Type::Var("T")}, {}, {}, Type::Unit0());
+
+  const auto resolved = polyfront::package::resolve(index, call, {}, {}, {});
+  CHECK_FALSE(resolved);
+  CHECK(resolved.errors | exists([](const auto &error) { return error ^ contains_slice("cyclic substitution"); }));
 }
 
 TEST_CASE("native package drivers derive staging from declaration boundaries") {
@@ -78,17 +136,17 @@ TEST_CASE("native package drivers derive staging from declaration boundaries") {
   };
   const auto allocations = plan.value->driver.collect_all<Spec::RemoteAlloc>();
   REQUIRE(allocations.size() == 2);
-  CHECK(allocations | aspartame::forall(usesContext));
+  CHECK(allocations | forall(usesContext));
   const auto copies = plan.value->driver.collect_all<Spec::RemoteMemcpy>();
   REQUIRE(copies.size() == 2);
-  CHECK(copies | aspartame::forall(usesContext));
+  CHECK(copies | forall(usesContext));
   CHECK(copies[0].direction.is<Direction::LocalToRemote>());
   CHECK(copies[1].direction.is<Direction::RemoteToLocal>());
   const auto frees = plan.value->driver.collect_all<Spec::RemoteFree>();
   REQUIRE(frees.size() == 2);
-  CHECK(frees | aspartame::forall(usesContext));
+  CHECK(frees | forall(usesContext));
   const auto casts = plan.value->driver.collect_all<Expr::Cast>();
-  CHECK(casts | aspartame::exists([](const auto &cast) {
+  CHECK(casts | exists([](const auto &cast) {
           const auto selected = cast.from.template get<Term::Select>();
           return selected && selected->root.symbol == "v2" && cast.as.template is<Type::IntU64>();
         }));
@@ -121,7 +179,7 @@ TEST_CASE("native package resolution rejects malformed extent metadata") {
       PackageIndex(InterfaceDef(Sym({"foo"}), {publicDecl}, {}), {ImplementationCandidate(name, implementationDecl, {}, {})});
   const auto resolved = polyfront::package::resolve(index, InvokeSignature(name, {}, {}, {ptr}, Type::Unit0()), {}, {}, {});
   CHECK_FALSE(resolved);
-  CHECK(resolved.errors | aspartame::exists([](const auto &error) { return error.find("negative") != std::string::npos; }));
+  CHECK(resolved.errors | exists([](const auto &error) { return error ^ contains_slice("negative"); }));
 }
 
 TEST_CASE("native package validation rejects malformed type binders") {
@@ -131,11 +189,9 @@ TEST_CASE("native package validation rejects malformed type binders") {
   const auto decl =
       FunctionDecl(name, {"T"}, {}, {Arg(Named("op", callable), {})}, {}, {}, Type::Var("AlsoMissing"), FunctionAffinity::Host());
   const auto errors = polyfront::package::validate(decl);
-  CHECK(errors | aspartame::exists([](const auto &error) { return error.find("callable type variable 0 is empty") != std::string::npos; }));
-  CHECK(errors
-        | aspartame::exists([](const auto &error) { return error.find("undeclared type variable `Missing`") != std::string::npos; }));
-  CHECK(errors
-        | aspartame::exists([](const auto &error) { return error.find("undeclared type variable `AlsoMissing`") != std::string::npos; }));
+  CHECK(errors | exists([](const auto &error) { return error ^ contains_slice("callable type variable 0 is empty"); }));
+  CHECK(errors | exists([](const auto &error) { return error ^ contains_slice("undeclared type variable `Missing`"); }));
+  CHECK(errors | exists([](const auto &error) { return error ^ contains_slice("undeclared type variable `AlsoMissing`"); }));
 }
 
 TEST_CASE("native package binding turns callable placeholders into function references") {
@@ -160,13 +216,15 @@ TEST_CASE("native package binding turns callable placeholders into function refe
   const auto callbackName = Sym({"user", "plusTwo"});
   const auto callbackDecl =
       FunctionDecl(callbackName, {}, {}, {Arg(Named("x", Type::IntS32()), {})}, {}, {}, Type::IntS32(), FunctionAffinity::Host());
+  const auto callbackOverload =
+      FunctionDecl(callbackName, {}, {}, {Arg(Named("x", Type::Float32()), {})}, {}, {}, Type::Float32(), FunctionAffinity::Host());
   const auto call = InvokeSignature(publicName, {}, {}, {Type::IntS32(), Type::FnRef(callbackName)}, Type::IntS32());
-  const auto resolved = polyfront::package::resolve(package.index, call, {callbackDecl}, {}, {{repr(Type::IntS32()), 4}});
+  const auto resolved = polyfront::package::resolve(package.index, call, {callbackOverload, callbackDecl}, {}, {{repr(Type::IntS32()), 4}});
   REQUIRE(resolved);
   const auto bound = polyfront::package::bindImplementationClosure(package, *resolved.value);
   REQUIRE(bound);
   CHECK(bound.value->size() == 1);
-  const auto selected = *bound.value | aspartame::find([&](const auto &fn) { return fn.decl.name == implementationDecl.name; });
+  const auto selected = *bound.value | find([&](const auto &fn) { return fn.decl.name == implementationDecl.name; });
   REQUIRE(selected);
   CHECK(selected->decl.args.size() == 1);
   const auto invokes = selected->collect_all<Expr::Invoke>();
@@ -188,5 +246,5 @@ TEST_CASE("native package struct closure rejects caller conflicts") {
   const auto package = Package(index, polyfront::packageProgram({function}, {packageDef}));
   const auto defs = polyfront::package::bindStructClosure(package, {function}, {callerDef});
   CHECK_FALSE(defs);
-  CHECK(defs.errors | aspartame::exists([](const auto &error) { return error.find("conflicts") != std::string::npos; }));
+  CHECK(defs.errors | exists([](const auto &error) { return error ^ contains_slice("conflicts"); }));
 }

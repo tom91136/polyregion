@@ -75,7 +75,7 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
                 return line;
               }
               // shared-compile: one setup, a run per variant, one cleanup, gated on a per-task fixture
-              const auto fix = "fix-" + t.id;
+              const auto fix = "fix-" + name;
               const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
               auto frag = fmt::format("add_test(\"compile-{}\" \"{}\" --compile-task \"{}\")\n", name, binary, t.id)
                           + fmt::format("set_tests_properties(\"compile-{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP \"{}\"{}{})\n",
@@ -83,8 +83,8 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
               frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
                         const auto vname = suffix.empty() ? name : name + "-" + suffix;
                         return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\")\n", vname, binary, t.id)
-                               + fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\"{}{})\n", vname, fix,
-                                             labelsProp, envProp(extraEnv));
+                               + fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\" RESOURCE_LOCK \"{}\"{}{})\n",
+                                             vname, fix, fix, labelsProp, envProp(extraEnv));
                       });
               return frag + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\")\n", name, binary, t.id)
                      + fmt::format("set_tests_properties(\"cleanup-{}\" PROPERTIES FIXTURES_CLEANUP \"{}\"{}{})\n", name, fix, labelsProp,

@@ -1,17 +1,23 @@
 #pragma once
 
 #include <cstdlib>
+#include <functional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include "aspartame/all.hpp"
 #include "nlohmann/json.hpp"
@@ -38,6 +44,75 @@ using namespace aspartame;
 
 inline bool entryNeedsErrorBuffer(const polyast::CompileResult &r) {
   return r.entryArgs ^ exists([](const auto &n) { return n.symbol == conventions::ErrorArg; });
+}
+
+inline std::optional<compiletime::Target> objectTargetFor(const llvm::Triple &triple,
+                                                          const llvm::Triple &host = llvm::Triple(llvm::sys::getProcessTriple())) {
+  switch (triple.getArch()) {
+    case llvm::Triple::x86_64: return compiletime::Target::Object_LLVM_x86_64;
+    case llvm::Triple::aarch64: return compiletime::Target::Object_LLVM_AArch64;
+    case llvm::Triple::arm: return compiletime::Target::Object_LLVM_ARM;
+    case llvm::Triple::riscv64:
+    case llvm::Triple::ppc64le:
+      return triple.getArch() == host.getArch() ? std::optional(compiletime::Target::Object_LLVM_HOST) : std::nullopt;
+    default: return {};
+  }
+}
+
+inline std::string objectCPUFor(const llvm::Triple &triple, const std::string &cpu,
+                                const llvm::Triple &host = llvm::Triple(llvm::sys::getProcessTriple())) {
+  if (!cpu.empty()) return cpu;
+  if (triple.getArch() == host.getArch()) return "native";
+  switch (triple.getArch()) {
+    case llvm::Triple::x86_64: return "x86-64";
+    case llvm::Triple::aarch64:
+    case llvm::Triple::arm: return "generic";
+    default: return {};
+  }
+}
+
+inline bool objectTargetsCompatible(const llvm::Triple &source, const llvm::Triple &target) {
+  const auto sourceOS = source.getOS(), targetOS = target.getOS();
+  const bool sameOS = sourceOS == targetOS || (sourceOS == llvm::Triple::Darwin && targetOS == llvm::Triple::MacOSX)
+                      || (sourceOS == llvm::Triple::MacOSX && targetOS == llvm::Triple::Darwin);
+  return source.getArch() == target.getArch() && source.getObjectFormat() == target.getObjectFormat()
+         && source.getEnvironment() == target.getEnvironment() && sameOS;
+}
+
+inline bool objectLayoutsCompatible(const llvm::Module &source, const llvm::DataLayout &target) {
+  const auto &layout = source.getDataLayout();
+  llvm::SmallPtrSet<llvm::Type *, 32> visited;
+  std::function<bool(llvm::Type *)> visit = [&](llvm::Type *type) {
+    if (!visited.insert(type).second) return true;
+    if (const auto pointer = llvm::dyn_cast<llvm::PointerType>(type)) {
+      const auto addressSpace = pointer->getAddressSpace();
+      if (layout.getPointerSizeInBits(addressSpace) != target.getPointerSizeInBits(addressSpace)
+          || layout.getPointerABIAlignment(addressSpace) != target.getPointerABIAlignment(addressSpace)
+          || layout.getPointerPrefAlignment(addressSpace) != target.getPointerPrefAlignment(addressSpace))
+        return false;
+    } else if (type->isSized()
+               && (layout.getTypeStoreSize(type) != target.getTypeStoreSize(type)
+                   || layout.getTypeAllocSize(type) != target.getTypeAllocSize(type)
+                   || layout.getABITypeAlign(type) != target.getABITypeAlign(type)
+                   || layout.getPrefTypeAlign(type) != target.getPrefTypeAlign(type)))
+      return false;
+    for (auto *subtype : type->subtypes())
+      if (!visit(subtype)) return false;
+    return true;
+  };
+  for (auto *type : source.getIdentifiedStructTypes())
+    if (!visit(type)) return false;
+  for (const auto &global : source.globals())
+    if (!visit(global.getValueType())) return false;
+  for (const auto &function : source) {
+    if (!visit(function.getFunctionType())) return false;
+    for (const auto &instruction : llvm::instructions(function)) {
+      if (!visit(instruction.getType())) return false;
+      for (const auto &operand : instruction.operands())
+        if (!visit(operand->getType())) return false;
+    }
+  }
+  return true;
 }
 
 struct KernelObject {

@@ -43,11 +43,10 @@ static Opt<MatchedCall> errorCategory(const clang::CallExpr &call, const clang::
   if (call.getNumArgs() != 0 || !decl.isInStdNamespace()) return {};
   const static Map<std::string, uint64_t> categories{
       {"generic_category", 1}, {"system_category", 2}, {"iostream_category", 3}, {"future_category", 4}};
-  const auto it = categories.find(decl.getNameAsString());
-  if (it == categories.end()) return {};
-  const auto value = it->second;
+  const auto category = categories ^ get_maybe(decl.getNameAsString());
+  if (!category) return {};
   const auto resultType = call.getType();
-  return MatchedCall{Lowering{[value, resultType](Remapper &self, Remapper::RemapContext &r) {
+  return MatchedCall{Lowering{[value = *category, resultType](Remapper &self, Remapper::RemapContext &r) {
                        return Expr::Cast(Term::IntU64Const(value), self.handleType(resultType, r));
                      }},
                      false};

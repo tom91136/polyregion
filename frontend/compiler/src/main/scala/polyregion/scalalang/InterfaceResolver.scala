@@ -129,6 +129,12 @@ private[scalalang] object InterfaceResolver {
     case _ => None
   }
 
+  private def layoutsOf(tpe: p.Type): List[(p.Type, Int)] =
+    sizeOf(tpe).map(tpe -> _).toList ::: (tpe match {
+      case p.Type.Ptr(component, _) => layoutsOf(component)
+      case _                        => Nil
+    })
+
   def link(
       pack: p.Package,
       declaration: String,
@@ -144,7 +150,7 @@ private[scalalang] object InterfaceResolver {
       target.args.map(_.tpe),
       target.rtn
     )
-    val layouts = (target.args.map(_.tpe) :+ target.rtn).flatMap(tpe => sizeOf(tpe).map(tpe -> _)).toMap ++ typeSizes
+    val layouts = (target.args.map(_.tpe) :+ target.rtn).flatMap(layoutsOf).toMap ++ typeSizes
     for {
       resolution <- pack.index.resolve(call, callableDecls, capabilities, layouts)
       selected <- pack.program.functions.filter(_.decl == resolution.candidate.implementation) match {
