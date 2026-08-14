@@ -344,6 +344,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json implementationcandidate_to_json(const ImplementationCandidate &);
 [[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json packageindex_to_json(const PackageIndex &);
+[[nodiscard]] POLYREGION_EXPORT Package package_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json package_to_json(const Package &);
 namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
@@ -556,9 +558,9 @@ namespace Direction {
 [[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const std::vector<uint8_t> &);
 
-[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex &);
-[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const uint8_t *, const uint8_t *);
-[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const std::vector<uint8_t> &);
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> package_to_msgpack(const Package &);
+[[nodiscard]] POLYREGION_EXPORT Package package_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT Package package_from_msgpack(const std::vector<uint8_t> &);
 
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const uint8_t *, const uint8_t *);

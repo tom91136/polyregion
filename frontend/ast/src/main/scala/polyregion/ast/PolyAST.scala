@@ -501,6 +501,8 @@ object PolyAST {
     def meta(key: String): Option[String] = metadata.find(_.key == key).map(_.value)
   }
 
+  case class Package(index: PackageIndex, program: Program) derives MsgPack.Codec
+
   case class StructLayoutMember(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec
   case class StructLayout(
       name: String,

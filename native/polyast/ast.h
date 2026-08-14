@@ -34,7 +34,7 @@ Type::Struct typeOf(const StructDef &def);
 
 std::string repr(const CompileResult &);
 
-std::variant<std::string, PackageIndex> decodePackageIndex(const uint8_t *begin, const uint8_t *end) noexcept;
+std::variant<std::string, Package> decodePackage(const uint8_t *begin, const uint8_t *end) noexcept;
 std::variant<std::string, Program> decodeHashedProgram(const uint8_t *begin, const uint8_t *end) noexcept;
 
 Opt<Type::Any> extractComponent(const Type::Any &t);

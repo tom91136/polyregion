@@ -613,7 +613,7 @@ file(WRITE "${CMAKE_BINARY_DIR}/test-dist-CTestTestfile.cmake"
         "set(CTEST_TEST_LOAD 0)\n"
         "${_polyregion_test_entries}")
 install(TARGETS ${POLYREGION_TEST_BINARIES} RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
-install(TARGETS polycpp-library-package-fixture RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
+install(TARGETS polycpp-package-fixture RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(TARGETS polyreflect-rt LIBRARY DESTINATION lib RUNTIME DESTINATION bin COMPONENT test-dist EXCLUDE_FROM_ALL)
 install(DIRECTORY polycpp/test/ DESTINATION test/polycpp COMPONENT test-dist EXCLUDE_FROM_ALL
         FILES_MATCHING PATTERN "check_*.cpp" PATTERN "*.h")
@@ -625,4 +625,4 @@ install(DIRECTORY test-profiles/ DESTINATION test/profiles COMPONENT test-dist E
 install(FILES "${CMAKE_BINARY_DIR}/test-dist-CTestTestfile.cmake"
         DESTINATION . RENAME CTestTestfile.cmake COMPONENT test-dist EXCLUDE_FROM_ALL)
 get_property(_polyregion_test_discover_targets GLOBAL PROPERTY POLYREGION_TEST_DISCOVER_TARGETS)
-add_custom_target(polyregion-test-dist DEPENDS ${POLYREGION_TEST_BINARIES} polycpp-library-package-fixture ${_polyregion_test_discover_targets})
+add_custom_target(polyregion-test-dist DEPENDS ${POLYREGION_TEST_BINARIES} polycpp-package-fixture ${_polyregion_test_discover_targets})

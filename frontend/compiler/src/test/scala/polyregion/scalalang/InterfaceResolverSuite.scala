@@ -20,8 +20,10 @@ object LookalikeApi {
 
 class InterfaceResolverSuite extends munit.FunSuite {
 
-  override def afterEach(context: AfterEach): Unit =
+  override def afterEach(context: AfterEach): Unit = {
     System.clearProperty("polyregion.library.capabilities")
+    System.clearProperty("polyregion.library.path")
+  }
 
   test("read a generated interface identity") {
     assertEquals(InterfaceTestMacros.interfaceIdentityOf[FooApi.type], Some("foo" -> "bar.increment"))
@@ -34,6 +36,14 @@ class InterfaceResolverSuite extends munit.FunSuite {
   test("read configured library capabilities") {
     System.setProperty("polyregion.library.capabilities", " host,fast,,host ")
     assertEquals(InterfaceResolver.configuredCapabilities, Set("host", "fast"))
+  }
+
+  test("reject a package identity that escapes its configured root") {
+    System.setProperty("polyregion.library.path", System.getProperty("java.io.tmpdir"))
+    assertEquals(
+      InterfaceResolver.loadPackage("../outside").left.toOption,
+      Some(List("invalid package identity `../outside`"))
+    )
   }
 
   test("resolve, link and execute a scalar interface call") {
@@ -64,7 +74,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       body = List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       isEntry = true
     )
-    val pack = InterfaceResolver.LibraryPackage(
+    val pack = p.Package(
       p.PackageIndex(
         p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
         List(p.ImplementationCandidate(publicName, implementationDecl, Nil, Nil))
@@ -137,7 +147,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       i32,
       p.Function.Affinity.Host
     )
-    val pack = InterfaceResolver.LibraryPackage(
+    val pack = p.Package(
       p.PackageIndex(
         p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
         List(p.ImplementationCandidate(publicDecl.name, implementationDecl, Nil, Nil))
@@ -185,7 +195,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Function.FpMode.Relaxed,
       true
     )
-    val pack = InterfaceResolver.LibraryPackage(
+    val pack = p.Package(
       p.PackageIndex(
         p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
         List(p.ImplementationCandidate(publicDecl.name, implementation.decl, Nil, Nil))

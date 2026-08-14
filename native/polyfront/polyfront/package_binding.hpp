@@ -13,7 +13,7 @@
 
 #include "ast.h"
 
-namespace polyregion::polyfront::library {
+namespace polyregion::polyfront::package {
 
 using TypeBindings = std::map<std::string, polyast::Type::Any>;
 
@@ -362,4 +362,4 @@ inline Checked<Resolution> resolve(const polyast::PackageIndex &index, const pol
   return out;
 }
 
-} // namespace polyregion::polyfront::library
+} // namespace polyregion::polyfront::package

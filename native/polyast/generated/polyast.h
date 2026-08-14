@@ -852,6 +852,7 @@ struct InterfaceDef;
 struct TypeSizeConstraint;
 struct ImplementationCandidate;
 struct PackageIndex;
+struct Package;
 
 struct POLYREGION_EXPORT Sym {
   std::vector<std::string> fqn;
@@ -10186,6 +10187,42 @@ struct POLYREGION_EXPORT PackageIndex {
   PackageIndex(InterfaceDef interface, std::vector<ImplementationCandidate> candidates) noexcept;
 };
 
+struct POLYREGION_EXPORT Package {
+  PackageIndex index;
+  Program program;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT Package withIndex(const PackageIndex &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Package withProgram(const Program &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Package>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    index.collect_where<T, U>(results_, f);
+    program.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT Package modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, Package>) {
+      return f(*this);
+    }
+    return Package(index.modify_all<T>(f), program.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Package &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Package &) const;
+  Package(PackageIndex index, Program program) noexcept;
+};
+
 } // namespace polyregion::polyast
 #ifndef _MSC_VER
   #pragma clang diagnostic pop // ide google-explicit-constructor
@@ -12877,6 +12914,9 @@ template <> struct hash<polyregion::polyast::ImplementationCandidate> {
 };
 template <> struct hash<polyregion::polyast::PackageIndex> {
   std::size_t operator()(const polyregion::polyast::PackageIndex &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Package> {
+  std::size_t operator()(const polyregion::polyast::Package &) const noexcept;
 };
 
 } // namespace std

@@ -320,9 +320,9 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |[[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const uint8_t*, const uint8_t*);
           |[[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const std::vector<uint8_t>&);
           |
-          |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex&);
-          |[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const uint8_t*, const uint8_t*);
-          |[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_msgpack(const std::vector<uint8_t>&);
+          |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> package_to_msgpack(const Package&);
+          |[[nodiscard]] POLYREGION_EXPORT Package package_from_msgpack(const uint8_t*, const uint8_t*);
+          |[[nodiscard]] POLYREGION_EXPORT Package package_from_msgpack(const std::vector<uint8_t>&);
           |
           |[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef>&);
           |[[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const uint8_t*, const uint8_t*);
@@ -372,7 +372,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |
           |constexpr auto AdtHash = "$hash";
           |constexpr auto ProgramHash = "$programHash";
-          |constexpr auto PackageIndexHash = "$packageHash";
+          |constexpr auto PackageHash = "$packageHash";
           |
           |namespace {
           |
@@ -784,26 +784,26 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |  return hashed_program_from_msgpack(xs_.data(), xs_.data() + xs_.size());
           |}
           |
-          |std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex& x_) {
+          |std::vector<uint8_t> package_to_msgpack(const Package& x_) {
           |  return encodeInterned([&](MsgpackWriter& w_) {
           |    w_.writeArrayHeader(2);
-          |    w_.writeString(std::string(PackageIndexHash));
-          |    packageindex_to_msgpack(w_, x_);
+          |    w_.writeString(std::string(PackageHash));
+          |    package_to_msgpack(w_, x_);
           |  });
           |}
           |
-          |PackageIndex packageindex_from_msgpack(const uint8_t* begin_, const uint8_t* end_) {
+          |Package package_from_msgpack(const uint8_t* begin_, const uint8_t* end_) {
           |  return decodeMaybeInterned(begin_, end_, [](MsgpackReader& r_) {
           |    auto n_ = r_.readArrayHeader();
-          |    if(n_ != 2) throw std::runtime_error("Expected versioned PackageIndex array of size 2");
+          |    if(n_ != 2) throw std::runtime_error("Expected versioned Package array of size 2");
           |    auto hash_ = r_.readString();
-          |    if(hash_ != PackageIndexHash) throw std::runtime_error("Expecting PackageIndex hash to be " + std::string(PackageIndexHash) + ", but was " + hash_);
-          |    return packageindex_from_msgpack(r_);
+          |    if(hash_ != PackageHash) throw std::runtime_error("Expecting Package hash to be " + std::string(PackageHash) + ", but was " + hash_);
+          |    return package_from_msgpack(r_);
           |  });
           |}
           |
-          |PackageIndex packageindex_from_msgpack(const std::vector<uint8_t>& xs_) {
-          |  return packageindex_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+          |Package package_from_msgpack(const std::vector<uint8_t>& xs_) {
+          |  return package_from_msgpack(xs_.data(), xs_.data() + xs_.size());
           |}
           |
           |std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef>& xs_) {

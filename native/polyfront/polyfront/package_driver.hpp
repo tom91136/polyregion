@@ -6,9 +6,9 @@
 
 #include "aspartame/all.hpp"
 
-#include "polyfront/library_binding.hpp"
+#include "polyfront/package_binding.hpp"
 
-namespace polyregion::polyfront::library {
+namespace polyregion::polyfront::package {
 
 struct DriverPlan {
   polyast::Function driver;
@@ -168,4 +168,4 @@ inline Checked<DriverPlan> buildDriver(const std::string &name, const Resolution
   return out;
 }
 
-} // namespace polyregion::polyfront::library
+} // namespace polyregion::polyfront::package

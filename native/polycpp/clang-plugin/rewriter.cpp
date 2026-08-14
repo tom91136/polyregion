@@ -19,9 +19,9 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyfront/diag.hpp"
-#include "polyfront/library_driver.hpp"
-#include "polyfront/library_emit.hpp"
-#include "polyfront/library_package.hpp"
+#include "polyfront/package.hpp"
+#include "polyfront/package_driver.hpp"
+#include "polyfront/package_program.hpp"
 #include "polyregion/conventions.h"
 
 #include "ast.h"
@@ -120,8 +120,8 @@ static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::
 }
 
 static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C, const InterfaceSite &site,
-                              const polyfront::library::Package &package, LibraryBitcode &libraryBitcode) {
-  using namespace polyfront::library;
+                              const polyast::Package &package, DriverBitcode &driverBitcode) {
+  using namespace polyfront::package;
   auto &D = CI.getDiagnostics();
   Remapper remapper(C);
   Remapper::RemapContext context;
@@ -215,20 +215,22 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
     return;
   }
   const Program program(plan.value->driver, *closure.value, *defs.value, PassPhase::Initial(), {});
-  const auto compiled = polyfront::compileProgram(opts, program, compiletime::Target::Object_LLVM_HOST, "native",
-                                                  {"--host-mirroring", "--passes", "FullOpt(level=2)"});
+  const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
+  const auto compiled =
+      polyfront::compileProgram(opts, program, compiletime::Target::Object_LLVM_HOST, targetCPU.empty() ? "native" : targetCPU,
+                                {"--host-mirroring", "--passes", "FullOpt(level=2)"});
   if (const auto *error = std::get_if<std::string>(&compiled)) {
     emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", *error);
     return;
   }
   const auto &result = std::get<CompileResult>(compiled);
   if (!result.binary) {
-    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "library host driver compilation failed: %0",
-         result.messages);
+    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
+         POLYREGION_DIAG_POLYSTL "interface host driver compilation failed: %0", result.messages);
     return;
   }
 
-  libraryBitcode.emplace_back(*result.binary);
+  driverBitcode.emplace_back(*result.binary);
 
   auto &S = CI.getSema();
   std::vector<clang::QualType> driverTypes;
@@ -582,14 +584,14 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
 }
 
 OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
-                                               std::shared_ptr<LibraryBitcode> libraryBitcode)
-    : clang::ASTConsumer(), CI(CI), opts(opts), libraryBitcode(std::move(libraryBitcode)) {}
+                                               std::shared_ptr<DriverBitcode> driverBitcode)
+    : clang::ASTConsumer(), CI(CI), opts(opts), driverBitcode(std::move(driverBitcode)) {}
 
 namespace {
 struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
   std::vector<const clang::FunctionDecl *> exports;
   bool VisitFunctionDecl(clang::FunctionDecl *fd) {
-    if (fd->doesThisDeclarationHaveABody() && hasAnnotation(fd, polyfront::LibraryExportAnnotation)) exports.push_back(fd);
+    if (fd->doesThisDeclarationHaveABody() && hasAnnotation(fd, polyfront::PackageExportAnnotation)) exports.push_back(fd);
     return true;
   }
 };
@@ -603,8 +605,8 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     if (collector.exports.empty())
       emit(D, clang::DiagnosticsEngine::Warning,
            POLYREGION_DIAG_POLYSTL "-fstdpar-emit-library set but no [[clang::annotate(\"%0\")]] functions found",
-           polyfront::LibraryExportAnnotation);
-    compileLibrary(opts, C, D, collector.exports, opts.emitLibraryPath);
+           polyfront::PackageExportAnnotation);
+    compilePackageProgram(opts, C, D, collector.exports, opts.emitLibraryPath);
     return;
   }
   for (auto r : outlinePolyregionOffload(C))
@@ -659,12 +661,12 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                          || action == clang::frontend::EmitObj;
   if (!emitsCode) return;
   for (const auto &site : interfaceSites(C)) {
-    const auto package = polyfront::library::loadPackage(site.packageName, opts.libraryPath.empty()
-                                                                               ? polyfront::library::packageRoots()
-                                                                               : polyfront::library::splitPackageRoots(opts.libraryPath));
+    const auto package = polyfront::package::loadPackage(site.packageName, opts.libraryPath.empty()
+                                                                               ? polyfront::package::packageRoots()
+                                                                               : polyfront::package::splitPackageRoots(opts.libraryPath));
     if (!package)
       for (const auto &error : package.errors)
         emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
-    else bindInterfaceCall(opts, CI, C, site, *package.value, *libraryBitcode);
+    else bindInterfaceCall(opts, CI, C, site, *package.value, *driverBitcode);
   }
 }

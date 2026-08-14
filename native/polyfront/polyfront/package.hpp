@@ -1,7 +1,9 @@
 #pragma once
 
+#include <chrono>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "llvm/ADT/SmallString.h"
@@ -11,22 +13,16 @@
 
 #include "aspartame/all.hpp"
 
-#include "polyfront/library_binding.hpp"
+#include "polyfront/package_binding.hpp"
+#include "polyregion/env_keys.h"
 
 #include "ast.h"
 #include "polyast_codec.h"
 
-namespace polyregion::polyfront::library {
+namespace polyregion::polyfront::package {
 
-inline constexpr auto PackagePathEnv = "POLYREGION_LIBRARY_PATH";
-inline constexpr auto PackageIndexName = "index.polyast";
-inline constexpr auto PackageProgramName = "program.polyast";
-
-struct Package {
-  polyast::PackageIndex index;
-  polyast::Program program;
-  std::string directory;
-};
+inline constexpr auto PackagePathEnv = env::PolyfrontLibraryPath;
+inline constexpr auto PackageName = "lib.polyast";
 
 inline std::vector<std::string> splitPackageRoots(const std::string &value) {
 #ifdef _WIN32
@@ -42,58 +38,83 @@ inline std::vector<std::string> packageRoots() {
   return value && *value ? splitPackageRoots(value) : std::vector<std::string>{};
 }
 
-inline Checked<Package> loadPackage(const std::string &libraryName, const std::vector<std::string> &roots = packageRoots()) {
-  Checked<Package> out;
-  const auto found = roots | aspartame::collect([&](const auto &root) -> std::optional<std::string> {
-                       llvm::SmallString<256> directory(root);
-                       llvm::sys::path::append(directory, libraryName);
-                       llvm::SmallString<256> indexPath(directory), programPath(directory);
-                       llvm::sys::path::append(indexPath, PackageIndexName);
-                       llvm::sys::path::append(programPath, PackageProgramName);
-                       if (llvm::sys::fs::exists(indexPath) && llvm::sys::fs::exists(programPath)) return directory.str().str();
-                       return std::nullopt;
-                     })
-                     | aspartame::to_vector();
-  if (found.empty()) {
-    out.errors.emplace_back("no package is available for library `" + libraryName + "`");
+inline bool safePathComponent(const std::string &value) {
+  if (value.empty() || value == "." || value == ".." || value.back() == '.' || value.back() == ' ') return false;
+  if (!(value | aspartame::forall([](char x) {
+          const auto byte = static_cast<unsigned char>(x);
+          return byte >= 32 && byte != 127 && x != '/' && x != '\\' && x != '<' && x != '>' && x != ':' && x != '"' && x != '|' && x != '?'
+                 && x != '*';
+        })))
+    return false;
+  const auto base = llvm::StringRef(value).take_until([](char x) { return x == '.'; }).upper();
+  if (std::vector<std::string>{"CON", "PRN", "AUX", "NUL"} | aspartame::contains(base)) return false;
+  const auto baseRef = llvm::StringRef(base);
+  return !(base.size() == 4 && (baseRef.starts_with("COM") || baseRef.starts_with("LPT")) && base.back() >= '1' && base.back() <= '9');
+}
+
+inline Checked<polyast::Package> loadPackageFile(const std::string &path) {
+  Checked<polyast::Package> out;
+  auto buffer = llvm::MemoryBuffer::getFile(path);
+#ifdef _WIN32
+  for (size_t attempt = 1; !buffer && attempt < 50; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    buffer = llvm::MemoryBuffer::getFile(path);
+  }
+#endif
+  if (!buffer) {
+    out.errors.emplace_back("cannot read package `" + path + "`");
     return out;
   }
-  if (found.size() != 1) {
-    out.errors.emplace_back("library `" + libraryName + "` is ambiguous across " + std::to_string(found.size()) + " package roots");
+  const auto bytes = (*buffer)->getBuffer();
+  auto decoded = polyast::decodePackage(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+  if (const auto *error = std::get_if<std::string>(&decoded)) {
+    out.errors.emplace_back("cannot decode package: " + *error);
     return out;
   }
-  llvm::SmallString<256> indexPath(found.front()), programPath(found.front());
-  llvm::sys::path::append(indexPath, PackageIndexName);
-  llvm::sys::path::append(programPath, PackageProgramName);
-  auto indexBuffer = llvm::MemoryBuffer::getFile(indexPath);
-  auto programBuffer = llvm::MemoryBuffer::getFile(programPath);
-  if (!indexBuffer) out.errors.emplace_back("cannot read package index `" + indexPath.str().str() + "`");
-  if (!programBuffer) out.errors.emplace_back("cannot read package program `" + programPath.str().str() + "`");
-  if (!out.errors.empty()) return out;
-  const auto indexBytes = (*indexBuffer)->getBuffer();
-  const auto programBytes = (*programBuffer)->getBuffer();
-  auto decodedIndex = polyast::decodePackageIndex(reinterpret_cast<const uint8_t *>(indexBytes.begin()),
-                                                  reinterpret_cast<const uint8_t *>(indexBytes.end()));
-  if (const auto *error = std::get_if<std::string>(&decodedIndex)) {
-    out.errors.emplace_back("cannot decode package index: " + *error);
-    return out;
-  }
-  auto index = std::get<polyast::PackageIndex>(std::move(decodedIndex));
-  if (symbol(index.interface.name) != libraryName) {
-    out.errors.emplace_back("package identity differs: expected `" + libraryName + "`, got `" + symbol(index.interface.name) + "`");
-    return out;
-  }
-  auto decodedProgram = polyast::decodeHashedProgram(reinterpret_cast<const uint8_t *>(programBytes.begin()),
-                                                     reinterpret_cast<const uint8_t *>(programBytes.end()));
-  if (const auto *error = std::get_if<std::string>(&decodedProgram)) {
-    out.errors.emplace_back("cannot decode package program: " + *error);
-    return out;
-  }
-  out.value = Package{std::move(index), std::get<polyast::Program>(std::move(decodedProgram)), found.front()};
+  out.value = std::get<polyast::Package>(std::move(decoded));
   return out;
 }
 
-inline Checked<polyast::Function> implementation(const Package &package, const Resolution &resolution) {
+inline Checked<polyast::Package> loadPackage(const std::string &packageName, const std::vector<std::string> &roots = packageRoots()) {
+  Checked<polyast::Package> out;
+  if (!safePathComponent(packageName)) {
+    out.errors.emplace_back("invalid package identity `" + packageName + "`");
+    return out;
+  }
+  const auto find = [&] {
+    return roots | aspartame::collect([&](const auto &root) -> std::optional<std::string> {
+             llvm::SmallString<256> path(root);
+             llvm::sys::path::append(path, packageName, PackageName);
+             return llvm::sys::fs::is_regular_file(path) ? std::optional(path.str().str()) : std::nullopt;
+           })
+           | aspartame::to_vector();
+  };
+  auto found = find();
+#ifdef _WIN32
+  for (size_t attempt = 1; found.empty() && attempt < 50; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    found = find();
+  }
+#endif
+  if (found.empty()) {
+    out.errors.emplace_back("no package is available for library `" + packageName + "`");
+    return out;
+  }
+  if (found.size() != 1) {
+    out.errors.emplace_back("library `" + packageName + "` is ambiguous across " + std::to_string(found.size()) + " package roots");
+    return out;
+  }
+  auto package = loadPackageFile(found.front());
+  if (!package) return package;
+  if (symbol(package.value->index.interface.name) != packageName) {
+    out.errors.emplace_back("package identity differs: expected `" + packageName + "`, got `" + symbol(package.value->index.interface.name)
+                            + "`");
+    return out;
+  }
+  return package;
+}
+
+inline Checked<polyast::Function> implementation(const polyast::Package &package, const Resolution &resolution) {
   Checked<polyast::Function> out;
   const auto matches = package.program.functions
                        | aspartame::filter([&](const auto &fn) { return fn.decl == resolution.candidate.implementation; })
@@ -105,7 +126,7 @@ inline Checked<polyast::Function> implementation(const Package &package, const R
   return out;
 }
 
-inline Checked<std::vector<polyast::Function>> bindImplementationClosure(const Package &package, const Resolution &resolution,
+inline Checked<std::vector<polyast::Function>> bindImplementationClosure(const polyast::Package &package, const Resolution &resolution,
                                                                          const std::vector<polyast::Function> &callables = {}) {
   using namespace polyast;
   Checked<std::vector<Function>> out;
@@ -159,14 +180,16 @@ inline Checked<std::vector<polyast::Function>> bindImplementationClosure(const P
   return out;
 }
 
-inline Checked<std::vector<polyast::StructDef>> bindStructClosure(const Package &package, const std::vector<polyast::Function> &functions,
+inline Checked<std::vector<polyast::StructDef>> bindStructClosure(const polyast::Package &package,
+                                                                  const std::vector<polyast::Function> &functions,
                                                                   const std::vector<polyast::StructDef> &callerDefs = {}) {
   using namespace polyast;
   Checked<std::vector<StructDef>> out;
-  std::vector<Sym> frontier;
-  for (const auto &function : functions)
-    for (const auto &tpe : function.collect_all<Type::Struct>())
-      frontier.emplace_back(tpe.name);
+  auto frontier = functions | aspartame::flat_map([](const auto &function) {
+                    return function.template collect_all<Type::Struct>() | aspartame::map([](const auto &tpe) { return tpe.name; })
+                           | aspartame::to_vector();
+                  })
+                  | aspartame::to_vector();
   std::set<std::string> reached;
   std::vector<StructDef> defs;
   while (!frontier.empty()) {
@@ -193,4 +216,4 @@ inline Checked<std::vector<polyast::StructDef>> bindStructClosure(const Package 
   return out;
 }
 
-} // namespace polyregion::polyfront::library
+} // namespace polyregion::polyfront::package

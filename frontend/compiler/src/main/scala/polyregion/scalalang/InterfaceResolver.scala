@@ -6,11 +6,10 @@ import polyregion.ast.{MsgPack, PolyAST as p, *, given}
 import polyregion.scalalang.generated.PolyASTWireSchema
 
 import java.nio.file.{Files, Path, Paths}
+import java.util.Locale
 import scala.util.control.NonFatal
 
 private[scalalang] object InterfaceResolver {
-
-  final case class LibraryPackage(index: p.PackageIndex, program: p.Program)
 
   private def configured(name: String, property: String): Option[String] =
     Option(System.getenv(name)).orElse(Option(System.getProperty(property))).map(_.trim).filter(_.nonEmpty)
@@ -18,6 +17,15 @@ private[scalalang] object InterfaceResolver {
   def configuredCapabilities: Set[String] =
     configured("POLYFRONT_LIBRARY_CAPABILITIES", "polyregion.library.capabilities")
       .fold(Set.empty[String])(_.split(',').iterator.map(_.trim).filter(_.nonEmpty).toSet)
+
+  private def safePathComponent(value: String): Boolean = {
+    val invalid = "\\/<>:\"|?*"
+    val base    = value.takeWhile(_ != '.').toUpperCase(Locale.ROOT)
+    value.nonEmpty && value != "." && value != ".." && !value.endsWith(".") && !value.endsWith(" ") &&
+    value.forall(ch => ch >= ' ' && ch != 127 && !invalid.contains(ch)) &&
+    !Set("CON", "PRN", "AUX", "NUL")(base) &&
+    !(base.length == 4 && (base.startsWith("COM") || base.startsWith("LPT")) && base.last >= '1' && base.last <= '9')
+  }
 
   private def decode[A: MsgPack.Codec](path: Path, expectedHash: String): Either[List[String], A] =
     try
@@ -36,28 +44,28 @@ private[scalalang] object InterfaceResolver {
       case NonFatal(error) => Left(List(s"cannot read package file `$path`: ${error.getMessage}"))
     }
 
-  def loadPackage(packageName: String): Either[List[String], LibraryPackage] = {
+  def loadPackage(packageName: String): Either[List[String], p.Package] = {
+    if (!safePathComponent(packageName)) return Left(List(s"invalid package identity `$packageName`"))
     val roots = configured("POLYFRONT_LIBRARY_PATH", "polyregion.library.path").toList
       .flatMap(_.split(java.io.File.pathSeparator).toList)
       .filter(_.nonEmpty)
     val matches = roots
-      .map(Paths.get(_).resolve(packageName))
-      .filter(path =>
-        Files.isRegularFile(path.resolve("index.polyast")) && Files.isRegularFile(path.resolve("program.polyast"))
-      )
+      .map(Paths.get(_).resolve(packageName).resolve("lib.polyast"))
+      .filter(Files.isRegularFile(_))
     matches match {
       case Nil         => Left(List(s"no library package is available for interface `$packageName`"))
       case _ :: _ :: _ => Left(List(s"interface `$packageName` is ambiguous across ${matches.size} package roots"))
-      case directory :: Nil =>
+      case path :: Nil =>
         for {
-          index   <- decode[p.PackageIndex](directory.resolve("index.polyast"), PolyASTWireSchema.PackageIndexHash)
-          program <- decode[p.Program](directory.resolve("program.polyast"), PolyASTWireSchema.ProgramHash)
+          pack <- decode[p.Package](path, PolyASTWireSchema.PackageHash)
           _ <- Either.cond(
-            index.interface.name.fqn.mkString(".") == packageName,
+            pack.index.interface.name.fqn.mkString(".") == packageName,
             (),
-            List(s"package identity differs: expected `$packageName`, got `${index.interface.name.fqn.mkString(".")}`")
+            List(
+              s"package identity differs: expected `$packageName`, got `${pack.index.interface.name.fqn.mkString(".")}`"
+            )
           )
-        } yield LibraryPackage(index, program)
+        } yield pack
     }
   }
 
@@ -122,7 +130,7 @@ private[scalalang] object InterfaceResolver {
   }
 
   def link(
-      pack: LibraryPackage,
+      pack: p.Package,
       declaration: String,
       target: p.Expr.Invoke,
       callableDecls: List[p.FunctionDecl] = Nil,

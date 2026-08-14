@@ -15,8 +15,8 @@
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
-#include "polyfront/library_driver.hpp"
-#include "polyfront/library_package.hpp"
+#include "polyfront/package.hpp"
+#include "polyfront/package_driver.hpp"
 
 #include "remapper.h"
 
@@ -25,7 +25,7 @@ namespace {
 using namespace aspartame;
 using namespace mlir;
 using namespace polyregion;
-using polyfront::library::Checked;
+using polyfront::package::Checked;
 
 constexpr llvm::StringLiteral InterfacePrefix = "polyregion_interface:";
 constexpr llvm::StringLiteral InterfaceCallee = "_QPpolyregion_interface";
@@ -120,7 +120,7 @@ Checked<std::string> writeBitcode(const std::vector<int8_t> &bytes) {
 void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::DiagnosticsEngine &diag, ModuleOp &module,
                                                                  const polyfront::Options &opts, std::vector<std::string> &bitcodeFiles) {
   using namespace polyast;
-  using namespace polyfront::library;
+  using namespace polyfront::package;
 
   std::vector<std::pair<func::FuncOp, Identity>> sites;
   module.walk([&](func::FuncOp function) {

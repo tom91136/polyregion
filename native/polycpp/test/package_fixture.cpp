@@ -6,8 +6,8 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "polyfront/library_emit.hpp"
-#include "polyfront/library_package.hpp"
+#include "polyfront/package.hpp"
+#include "polyfront/package_program.hpp"
 
 #include "ast.h"
 #include "polyast_codec.h"
@@ -99,17 +99,16 @@ int main(int argc, char **argv) {
                                    ImplementationCandidate(applyName, applyImplementationDecl, {}, {}),
                                    ImplementationCandidate(combineName, combineImplementationDecl, {}, {}),
                                    ImplementationCandidate(capableName, capableImplementationDecl, {"demo"}, {})});
-  const auto program = polyregion::polyfront::libraryProgram(
+  const auto program = polyregion::polyfront::packageProgram(
       {implementation, copyImplementation, applyImplementation, combineImplementation, capableImplementation}, {});
 
-  llvm::SmallString<256> indexPath(directory), programPath(directory);
-  llvm::sys::path::append(indexPath, polyregion::polyfront::library::PackageIndexName);
-  llvm::sys::path::append(programPath, polyregion::polyfront::library::PackageProgramName);
-  const auto bytes = packageindex_to_msgpack(index);
+  llvm::SmallString<256> path(directory);
+  llvm::sys::path::append(path, polyregion::polyfront::package::PackageName);
+  const auto bytes = package_to_msgpack(Package(index, program));
   std::error_code ec;
-  llvm::raw_fd_ostream out(indexPath, ec, llvm::sys::fs::OF_None);
+  llvm::raw_fd_ostream out(path, ec, llvm::sys::fs::OF_None);
   if (ec) return 4;
   out.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
   out.close();
-  return std::holds_alternative<std::error_code>(polyregion::polyfront::writeProgramMsgpack(program, programPath.str().str())) ? 5 : 0;
+  return out.has_error() ? 5 : 0;
 }

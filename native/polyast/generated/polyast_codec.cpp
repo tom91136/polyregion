@@ -8,9 +8,9 @@
 #include <unordered_map>
 #include <utility>
 
-constexpr auto AdtHash = "1003764515119cfd2b763a8b72998bce";
+constexpr auto AdtHash = "4f13ee6dcd5f5d0dcd0e4cf9ed641cd2";
 constexpr auto ProgramHash = "1330d953c1f1fc11b41203660d349da7";
-constexpr auto PackageIndexHash = "785ab7aa7a56bde2f46122ba401780aa";
+constexpr auto PackageHash = "4f13ee6dcd5f5d0dcd0e4cf9ed641cd2";
 
 namespace {
 
@@ -3563,6 +3563,18 @@ json packageindex_to_json(const PackageIndex &x_) {
   }
   return json::array({interface, candidates});
 }
+
+Package package_from_json(const json &j_) {
+  auto index = packageindex_from_json(j_.at(0));
+  auto program = program_from_json(j_.at(1));
+  return {index, program};
+}
+
+json package_to_json(const Package &x_) {
+  auto index = packageindex_to_json(x_.index);
+  auto program = program_to_json(x_.program);
+  return json::array({index, program});
+}
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
@@ -4194,6 +4206,10 @@ PackageIndex packageindex_fields_from_msgpack(MsgpackReader &, size_t);
 void packageindex_fields_to_msgpack(MsgpackWriter &, const PackageIndex &);
 PackageIndex packageindex_from_msgpack(MsgpackReader &);
 void packageindex_to_msgpack(MsgpackWriter &, const PackageIndex &);
+Package package_fields_from_msgpack(MsgpackReader &, size_t);
+void package_fields_to_msgpack(MsgpackWriter &, const Package &);
+Package package_from_msgpack(MsgpackReader &);
+void package_to_msgpack(MsgpackWriter &, const Package &);
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
 void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
@@ -11421,6 +11437,28 @@ void packageindex_to_msgpack(MsgpackWriter &w_, const PackageIndex &x_) {
   packageindex_fields_to_msgpack(w_, x_);
 }
 
+Package package_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Package with 2 field(s)");
+  auto index = packageindex_from_msgpack(r_);
+  auto program = program_from_msgpack(r_);
+  return {index, program};
+}
+
+void package_fields_to_msgpack(MsgpackWriter &w_, const Package &x_) {
+  packageindex_to_msgpack(w_, x_.index);
+  program_to_msgpack(w_, x_.program);
+}
+
+Package package_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return package_fields_from_msgpack(r_, n_);
+}
+
+void package_to_msgpack(MsgpackWriter &w_, const Package &x_) {
+  w_.writeArrayHeader(2);
+  package_fields_to_msgpack(w_, x_);
+}
+
 static void structdefs_value_to_msgpack(MsgpackWriter &w_, const std::vector<StructDef> &xs_) {
   w_.writeArrayHeader(xs_.size());
   for (const auto &x_ : xs_)
@@ -11468,28 +11506,25 @@ Program hashed_program_from_msgpack(const std::vector<uint8_t> &xs_) {
   return hashed_program_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
 
-std::vector<uint8_t> packageindex_to_msgpack(const PackageIndex &x_) {
+std::vector<uint8_t> package_to_msgpack(const Package &x_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
-    w_.writeString(std::string(PackageIndexHash));
-    packageindex_to_msgpack(w_, x_);
+    w_.writeString(std::string(PackageHash));
+    package_to_msgpack(w_, x_);
   });
 }
 
-PackageIndex packageindex_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+Package package_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
   return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
     auto n_ = r_.readArrayHeader();
-    if (n_ != 2) throw std::runtime_error("Expected versioned PackageIndex array of size 2");
+    if (n_ != 2) throw std::runtime_error("Expected versioned Package array of size 2");
     auto hash_ = r_.readString();
-    if (hash_ != PackageIndexHash)
-      throw std::runtime_error("Expecting PackageIndex hash to be " + std::string(PackageIndexHash) + ", but was " + hash_);
-    return packageindex_from_msgpack(r_);
+    if (hash_ != PackageHash) throw std::runtime_error("Expecting Package hash to be " + std::string(PackageHash) + ", but was " + hash_);
+    return package_from_msgpack(r_);
   });
 }
 
-PackageIndex packageindex_from_msgpack(const std::vector<uint8_t> &xs_) {
-  return packageindex_from_msgpack(xs_.data(), xs_.data() + xs_.size());
-}
+Package package_from_msgpack(const std::vector<uint8_t> &xs_) { return package_from_msgpack(xs_.data(), xs_.data() + xs_.size()); }
 
 std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
   return encodeInterned([&](MsgpackWriter &w_) { structdefs_value_to_msgpack(w_, xs_); });

@@ -142,13 +142,13 @@ else ()
     add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource)
 endif ()
 
-add_executable(polycpp-library-package-fixture test/library_package_fixture.cpp)
-target_include_directories(polycpp-library-package-fixture SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
-target_link_libraries(polycpp-library-package-fixture PRIVATE polyfront-options PolyAST Aspartame::Aspartame)
-polyregion_apply_common_options(polycpp-library-package-fixture)
+add_executable(polycpp-package-fixture test/package_fixture.cpp)
+target_include_directories(polycpp-package-fixture SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+target_link_libraries(polycpp-package-fixture PRIVATE polyfront-options PolyAST Aspartame::Aspartame)
+polyregion_apply_common_options(polycpp-package-fixture)
 
 add_executable(polycpp-tests test/test_all.cpp)
-add_dependencies(polycpp-tests polycpp polystl polycpp-library-package-fixture)
+add_dependencies(polycpp-tests polycpp polystl polycpp-package-fixture)
 target_include_directories(polycpp-tests PRIVATE
         ../include
         polystl
@@ -188,7 +188,7 @@ polytest_configure_suite(polycpp-tests
         LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>"
         INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
         GLOB "check_*.cpp"
-        PACKAGE_FIXTURE "$<TARGET_FILE:polycpp-library-package-fixture>"
+        PACKAGE_FIXTURE "$<TARGET_FILE:polycpp-package-fixture>"
         RECURSIVE
         TEST_FILES_OUT _polycpp_test_files)
 

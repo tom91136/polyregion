@@ -1043,7 +1043,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
   if (const auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
     if (cxxRecord->getNumVBases() != 0) {
-      if (!emitLibraryMode)
+      if (!emitPackageProgramMode)
         raise(fmt::format("Unsupported virtual base in {} at {} (a shared base subobject has no place in the flattened record layout)",
                           name, decl->getLocation().printToString(context.getSourceManager())));
       const auto sizeInBytes = context.getTypeSizeInChars(context.getCanonicalTagType(decl)).getQuantity();
@@ -1761,7 +1761,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::ExprWithCleanups *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
       // dropping the binding drops the destructor call, so only pass through when destruction is a no-op
       [&](const clang::CXXBindTemporaryExpr *expr) -> Expr::Any {
-        if (!emitLibraryMode && !destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl()))
+        if (!emitPackageProgramMode && !destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl()))
           raise(fmt::format("Unsupported temporary of type {} at {} (dropping it would drop its destructor's effects)",
                             expr->getType().getAsString(), expr->getBeginLoc().printToString(context.getSourceManager())));
         return handleExpr(expr->getSubExpr(), r);
@@ -1839,7 +1839,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                           expr->getBeginLoc().printToString(context.getSourceManager())));
       },
       [&](const clang::CXXThrowExpr *expr) -> Expr::Any {
-        if (emitLibraryMode) return Expr::Alias(Term::Unit0Const());
+        if (emitPackageProgramMode) return Expr::Alias(Term::Unit0Const());
         const auto loc = expr->getBeginLoc().printToString(context.getSourceManager());
         const auto sub = expr->getSubExpr();
         if (!sub) {
@@ -3072,7 +3072,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             Opt<Cleanup> cleanup;
 
             if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
-                rd && !emitLibraryMode && !isStdExceptionRecord(rd) && !destroysWithoutEffect(rd)) {
+                rd && !emitPackageProgramMode && !isStdExceptionRecord(rd) && !destroysWithoutEffect(rd)) {
               const auto reject = [&](const std::string &why) {
                 raise(fmt::format("Unsupported local {} of type {} at {} ({}, so its destructor's effects would be lost)", declName(var),
                                   var->getType().getAsString(), var->getLocation().printToString(context.getSourceManager()), why));
@@ -3329,7 +3329,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::NullStmt *stmt) {}, [&](const clang::AttributedStmt *stmt) { handleStmt(stmt->getSubStmt(), r); },
       [&](const clang::CXXTryStmt *stmt) {
-        if (emitLibraryMode) return handleStmt(stmt->getTryBlock(), r);
+        if (emitPackageProgramMode) return handleStmt(stmt->getTryBlock(), r);
         auto composedWhats = mayThrowComposedStdExceptions(stmt->getTryBlock());
         auto body = r.scoped([&](RemapContext &rb) {
           rb.tryFrame = rb.cleanups.size();

@@ -4716,6 +4716,18 @@ POLYREGION_EXPORT bool PackageIndex::operator==(const PackageIndex &rhs) const {
   return (interface == rhs.interface) && (candidates == rhs.candidates);
 }
 
+Package::Package(PackageIndex index, Program program) noexcept : index(std::move(index)), program(std::move(program)) {}
+size_t Package::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Package Package::withIndex(const PackageIndex &v_) const { return Package(v_, program); }
+Package Package::withProgram(const Program &v_) const { return Package(index, v_); }
+POLYREGION_EXPORT bool Package::operator!=(const Package &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool Package::operator==(const Package &rhs) const { return (index == rhs.index) && (program == rhs.program); }
+
 } // namespace polyregion::polyast
 
 std::size_t std::hash<polyregion::polyast::Sym>::operator()(const polyregion::polyast::Sym &x) const noexcept { return x.hash_code(); }
@@ -5497,5 +5509,8 @@ std::hash<polyregion::polyast::ImplementationCandidate>::operator()(const polyre
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::PackageIndex>::operator()(const polyregion::polyast::PackageIndex &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Package>::operator()(const polyregion::polyast::Package &x) const noexcept {
   return x.hash_code();
 }

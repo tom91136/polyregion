@@ -14,9 +14,9 @@ using std::string;
 
 using namespace aspartame;
 
-std::variant<std::string, PackageIndex> polyregion::polyast::decodePackageIndex(const uint8_t *begin, const uint8_t *end) noexcept {
+std::variant<std::string, Package> polyregion::polyast::decodePackage(const uint8_t *begin, const uint8_t *end) noexcept {
   try {
-    return packageindex_from_msgpack(begin, end);
+    return package_from_msgpack(begin, end);
   } catch (const std::exception &e) {
     return std::string(e.what());
   }

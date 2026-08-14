@@ -19,7 +19,7 @@ using polyregion::raise;
 
 struct Remapper {
   clang::ASTContext &context;
-  bool emitLibraryMode = false;
+  bool emitPackageProgramMode = false;
   mutable Map<std::string, Set<std::string>> readOnlyMembers{};
   struct BitFieldInfo {
     Named storage;

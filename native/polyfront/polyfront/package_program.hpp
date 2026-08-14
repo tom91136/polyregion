@@ -12,12 +12,12 @@
 
 namespace polyregion::polyfront {
 
-inline constexpr auto LibraryRootName = "__library_root";
-inline constexpr auto LibraryExportAnnotation = "polyregion_export";
+inline constexpr auto PackageRootName = "__package_root";
+inline constexpr auto PackageExportAnnotation = "polyregion_export";
 
-inline polyast::Program libraryProgram(std::vector<polyast::Function> functions, std::vector<polyast::StructDef> defs) {
+inline polyast::Program packageProgram(std::vector<polyast::Function> functions, std::vector<polyast::StructDef> defs) {
   using namespace polyast::dsl;
-  auto root = function(LibraryRootName, {}, polyast::Type::Unit0(), polyast::FunctionVisibility::Internal())({ret()});
+  auto root = function(PackageRootName, {}, polyast::Type::Unit0(), polyast::FunctionVisibility::Internal())({ret()});
   return polyast::Program(std::move(root), std::move(functions), std::move(defs), polyast::PassPhase::Initial(), {});
 }
 
@@ -27,7 +27,8 @@ inline std::variant<std::error_code, size_t> writeProgramMsgpack(const polyast::
   llvm::raw_fd_ostream out(path, ec, llvm::sys::fs::OF_None);
   if (ec) return ec;
   out.write(reinterpret_cast<const char *>(data.data()), data.size());
-  out.flush();
+  out.close();
+  if (out.has_error()) return out.error();
   return data.size();
 }
 

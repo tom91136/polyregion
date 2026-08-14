@@ -1111,7 +1111,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
 
   if (!opts.emitLibraryPath.empty()) {
     DataLayout L(m);
-    compileLibrary(diag, opts, m, L, opts.emitLibraryPath);
+    compilePackageProgram(diag, opts, m, L, opts.emitLibraryPath);
     return;
   }
 

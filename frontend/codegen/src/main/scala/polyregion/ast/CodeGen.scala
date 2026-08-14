@@ -172,23 +172,12 @@ private[polyregion] object CodeGen {
       :: deriveStruct[CompileResult]()
       :: Nil
 
-  private def astPackageDependencies: List[StructNode] =
-    deriveStruct[Function.Visibility]()
-      :: deriveStruct[Function.Affinity]()
-      :: deriveStruct[Arg.Access]()
-      :: deriveStruct[Arg.SizeExpr]()
-      :: deriveStruct[Arg.Extent]()
-      :: deriveStruct[Arg.Boundary]()
-      :: deriveStruct[Arg]()
-      :: deriveStruct[FunctionDecl]()
-      :: deriveStruct[MetaEntry]()
-      :: Nil
-
   private def astPackageStructs: List[StructNode] =
     deriveStruct[InterfaceDef]()
       :: deriveStruct[TypeSizeConstraint]()
       :: deriveStruct[ImplementationCandidate]()
       :: deriveStruct[PackageIndex]()
+      :: deriveStruct[Package]()
       :: Nil
 
   private def generateAstBindings() = {
@@ -196,8 +185,8 @@ private[polyregion] object CodeGen {
     println("Generating C++ mirror for PolyAST...")
 
     val programStructs = astCoreStructs ::: astProgramStructs
-    val packageStructs = astCoreStructs ::: astPackageDependencies ::: astPackageStructs
-    val structs        = programStructs ::: astPackageStructs
+    val packageStructs = programStructs ::: astPackageStructs
+    val structs        = packageStructs
 
     val (reprProtos, reprImpls): (String, String) = compiletime.generateReprSource[PolyAST.type]
 
@@ -312,8 +301,8 @@ private[polyregion] object CodeGen {
            |
            |@Generated(Array("polyregion.ast.CodeGen"))
            |private[scalalang] object PolyASTWireSchema {
-           |  inline val ProgramHash      = "$programHash"
-           |  inline val PackageIndexHash = "$packageHash"
+           |  inline val ProgramHash = "$programHash"
+           |  inline val PackageHash = "$packageHash"
            |}
            |""".stripMargin
       )
@@ -325,7 +314,7 @@ private[polyregion] object CodeGen {
 
   def programVersioned(x: Program)            = MsgPack.Versioned(programHash, x)
   def structDefsVersioned(x: List[StructDef]) = MsgPack.Versioned(programHash, x)
-  def packageVersioned(x: PackageIndex)       = MsgPack.Versioned(packageHash, x)
+  def packageVersioned(x: Package)            = MsgPack.Versioned(packageHash, x)
 
   private def writeConventions(): Unit = {
     val target = Paths.get("../native/common/generated/polyregion/conventions.h").toAbsolutePath.normalize
