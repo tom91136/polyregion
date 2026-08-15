@@ -39,6 +39,54 @@ using namespace aspartame;
 
 namespace {
 
+constexpr static llvm::StringLiteral packageExportPrefix = "polyregion_export:";
+
+struct PackageExportIdentity {
+  std::optional<Sym> name;
+  bool invalid;
+};
+
+static PackageExportIdentity packageExportIdentity(const clang::FunctionDecl *decl, const clang::ASTContext &context,
+                                                   clang::DiagnosticsEngine &diag) {
+  bool legacy = false;
+  bool invalid = false;
+  Vector<Sym> explicitNames;
+  for (const auto *attr : decl->attrs()) {
+    const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+    if (!annotation) continue;
+    const auto value = annotation->getAnnotation();
+    if (value == polyfront::PackageExportAnnotation) {
+      legacy = true;
+      continue;
+    }
+    if (!value.starts_with(packageExportPrefix)) continue;
+    const auto parts = value.drop_front(packageExportPrefix.size()).str() ^ split('.');
+    if (parts.empty() || parts ^ exists([](const auto &part) { return part.empty(); })) {
+      emit(diag, annotation->getLocation(), clang::DiagnosticsEngine::Level::Error,
+           POLYREGION_DIAG_POLYSTL "Malformed package export identity: %0", value.str());
+      invalid = true;
+    } else {
+      explicitNames.emplace_back(parts);
+    }
+  }
+
+  const auto names = explicitNames | distinct() | to_vector();
+  if (names.size() > 1) {
+    emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
+         POLYREGION_DIAG_POLYSTL "Conflicting package export identities: %0",
+         names | map([](const auto &name) { return repr(name); }) | mk_string(", "));
+    invalid = true;
+  }
+  if (invalid) return {{}, true};
+  if (!names.empty()) return {names.front(), false};
+  if (!legacy) return {{}, false};
+
+  std::string qualified;
+  llvm::raw_string_ostream out(qualified);
+  decl->getNameForDiagnostic(out, context.getPrintingPolicy(), /*Qualified*/ true);
+  return {Sym({qualified}), false};
+}
+
 template <typename F> class InlineMatchCallback final : public clang::ast_matchers::MatchFinder::MatchCallback {
   F f;
   void run(const clang::ast_matchers::MatchFinder::MatchResult &result) override { f(result); }
@@ -599,9 +647,19 @@ OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, cons
 
 namespace {
 struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
-  std::vector<const clang::FunctionDecl *> exports;
+  clang::ASTContext &context;
+  clang::DiagnosticsEngine &diag;
+  std::vector<PackageExport> exports;
+  bool invalid = false;
+
+  ExportCollector(clang::ASTContext &context, clang::DiagnosticsEngine &diag) : context(context), diag(diag) {}
+
   bool VisitFunctionDecl(clang::FunctionDecl *fd) {
-    if (fd->doesThisDeclarationHaveABody() && hasAnnotation(fd, polyfront::PackageExportAnnotation)) exports.push_back(fd);
+    if (fd->doesThisDeclarationHaveABody()) {
+      const auto identity = packageExportIdentity(fd, context, diag);
+      invalid |= identity.invalid;
+      if (identity.name) exports.push_back({fd, *identity.name});
+    }
     return true;
   }
 };
@@ -610,8 +668,9 @@ struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   auto &D = CI.getDiagnostics();
   if (!opts.emitLibraryPath.empty()) {
-    ExportCollector collector;
+    ExportCollector collector(C, D);
     collector.TraverseDecl(C.getTranslationUnitDecl());
+    if (collector.invalid) return;
     if (collector.exports.empty())
       emit(D, clang::DiagnosticsEngine::Warning,
            POLYREGION_DIAG_POLYSTL "-fstdpar-emit-library set but no [[clang::annotate(\"%0\")]] functions found",

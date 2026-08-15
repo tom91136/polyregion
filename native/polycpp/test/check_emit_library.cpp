@@ -1,9 +1,11 @@
 #pragma region case: exports
 #pragma region offload-only
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -DCHECK_KIND=0 -c -o {output}.o {input}
+#pragma region do: polycpp --polyc {output}.polyast --emit-ast --export=foo.implementation.exportedA -p DeadFunctionElimination -o {output}.export.polyast
+#pragma region do: polycpp --polyc {output}.export.polyast -p DeadFunctionElimination --target=host -O0 -o {output}.export.o
 #pragma region do: polycpp --polyc {output}.polyast --list-exports
-#pragma region requires@0: exportedA
-#pragma region requires@1: exportedB
+#pragma region requires@0: exportedB
+#pragma region requires@1: foo.implementation.exportedA
 
 #pragma region case: virtual-base
 #pragma region offload-only
@@ -62,6 +64,7 @@
 #include "test_utils.h"
 
 #define POLYREGION_EXPORT_FN [[clang::annotate("polyregion_export")]]
+#define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 
 struct Effect {
   int *sink;
@@ -86,7 +89,7 @@ static int helper(const int x) { return x * 2; }
 static int unrelated(const int x) { return x + 1; }
 
 #if CHECK_KIND == 0
-POLYREGION_EXPORT_FN int exportedA(const int x) { return helper(x) + 1; }
+POLYREGION_EXPORT_AS("foo.implementation.exportedA") int exportedA(const int x) { return x <= 0 ? 0 : exportedA(x - 1) + 1; }
 POLYREGION_EXPORT_FN int exportedB(const int x) { return helper(x) + 2; }
 #elif CHECK_KIND == 1
 POLYREGION_EXPORT_FN int relaxed(Diamond *d) { return d == nullptr ? 0 : 1; }

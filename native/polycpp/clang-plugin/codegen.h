@@ -12,6 +12,11 @@
 
 namespace polyregion::polystl {
 
+struct PackageExport {
+  const clang::FunctionDecl *decl;
+  polyregion::polyast::Sym name;
+};
+
 polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
                                       clang::ASTContext &C,                //
                                       clang::DiagnosticsEngine &diag,      //
@@ -20,9 +25,9 @@ polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
                                       const clang::SourceLocation &loc,    //
                                       runtime::PlatformKind kind);
 
-void compilePackageProgram(const polyfront::Options &opts,                          //
-                           clang::ASTContext &C,                                    //
-                           clang::DiagnosticsEngine &diag,                          //
-                           const std::vector<const clang::FunctionDecl *> &exports, //
+void compilePackageProgram(const polyfront::Options &opts,            //
+                           clang::ASTContext &C,                      //
+                           clang::DiagnosticsEngine &diag,            //
+                           const std::vector<PackageExport> &exports, //
                            const std::string &outPath);
 } // namespace polyregion::polystl

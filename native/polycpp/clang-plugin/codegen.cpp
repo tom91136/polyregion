@@ -205,31 +205,51 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                  mir.bitcode, mir.mirrorId, asserts};
 }
 
-void polystl::compilePackageProgram(const polyfront::Options &opts,                          //
-                                    clang::ASTContext &C,                                    //
-                                    clang::DiagnosticsEngine &diag,                          //
-                                    const std::vector<const clang::FunctionDecl *> &exports, //
+void polystl::compilePackageProgram(const polyfront::Options &opts,            //
+                                    clang::ASTContext &C,                      //
+                                    clang::DiagnosticsEngine &diag,            //
+                                    const std::vector<PackageExport> &exports, //
                                     const std::string &outPath) {
   Remapper remapper(C);
   remapper.emitPackageProgramMode = true;
   Remapper::RemapContext r;
+  Map<Sym, Sym> exportNames;
 
-  for (const auto *decl : exports) {
-    auto [name, fn] = remapper.handleCall(decl, r);
+  for (const auto &[decl, exportName] : exports) {
+    auto fn = remapper.handleCall(decl, r).second;
+    exportNames.emplace(fn->decl.name, exportName);
     fn->visibility = FunctionVisibility::Exported();
-    std::string qn;
-    {
-      llvm::raw_string_ostream os(qn);
-      decl->getNameForDiagnostic(os, C.getPrintingPolicy(), /*Qualified*/ true);
-    }
-    fn->decl.name = Sym({qn});
+    fn->decl.name = exportName;
     if (opts.verbose)
       emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Exporting package symbol: %0",
-           name);
+           repr(exportName));
   }
 
-  const auto program = polyfront::packageProgram(r.functions | values() | map([](const auto &x) { return std::move(*x); }) | to_vector(),
-                                                 r.structs | values() | map([](const auto &x) { return std::move(*x); }) | to_vector());
+  const auto functions =
+      r.functions //
+      | values()  //
+      | map([&](const auto &x) {
+          return x->template modify_all<Type::FnRef>([&](const auto &ref) {
+            return exportNames ^ get_maybe(ref.name) ^ map([&](const auto &name) { return ref.withName(name); }) ^ get_or_else(ref);
+          });
+        }) //
+      | to_vector();
+  Set<Sym> functionNames;
+  const auto duplicateName = functions | collect_first([&](const auto &fn) -> Opt<Sym> {
+                               if (functionNames.emplace(fn.decl.name).second) return {};
+                               return fn.decl.name;
+                             });
+  if (duplicateName) {
+    const auto site = exports | collect_first([&](const auto &x) -> Opt<const clang::FunctionDecl *> {
+                        if (x.name == *duplicateName) return x.decl;
+                        return {};
+                      });
+    emit(diag, site ? (*site)->getBeginLoc() : clang::SourceLocation{}, clang::DiagnosticsEngine::Level::Error,
+         POLYREGION_DIAG_POLYSTL "Duplicate package function identity: %0", repr(*duplicateName));
+    return;
+  }
+  const auto program =
+      polyfront::packageProgram(functions, r.structs | values() | map([](const auto &x) { return std::move(*x); }) | to_vector());
 
   polyfront::writeProgramMsgpack(program, outPath) //
       ^ foreach_total(
