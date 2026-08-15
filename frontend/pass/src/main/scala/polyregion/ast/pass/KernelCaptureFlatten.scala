@@ -3,6 +3,19 @@ package polyregion.ast.pass
 import polyregion.ast.{Log, PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+// makes global pointer fields embedded in an offload capture explicit kernel arguments, rewriting both the
+// kernel body and every direct or remote launch site to keep the constrained buffer ABI in sync. scalar
+// capture fields stay in the aggregate; an escaped by-value subobject is copied locally and its pointer
+// fields patched from the explicit arguments before use
+// examples:
+//   kernel(cap){ cap.data[i] }          ->  kernel(cap, #ptr){ #ptr[i] }
+//   launch(kernel, cap)                 ->  launch(kernel, cap, cap.data)
+//   kernel(cap){ copy = cap.view }      ->  copy = cap.view; copy.data = #ptr  (then use copy)
+// edge cases:
+//   scalar-only capture                ->  unchanged
+//   module/term captures               ->  retain their flattened call/launch order ahead of ordinary args
+//   overloaded remote kernel           ->  selected by substituted effective parameter types
+//   nested pointer graph / union / slot mutation / unsupported escape  ->  rejected
 object KernelCaptureFlatten extends ProgramPass {
 
   override def phase: p.PassPhase = p.PassPhase.PostMono
@@ -10,7 +23,7 @@ object KernelCaptureFlatten extends ProgramPass {
   private final case class Leaf(path: List[p.PathStep], tpe: p.Type.Ptr)
   private final case class Binding(leaf: Leaf, arg: p.Arg)
   private final case class Repair(path: List[p.PathStep], tpe: p.Type.Struct, local: p.Named)
-  private final case class Plan(capture: p.Named, captureIndex: Int, bindings: List[Binding], repairs: List[Repair])
+  private final case class Plan(capture: p.Named, bindings: List[Binding], repairs: List[Repair])
 
   private def fail(kernel: p.Function, message: String): Nothing =
     throw RuntimeException(s"KernelCaptureFlatten: kernel ${kernel.name.repr}: $message")
@@ -86,15 +99,40 @@ object KernelCaptureFlatten extends ProgramPass {
 
     val allFunctions = program.entry :: program.functions
     val calls        = allFunctions.flatMap(_.collectWhere[p.Expr] { case call: p.Expr.Invoke => call })
-    val called       = calls.flatMap(_.calleeSym).toSet
-    val byName       = allFunctions.groupBy(_.name)
+    val launches = allFunctions.flatMap(
+      _.collectWhere[p.Expr] { case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) => launch }
+    )
+    val byName = allFunctions.groupBy(_.name)
+
+    def launchParameters(kernel: p.Function, tpeArgs: List[p.Type]): List[p.Arg] = {
+      val env = kernel.tpeVars.zip(tpeArgs).toMap
+      (kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args)
+        .map(arg => arg.copy(named = arg.named.copy(tpe = subst(arg.named.tpe, env))))
+        .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
+    }
+
+    def launchTarget(launch: p.Spec.RemoteLaunch): Option[p.Function] = launch.kernel.tpe match {
+      case p.Type.FnRef(name) =>
+        val matches = byName.getOrElse(name, Nil).filter { candidate =>
+          val parameters = launchParameters(candidate, launch.tpeArgs)
+          candidate.affinity == p.Function.Affinity.Offload &&
+          candidate.receiver.isEmpty &&
+          candidate.rtn == p.Type.Unit0 &&
+          candidate.tpeVars.size == launch.tpeArgs.size &&
+          parameters.map(_.named.tpe) == launch.args.map(_.tpe)
+        }
+        matches match {
+          case kernel :: Nil => Some(kernel)
+          case Nil           => None
+          case _ =>
+            throw RuntimeException(s"KernelCaptureFlatten: launch of ${name.repr} matches multiple function bodies")
+        }
+      case _ => None
+    }
 
     def buildPlan(kernel: p.Function): Option[Plan] = captureRoot(kernel) match {
       case None => None
       case Some((capture, captureStruct)) =>
-        val params       = kernel.receiver.toList ::: kernel.args
-        val captureIndex = params.indexWhere(_.named == capture)
-        if (captureIndex < 0) fail(kernel, s"capture ${capture.symbol} is absent from the effective kernel parameters")
         val leaves = leavesOf(kernel, captureStruct)
         if (leaves.isEmpty) None
         else {
@@ -152,19 +190,24 @@ object KernelCaptureFlatten extends ProgramPass {
             val tpe = select.tpe.asInstanceOf[p.Type.Struct]
             Repair(select.steps, tpe, p.Named(s"#capture_copy_$index", tpe))
           }
-          Option.when(bindings.nonEmpty)(Plan(capture, captureIndex, bindings, repairs))
+          Option.when(bindings.nonEmpty)(Plan(capture, bindings, repairs))
         }
     }
 
-    val plans: Map[p.Sym, Plan] = called.flatMap { name =>
+    val directlyCalled = calls.flatMap(_.calleeSym).toSet.flatMap { name =>
       byName.getOrElse(name, Nil) match {
-        case kernel :: Nil if kernel.affinity == p.Function.Affinity.Offload => buildPlan(kernel).map(name -> _)
+        case kernel :: Nil if kernel.affinity == p.Function.Affinity.Offload => List(kernel)
         case Nil                                                             => Nil
         case _ :: Nil                                                        => Nil
         case _ =>
           throw RuntimeException(s"KernelCaptureFlatten: called kernel ${name.repr} has multiple function bodies")
       }
-    }.toMap
+    }
+    val launchTargets = launches.flatMap(launchTarget)
+    val plans: Map[p.FunctionDecl, Plan] =
+      (directlyCalled ++ launchTargets).flatMap(kernel => buildPlan(kernel).map(kernel.decl -> _)).toMap
+    val directPlans: Map[p.Sym, (p.Function, Plan)] =
+      directlyCalled.flatMap(kernel => plans.get(kernel.decl).map(plan => kernel.name -> (kernel, plan))).toMap
 
     def rewriteKernel(kernel: p.Function, plan: Plan): p.Function = {
       def rewriteTerm(term: p.Term): p.Term = term match {
@@ -215,29 +258,49 @@ object KernelCaptureFlatten extends ProgramPass {
       )
     }
 
+    def extractedArgs(
+        kernel: p.Function,
+        plan: Plan,
+        parameters: List[p.Arg],
+        arguments: List[p.Term],
+        transport: String
+    ): List[p.Term] = {
+      val expected = parameters.size
+      if (arguments.size != expected)
+        fail(kernel, s"$transport has ${arguments.size} arguments but kernel has $expected effective parameters")
+      val captureIndex = parameters.indexWhere(_.named == plan.capture)
+      if (captureIndex < 0)
+        fail(kernel, s"capture ${plan.capture.symbol} is absent from the effective kernel parameters")
+      val captureArg = arguments(captureIndex) match {
+        case select: p.Term.Select => select
+        case other                 => fail(kernel, s"$transport capture argument ${other.repr} is not a Select")
+      }
+      plan.bindings.map(binding =>
+        p.Term.Select(captureArg.root, captureArg.steps ::: binding.leaf.path, binding.leaf.tpe): p.Term
+      )
+    }
+
     def rewriteCalls(owner: p.Function): p.Function = owner.modifyAll[p.Expr] {
-      case call: p.Expr.Invoke if call.calleeSym.exists(plans.contains) =>
-        val name     = call.calleeSym.get
-        val plan     = plans(name)
-        val kernel   = byName(name).head
-        val params   = call.receiver.toList ::: call.args
-        val expected = kernel.receiver.size + kernel.args.size
-        if (params.size != expected)
-          fail(kernel, s"call has ${params.size} arguments but kernel has $expected effective parameters")
-        val captureArg = params(plan.captureIndex) match {
-          case select: p.Term.Select => select
-          case other                 => fail(kernel, s"call capture argument ${other.repr} is not a Select")
+      case call: p.Expr.Invoke if call.calleeSym.exists(directPlans.contains) =>
+        val (kernel, plan) = directPlans(call.calleeSym.get)
+        val params         = call.receiver.toList ::: call.args
+        val parameters     = kernel.receiver.toList ::: kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args
+        call.copy(args = call.args ::: extractedArgs(kernel, plan, parameters, params, "call"))
+      case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) =>
+        launchTarget(launch).flatMap(kernel => plans.get(kernel.decl).map(kernel -> _)) match {
+          case Some((kernel, plan)) =>
+            val parameters = launchParameters(kernel, launch.tpeArgs)
+            p.Expr.SpecOp(
+              launch.copy(args = launch.args ::: extractedArgs(kernel, plan, parameters, launch.args, "launch"))
+            )
+          case None => p.Expr.SpecOp(launch)
         }
-        val extracted = plan.bindings.map(binding =>
-          p.Term.Select(captureArg.root, captureArg.steps ::: binding.leaf.path, binding.leaf.tpe): p.Term
-        )
-        call.copy(args = call.args ::: extracted)
       case expr => expr
     }
 
-    val entry = rewriteCalls(plans.get(program.entry.name).fold(program.entry)(rewriteKernel(program.entry, _)))
+    val entry = rewriteCalls(plans.get(program.entry.decl).fold(program.entry)(rewriteKernel(program.entry, _)))
     val functions = program.functions.map(function =>
-      rewriteCalls(plans.get(function.name).fold(function)(rewriteKernel(function, _)))
+      rewriteCalls(plans.get(function.decl).fold(function)(rewriteKernel(function, _)))
     )
     if (plans.nonEmpty)
       log.info(

@@ -5,6 +5,20 @@ import scala.collection.mutable
 import polyregion.ast.{Log, PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+// emulates fixed-width subgroup operations with workgroup-local scratch and barriers for targets without
+// native subgroup support. subgroup size/lane become constants and local-id arithmetic; shuffles, votes and
+// ballots exchange scalar or aggregate leaves through scratch sized to the configured workgroup ceiling
+// examples:
+//   subgroupSize()             ->  width
+//   laneIdx()                  ->  localIdx(0) & (width - 1)
+//   shuffleDown(x, delta)      ->  scratch[localIdx] = x; barrier; scratch[subgroupBase + lane + delta]
+//   voteAny(p) / voteAll(p)    ->  one predicate slot per subgroup, reduced by its lanes
+//   ballot(p)                  ->  one predicate slot per workgroup lane, packed into an i32 mask
+// edge cases:
+//   source outside subgroup/workgroup  ->  shuffle retains the calling lane's value
+//   aggregate shuffle                  ->  one scratch buffer per scalar leaf
+//   nested control flow                ->  exchange barriers stay at the operation site
+//   width / maxGroupSize               ->  require a power-of-two width <= 32 and a divisible ceiling
 case class SubgroupLower(width: Int = 32, maxGroupSize: Int = 1024) extends ProgramPass derives PassArgCodec {
   override def phase: p.PassPhase = p.PassPhase.PostMono
 

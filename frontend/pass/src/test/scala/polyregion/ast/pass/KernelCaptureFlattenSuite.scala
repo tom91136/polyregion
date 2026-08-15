@@ -87,13 +87,15 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     val capDef = p.StructDef(capSym, Nil, List(named("data", i32p)), Nil)
     val capArg = named(p.Conventions.CaptureArg, capPtr)
     val data   = p.Term.Select(capArg, List(p.PathStep.Field("data")), i32p)
+    val module = arg("module", p.Type.IntU32)
     val kernel = fn(
       "argumentKernel",
       body = List(
         p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true
+      isEntry = true,
+      moduleCaptures = List(module)
     ).modifyDecl(_.copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
     val fired   = named("fired", p.Type.Unit0)
@@ -102,7 +104,15 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(capture, None, isMutable = true),
         p.Stmt.Var(
           fired,
-          Some(p.Expr.Invoke(p.Type.FnRef(kernel.name), Nil, None, List(selectT(capture)), p.Type.Unit0)),
+          Some(
+            p.Expr.Invoke(
+              p.Type.FnRef(kernel.name),
+              Nil,
+              None,
+              List(p.Term.IntU32Const(7), selectT(capture)),
+              p.Type.Unit0
+            )
+          ),
           isMutable = false
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
@@ -119,6 +129,121 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     assertEquals(outKernel.args.map(_.named.tpe), List[p.Type](capPtr, i32p))
     assertEquals(
       outCall.args,
+      List[p.Term](
+        p.Term.IntU32Const(7),
+        selectT(capture),
+        p.Term.Select(capture, List(p.PathStep.Field("data")), i32p)
+      )
+    )
+  }
+
+  test("extracts pointer leaves from a specialised remote launch") {
+    val capSym = sym("RemoteCapture")
+    val capTpe = p.Type.Struct(capSym, Nil)
+    val capPtr = p.Type.Ptr(capTpe, global)
+    val capDef = p.StructDef(capSym, Nil, List(named("data", i32p)), Nil)
+    val capArg = named(p.Conventions.CaptureArg, capPtr)
+    val data   = p.Term.Select(capArg, List(p.PathStep.Field("data")), i32p)
+    val kernel = fn(
+      "remoteKernel",
+      body = List(
+        p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      ),
+      isEntry = true,
+      moduleCaptures = List(arg("moduleA", p.Type.IntU32), arg("moduleB", p.Type.IntU64))
+    ).modifyDecl(
+      _.copy(
+        tpeVars = List("T"),
+        args = List(arg("erased", p.Type.Var("T")), p.Arg(capArg)),
+        affinity = p.Function.Affinity.Offload
+      )
+    )
+    val capture = named("capture", capPtr)
+    val context = p.Term.NullPtrConst(p.Type.IntU8, global, p.Region.Opaque)
+    val one     = p.Term.IntU32Const(1)
+    val launch = p.Spec.RemoteLaunch(
+      context,
+      p.Term.Poison(p.Type.FnRef(kernel.name)),
+      List(p.Type.Unit0),
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      List(p.Term.IntU32Const(7), p.Term.IntU64Const(8), selectT(capture))
+    )
+    val caller = entry(
+      body = List(
+        p.Stmt.Var(capture, None, isMutable = true),
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
+
+    val out       = KernelCaptureFlatten(Specialisation(program(caller, List(kernel), List(capDef)), NoopLog), NoopLog)
+    val outKernel = out.functions.head
+    val outLaunch = out.entry.collectWhere[p.Expr] { case p.Expr.SpecOp(x: p.Spec.RemoteLaunch) => x }.head
+
+    assertEquals(outKernel.args.map(_.named.tpe), List[p.Type](p.Type.Unit0, capPtr, i32p))
+    assertEquals(
+      outLaunch.args,
+      List[p.Term](
+        p.Term.IntU32Const(7),
+        p.Term.IntU64Const(8),
+        selectT(capture),
+        p.Term.Select(capture, List(p.PathStep.Field("data")), i32p)
+      )
+    )
+  }
+
+  test("resolves a remote kernel overload before flattening its capture") {
+    val capSym = sym("OverloadedCapture")
+    val capTpe = p.Type.Struct(capSym, Nil)
+    val capPtr = p.Type.Ptr(capTpe, global)
+    val capDef = p.StructDef(capSym, Nil, List(named("data", i32p)), Nil)
+    val capArg = named(p.Conventions.CaptureArg, capPtr)
+    val data   = p.Term.Select(capArg, List(p.PathStep.Field("data")), i32p)
+    val selected = fn(
+      "overloadedKernel",
+      body = List(
+        p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    ).modifyDecl(_.copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload))
+    val other = fn("overloadedKernel", args = List(arg("value", p.Type.IntS32)))
+      .modifyDecl(_.copy(affinity = p.Function.Affinity.Offload))
+    val capture = named("capture", capPtr)
+    val context = p.Term.NullPtrConst(p.Type.IntU8, global, p.Region.Opaque)
+    val one     = p.Term.IntU32Const(1)
+    val launch = p.Spec.RemoteLaunch(
+      context,
+      p.Term.Poison(p.Type.FnRef(selected.name)),
+      Nil,
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      List(selectT(capture))
+    )
+    val caller = entry(
+      body = List(
+        p.Stmt.Var(capture, None, isMutable = true),
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
+
+    val out = KernelCaptureFlatten(program(caller, List(selected, other), List(capDef)), NoopLog)
+
+    assertEquals(out.functions.map(_.args.map(_.named.tpe)), List(List(capPtr, i32p), List(p.Type.IntS32)))
+    assertEquals(
+      out.entry.collectWhere[p.Expr] { case p.Expr.SpecOp(x: p.Spec.RemoteLaunch) => x }.head.args,
       List[p.Term](selectT(capture), p.Term.Select(capture, List(p.PathStep.Field("data")), i32p))
     )
   }
