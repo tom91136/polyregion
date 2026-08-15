@@ -3,8 +3,11 @@
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
@@ -110,24 +113,26 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
   const Program p(entry, {}, {}, PassPhase::Initial(), {});
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
 
-  const auto result = polyregion::compiler::compile(p, {Target::Object_LLVM_ARM, "cortex-a7"}, OptLevel::O0);
-  REQUIRE(result.binary);
-  const auto &ir = llvmIrOf(result);
-  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare i32 @polyrt_remote_malloc(ptr, i32)"));
-  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_memcpy(ptr, i32, i32, i32, i32)"));
-  CHECK_THAT(
-      ir, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_launch(ptr, ptr, ptr, i32, i32, i32, i32, i32, i32, i32, i32"));
-  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_free(ptr, i32)"));
+  const auto checkAbi = [&](const auto &result, const std::string &sizeType) {
+    REQUIRE(result.binary);
+    const auto &ir = llvmIrOf(result);
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare {} @polyrt_remote_malloc(ptr, {})", sizeType, sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
+                       fmt::format("declare void @polyrt_remote_memcpy(ptr, {}, {}, {}, i32)", sizeType, sizeType, sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
+                       fmt::format("declare void @polyrt_remote_launch(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare void @polyrt_remote_free(ptr, {})", sizeType)));
+    if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
+  };
 
-  const auto result64 = polyregion::compiler::compile(p, {Target::Object_LLVM_x86_64, "x86-64"}, OptLevel::O0);
-  REQUIRE(result64.binary);
-  const auto &ir64 = llvmIrOf(result64);
-  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("declare i64 @polyrt_remote_malloc(ptr, i64)"));
-  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_memcpy(ptr, i64, i64, i64, i32)"));
-  CHECK_THAT(
-      ir64, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_launch(ptr, ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i64"));
-  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("declare void @polyrt_remote_free(ptr, i64)"));
-  CHECK_THAT(ir64, Catch::Matchers::ContainsSubstring("zext i32"));
+  checkAbi(polyregion::compiler::compile(p, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0), sizeof(void *) == 4 ? "i32" : "i64");
+
+  auto armTriple = llvm::Triple(llvm::sys::getProcessTriple());
+  armTriple.setArch(llvm::Triple::arm);
+  std::string targetError;
+  if (llvm::TargetRegistry::lookupTarget("", armTriple, targetError)) {
+    checkAbi(polyregion::compiler::compile(p, {Target::Object_LLVM_ARM, "cortex-a7"}, OptLevel::O0), "i32");
+  } else WARN("ARM target is unavailable in this LLVM distribution: " << targetError);
 }
 
 TEST_CASE("C source bounds local names and retains source names on request", "[backend]") {
