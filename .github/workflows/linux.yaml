@@ -24,6 +24,11 @@ jobs:
     steps:
       - uses: &checkout actions/checkout@v6
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gfortran
+
       - &setup-java
         name: Setup JDK + sbt cache
         uses: actions/setup-java@v5
