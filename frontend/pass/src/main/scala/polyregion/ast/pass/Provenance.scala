@@ -82,9 +82,20 @@ object Provenance {
         f.termCaptures.map(_.named)).map(n => n.symbol -> n).toMap
     val parameters =
       (f.receiver.toList ::: f.args ::: f.moduleCaptures ::: f.termCaptures).map(_.named)
+    val localStorage = statements.collect { case p.Stmt.Var(n, _, _) => n.symbol }.toSet
     val initial = parameters.collect {
       case n if isPtr(n.tpe) => n -> p.Region.Rooted(n)
     }.toMap -> Map.empty[Slot, p.Region]
+
+    def joinInFunction(x: p.Region, y: p.Region): p.Region = (x, y) match {
+      // Function-local variables denote private storage even when an inlined generic helper left a stale Global
+      // annotation on their aggregate type. A conditional choice between such addresses is still a real pointer,
+      // never a capture-arena byte offset.
+      case (p.Region.Rooted(a), p.Region.Rooted(b))
+          if localStorage(a.symbol) && localStorage(b.symbol) && !isPtr(a.tpe) && !isPtr(b.tpe) =>
+        x
+      case _ => joinRegions(x, y)
+    }
 
     def transfer(state: State, stmt: p.Stmt): State = {
       val (m, slots) = state
@@ -155,7 +166,7 @@ object Provenance {
       }
       def join(n: p.Named, r: p.Region): Map[p.Named, p.Region] = {
         val existing = m.get(n).orElse(m.collectFirst { case (named, region) if named.symbol == n.symbol => region })
-        m.filterNot(_._1.symbol == n.symbol) + (n -> existing.fold(r)(joinRegions(_, r)))
+        m.filterNot(_._1.symbol == n.symbol) + (n -> existing.fold(r)(joinInFunction(_, r)))
       }
       def updateEncoded(n: p.Named, e: p.Expr): Map[p.Named, p.Region] =
         if (!trackEncoded) m
@@ -166,7 +177,7 @@ object Provenance {
             case None                                                => m
           }
       def joinSlot(key: Slot, r: p.Region): Map[Slot, p.Region] =
-        slots.updated(key, slots.get(key).fold(r)(joinRegions(_, r)))
+        slots.updated(key, slots.get(key).fold(r)(joinInFunction(_, r)))
       def copySlots(
           target: p.Named,
           targetPrefix: List[p.PathStep],
@@ -186,7 +197,7 @@ object Provenance {
         (targetPaths ++ copied.keySet).foldLeft(slots) { (acc, path) =>
           val key      = target.symbol -> path
           val incoming = copied.getOrElse(path, p.Region.Opaque)
-          acc.updated(key, acc.get(key).fold(incoming)(joinRegions(_, incoming)))
+          acc.updated(key, acc.get(key).fold(incoming)(joinInFunction(_, incoming)))
         }
       }
       stmt match {
@@ -209,7 +220,7 @@ object Provenance {
       val (lm, ls) = left
       val (rm, rs) = right
       def joinOptional(l: Option[p.Region], r: Option[p.Region]): p.Region =
-        l.zip(r).map(joinRegions).getOrElse(p.Region.Opaque)
+        l.zip(r).map(joinInFunction).getOrElse(p.Region.Opaque)
       val names = (lm.keysIterator ++ rm.keysIterator).map(n => n.symbol -> n).toMap
       val regions = names.valuesIterator.map { n =>
         val l = lm.collectFirst { case (named, region) if named.symbol == n.symbol => region }
