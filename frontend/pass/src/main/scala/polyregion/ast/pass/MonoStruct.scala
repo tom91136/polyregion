@@ -19,42 +19,82 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
   override def apply(program: p.Program, log: Log): (Map[p.Sym, p.Sym], p.Program) = {
 
-    val structsInFunction: List[p.Type.Struct] =
-      (program.entry :: program.functions)
-        .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s })
-        .distinct
+    val rootStructs: List[p.Type.Struct] =
+      ((program.entry :: program.functions).flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s }) ++
+        program.defs
+          .filter(_.tpeVars.isEmpty)
+          .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s })).distinct
 
     val sdefByName = program.defs.map(d => d.name -> d).toMap
 
-    log.info("uses", structsInFunction.map(_.repr)*)
-    log.info("defs", program.defs.map(_.repr)*)
-    val monoStructDefs = for {
-      sdef   <- program.defs
-      struct <- structsInFunction
-      if struct.name == sdef.name
-      table = sdef.tpeVars.zip(struct.args).toMap
-    } yield struct -> p.StructDef(
-      name = p.Sym(struct.monomorphicName),
-      tpeVars = Nil,
-      members = sdef.members.modifyAll[p.Type](
-        _.mapLeaf {
-          case p.Type.Var(name) => table(name)
-          case x                => x
-        }
-      ),
-      parents = sdef.parents,
-      isUnion = sdef.isUnion
-    )
+    def instantiate(struct: p.Type.Struct): Option[p.StructDef] = sdefByName.get(struct.name).map { sdef =>
+      val table = sdef.tpeVars.zip(struct.args).toMap
+      def subst(t: p.Type, env: Map[String, p.Type] = table): p.Type = t match {
+        case variable @ p.Type.Var(name)     => env.getOrElse(name, variable)
+        case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(subst(_, env)))
+        case p.Type.Ptr(comp, space)         => p.Type.Ptr(subst(comp, env), space)
+        case p.Type.Arr(comp, length, space) => p.Type.Arr(subst(comp, env), length, space)
+        case p.Type.Exec(tpeVars, args, rtn) =>
+          val nested = env -- tpeVars
+          p.Type.Exec(tpeVars, args.map(subst(_, nested)), subst(rtn, nested))
+        case x => x
+      }
+      def substStruct(struct: p.Type.Struct): p.Type.Struct = subst(struct) match {
+        case result: p.Type.Struct => result
+        case _ => throw AssertionError(s"struct substitution changed ${struct.repr} to a non-struct type")
+      }
+      p.StructDef(
+        name = if sdef.tpeVars.isEmpty then sdef.name else p.Sym(struct.monomorphicName),
+        tpeVars = Nil,
+        members = sdef.members.map(member => member.copy(tpe = subst(member.tpe))),
+        parents = sdef.parents.map(substStruct),
+        isUnion = sdef.isUnion
+      )
+    }
 
-    val nameTable = monoStructDefs.map((s, sdef) => s.name -> sdef.name).toMap
-    val replacementTable =
-      monoStructDefs
-        .map((s, sdef) =>
-          s -> sdef.copy(parents = sdef.parents.flatMap { parent =>
-            nameTable.get(parent.name).map(newName => p.Type.Struct(newName, Nil))
-          })
+    case class Pending(struct: p.Type.Struct, ancestry: Map[p.Sym, List[p.Type.Struct]])
+
+    def typeComplexity(tpe: p.Type): Int = tpe match {
+      case p.Type.Struct(_, args)    => 1 + args.map(typeComplexity).sum
+      case p.Type.Ptr(comp, _)       => 1 + typeComplexity(comp)
+      case p.Type.Arr(comp, _, _)    => 1 + typeComplexity(comp)
+      case p.Type.Exec(_, args, rtn) => 1 + args.map(typeComplexity).sum + typeComplexity(rtn)
+      case _                         => 1
+    }
+
+    @annotation.tailrec
+    def closeStructs(
+        pending: List[Pending],
+        seen: Set[p.Type.Struct] = Set.empty,
+        result: List[p.Type.Struct] = Nil
+    ): List[p.Type.Struct] = pending match {
+      case Nil                                        => result
+      case Pending(struct, _) :: tail if seen(struct) => closeStructs(tail, seen, result)
+      case Pending(struct, ancestry) :: tail =>
+        val history = ancestry.getOrElse(struct.name, Nil)
+        history.takeRight(2) match {
+          case previousPrevious :: previous :: Nil
+              if typeComplexity(struct) > typeComplexity(previous) &&
+                typeComplexity(previous) > typeComplexity(previousPrevious) =>
+            throw IllegalStateException(
+              s"MonoStruct detected expanding polymorphic recursion in ${struct.name.repr}: " +
+                s"${previousPrevious.repr} -> ${previous.repr} -> ${struct.repr}"
+            )
+          case _ => ()
+        }
+        val nestedAncestry = ancestry.updated(struct.name, history :+ struct)
+        val dependencies = instantiate(struct).toList.flatMap(
+          _.collectWhere[p.Type] { case dependency: p.Type.Struct => dependency }
         )
-        .toMap
+        closeStructs(tail ::: dependencies.map(Pending(_, nestedAncestry)), seen + struct, result :+ struct)
+    }
+
+    val structUses = closeStructs(rootStructs.map(Pending(_, Map.empty)))
+
+    log.info("uses", structUses.map(_.repr)*)
+    log.info("defs", program.defs.map(_.repr)*)
+    val monoStructDefs   = structUses.flatMap(struct => instantiate(struct).map(struct -> _))
+    val replacementTable = monoStructDefs.toMap
 
     log.info("rename table", replacementTable.map((k, v) => s"${k.repr} => ${v.repr}").toSeq*)
 
@@ -83,30 +123,28 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
       case p.Type.Arr(c, l, s) => p.Type.Arr(doReplacement(c), l, s)
       case a                   => a
     }
+    def replaceStruct(struct: p.Type.Struct): p.Type.Struct = doReplacement(struct) match {
+      case result: p.Type.Struct => result
+      case _ => throw AssertionError(s"struct replacement changed ${struct.repr} to a non-struct type")
+    }
 
     val rootStructDefs = monoStructDefs
       .map(_._2)
-      .map(s => s.copy(members = s.members.modifyAll[p.Type](doReplacement(_))))
+      .map(s =>
+        s.copy(
+          members = s.members.modifyAll[p.Type](doReplacement(_)),
+          parents = s.parents.map(replaceStruct)
+        )
+      )
 
-    val referencedStructDefs = rootStructDefs
-      .collectWhere[p.Type] { t =>
-        def findLeafStructDefs(t: p.Type): List[p.StructDef] = t match {
-          case p.Type.Struct(name, xs) =>
-            xs.flatMap(findLeafStructDefs(_)) ::: program.defs.filter(_.name == name)
-          case p.Type.Ptr(component, _)    => findLeafStructDefs(component)
-          case p.Type.Arr(component, _, _) => findLeafStructDefs(component)
-          case _                           => Nil
-        }
-        findLeafStructDefs(t)
-      }
-      .flatten
+    val concreteStructDefs = program.defs.filter(_.tpeVars.isEmpty).map(_.modifyAll[p.Type](doReplacement(_)))
 
     (
       replacementTable.map((struct, sdef) => sdef.name -> struct.name),
       program.copy(
         entry = program.entry.modifyAll[p.Type](doReplacement(_)),
         functions = program.functions.map(_.modifyAll[p.Type](doReplacement(_))),
-        defs = rootStructDefs ++ referencedStructDefs,
+        defs = (rootStructDefs ++ concreteStructDefs).distinctBy(_.name),
         phase = p.PassPhase.PostMono
       )
     )

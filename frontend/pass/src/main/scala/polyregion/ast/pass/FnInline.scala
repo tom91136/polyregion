@@ -21,6 +21,88 @@ import polyregion.ast.Traversal.*
 // references to loop-/branch-local vars escape their scope
 object FnInline extends ProgramPass {
 
+  private type OverloadLut = Map[(p.Sym, Int), List[p.Function]]
+
+  private def sameType(left: p.Type, right: p.Type): Boolean = {
+    def loop(
+        x: p.Type,
+        y: p.Type,
+        xBound: Map[String, Int],
+        yBound: Map[String, Int],
+        depth: Int
+    ): Boolean = (x, y) match {
+      case (p.Type.Nothing, _) | (_, p.Type.Nothing) => true
+      case (p.Type.Var(xName), p.Type.Var(yName)) =>
+        (xBound.get(xName), yBound.get(yName)) match {
+          case (Some(xId), Some(yId)) => xId == yId
+          case (None, None)           => xName == yName
+          case _                      => false
+        }
+      case (p.Type.Struct(xName, xArgs), p.Type.Struct(yName, yArgs)) =>
+        xName == yName && xArgs.size == yArgs.size &&
+        xArgs.zip(yArgs).forall((a, b) => loop(a, b, xBound, yBound, depth))
+      case (p.Type.Ptr(xComp, xSpace), p.Type.Ptr(yComp, ySpace)) =>
+        xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
+      case (p.Type.Arr(xComp, xLength, xSpace), p.Type.Arr(yComp, yLength, ySpace)) =>
+        xLength == yLength && xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
+      case (p.Type.Exec(xVars, xArgs, xRtn), p.Type.Exec(yVars, yArgs, yRtn)) =>
+        val ids       = xVars.indices.map(depth + _)
+        val nestedX   = xBound ++ xVars.zip(ids)
+        val nestedY   = yBound ++ yVars.zip(ids)
+        val nestedEnd = depth + xVars.size
+        xVars.size == yVars.size && xArgs.size == yArgs.size &&
+        xArgs.zip(yArgs).forall((a, b) => loop(a, b, nestedX, nestedY, nestedEnd)) &&
+        loop(xRtn, yRtn, nestedX, nestedY, nestedEnd)
+      case _ => x == y
+    }
+    loop(left, right, Map.empty, Map.empty, 0)
+  }
+
+  private def flatParams(f: p.Function): List[p.Type] =
+    f.moduleCaptures.map(_.named.tpe) ++ f.termCaptures.map(_.named.tpe) ++ f.args.map(_.named.tpe)
+
+  private def receiverTypeArgs(ivk: p.Expr.Invoke): List[p.Type] = ivk.receiver.toList.flatMap(_.tpe match {
+    case p.Type.Struct(_, args)                => args
+    case p.Type.Ptr(p.Type.Struct(_, args), _) => args
+    case _                                     => Nil
+  })
+
+  private def appliedTypeArgs(ivk: p.Expr.Invoke, expected: Int): List[p.Type] = {
+    val combined = receiverTypeArgs(ivk) ++ ivk.tpeArgs
+    if (ivk.tpeArgs.size == expected) ivk.tpeArgs
+    else if (combined.size == expected) combined
+    else ivk.tpeArgs
+  }
+
+  private val ExecBinderPrefix = "#fn_inline_exec#"
+
+  private def protectExecBinders(tpe: p.Type): p.Type = {
+    def rename(t: p.Type, env: Map[String, String]): p.Type = t match {
+      case p.Type.Var(name)                => p.Type.Var(env.getOrElse(name, name))
+      case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(rename(_, env)))
+      case p.Type.Ptr(comp, space)         => p.Type.Ptr(rename(comp, env), space)
+      case p.Type.Arr(comp, length, space) => p.Type.Arr(rename(comp, env), length, space)
+      case p.Type.Exec(vars, args, rtn) =>
+        val nested = env -- vars
+        p.Type.Exec(vars, args.map(rename(_, nested)), rename(rtn, nested))
+      case other => other
+    }
+    tpe match {
+      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.startsWith(ExecBinderPrefix)) =>
+        val renamed = vars.map(ExecBinderPrefix + _)
+        val env     = vars.zip(renamed).toMap
+        p.Type.Exec(renamed, args.map(rename(_, env)), rename(rtn, env))
+      case other => other
+    }
+  }
+
+  private def unprotectExecBinders(tpe: p.Type): p.Type = tpe match {
+    case p.Type.Var(name) if name.startsWith(ExecBinderPrefix) => p.Type.Var(name.stripPrefix(ExecBinderPrefix))
+    case p.Type.Exec(vars, args, rtn) =>
+      p.Type.Exec(vars.map(_.stripPrefix(ExecBinderPrefix)), args, rtn)
+    case other => other
+  }
+
   private def substTerms(tree: p.Function, table: Map[p.Named, p.Term]): p.Function =
     tree.modifyAll[p.Term] {
       case p.Term.Select(root, steps, tpe) =>
@@ -73,20 +155,18 @@ object FnInline extends ProgramPass {
       ctr: java.util.concurrent.atomic.AtomicLong
   ): (p.Expr, List[p.Stmt], List[p.Arg]) = {
 
-    val concreteTpeArgs = ivk.receiver
-      .map(_.tpe match {
-        case p.Type.Struct(_, tpeArgs) => tpeArgs
-        case _                         => Nil
-      })
-      .getOrElse(Nil) ++ ivk.tpeArgs
+    val concreteTpeArgs = appliedTypeArgs(ivk, f.tpeVars.size)
 
     val table = f.tpeVars.zip(concreteTpeArgs).toMap
 
     val renamed = renameAll(
-      f.modifyAll[p.Type](_.mapLeaf {
-        case p.Type.Var(name) if table.contains(name) => table(name)
-        case x                                        => x
-      }),
+      f
+        .modifyAll[p.Type](protectExecBinders)
+        .modifyAll[p.Type](_.mapLeaf {
+          case p.Type.Var(name) if table.contains(name) => table(name)
+          case x                                        => x
+        })
+        .modifyAll[p.Type](unprotectExecBinders),
       ctr
     )
 
@@ -97,26 +177,43 @@ object FnInline extends ProgramPass {
         renamed.termCaptures.map(_.named) ++
         renamed.args.map(_.named)
     val replacements = ivk.receiver.toList ++ ivk.args
-    val substTable   = targetNames.zip(replacements).toMap
-    val substituted  = substTerms(renamed, substTable)
+    val parameters   = targetNames.zip(replacements)
+    val mutableParameters = renamed
+      .collectWhere[p.Stmt] { case p.Stmt.Mut(p.Term.Select(root, _, _), _) =>
+        root
+      }
+      .toSet
+    val moduleCaptureNames = renamed.moduleCaptures.map(_.named).toSet
+    val mutableLocals = parameters.collect {
+      case (name, value) if mutableParameters.contains(name) =>
+        val local =
+          if (moduleCaptureNames(name)) p.Named(s"_inline_${ctr.incrementAndGet()}_${name.symbol}", name.tpe)
+          else name
+        name -> (local, p.Stmt.Var(local, Some(p.Expr.Alias(value)), isMutable = true))
+    }
+    val bindings = mutableLocals.map(_._2._2)
+    val substTable = parameters.filterNot((name, _) => mutableParameters.contains(name)).toMap ++
+      mutableLocals.map { case (original, (local, _)) => original -> p.Term.Select(local, Nil, local.tpe) }
+    val substituted = substTerms(renamed, substTable)
 
     // rebindReturn turns each `return` into a phi store but cannot model early exit; sink the
     // fall-through after a returning branch into the sibling branch so the returns become mutually
     // exclusive (else an unconditional tail return clobbers the phi set in a conditional branch)
-    val sunk        = substituted.copy(body = sinkAfterReturn(substituted.body))
-    val returnExprs = sunk.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e }
+    val sunk         = substituted.copy(body = sinkAfterReturn(bindings ::: substituted.body))
+    val returnExprs  = sunk.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e }
+    val directReturn = sunk.body.collectFirst { case p.Stmt.Return(e) => e }
 
     returnExprs match {
       case Nil =>
         throw AssertionError(s"no return in function ${f.signature}")
-      case expr :: Nil if !returnsInsideTry(sunk.body) =>
+      case expr :: Nil if directReturn.contains(expr) && !returnsNeedUnwind(sunk.body) =>
         val noReturnBody = sunk.body.flatMap(stripReturn)
         (expr, noReturnBody, renamed.moduleCaptures)
       case _ =>
         val phiName                  = p.Named(s"_inline_phi_${ctr.incrementAndGet()}", ivk.tpe)
         val phiSelect: p.Term.Select = p.Term.Select(phiName, Nil, ivk.tpe)
         val phiDecl                  = p.Stmt.Var(phiName, None, isMutable = true)
-        if (returnsInsideTry(sunk.body)) {
+        if (returnsNeedUnwind(sunk.body)) {
           val flagName                = p.Named(s"_inline_exit_${ctr.incrementAndGet()}", p.Type.Bool1)
           val flagTerm: p.Term.Select = p.Term.Select(flagName, Nil, p.Type.Bool1)
           val flagDecl = p.Stmt.Var(flagName, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true)
@@ -132,12 +229,12 @@ object FnInline extends ProgramPass {
   private def containsReturn(s: p.Stmt): Boolean =
     s.collectFirst_[p.Stmt] { case r: p.Stmt.Return => r }.isDefined
 
-  private def returnsInsideTry(stmts: List[p.Stmt]): Boolean = stmts.exists {
-    case t: p.Stmt.Try        => t.blocks.exists(_.exists(containsReturn)) || t.blocks.exists(returnsInsideTry)
-    case p.Stmt.Cond(_, t, f) => returnsInsideTry(t) || returnsInsideTry(f)
-    case p.Stmt.While(_, b)   => returnsInsideTry(b)
-    case p.Stmt.ForRange(_, _, _, _, b) => returnsInsideTry(b)
-    case p.Stmt.Annotated(inner, _, _)  => returnsInsideTry(List(inner))
+  private def returnsNeedUnwind(stmts: List[p.Stmt]): Boolean = stmts.exists {
+    case t: p.Stmt.Try      => t.blocks.exists(_.exists(containsReturn)) || t.blocks.exists(returnsNeedUnwind)
+    case p.Stmt.While(_, b) => b.exists(containsReturn) || returnsNeedUnwind(b)
+    case p.Stmt.ForRange(_, _, _, _, b) => b.exists(containsReturn) || returnsNeedUnwind(b)
+    case p.Stmt.Cond(_, t, f)           => returnsNeedUnwind(t) || returnsNeedUnwind(f)
+    case p.Stmt.Annotated(inner, _, _)  => returnsNeedUnwind(List(inner))
     case _                              => false
   }
 
@@ -200,14 +297,25 @@ object FnInline extends ProgramPass {
   }
 
   private def alwaysReturns(stmts: List[p.Stmt]): Boolean = stmts.lastOption match {
-    case Some(p.Stmt.Return(_))          => true
-    case Some(p.Stmt.Cond(_, t, f))      => alwaysReturns(t) && alwaysReturns(f)
-    case Some(p.Stmt.Annotated(s, _, _)) => alwaysReturns(List(s))
-    case _                               => false
+    case Some(p.Stmt.Return(_))                            => true
+    case Some(p.Stmt.Cond(p.Term.Bool1Const(true), t, _))  => alwaysReturns(t)
+    case Some(p.Stmt.Cond(p.Term.Bool1Const(false), _, f)) => alwaysReturns(f)
+    case Some(p.Stmt.Cond(_, t, f))                        => alwaysReturns(t) && alwaysReturns(f)
+    case Some(p.Stmt.Annotated(s, _, _))                   => alwaysReturns(List(s))
+    case _                                                 => false
   }
 
   private def sinkAfterReturn(stmts: List[p.Stmt]): List[p.Stmt] = stmts match {
-    case Nil => Nil
+    case Nil                     => Nil
+    case (r: p.Stmt.Return) :: _ => List(r)
+    case p.Stmt.Cond(c @ p.Term.Bool1Const(true), t, _) :: rest =>
+      val chosen = sinkAfterReturn(t)
+      val head   = p.Stmt.Cond(c, chosen, Nil)
+      if (alwaysReturns(chosen)) List(head) else head :: sinkAfterReturn(rest)
+    case p.Stmt.Cond(c @ p.Term.Bool1Const(false), _, f) :: rest =>
+      val chosen = sinkAfterReturn(f)
+      val head   = p.Stmt.Cond(c, Nil, chosen)
+      if (alwaysReturns(chosen)) List(head) else head :: sinkAfterReturn(rest)
     case p.Stmt.Cond(c, t, f) :: rest =>
       val t2 = sinkAfterReturn(t)
       val f2 = sinkAfterReturn(f)
@@ -217,6 +325,9 @@ object FnInline extends ProgramPass {
         case (false, true) if rest.nonEmpty => List(p.Stmt.Cond(c, sinkAfterReturn(t2 ::: rest), f2))
         case _                              => p.Stmt.Cond(c, t2, f2) :: sinkAfterReturn(rest)
       }
+    case p.Stmt.Annotated(inner, pos, comment) :: rest =>
+      val head = sinkAfterReturn(List(inner)).map(p.Stmt.Annotated(_, pos, comment))
+      if (alwaysReturns(List(inner))) head else head ::: sinkAfterReturn(rest)
     case (t: p.Stmt.Try) :: rest => t.mapBlocks(sinkAfterReturn) :: sinkAfterReturn(rest)
     case other :: rest           => other :: sinkAfterReturn(rest)
   }
@@ -241,21 +352,22 @@ object FnInline extends ProgramPass {
     case other                             => other
   }
 
-  private def resolveOverload(ivk: p.Expr.Invoke, program: p.Program): p.Function = {
-    def flatParams(f: p.Function): List[p.Type] =
-      f.moduleCaptures.map(_.named.tpe) ++ f.termCaptures.map(_.named.tpe) ++ f.args.map(_.named.tpe)
-    val candidates =
-      program.functions.distinct.filter(f => f.name == ivk.calleeName && flatParams(f).size == ivk.args.size)
+  private def resolveOverload(ivk: p.Expr.Invoke, overloads: OverloadLut): p.Function = {
+    val candidates = overloads.getOrElse((ivk.calleeName, ivk.args.size), Nil)
     candidates.filter { f =>
-      val varToTpeLut = f.tpeVars.zip(ivk.tpeArgs).toMap
-      val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
-        case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
-        case x                 => x
-      })
+      val varToTpeLut = f.tpeVars.zip(appliedTypeArgs(ivk, f.tpeVars.size)).toMap
+      val sig = f.signature
+        .modifyAll[p.Type](protectExecBinders)
+        .modifyAll[p.Type](_.mapLeaf {
+          case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
+          case x                 => x
+        })
+        .modifyAll[p.Type](unprotectExecBinders)
       val flatSigParams = sig.moduleCaptures ++ sig.termCaptures ++ sig.args
       sig.receiver.size == ivk.receiver.size &&
-      flatSigParams.zip(ivk.args.map(_.tpe)).forall(_ =:= _) &&
-      sig.rtn =:= ivk.rtn
+      sig.receiver.zip(ivk.receiver.map(_.tpe)).forall(sameType) &&
+      flatSigParams.zip(ivk.args.map(_.tpe)).forall(sameType) &&
+      sameType(sig.rtn, ivk.rtn)
     } match {
       case f :: Nil => f
       case Nil =>
@@ -271,57 +383,66 @@ object FnInline extends ProgramPass {
 
   private def inlineExpr(
       expr: p.Expr,
-      program: p.Program,
-      ctr: java.util.concurrent.atomic.AtomicLong
+      overloads: OverloadLut,
+      ctr: java.util.concurrent.atomic.AtomicLong,
+      active: List[String]
   ): (p.Expr, List[p.Stmt], List[p.Arg]) =
     expr match {
       case ivk: p.Expr.Invoke =>
-        val (resultExpr, inlineStmts, caps)  = inlineOne(ivk, resolveOverload(ivk, program), ctr)
-        val (rewrittenStmts, nestedCaps)     = inlineStmts.foldMap(s => inlineStmt(s, program, ctr))
-        val (finalExpr, tailStmts, tailCaps) = inlineExpr(resultExpr, program, ctr)
+        val callee    = resolveOverload(ivk, overloads)
+        val calleeKey = callee.signatureRepr
+        if (active.contains(calleeKey))
+          throw IllegalStateException(
+            s"FnInline: recursive call cycle is unsupported: ${(calleeKey :: active).reverse.mkString(" -> ")}"
+          )
+        val nestedActive                     = calleeKey :: active
+        val (resultExpr, inlineStmts, caps)  = inlineOne(ivk, callee, ctr)
+        val (rewrittenStmts, nestedCaps)     = inlineStmts.foldMap(s => inlineStmt(s, overloads, ctr, nestedActive))
+        val (finalExpr, tailStmts, tailCaps) = inlineExpr(resultExpr, overloads, ctr, nestedActive)
         (finalExpr, rewrittenStmts ::: tailStmts, caps ++ nestedCaps ++ tailCaps)
       case _ => (expr, Nil, Nil)
     }
 
   private def inlineStmt(
       stmt: p.Stmt,
-      program: p.Program,
-      ctr: java.util.concurrent.atomic.AtomicLong
+      overloads: OverloadLut,
+      ctr: java.util.concurrent.atomic.AtomicLong,
+      active: List[String]
   ): (List[p.Stmt], List[p.Arg]) = stmt match {
     case p.Stmt.Var(n, Some(e), mut) =>
-      val (newE, prepend, caps) = inlineExpr(e, program, ctr)
+      val (newE, prepend, caps) = inlineExpr(e, overloads, ctr, active)
       (prepend :+ p.Stmt.Var(n, Some(newE), mut), caps)
     case p.Stmt.Var(_, None, _) => (List(stmt), Nil)
     case p.Stmt.Mut(name, e) =>
-      val (newE, prepend, caps) = inlineExpr(e, program, ctr)
+      val (newE, prepend, caps) = inlineExpr(e, overloads, ctr, active)
       (prepend :+ p.Stmt.Mut(name, newE), caps)
     case _: p.Stmt.Update => (List(stmt), Nil)
     case p.Stmt.Return(e) =>
-      val (newE, prepend, caps) = inlineExpr(e, program, ctr)
+      val (newE, prepend, caps) = inlineExpr(e, overloads, ctr, active)
       (prepend :+ p.Stmt.Return(newE), caps)
     case p.Stmt.While(cond, body) =>
-      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program, ctr))
+      val (newBody, caps) = body.foldMap(s => inlineStmt(s, overloads, ctr, active))
       (List(p.Stmt.While(cond, newBody)), caps)
     case p.Stmt.Cond(cond, t, e) =>
-      val (newT, capsT) = t.foldMap(s => inlineStmt(s, program, ctr))
-      val (newE, capsE) = e.foldMap(s => inlineStmt(s, program, ctr))
+      val (newT, capsT) = t.foldMap(s => inlineStmt(s, overloads, ctr, active))
+      val (newE, capsE) = e.foldMap(s => inlineStmt(s, overloads, ctr, active))
       (List(p.Stmt.Cond(cond, newT, newE)), capsT ++ capsE)
     case p.Stmt.ForRange(i, lb, ub, step, body) =>
-      val (newBody, caps) = body.foldMap(s => inlineStmt(s, program, ctr))
+      val (newBody, caps) = body.foldMap(s => inlineStmt(s, overloads, ctr, active))
       (List(p.Stmt.ForRange(i, lb, ub, step, newBody)), caps)
     case p.Stmt.Try(body, handlers, fin) =>
-      val (newBody, capsB) = body.foldMap(s => inlineStmt(s, program, ctr))
+      val (newBody, capsB) = body.foldMap(s => inlineStmt(s, overloads, ctr, active))
       val (newHandlers, capsH) = handlers.foldMap { h =>
-        val (hBody, hCaps) = h.body.foldMap(s => inlineStmt(s, program, ctr))
+        val (hBody, hCaps) = h.body.foldMap(s => inlineStmt(s, overloads, ctr, active))
         (List(h.copy(body = hBody)), hCaps)
       }
-      val (newFin, capsF) = fin.foldMap(s => inlineStmt(s, program, ctr))
+      val (newFin, capsF) = fin.foldMap(s => inlineStmt(s, overloads, ctr, active))
       (List(p.Stmt.Try(newBody, newHandlers, newFin)), capsB ++ capsH ++ capsF)
     case p.Stmt.Raise(value, exceptionKind, cleanup) =>
-      val (newCleanup, caps) = cleanup.foldMap(s => inlineStmt(s, program, ctr))
+      val (newCleanup, caps) = cleanup.foldMap(s => inlineStmt(s, overloads, ctr, active))
       (List(p.Stmt.Raise(value, exceptionKind, newCleanup)), caps)
     case p.Stmt.Annotated(inner, pos, c) =>
-      val (rewritten, caps) = inlineStmt(inner, program, ctr)
+      val (rewritten, caps) = inlineStmt(inner, overloads, ctr, active)
       (rewritten.map(p.Stmt.Annotated(_, pos, c)), caps)
     case _ => (List(stmt), Nil)
   }
@@ -329,15 +450,21 @@ object FnInline extends ProgramPass {
   override def apply(program: p.Program, log: Log): p.Program = {
     // per-run counter: names from repeated inlinings stay unique within one program, and the numbering
     // is independent of process compile order (the names embed into emitted kernel images)
-    val ctr = new java.util.concurrent.atomic.AtomicLong(0L)
+    val ctr       = new java.util.concurrent.atomic.AtomicLong(0L)
+    val overloads = program.functions.distinct.groupBy(f => (f.name, flatParams(f).size))
     val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
-      val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, program, ctr))
+      val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, overloads, ctr, Nil))
       f.copy(
         decl = f.decl.copy(moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct),
         body = stmts
       )
     }
 
+    val remaining = f.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk }
+    if (remaining.nonEmpty)
+      throw IllegalStateException(
+        s"FnInline did not converge after $n iteration(s); remaining calls: ${remaining.map(_.calleeName.repr).distinct.mkString(", ")}"
+      )
     log.info(s"converged in $n iteration(s)")
     program.copy(entry = f, functions = Nil)
 
