@@ -31,6 +31,8 @@ POLYREGION_EXPORT const CpuInfo &hostCpuInfo();
 POLYREGION_EXPORT const llvm::Target *targetFromTriple(const llvm::Triple &tripleName);
 POLYREGION_EXPORT Pair<Opt<std::string>, std::string> verifyModule(llvm::Module &mod);
 POLYREGION_EXPORT bool captureModuleIr();
+// Internal translation seam kept visible for focused static-library tests; this is not part of the shared ABI.
+[[nodiscard]] std::string normaliseSpirvNarrowIntegerOperands(std::string spv);
 POLYREGION_EXPORT polyast::CompileResult compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
                                                        llvm::Module &M, bool emitBitcode = false);
 

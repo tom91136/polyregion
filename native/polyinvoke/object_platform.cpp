@@ -42,6 +42,14 @@ using namespace aspartame;
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::object;
 
+namespace {
+thread_local uint64_t hostThreadGlobalIdx = 0;
+thread_local uint64_t hostThreadGlobalSize = 1;
+} // namespace
+
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_idx() { return hostThreadGlobalIdx; }
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_size() { return hostThreadGlobalSize; }
+
 static void ffiInvoke(const char *prefix, uint64_t symbolAddress, const std::vector<Type> &types, std::vector<void *> &args) {
   const auto toFFITpe = [prefix](const Type &tpe) -> ffi_type * {
     switch (tpe) {
@@ -429,7 +437,9 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },
-      [symAddr, types, argData](size_t tid) {
+      [symAddr, types, argData, global = policy.global.x](size_t tid) {
+        hostThreadGlobalIdx = tid;
+        hostThreadGlobalSize = global;
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         if (types[0] != Type::IntS64) {
@@ -558,7 +568,9 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },
-      [address, types, argData](size_t tid) {
+      [address, types, argData, global = policy.global.x](size_t tid) {
+        hostThreadGlobalIdx = tid;
+        hostThreadGlobalSize = global;
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         auto _tid = int64_t(tid);

@@ -2,6 +2,8 @@
 #include "fmt/core.h"
 #include "magic_enum/magic_enum.hpp"
 
+#include "polyregion/env_keys.h"
+
 #include "ast.h"
 #include "llvm.h"
 #include "llvmc.h"
@@ -14,6 +16,10 @@ using namespace polyregion::backend::details;
 
 TargetedContext::TargetedContext(const LLVMBackend::Options &options)
     : options(options), dataLayout(options.targetInfo().resolveDataLayout()) {
+  // value names cost memory for the whole compile and only ever leave via the IR text captured into the compile
+  // events, so keep them for the same knob that keeps readable identifiers in the emitted C source. read per
+  // context, not once per process: a caller may set the knob between compiles
+  actual.setDiscardValueNames(std::getenv(env::PolycVerboseNames) == nullptr);
   switch (options.target) {
     case LLVMBackend::Target::x86_64:
     case LLVMBackend::Target::AArch64:
@@ -68,11 +74,15 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
   // SPIR-V Kernel keeps private in the Function AS: widening to Generic makes IGC's SIMD vectoriser
   // read private arrays as shared, not per-lane
   const auto privateAS = spirvKernel ? AllocaAS : (GenericAS != 0 ? GenericAS : GlobalAS);
-  const auto globalAS = spirvKernel ? GenericAS : GlobalAS;
-  return s.match_total(                                        //
-      [&](const TypeSpace::Local &) { return LocalAS; },       //
-      [&](const TypeSpace::Global &) { return globalAS; },     //
-      [&](const TypeSpace::Constant &) { return ConstantAS; }, //
+  // SPIR-V Kernel: an internal (non-kernel-arg) Global pointer is the "flat" pointer the body threads
+  // through helpers. Map it to Generic so a Workgroup(local_accessor)->flat decay is a valid
+  // OpPtrCastToGeneric and loads/stores dispatch to SLM. Workgroup and CrossWorkgroup are disjoint on
+  // Intel; a direct 3->1 cast cannot address SLM. Kernel-arg pointers stay CrossWorkgroup (see
+  // addressSpaceForKernelArg) and widen to Generic at use.
+  const auto globalAS = spirvKernel && GenericAS != 0 ? GenericAS : GlobalAS;
+  return s.match_total(                                  //
+      [&](const TypeSpace::Local &) { return LocalAS; }, //
+      [&](const TypeSpace::Global &) { return globalAS; }, [&](const TypeSpace::Constant &) { return ConstantAS; },
       [&](const TypeSpace::Private &) { return privateAS; });
 }
 
@@ -175,16 +185,19 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       },                                                                                                  //
       [&](const Type::Ptr &x) -> llvm::Type * { return llvm::PointerType::get(actual, ptrAS(x.space)); }, //
       [&](const Type::Arr &x) -> llvm::Type * {
-        // Sized arrays decay to a pointer at function boundaries (matching C); inside a struct
-        // body keep [N x T] for [0, idx] GEPs. SPIR-V Kernel forbids [0 x T] (see voidLike), so
-        // collapse to i8.
-        if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(TypeSpace::Global()));
+        // Sized arrays decay to a pointer at function boundaries (matching C) but keep their own space, as
+        // Type::Ptr does: demoting a workgroup array to the flat AS narrows a 32-bit LDS address into a
+        // 64-bit slot. Inside a struct body keep [N x T] for [0, idx] GEPs. SPIR-V Kernel forbids [0 x T]
+        // (see voidLike), so collapse to i8.
+        if (functionBoundary) return llvm::PointerType::get(actual, ptrAS(x.space));
         if (spirvKernel && x.length == 0) return llvm::Type::getInt8Ty(actual);
         return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), x.length);
       }, //
-      [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },
+      [&](const Type::Var &x) -> llvm::Type * {
+        throw BackendException(fmt::format("Type variable {} should be erased before LLVM lowering", x.name));
+      },
       [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); },
-      [&](const Type::FnRef &x) -> llvm::Type * { throw BackendException("Type::FnRef should be erased before LLVM lowering"); });
+      [&](const Type::FnRef &) -> llvm::Type * { return llvm::Type::getInt8Ty(actual); });
 }
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
@@ -205,7 +218,8 @@ StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::s
   return {.def = def, .layout = layout, .tpe = tpe, .memberIndices = table};
 }
 
-Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<StructDef> &structs) {
+Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<StructDef> &structs, const Set<std::string> &deAliasedUnions,
+                                                             const std::function<bool(const std::string &)> &isDiscontinuityName) {
   // Two-phase resolution to handle recursive defs (e.g., Node → Option[Node] → Node).
   // Phase 1: create opaque struct types for every def so subsequent type resolution can refer
   // to them by name without requiring the full body.
@@ -216,7 +230,7 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // only reading `node.elem`) work fine.
   std::function<Vector<std::string>(const Type::Any &)> referencedStructNames = [&](const Type::Any &t) -> Vector<std::string> {
     if (auto s = t.template get<Type::Struct>()) {
-      return Vector<std::string>{repr(s->name)} | concat(s->args | flat_map(referencedStructNames)) | to_vector();
+      return Vector<std::string>{repr(s->name)} ^ concat(s->args ^ flat_map(referencedStructNames));
     } else if (auto p = t.template get<Type::Ptr>()) {
       return referencedStructNames(p->comp);
     } else if (auto a = t.template get<Type::Arr>()) {
@@ -227,9 +241,8 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
     return {};
   };
   const auto structNames = structs | flat_map([&](const auto &def) {
-                             return Vector<std::string>{repr(def.name)}                                                           //
-                                    | concat(def.members | flat_map([&](const auto &m) { return referencedStructNames(m.tpe); })) //
-                                    | to_vector();
+                             return Vector<std::string>{repr(def.name)} //
+                                    ^ concat(def.members ^ flat_map([&](const auto &m) { return referencedStructNames(m.tpe); }));
                            })           //
                            | distinct() //
                            | to_vector();
@@ -240,11 +253,11 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // We give them a single i8 placeholder member so LLVM treats them as sized (size 1) — empty
   // structs aren't well-supported by `DataLayout::getAlignment`.
   const auto originalNames = structs | map([](const auto &d) { return repr(d.name); }) | to<Set>();
-  const auto syntheticDefs = structNames | collect([&](const auto &name) -> Opt<StructDef> {
-                               if (originalNames.contains(name)) return {};
+  const auto syntheticDefs = structNames ^ collect([&](const auto &name) -> Opt<StructDef> {
+                               if (originalNames ^ contains(name)) return {};
                                return StructDef(Sym({name}), {}, {Named("__opaque", Type::IntS8())}, {}, /*isUnion*/ false);
                              });
-  const auto allDefs = structs | concat(syntheticDefs) | to_vector();
+  const auto allDefs = structs ^ concat(syntheticDefs);
 
   // Phase 2a: register stubs so resolveType can refer to any struct by name during body resolution.
   const auto resolved =
@@ -261,30 +274,66 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   // (8-byte pointer slots) to defend against empty-struct fields computing to 0 bytes; we keep that
   // defence narrowly by giving empty structs a single placeholder byte.
   const auto typeReadyForUnionStorage = [&](const Type::Any &tpe) {
+    // a union's storage size needs getTypeAllocSize over its members, which asserts on any not-yet-sized member.
+    // require isSized() (transitive) rather than merely !isOpaque(): a non-union member struct can have had its
+    // body set yet still be unsized because it inlines a union sized later this pass. pointers stay sized so
+    // recursive defs (which cycle through Ptr) don't deadlock
     std::function<bool(const Type::Any &)> sized = [&](const Type::Any &t) {
-      if (auto s = t.template get<Type::Struct>()) return !opaqueTypes.at(repr(s->name))->isOpaque();
+      if (auto s = t.template get<Type::Struct>()) return opaqueTypes.at(repr(s->name))->isSized();
       if (auto a = t.template get<Type::Arr>()) return sized(a->comp);
       return true;
     };
     return sized(tpe);
   };
+  // a member transitively holding a caller-flagged (isDiscontinuityName) struct gets its own region when its union
+  // is de-aliased instead of sharing a byte range with the overlay
+  auto discMemo = std::make_shared<Map<std::string, bool>>();
+  std::function<bool(const Type::Any &)> holdsDiscontinuity = [&, discMemo](const Type::Any &t) -> bool {
+    if (const auto s = t.template get<Type::Struct>()) {
+      const auto name = repr(s->name);
+      if (const auto memoised = *discMemo ^ get_maybe(name)) return *memoised;
+      if (isDiscontinuityName && isDiscontinuityName(name)) return (*discMemo)[name] = true;
+      (*discMemo)[name] = false; // provisional, breaks any cycle through this name
+      const bool r = resolved ^ get_maybe(name) ^ exists([&](const auto &info) {
+                       return info.def.members ^ exists([&](const auto &m) { return holdsDiscontinuity(m.tpe); });
+                     });
+      return (*discMemo)[name] = r;
+    }
+    if (const auto a = t.template get<Type::Arr>()) return holdsDiscontinuity(a->comp);
+    return false;
+  };
+  // overlay storage (max-sized, max-aligned lead + i8 pad) for a set of union member types
+  const auto overlayFields = [&](const std::vector<llvm::Type *> &mts) -> std::vector<llvm::Type *> {
+    const auto maxSize = mts ^ fold_left(uint64_t{0}, [&](auto acc, auto *mt) { //
+                           return std::max(acc, dataLayout.getTypeAllocSize(mt).getFixedValue());
+                         });
+    auto *const leadTy = (mts ^ max_by([&](auto *mt) { return dataLayout.getABITypeAlign(mt).value(); })).value();
+    const auto leadSize = dataLayout.getTypeAllocSize(leadTy).getFixedValue();
+    if (maxSize > leadSize) return {leadTy, llvm::ArrayType::get(llvm::Type::getInt8Ty(actual), maxSize - leadSize)};
+    return {leadTy};
+  };
+  // the same storage as one element, for a de-aliased union that appends further fields beside it
+  const auto overlayStorage = [&](const std::vector<llvm::Type *> &mts) -> llvm::Type * {
+    const auto fs = overlayFields(mts);
+    return fs.size() == 1 ? fs[0] : llvm::StructType::get(actual, fs);
+  };
   auto setBody = [&](const StructDef &def) {
     auto *tpe = opaqueTypes.at(repr(def.name));
     if (!tpe->isOpaque()) return true; // body already set; safe in case of duplicate StructDefs
-    if (def.isUnion && !(def.members | forall([&](const auto &m) { return typeReadyForUnionStorage(m.tpe); }))) return false;
+    if (def.isUnion && !(def.members ^ forall([&](const auto &m) { return typeReadyForUnionStorage(m.tpe); }))) return false;
     const auto memberTypes = def.members ^ map([&](const auto &m) { return resolveType(m.tpe, resolved, /*functionBoundary*/ false); });
-    if (def.isUnion && !memberTypes.empty()) {
-      const auto maxSize = memberTypes                                                     //
-                           | fold_left(uint64_t{0}, [&](const auto &acc, const auto &mt) { //
-                               return std::max(acc, dataLayout.getTypeAllocSize(mt).getFixedValue());
-                             });
-      auto *const leadTy = (memberTypes | max_by([&](const auto &mt) { return dataLayout.getABITypeAlign(mt).value(); })).value();
-      const auto leadSize = dataLayout.getTypeAllocSize(leadTy).getFixedValue();
-      const auto storage = maxSize > leadSize
-                               ? std::vector<llvm::Type *>{leadTy, llvm::ArrayType::get(llvm::Type::getInt8Ty(actual), maxSize - leadSize)}
-                               : std::vector<llvm::Type *>{leadTy};
-      tpe->setBody(storage);
-    } else tpe->setBody(memberTypes);
+    if (def.isUnion && (deAliasedUnions ^ contains(repr(def.name))) && !memberTypes.empty()) {
+      const auto typedMembers = def.members ^ zip(memberTypes);
+      const auto overlayTys = typedMembers ^ collect([&](const auto &member, auto *memberType) -> Opt<llvm::Type *> {
+                                return holdsDiscontinuity(member.tpe) ? std::nullopt : Opt<llvm::Type *>{memberType};
+                              });
+      auto body = overlayTys.empty() ? std::vector<llvm::Type *>{} : std::vector<llvm::Type *>{overlayStorage(overlayTys)};
+      body ^= concat(typedMembers ^ collect([&](const auto &member, auto *memberType) -> Opt<llvm::Type *> {
+                       return holdsDiscontinuity(member.tpe) ? Opt<llvm::Type *>{memberType} : std::nullopt;
+                     }));
+      tpe->setBody(body);
+    } else if (def.isUnion && !memberTypes.empty()) tpe->setBody(overlayFields(memberTypes));
+    else tpe->setBody(memberTypes);
     return true;
   };
   allDefs | filter([](const auto &def) { return !def.isUnion; }) | for_each([&](const auto &def) { setBody(def); });
@@ -294,7 +343,7 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
                  | filter([&](const auto &def) { return def.isUnion && opaqueTypes.at(repr(def.name))->isOpaque(); }) //
                  | fold_left(false, [&](const auto &acc, const auto &def) { return setBody(def) || acc; });
   }
-  allDefs | for_each([&](const auto &def) {
+  allDefs ^ for_each([&](const auto &def) {
     if (opaqueTypes.at(repr(def.name))->isOpaque()) {
       throw BackendException(fmt::format("Could not size union struct {}", repr(def.name)));
     }
@@ -303,7 +352,8 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
   return allDefs | map([&](const auto &def) {
            auto tpe = opaqueTypes.at(repr(def.name));
            const auto table = def.members | map([](const auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to<Map>();
-           if (def.isUnion) {
+           const bool deAlias = def.isUnion && (deAliasedUnions ^ contains(repr(def.name)));
+           if (def.isUnion && !deAlias) {
              const StructLayout layout(
                  /*name*/ repr(def.name),
                  /*sizeInBytes*/ static_cast<int64_t>(dataLayout.getTypeAllocSize(tpe).getFixedValue()),
@@ -316,6 +366,25 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
                            dataLayout.getTypeAllocSize(resolveType(named.tpe, resolved, /*functionBoundary*/ false)).getFixedValue()));
                  }));
              return std::pair{repr(def.name), StructInfo{.def = def, .layout = layout, .tpe = tpe, .memberIndices = table}};
+           }
+           if (deAlias) {
+             // body is {overlayStorage?, disc0, disc1, ...}: overlay members alias offset 0, each discontinuity
+             // member takes the offset of its own field (element 0 is the overlay region when there is one)
+             const auto sl = dataLayout.getStructLayout(tpe);
+             const bool anyOverlay = def.members ^ exists([&](auto &m) { return !holdsDiscontinuity(m.tpe); });
+             const size_t base = anyOverlay ? 1 : 0;
+             size_t sepRank = 0;
+             const auto members =
+                 def.members ^ map([&](const auto &named) {
+                   const auto size =
+                       static_cast<int64_t>(dataLayout.getTypeAllocSize(resolveType(named.tpe, resolved, false)).getFixedValue());
+                   const auto offset = holdsDiscontinuity(named.tpe) ? static_cast<int64_t>(sl->getElementOffset(base + sepRank++)) : 0;
+                   return StructLayoutMember(named, offset, size);
+                 });
+             const StructLayout layout(repr(def.name), static_cast<int64_t>(sl->getSizeInBytes()),
+                                       static_cast<int64_t>(sl->getAlignment().value()), members);
+             return std::pair{repr(def.name),
+                              StructInfo{.def = def, .layout = layout, .tpe = tpe, .memberIndices = table, .deAliased = true}};
            }
            const auto structLayout = dataLayout.getStructLayout(tpe);
            const StructLayout layout(/*name*/ repr(def.name),
@@ -376,11 +445,10 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     };
   };
 
-  // XXX Pin to SPIR-V 1.2: OpenCL 1.2 conformant ICDs (Intel NEO included) only accept 1.0 via
-  // clCreateProgramWithIL; 1.2 is what OpenCL 2.1+ environments accept. Without a version
-  // suffix LLVM defaults to 1.4 and the program won't load on most current OpenCL drivers.
-  constexpr const char *Spirv32KernelTriple = "spirv32v1.2-unknown-unknown";
-  constexpr const char *Spirv64KernelTriple = "spirv64v1.2-unknown-unknown";
+  // OpenCL 2.1 accepts SPIR-V 1.2. Raise only programs that actually need core subgroup shuffles to 1.3;
+  // without an explicit suffix LLVM defaults to 1.4 and needlessly excludes older drivers.
+  const char *Spirv32KernelTriple = spirvVersion13 ? "spirv32v1.3-unknown-unknown" : "spirv32v1.2-unknown-unknown";
+  const char *Spirv64KernelTriple = spirvVersion13 ? "spirv64v1.3-unknown-unknown" : "spirv64v1.2-unknown-unknown";
   constexpr const char *SpirvVulkanComputeTriple = "spirv-unknown-vulkan1.3-compute";
 
   switch (target) {

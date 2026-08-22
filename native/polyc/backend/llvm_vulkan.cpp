@@ -87,7 +87,8 @@ std::optional<std::tuple<llvm::Value *, llvm::Type *, std::vector<llvm::Value *>
     arrTy = std::get<1>(*b);
   } else if (select.root.tpe.template is<Type::Arr>()) {
     base = cg.mkTermVal(Term::Select(select.root, {}, select.root.tpe));
-    arrTy = cg.resolveType(select.root.tpe);
+    if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(base->stripPointerCasts())) arrTy = alloca->getAllocatedType();
+    else arrTy = cg.resolveType(select.root.tpe);
   } else return std::nullopt;
   if (!(select.steps ^ forall([](const auto &step) { return step.template is<PathStep::IndexDyn>(); }))) return std::nullopt;
   const auto indices =
@@ -192,8 +193,10 @@ std::optional<ValPtr> VulkanLowering::mkIndex(const Term::Select &lhs, const Ter
   else if (auto a = lhs.tpe.template get<Type::Arr>()) compTpe = a->comp;
   if (!compTpe) return std::nullopt;
   const auto ty = cg.resolveType(*compTpe);
-  if (compTpe->template is<Type::Bool1>())
-    return ValPtr{B.CreateICmpNE(cg.C.load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(cg.C.actual), 0, true))};
+  if (compTpe->template is<Type::Bool1>()) {
+    auto *physicalTy = llvm::Type::getInt8Ty(cg.C.actual);
+    return ValPtr{B.CreateICmpNE(cg.C.load(B, ptr, physicalTy), llvm::ConstantInt::get(physicalTy, 0, true))};
+  }
   if (compTpe->template is<Type::Struct>()) return ValPtr{ptr};
   return ValPtr{cg.C.load(B, ptr, ty)};
 }
@@ -213,13 +216,32 @@ bool VulkanLowering::mkUpdate(const Term::Select &lhs, const Term::Any &idx, con
   }
   const auto valTy = value.tpe().template is<Type::Bool1>() ? llvm::Type::getInt8Ty(cg.C.actual) : cg.resolveType(value.tpe());
   const auto _ =
-      cg.C.store(B, value.tpe().template is<Type::Bool1>() ? B.CreateIntCast(cg.mkTermVal(value), valTy, true) : cg.mkTermVal(value), ptr);
+      cg.C.store(B, value.tpe().template is<Type::Bool1>() ? B.CreateZExt(cg.mkTermVal(value), valTy) : cg.mkTermVal(value), ptr);
   return true;
 }
 
-llvm::Type *VulkanLowering::localAllocType(CodeGen &, const Type::Any &nameTpe, llvm::Type *tpe) {
-  if (nameTpe.template is<Type::Arr>()) return flattenArray(tpe).first;
+static llvm::Type *physicalLocalType(CodeGen &gen, const Type::Any &logical) {
+  if (logical.template is<Type::Bool1>()) return llvm::Type::getInt8Ty(gen.C.actual);
+  if (const auto arr = logical.template get<Type::Arr>()) return llvm::ArrayType::get(physicalLocalType(gen, arr->comp), arr->length);
+  return gen.resolveType(logical);
+}
+
+llvm::Type *VulkanLowering::localAllocType(CodeGen &gen, const Type::Any &nameTpe, llvm::Type *tpe) {
+  if (nameTpe.template is<Type::Arr>()) return flattenArray(physicalLocalType(gen, nameTpe)).first;
   return tpe;
+}
+
+std::optional<ValPtr> VulkanLowering::allocateLocalArray(CodeGen &, const std::string &symbol, const AnyType &nameTpe,
+                                                         llvm::Type *allocTy) {
+  const auto arr = nameTpe.template get<Type::Arr>();
+  if (!arr || !arr->space.template is<TypeSpace::Local>() || arr->length == 0) return std::nullopt;
+  auto *base = new llvm::GlobalVariable(cg.M, allocTy, /*isConstant*/ false, llvm::GlobalValue::InternalLinkage,
+                                        llvm::Constant::getNullValue(allocTy), symbol + "_wg", nullptr, llvm::GlobalValue::NotThreadLocal,
+                                        AddrSpace::Workgroup);
+  // The global is flat because logical Vulkan uses one dynamic access-chain index, but retain every
+  // physical dimension as metadata so localChainPtr can derive strides such as [4][8] => i * 8 + j.
+  localBases.insert_or_assign(symbol, std::tuple{arr->comp, physicalLocalType(cg, nameTpe), static_cast<llvm::Value *>(base)});
+  return base;
 }
 
 bool VulkanLowering::defineLocalString(CodeGen &, const std::string &symbol, const std::string &bytes, const AnyType &elemTpe) {

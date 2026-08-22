@@ -1,9 +1,71 @@
 package polyregion.ast.pass
 
 import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.Traversal.*
 import PassTest.*
 
 class ArenaLowerSuite extends munit.FunSuite {
+
+  test("arena atomic and volatile operations rebase offset pointers") {
+    val capSym  = sym("Cap")
+    val ptrTpe  = p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global)
+    val capTpe  = p.Type.Struct(capSym, Nil)
+    val cap     = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val pointer = named("pointer", ptrTpe)
+    val loaded  = named("loaded", p.Type.IntU32)
+    val stored  = named("stored", p.Type.Unit0)
+    val swapped = named("swapped", p.Type.IntU32)
+    val capDef  = p.StructDef(capSym, Nil, List(named("data", ptrTpe)), Nil)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(
+          pointer,
+          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
+          isMutable = false
+        ),
+        p.Stmt.Var(
+          loaded,
+          Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(p.Term.Select(pointer, Nil, ptrTpe), p.Type.IntU32))),
+          isMutable = false
+        ),
+        p.Stmt.Var(
+          stored,
+          Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(p.Term.Select(pointer, Nil, ptrTpe), p.Term.IntU32Const(7)))),
+          isMutable = false
+        ),
+        p.Stmt.Var(
+          swapped,
+          Some(
+            p.Expr.SpecOp(
+              p.Spec.GpuAtomicRMW(
+                p.AtomicOp.Xchg,
+                p.Term.Select(pointer, Nil, ptrTpe),
+                p.Term.IntU32Const(9),
+                p.MemScope.Device,
+                p.MemOrder.Relaxed,
+                p.Type.IntU32
+              )
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+    val pointers = out.collectAll[p.Expr].collect {
+      case p.Expr.SpecOp(x: p.Spec.GpuAtomicRMW)     => x.ptr
+      case p.Expr.SpecOp(x: p.Spec.GpuVolatileLoad)  => x.ptr
+      case p.Expr.SpecOp(x: p.Spec.GpuVolatileStore) => x.ptr
+    }
+    assertEquals(pointers.size, 3)
+    assert(pointers.forall {
+      case p.Term.Select(root, Nil, `ptrTpe`) => root.symbol.startsWith("#ab")
+      case _                                  => false
+    })
+  }
 
   test("flat arena lowering exposes a byte arena at the function boundary") {
     val capSym    = sym("Cap")

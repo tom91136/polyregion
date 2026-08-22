@@ -70,6 +70,10 @@ static std::string volatileHelperName(const bool load, const std::string &space,
   return fmt::format("_pr_v{}_{}_{}", load ? "ld" : "st", space, element);
 }
 
+static std::string atomicMinMaxHelperName(const bool minimum, const std::string &element) {
+  return fmt::format("_pr_atomic_{}_{}", minimum ? "min" : "max", element);
+}
+
 struct SlotUnion {
   Map<std::string, std::string> parent;
   std::string find(const std::string &key) {
@@ -153,8 +157,8 @@ struct CLAddressSpaceTracePass {
 
   PathWalk walkPath(const Type::Any &rootTpe, const std::vector<PathStep::Any> &steps, size_t upto) const {
     Type::Any current = rootTpe;
-    TypeSpace::Any live = rootTpe.template get<Type::Ptr>() ^ map([](const auto &p) { return p.space; })
-                          ^ get_or_else(isLocalArr(rootTpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
+    TypeSpace::Any live = rootTpe.template get<Type::Ptr>() | map([](const auto &p) { return p.space; })
+                          | get_or_else(isLocalArr(rootTpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
     for (size_t i = 0; i < upto && i < steps.size(); ++i) {
       steps[i].match_total(
           [&](const PathStep::Field &f) {
@@ -180,14 +184,23 @@ struct CLAddressSpaceTracePass {
   SpacedTerm mapTerm(const Term::Any &term, StackScope &scope) {
     if (auto sel = term.template get<Term::Select>()) {
       const auto rebound = scope.vars ^ get_or_default(sel->root.symbol, sel->root);
-      const auto liveSpace = walkPath(rebound.tpe, sel->steps, sel->steps.size()).space;
+      const auto walked = walkPath(rebound.tpe, sel->steps, sel->steps.size());
+      const auto liveSpace = walked.space;
       auto declared = sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>();
       if (declared)
         if (const auto field = sel->steps.back().template get<PathStep::Field>())
           if (const auto tpe = fieldType(walkPath(rebound.tpe, sel->steps, sel->steps.size() - 1).type, field->name))
             declared = tpe->template get<Type::Ptr>() ^ get_or_else(*declared);
-      const auto space = declared ^ map([](const auto &p) { return p.space; }) ^ get_or_else(liveSpace);
-      return SpacedTerm{Term::Select(rebound, sel->steps, sel->tpe), space};
+      const auto space = declared | map([](const auto &p) { return p.space; }) | get_or_else(liveSpace);
+      // The conflict-splitting pass can replace the root with an address-space-specialised
+      // struct. Carry that structural replacement through aliases; retaining sel->tpe here
+      // silently converts `private Box_asp*` back to `private Box*`. Preserve the declared
+      // type otherwise because non-entry helper arguments deliberately retain their original
+      // address-space contract even though their local binding is private.
+      auto actualTpe = sel->tpe;
+      const auto declaredStruct = structNameOf(actualTpe), walkedStruct = structNameOf(walked.type);
+      if (declaredStruct && walkedStruct && *declaredStruct != *walkedStruct) actualTpe = walked.type;
+      return SpacedTerm{Term::Select(rebound, sel->steps, actualTpe), space};
     }
     // XXX null seeds its space from the pointee (refTpe=Global) so `T* p = nullptr` later infers Global not Private
     if (auto np = term.template get<Term::NullPtrConst>()) return SpacedTerm{term, np->space};
@@ -212,8 +225,8 @@ struct CLAddressSpaceTracePass {
             return {Expr::Cast(st.actual, x.as), asPtr->space};
           // re-space the cast target so OpenCL doesn't see a global<-private mismatch
           auto as = x.as.template get<Type::Ptr>()                                            //
-                    ^ map([&](const auto &p) { return Type::Ptr(p.comp, st.space).widen(); }) //
-                    ^ get_or_else(x.as);
+                    | map([&](const auto &p) { return Type::Ptr(p.comp, st.space).widen(); }) //
+                    | get_or_else(x.as);
           return {Expr::Cast(st.actual, as), st.space};
         },
         [&](const Expr::Invoke &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },
@@ -426,7 +439,7 @@ struct CLAddressSpaceTracePass {
                                                  const Map<Sym, StructDef> &structDefs) {
     const auto carries = [&](const Type::Any &tpe) -> std::optional<Sym> {
       const auto structure = structNameOf(tpe);
-      return structure && conflicted.contains(*structure) ? structure : std::nullopt;
+      return structure && (conflicted ^ contains(*structure)) ? structure : std::nullopt;
     };
 
     SlotUnion slots;
@@ -525,7 +538,7 @@ struct CLAddressSpaceTracePass {
         if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
         const auto structure = owner.template get<Type::Struct>();
         const auto tpe = structure ? fieldType(owner, field->name) : std::nullopt;
-        if (structure && tpe && tpe->template is<Type::Ptr>() && conflicted.contains(structure->name)) {
+        if (structure && tpe && tpe->template is<Type::Ptr>() && (conflicted ^ contains(structure->name))) {
           if (select.steps.size() != 1) throw backend::BackendException("cannot specialise indirect conflicting pointer field");
           colours.emplace_back(registerVariable(fn, select.root.symbol, structure->name), field->name, expressionSpace(mut->expr));
         } else if (structure && tpe) {
@@ -614,11 +627,11 @@ struct CLAddressSpaceTracePass {
           std::string suffix = "_as", key = repr(copies.front().owner);
           for (const auto &member : owner->second.members) {
             const auto carried = structNameOf(member.tpe);
-            if (!carried || !conflicted.contains(*carried)) continue;
+            if (!carried || !(conflicted ^ contains(*carried))) continue;
             if (const auto replacement = replacements.find(member.symbol); replacement != replacements.end()) {
               const auto child = repr(replacement->second);
-              const auto at = child.rfind("_as");
-              const auto code = at == std::string::npos ? "g" : child.substr(at + 3);
+              const auto parts = child ^ split("_as");
+              const auto code = parts.size() == 1 ? "g" : parts.back();
               suffix += code;
               key += "\x1f" + member.symbol + "\x1f" + child;
             } else {
@@ -672,7 +685,7 @@ struct CLAddressSpaceTracePass {
     });
     return retyped.template modify_all<Expr::RefTo>([&](const Expr::RefTo &ref) {
       const auto select = ref.lhs.template get<Term::Select>();
-      if (!select || !types.contains(select->root.symbol)) return ref;
+      if (!select || !(types ^ get_maybe(select->root.symbol))) return ref;
       return Expr::RefTo(ref.lhs, ref.idx, walkPath(select->root.tpe, select->steps, select->steps.size()).type, ref.space, ref.region);
     });
   }
@@ -681,7 +694,7 @@ struct CLAddressSpaceTracePass {
     CLAddressSpaceTracePass pass;
     pass.strictSpaces = strictSpaces;
     for (const auto &def : p.defs)
-      pass.fields.emplace(def.name, def.members ^ map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) ^ to<Map>());
+      pass.fields.emplace(def.name, def.members | map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) | to<Map>());
 
     const auto argRespace = [](const Function &f) {
       const auto kernel = f.isEntry;
@@ -700,10 +713,10 @@ struct CLAddressSpaceTracePass {
     for (bool changed = true; changed;) {
       changed = false;
       MemberStores stores;
-      seeds | for_each([&](const auto &function) { pass.mapFn(function, &stores); });
+      seeds ^ for_each([&](const auto &function) { pass.mapFn(function, &stores); });
       const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
         const auto it = members.find(structure);
-        return it != members.end() && it->second.contains(field);
+        return it != members.end() && (it->second ^ contains(field));
       };
       const auto respace = [&](const auto &members, const TypeSpace::Any &space, const auto &skip) {
         for (const auto &[structure, names] : members)
@@ -727,10 +740,10 @@ struct CLAddressSpaceTracePass {
     }
 
     MemberStores stores;
-    if (strictSpaces) seeds | for_each([&](const auto &function) { pass.mapFn(function, &stores); });
+    if (strictSpaces) seeds ^ for_each([&](const auto &function) { pass.mapFn(function, &stores); });
     const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
       const auto it = members.find(structure);
-      return it != members.end() && it->second.contains(field);
+      return it != members.end() && (it->second ^ contains(field));
     };
     Set<Sym> conflicted;
     for (const auto *bucket : {&stores.global, &stores.constant, &stores.local, &stores.priv})
@@ -743,7 +756,7 @@ struct CLAddressSpaceTracePass {
 
     ConflictSplit split;
     if (!conflicted.empty()) {
-      const auto structDefs = p.defs ^ map([](const auto &def) { return std::pair{def.name, def}; }) ^ to<Map>();
+      const auto structDefs = p.defs | map([](const auto &def) { return std::pair{def.name, def}; }) | to<Map>();
       const auto planned =
           pass.planConflictSplit(seeds ^ map([&](const auto &function) { return pass.mapFn(function); }), conflicted, structDefs);
       if (!planned) throw backend::BackendException("address-space-specialized struct escapes representable storage");
@@ -756,7 +769,7 @@ struct CLAddressSpaceTracePass {
             field->second = retypeStructOccurrence(field->second, clone);
     for (const auto &[name, def] : split.clones)
       pass.fields.insert_or_assign(name,
-                                   def.members ^ map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) ^ to<Map>());
+                                   def.members | map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) | to<Map>());
     const auto reify = [&](const StructDef &def) {
       const auto fields = pass.fields.find(def.name);
       return fields == pass.fields.end() ? def : def.withMembers(def.members ^ map([&](const auto &member) {
@@ -772,7 +785,7 @@ struct CLAddressSpaceTracePass {
 
     const auto remap = [&](const Function &function) { return pass.mapFn(pass.retypeConflicted(argRespace(function), split)); };
     auto entry = remap(p.entry);
-    auto fns = p.functions | map(remap) | to_vector();
+    auto fns = p.functions ^ map(remap);
 
     auto sigOf = [](const Expr::Invoke &inv) {
       return Signature(calleeName(inv), /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](const auto &e) { return e.tpe(); }),
@@ -780,7 +793,7 @@ struct CLAddressSpaceTracePass {
     };
 
     Map<Signature, std::shared_ptr<Function>> functionTable;
-    fns | for_each([&](const auto &f) {
+    fns ^ for_each([&](const auto &f) {
       const Signature sig(f.decl.name, /*tpeVars*/ {}, /*receiver*/ {}, f.decl.args ^ map([](const auto &e) { return e.named.tpe; }),
                           /*moduleCaptures*/ {},
                           /*termCaptures*/ {}, f.decl.rtn);
@@ -791,7 +804,7 @@ struct CLAddressSpaceTracePass {
       const auto specialised = functionTable                                                                                      //
                                | flat_map([&](const auto &, const auto &f) { return f->template collect_all<Expr::Invoke>(); })   //
                                | collect([&](const auto &inv) -> std::optional<std::pair<Signature, std::shared_ptr<Function>>> { //
-                                   if (const auto sig = sigOf(inv); !functionTable.contains(sig)) {
+                                   if (const auto sig = sigOf(inv); !(functionTable ^ get_maybe(sig))) {
                                      if (auto spec = functionTable ^ find([&](const auto &lhs, const auto &) {
                                                        return lhs.name == sig.name && lhs.args.size() == sig.args.size();
                                                      })) {
@@ -858,7 +871,7 @@ std::string backend::CSource::normalise(const std::string &s) const {
                return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') ? c : '_';
              });
   // escape whole identifiers only: a symbol merely containing `kernel` must stay verbatim to match the launch lookup
-  if (reserved.contains(out) || (dialect == Dialect::MSL1_0 && mslReserved.contains(out))) out = "_" + out;
+  if ((reserved ^ contains(out)) || (dialect == Dialect::MSL1_0 && (mslReserved ^ contains(out)))) out = "_" + out;
   return out;
 }
 
@@ -866,10 +879,11 @@ std::string backend::CSource::normalise(const Sym &s) const { return normalise(r
 
 static std::string sourceIdent(const Origin &origin) {
   if (!origin.source) return {};
-  auto s = *origin.source;
-  const auto begin = s.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) return {};
-  s = s.substr(begin, s.find_last_not_of(" \t\r\n") - begin + 1);
+  const auto ignored = [](const char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+  const auto first = *origin.source ^ index_where([&](const char c) { return !ignored(c); });
+  if (first < 0) return {};
+  const auto last = *origin.source ^ last_index_where([&](const char c) { return !ignored(c); });
+  const auto s = *origin.source ^ slice(first, last + 1);
   if (s.empty() || (!std::isalpha(static_cast<unsigned char>(s.front())) && s.front() != '_')) return {};
   if (s ^ exists([](const char c) { return !std::isalnum(static_cast<unsigned char>(c)) && c != '_'; })) return {};
   return s;
@@ -889,7 +903,7 @@ std::string backend::CSource::localName(const std::string &symbol) {
   std::string name;
   do
     name = denseName(localNameCounter++);
-  while (fileScopeNames.contains(name));
+  while (fileScopeNames ^ contains(name));
   return localNames.emplace(symbol, name).first->second;
 }
 
@@ -904,18 +918,18 @@ void backend::CSource::bindLocalNames(const Function &fn) {
     if (!name.empty()) {
       const auto base = normalise(name);
       name = base;
-      for (size_t suffix = 1; used.contains(name); ++suffix)
+      for (size_t suffix = 1; used ^ contains(name); ++suffix)
         name = base + "_" + std::to_string(suffix);
     } else {
       do
         name = denseName(localNameCounter++);
-      while (used.contains(name));
+      while (used ^ contains(name));
     }
     used.emplace(name);
     localNames.emplace(named.symbol, name);
   };
-  fn.decl.args | for_each([&](const auto &arg) { bind(arg.named); });
-  fn.template collect_all<Named>() | for_each(bind);
+  fn.decl.args ^ for_each([&](const auto &arg) { bind(arg.named); });
+  fn.template collect_all<Named>() ^ for_each(bind);
 }
 
 Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::string &fieldName) const {
@@ -1129,18 +1143,18 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       [&](const Expr::Alias &x) { return mkTerm(x.ref); },
       [&](const Expr::SpecOp &x) {
         struct DialectAccessor {
-          std::string cl, msl;
+          std::string c11, cl, msl;
         };
         const auto gpuIntr = [&](const DialectAccessor &accessor) -> std::string {
           switch (dialect) {
-            case Dialect::C11: throw std::logic_error(to_string(x) + " not supported for C11");
+            case Dialect::C11: return accessor.c11;
             case Dialect::MSL1_0: return accessor.msl;
             case Dialect::OpenCL1_1: return accessor.cl;
           }
         };
         const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Term::Any &index) -> std::string {
           switch (dialect) {
-            case Dialect::C11: throw std::logic_error(to_string(x) + " not supported for C11");
+            case Dialect::C11: return accessor.c11;
             case Dialect::MSL1_0: return fmt::format("{}[{}]", accessor.msl, mkTerm(index));
             case Dialect::OpenCL1_1: return fmt::format("{}({})", accessor.cl, mkTerm(index));
           }
@@ -1150,50 +1164,147 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
               throw BackendException("assert reached codegen; the StructuredExit pass must run before the backend");
             }, //
             [&](const Spec::GpuBarrierGlobal &v) {
-              return gpuIntr({.cl = "barrier(CLK_GLOBAL_MEM_FENCE)", //
-                              .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});
+              return gpuIntr({.c11 = "((void)0)",
+                              .cl = "barrier(CLK_GLOBAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
             },
             [&](const Spec::GpuBarrierLocal &v) {
-              return gpuIntr({.cl = "barrier(CLK_LOCAL_MEM_FENCE)", //
-                              .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});
+              return gpuIntr({.c11 = "((void)0)",
+                              .cl = "barrier(CLK_LOCAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"});
             },
             [&](const Spec::GpuBarrierAll &v) {
-              return gpuIntr({.cl = "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
-                              .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});
+              return gpuIntr({.c11 = "((void)0)",
+                              .cl = "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device)"});
             },
             [&](const Spec::GpuFenceGlobal &v) {
-              return gpuIntr({.cl = "mem_fence(CLK_GLOBAL_MEM_FENCE)", //
+              return gpuIntr({.c11 = "((void)0)",
+                              .cl = "mem_fence(CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
             },
             [&](const Spec::GpuFenceLocal &v) {
-              return gpuIntr({.cl = "mem_fence(CLK_LOCAL_MEM_FENCE)", //
+              return gpuIntr({.c11 = "((void)0)",
+                              .cl = "mem_fence(CLK_LOCAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"});
             },
             [&](const Spec::GpuFenceAll &v) {
-              return gpuIntr({.cl = "mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
+              return gpuIntr({.c11 = "((void)0)",
+                              .cl = "mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
                               .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
             },
-            [&](const Spec::GpuGlobalIdx &v) { return gpuDimIntr({.cl = "get_global_id", .msl = "__get_global_id__"}, v.dim); },      //
-            [&](const Spec::GpuGlobalSize &v) { return gpuDimIntr({.cl = "get_global_size", .msl = "__get_global_size__"}, v.dim); }, //
-            [&](const Spec::GpuGroupIdx &v) { return gpuDimIntr({.cl = "get_group_id", .msl = "__get_group_id__"}, v.dim); },         //
-            [&](const Spec::GpuGroupSize &v) { return gpuDimIntr({.cl = "get_num_groups", .msl = "__get_num_groups__"}, v.dim); },    //
-            [&](const Spec::GpuLocalIdx &v) { return gpuDimIntr({.cl = "get_local_id", .msl = "__get_local_id__"}, v.dim); },         //
-            [&](const Spec::GpuLocalSize &v) { return gpuDimIntr({.cl = "get_local_size", .msl = "__get_local_size__"}, v.dim); },    //
-            [&](const Spec::GpuLaneIdx &) -> std::string { throw BackendException("Spec::GpuLaneIdx requires SubgroupLower"); },
-            [&](const Spec::GpuSubgroupSize &) -> std::string { throw BackendException("Spec::GpuSubgroupSize requires SubgroupLower"); },
-            [&](const Spec::GpuShuffleDown &) -> std::string { throw BackendException("Spec::GpuShuffleDown requires SubgroupLower"); },
-            [&](const Spec::GpuShuffleUp &) -> std::string { throw BackendException("Spec::GpuShuffleUp requires SubgroupLower"); },
-            [&](const Spec::GpuShuffleIdx &) -> std::string { throw BackendException("Spec::GpuShuffleIdx requires SubgroupLower"); },
-            [&](const Spec::GpuShuffleXor &) -> std::string { throw BackendException("Spec::GpuShuffleXor requires SubgroupLower"); },
+            [&](const Spec::GpuGlobalIdx &v) { return gpuDimIntr({.c11 = "0", .cl = "get_global_id", .msl = "__get_global_id__"}, v.dim); },
+            [&](const Spec::GpuGlobalSize &v) {
+              return gpuDimIntr({.c11 = "1", .cl = "get_global_size", .msl = "__get_global_size__"}, v.dim);
+            },
+            [&](const Spec::GpuGroupIdx &v) { return gpuDimIntr({.c11 = "0", .cl = "get_group_id", .msl = "__get_group_id__"}, v.dim); },
+            [&](const Spec::GpuGroupSize &v) {
+              return gpuDimIntr({.c11 = "1", .cl = "get_num_groups", .msl = "__get_num_groups__"}, v.dim);
+            },
+            [&](const Spec::GpuLocalIdx &v) { return gpuDimIntr({.c11 = "0", .cl = "get_local_id", .msl = "__get_local_id__"}, v.dim); },
+            [&](const Spec::GpuLocalSize &v) {
+              return gpuDimIntr({.c11 = "1", .cl = "get_local_size", .msl = "__get_local_size__"}, v.dim);
+            },
+            [&](const Spec::GpuLaneIdx &) -> std::string {
+              if (dialect == Dialect::C11) return "0";
+              throw BackendException("Spec::GpuLaneIdx requires SubgroupLower");
+            },
+            [&](const Spec::GpuSubgroupSize &) -> std::string {
+              if (dialect == Dialect::C11) return "1";
+              throw BackendException("Spec::GpuSubgroupSize requires SubgroupLower");
+            },
+            [&](const Spec::GpuShuffleDown &v) -> std::string {
+              if (dialect == Dialect::C11) return mkTerm(v.value);
+              throw BackendException("Spec::GpuShuffleDown requires SubgroupLower");
+            },
+            [&](const Spec::GpuShuffleUp &v) -> std::string {
+              if (dialect == Dialect::C11) return mkTerm(v.value);
+              throw BackendException("Spec::GpuShuffleUp requires SubgroupLower");
+            },
+            [&](const Spec::GpuShuffleIdx &v) -> std::string {
+              if (dialect == Dialect::C11) return mkTerm(v.value);
+              throw BackendException("Spec::GpuShuffleIdx requires SubgroupLower");
+            },
+            [&](const Spec::GpuShuffleXor &v) -> std::string {
+              if (dialect == Dialect::C11) return mkTerm(v.value);
+              throw BackendException("Spec::GpuShuffleXor requires SubgroupLower");
+            },
             [&](const Spec::GpuSubgroupBarrier &) -> std::string {
+              if (dialect == Dialect::C11) return "((void)0)";
               if (dialect == Dialect::OpenCL1_1) return "sub_group_barrier(CLK_LOCAL_MEM_FENCE)";
               throw BackendException("Spec::GpuSubgroupBarrier is unsupported for this C source dialect");
             },
-            [&](const Spec::GpuBallot &) -> std::string { throw BackendException("Spec::GpuBallot requires SubgroupLower"); },
-            [&](const Spec::GpuVoteAny &) -> std::string { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
-            [&](const Spec::GpuVoteAll &) -> std::string { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); },
+            [&](const Spec::GpuBallot &v) -> std::string {
+              if (dialect == Dialect::C11) return fmt::format("(({} && (({} & 1u) != 0u)) ? 1u : 0u)", mkTerm(v.pred), mkTerm(v.mask));
+              throw BackendException("Spec::GpuBallot requires SubgroupLower");
+            },
+            [&](const Spec::GpuVoteAny &v) -> std::string {
+              if (dialect == Dialect::C11) return fmt::format("({} && (({} & 1u) != 0u))", mkTerm(v.pred), mkTerm(v.mask));
+              throw BackendException("Spec::GpuVoteAny requires SubgroupLower");
+            },
+            [&](const Spec::GpuVoteAll &v) -> std::string {
+              if (dialect == Dialect::C11) return fmt::format("({} || (({} & 1u) == 0u))", mkTerm(v.pred), mkTerm(v.mask));
+              throw BackendException("Spec::GpuVoteAll requires SubgroupLower");
+            },
             [&](const Spec::GpuAtomicRMW &v) -> std::string {
-              if (dialect != Dialect::MSL1_0) throw BackendException("Spec::GpuAtomicRMW unsupported for this C source dialect");
+              if (dialect == Dialect::C11) {
+                if (!v.rtn.template is<Type::IntS32>() && !v.rtn.template is<Type::IntU32>())
+                  throw BackendException("C11 supports only 32-bit integer atomic RMW");
+                if (!v.order.template is<MemOrder::Relaxed>()) throw BackendException("C11 atomic RMW supports only relaxed ordering");
+                const auto type = mkTpe(v.rtn), ptr = mkTerm(v.ptr), value = mkTerm(v.value);
+                return v.op.match_total(
+                    [&](const AtomicOp::Xchg &) {
+                      return fmt::format("atomic_exchange_explicit((volatile _Atomic({})*){}, ({}){}, memory_order_relaxed)", type, ptr,
+                                         type, value);
+                    },
+                    [&](const AtomicOp::Add &) {
+                      return fmt::format("atomic_fetch_add_explicit((volatile _Atomic({})*){}, ({}){}, memory_order_relaxed)", type, ptr,
+                                         type, value);
+                    },
+                    [&](const AtomicOp::Sub &) {
+                      return fmt::format("atomic_fetch_sub_explicit((volatile _Atomic({})*){}, ({}){}, memory_order_relaxed)", type, ptr,
+                                         type, value);
+                    },
+                    [&](const AtomicOp::And &) {
+                      return fmt::format("atomic_fetch_and_explicit((volatile _Atomic({})*){}, ({}){}, memory_order_relaxed)", type, ptr,
+                                         type, value);
+                    },
+                    [&](const AtomicOp::Or &) {
+                      return fmt::format("atomic_fetch_or_explicit((volatile _Atomic({})*){}, ({}){}, memory_order_relaxed)", type, ptr,
+                                         type, value);
+                    },
+                    [&](const AtomicOp::Xor &) {
+                      return fmt::format("atomic_fetch_xor_explicit((volatile _Atomic({})*){}, ({}){}, memory_order_relaxed)", type, ptr,
+                                         type, value);
+                    },
+                    [&](const AtomicOp::Min &) {
+                      return fmt::format("{}((volatile _Atomic({})*){}, ({}){})", atomicMinMaxHelperName(true, type), type, ptr, type,
+                                         value);
+                    },
+                    [&](const AtomicOp::Max &) {
+                      return fmt::format("{}((volatile _Atomic({})*){}, ({}){})", atomicMinMaxHelperName(false, type), type, ptr, type,
+                                         value);
+                    });
+              }
+              if (dialect == Dialect::OpenCL1_1) {
+                if (!v.rtn.template is<Type::IntS32>() && !v.rtn.template is<Type::IntU32>())
+                  throw BackendException("OpenCL 1.1 supports only 32-bit integer atomic RMW");
+                if (!v.order.template is<MemOrder::Relaxed>())
+                  throw BackendException("OpenCL 1.1 atomic RMW supports only relaxed ordering");
+                const auto p = v.ptr.tpe().template get<Type::Ptr>();
+                if (!p) throw BackendException("OpenCL atomic RMW requires a pointer operand");
+                const auto space = p->space.match_total(
+                    [](const TypeSpace::Global &) { return "global"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
+                    [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
+                if (space != "global" && space != "local") throw BackendException("OpenCL atomic RMW requires global or local storage");
+                const auto function = v.op.match_total(
+                    [](const AtomicOp::Xchg &) { return "atomic_xchg"s; }, [](const AtomicOp::Add &) { return "atomic_add"s; },
+                    [](const AtomicOp::Sub &) { return "atomic_sub"s; }, [](const AtomicOp::And &) { return "atomic_and"s; },
+                    [](const AtomicOp::Or &) { return "atomic_or"s; }, [](const AtomicOp::Xor &) { return "atomic_xor"s; },
+                    [](const AtomicOp::Min &) { return "atomic_min"s; }, [](const AtomicOp::Max &) { return "atomic_max"s; });
+                const auto type = mkTpe(v.rtn);
+                return fmt::format("{}((volatile {} {}*){}, ({}){})", function, space, type, mkTerm(v.ptr), type, mkTerm(v.value));
+              }
               if (!v.rtn.template is<Type::IntS32>() && !v.rtn.template is<Type::IntU32>())
                 throw BackendException("MSL supports only 32-bit integer atomic RMW");
               const auto space = mslPtrSpace(v.ptr);
@@ -1240,7 +1351,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                     [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
                 return fmt::format("(*((volatile {} {}*){}))", space, type, ptr);
               }
-              throw BackendException("Spec::GpuVolatileLoad unsupported for C11");
+              return fmt::format("(*((volatile {}*){}))", type, ptr);
             },
             [&](const Spec::GpuVolatileStore &v) -> std::string {
               const auto ptr = mkTerm(v.ptr), value = mkTerm(v.value), type = mkTpe(v.value.tpe());
@@ -1261,7 +1372,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                     [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
                 return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
               }
-              throw BackendException("Spec::GpuVolatileStore unsupported for C11");
+              return fmt::format("(*((volatile {}*){}) = {})", type, ptr, value);
             } //
         );
       },
@@ -1344,7 +1455,13 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         if (x.idx)
           if (auto pt = x.lhs.tpe().template get<Type::Ptr>(); pt && pt->comp.template is<Type::Arr>())
             return fmt::format("&({})[0][{}]", mkTerm(x.lhs), mkTerm(*x.idx));
-        std::string str = fmt::format("&({} /*{}*/)", mkTerm(x.lhs), mkTpe(x.comp));
+        std::string str;
+        // OpenCL C has no C++ temporary materialisation: `&(1)` is invalid.  A C99
+        // compound literal provides the required private lvalue and preserves RefTo's
+        // lifetime for the enclosing block.
+        if (dialect == Dialect::OpenCL1_1 && !x.lhs.template is<Term::Select>() && !x.lhs.template is<Term::StringConst>())
+          str = fmt::format("&((private {}){{{}}})", mkTpe(x.comp), mkTerm(x.lhs));
+        else str = fmt::format("&({} /*{}*/)", mkTerm(x.lhs), mkTpe(x.comp));
         // a value lhs would make `&value[idx]` illegal C, so drop the idx; a pointer/array lhs keeps it
         const bool valueLhs = !x.lhs.tpe().template is<Type::Ptr>() && !x.lhs.tpe().template is<Type::Arr>();
         if (x.idx && !valueLhs) str += fmt::format("[{}]", mkTerm(*x.idx));
@@ -1364,7 +1481,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                   const auto selected = resolveFieldType(owner, f.name);
                   const bool elided = (f.name ^ starts_with(conventions::BaseFieldPrefix))
                                       && (selected.template get<Type::Struct>() //
-                                          ^ exists([&](const auto &s) { return zeroSizeStructNames.contains(normalise(s.name)); }));
+                                          ^ exists([&](const auto &s) { return zeroSizeStructNames ^ contains(normalise(s.name)); }));
                   elidedBaseSteps.emplace_back(elided);
                   owner = selected;
                 },
@@ -1385,8 +1502,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
           if (!elidedBaseSteps.empty() && elidedBaseSteps.back()) {
             auto parent = mkTerm(x.lhs);
             for (auto it = elidedBaseSteps.rbegin(); it != elidedBaseSteps.rend() && *it; ++it) {
-              const auto cut = parent.rfind('.');
-              if (cut == std::string::npos) break;
+              const auto cut = parent ^ last_index_of('.');
+              if (cut < 0) break;
               parent.resize(cut);
             }
             str = fmt::format("&({})", parent);
@@ -1416,10 +1533,10 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
     const auto name = normalise(s->name);
     // a populated union stays whole; naming its members would not preserve the active one
     // a zero-size member has no storage in the emitted body, so it must not be named
-    if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !unionDefNames.contains(name)))
+    if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !(unionDefNames ^ contains(name))))
       return it->second | filter([&](const auto &m) {
                return !m.second.template is<Type::FnRef>() && !(m.second.template get<Type::Struct>() ^ exists([&](const auto &nested) {
-                                                                  return zeroSizeStructNames.contains(normalise(nested.name));
+                                                                  return zeroSizeStructNames ^ contains(normalise(nested.name));
                                                                 }));
              })
              | map([&](const auto &m) {
@@ -1439,14 +1556,14 @@ std::string backend::CSource::mkVolatileCopy(const std::string &lhs, const std::
   }
   if (const auto structure = tpe.template get<Type::Struct>()) {
     const auto name = normalise(structure->name);
-    if (unionDefNames.contains(name))
+    if (unionDefNames ^ contains(name))
       throw BackendException("volatile access to union " + repr(structure->name) + " is unsupported for MSL");
     const auto members = structDefsByName.find(name);
     if (members == structDefsByName.end()) throw BackendException("volatile access to undeclared struct " + repr(structure->name));
     return members->second | filter([&](const auto &member) {
              return !member.second.template is<Type::FnRef>()
                     && !(member.second.template get<Type::Struct>()
-                         ^ exists([&](const auto &nested) { return zeroSizeStructNames.contains(normalise(nested.name)); }));
+                         ^ exists([&](const auto &nested) { return zeroSizeStructNames ^ contains(normalise(nested.name)); }));
            })
            | map([&](const auto &member) {
                return mkVolatileCopy(fmt::format("{}.{}", lhs, member.first), fmt::format("{}.{}", rhs, member.first), member.second,
@@ -1473,12 +1590,13 @@ std::optional<std::string> backend::CSource::mkZeroInit(const Type::Any &tpe) co
     if (const auto s = t.template get<Type::Struct>()) {
       const auto members = structDefsByName.find(normalise(s->name));
       if (members == structDefsByName.end()) return false;
-      const auto first = members->second | find([&](const auto &member) {
-                           const auto &memberTpe = member.second;
-                           return !memberTpe.template is<Type::FnRef>()
-                                  && !(memberTpe.template get<Type::Struct>()
-                                       ^ exists([&](const auto &nested) { return zeroSizeStructNames.contains(normalise(nested.name)); }));
-                         });
+      const auto first =
+          members->second ^ find([&](const auto &member) {
+            const auto &memberTpe = member.second;
+            return !memberTpe.template is<Type::FnRef>() && !(memberTpe.template get<Type::Struct>() ^ exists([&](const auto &nested) {
+                                                                return zeroSizeStructNames ^ contains(normalise(nested.name));
+                                                              }));
+          });
       return first ^ exists([&](const auto &member) { return reachesScalar(member.second, depth + 1); });
     }
     return !t.template is<Type::FnRef>() && !t.template is<Type::Unit0>() && !t.template is<Type::Nothing>();
@@ -1524,11 +1642,11 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         return fmt::format("{}[{}] = {};", mkTerm(x.lhs), mkTerm(x.idx), mkTerm(x.value));
       },
       [&](const Stmt::While &x) {
-        const auto body = x.body | mk_string("\n", [&](const auto &s) { return mkStmt(s); });
+        const auto body = x.body ^ mk_string("\n", [&](const auto &s) { return mkStmt(s); });
         return fmt::format("while({}) {{\n{}\n}}", mkTerm(x.cond), body ^ indent(2));
       },
       [&](const Stmt::ForRange &x) {
-        const auto body = x.body | mk_string("\n", [&](const auto &s) { return mkStmt(s); });
+        const auto body = x.body ^ mk_string("\n", [&](const auto &s) { return mkStmt(s); });
         const auto induction = localName(x.induction.symbol);
         return fmt::format("for({} {} = {}; {} < {}; {} += {}) {{\n{}\n}}",     //
                            mkTpe(x.induction.tpe), induction, mkTerm(x.lbIncl), //
@@ -1622,21 +1740,20 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
                      fnPrefix,                    //
                      mkTpe(fnTree.decl.rtn),      //
                      normalise(fnTree.decl.name), //
-                     argExprs | mk_string(", "));
+                     argExprs ^ mk_string(", "));
 }
 
 std::string backend::CSource::mkFn(const Function &fnTree) {
   bindLocalNames(fnTree);
   const auto allVars = fnTree.body ^ flat_map([](const auto &s) { return s.template collect_all<Stmt::Var>(); });
   Set<std::string> seen;
-  const auto localVars =
-      (allVars ^ filter([&](const auto &v) { return isLocalArr(v.name.tpe) && seen.insert(v.name.symbol).second; })) ^ to_vector();
+  const auto localVars = allVars ^ filter([&](const auto &v) { return isLocalArr(v.name.tpe) && seen.insert(v.name.symbol).second; });
   struct Usage {
     uint64_t fixedBytes = 0;
     std::vector<std::string> fixedSizeExprs;
     const Named *dynamic = nullptr;
   };
-  const auto usage = localVars ^ fold_left(Usage{}, [&](Usage acc, const auto &v) {
+  const auto usage = localVars ^ fold_left(Usage{0, {}, nullptr}, [&](Usage acc, const auto &v) {
                        const auto extent = arrayExtent(v.name.tpe);
                        if (!extent) throw BackendException("workgroup array extent overflow");
                        if (extent->count == 0) {
@@ -1662,12 +1779,12 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
   std::vector<std::string> regionConditions;
   if (!fixedExpr.empty()) regionConditions.push_back(fmt::format("({}) <= {}", fixedExpr, remaining));
   if (usage.dynamic) {
-    const auto required = (fnTree.template collect_all<Expr::Cast>() ^ collect([&](const auto &cast) -> std::optional<std::string> {
-                             if (const auto ptr = cast.as.template get<Type::Ptr>(); ptr && ptr->space.template is<TypeSpace::Local>())
-                               if (const auto structure = ptr->comp.template get<Type::Struct>()) return mkTpe(structure->widen());
-                             return std::nullopt;
-                           }))
-                          ^ to<Set>();
+    const auto required = fnTree.template collect_all<Expr::Cast>() | collect([&](const auto &cast) -> std::optional<std::string> {
+                            if (const auto ptr = cast.as.template get<Type::Ptr>(); ptr && ptr->space.template is<TypeSpace::Local>())
+                              if (const auto structure = ptr->comp.template get<Type::Struct>()) return mkTpe(structure->widen());
+                            return std::nullopt;
+                          })
+                          | to<Set>();
     regionConditions ^=
         concat(required ^ map([&](const auto &structure) { return fmt::format("sizeof({}) <= ({})", structure, available); }));
   }
@@ -1715,8 +1832,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                              | map([](const auto &def) { return def.name; })               //
                              | to<Set>();
   auto zeroSizeMember = [&](const Named &m) {
-    return m.tpe.template is<Type::FnRef>()
-           || (m.tpe.template get<Type::Struct>() ^ exists([&](const auto &s) { return zeroSizeStructs.contains(s.name); }));
+    return m.tpe.template get<Type::Struct>() ^ exists([&](const auto &s) { return zeroSizeStructs ^ contains(s.name); });
   };
   // metal rejects an all-zero-size body as a `[[buffer]]` pointee; OpenCL-C tolerates the empty member
   if (dialect == Dialect::MSL1_0)
@@ -1726,8 +1842,16 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         if (def.members ^ forall(zeroSizeMember)) zeroSizeStructs.emplace(def.name);
       changed = zeroSizeStructs.size() != seen;
     }
-  zeroSizeStructNames = zeroSizeStructs | map([&](const auto &name) { return normalise(name); }) | to<Set>();
+  zeroSizeStructNames = zeroSizeStructs ^ map([&](const auto &name) { return normalise(name); });
   auto realStorageMember = [&](const Named &m) { return !zeroSizeMember(m); };
+  auto renderStorageMember = [&](const Named &m) {
+    // FnRef is an erased stateless callable, but its originating C++ object still occupies one byte when
+    // captured as a data member.  Keeping that byte is ABI-significant: otherwise every later capture is read
+    // at the preceding offset (for example `fn, init, step` becomes `init, step, ...`).  Calls and standalone
+    // FnRef values remain erased; this is only their aggregate storage slot.
+    const auto storageTpe = m.tpe.template is<Type::FnRef>() ? Type::IntU8().widen() : m.tpe;
+    return fmt::format("  {};", mkDecl(storageTpe, normalise(m.symbol)));
+  };
 
   // only by-value members create a definition-order dependency; pointer members resolve via the forward decl
   auto structsAndDeps = program.defs | map([&](const auto &def) {
@@ -1741,8 +1865,10 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                         }) //
                         | to<Map>();
 
-  const auto includes = dialect == Dialect::C11 ? std::vector<std::string>{"#include <stdint.h>\n#include <stdbool.h>\n#include <math.h>"}
-                                                : std::vector<std::string>{};
+  const auto includes =
+      dialect == Dialect::C11
+          ? std::vector<std::string>{"#include <stdint.h>\n#include <stdbool.h>\n#include <math.h>\n#include <stdatomic.h>"}
+          : std::vector<std::string>{};
   // forward-declare every struct so pointer members (including cyclic ones) resolve
   const auto typedefs =
       program.defs ^ map([&](const auto &def) {
@@ -1755,7 +1881,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   while (resolved.size() != program.defs.size()) {
     const auto noDeps = structsAndDeps                                  //
                         | filter([&](const auto &s, const auto &deps) { //
-                            return !resolved.contains(s.name) && deps | forall([&](const auto &d) { return resolved.contains(d); });
+                            return !(resolved ^ contains(s.name)) && deps ^ forall([&](const auto &d) { return resolved ^ contains(d); });
                           })     //
                         | keys() //
                         | to_vector();
@@ -1765,9 +1891,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     }
     structBodies ^= concat(noDeps ^ map([&](const auto &s) {
                              return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", normalise(s.name),
-                                                s.members | filter(realStorageMember) | mk_string("{\n", "\n", "\n}", [&](const auto &m) {
-                                                  return fmt::format("  {};", mkDecl(m.tpe, normalise(m.symbol)));
-                                                }));
+                                                s.members | filter(realStorageMember) | mk_string("{\n", "\n", "\n}", renderStorageMember));
                            }));
     resolved ^= concat(noDeps ^ map([](const auto &s) { return s.name; }));
   }
@@ -1791,14 +1915,14 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         }) //
       | to_vector();
 
-  const auto typeNames = program.defs | flat_map([&](const auto &def) {
+  const auto typeNames = program.defs ^ flat_map([&](const auto &def) {
                            return std::vector<std::string>{normalise(def.name)}
                                   ^ concat(def.members ^ map([&](const auto &member) { return normalise(member.symbol); }));
-                         })
-                         | to_vector();
-  fileScopeNames =
-      (typeNames ^ concat(allFns | map([&](const auto &fn) { return normalise(fn.decl.name); })) ^ concat(stringConstNames | values()))
-      | to<Set>();
+                         });
+  fileScopeNames = typeNames                                                                       //
+                   | concat(allFns ^ map([&](const auto &fn) { return normalise(fn.decl.name); })) //
+                   | concat(stringConstNames ^ values())                                           //
+                   | to<Set>();
 
   std::vector<std::string> volatileHelpers;
   if (dialect == Dialect::MSL1_0) {
@@ -1808,18 +1932,38 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       const auto space = mslPtrSpace(ptr), name = volatileHelperName(load, space, mkTpe(tpe));
       if (emitted.insert(name).second) volatileHelpers.push_back(mkVolatileHelper(load, tpe, space));
     };
-    allFns | for_each([&](const auto &fn) {
-      fn.template collect_all<Spec::GpuVolatileLoad>() | for_each([&](const auto &load) { add(true, load.rtn, load.ptr); });
-      fn.template collect_all<Spec::GpuVolatileStore>() | for_each([&](const auto &store) { add(false, store.value.tpe(), store.ptr); });
+    allFns ^ for_each([&](const auto &fn) {
+      fn.template collect_all<Spec::GpuVolatileLoad>() ^ for_each([&](const auto &load) { add(true, load.rtn, load.ptr); });
+      fn.template collect_all<Spec::GpuVolatileStore>() ^ for_each([&](const auto &store) { add(false, store.value.tpe(), store.ptr); });
     });
   }
 
-  const auto protos = allFns | mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
+  const auto atomicHelpers = dialect == Dialect::C11
+                                 ? allFns                                                                                       //
+                                       | flat_map([](const auto &fn) { return fn.template collect_all<Spec::GpuAtomicRMW>(); }) //
+                                       | collect([&](const auto &atomic) -> std::optional<std::string> {
+                                           const bool minimum = atomic.op.template is<AtomicOp::Min>();
+                                           if (!minimum && !atomic.op.template is<AtomicOp::Max>()) return std::nullopt;
+                                           const auto type = mkTpe(atomic.rtn), name = atomicMinMaxHelperName(minimum, type);
+                                           return fmt::format("static {} {}(volatile _Atomic({}) *p, {} v) {{\n"
+                                                              "  {} old = atomic_load_explicit(p, memory_order_relaxed);\n"
+                                                              "  while (v {} old && !atomic_compare_exchange_weak_explicit(p, &old, v, "
+                                                              "memory_order_relaxed, memory_order_relaxed)) {{}}\n"
+                                                              "  return old;\n"
+                                                              "}}",
+                                                              type, name, type, type, type, minimum ? "<" : ">");
+                                         })         //
+                                       | distinct() //
+                                       | to_vector()
+                                 : std::vector<std::string>{};
+
+  const auto protos = allFns ^ mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
   auto code = includes                                                       //
               | concat(typedefs)                                             //
               | concat(structBodies)                                         //
               | concat(stringDecls)                                          //
               | concat(volatileHelpers)                                      //
+              | concat(atomicHelpers)                                        //
               | append(protos)                                               //
               | append(std::string("\n"))                                    //
               | concat(allFns ^ map([&](const auto &f) { return mkFn(f); })) //

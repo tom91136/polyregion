@@ -119,6 +119,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
     }
   }();
   opts.emitBitcode = options.hostMirroring;
+  opts.workgroupMemoryBytes = options.workgroupMemoryBytes;
   return opts;
 }
 
@@ -182,7 +183,8 @@ PluginRegistry &sharedPlugins() {
 }
 
 std::string bareName(const std::string &step) {
-  return std::string(std::string_view(step) ^ take_while([](char c) { return c != '('; }) ^ trim());
+  const auto prefix = std::string_view(step) ^ take_while([](char c) { return c != '('; });
+  return std::string(prefix ^ trim());
 }
 
 } // namespace
@@ -293,9 +295,10 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   }
 
   if (options.hostMirroring) {
-    auto hostFns = std::vector<polyast::Function>{effective.entry} //
-                   ^ concat(effective.functions)                   //
-                   ^ filter([](const auto &f) { return f.decl.affinity.template is<polyast::FunctionAffinity::Host>(); });
+    auto hostFns = std::vector<polyast::Function>{effective.entry}                                                        //
+                   | concat(effective.functions)                                                                          //
+                   | filter([](const auto &f) { return f.decl.affinity.template is<polyast::FunctionAffinity::Host>(); }) //
+                   | to_vector();
     if (hostFns.empty()) return {{}, {}, preEvents, {}, "hostMirroring: pipeline produced no Host-affinity functions", {}};
     effective = polyast::Program(hostFns.front(), std::vector<polyast::Function>(std::next(hostFns.begin()), hostFns.end()), effective.defs,
                                  effective.phase, effective.metadata);

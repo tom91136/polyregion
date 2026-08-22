@@ -24,6 +24,10 @@
 #include "polyregion/export.h"
 #include "polyregion/types.h"
 
+// Internal CPU-codegen ABI: the HostThreaded launcher sets this per worker before invoking a kernel.
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_idx();  // NOLINT(*-reserved-identifier)
+extern "C" POLYREGION_EXPORT uint64_t __polyregion_host_thread_global_size(); // NOLINT(*-reserved-identifier)
+
 #ifdef POLYINVOKE_TRACE
   #error POLYINVOKE_TRACE already defined
 #else

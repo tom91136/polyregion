@@ -432,6 +432,14 @@ object ArenaLower extends ProgramPass {
       // ArenaLower) so a Select carries no nested term and is visited once
       case op: p.Expr.IntrOp => op.modifyAll[p.Term](rwTerm)
       case op: p.Expr.MathOp => op.modifyAll[p.Term](rwTerm)
+      case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, ptr, value, scope, order, rtn)) if offsetVal(ptr) =>
+        p.Expr.SpecOp(
+          p.Spec.GpuAtomicRMW(op, sel(arenaBase(rwTerm(ptr), ptr.tpe)), rwTerm(value), scope, order, rtn)
+        )
+      case p.Expr.SpecOp(p.Spec.GpuVolatileLoad(ptr, rtn)) if offsetVal(ptr) =>
+        p.Expr.SpecOp(p.Spec.GpuVolatileLoad(sel(arenaBase(rwTerm(ptr), ptr.tpe)), rtn))
+      case p.Expr.SpecOp(p.Spec.GpuVolatileStore(ptr, value)) if offsetVal(ptr) =>
+        p.Expr.SpecOp(p.Spec.GpuVolatileStore(sel(arenaBase(rwTerm(ptr), ptr.tpe)), rwTerm(value)))
       case op: p.Expr.SpecOp => op.modifyAll[p.Term](rwTerm)
       case x                 => x
     }

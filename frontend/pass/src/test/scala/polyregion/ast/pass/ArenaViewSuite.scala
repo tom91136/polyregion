@@ -225,4 +225,129 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(comparison.map(_.x.tpe), Some(p.Type.IntS64))
     assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
   }
+
+  test("arena atomic and volatile accesses use a typed scalar view") {
+    val value   = named("value", p.Type.IntU32)
+    val capArg  = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val ptrTpe  = p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global)
+    val pointer = named("pointer", ptrTpe)
+    val loaded  = named("loaded", p.Type.IntU32)
+    val stored  = named("stored", p.Type.Unit0)
+    val swapped = named("swapped", p.Type.IntU32)
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(
+            pointer,
+            Some(
+              p.Expr.RefTo(
+                p.Term.Select(capArg.named, List(p.PathStep.Field(value.symbol)), value.tpe),
+                None,
+                value.tpe,
+                p.Type.Space.Global,
+                p.Region.Rooted(capArg.named)
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            loaded,
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(selectT(pointer), value.tpe))),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            stored,
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(selectT(pointer), selectT(loaded)))),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            swapped,
+            Some(
+              p.Expr.SpecOp(
+                p.Spec.GpuAtomicRMW(
+                  p.AtomicOp.Xchg,
+                  selectT(pointer),
+                  p.Term.IntU32Const(7),
+                  p.MemScope.Device,
+                  p.MemOrder.Relaxed,
+                  value.tpe
+                )
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(p.StructDef(capSym, Nil, List(value), Nil))
+    )
+
+    val result = ArenaView(program, NoopLog)
+    val ops = result.entry.collectAll[p.Expr].collect {
+      case p.Expr.SpecOp(x: p.Spec.GpuAtomicRMW)     => x.ptr
+      case p.Expr.SpecOp(x: p.Spec.GpuVolatileLoad)  => x.ptr
+      case p.Expr.SpecOp(x: p.Spec.GpuVolatileStore) => x.ptr
+    }
+    assertEquals(ops.map(_.tpe), List.fill(3)(ptrTpe))
+    val refs = result.entry.collectAll[p.Expr].collect {
+      case x: p.Expr.RefTo if x.comp == value.tpe && x.space == p.Type.Space.Global => x
+    }
+    assertEquals(refs.size, 3)
+    assert(refs.forall {
+      case p.Expr.RefTo(p.Term.Select(root, Nil, _), Some(_), _, _, _) => root.symbol == "#av2"
+      case _                                                           => false
+    })
+  }
+
+  test("arena aggregate volatile access expands into typed scalar leaves") {
+    val pairSym = sym("Pair")
+    val pairTpe = p.Type.Struct(pairSym, Nil)
+    val pairPtr = p.Type.Ptr(pairTpe, p.Type.Space.Global)
+    val pairDef = p.StructDef(pairSym, Nil, List(named("first", p.Type.IntU32), named("second", p.Type.IntU32)), Nil)
+    val capArg  = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val pointer = named("pointer", pairPtr)
+    val loaded  = named("loaded", pairTpe)
+    val stored  = named("stored", p.Type.Unit0)
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(
+            pointer,
+            Some(p.Expr.Alias(p.Term.Select(capArg.named, List(p.PathStep.Field("pair")), pairPtr))),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            loaded,
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileLoad(selectT(pointer), pairTpe))),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            stored,
+            Some(p.Expr.SpecOp(p.Spec.GpuVolatileStore(selectT(pointer), selectT(loaded)))),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(p.StructDef(capSym, Nil, List(named("pair", pairPtr)), Nil), pairDef)
+    )
+
+    val result = ArenaView(program, NoopLog)
+    val loads = result.entry.collectAll[p.Expr].collect { case p.Expr.SpecOp(x: p.Spec.GpuVolatileLoad) =>
+      x
+    }
+    val stores = result.entry.collectAll[p.Expr].collect { case p.Expr.SpecOp(x: p.Spec.GpuVolatileStore) =>
+      x
+    }
+    assertEquals(loads.map(_.rtn), List.fill(2)(p.Type.IntU32))
+    assertEquals(stores.map(_.value.tpe), List.fill(2)(p.Type.IntU32))
+    assert((loads.map(_.ptr) ::: stores.map(_.ptr)).forall {
+      case p.Term.Select(root, Nil, p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global)) => root.symbol.startsWith("#vr")
+      case _                                                                        => false
+    })
+  }
 }

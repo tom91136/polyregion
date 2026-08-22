@@ -12,6 +12,7 @@
 
 #include "polyregion/types.h"
 
+using namespace polyregion::backend;
 using namespace polyregion::backend::details;
 using namespace aspartame;
 
@@ -108,6 +109,8 @@ const OclBuiltin GET_GROUP_ID{"_Z12get_group_idj", i64, {i32}};
 const OclBuiltin GET_NUM_GROUPS{"_Z14get_num_groupsj", i64, {i32}};
 const OclBuiltin GET_LOCAL_ID{"_Z12get_local_idj", i64, {i32}};
 const OclBuiltin GET_LOCAL_SIZE{"_Z14get_local_sizej", i64, {i32}};
+const OclBuiltin GET_SUB_GROUP_SIZE{"_Z18get_sub_group_sizev", i32, {}};
+const OclBuiltin GET_SUB_GROUP_LOCAL_ID{"_Z22get_sub_group_local_idv", i32, {}};
 // XXX Use the `__spirv_*` form: OpenCL `barrier(flags)` routes through SPIRVBuiltins.cpp::
 // buildBarrierInst which ORs SequentiallyConsistent into the semantics; OpenCL drivers reject
 // that and silently drop the barrier. The __spirv_* path bypasses that and emits the op with
@@ -178,6 +181,163 @@ static ValPtr callOcl(CodeGen &cg, const OclBuiltin &b, const AnyType &requested
   throw polyregion::backend::BackendException(std::string("cannot coerce OCL builtin ") + b.mangled + " result to requested type");
 }
 
+// call a mangled OpenCL builtin: SPIR_FUNC on both the declaration and the call site, and convergent so the
+// optimiser cannot sink a collective out of uniform control flow
+static llvm::CallInst *callSpirFunc(CodeGen &cg, const std::string &mangled, llvm::Type *rtn, llvm::ArrayRef<ValPtr> args) {
+  std::vector<llvm::Type *> argTys;
+  argTys.reserve(args.size());
+  for (auto *a : args)
+    argTys.push_back(a->getType());
+  auto callee = cg.M.getOrInsertFunction(mangled, llvm::FunctionType::get(rtn, argTys, false));
+  auto *fn = llvm::cast<llvm::Function>(callee.getCallee());
+  fn->setCallingConv(llvm::CallingConv::SPIR_FUNC), fn->addFnAttr(llvm::Attribute::Convergent), fn->addFnAttr(llvm::Attribute::NoUnwind);
+  auto *call = cg.B.CreateCall(fn, args);
+  call->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+  return call;
+}
+
+// Itanium mangling of an OpenCL builtin taking `suffix`-typed arguments
+static std::string mangleOcl(const std::string &name, const std::string &suffix) {
+  return "_Z" + std::to_string(name.size()) + name + suffix;
+}
+
+// OpenCL Itanium mangle suffix for a scalar shuffle element from the polyast type; nullptr if not a scalar
+static const char *scalarShuffleMangle(const Type::Any &rtn) {
+  return rtn.is<Type::Float32>()   ? "f"
+         : rtn.is<Type::Float64>() ? "d"
+         : rtn.is<Type::Float16>() ? "Dh"
+         : rtn.is<Type::IntS8>()   ? "c"
+         : rtn.is<Type::IntU8>()   ? "h"
+         : rtn.is<Type::IntS16>()  ? "s"
+         : rtn.is<Type::IntU16>()  ? "t"
+         : rtn.is<Type::IntS32>()  ? "i"
+         : rtn.is<Type::IntU32>()  ? "j"
+         : rtn.is<Type::IntS64>()  ? "l"
+         : rtn.is<Type::IntU64>()  ? "m"
+                                   : nullptr;
+}
+
+// width-derived mangle for an LLVM scalar leaf; shuffle is a bit-exact lane permutation so signedness is irrelevant
+static std::string leafShuffleMangle(llvm::Type *ty) {
+  if (ty->isFloatTy()) return "f";
+  if (ty->isDoubleTy()) return "d";
+  if (ty->isHalfTy()) return "Dh";
+  if (ty->isIntegerTy()) switch (ty->getIntegerBitWidth()) {
+      case 8: return "h";
+      case 16: return "t";
+      case 32: return "j";
+      case 64: return "m";
+      default: break;
+    }
+  throw BackendException("unsupported subgroup shuffle leaf type on SPIRV-CL");
+}
+
+static ValPtr emitShuffleCall(CodeGen &cg, const std::string &base, const std::string &m, ValPtr valV, ValPtr idxV) {
+  return callSpirFunc(cg, mangleOcl(base, m + "j"), valV->getType(), {valV, idxV});
+}
+
+// permute an aggregate by shuffling each scalar leaf with the same lane index and reassembling
+static ValPtr emitShuffleAgg(CodeGen &cg, const std::string &base, ValPtr valV, ValPtr idxV) {
+  auto *ty = valV->getType();
+  if (ty->isStructTy() || ty->isArrayTy()) {
+    const unsigned n = ty->isStructTy() ? ty->getStructNumElements() : static_cast<unsigned>(ty->getArrayNumElements());
+    ValPtr agg = llvm::UndefValue::get(ty);
+    for (unsigned i = 0; i < n; ++i)
+      agg = cg.B.CreateInsertValue(agg, emitShuffleAgg(cg, base, cg.B.CreateExtractValue(valV, {i}), idxV), {i});
+    return agg;
+  }
+  return emitShuffleCall(cg, base, leafShuffleMangle(ty), valV, idxV);
+}
+
+// shuffle an aggregate carried by pointer: walk the leaves via GEP, shuffling each scalar from src into dst. this
+// keeps only scalar loads/shuffles/stores in the IR - the SPIR-V backend selects an aggregate-SSA
+// ExtractValue/InsertValue chain poorly (it asserts in ISel), so never form a whole-aggregate value here
+static void emitShuffleAggPtr(CodeGen &cg, const std::string &base, llvm::Type *ty, ValPtr srcPtr, ValPtr dstPtr, ValPtr idxV) {
+  auto *i32 = cg.C.i32Ty();
+  if (ty->isStructTy() || ty->isArrayTy()) {
+    const unsigned n = ty->isStructTy() ? ty->getStructNumElements() : static_cast<unsigned>(ty->getArrayNumElements());
+    for (unsigned i = 0; i < n; ++i) {
+      auto *elemTy = ty->isStructTy() ? ty->getStructElementType(i) : ty->getArrayElementType();
+      llvm::Value *idx[] = {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)};
+      emitShuffleAggPtr(cg, base, elemTy, cg.B.CreateInBoundsGEP(ty, srcPtr, idx), cg.B.CreateInBoundsGEP(ty, dstPtr, idx), idxV);
+    }
+  } else {
+    cg.B.CreateStore(emitShuffleCall(cg, base, leafShuffleMangle(ty), cg.B.CreateLoad(ty, srcPtr), idxV), dstPtr);
+  }
+}
+
+// sub_group_shuffle{,_up,_down,_xor} lower to OpGroupNonUniformShuffle{,Up,Down,Xor} (subgroup scope); the SPIRV
+// backend infers the scope from the `sub_group` name prefix. a scalar element shuffles in one call; an aggregate
+// (by-segment scan carries a tuple<value,key> through the subgroup scan) permutes each scalar leaf the same way
+static ValPtr emitSubgroupShuffle(CodeGen &cg, const std::string &base, const Term::Any &value, ValPtr idxV, const Type::Any &rtn) {
+  idxV = cg.B.CreateIntCast(idxV, cg.C.i32Ty(), /*isSigned*/ false);
+  auto *valV = cg.mkTermVal(value);
+  if (const char *m = scalarShuffleMangle(rtn)) return emitShuffleCall(cg, base, m, valV, idxV);
+  if (valV->getType()->isStructTy() || valV->getType()->isArrayTy()) return emitShuffleAgg(cg, base, valV, idxV);
+  // structByPtr backends carry an aggregate (the by-segment scan's tuple<value,key>) by pointer; load it, shuffle
+  // each scalar leaf, then hand back a fresh slot so the result stays in the by-pointer form the caller expects
+  if (valV->getType()->isPointerTy() && (rtn.is<Type::Struct>() || rtn.is<Type::Arr>())) {
+    auto *aggTy = cg.resolveType(rtn);
+    auto *slot = cg.B.CreateAlloca(aggTy, cg.C.AllocaAS, nullptr, "sg_shuffle_agg");
+    emitShuffleAggPtr(cg, base, aggTy, valV, slot, idxV);
+    return slot;
+  }
+  throw BackendException("unsupported subgroup shuffle element type on SPIRV-CL");
+}
+
+// OpenCL subgroup shuffle builtins do not carry CUDA's clamp/member-mask operands. Compute a segment-relative
+// source lane, execute the collective convergently, then retain the caller's value for lanes excluded by the
+// clamp or mask. A clamp of 31 therefore describes independent 32-lane segments even on a 64-lane subgroup.
+static ValPtr emitClampedSubgroupShuffle(CodeGen &cg, const char kind, const Term::Any &value, const Term::Any &arg, const Term::Any &bound,
+                                         const Term::Any &mask, const Type::Any &rtn) {
+  auto *i32 = cg.C.i32Ty();
+  auto *lane = callOcl(cg, GET_SUB_GROUP_LOCAL_ID, Type::IntU32(), {});
+  auto *subgroupSize = callOcl(cg, GET_SUB_GROUP_SIZE, Type::IntU32(), {});
+  auto *a = cg.B.CreateIntCast(cg.mkTermVal(arg), i32, false);
+  auto *clamp = cg.B.CreateIntCast(cg.mkTermVal(bound), i32, false);
+  auto *segmentBase = cg.B.CreateAnd(lane, cg.B.CreateNot(clamp));
+  auto *segmentLast = cg.B.CreateOr(segmentBase, clamp);
+  ValPtr srcLane;
+  ValPtr inRange;
+  switch (kind) {
+    case 'd':
+      srcLane = cg.B.CreateAdd(lane, a);
+      inRange = cg.B.CreateICmpULE(a, cg.B.CreateSub(segmentLast, lane));
+      break;
+    case 'u':
+      srcLane = cg.B.CreateSub(lane, a);
+      inRange = cg.B.CreateICmpULE(a, cg.B.CreateSub(lane, segmentBase));
+      break;
+    case 'x':
+      srcLane = cg.B.CreateXor(lane, a);
+      inRange = cg.B.CreateAnd(cg.B.CreateICmpUGE(srcLane, segmentBase), cg.B.CreateICmpULE(srcLane, segmentLast));
+      break;
+    default:
+      srcLane = cg.B.CreateOr(segmentBase, cg.B.CreateAnd(a, clamp));
+      inRange = cg.B.CreateICmpULE(srcLane, segmentLast);
+      break;
+  }
+  inRange = cg.B.CreateAnd(inRange, cg.B.CreateICmpULT(srcLane, subgroupSize));
+
+  auto *maskV = cg.B.CreateIntCast(cg.mkTermVal(mask), i32, false);
+  // Match NVPTX's maskless convention: -1 means all currently active subgroup lanes, including lanes >=32
+  // on a wider subgroup; any other value is a literal 32-bit membership mask.
+  auto *isAll = cg.B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32, 0xFFFFFFFFu));
+  const auto member = [&](ValPtr laneV) {
+    auto *bit = cg.B.CreateAnd(laneV, llvm::ConstantInt::get(i32, 31));
+    auto *set =
+        cg.B.CreateICmpNE(cg.B.CreateAnd(cg.B.CreateLShr(maskV, bit), llvm::ConstantInt::get(i32, 1)), llvm::ConstantInt::get(i32, 0));
+    auto *literal = cg.B.CreateAnd(cg.B.CreateICmpULT(laneV, llvm::ConstantInt::get(i32, 32)), set);
+    return cg.B.CreateOr(isAll, literal);
+  };
+  inRange = cg.B.CreateAnd(inRange, cg.B.CreateAnd(member(lane), member(srcLane)));
+  // The collective still executes for every lane, so its operand itself must be valid; selecting the result
+  // afterwards is too late for an out-of-range subgroup source. Selecting the caller lane here also makes the
+  // shuffled result the original value when excluded, including aggregate values carried by pointer.
+  auto *safeSrcLane = cg.B.CreateSelect(inRange, srcLane, lane);
+  return emitSubgroupShuffle(cg, "sub_group_shuffle", value, safeSrcLane, rtn);
+}
+
 // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   auto &ctx = cg.C.actual;
@@ -208,32 +368,30 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::CrossWorkgroupMemory); },
       [&](const Spec::GpuFenceLocal &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory); },
       [&](const Spec::GpuFenceAll &v) -> ValPtr { return fence(v.tpe, SpvMemSem::WorkgroupMemory | SpvMemSem::CrossWorkgroupMemory); },
-      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
-        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { return callOcl(cg, GET_SUB_GROUP_LOCAL_ID, Type::IntU32(), {}); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return callOcl(cg, GET_SUB_GROUP_SIZE, Type::IntU32(), {}); },
+      [&](const Spec::GpuShuffleDown &v) -> ValPtr {
+        return emitClampedSubgroupShuffle(cg, 'd', v.value, v.delta, v.width, v.mask, v.rtn);
       },
-      [&](const Spec::GpuShuffleDown &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
+      [&](const Spec::GpuShuffleUp &v) -> ValPtr { return emitClampedSubgroupShuffle(cg, 'u', v.value, v.delta, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleIdx &v) -> ValPtr {
+        return emitClampedSubgroupShuffle(cg, 'i', v.value, v.srcLane, v.width, v.mask, v.rtn);
       },
-      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleXor &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
+      [&](const Spec::GpuShuffleXor &v) -> ValPtr {
+        return emitClampedSubgroupShuffle(cg, 'x', v.value, v.laneMask, v.width, v.mask, v.rtn);
       },
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return subgroupBarrier(); },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for SPIRV-CL"); },
+      [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
       [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a local orchestration operation"); },
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
-      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for SPIRV-CL"); },
-      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for SPIRV-CL"); });
+      [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
+      [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   OclMangledMath m{cg};
@@ -277,6 +435,12 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
     B.CreateIntrinsic(llvm::Type::getVoidTy(ctx), llvm::Intrinsic::spv_group_memory_barrier_with_group_sync, {});
     return cg.mkTermVal(Term::Unit0Const());
   };
+  auto atomicScope = [](const MemScope::Any &scope) -> std::string {
+    return scope.match_total([](const MemScope::Subgroup &) -> std::string { return "subgroup"; },
+                             [](const MemScope::Workgroup &) -> std::string { return "workgroup"; },
+                             [](const MemScope::Device &) -> std::string { return "device"; },
+                             [](const MemScope::System &) -> std::string { return ""; });
+  };
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { throw polyregion::backend::BackendException("unimplemented"); },
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return builtin(llvm::Intrinsic::spv_thread_id, v.dim, v.tpe); },
@@ -314,14 +478,14 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for SPIRV-Vulkan"); },
+      [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, atomicScope(v.scope)); },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
       [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a local orchestration operation"); },
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
-      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for SPIRV-Vulkan"); },
-      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for SPIRV-Vulkan"); });
+      [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
+      [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }
 
 // XXX Vulkan float math uses LLVM intrinsics (GLSL.std.450), the OpenCL.std mangled libcalls crash the Intel driver

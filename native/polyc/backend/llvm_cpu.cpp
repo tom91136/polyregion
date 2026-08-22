@@ -25,6 +25,18 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
   const auto external = [&](const std::string &name, llvm::Type *result, llvm::ArrayRef<llvm::Type *> args) {
     return cg.M.getOrInsertFunction(name, llvm::FunctionType::get(result, args, false));
   };
+  const auto dimensionZero = [&](const Term::Any &dimension, ValPtr zero, ValPtr nonzero) -> ValPtr {
+    auto *dim = cg.B.CreateZExtOrTrunc(cg.mkTermVal(dimension), i32);
+    return cg.B.CreateSelect(cg.B.CreateICmpEQ(dim, llvm::ConstantInt::get(i32, 0)), zero, nonzero);
+  };
+  const auto threadId = [&]() -> ValPtr {
+    auto *value = cg.B.CreateCall(external("__polyregion_host_thread_global_idx", i64, {}));
+    return cg.B.CreateZExtOrTrunc(value, i32);
+  };
+  const auto globalSize = [&]() -> ValPtr {
+    auto *value = cg.B.CreateCall(external("__polyregion_host_thread_global_size", i64, {}));
+    return cg.B.CreateZExtOrTrunc(value, i32);
+  };
   const auto asSize = [&](const Term::Any &term) -> ValPtr {
     auto *value = cg.mkTermVal(term);
     return value->getType()->isPointerTy() ? cg.B.CreatePtrToInt(value, sizeTy) : cg.B.CreateZExtOrTrunc(value, sizeTy);
@@ -56,23 +68,37 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
       [&](const Spec::GpuFenceGlobal &) -> ValPtr { return noop(); },   //
       [&](const Spec::GpuFenceLocal &) -> ValPtr { return noop(); },    //
       [&](const Spec::GpuFenceAll &) -> ValPtr { return noop(); },      //
-      [&](const Spec::GpuGlobalIdx &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuGlobalSize &) -> ValPtr { throw BackendException("unimplemented"); }, //
-      [&](const Spec::GpuGroupIdx &) -> ValPtr { throw BackendException("unimplemented"); },   //
-      [&](const Spec::GpuGroupSize &) -> ValPtr { throw BackendException("unimplemented"); },  //
-      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return k(v, 0); },                           //
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return k(v, 1); },                          //
-      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires SubgroupLower"); },
-      [&](const Spec::GpuSubgroupSize &) -> ValPtr { throw BackendException("Spec::GpuSubgroupSize requires SubgroupLower"); },
-      [&](const Spec::GpuShuffleDown &) -> ValPtr { throw BackendException("Spec::GpuShuffleDown requires SubgroupLower"); },
-      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires SubgroupLower"); },
-      [&](const Spec::GpuShuffleIdx &) -> ValPtr { throw BackendException("Spec::GpuShuffleIdx requires SubgroupLower"); },
-      [&](const Spec::GpuShuffleXor &) -> ValPtr { throw BackendException("Spec::GpuShuffleXor requires SubgroupLower"); },
+      // HostThreaded models each host task as a one-work-item workgroup: execution barriers are
+      // therefore no-ops, while dimension-zero global/group topology reflects the dispatch.
+      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return dimensionZero(v.dim, threadId(), k(v, 0)); },    //
+      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return dimensionZero(v.dim, globalSize(), k(v, 1)); }, //
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return dimensionZero(v.dim, threadId(), k(v, 0)); },     //
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { return dimensionZero(v.dim, globalSize(), k(v, 1)); },  //
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return k(v, 0); },                                       //
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return k(v, 1); },                                      //
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { return llvm::ConstantInt::get(i32, 0); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return llvm::ConstantInt::get(i32, 1); },
+      [&](const Spec::GpuShuffleDown &v) -> ValPtr { return cg.mkTermVal(v.value); },
+      [&](const Spec::GpuShuffleUp &v) -> ValPtr { return cg.mkTermVal(v.value); },
+      [&](const Spec::GpuShuffleIdx &v) -> ValPtr { return cg.mkTermVal(v.value); },
+      [&](const Spec::GpuShuffleXor &v) -> ValPtr { return cg.mkTermVal(v.value); },
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return noop(); },
-      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires SubgroupLower"); },
-      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires SubgroupLower"); },
-      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for CPU"); },
+      [&](const Spec::GpuBallot &v) -> ValPtr {
+        auto *member =
+            cg.B.CreateICmpNE(cg.B.CreateAnd(cg.mkTermVal(v.mask), llvm::ConstantInt::get(i32, 1)), llvm::ConstantInt::get(i32, 0));
+        return cg.B.CreateSelect(cg.B.CreateAnd(member, cg.toI1(v.pred)), llvm::ConstantInt::get(i32, 1), llvm::ConstantInt::get(i32, 0));
+      },
+      [&](const Spec::GpuVoteAny &v) -> ValPtr {
+        auto *member =
+            cg.B.CreateICmpNE(cg.B.CreateAnd(cg.mkTermVal(v.mask), llvm::ConstantInt::get(i32, 1)), llvm::ConstantInt::get(i32, 0));
+        return cg.B.CreateAnd(member, cg.toI1(v.pred));
+      },
+      [&](const Spec::GpuVoteAll &v) -> ValPtr {
+        auto *member =
+            cg.B.CreateICmpNE(cg.B.CreateAnd(cg.mkTermVal(v.mask), llvm::ConstantInt::get(i32, 1)), llvm::ConstantInt::get(i32, 0));
+        return cg.B.CreateOr(cg.B.CreateNot(member), cg.toI1(v.pred));
+      },
+      [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
       [&](const Spec::RemoteLaunch &v) -> ValPtr {
         const auto count = v.args.size();
         const auto zero = llvm::ConstantInt::get(i64, 0);
@@ -94,9 +120,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         };
         v.args | zip_with_index(size_t{0}) | for_each([&](const auto &arg, const auto index) {
           ValPtr value;
-          if (const auto pointer = arg.tpe().template get<Type::Ptr>(); pointer && pointer->comp.template is<Type::Struct>()) {
-            value = mirror(cg.resolveType(pointer->comp), [&] { return asSize(arg); });
-          } else if (arg.tpe().template is<Type::Struct>()) {
+          if (arg.tpe().template is<Type::Struct>()) {
             auto *type = cg.resolveType(arg.tpe());
             auto *local = cg.B.CreateAlloca(type, nullptr, "remote_closure");
             cg.B.CreateStore(cg.mkTermVal(arg), local);
@@ -119,7 +143,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
                         {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX),
                          asSize(v.blockY), asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count),
                          cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero})});
-        mirrored | for_each([&](auto *remote) {
+        mirrored ^ for_each([&](auto *remote) {
           cg.B.CreateCall(external("polyrt_remote_free", unit, {ptr, sizeTy}), {cg.mkTermVal(v.context), remote});
         });
         return noop();
@@ -144,8 +168,8 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         cg.B.CreateCall(external("polyrt_remote_sync", unit, {ptr}), {cg.mkTermVal(v.context)});
         return noop();
       },
-      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for CPU"); },
-      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for CPU"); } //
+      [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
+      [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); } //
   );
 }
 ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {

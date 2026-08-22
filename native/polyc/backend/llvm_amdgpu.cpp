@@ -7,6 +7,8 @@ using namespace polyregion::backend::details;
 void AMDGPUTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
   if (source.isEntry) {
     fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+    // without this the AMDGPUAttributor skips the multi-dim workitem/workgroup-id ABI and y/z ids read 0
+    fn.addFnAttr("amdgpu-flat-work-group-size", "1,1024");
   }
 }
 ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
@@ -76,38 +78,113 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
                                                                  d2, cg.mkTermVal(Term::IntS32Const(0)))));
   };
 
+  auto callIntr = [&](llvm::Intrinsic::ID id, llvm::ArrayRef<ValPtr> args) -> ValPtr {
+    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, id, {}), args);
+  };
+  auto laneId = [&]() -> ValPtr {
+    auto negOne = llvm::ConstantInt::get(cg.C.i32Ty(), -1);
+    return callIntr(llvm::Intrinsic::amdgcn_mbcnt_hi,
+                    {negOne, callIntr(llvm::Intrinsic::amdgcn_mbcnt_lo, {negOne, llvm::ConstantInt::get(cg.C.i32Ty(), 0)})});
+  };
+  auto activeMask = [&]() -> ValPtr {
+    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i32Ty()}),
+                           llvm::ConstantInt::getTrue(cg.C.actual));
+  };
+  // ds_bpermute shuffle: out-of-range source lane selects the own word to match shfl clamp semantics
+  auto shuffle = [&](char kind, const Term::Any &value, const Term::Any &arg, const Term::Any &bound, const Term::Any &mask,
+                     const Type::Any &rtn) -> ValPtr {
+    auto &B = cg.B;
+    auto i32Ty = cg.C.i32Ty();
+    auto valTy = cg.resolveType(rtn);
+    const uint64_t words = (cg.M.getDataLayout().getTypeAllocSize(valTy) + 3) / 4;
+    auto srcVal = cg.mkTermVal(value);
+    auto lid = laneId();
+    auto a = B.CreateIntCast(cg.mkTermVal(arg), i32Ty, false);
+    auto clamp = B.CreateIntCast(cg.mkTermVal(bound), i32Ty, false);
+    auto segmentBase = B.CreateAnd(lid, B.CreateNot(clamp));
+    auto segmentLast = B.CreateOr(segmentBase, clamp);
+    ValPtr srcLane, inRange;
+    switch (kind) {
+      case 'd':
+        srcLane = B.CreateAdd(lid, a);
+        inRange = B.CreateICmpULE(srcLane, segmentLast);
+        break;
+      case 'u':
+        srcLane = B.CreateSub(lid, a);
+        inRange = B.CreateICmpUGE(srcLane, segmentBase);
+        break;
+      case 'x':
+        srcLane = B.CreateXor(lid, a);
+        inRange = B.CreateAnd(B.CreateICmpUGE(srcLane, segmentBase), B.CreateICmpULE(srcLane, segmentLast));
+        break;
+      default:
+        srcLane = B.CreateOr(segmentBase, B.CreateAnd(a, clamp));
+        inRange = B.CreateICmpULE(srcLane, segmentLast);
+        break;
+    }
+    inRange = B.CreateAnd(inRange, B.CreateICmpULT(srcLane, cg.intr0(llvm::Intrinsic::amdgcn_wavefrontsize)));
+    auto *maskV = B.CreateIntCast(cg.mkTermVal(mask), i32Ty, false);
+    auto *active = activeMask();
+    auto *requested = B.CreateIntCast(maskV, active->getType(), false);
+    auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32Ty, 0xFFFFFFFFu));
+    auto *members = B.CreateSelect(isAll, active, B.CreateAnd(requested, active));
+    const auto member = [&](ValPtr lane) {
+      const auto bits = members->getType()->getIntegerBitWidth();
+      auto *bounded = B.CreateICmpULT(lane, llvm::ConstantInt::get(i32Ty, bits));
+      auto *bit = B.CreateIntCast(lane, members->getType(), false);
+      auto *set = B.CreateICmpNE(B.CreateAnd(B.CreateLShr(members, bit), llvm::ConstantInt::get(members->getType(), 1)),
+                                 llvm::ConstantInt::get(members->getType(), 0));
+      return B.CreateAnd(bounded, set);
+    };
+    inRange = B.CreateAnd(inRange, B.CreateAnd(member(lid), member(srcLane)));
+    auto *safeSrcLane = B.CreateSelect(inRange, srcLane, lid);
+    auto index = B.CreateShl(safeSrcLane, llvm::ConstantInt::get(i32Ty, 2));
+    // a pointer arg (aggregate passed by address) still returns the shuffled value, not dstPtr; the caller
+    // stores into a value-typed slot, so returning the pointer writes pointer bits over the aggregate
+    return cg.shuffleStage(valTy, valTy, words, srcVal, "shfl", [&](llvm::Value *word) -> llvm::Value * {
+      auto bp = callIntr(llvm::Intrinsic::amdgcn_ds_bpermute, {index, word});
+      return B.CreateSelect(inRange, bp, word);
+    });
+  };
+
+  auto amdgpuScope = [](const MemScope::Any &s) -> std::string {
+    return s.match_total([](const MemScope::Subgroup &) -> std::string { return "wavefront"; },
+                         [](const MemScope::Workgroup &) -> std::string { return "workgroup"; },
+                         [](const MemScope::Device &) -> std::string { return "agent"; },
+                         [](const MemScope::System &) -> std::string { return ""; });
+  };
+
+  // s_barrier syncs execution not memory; workgroup-scope fences make the legaliser emit the s_waitcnt
+  auto wgBarrier = [&]() -> ValPtr {
+    const auto ws = cg.C.actual.getOrInsertSyncScopeID("workgroup");
+    cg.B.CreateFence(llvm::AtomicOrdering::Release, ws);
+    auto b = cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
+    cg.B.CreateFence(llvm::AtomicOrdering::Acquire, ws);
+    return b;
+  };
+  auto ballot = [&](llvm::Value *pred) {
+    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i32Ty()}), pred);
+  };
+  auto memberMask = [&](const Term::Any &mask, llvm::Type *ballotTy) -> llvm::Value * {
+    auto *requested = cg.B.CreateIntCast(cg.mkTermVal(mask), cg.C.i32Ty(), false);
+    auto *active = activeMask();
+    auto *literal = cg.B.CreateIntCast(requested, ballotTy, false);
+    auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFu));
+    return cg.B.CreateSelect(isAll, active, cg.B.CreateAnd(literal, active));
+  };
+
   return expr.op.match_total(                                                           //
       [&](const Spec::Assert &) -> ValPtr { throw BackendException("unimplemented"); }, //
-      [&](const Spec::GpuBarrierGlobal &) -> ValPtr {
-        // work_group_barrier (__memory_scope, 1, 1)
-        // FIXME
-        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Expr::IntConst(0xFF));
-        return cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
-      },
-      [&](const Spec::GpuBarrierLocal &) -> ValPtr {
-        // work_group_barrier (__memory_scope, 1, 1)
-        // FIXME
-        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Expr::IntConst(0xFF));
-        return cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
-      },
-      [&](const Spec::GpuBarrierAll &) -> ValPtr {
-        // work_group_barrier (__memory_scope, 1, 1)
-        // FIXME
-        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Expr::IntConst(0xFF));
-        return cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
-      },
+      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return wgBarrier(); },
+      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return wgBarrier(); },
+      [&](const Spec::GpuBarrierAll &) -> ValPtr { return wgBarrier(); },
       [&](const Spec::GpuFenceGlobal &) -> ValPtr {
-        // atomic_work_item_fence(0, 5, 1) // FIXME
-        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
+        return cg.B.CreateFence(llvm::AtomicOrdering::SequentiallyConsistent, cg.C.actual.getOrInsertSyncScopeID("agent"));
       },
       [&](const Spec::GpuFenceLocal &) -> ValPtr {
-        // atomic_work_item_fence(0, 5, 1) // FIXME
-        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
+        return cg.B.CreateFence(llvm::AtomicOrdering::SequentiallyConsistent, cg.C.actual.getOrInsertSyncScopeID("workgroup"));
       },
-      [&](const Spec::GpuFenceAll &) -> ValPtr {
-        // atomic_work_item_fence(0, 5, 1) // FIXME
-        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
-      },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return cg.B.CreateFence(llvm::AtomicOrdering::SequentiallyConsistent); },
 
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr {
         return dim3OrAssert(v.dim,                                                                                         //
@@ -145,32 +222,35 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
                             localSizeU32(1), //
                             localSizeU32(2));
       },
-      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
-        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleDown &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleXor &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
-      },
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { return laneId(); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return cg.intr0(llvm::Intrinsic::amdgcn_wavefrontsize); },
+      [&](const Spec::GpuShuffleDown &v) -> ValPtr { return shuffle('d', v.value, v.delta, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleUp &v) -> ValPtr { return shuffle('u', v.value, v.delta, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleIdx &v) -> ValPtr { return shuffle('i', v.value, v.srcLane, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleXor &v) -> ValPtr { return shuffle('x', v.value, v.laneMask, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return cg.intr0(llvm::Intrinsic::amdgcn_wave_barrier); },
-      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for AMDGPU"); },
+      [&](const Spec::GpuBallot &v) -> ValPtr {
+        auto *votes = ballot(cg.mkTermVal(v.pred));
+        return cg.B.CreateIntCast(cg.B.CreateAnd(votes, memberMask(v.mask, votes->getType())), cg.C.i32Ty(), false);
+      },
+      [&](const Spec::GpuVoteAny &v) -> ValPtr {
+        auto *votes = ballot(cg.mkTermVal(v.pred));
+        auto *mask = memberMask(v.mask, votes->getType());
+        return cg.B.CreateICmpNE(cg.B.CreateAnd(votes, mask), llvm::ConstantInt::get(mask->getType(), 0));
+      },
+      [&](const Spec::GpuVoteAll &v) -> ValPtr {
+        auto *votes = ballot(cg.mkTermVal(v.pred));
+        auto *mask = memberMask(v.mask, votes->getType());
+        return cg.B.CreateICmpEQ(cg.B.CreateAnd(votes, mask), mask);
+      },
+      [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, amdgpuScope(v.scope)); },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
       [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a local orchestration operation"); },
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
-      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for AMDGPU"); },
-      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for AMDGPU"); });
+      [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
+      [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }
 ValPtr AMDGPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   // XXX OCML: `__ocml_<name>_f32` / `__ocml_<name>_f64`.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -26,6 +27,8 @@ public:
     Target target;
     std::string arch;
     bool emitBitcode = false;
+    uint32_t workgroupMemoryBytes = 32768;
+    bool spirvVersion13 = false;
     [[nodiscard]] llvmc::TargetInfo targetInfo() const;
   };
 
@@ -34,6 +37,10 @@ public:
   [[nodiscard]] std::vector<StructLayout> resolveLayouts(const std::vector<StructDef> &structs) override;
   [[nodiscard]] CompileResult compileProgram(const Program &program, const compiletime::OptLevel &opt) override;
 };
+
+// device kernel entry symbol: repr(sym) with every non-alnum/'_' byte mapped to '_' (NVPTX has a limited
+// legal-character set). the host launcher's module/kernel string must equal this exactly
+[[nodiscard]] std::string normaliseSymbol(const Sym &sym);
 
 namespace details {
 
@@ -45,11 +52,20 @@ using AnyExpr = Expr::Any;
 using AnyTerm = Term::Any;
 using AnyStmt = Stmt::Any;
 
+// numeric kind for atomic/collective op lowering: float vs integer, and (for integers) signed vs unsigned
+struct NumericKind {
+  bool isFloat, isSigned;
+};
+[[nodiscard]] NumericKind classifyNumeric(const AnyType &tpe);
+
 struct StructInfo {
   StructDef def;
   StructLayout layout;
   llvm::StructType *tpe;
   Map<std::string, size_t> memberIndices;
+  // an LDS/shared union whose members are reused storage (not type-punned) laid out sequentially like a struct;
+  // set for Local-space unions to keep the AMDGPU O3 memory optimiser from miscompiling the type-punned overlay
+  bool deAliased = false;
 };
 
 enum AddrSpace : unsigned { Default = 0, CrossWorkgroup = 1, Workgroup = 3, Generic = 4, Private = 5 };
@@ -74,6 +90,8 @@ struct TargetedContext {
     return options.target == LLVMBackend::Target::SPIRV32_Kernel || options.target == LLVMBackend::Target::SPIRV64_Kernel;
   }
   [[nodiscard]] bool isVulkan() const { return options.target == LLVMBackend::Target::SPIRV_GLCompute; }
+  [[nodiscard]] bool isNVPTX() const { return options.target == LLVMBackend::Target::NVPTX64; }
+  [[nodiscard]] bool isAMDGPU() const { return options.target == LLVMBackend::Target::AMDGCN; }
 
   [[nodiscard]] AS addressSpace(const TypeSpace::Any &s) const;
   [[nodiscard]] AS addressSpaceForKernelArg(const TypeSpace::Any &s) const;
@@ -85,7 +103,11 @@ struct TargetedContext {
   [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, const Map<std::string, StructInfo> &structs, bool functionBoundary = false,
                                         bool kernelEntryArg = false);
   [[nodiscard]] StructInfo resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs);
-  [[nodiscard]] Map<std::string, StructInfo> resolveLayouts(const std::vector<StructDef> &structs);
+  // isDiscontinuityName flags the members a de-aliased union separates out; the layout engine itself carries no
+  // vendor knowledge (llvm.cpp supplies the rocPRIM predicate)
+  [[nodiscard]] Map<std::string, StructInfo> resolveLayouts(const std::vector<StructDef> &structs,
+                                                            const Set<std::string> &deAliasedUnions = {},
+                                                            const std::function<bool(const std::string &)> &isDiscontinuityName = {});
 };
 
 struct CodeGen;
@@ -98,6 +120,9 @@ struct PointerModel {
   virtual void storeUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) = 0;
   virtual std::optional<ValPtr> termSelectVal(CodeGen &gen, const Term::Select &select) { return std::nullopt; }
   virtual llvm::Type *localAllocType(CodeGen &gen, const AnyType &nameTpe, llvm::Type *tpe) { return tpe; }
+  virtual std::optional<ValPtr> allocateLocalArray(CodeGen &gen, const std::string &symbol, const AnyType &nameTpe, llvm::Type *allocTy) {
+    return std::nullopt;
+  }
   virtual bool defineLocalString(CodeGen &gen, const std::string &symbol, const std::string &bytes, const AnyType &elemTpe) {
     return false;
   }
@@ -132,10 +157,16 @@ struct CodeGen {
 
   Map<std::string, Pair<AnyType, llvm::Value *>> stackVarPtrs{};
   Map<std::string, StructInfo> structTypes{};
+  // LDS reuse-union names de-aliased for this program (AMDGPU only, budget-capped); reused by the metadata pass
+  Set<std::string> deAliasedUnions{};
   Map<Signature, llvm::Function *> functions{};
+  Map<Signature, llvm::Function *> externalFunctions{};
   std::unique_ptr<PointerModel> ptrModel;
   // Out-pointer for sret-transformed bodies; `Stmt::Return` writes through it. Reset per body.
   llvm::Value *currentSretParam = nullptr;
+  // SPIR-V kernels share one module workgroup arena; size it before emitting any body from the maximum
+  // fixed Local storage reachable by an entry point, so helper/emission order cannot change the ABI.
+  uint64_t sharedDynamicLocalBytes = 0;
 
   // XXX SPIR-V Kernel only: byte arithmetic + memcpy works around Intel IGC's mis-routing of
   // `OpInBoundsPtrAccessChain` with `OpConstantNull` element. Logical SPIR-V (GLCompute) runs
@@ -153,6 +184,10 @@ struct CodeGen {
 
   [[nodiscard]] llvm::Value *byteOffsetPtr(llvm::Value *base, llvm::Value *byteOff, const std::string &name);
   [[nodiscard]] llvm::Value *i64SExt(llvm::Value *v);
+  // signed/unsigned int mismatch shares one LLVM integer slot, so the store/compare is bit-identical
+  [[nodiscard]] bool sameIntSlot(const AnyType &a, const AnyType &b);
+  // lower a term to an i1 predicate (already-i1 passes through, otherwise `!= 0`)
+  [[nodiscard]] ValPtr toI1(const AnyTerm &p);
 
   [[nodiscard]] ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyTerm &arg);
   [[nodiscard]] ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyTerm &lhs, const AnyTerm &rhs);
@@ -179,7 +214,21 @@ struct CodeGen {
 
   [[nodiscard]] ValPtr mkSignumVal(const AnyExpr &expr, const AnyTerm &x, const AnyType &tpe);
 
-  Pair<Opt<std::string>, std::string> transform(const Program &program);
+  // shared atomic lowering; the target handler supplies the syncscope string for the memory scope
+  [[nodiscard]] ValPtr mkAtomicRMW(const polyast::Spec::GpuAtomicRMW &op, const std::string &scope);
+  [[nodiscard]] ValPtr mkVolatileLoad(const polyast::Spec::GpuVolatileLoad &op);
+  [[nodiscard]] ValPtr mkVolatileStore(const polyast::Spec::GpuVolatileStore &op);
+
+  // on-device lowering of a host-orchestration memcpy: a plain llvm.memcpy (no host/device split in a kernel).
+  // alloc/free/sync/launch cannot be host-orchestrated from a kernel, so the target handlers lower them to no-ops
+  // rather than failing compilation
+  // per-word i32 staging shared by the warp/wave shuffle lowerings: stage `srcVal` (or a pointer to it) into
+  // `words` i32 words backed by `bufTy`, transform each word via `perWord`, reload the result as `valTy`
+  [[nodiscard]] ValPtr shuffleStage(llvm::Type *valTy, llvm::Type *bufTy, uint64_t words, ValPtr srcVal, const std::string &tag,
+                                    const std::function<ValPtr(ValPtr)> &perWord);
+
+  // rawLocalUnions is localReuseUnionsRaw(program), computed once per compile by compileProgram
+  Pair<Opt<std::string>, std::string> transform(const Program &program, const Set<std::string> &rawLocalUnions);
 };
 
 template <typename Unary, typename Binary, typename AbsFractional>

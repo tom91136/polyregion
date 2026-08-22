@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstring>
 
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/LLVMContext.h"
@@ -12,10 +13,12 @@
 #include "aspartame/all.hpp"
 #include "catch2/catch_all.hpp"
 #include "fmt/format.h"
+#include "spirv/unified1/spirv.hpp"
 
 #include "polyregion/env_keys.h"
 
 #include "ast.h"
+#include "backend/llvm.h"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
@@ -42,6 +45,18 @@ template <typename C> static const std::string &eventDataOf(const C &c, const st
 }
 
 template <typename C> static const std::string &llvmIrOf(const C &c) { return eventDataOf(c, "ast_to_llvm_ir"); }
+
+static polyregion::backend::LLVMBackend::Options llvmHostOptions() {
+  using Backend = polyregion::backend::LLVMBackend;
+  switch (polyregion::backend::llvmc::defaultHostTriple().getArch()) {
+    case llvm::Triple::x86_64: return {Backend::Target::x86_64, "native"};
+    case llvm::Triple::aarch64: return {Backend::Target::AArch64, "native"};
+    case llvm::Triple::arm: return {Backend::Target::ARM, "native"};
+    case llvm::Triple::riscv64: return {Backend::Target::RISCV64, "native"};
+    case llvm::Triple::ppc64le: return {Backend::Target::PPC64LE, "native"};
+    default: throw std::logic_error("Unsupported host architecture in LLVM backend test");
+  }
+}
 
 static Program arenaOffsetCastProgram() {
   using namespace polyregion::polyast::dsl;
@@ -79,6 +94,120 @@ TEST_CASE("LLVM IR event payloads are opt-in", "[backend]") {
   }
 }
 
+TEST_CASE("SPIR-V normalises narrowed integer operands", "[backend][spirv]") {
+  const std::vector<uint32_t> words{
+      spv::MagicNumber,
+      0x00010300u,
+      0u,
+      20u,
+      0u,
+      (4u << 16) | spv::OpTypeInt,
+      1u,
+      64u,
+      0u,
+      (4u << 16) | spv::OpTypeInt,
+      2u,
+      32u,
+      0u,
+      (5u << 16) | spv::OpConstant,
+      1u,
+      3u,
+      7u,
+      0u,
+      (4u << 16) | spv::OpConstant,
+      2u,
+      4u,
+      255u,
+      (5u << 16) | spv::OpBitwiseAnd,
+      2u,
+      5u,
+      3u,
+      4u,
+  };
+  const std::string input(reinterpret_cast<const char *>(words.data()), words.size() * sizeof(uint32_t));
+  const auto repaired = polyregion::backend::llvmc::normaliseSpirvNarrowIntegerOperands(input);
+  REQUIRE(repaired.size() == input.size() + 4 * sizeof(uint32_t));
+  const auto *out = reinterpret_cast<const uint32_t *>(repaired.data());
+  CHECK(out[3] == 21u);
+  const size_t convert = words.size() - 5;
+  CHECK(out[convert] == ((4u << 16) | spv::OpUConvert));
+  CHECK(out[convert + 1] == 2u);
+  CHECK(out[convert + 2] == 20u);
+  CHECK(out[convert + 3] == 3u);
+  CHECK(out[convert + 4] == ((5u << 16) | spv::OpBitwiseAnd));
+  CHECK(out[convert + 7] == 20u);
+  CHECK(out[convert + 8] == 4u);
+
+  auto wideningWords = words;
+  wideningWords[23] = 1u;
+  wideningWords[25] = 4u;
+  wideningWords[26] = 3u;
+  const std::string widening(reinterpret_cast<const char *>(wideningWords.data()), wideningWords.size() * sizeof(uint32_t));
+  CHECK(polyregion::backend::llvmc::normaliseSpirvNarrowIntegerOperands(widening) == widening);
+
+  for (const auto op : {spv::OpBitwiseOr, spv::OpBitwiseXor}) {
+    auto variant = words;
+    variant[convert] = (5u << 16) | op;
+    const std::string blob(reinterpret_cast<const char *>(variant.data()), variant.size() * sizeof(uint32_t));
+    const auto normalised = polyregion::backend::llvmc::normaliseSpirvNarrowIntegerOperands(blob);
+    REQUIRE(normalised.size() == blob.size() + 4 * sizeof(uint32_t));
+    const auto *normalisedWords = reinterpret_cast<const uint32_t *>(normalised.data());
+    CHECK(normalisedWords[convert] == ((4u << 16) | spv::OpUConvert));
+    CHECK(normalisedWords[convert + 4] == ((5u << 16) | op));
+  }
+
+  auto shiftWords = words;
+  shiftWords[convert] = (5u << 16) | spv::OpShiftLeftLogical;
+  const std::string shiftBlob(reinterpret_cast<const char *>(shiftWords.data()), shiftWords.size() * sizeof(uint32_t));
+  const auto normalisedShift = polyregion::backend::llvmc::normaliseSpirvNarrowIntegerOperands(shiftBlob);
+  REQUIRE(normalisedShift.size() == shiftBlob.size() + 4 * sizeof(uint32_t));
+  const auto *normalisedShiftWords = reinterpret_cast<const uint32_t *>(normalisedShift.data());
+  CHECK(normalisedShiftWords[convert] == ((4u << 16) | spv::OpUConvert));
+  CHECK(normalisedShiftWords[convert + 4] == ((5u << 16) | spv::OpShiftLeftLogical));
+  CHECK(normalisedShiftWords[convert + 7] == 20u);
+  CHECK(normalisedShiftWords[convert + 8] == 4u);
+
+  auto extendedWords = words;
+  extendedWords.resize(convert);
+  extendedWords[3] = 40u;
+  const std::vector<uint32_t> vectorAndUnary{
+      (4u << 16) | spv::OpTypeVector,
+      6u,
+      1u,
+      2u,
+      (4u << 16) | spv::OpTypeVector,
+      7u,
+      2u,
+      2u,
+      (3u << 16) | spv::OpUndef,
+      6u,
+      8u,
+      (3u << 16) | spv::OpUndef,
+      7u,
+      9u,
+      (5u << 16) | spv::OpBitwiseAnd,
+      7u,
+      10u,
+      8u,
+      9u,
+      (4u << 16) | spv::OpNot,
+      2u,
+      11u,
+      3u,
+  };
+  extendedWords.insert(extendedWords.end(), vectorAndUnary.begin(), vectorAndUnary.end());
+  const std::string extendedBlob(reinterpret_cast<const char *>(extendedWords.data()), extendedWords.size() * sizeof(uint32_t));
+  const auto normalisedExtended = polyregion::backend::llvmc::normaliseSpirvNarrowIntegerOperands(extendedBlob);
+  REQUIRE(normalisedExtended.size() == extendedBlob.size() + 8 * sizeof(uint32_t));
+  const auto *normalisedExtendedWords = reinterpret_cast<const uint32_t *>(normalisedExtended.data());
+  CHECK(normalisedExtendedWords[extendedWords.size() - 9] == ((4u << 16) | spv::OpUConvert));
+  CHECK(normalisedExtendedWords[extendedWords.size() - 8] == 7u);
+  CHECK(normalisedExtendedWords[extendedWords.size() - 5] == ((5u << 16) | spv::OpBitwiseAnd));
+  CHECK(normalisedExtendedWords[extendedWords.size()] == ((4u << 16) | spv::OpUConvert));
+  CHECK(normalisedExtendedWords[extendedWords.size() + 1] == 2u);
+  CHECK(normalisedExtendedWords[extendedWords.size() + 4] == ((4u << 16) | spv::OpNot));
+}
+
 TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -102,9 +231,17 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
            false)
            .widen(),
        Var(launched,
-           Expr::SpecOp(Spec::RemoteLaunch(selectNamed(context).widen(), kernel, {}, selectNamed(extent).widen(),
-                                           selectNamed(extent).widen(), selectNamed(extent).widen(), selectNamed(extent).widen(),
-                                           selectNamed(extent).widen(), selectNamed(extent).widen(), selectNamed(extent).widen(), {}))
+           Expr::SpecOp(Spec::RemoteLaunch(/*context*/ selectNamed(context).widen(),
+                                           /*kernel*/ kernel,
+                                           /*tpeArgs*/ {},
+                                           /*gridX*/ selectNamed(extent).widen(),
+                                           /*gridY*/ selectNamed(extent).widen(),
+                                           /*gridZ*/ selectNamed(extent).widen(),
+                                           /*blockX*/ selectNamed(extent).widen(),
+                                           /*blockY*/ selectNamed(extent).widen(),
+                                           /*blockZ*/ selectNamed(extent).widen(),
+                                           /*shmem*/ selectNamed(extent).widen(),
+                                           /*args*/ {}))
                .widen(),
            false)
            .widen(),
@@ -133,6 +270,25 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
   if (llvm::TargetRegistry::lookupTarget("", armTriple, targetError)) {
     checkAbi(polyregion::compiler::compile(p, {Target::Object_LLVM_ARM, "cortex-a7"}, OptLevel::O0), "i32");
   } else WARN("ARM target is unavailable in this LLVM distribution: " << targetError);
+}
+
+TEST_CASE("CPU Bool1 boundaries use canonical byte values", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named out("out", Type::Ptr(Type::Bool1(), TypeSpace::Global()));
+  const Function entry =
+      mkFn("write_bool", {Arg(out, {})}, Type::Bool1(),
+           {Stmt::Update(selectNamed(out), Term::IntS32Const(0), Term::Bool1Const(true)).widen(), ret(Term::Bool1Const(true))},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled =
+      polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("store i8 1"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("ret i8 1"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("i8 -1"));
 }
 
 TEST_CASE("C source bounds local names and retains source names on request", "[backend]") {
@@ -199,9 +355,9 @@ TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("[256]") != std::string::npos);
-  CHECK(source.find("get_local_id(0)") != std::string::npos);
-  CHECK(source.find("sub_group_barrier(CLK_LOCAL_MEM_FENCE)") != std::string::npos);
+  CHECK(source ^ contains_slice("[256]"));
+  CHECK(source ^ contains_slice("get_local_id(0)"));
+  CHECK(source ^ contains_slice("barrier(CLK_LOCAL_MEM_FENCE)"));
 }
 
 TEST_CASE("C source shares one bounded workgroup region per kernel", "[backend]") {
@@ -235,7 +391,7 @@ TEST_CASE("C source shares one bounded workgroup region per kernel", "[backend]"
     CHECK(occurrences("[64]") == 2);
     CHECK(occurrences("[768]") == 2);
     CHECK(occurrences("_v2 = ((") == 2);
-    CHECK(source.find("[0]") == std::string::npos);
+    CHECK_FALSE(source ^ contains_slice("[0]"));
   }
 }
 
@@ -279,9 +435,9 @@ TEST_CASE("C source preserves hoisted workgroup array initialisation", "[backend
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string sourceText(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(sourceText.find("local char _v3[48]") != std::string::npos);
-  CHECK(sourceText.find("local int* _v2 = ((local int*) _v3)") != std::string::npos);
-  CHECK(sourceText.find("_v1[_ac0] = _v0[_ac0]") != std::string::npos);
+  CHECK(sourceText ^ contains_slice("local char _v3[48]"));
+  CHECK(sourceText ^ contains_slice("local int* _v2 = ((local int*) _v3)"));
+  CHECK(sourceText ^ contains_slice("_v1[_ac0] = _v0[_ac0]"));
 }
 
 TEST_CASE("C source accounts for workgroup struct storage", "[backend]") {
@@ -314,9 +470,9 @@ TEST_CASE("C source accounts for workgroup struct storage", "[backend]") {
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("2 * sizeof(State)") != std::string::npos);
-  CHECK(source.find("1 * sizeof(Empty)") != std::string::npos);
-  CHECK(source.find("sizeof(State) <= (") != std::string::npos);
+  CHECK(source ^ contains_slice("2 * sizeof(State)"));
+  CHECK(source ^ contains_slice("1 * sizeof(Empty)"));
+  CHECK(source ^ contains_slice("sizeof(State) <= ("));
 }
 
 TEST_CASE("C source specialises pointer-bearing structs by address space", "[backend]") {
@@ -327,7 +483,9 @@ TEST_CASE("C source specialises pointer-bearing structs by address space", "[bac
   const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
   const auto localStorage = Type::Arr(Type::IntS32(), 0, TypeSpace::Local()).widen();
   const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const auto privateBoxPtrTpe = Type::Ptr(box, TypeSpace::Private()).widen();
   const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
+      privateBoxPtr("privateBoxPtr", privateBoxPtrTpe), privateBoxPtrCopy("privateBoxPtrCopy", privateBoxPtrTpe),
       scratch("scratch", localStorage), localBox("localBox", box);
   const auto member = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
   const Function entry =
@@ -341,6 +499,10 @@ TEST_CASE("C source specialises pointer-bearing structs by address space", "[bac
                    Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque())
                        .widen())
                    .widen(),
+               Var(privateBoxPtr,
+                   Expr::RefTo(Term::Select(privateBox, {}, box).widen(), {}, box, TypeSpace::Private(), Region::Opaque()).widen(), false)
+                   .widen(),
+               Var(privateBoxPtrCopy, Expr::Alias(Term::Select(privateBoxPtr, {}, privateBoxPtrTpe).widen()).widen(), false).widen(),
                Var(scratch, std::optional<Expr::Any>{}, true).widen(),
                Var(localBox, Expr::Alias(Term::Poison(box).widen()).widen(), true).widen(),
                Mut(member(localBox), Expr::RefTo(Term::Select(scratch, {}, localStorage).widen(), Term::IntS32Const(0).widen(),
@@ -357,29 +519,31 @@ TEST_CASE("C source specialises pointer-bearing structs by address space", "[bac
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("typedef struct Box_asp Box_asp;") != std::string::npos);
-  CHECK(source.find("typedef struct Box_asg Box_asg;") != std::string::npos);
-  CHECK(source.find("global int* ptr;") != std::string::npos);
-  CHECK(source.find("private int* ptr;") != std::string::npos);
-  CHECK(source.find("local int* ptr;") != std::string::npos);
-  CHECK(source.find("Box_asp _v3;") != std::string::npos);
-  CHECK(source.find("Box _v5;") != std::string::npos);
+  CHECK(source ^ contains_slice("typedef struct Box_asp Box_asp;"));
+  CHECK(source ^ contains_slice("typedef struct Box_asg Box_asg;"));
+  CHECK(source ^ contains_slice("global int* ptr;"));
+  CHECK(source ^ contains_slice("private int* ptr;"));
+  CHECK(source ^ contains_slice("local int* ptr;"));
+  CHECK(source ^ contains_slice("Box_asp _v3;"));
+  CHECK(source ^ contains_slice("private Box_asp* _v4"));
+  CHECK(source ^ contains_slice("private Box_asp* _v5"));
+  CHECK(source ^ contains_slice("Box _v7;"));
 
   opts.target = Target::Source_C_Metal1_0;
   const auto metal = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   INFO(repr(metal));
   REQUIRE(metal.binary != std::nullopt);
   const std::string metalSource(reinterpret_cast<const char *>(metal.binary->data()), metal.binary->size());
-  CHECK(metalSource.find("thread int32_t* ptr;") != std::string::npos);
-  CHECK(metalSource.find("threadgroup int32_t* ptr;") != std::string::npos);
-  CHECK(metalSource.find("device int32_t* ptr;") != std::string::npos);
+  CHECK(metalSource ^ contains_slice("thread int32_t* ptr;"));
+  CHECK(metalSource ^ contains_slice("threadgroup int32_t* ptr;"));
+  CHECK(metalSource ^ contains_slice("device int32_t* ptr;"));
 
   opts.target = Target::Source_C_C11;
   const auto c11 = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   INFO(repr(c11));
   REQUIRE(c11.binary != std::nullopt);
   const std::string c11Source(reinterpret_cast<const char *>(c11.binary->data()), c11.binary->size());
-  CHECK(c11Source.find("Box_as") == std::string::npos);
+  CHECK_FALSE(c11Source ^ contains_slice("Box_as"));
 }
 
 TEST_CASE("C source propagates address-space specialisation through stored structs", "[backend]") {
@@ -424,9 +588,9 @@ TEST_CASE("C source propagates address-space specialisation through stored struc
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("typedef struct Wrapper_asp Wrapper_asp;") != std::string::npos);
-  CHECK(source.find("Box_asp _base_Box;") != std::string::npos);
-  CHECK(source.find("Wrapper_asp _v5;") != std::string::npos);
+  CHECK(source ^ contains_slice("typedef struct Wrapper_asp Wrapper_asp;"));
+  CHECK(source ^ contains_slice("Box_asp _base_Box;"));
+  CHECK(source ^ contains_slice("Wrapper_asp _v5;"));
   CHECK(source ^ contains_slice("Wrapper_asp _v6;"));
   CHECK(source ^ contains_slice("Wrapper_asp _v7;"));
 
@@ -477,13 +641,13 @@ TEST_CASE("C source combines nested struct specialisations deterministically", "
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  const auto gp = source.find("typedef struct Wrapper_asgp Wrapper_asgp;");
-  const auto pg = source.find("typedef struct Wrapper_aspg Wrapper_aspg;");
-  CHECK(gp != std::string::npos);
-  CHECK(pg != std::string::npos);
+  const auto gp = source ^ index_of_slice("typedef struct Wrapper_asgp Wrapper_asgp;");
+  const auto pg = source ^ index_of_slice("typedef struct Wrapper_aspg Wrapper_aspg;");
+  CHECK(gp >= 0);
+  CHECK(pg >= 0);
   CHECK(gp < pg);
-  CHECK(source.find("Box_asp left;") != std::string::npos);
-  CHECK(source.find("Box_asp right;") != std::string::npos);
+  CHECK(source ^ contains_slice("Box_asp left;"));
+  CHECK(source ^ contains_slice("Box_asp right;"));
 }
 
 TEST_CASE("C source rejects cross-space pointer merges before dereference", "[backend]") {
@@ -612,7 +776,7 @@ TEST_CASE("C source traces reads from address-space-specialised fields", "[backe
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("private int* _v4 = _v3.ptr;") != std::string::npos);
+  CHECK(source ^ contains_slice("private int* _v4 = _v3.ptr;"));
 }
 
 TEST_CASE("C source distinguishes struct specialisations by complete field signature", "[backend]") {
@@ -645,10 +809,10 @@ TEST_CASE("C source distinguishes struct specialisations by complete field signa
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("typedef struct Pair_aspg Pair_aspg;") != std::string::npos);
-  CHECK(source.find("typedef struct Pair_asgp Pair_asgp;") != std::string::npos);
-  CHECK(source.find("Pair_aspg _v4;") != std::string::npos);
-  CHECK(source.find("Pair_asgp _v5;") != std::string::npos);
+  CHECK(source ^ contains_slice("typedef struct Pair_aspg Pair_aspg;"));
+  CHECK(source ^ contains_slice("typedef struct Pair_asgp Pair_asgp;"));
+  CHECK(source ^ contains_slice("Pair_aspg _v4;"));
+  CHECK(source ^ contains_slice("Pair_asgp _v5;"));
 }
 
 TEST_CASE("C source traces pointer fields through fixed array indices", "[backend]") {
@@ -675,7 +839,7 @@ TEST_CASE("C source traces pointer fields through fixed array indices", "[backen
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("private int* ptr;") != std::string::npos);
+  CHECK(source ^ contains_slice("private int* ptr;"));
 }
 
 TEST_CASE("C source rejects conflicting pointer fields through fixed array indices", "[backend]") {
@@ -728,8 +892,8 @@ TEST_CASE("C source keeps constant and global struct pointer fields distinct", "
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("typedef struct Box_asc Box_asc;") != std::string::npos);
-  CHECK(source.find("constant char* ptr;") != std::string::npos);
+  CHECK(source ^ contains_slice("typedef struct Box_asc Box_asc;"));
+  CHECK(source ^ contains_slice("constant char* ptr;"));
 }
 
 TEST_CASE("C source isolates struct specialisations between overloaded functions", "[backend]") {
@@ -762,8 +926,8 @@ TEST_CASE("C source isolates struct specialisations between overloaded functions
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("Box_asc _v2;") != std::string::npos);
-  CHECK(source.find("Box_asp _v2;") != std::string::npos);
+  CHECK(source ^ contains_slice("Box_asc _v2;"));
+  CHECK(source ^ contains_slice("Box_asp _v2;"));
 }
 
 TEST_CASE("MSL lowers 32-bit atomic read-modify-write operations", "[backend][metal][atomic]") {
@@ -795,15 +959,15 @@ TEST_CASE("MSL lowers 32-bit atomic read-modify-write operations", "[backend][me
     INFO(repr(c));
     REQUIRE(c.binary);
     const std::string source(c.binary->begin(), c.binary->end());
-    CHECK(source.find(name + "((device atomic_int*)") != std::string::npos);
+    CHECK(source ^ contains_slice(name + "((device atomic_int*)"));
   }
 
   const auto local = compile(AtomicOp::Add(), MemOrder::Relaxed(), Type::IntU32(), TypeSpace::Local());
   INFO(repr(local));
   REQUIRE(local.binary);
   const std::string source(local.binary->begin(), local.binary->end());
-  CHECK(source.find("atomic_fetch_add_explicit((threadgroup atomic_uint*)") != std::string::npos);
-  CHECK(source.find("metal::memory_order_relaxed") != std::string::npos);
+  CHECK(source ^ contains_slice("atomic_fetch_add_explicit((threadgroup atomic_uint*)"));
+  CHECK(source ^ contains_slice("metal::memory_order_relaxed"));
   for (const auto &order : std::vector<MemOrder::Any>{MemOrder::Acquire(), MemOrder::Release(), MemOrder::AcqRel(), MemOrder::SeqCst()})
     REQUIRE_THROWS_WITH(compile(AtomicOp::Add(), order, Type::IntU32(), TypeSpace::Local()),
                         Catch::Matchers::ContainsSubstring("MSL atomic RMW supports only relaxed ordering"));
@@ -872,22 +1036,425 @@ TEST_CASE("MSL lowers volatile aggregate access memberwise", "[backend][metal][v
   REQUIRE(c.binary);
   const std::string source(c.binary->begin(), c.binary->end());
   for (const auto &space : {"device", "threadgroup", "thread"}) {
-    CHECK(source.find("_pr_vld_" + std::string(space) + "_Outer") != std::string::npos);
-    CHECK(source.find("_pr_vst_" + std::string(space) + "_Outer") != std::string::npos);
+    CHECK(source ^ contains_slice("_pr_vld_" + std::string(space) + "_Outer"));
+    CHECK(source ^ contains_slice("_pr_vst_" + std::string(space) + "_Outer"));
   }
-  CHECK(source.find("r.inner.x = (*p).inner.x;") != std::string::npos);
-  CHECK(source.find("for (int _vc1 = 0; _vc1 < 2; _vc1++)") != std::string::npos);
-  CHECK(source.find("(*p).values[_vc1] = v.values[_vc1];") != std::string::npos);
-  const auto loadDefinition = source.find("Outer _pr_vld_device_Outer(");
-  const auto storeDefinition = source.find("void _pr_vst_device_Outer(");
-  REQUIRE(loadDefinition != std::string::npos);
-  REQUIRE(storeDefinition != std::string::npos);
-  CHECK(source.find("Outer _pr_vld_device_Outer(", loadDefinition + 1) == std::string::npos);
-  CHECK(source.find("void _pr_vst_device_Outer(", storeDefinition + 1) == std::string::npos);
+  CHECK(source ^ contains_slice("r.inner.x = (*p).inner.x;"));
+  CHECK(source ^ contains_slice("for (int _vc1 = 0; _vc1 < 2; _vc1++)"));
+  CHECK(source ^ contains_slice("(*p).values[_vc1] = v.values[_vc1];"));
+  const auto loadNeedle = std::string("Outer _pr_vld_device_Outer(");
+  const auto storeNeedle = std::string("void _pr_vst_device_Outer(");
+  const auto loadDefinition = source ^ index_of_slice(loadNeedle);
+  const auto storeDefinition = source ^ index_of_slice(storeNeedle);
+  REQUIRE(loadDefinition >= 0);
+  REQUIRE(storeDefinition >= 0);
+  CHECK_FALSE((source | drop(loadDefinition + 1) | contains_slice(loadNeedle)));
+  CHECK_FALSE((source | drop(storeDefinition + 1) | contains_slice(storeNeedle)));
   const auto again = polyregion::compiler::compile(Program(entry, {global, local, priv}, {innerDef, outerDef}, PassPhase::Initial(), {}),
                                                    opts, OptLevel::O0);
   REQUIRE(again.binary);
   CHECK(source == std::string(again.binary->begin(), again.binary->end()));
+}
+
+TEST_CASE("LLVM GPU targets lower volatile access", "[backend][volatile]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named ptr("ptr", ptrTpe), loaded("loaded", Type::IntS32()), stored("stored", Type::Unit0());
+  const Function entry =
+      mkFn("kernel", {Arg(ptr, {})}, Type::Unit0(),
+           {Var(loaded, Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), Type::IntS32())).widen(), false).widen(),
+            Var(stored, Expr::SpecOp(Spec::GpuVolatileStore(selectNamed(ptr), selectNamed(loaded))).widen(), false).widen(),
+            Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_35"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+           {Target::Object_LLVM_SPIRV64_Kernel, ""},
+       }) {
+    INFO(arch);
+    auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
+    CHECK(compiled.messages == "");
+    CHECK(compiled.binary != std::nullopt);
+  }
+}
+
+TEST_CASE("LLVM aggregate volatile access keeps the pointee alignment", "[backend][volatile]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym pairName({"Pair"});
+  const auto pairType = Type::Struct(pairName, {}).widen();
+  const StructDef pair(pairName, {}, {Named("x", Type::IntS32()), Named("y", Type::IntS32())}, {}, false);
+  const Named ptr("ptr", Type::Ptr(pairType, TypeSpace::Global())), loaded("loaded", pairType), stored("stored", Type::Unit0());
+  const Function entry =
+      mkFn("kernel", {Arg(ptr, {})}, Type::Unit0(),
+           {Var(loaded, Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), pairType)).widen(), false).widen(),
+            Var(stored, Expr::SpecOp(Spec::GpuVolatileStore(selectNamed(ptr), selectNamed(loaded))).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  for (const auto &[target, arch] :
+       std::vector<std::pair<Target, std::string>>{{Target::Object_LLVM_NVPTX64, "sm_60"}, {Target::Object_LLVM_SPIRV64_Kernel, ""}}) {
+    INFO(arch);
+    const auto compiled = polyregion::compiler::compile(Program(entry, {}, {pair}, PassPhase::Initial(), {}), {target, arch}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("load volatile i64, ptr"));
+    CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store volatile i64"));
+    CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring(", align 4"));
+  }
+}
+
+TEST_CASE("Vulkan preserves typed aggregate volatile access", "[backend][volatile][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym pairName({"Pair"});
+  const auto pairType = Type::Struct(pairName, {}).widen();
+  const StructDef pair(pairName, {}, {Named("x", Type::IntS32()), Named("y", Type::IntS32())}, {}, false);
+  const Named value("value", pairType), ptr("ptr", Type::Ptr(pairType, TypeSpace::Private())), loaded("loaded", pairType),
+      stored("stored", Type::Unit0());
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(value, std::optional<Expr::Any>{}, true).widen(),
+            Var(ptr, Expr::RefTo(selectNamed(value).widen(), {}, pairType, TypeSpace::Private(), Region::Opaque()).widen(), false).widen(),
+            Var(loaded, Expr::SpecOp(Spec::GpuVolatileLoad(selectNamed(ptr), pairType)).widen(), false).widen(),
+            Var(stored, Expr::SpecOp(Spec::GpuVolatileStore(selectNamed(ptr), selectNamed(loaded))).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {pair}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("load volatile %Pair"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store volatile %Pair"));
+  CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("load volatile i64"));
+  CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("store volatile i64"));
+}
+
+TEST_CASE("Vulkan uses byte-backed workgroup booleans", "[backend][subgroup][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto scratchTpe = Type::Arr(Type::Bool1(), 32, TypeSpace::Local());
+  const Named scratch("scratch", scratchTpe), loaded("loaded", Type::Bool1());
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(scratch, std::optional<Expr::Any>{}, true).widen(),
+            Update(selectNamed(scratch), Term::IntU32Const(0).widen(), Term::Bool1Const(true).widen()).widen(),
+            Var(loaded, Expr::Index(selectNamed(scratch), Term::IntU32Const(0).widen(), Type::Bool1()).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("@scratch_wg = internal addrspace(3) global [32 x i8]"));
+  CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("alloca [32 x i8]"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("load i8"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store i8"));
+}
+
+TEST_CASE("Vulkan retains multidimensional workgroup-array strides", "[backend][subgroup][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto rowTpe = Type::Arr(Type::IntU32(), 8, TypeSpace::Local());
+  const auto scratchTpe = Type::Arr(rowTpe, 4, TypeSpace::Local());
+  const Named scratch("scratch", scratchTpe), loaded("loaded", Type::IntU32());
+  const Term::Select row(scratch, {PathStep::IndexDyn(Term::IntU32Const(2).widen()).widen()}, rowTpe);
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {Var(scratch, std::optional<Expr::Any>{}, true).widen(),
+                               Update(row, Term::IntU32Const(3).widen(), Term::IntU32Const(42).widen()).widen(),
+                               Var(loaded, Expr::Index(row, Term::IntU32Const(3).widen(), Type::IntU32()).widen(), false).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O3);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("@scratch_wg = internal addrspace(3) global [32 x i32]"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("i64 19"));
+}
+
+TEST_CASE("LLVM CUDA and HIP targets lower subgroup votes", "[backend][subgroup]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto mask = Term::IntU32Const(-1).widen();
+  const auto predicate = Term::Bool1Const(true).widen();
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {Var(Named("ballot", Type::IntU32()), Expr::SpecOp(Spec::GpuBallot(mask, predicate)).widen(), false).widen(),
+                               Var(Named("any", Type::Bool1()), Expr::SpecOp(Spec::GpuVoteAny(mask, predicate)).widen(), false).widen(),
+                               Var(Named("all", Type::Bool1()), Expr::SpecOp(Spec::GpuVoteAll(mask, predicate)).widen(), false).widen(),
+                               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_60"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+       }) {
+    INFO(arch);
+    auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
+    CHECK(compiled.messages == "");
+    CHECK(compiled.binary != std::nullopt);
+  }
+}
+
+TEST_CASE("LLVM GPU shuffles pad narrow values without widening the result", "[backend][subgroup]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named value("value", Type::IntU8()), shuffled("shuffled", Type::IntU8());
+  const Function entry =
+      mkFn("kernel", {Arg(value, {})}, Type::Unit0(),
+           {Var(shuffled,
+                Expr::SpecOp(Spec::GpuShuffleDown(selectNamed(value).widen(), Term::IntU32Const(1).widen(), Term::IntU32Const(31).widen(),
+                                                  Term::IntU32Const(-1).widen(), Type::IntU8()))
+                    .widen(),
+                false)
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_60"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+           {Target::Object_LLVM_SPIRV64_Kernel, ""},
+       }) {
+    INFO(arch);
+    const auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
+    CHECK(compiled.messages == "");
+    CHECK(compiled.binary != std::nullopt);
+    if (target == Target::Object_LLVM_SPIRV64_Kernel && compiled.binary) {
+      REQUIRE(compiled.binary->size() >= 2 * sizeof(uint32_t));
+      uint32_t spirvVersion = 0;
+      std::memcpy(&spirvVersion, compiled.binary->data() + sizeof(uint32_t), sizeof(uint32_t));
+      CHECK(spirvVersion == 0x00010300u);
+    }
+  }
+}
+
+TEST_CASE("LLVM GPU shuffles honour lane masks and physical subgroup bounds", "[backend][subgroup]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named value("value", Type::IntU32()), mask("mask", Type::IntU32()), shuffled("shuffled", Type::IntU32());
+  const Function entry =
+      mkFn("kernel", {Arg(value, {}), Arg(mask, {})}, Type::Unit0(),
+           {Var(shuffled,
+                Expr::SpecOp(Spec::GpuShuffleIdx(selectNamed(value).widen(), Term::IntU32Const(0).widen(), Term::IntU32Const(7).widen(),
+                                                 selectNamed(mask).widen(), Type::IntU32()))
+                    .widen(),
+                false)
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+
+  const auto amd = polyregion::compiler::compile(program, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O0);
+  REQUIRE(amd.binary);
+  CHECK_THAT(llvmIrOf(amd), Catch::Matchers::ContainsSubstring("icmp ult i32"));
+  CHECK_THAT(llvmIrOf(amd), Catch::Matchers::ContainsSubstring("and i32"));
+  CHECK_THAT(llvmIrOf(amd), Catch::Matchers::ContainsSubstring("llvm.amdgcn.wavefrontsize"));
+
+  const auto spirv = polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  REQUIRE(spirv.binary);
+  CHECK_THAT(llvmIrOf(spirv), Catch::Matchers::ContainsSubstring("get_sub_group_size"));
+  CHECK_THAT(llvmIrOf(spirv), Catch::Matchers::ContainsSubstring("icmp ult i32"));
+
+  const auto nvLegacy = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_60"}, OptLevel::O0);
+  REQUIRE(nvLegacy.binary);
+  CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.idx.i32"));
+  CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("i32 6151"));
+
+  const auto nvSync = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
+  REQUIRE(nvSync.binary);
+  CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.sync.idx.i32"));
+  CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("activemask.b32"));
+  CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("i32 6151"));
+}
+
+TEST_CASE("AMDGPU fences remain non-blocking memory fences", "[backend][volatile]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {Var(Named("global", Type::Unit0()), Expr::SpecOp(Spec::GpuFenceGlobal()).widen(), false).widen(),
+                               Var(Named("local", Type::Unit0()), Expr::SpecOp(Spec::GpuFenceLocal()).widen(), false).widen(),
+                               Var(Named("all", Type::Unit0()), Expr::SpecOp(Spec::GpuFenceAll()).widen(), false).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled =
+      polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("fence syncscope(\"agent\") seq_cst"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("fence syncscope(\"workgroup\") seq_cst"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("fence seq_cst"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("llvm.amdgcn.s.barrier"));
+}
+
+TEST_CASE("AMDGPU isolates vendor reuse unions and clamps the affected optimisation", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym discontinuityName({"rocprim_block_discontinuity"});
+  const auto discontinuityType = Type::Struct(discontinuityName, {}).widen();
+  const StructDef discontinuity(discontinuityName, {}, {Named("tail", Type::IntU32())}, {}, false);
+  const Sym reuseName({"rocprim_partition_kernel_impl_storage"});
+  const auto reuseType = Type::Struct(reuseName, {}).widen();
+  const StructDef reuse(reuseName, {}, {Named("exchange", Type::IntU32()), Named("flags", discontinuityType)}, {}, true);
+  const auto localStorage = Type::Arr(reuseType, 1, TypeSpace::Local()).widen();
+  const Named storage("storage", localStorage), temporary("temporary", Type::IntS32());
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {Var(storage, std::optional<Expr::Any>{}, true).widen(),
+                               Var(temporary, Expr::Alias(Term::IntS32Const(1).widen()).widen(), false).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::backend::LLVMBackend backend({.target = polyregion::backend::LLVMBackend::Target::AMDGCN, .arch = "gfx906"});
+  const auto compiled = backend.compileProgram(Program(entry, {}, {discontinuity, reuse}, PassPhase::Initial(), {}), OptLevel::O3);
+  REQUIRE(compiled.binary);
+  const auto layout = compiled.layouts ^ find_cref([&](const auto &x) { return x.name == repr(reuseName); });
+  REQUIRE(layout);
+  REQUIRE(layout->get().members.size() == 2);
+  CHECK(layout->get().members[0].offsetInBytes == 0);
+  CHECK(layout->get().members[1].offsetInBytes > 0);
+  CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), Catch::Matchers::ContainsSubstring("alloca i32"));
+}
+
+TEST_CASE("LLVM GPU kernels accept stateless callable parameters", "[backend][callable]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named callable("callable", Type::FnRef(Sym({"predicate"})));
+  const Function entry =
+      mkFn("kernel", {Arg(callable, {})}, Type::Unit0(), {Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_60"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+       }) {
+    INFO(arch);
+    const auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
+    CHECK(compiled.messages == "");
+    CHECK(compiled.binary != std::nullopt);
+  }
+}
+
+TEST_CASE("LLVM forwards stateless callable parameters", "[backend][callable]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto callableType = Type::FnRef(Sym({"predicate"})).widen();
+  const Named callable("callable", callableType);
+  const Function sink = mkFn("sink", {Arg(callable, {})}, Type::Unit0(), {ret()}, FunctionVisibility::Internal());
+  const Function forward = mkFn("forward", {Arg(callable, {})}, Type::Unit0(),
+                                {ret(Expr::Invoke(Type::FnRef(sink.decl.name), {}, {}, {selectNamed(callable)}, Type::Unit0()).widen())},
+                                FunctionVisibility::Internal());
+  const Function entry =
+      mkFn("entry", {}, Type::Unit0(),
+           {ret(Expr::Invoke(Type::FnRef(forward.decl.name), {}, {}, {Term::Poison(callableType)}, Type::Unit0()).widen())},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {forward, sink}, {}, PassPhase::Initial(), {});
+
+  const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  CHECK(compiled.messages == "");
+  CHECK(compiled.binary != std::nullopt);
+}
+
+TEST_CASE("LLVM evaluates Unit0 return expressions", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Function entry = mkFn("entry", {}, Type::Unit0(), {ret(Expr::ForeignCall("unit_effect", {}, Type::Unit0()).widen())},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled =
+      polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("call void @unit_effect"));
+}
+
+TEST_CASE("LLVM internal functions do not shadow foreign symbols", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named bytes("bytes", Type::IntU64());
+  const auto ptrType = Type::Ptr(Type::Unit0(), TypeSpace::Global()).widen();
+  const Function wrapper = mkFn("malloc", {Arg(bytes, {})}, ptrType,
+                                {ret(Expr::ForeignCall("malloc", {selectNamed(bytes)}, ptrType).widen())}, FunctionVisibility::Internal());
+  const Function entry = mkFn("entry", {}, Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::backend::details::CodeGen cg(llvmHostOptions(), "foreign_collision");
+  const auto [error, ir] = cg.transform(Program(entry, {wrapper}, {}, PassPhase::Initial(), {}), {});
+  REQUIRE_FALSE(error);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("define internal ptr @polyregion_internal_malloc"));
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call ptr @malloc"));
+}
+
+TEST_CASE("LLVM gives stored callable references addressable bytes", "[backend][callable]") {
+  polyregion::compiler::initialise();
+  const auto callableType = Type::FnRef(Sym({"predicate"})).widen();
+  const auto boxType = Type::Struct(Sym({"CallableBox"}), {}).widen();
+  const StructDef box(Sym({"CallableBox"}), {}, {Named("callable", callableType)}, {}, false);
+  const StructDef iterator(Sym({"Iterator"}), {}, {Named("input", Type::Ptr(Type::IntU8(), TypeSpace::Global())), Named("op", boxType)}, {},
+                           false);
+  const auto layouts = polyregion::backend::LLVMBackend(llvmHostOptions()).resolveLayouts({box, iterator});
+  const auto boxLayout = layouts ^ find_cref([](const auto &x) { return x.name == "CallableBox"; });
+  const auto iteratorLayout = layouts ^ find_cref([](const auto &x) { return x.name == "Iterator"; });
+  REQUIRE(boxLayout);
+  REQUIRE(iteratorLayout);
+  CHECK(boxLayout->get().sizeInBytes == 1);
+  CHECK(boxLayout->get().members[0].sizeInBytes == 1);
+  CHECK(iteratorLayout->get().sizeInBytes == 16);
+  CHECK(iteratorLayout->get().members[1].offsetInBytes == 8);
+}
+
+TEST_CASE("LLVM stores stateless callable fields at their storage width", "[backend][callable]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto callableType = Type::FnRef(Sym({"predicate"})).widen();
+  const auto boxSym = Sym({"CallableBox"});
+  const auto boxType = Type::Struct(boxSym, {}).widen();
+  const StructDef box(boxSym, {}, {Named("callable", callableType)}, {}, false);
+  const Named count("count", Type::IntS32()), value("value", boxType);
+  const auto field = Term::Select(value, {PathStep::Field("callable").widen()}, callableType);
+  const Function entry = mkFn("entry", {Arg(count, {})}, Type::IntS32(),
+                              {Var(value, std::optional<Expr::Any>{}, true).widen(),
+                               Mut(field, Expr::Alias(Term::Poison(callableType).widen()).widen()).widen(), ret(selectNamed(count))},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {box}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("store i8 poison"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store ptr null"));
+}
+
+TEST_CASE("LLVM stops emitting a function body after terminal branches", "[backend][control-flow]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Function entry = mkFn(
+      "entry", {}, Type::IntS32(),
+      {Stmt::Cond(Term::Bool1Const(true), {ret(Term::IntS32Const(1))}, {ret(Term::IntS32Const(2))}).widen(), ret(Term::IntS32Const(0))},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+  CHECK(compiled.messages == "");
+  CHECK(compiled.binary != std::nullopt);
 }
 
 TEST_CASE("volatile access respects C source address spaces", "[backend][metal][volatile]") {
@@ -917,19 +1484,20 @@ TEST_CASE("volatile access respects C source address spaces", "[backend][metal][
   };
 
   const auto scalar = emit(Target::Source_C_Metal1_0, makeProgram(TypeSpace::Global(), false));
-  CHECK(scalar.find("volatile device int32_t*") != std::string::npos);
-  CHECK(scalar.find("_pr_vld_") == std::string::npos);
+  CHECK(scalar ^ contains_slice("volatile device int32_t*"));
+  CHECK_FALSE(scalar ^ contains_slice("_pr_vld_"));
 
   const auto constant = emit(Target::Source_C_Metal1_0, makeProgram(TypeSpace::Constant(), false, record));
-  CHECK(constant.find("_pr_vld_constant_Record") != std::string::npos);
+  CHECK(constant ^ contains_slice("_pr_vld_constant_Record"));
   REQUIRE_THROWS_WITH(emit(Target::Source_C_Metal1_0, makeProgram(TypeSpace::Constant(), true, record)),
                       Catch::Matchers::ContainsSubstring("volatile store to constant storage is unsupported for MSL"));
 
   const auto opencl = emit(Target::Source_C_OpenCL1_1, makeProgram(TypeSpace::Global(), false, record));
-  CHECK(opencl.find("volatile global Record*") != std::string::npos);
-  CHECK(opencl.find("_pr_vld_") == std::string::npos);
-  REQUIRE_THROWS_WITH(emit(Target::Source_C_C11, makeProgram(TypeSpace::Global(), false, record)),
-                      Catch::Matchers::ContainsSubstring("Spec::GpuVolatileLoad unsupported for C11"));
+  CHECK(opencl ^ contains_slice("volatile global Record*"));
+  CHECK_FALSE(opencl ^ contains_slice("_pr_vld_"));
+  const auto c11 = emit(Target::Source_C_C11, makeProgram(TypeSpace::Global(), false, record));
+  CHECK(c11 ^ contains_slice("volatile Record*"));
+  CHECK_FALSE(c11 ^ contains_slice("_pr_vld_"));
 }
 
 TEST_CASE("MSL rejects volatile union access", "[backend][metal][volatile]") {
@@ -1020,6 +1588,39 @@ TEST_CASE("host prelude with foreign calls compiles to host object", "[backend]"
   CHECK(c.binary != std::nullopt);
 }
 
+TEST_CASE("HostThreaded topology uses the task id and launch size", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named globalIdx("global_idx", Type::IntU32());
+  const Named helperIdx("helper_idx", Type::IntU32());
+  const Named globalSize("global_size", Type::IntU32());
+  const auto dimension = Term::IntU32Const(0).widen();
+  const Function helper = mkFn("index_helper", {}, Type::IntU32(),
+                               {
+                                   Var(globalIdx, Expr::SpecOp(Spec::GpuGlobalIdx(dimension)).widen(), false).widen(),
+                                   Return(Expr::Alias(selectNamed(globalIdx).widen()).widen()).widen(),
+                               },
+                               FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+  const Function entry = mkFn(
+      "kernel", {}, Type::IntU32(),
+      {
+          Var(helperIdx, Expr::Invoke(Type::FnRef(helper.decl.name), {}, std::optional<Term::Any>{}, {}, Type::IntU32()).widen(), false)
+              .widen(),
+          Var(globalSize, Expr::SpecOp(Spec::GpuGlobalSize(dimension)).widen(), false).widen(),
+          Return(Expr::IntrOp(Add(selectNamed(helperIdx).widen(), selectNamed(globalSize).widen(), Type::IntU32())).widen()).widen(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::backend::details::CodeGen codegen(llvmHostOptions(), "host_thread_topology");
+  const auto [error, ir] = codegen.transform(Program(entry, {helper}, {}, PassPhase::Initial(), {}), {});
+  REQUIRE_FALSE(error);
+  CHECK(ir ^ contains_slice("@__polyregion_host_thread_global_idx"));
+  CHECK(ir ^ contains_slice("@__polyregion_host_thread_global_size"));
+  CHECK(ir ^ contains_slice("define internal i32 @polyregion_internal_index_helper()"));
+  CHECK(ir ^ contains_slice("define i32 @kernel(i64"));
+}
+
 TEST_CASE("host orchestration lowers remote launches through the context ABI", "[backend]") {
   polyregion::compiler::initialise();
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
@@ -1027,23 +1628,50 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
 
   const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
   const Named context("context", contextType);
-  const auto kernel = mkFn("remote.kernel", {}, Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Sym payloadName({"Payload"});
+  const Type::Struct payloadType(payloadName, {});
+  const StructDef payload(payloadName, {}, {Named("value", Type::IntS32())}, {}, false);
+  const Named remote("remote", Type::Ptr(payloadType, TypeSpace::Global()));
+  const Named closure("closure", payloadType);
+  const auto kernel = mkFn("remote.kernel", {Arg(Named("remote", remote.tpe), {}), Arg(Named("closure", closure.tpe), {})}, Type::Unit0(),
+                           {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   const auto one = Term::IntU32Const(1).widen();
   const auto zero = Term::IntU32Const(0).widen();
-  const auto launch = Spec::RemoteLaunch(selectNamed(context).widen(), Term::Poison(Type::FnRef(kernel.decl.name)).widen(), {}, one, one,
-                                         one, one, one, one, zero, {});
+  const auto launch = Spec::RemoteLaunch(/*context*/ selectNamed(context).widen(),
+                                         /*kernel*/ Term::Poison(Type::FnRef(kernel.decl.name)).widen(),
+                                         /*tpeArgs*/ {},
+                                         /*gridX*/ one,
+                                         /*gridY*/ one,
+                                         /*gridZ*/ one,
+                                         /*blockX*/ one,
+                                         /*blockY*/ one,
+                                         /*blockZ*/ one,
+                                         /*shmem*/ zero,
+                                         /*args*/ {selectNamed(remote).widen(), selectNamed(closure).widen()});
   const Named launched("launched", Type::Unit0());
-  const Function driver(FunctionDecl(Sym({"driver"}), {}, {}, {Arg(context, {})}, {}, {}, Type::Unit0(), FunctionAffinity::Host()),
+  const Function driver(FunctionDecl(Sym({"driver"}), {}, {}, {Arg(context, {}), Arg(remote, {}), Arg(closure, {})}, {}, {}, Type::Unit0(),
+                                     FunctionAffinity::Host()),
                         {Var(launched, Expr::SpecOp(launch).widen(), false).widen(), ret()}, FunctionVisibility::Exported(),
                         FunctionFpMode::Relaxed(), false);
-  const Program program(driver, {kernel}, {}, PassPhase::Initial(), {});
+  const Program program(driver, {kernel}, {payload}, PassPhase::Initial(), {});
   polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
   options.pipelineSpec = "FullOpt(level=0)";
 
   const auto compiled = polyregion::compiler::compile(program, options, OptLevel::O0);
   INFO(repr(compiled));
   REQUIRE(compiled.binary);
-  CHECK(llvmIrOf(compiled) ^ contains_slice("polyrt_remote_launch"));
+  const auto &ir = llvmIrOf(compiled);
+  INFO(ir);
+  CHECK(ir ^ contains_slice("polyrt_remote_launch"));
+  const auto callCount = [&](const std::string &callee) {
+    const auto needle = "@" + callee + "(";
+    const auto lines = ir ^ split('\n');
+    return lines ^ count([&](const auto &line) { return (line ^ contains_slice("call ")) && (line ^ contains_slice(needle)); });
+  };
+  // The by-value aggregate needs one temporary remote allocation; the pointer argument is forwarded unchanged.
+  CHECK(callCount("polyrt_remote_malloc") == 1);
+  CHECK(callCount("polyrt_remote_memcpy") == 1);
+  CHECK(ir ^ contains_slice("i32 0)"));
 }
 
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {
@@ -1101,7 +1729,113 @@ TEST_CASE("by-value array initialisation copies contents on by-pointer targets",
   INFO(repr(c));
   CHECK(c.messages == "");
 
-  CHECK(llvmIrOf(c).find("llvm.memcpy") != std::string::npos);
+  CHECK(llvmIrOf(c) ^ contains_slice("llvm.memcpy"));
+}
+
+TEST_CASE("SPIR-V dynamic workgroup views do not initialise shared storage", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const auto dynamic = Type::Arr(Type::IntS8(), 0, TypeSpace::Local());
+  const auto fixed = Type::Arr(Type::IntS8(), 16, TypeSpace::Local());
+  const Named first("first", dynamic), second("second", dynamic), reserved("reserved", fixed);
+  Function entry = mkFn("kernel", {}, Type::Unit0(),
+                        {
+                            Var(reserved, Expr::Alias(Term::Poison(fixed).widen()).widen(), true).widen(),
+                            Var(first, Expr::Alias(Term::Poison(dynamic).widen()).widen(), true).widen(),
+                            Var(second, Expr::Alias(Term::Poison(dynamic).widen()).widen(), true).widen(),
+                            Update(selectNamed(first), Term::IntS32Const(0).widen(), Term::IntS8Const(7).widen()).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV64_Kernel, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  opts.workgroupMemoryBytes = 64;
+  const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const auto &ir = llvmIrOf(c);
+  CHECK(ir ^ contains_slice("@polyc_dyn_shared"));
+  CHECK(ir ^ contains_slice("[48 x i8]"));
+  CHECK(ir ^ contains_slice("store i8 7"));
+  CHECK_FALSE(ir ^ contains_slice("store i8 poison"));
+  REQUIRE(c.binary->size() >= 2 * sizeof(uint32_t));
+  uint32_t spirvVersion = 0;
+  std::memcpy(&spirvVersion, c.binary->data() + sizeof(uint32_t), sizeof(uint32_t));
+  CHECK(spirvVersion == 0x00010200u);
+}
+
+TEST_CASE("LLVM GPU targets reject fixed workgroup storage beyond configured capacity", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto oversized = Type::Arr(Type::IntU8(), 129, TypeSpace::Local()).widen();
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(), {Var(Named("storage", oversized), std::optional<Expr::Any>{}, false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_60"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+           {Target::Object_LLVM_SPIRV64_Kernel, ""},
+       }) {
+    INFO(arch);
+    polyregion::compiler::Options options{target, arch};
+    options.pipelineSpec = "FullOpt(level=0)";
+    options.workgroupMemoryBytes = 128;
+    REQUIRE_THROWS_WITH(polyregion::compiler::compile(program, options, OptLevel::O0),
+                        Catch::Matchers::ContainsSubstring("workgroup storage exceeds configured capacity of 128 bytes"));
+  }
+}
+
+TEST_CASE("LLVM workgroup accounting includes reachable helper storage", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto helperCall = [](const Function &helper) {
+    return Expr::Invoke(Type::FnRef(helper.decl.name), {}, std::optional<Term::Any>{}, {}, Type::Unit0()).widen();
+  };
+  const auto local = [](const std::string &name, uint32_t bytes) {
+    return Var(Named(name, Type::Arr(Type::IntU8(), bytes, TypeSpace::Local())), std::optional<Expr::Any>{}, false).widen();
+  };
+
+  const Function tooLargeHelper =
+      mkFn("too_large_helper", {}, Type::Unit0(), {local("helper_storage", 80), ret()}, FunctionVisibility::Internal());
+  const Function tooLargeEntry = mkFn("too_large_kernel", {}, Type::Unit0(), {local("entry_storage", 80), ret(helperCall(tooLargeHelper))},
+                                      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::backend::LLVMBackend constrained(
+      {.target = polyregion::backend::LLVMBackend::Target::SPIRV64_Kernel, .arch = "", .workgroupMemoryBytes = 128});
+  REQUIRE_THROWS_WITH(constrained.compileProgram(Program(tooLargeEntry, {tooLargeHelper}, {}, PassPhase::Initial(), {}), OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("workgroup storage exceeds configured capacity of 128 bytes"));
+
+  const Function dynamicHelper = mkFn("dynamic_helper", {}, Type::Unit0(), {local("dynamic", 0), ret()}, FunctionVisibility::Internal());
+  const Function boundedEntry = mkFn("bounded_kernel", {}, Type::Unit0(), {local("reserved", 48), ret(helperCall(dynamicHelper))},
+                                     FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::backend::details::CodeGen codegen(
+      {.target = polyregion::backend::LLVMBackend::Target::SPIRV64_Kernel, .arch = "", .workgroupMemoryBytes = 64}, "workgroup_accounting");
+  const auto [error, ir] = codegen.transform(Program(boundedEntry, {dynamicHelper}, {}, PassPhase::Initial(), {}), {});
+  REQUIRE_FALSE(error);
+  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("[16 x i8]"));
+
+  const std::string overloadName = "overloaded_helper";
+  const Function dynamicOverload = mkFn(overloadName, {Arg(Named("value", Type::IntS32()), {})}, Type::Unit0(), {local("view", 0), ret()},
+                                        FunctionVisibility::Internal());
+  const Function unusedFixedOverload = mkFn(overloadName, {Arg(Named("value", Type::Float32()), {})}, Type::Unit0(),
+                                            {local("unused_storage", 64), ret()}, FunctionVisibility::Internal());
+  const auto invokeDynamic =
+      Expr::Invoke(Type::FnRef(Sym({overloadName})), {}, std::optional<Term::Any>{}, {Term::IntS32Const(1).widen()}, Type::Unit0()).widen();
+  const Function overloadEntry =
+      mkFn("overload_kernel", {}, Type::Unit0(), {ret(invokeDynamic)}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::backend::details::CodeGen overloadCodegen(
+      {.target = polyregion::backend::LLVMBackend::Target::SPIRV64_Kernel, .arch = "", .workgroupMemoryBytes = 128}, "overload_accounting");
+  const auto [overloadError, overloadIr] =
+      overloadCodegen.transform(Program(overloadEntry, {dynamicOverload, unusedFixedOverload}, {}, PassPhase::Initial(), {}), {});
+  REQUIRE_FALSE(overloadError);
+  CHECK_THAT(overloadIr, Catch::Matchers::ContainsSubstring("[128 x i8]"));
 }
 
 TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer space", "[backend]") {
@@ -1114,8 +1848,8 @@ TEST_CASE("opencl source keeps scalar arena offset casts in the target pointer s
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("global char* _v1 = ((global char*) _v0);") != std::string::npos);
-  CHECK(source.find("private char* _v1") == std::string::npos);
+  CHECK(source ^ contains_slice("global char* _v1 = ((global char*) _v0);"));
+  CHECK_FALSE(source ^ contains_slice("private char* _v1"));
 }
 
 TEST_CASE("C source zero-initialises struct locals", "[backend]") {
@@ -1141,11 +1875,11 @@ TEST_CASE("C source zero-initialises struct locals", "[backend]") {
     INFO(repr(c));
     REQUIRE(c.binary != std::nullopt);
     const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-    CHECK(source.find(expected) != std::string::npos);
+    CHECK(source ^ contains_slice(expected));
   }
 }
 
-TEST_CASE("C source omits values without a representation", "[backend]") {
+TEST_CASE("C source preserves erased callable member storage", "[backend][callable]") {
   polyregion::compiler::initialise();
 
   const auto sourceOf = [](const Program &p) {
@@ -1170,8 +1904,10 @@ TEST_CASE("C source omits values without a representation", "[backend]") {
                                  Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
                                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
     const auto source = sourceOf(Program(entry, {}, {box}, PassPhase::Initial(), {}));
-    CHECK(source.find("int value;") != std::string::npos);
-    CHECK(source.find("fn;") == std::string::npos);
+    CHECK(source ^ contains_slice("int value;"));
+    CHECK(source ^ contains_slice("uchar fn;"));
+    // A standalone function reference is still a compile-time-only value and has no C declaration.
+    CHECK_FALSE(source ^ contains_slice("dead _v"));
   }
 
   SECTION("aggregate poison") {
@@ -1189,9 +1925,9 @@ TEST_CASE("C source omits values without a representation", "[backend]") {
                                  Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
                                 FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
     const auto source = sourceOf(Program(entry, {}, {box}, PassPhase::Initial(), {}));
-    CHECK(source.find("Box _v0;") != std::string::npos);
-    CHECK(source.find("int _v1[2];") != std::string::npos);
-    CHECK(source.find("poison") == std::string::npos);
+    CHECK(source ^ contains_slice("Box _v0;"));
+    CHECK(source ^ contains_slice("int _v1[2];"));
+    CHECK_FALSE(source ^ contains_slice("poison"));
   }
 }
 
@@ -1209,8 +1945,8 @@ TEST_CASE("C source emits every entry function", "[backend]") {
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("first_kernel") != std::string::npos);
-  CHECK(source.find("second_kernel") != std::string::npos);
+  CHECK(source ^ contains_slice("first_kernel"));
+  CHECK(source ^ contains_slice("second_kernel"));
 }
 
 TEST_CASE("metal source does not emit zero-size empty marker members", "[backend]") {
@@ -1258,11 +1994,11 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("_empty pad") == std::string::npos);
-  CHECK(source.find("_nested nest") == std::string::npos);
-  CHECK(source.find("_v0._base_middle") == std::string::npos);
-  CHECK(source.find("&(_v0)") != std::string::npos);
-  CHECK(source.find("uint8_t tail;") != std::string::npos);
+  CHECK_FALSE(source ^ contains_slice("_empty pad"));
+  CHECK_FALSE(source ^ contains_slice("_nested nest"));
+  CHECK_FALSE(source ^ contains_slice("_v0._base_middle"));
+  CHECK(source ^ contains_slice("&(_v0)"));
+  CHECK(source ^ contains_slice("uint8_t tail;"));
 }
 
 TEST_CASE("metal source canonicalises empty true branches", "[backend]") {
@@ -1288,8 +2024,8 @@ TEST_CASE("metal source canonicalises empty true branches", "[backend]") {
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("if (!(_v0))") != std::string::npos);
-  CHECK(source.find("if (_v0) {\n\n  } else") == std::string::npos);
+  CHECK(source ^ contains_slice("if (!(_v0))"));
+  CHECK_FALSE(source ^ contains_slice("if (_v0) {\n\n  } else"));
 }
 
 TEST_CASE("opencl source escapes reserved words as whole identifiers only", "[backend]") {
@@ -1308,10 +2044,10 @@ TEST_CASE("opencl source escapes reserved words as whole identifiers only", "[ba
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source.find("my_kernel_agent") != std::string::npos);
-  CHECK(source.find("my__kernel_agent") == std::string::npos);
-  CHECK(source.find("int _long4;") != std::string::npos);
-  CHECK(source.find("int kernels;") != std::string::npos);
+  CHECK(source ^ contains_slice("my_kernel_agent"));
+  CHECK_FALSE(source ^ contains_slice("my__kernel_agent"));
+  CHECK(source ^ contains_slice("int _long4;"));
+  CHECK(source ^ contains_slice("int kernels;"));
 }
 
 TEST_CASE("integer comparisons follow operand signedness", "[backend]") {
@@ -1347,7 +2083,7 @@ TEST_CASE("integer comparisons follow operand signedness", "[backend]") {
   for (const auto *predicate : {"icmp ult", "icmp ule", "icmp ugt", "icmp uge", //
                                 "icmp slt", "icmp sle", "icmp sgt", "icmp sge"}) {
     INFO(predicate);
-    CHECK(ir.find(predicate) != std::string::npos);
+    CHECK(ir ^ contains_slice(predicate));
   }
 }
 
@@ -1386,7 +2122,7 @@ TEST_CASE("integer division, remainder, min, max and shift follow operand signed
   for (const auto *op : {"udiv i32", "urem i32", "icmp ult", "lshr i32", //
                          "sdiv i32", "srem i32", "icmp slt", "ashr i32"}) {
     INFO(op);
-    CHECK(ir.find(op) != std::string::npos);
+    CHECK(ir ^ contains_slice(op));
   }
 }
 
@@ -1446,8 +2182,8 @@ TEST_CASE("struct size and member offset agree on the target layout", "[backend]
   REQUIRE(c.binary != std::nullopt);
 
   const auto &ir = llvmIrOf(c);
-  CHECK(ir.find("store i64 16") != std::string::npos);
-  CHECK(ir.find("store i64 8") != std::string::npos);
+  CHECK(ir ^ contains_slice("store i64 16"));
+  CHECK(ir ^ contains_slice("store i64 8"));
 }
 
 TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]") {
@@ -1476,7 +2212,7 @@ TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
 
-  CHECK(llvmIrOf(c).find("load ptr") == std::string::npos);
+  CHECK_FALSE(llvmIrOf(c) ^ contains_slice("load ptr"));
 }
 
 TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backend]") {
@@ -1511,7 +2247,7 @@ TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backe
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
 
-  CHECK(llvmIrOf(c).find("br i1 true") == std::string::npos);
+  CHECK_FALSE(llvmIrOf(c) ^ contains_slice("br i1 true"));
 }
 
 TEST_CASE("integral to pointer casts lower to inttoptr", "[backend]") {
@@ -1526,7 +2262,7 @@ TEST_CASE("integral to pointer casts lower to inttoptr", "[backend]") {
   CHECK(c.messages == "");
   REQUIRE(c.binary != std::nullopt);
 
-  CHECK(llvmIrOf(c).find("inttoptr") != std::string::npos);
+  CHECK(llvmIrOf(c) ^ contains_slice("inttoptr"));
 }
 
 TEST_CASE("taking the address of a constant materialises an entry block slot", "[backend]") {
@@ -1553,8 +2289,31 @@ TEST_CASE("taking the address of a constant materialises an entry block slot", "
   REQUIRE(c.binary != std::nullopt);
 
   const auto &ir = llvmIrOf(c);
-  CHECK(ir.find("alloca i32") != std::string::npos);
-  CHECK(ir.find("store i32 1") != std::string::npos);
+  CHECK(ir ^ contains_slice("alloca i32"));
+  CHECK(ir ^ contains_slice("store i32 1"));
+}
+
+TEST_CASE("OpenCL source takes the address of a constant through a compound literal", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named ref("p", Type::Ptr(Type::IntU32(), TypeSpace::Private()));
+  Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {
+          Var(ref, Expr::RefTo(Term::IntU32Const(1).widen(), {}, Type::IntU32(), TypeSpace::Private(), Region::Opaque()).widen(), false)
+              .widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source ^ contains_slice("private uint* _v0 = &((private uint){1})"));
+  CHECK_FALSE(source ^ contains_slice("&(1 /*uint*/)"));
 }
 
 TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its address", "[backend]") {
@@ -1601,8 +2360,14 @@ TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its a
 
   using Catch::Matchers::ContainsSubstring;
   const auto &ir = llvmIrOf(compiled);
-  CHECK_THAT(ir, ContainsSubstring("load %Dst, ptr %src_stack_ptr"));
-  CHECK_THAT(ir, !ContainsSubstring("store ptr %src_stack_ptr, ptr %dst_stack_ptr"));
+  const auto marker = std::string(" = alloca %Src");
+  const auto markerPos = ir ^ index_of_slice(marker);
+  REQUIRE(markerPos >= 0);
+  const auto namePos = ir | take(markerPos) | last_index_of('%');
+  REQUIRE(namePos >= 0);
+  const auto srcAlloca = ir ^ slice(namePos, markerPos);
+  CHECK_THAT(ir, ContainsSubstring("load %Dst, ptr " + srcAlloca));
+  CHECK_THAT(ir, !ContainsSubstring("store ptr " + srcAlloca + ", ptr "));
   CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), ContainsSubstring("store i32 305"));
 }
 

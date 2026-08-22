@@ -558,6 +558,95 @@ object ArenaView extends ProgramPass {
       if (!arenaTerm(base)) None
       else if (isPtr(base.tpe)) Some(ptrValue(base))
       else Some(addrOffset(base))
+    def scalarRefAt(off: p.Term, tpe: p.Type): p.Term = {
+      val (view, _, sh) = viewFor(tpe)
+      bind(
+        "vr",
+        p.Expr.RefTo(
+          sel(view),
+          Some(indexOf(off, sh)),
+          tpe,
+          Global,
+          p.Region.Rooted(view)
+        )
+      )
+    }
+    def arenaScalarRef(ptr: p.Term, tpe: p.Type): p.Term = {
+      if (isAgg(tpe))
+        throw IllegalArgumentException(s"arena atomic access requires a scalar type; got ${tpe.repr}")
+      scalarRefAt(
+        derefOffset(ptr).getOrElse(throw IllegalArgumentException(s"expected arena pointer: ${ptr.repr}")),
+        tpe
+      )
+    }
+    def volatileLoadAt(off: p.Term, tpe: p.Type): p.Term =
+      if (!isAgg(tpe)) bind("vl", p.Expr.SpecOp(p.Spec.GpuVolatileLoad(scalarRefAt(off, tpe), tpe)))
+      else {
+        val value = fresh("vv", tpe)
+        pre += p.Stmt.Var(value, None, isMutable = true)
+        def load(prefix: List[p.PathStep], at: p.Term, fieldTpe: p.Type): Unit = fieldTpe match {
+          case struct: p.Type.Struct =>
+            canonicalMembers(struct.name).foreach { member =>
+              load(
+                prefix :+ p.PathStep.Field(member.symbol),
+                add(at, asI64(bind("of", p.Expr.OffsetOf(fieldTpe, member.symbol)))),
+                i64ify(member.tpe)
+              )
+            }
+          case p.Type.Arr(component, size, _) =>
+            (0 until size).foreach(index =>
+              load(
+                prefix :+ p.PathStep.Index(index),
+                add(at, mulBytes(i64(index.toLong), component)),
+                i64ify(component)
+              )
+            )
+          case scalar =>
+            pre += p.Stmt.Mut(
+              p.Term.Select(value, prefix, scalar),
+              p.Expr.Alias(bind("vl", p.Expr.SpecOp(p.Spec.GpuVolatileLoad(scalarRefAt(at, scalar), scalar))))
+            )
+        }
+        load(Nil, off, tpe)
+        sel(value)
+      }
+    def volatileStoreAt(off: p.Term, tpe: p.Type, value: p.Term): Unit = {
+      val source          = value match { case s: p.Term.Select => s; case _ => bindTerm("vs", value) }
+      val (root, initial) = (source.root, source.steps)
+      def store(prefix: List[p.PathStep], at: p.Term, fieldTpe: p.Type): Unit = fieldTpe match {
+        case struct: p.Type.Struct =>
+          canonicalMembers(struct.name).foreach { member =>
+            store(
+              prefix :+ p.PathStep.Field(member.symbol),
+              add(at, asI64(bind("of", p.Expr.OffsetOf(fieldTpe, member.symbol)))),
+              i64ify(member.tpe)
+            )
+          }
+        case p.Type.Arr(component, size, _) =>
+          (0 until size).foreach(index =>
+            store(
+              prefix :+ p.PathStep.Index(index),
+              add(at, mulBytes(i64(index.toLong), component)),
+              i64ify(component)
+            )
+          )
+        case scalar =>
+          val done = fresh("vs", p.Type.Unit0)
+          pre += p.Stmt.Var(
+            done,
+            Some(
+              p.Expr.SpecOp(
+                p.Spec.GpuVolatileStore(
+                  scalarRefAt(at, scalar),
+                  rwTerm(p.Term.Select(root, initial ::: prefix, scalar))
+                )
+              )
+            ),
+            isMutable = false
+          )
+      }
+      store(Nil, off, tpe)
+    }
     // offset of an arena data lvalue whose address is taken (`&obj.field`, field non-pointer)
     def addrOffset(base: p.Term): p.Term = base match {
       case p.Term.Select(root, steps, _) => lvalueOffset(root, steps).getOrElse(asI64(rwTerm(base)))
@@ -619,8 +708,28 @@ object ArenaView extends ProgramPass {
       case p.Expr.IntrOp(p.Intr.LogicNeq(x, y))  => equality(x, y, p.Intr.LogicNeq.apply)
       case op: p.Expr.IntrOp                     => op.modifyAll[p.Term](rwTerm)
       case op: p.Expr.MathOp                     => op.modifyAll[p.Term](rwTerm)
-      case op: p.Expr.SpecOp                     => op.modifyAll[p.Term](rwTerm)
-      case x                                     => x
+      case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, ptr, value, scope, order, rtn)) if arenaTerm(ptr) =>
+        p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, arenaScalarRef(ptr, rtn), rwTerm(value), scope, order, rtn))
+      case p.Expr.SpecOp(p.Spec.GpuVolatileLoad(ptr, rtn)) if arenaTerm(ptr) =>
+        if (isAgg(rtn))
+          p.Expr.Alias(
+            volatileLoadAt(
+              derefOffset(ptr).getOrElse(throw IllegalArgumentException(s"expected arena pointer: ${ptr.repr}")),
+              rtn
+            )
+          )
+        else p.Expr.SpecOp(p.Spec.GpuVolatileLoad(arenaScalarRef(ptr, rtn), rtn))
+      case p.Expr.SpecOp(p.Spec.GpuVolatileStore(ptr, value)) if arenaTerm(ptr) =>
+        if (isAgg(value.tpe)) {
+          volatileStoreAt(
+            derefOffset(ptr).getOrElse(throw IllegalArgumentException(s"expected arena pointer: ${ptr.repr}")),
+            value.tpe,
+            value
+          )
+          p.Expr.Alias(p.Term.Unit0Const)
+        } else p.Expr.SpecOp(p.Spec.GpuVolatileStore(arenaScalarRef(ptr, value.tpe), rwTerm(value)))
+      case op: p.Expr.SpecOp => op.modifyAll[p.Term](rwTerm)
+      case x                 => x
     }
 
     def rwInit(n: p.Named, e: p.Expr): (p.Named, p.Expr) =

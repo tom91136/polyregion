@@ -9,7 +9,9 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 
+#define SPV_ENABLE_UTILITY_CODE
 #include "spirv/unified1/spirv.hpp"
+#undef SPV_ENABLE_UTILITY_CODE
 
 namespace llvm {
 class Module;
@@ -234,6 +236,107 @@ static std::string patchSpirvConstantNull(std::string spv) {
     } else out.insert(out.end(), src + i, src + i + wc);
     i += wc;
   }
+  return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
+// LLVM's SPIR-V translator can fold an integer truncation into an integer operation without converting its
+// operands first (observed in oneDPL's reduce-then-scan kernels), producing e.g.
+//   %bad = OpBitwiseAnd %uint %ulong_value %uint_255
+// The LLVM module is valid before translation, but the resulting SPIR-V is not.
+// Restore narrowing conversions immediately before integer operations whose value operands must match the result
+// width. Shift amounts are allowed to differ, so only their base operand is normalised. Leave widening and unknown
+// definitions untouched: the required extension signedness cannot be inferred here.
+std::string llvmc::normaliseSpirvNarrowIntegerOperands(std::string spv) {
+  if (spv.size() < 5 * sizeof(uint32_t) || spv.size() % sizeof(uint32_t) != 0) return spv;
+  auto *src = reinterpret_cast<const uint32_t *>(spv.data());
+  const size_t nWords = spv.size() / sizeof(uint32_t);
+  auto opcode = [](uint32_t inst) { return static_cast<uint16_t>(inst & 0xFFFF); };
+  auto wcount = [](uint32_t inst) { return static_cast<uint16_t>(inst >> 16); };
+  // Pair of {instruction value operands, operands constrained to the result type}.
+  auto operandShape = [](const uint16_t op) -> std::pair<uint32_t, uint32_t> {
+    switch (op) {
+      case spv::OpIAdd:
+      case spv::OpISub:
+      case spv::OpIMul:
+      case spv::OpUDiv:
+      case spv::OpSDiv:
+      case spv::OpUMod:
+      case spv::OpSRem:
+      case spv::OpSMod:
+      case spv::OpBitwiseAnd:
+      case spv::OpBitwiseOr:
+      case spv::OpBitwiseXor: return {2, 2};
+      case spv::OpShiftRightLogical:
+      case spv::OpShiftRightArithmetic:
+      case spv::OpShiftLeftLogical: return {2, 1};
+      case spv::OpSNegate:
+      case spv::OpNot: return {1, 1};
+      default: return {0, 0};
+    }
+  };
+
+  struct IntShape {
+    uint32_t width;
+    uint32_t lanes;
+  };
+  std::unordered_map<uint32_t, IntShape> intShapes;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]);
+    if (wc == 0 || i + wc > nWords) return spv;
+    if (opcode(src[i]) == spv::OpTypeInt && wc == 4) intShapes.emplace(src[i + 1], IntShape{src[i + 2], 1});
+    i += wc;
+  }
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]);
+    if (opcode(src[i]) == spv::OpTypeVector && wc == 4)
+      if (const auto component = intShapes.find(src[i + 2]); component != intShapes.end())
+        intShapes.emplace(src[i + 1], IntShape{component->second.width, src[i + 3]});
+    i += wc;
+  }
+
+  std::unordered_map<uint32_t, uint32_t> valueTypes;
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]);
+    bool hasResult = false, hasResultType = false;
+    spv::HasResultAndType(static_cast<spv::Op>(opcode(src[i])), &hasResult, &hasResultType);
+    if (hasResult && hasResultType && wc >= 3 && intShapes.count(src[i + 1])) valueTypes[src[i + 2]] = src[i + 1];
+    i += wc;
+  }
+
+  uint32_t nextId = src[3];
+  bool changed = false;
+  std::vector<uint32_t> out(src, src + 5);
+  out.reserve(nWords + 16);
+  for (size_t i = 5; i < nWords;) {
+    const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    const auto [operandCount, constrainedCount] = operandShape(op);
+    if (operandCount != 0 && wc == 3 + operandCount && intShapes.count(src[i + 1])) {
+      uint32_t operands[2] = {src[i + 3], operandCount == 2 ? src[i + 4] : 0};
+      for (uint32_t operandIndex = 0; operandIndex < constrainedCount; ++operandIndex) {
+        uint32_t &operand = operands[operandIndex];
+        const auto found = valueTypes.find(operand);
+        if (found == valueTypes.end() || found->second == src[i + 1]) continue;
+        const auto &source = intShapes.at(found->second);
+        const auto &result = intShapes.at(src[i + 1]);
+        if (source.lanes != result.lanes || source.width <= result.width) continue;
+        const uint32_t converted = nextId++;
+        out.push_back((4u << 16) | spv::OpUConvert);
+        out.push_back(src[i + 1]);
+        out.push_back(converted);
+        out.push_back(operand);
+        operand = converted;
+        changed = true;
+      }
+      out.push_back(src[i]);
+      out.push_back(src[i + 1]);
+      out.push_back(src[i + 2]);
+      out.push_back(operands[0]);
+      if (operandCount == 2) out.push_back(operands[1]);
+    } else out.insert(out.end(), src + i, src + i + wc);
+    i += wc;
+  }
+  if (!changed) return spv;
+  out[3] = nextId;
   return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
 }
 
@@ -770,6 +873,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // `OpConstantNull %u32 %id` into `OpConstant %u32 %id 0` (u32 only, leaving
         // `OpConstantNull %ulong` and pointer-null alone).
         spvBlob = patchSpirvConstantNull(std::move(spvBlob));
+        spvBlob = normaliseSpirvNarrowIntegerOperands(std::move(spvBlob));
         // only Vulkan's logical memory model assumes no-alias by default; OpenCL is C-like (may-alias), already sound
         if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) {
           spvBlob = patchSpirvAliased(std::move(spvBlob));

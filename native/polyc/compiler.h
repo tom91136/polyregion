@@ -22,13 +22,14 @@ using TimePoint = std::chrono::steady_clock::time_point;
 POLYREGION_EXPORT void initialise();
 
 inline constexpr auto DefaultPipelineSpec = "FullOpt;StructuredExit";
+inline constexpr uint32_t DefaultWorkgroupMemoryBytes = 32768;
 
 struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT compiletime::Target target;
   POLYREGION_EXPORT std::string arch;
   POLYREGION_EXPORT std::string pipelineSpec = {}; // pipeline spec ("Name(k=v,k=v); Name; ...")
   POLYREGION_EXPORT bool hostMirroring = false;    // compile only Host-affinity functions, emit bitcode
-  POLYREGION_EXPORT uint32_t workgroupMemoryBytes = 32768;
+  POLYREGION_EXPORT uint32_t workgroupMemoryBytes = DefaultWorkgroupMemoryBytes;
 };
 
 POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);

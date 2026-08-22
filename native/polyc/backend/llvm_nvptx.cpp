@@ -1,6 +1,7 @@
 #include "llvm_nvptx.h"
 
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -11,6 +12,19 @@
 
 using namespace aspartame;
 using namespace polyregion::backend::details;
+
+namespace {
+
+// during AST codegen the module still carries LLVM's default layout (i64 ABI align 4); the NVPTX layout
+// with i64:64 binds only after codegen. sizing words off the default under-counts an i64-padded aggregate,
+// leaving its tail words unshuffled, so resolve the target layout while the module's is still default
+uint64_t nvptxShuffleWords(CodeGen &cg, llvm::Type *valTy) {
+  const auto &moduleDL = cg.M.getDataLayout();
+  const llvm::DataLayout dl = moduleDL.isDefault() ? cg.C.options.targetInfo().resolveDataLayout() : moduleDL;
+  return (dl.getTypeAllocSize(valTy) + 3) / 4;
+}
+
+} // namespace
 
 void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
   if (source.isEntry) {
@@ -51,6 +65,106 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
     return cg.B.CreateCall(callee, cg.mkTermVal(Term::IntU32Const(0)));
   };
 
+  auto activeMask = [&]() -> llvm::Value * {
+    // LLVM exposes llvm.nvvm.activemask but the NVPTX selector does not lower it in the supported LLVM
+    // toolchain. Keep the convergent register read explicit instead of failing during instruction selection.
+    auto *fnTy = llvm::FunctionType::get(cg.C.i32Ty(), {}, false);
+    auto *asmFn = llvm::InlineAsm::get(fnTy, "activemask.b32 $0;", "=r", false);
+    auto *active = cg.B.CreateCall(asmFn);
+    active->addFnAttr(llvm::Attribute::Convergent);
+    return active;
+  };
+  auto effectiveMask = [&](const Term::Any &mask, llvm::Value *active) -> llvm::Value * {
+    auto *requested = cg.B.CreateIntCast(cg.mkTermVal(mask), cg.C.i32Ty(), false);
+    auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFu));
+    // Literal masks cannot make inactive lanes valid sources; the all-lanes sentinel means every lane
+    // active at this convergent operation, including a partial warp.
+    return cg.B.CreateSelect(isAll, active, cg.B.CreateAnd(requested, active));
+  };
+
+  // Per-word nvvm shfl. The public clamp is an inclusive segment mask; PTX packs its inverse into
+  // c[12:8] and the clamp into c[4:0]. Every currently executing lane participates in shfl.sync,
+  // while the requested mask is applied logically so excluded callers/sources retain their own value.
+  auto shuffle = [&](char kind, llvm::Intrinsic::ID id, const Term::Any &value, const Term::Any &delta, const Term::Any &width,
+                     const Term::Any &mask, const Type::Any &rtn) -> ValPtr {
+    auto &B = cg.B;
+    auto valTy = cg.resolveType(rtn);
+    const auto words = nvptxShuffleWords(cg, valTy);
+    auto srcVal = cg.mkTermVal(value);
+    auto *i32Ty = cg.C.i32Ty();
+    auto *lane = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_laneid);
+    auto *a = B.CreateIntCast(cg.mkTermVal(delta), i32Ty, false);
+    auto *clamp = B.CreateAnd(B.CreateIntCast(cg.mkTermVal(width), i32Ty, false), llvm::ConstantInt::get(i32Ty, 31));
+    auto *segmentBase = B.CreateAnd(lane, B.CreateNot(clamp));
+    auto *segmentLast = B.CreateOr(segmentBase, clamp);
+    llvm::Value *srcLane = nullptr;
+    llvm::Value *shuffleArg = a;
+    llvm::Value *inRange = nullptr;
+    switch (kind) {
+      case 'd':
+        srcLane = B.CreateAdd(lane, a);
+        inRange = B.CreateICmpULE(a, B.CreateSub(segmentLast, lane));
+        break;
+      case 'u':
+        srcLane = B.CreateSub(lane, a);
+        inRange = B.CreateICmpULE(a, B.CreateSub(lane, segmentBase));
+        break;
+      case 'x':
+        srcLane = B.CreateXor(lane, a);
+        inRange = B.CreateAnd(B.CreateICmpUGE(srcLane, segmentBase), B.CreateICmpULE(srcLane, segmentLast));
+        break;
+      default:
+        shuffleArg = B.CreateAnd(a, clamp);
+        srcLane = B.CreateOr(segmentBase, shuffleArg);
+        inRange = B.CreateICmpULE(srcLane, segmentLast);
+        break;
+    }
+    inRange = B.CreateAnd(inRange, B.CreateICmpULT(srcLane, llvm::ConstantInt::get(i32Ty, 32)));
+    auto *active = activeMask();
+    auto *members = effectiveMask(mask, active);
+    const auto member = [&](llvm::Value *laneV) {
+      auto *bit = B.CreateAnd(laneV, llvm::ConstantInt::get(i32Ty, 31));
+      auto *set =
+          B.CreateICmpNE(B.CreateAnd(B.CreateLShr(members, bit), llvm::ConstantInt::get(i32Ty, 1)), llvm::ConstantInt::get(i32Ty, 0));
+      return B.CreateAnd(B.CreateICmpULT(laneV, llvm::ConstantInt::get(i32Ty, 32)), set);
+    };
+    inRange = B.CreateAnd(inRange, B.CreateAnd(member(lane), member(srcLane)));
+    auto *ownArg = kind == 'i' ? B.CreateAnd(lane, clamp) : llvm::ConstantInt::get(i32Ty, 0);
+    auto *safeArg = B.CreateSelect(inRange, shuffleArg, ownArg);
+    auto *segmentMask = B.CreateAnd(B.CreateNot(clamp), llvm::ConstantInt::get(i32Ty, 31));
+    auto *control = B.CreateOr(clamp, B.CreateShl(segmentMask, llvm::ConstantInt::get(i32Ty, 8)));
+    const auto archNumber = (cg.C.options.arch ^ starts_with("sm_")) ? std::stoi(cg.C.options.arch ^ drop(3)) : 0;
+    const bool legacy = archNumber != 0 && archNumber < 70;
+    const auto legacyId = [&] {
+      if (id == llvm::Intrinsic::nvvm_shfl_sync_down_i32) return llvm::Intrinsic::nvvm_shfl_down_i32;
+      if (id == llvm::Intrinsic::nvvm_shfl_sync_up_i32) return llvm::Intrinsic::nvvm_shfl_up_i32;
+      if (id == llvm::Intrinsic::nvvm_shfl_sync_bfly_i32) return llvm::Intrinsic::nvvm_shfl_bfly_i32;
+      return llvm::Intrinsic::nvvm_shfl_idx_i32;
+    }();
+    auto shfl = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacy ? legacyId : id, {});
+    // the shuffle yields a value of the declared element type; a pointer arg (an aggregate passed by
+    // address) still returns the shuffled value, not dstPtr - the caller stores the result into a
+    // value-typed slot, so returning the pointer would write the pointer bits over the aggregate
+    return cg.shuffleStage(valTy, valTy, words, srcVal, "shfl", [&](llvm::Value *word) {
+      auto *shuffled = legacy ? B.CreateCall(shfl, {word, safeArg, control}) : B.CreateCall(shfl, {active, word, safeArg, control});
+      return B.CreateSelect(inRange, shuffled, word);
+    });
+  };
+
+  auto nvptxScope = [](const MemScope::Any &s) -> std::string {
+    return s.match_total([](const MemScope::Subgroup &) -> std::string { return "block"; }, // no warp-scoped atomic
+                         [](const MemScope::Workgroup &) -> std::string { return "block"; },
+                         [](const MemScope::Device &) -> std::string { return "device"; },
+                         [](const MemScope::System &) -> std::string { return ""; });
+  };
+  auto ballot = [&](llvm::Value *mask, const Term::Any &pred) {
+    auto *fnTy = llvm::FunctionType::get(cg.C.i32Ty(), {llvm::Type::getInt1Ty(cg.C.actual), cg.C.i32Ty()}, false);
+    auto *asmFn = llvm::InlineAsm::get(fnTy, "vote.sync.ballot.b32 $0, $1, $2;", "=r,b,r", false);
+    auto *call = cg.B.CreateCall(asmFn, {cg.toI1(pred), mask});
+    call->addFnAttr(llvm::Attribute::Convergent);
+    return call;
+  };
+
   return expr.op.match_total( //
       [&](const Spec::Assert &v) -> ValPtr {
         // cg.extFn1(  "__assertfail", Type::Unit0(), Term::Unit0Const()); // TODO
@@ -60,9 +174,9 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return barrier0(); },
       [&](const Spec::GpuBarrierLocal &) -> ValPtr { return barrier0(); },
       [&](const Spec::GpuBarrierAll &) -> ValPtr { return barrier0(); },
-      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
+      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_gl); }, // device-scope, cross-block
       [&](const Spec::GpuFenceLocal &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
-      [&](const Spec::GpuFenceAll &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_sys); },
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr {
         return dim3OrAssert(v.dim, //
                             globalId(llvm::Intrinsic::nvvm_read_ptx_sreg_ctaid_x, llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x,
@@ -102,35 +216,47 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_y), //
                             cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_z));
       },
-      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
-        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_laneid); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize); },
+      [&](const Spec::GpuShuffleDown &v) -> ValPtr {
+        return shuffle('d', llvm::Intrinsic::nvvm_shfl_sync_down_i32, v.value, v.delta, v.width, v.mask, v.rtn);
       },
-      [&](const Spec::GpuShuffleDown &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
+      [&](const Spec::GpuShuffleUp &v) -> ValPtr {
+        return shuffle('u', llvm::Intrinsic::nvvm_shfl_sync_up_i32, v.value, v.delta, v.width, v.mask, v.rtn);
       },
-      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
+      [&](const Spec::GpuShuffleIdx &v) -> ValPtr {
+        return shuffle('i', llvm::Intrinsic::nvvm_shfl_sync_idx_i32, v.value, v.srcLane, v.width, v.mask, v.rtn);
       },
-      [&](const Spec::GpuShuffleXor &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
+      [&](const Spec::GpuShuffleXor &v) -> ValPtr {
+        return shuffle('x', llvm::Intrinsic::nvvm_shfl_sync_bfly_i32, v.value, v.laneMask, v.width, v.mask, v.rtn);
       },
       [&](const Spec::GpuSubgroupBarrier &v) -> ValPtr {
-        return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}),
-                               cg.mkTermVal(v.mask));
+        (void)v;
+        return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}), activeMask());
       },
-      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuAtomicRMW &) -> ValPtr { throw BackendException("Spec::GpuAtomicRMW unsupported for NVPTX"); },
+      [&](const Spec::GpuBallot &v) -> ValPtr {
+        auto *active = activeMask();
+        auto *mask = effectiveMask(v.mask, active);
+        return cg.B.CreateAnd(ballot(active, v.pred), mask);
+      },
+      [&](const Spec::GpuVoteAny &v) -> ValPtr {
+        auto *active = activeMask();
+        auto *mask = effectiveMask(v.mask, active);
+        return cg.B.CreateICmpNE(cg.B.CreateAnd(ballot(active, v.pred), mask), llvm::ConstantInt::get(mask->getType(), 0));
+      },
+      [&](const Spec::GpuVoteAll &v) -> ValPtr {
+        auto *active = activeMask();
+        auto *mask = effectiveMask(v.mask, active);
+        return cg.B.CreateICmpEQ(cg.B.CreateAnd(ballot(active, v.pred), mask), mask);
+      },
+      [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, nvptxScope(v.scope)); },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
       [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a local orchestration operation"); },
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
-      [&](const Spec::GpuVolatileLoad &) -> ValPtr { throw BackendException("Spec::GpuVolatileLoad unsupported for NVPTX"); },
-      [&](const Spec::GpuVolatileStore &) -> ValPtr { throw BackendException("Spec::GpuVolatileStore unsupported for NVPTX"); });
+      [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
+      [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }
 
 void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
@@ -142,6 +268,8 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
   llvm::GlobalVariable *sharedGlobal = nullptr;
   auto getSharedGlobal = [&]() {
     if (sharedGlobal) return sharedGlobal;
+    // an `extern __shared__` decl in codegen may already have emitted the dynamic shared global; share it
+    if (auto *existing = M.getNamedGlobal(PolycDynSharedGlobal)) return sharedGlobal = existing;
     auto *arrTy = llvm::ArrayType::get(llvm::Type::getInt8Ty(ctx), 0);
     sharedGlobal = new llvm::GlobalVariable(M, arrTy, /*isConstant*/ false, llvm::GlobalValue::ExternalLinkage,
                                             /*Initializer*/ nullptr, PolycDynSharedGlobal, /*InsertBefore*/ nullptr,
@@ -154,6 +282,11 @@ void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {
                  | filter([](const auto &fn) { return !fn.isDeclaration() && fn.getCallingConv() == llvm::CallingConv::PTX_Kernel; }) //
                  | map([](const auto &fn) { return const_cast<llvm::Function *>(&fn); })                                              //
                  | to_vector();
+
+  // NVPTX kernel entry points must have external (non-local) linkage; internal linkage trips
+  // getFunctionParamOptimizedAlign's non-local-linkage assertion at device O0
+  for (auto *fn : kernels)
+    if (fn->hasLocalLinkage()) fn->setLinkage(llvm::GlobalValue::ExternalLinkage);
 
   for (auto *fn : kernels) {
     bool hasSharedParam = false;

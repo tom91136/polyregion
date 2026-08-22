@@ -151,7 +151,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  }
 
                  compiler::initialise();
-                 fmt::print(stderr, "[POLYC] Compiling program:\n=================\n{}\n=================\n", repr(program));
+                 if (verbose) fmt::print(stderr, "[POLYC] Compiling program:\n=================\n{}\n=================\n", repr(program));
 
                  auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes, hostMirroring}, opt);
                  if (verbose) fmt::print(stderr, "{}\n", repr(compilation));

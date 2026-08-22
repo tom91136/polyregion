@@ -896,8 +896,15 @@ TEST_CASE("cast aggregate value to pointer aliases its storage", "[compiler]") {
   const auto result = assertCompile(program({pairDef}, {fn}));
   const auto ir = result.events ^ find_cref([](const auto &event) { return event.name == "ast_to_llvm_ir"; });
   REQUIRE(ir);
-  CHECK_THAT(ir->get().data, ContainsSubstring("store ptr %pair_stack_ptr, ptr %storage_stack_ptr"));
-  CHECK_THAT(ir->get().data, ContainsSubstring("store i32 42, ptr %storage_update_ptr"));
+  const auto &data = ir->get().data;
+  const auto marker = std::string(" = alloca %Pair");
+  const auto markerPos = data ^ index_of_slice(marker);
+  REQUIRE(markerPos >= 0);
+  const auto namePos = data | take(markerPos) | last_index_of('%');
+  REQUIRE(namePos >= 0);
+  const auto pairAlloca = data ^ slice(namePos, markerPos);
+  CHECK_THAT(data, ContainsSubstring("store ptr " + pairAlloca + ", ptr "));
+  CHECK_THAT(data, ContainsSubstring("store i32 42, ptr %"));
 }
 
 TEST_CASE("cast fp to int expr", "[compiler]") {

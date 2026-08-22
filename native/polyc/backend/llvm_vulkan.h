@@ -47,6 +47,8 @@ struct VulkanLowering : PointerModel {
   [[nodiscard]] bool mkUpdate(const Term::Select &lhs, const Term::Any &idx, const Term::Any &value);
 
   [[nodiscard]] llvm::Type *localAllocType(CodeGen &, const Type::Any &nameTpe, llvm::Type *tpe) override;
+  [[nodiscard]] std::optional<ValPtr> allocateLocalArray(CodeGen &, const std::string &symbol, const AnyType &nameTpe,
+                                                         llvm::Type *allocTy) override;
 
   bool defineLocalString(CodeGen &, const std::string &symbol, const std::string &bytes, const AnyType &elemTpe) override;
 
