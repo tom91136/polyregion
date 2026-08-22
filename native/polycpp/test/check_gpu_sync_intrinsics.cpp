@@ -9,7 +9,7 @@
 #include "test_utils.h"
 
 int main() {
-  if (std::getenv(polyregion::env::PolystlNoOffload)) {
+  if (!polyregionTestOffloadEnabled()) {
     __polyregion_gpu_fence_global();
     __polyregion_gpu_fence_local();
     __polyregion_gpu_fence_all();

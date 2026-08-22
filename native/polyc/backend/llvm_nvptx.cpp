@@ -40,6 +40,9 @@ void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, cons
   }
 }
 ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
+  const auto archNumber = (cg.C.options.arch ^ starts_with("sm_")) ? std::stoi(cg.C.options.arch ^ drop(3)) : 0;
+  const bool legacySubgroup = archNumber != 0 && archNumber < 70;
+
   // threadId =  @llvm.nvvm.read.ptx.sreg.tid.*
   // blockIdx =  @llvm.nvvm.read.ptx.sreg.ctaid.*
   // blockDim =  @llvm.nvvm.read.ptx.sreg.ntid.*
@@ -65,7 +68,15 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
     return cg.B.CreateCall(callee, cg.mkTermVal(Term::IntU32Const(0)));
   };
 
+  auto legacyBallot = [&](llvm::Value *pred) {
+    auto *fnTy = llvm::FunctionType::get(cg.C.i32Ty(), {llvm::Type::getInt1Ty(cg.C.actual)}, false);
+    auto *asmFn = llvm::InlineAsm::get(fnTy, "vote.ballot.b32 $0, $1;", "=r,b", false);
+    auto *call = cg.B.CreateCall(asmFn, pred);
+    call->addFnAttr(llvm::Attribute::Convergent);
+    return call;
+  };
   auto activeMask = [&]() -> llvm::Value * {
+    if (legacySubgroup) return legacyBallot(llvm::ConstantInt::getTrue(cg.C.actual));
     // LLVM exposes llvm.nvvm.activemask but the NVPTX selector does not lower it in the supported LLVM
     // toolchain. Keep the convergent register read explicit instead of failing during instruction selection.
     auto *fnTy = llvm::FunctionType::get(cg.C.i32Ty(), {}, false);
@@ -136,20 +147,18 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
     // The segment mask supplies the per-segment base, so shfl.up needs a zero low clamp.
     auto *controlClamp = kind == 'u' ? llvm::ConstantInt::get(i32Ty, 0) : clamp;
     auto *control = B.CreateOr(controlClamp, B.CreateShl(segmentMask, llvm::ConstantInt::get(i32Ty, 8)));
-    const auto archNumber = (cg.C.options.arch ^ starts_with("sm_")) ? std::stoi(cg.C.options.arch ^ drop(3)) : 0;
-    const bool legacy = archNumber != 0 && archNumber < 70;
     const auto legacyId = [&] {
       if (id == llvm::Intrinsic::nvvm_shfl_sync_down_i32) return llvm::Intrinsic::nvvm_shfl_down_i32;
       if (id == llvm::Intrinsic::nvvm_shfl_sync_up_i32) return llvm::Intrinsic::nvvm_shfl_up_i32;
       if (id == llvm::Intrinsic::nvvm_shfl_sync_bfly_i32) return llvm::Intrinsic::nvvm_shfl_bfly_i32;
       return llvm::Intrinsic::nvvm_shfl_idx_i32;
     }();
-    auto shfl = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacy ? legacyId : id, {});
+    auto shfl = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacySubgroup ? legacyId : id, {});
     // the shuffle yields a value of the declared element type; a pointer arg (an aggregate passed by
     // address) still returns the shuffled value, not dstPtr - the caller stores the result into a
     // value-typed slot, so returning the pointer would write the pointer bits over the aggregate
     return cg.shuffleStage(valTy, valTy, words, srcVal, "shfl", [&](llvm::Value *word) {
-      auto *shuffled = legacy ? B.CreateCall(shfl, {word, safeArg, control}) : B.CreateCall(shfl, {active, word, safeArg, control});
+      auto *shuffled = legacySubgroup ? B.CreateCall(shfl, {word, safeArg, control}) : B.CreateCall(shfl, {active, word, safeArg, control});
       return B.CreateSelect(inRange, shuffled, word);
     });
   };
@@ -161,6 +170,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
                          [](const MemScope::System &) -> std::string { return ""; });
   };
   auto ballot = [&](llvm::Value *mask, const Term::Any &pred) {
+    if (legacySubgroup) return legacyBallot(cg.toI1(pred));
     auto *fnTy = llvm::FunctionType::get(cg.C.i32Ty(), {llvm::Type::getInt1Ty(cg.C.actual), cg.C.i32Ty()}, false);
     auto *asmFn = llvm::InlineAsm::get(fnTy, "vote.sync.ballot.b32 $0, $1, $2;", "=r,b,r", false);
     auto *call = cg.B.CreateCall(asmFn, {cg.toI1(pred), mask});
@@ -235,6 +245,10 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       },
       [&](const Spec::GpuSubgroupBarrier &v) -> ValPtr {
         (void)v;
+        // Before Volta, a warp executes in lockstep and has no warp execution-barrier instruction.
+        // Preserve subgroup memory ordering without strengthening this into a CTA execution barrier,
+        // which could deadlock when only one warp reaches a subgroup-uniform barrier.
+        if (legacySubgroup) return cg.intr0(llvm::Intrinsic::nvvm_membar_cta);
         return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}), activeMask());
       },
       [&](const Spec::GpuBallot &v) -> ValPtr {

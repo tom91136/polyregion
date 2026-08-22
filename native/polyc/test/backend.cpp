@@ -1216,7 +1216,7 @@ TEST_CASE("LLVM CUDA and HIP targets lower subgroup votes", "[backend][subgroup]
   const Program program(entry, {}, {}, PassPhase::Initial(), {});
 
   for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
-           {Target::Object_LLVM_NVPTX64, "sm_60"},
+           {Target::Object_LLVM_NVPTX64, "sm_35"},
            {Target::Object_LLVM_AMDGCN, "gfx906"},
        }) {
     INFO(arch);
@@ -1224,6 +1224,28 @@ TEST_CASE("LLVM CUDA and HIP targets lower subgroup votes", "[backend][subgroup]
     CHECK(compiled.messages == "");
     CHECK(compiled.binary != std::nullopt);
   }
+}
+
+TEST_CASE("NVPTX subgroup barriers support legacy and synchronised warps", "[backend][subgroup]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {Var(Named("barrier", Type::Unit0()), Expr::SpecOp(Spec::GpuSubgroupBarrier(Term::IntU32Const(-1).widen())).widen(), false).widen(),
+       ret()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+
+  const auto legacy = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_35"}, OptLevel::O0);
+  REQUIRE(legacy.binary);
+  CHECK_THAT(llvmIrOf(legacy), Catch::Matchers::ContainsSubstring("llvm.nvvm.membar.cta"));
+  CHECK_THAT(llvmIrOf(legacy), !Catch::Matchers::ContainsSubstring("llvm.nvvm.bar.warp.sync"));
+
+  const auto synchronised = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
+  REQUIRE(synchronised.binary);
+  CHECK_THAT(llvmIrOf(synchronised), Catch::Matchers::ContainsSubstring("llvm.nvvm.bar.warp.sync"));
 }
 
 TEST_CASE("LLVM GPU shuffles pad narrow values without widening the result", "[backend][subgroup]") {
@@ -1299,6 +1321,9 @@ TEST_CASE("LLVM GPU shuffles honour lane masks and physical subgroup bounds", "[
 
   const auto nvLegacy = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_60"}, OptLevel::O0);
   REQUIRE(nvLegacy.binary);
+  CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("vote.ballot.b32"));
+  CHECK_THAT(llvmIrOf(nvLegacy), !Catch::Matchers::ContainsSubstring("vote.sync.ballot.b32"));
+  CHECK_THAT(llvmIrOf(nvLegacy), !Catch::Matchers::ContainsSubstring("activemask.b32"));
   CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.idx.i32"));
   CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.up.i32"));
   CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("i32 6151"));

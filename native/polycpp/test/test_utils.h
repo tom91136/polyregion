@@ -15,9 +15,23 @@
 #include "polystl/algorithm_impl.h"
 #include "polystl/polystl.h"
 
+inline bool polyregionTestEnvIsSet(const char *name) {
+#if defined(_WIN32)
+  char *value = nullptr;
+  std::size_t size = 0;
+  const auto error = _dupenv_s(&value, &size, name);
+  std::free(value);
+  return error == 0 && size != 0;
+#else
+  return std::getenv(name) != nullptr;
+#endif
+}
+
+inline bool polyregionTestOffloadEnabled() { return !polyregionTestEnvIsSet(polyregion::env::PolystlNoOffload); }
+
 template <typename F> //
 [[clang::noinline]] std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
-  static bool offload = !std::getenv(polyregion::env::PolystlNoOffload);
+  static bool offload = polyregionTestOffloadEnabled();
   std::invoke_result_t<F> result{};
   size_t totalObjects = 0;
   if (offload) {
@@ -74,7 +88,7 @@ template <typename F> //
 
 template <typename F> //
 void __polyregion_offload_workgroup__(size_t lanes, F f) {
-  static bool offload = !std::getenv(polyregion::env::PolystlNoOffload);
+  static bool offload = polyregionTestOffloadEnabled();
   if (!offload) {
     for (size_t i = 0; i < lanes; ++i)
       f(static_cast<uint32_t>(i));
