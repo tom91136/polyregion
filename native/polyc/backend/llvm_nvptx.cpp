@@ -132,7 +132,10 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
     auto *ownArg = kind == 'i' ? B.CreateAnd(lane, clamp) : llvm::ConstantInt::get(i32Ty, 0);
     auto *safeArg = B.CreateSelect(inRange, shuffleArg, ownArg);
     auto *segmentMask = B.CreateAnd(B.CreateNot(clamp), llvm::ConstantInt::get(i32Ty, 31));
-    auto *control = B.CreateOr(clamp, B.CreateShl(segmentMask, llvm::ConstantInt::get(i32Ty, 8)));
+    // PTX interprets c[4:0] as the upper bound for down/idx/bfly, but as the lower bound for up.
+    // The segment mask supplies the per-segment base, so shfl.up needs a zero low clamp.
+    auto *controlClamp = kind == 'u' ? llvm::ConstantInt::get(i32Ty, 0) : clamp;
+    auto *control = B.CreateOr(controlClamp, B.CreateShl(segmentMask, llvm::ConstantInt::get(i32Ty, 8)));
     const auto archNumber = (cg.C.options.arch ^ starts_with("sm_")) ? std::stoi(cg.C.options.arch ^ drop(3)) : 0;
     const bool legacy = archNumber != 0 && archNumber < 70;
     const auto legacyId = [&] {

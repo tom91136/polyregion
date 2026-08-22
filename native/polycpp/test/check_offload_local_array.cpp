@@ -10,7 +10,7 @@
 int main() {
   const int r = __polyregion_offload_f1__([]() -> int {
     [[clang::annotate("__polyregion_local")]] int scratch[256];
-    scratch[__polyregion_builtin_gpu_local_idx(0)] = 42;
+    scratch[__polyregion_gpu_local_idx(0)] = 42;
     return scratch[0];
   });
   std::printf("%d", r);

@@ -87,8 +87,9 @@ std::optional<std::tuple<llvm::Value *, llvm::Type *, std::vector<llvm::Value *>
     arrTy = std::get<1>(*b);
   } else if (select.root.tpe.template is<Type::Arr>()) {
     base = cg.mkTermVal(Term::Select(select.root, {}, select.root.tpe));
-    if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(base->stripPointerCasts())) arrTy = alloca->getAllocatedType();
-    else arrTy = cg.resolveType(select.root.tpe);
+    // Private arrays are allocated flat for Vulkan, but their logical shape supplies the strides for nested
+    // indexing. Workgroup arrays with a distinct physical representation are recorded in localBases above.
+    arrTy = cg.resolveType(select.root.tpe);
   } else return std::nullopt;
   if (!(select.steps ^ forall([](const auto &step) { return step.template is<PathStep::IndexDyn>(); }))) return std::nullopt;
   const auto indices =

@@ -1179,6 +1179,28 @@ TEST_CASE("Vulkan retains multidimensional workgroup-array strides", "[backend][
   CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("i64 19"));
 }
 
+TEST_CASE("Vulkan retains multidimensional private-array strides", "[backend][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto rowTpe = Type::Arr(Type::IntU32(), 8, TypeSpace::Private());
+  const auto scratchTpe = Type::Arr(rowTpe, 4, TypeSpace::Private());
+  const Named scratch("scratch", scratchTpe), loaded("loaded", Type::IntU32());
+  const Term::Select row(scratch, {PathStep::IndexDyn(Term::IntU32Const(2).widen()).widen()}, rowTpe);
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {Var(scratch, std::optional<Expr::Any>{}, true).widen(),
+                               Update(row, Term::IntU32Const(3).widen(), Term::IntU32Const(42).widen()).widen(),
+                               Var(loaded, Expr::Index(row, Term::IntU32Const(3).widen(), Type::IntU32()).widen(), false).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("alloca [32 x i32]"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("i64 19"));
+}
+
 TEST_CASE("LLVM CUDA and HIP targets lower subgroup votes", "[backend][subgroup]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -1243,12 +1265,19 @@ TEST_CASE("LLVM GPU shuffles honour lane masks and physical subgroup bounds", "[
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
-  const Named value("value", Type::IntU32()), mask("mask", Type::IntU32()), shuffled("shuffled", Type::IntU32());
+  const Named value("value", Type::IntU32()), mask("mask", Type::IntU32()), shuffled("shuffled", Type::IntU32()),
+      shuffledUp("shuffledUp", Type::IntU32());
   const Function entry =
       mkFn("kernel", {Arg(value, {}), Arg(mask, {})}, Type::Unit0(),
            {Var(shuffled,
                 Expr::SpecOp(Spec::GpuShuffleIdx(selectNamed(value).widen(), Term::IntU32Const(0).widen(), Term::IntU32Const(7).widen(),
                                                  selectNamed(mask).widen(), Type::IntU32()))
+                    .widen(),
+                false)
+                .widen(),
+            Var(shuffledUp,
+                Expr::SpecOp(Spec::GpuShuffleUp(selectNamed(value).widen(), Term::IntU32Const(1).widen(), Term::IntU32Const(7).widen(),
+                                                selectNamed(mask).widen(), Type::IntU32()))
                     .widen(),
                 false)
                 .widen(),
@@ -1271,13 +1300,17 @@ TEST_CASE("LLVM GPU shuffles honour lane masks and physical subgroup bounds", "[
   const auto nvLegacy = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_60"}, OptLevel::O0);
   REQUIRE(nvLegacy.binary);
   CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.idx.i32"));
+  CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.up.i32"));
   CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("i32 6151"));
+  CHECK_THAT(llvmIrOf(nvLegacy), Catch::Matchers::ContainsSubstring("i32 6144"));
 
   const auto nvSync = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
   REQUIRE(nvSync.binary);
   CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.sync.idx.i32"));
+  CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("llvm.nvvm.shfl.sync.up.i32"));
   CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("activemask.b32"));
   CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("i32 6151"));
+  CHECK_THAT(llvmIrOf(nvSync), Catch::Matchers::ContainsSubstring("i32 6144"));
 }
 
 TEST_CASE("AMDGPU fences remain non-blocking memory fences", "[backend][volatile]") {
@@ -1415,8 +1448,11 @@ TEST_CASE("LLVM gives stored callable references addressable bytes", "[backend][
   REQUIRE(iteratorLayout);
   CHECK(boxLayout->get().sizeInBytes == 1);
   CHECK(boxLayout->get().members[0].sizeInBytes == 1);
-  CHECK(iteratorLayout->get().sizeInBytes == 16);
-  CHECK(iteratorLayout->get().members[1].offsetInBytes == 8);
+  REQUIRE(iteratorLayout->get().members.size() == 2);
+  const auto pointerBytes = iteratorLayout->get().members[0].sizeInBytes;
+  CHECK(pointerBytes == sizeof(void *));
+  CHECK(iteratorLayout->get().sizeInBytes == pointerBytes * 2);
+  CHECK(iteratorLayout->get().members[1].offsetInBytes == pointerBytes);
 }
 
 TEST_CASE("LLVM stores stateless callable fields at their storage width", "[backend][callable]") {

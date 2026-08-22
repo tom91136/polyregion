@@ -21,7 +21,7 @@ inline std::string fullOpt(std::optional<int> stackDepth) {
 // StructuredExit runs before ArenaLower so a runtime assert message's copy loop (an opaque-pointer deref) is
 // arena-lowered too; it stays after FullOpt so the optimiser cannot DCE its error-buffer writes
 inline std::string deviceArena(std::optional<int> stackDepth = {}) {
-  return fullOpt(stackDepth) + ";StructuredExit;ArenaLower;VerifyAnchors(strict=true)";
+  return fullOpt(stackDepth) + ";SubgroupLower;StructuredExit;ArenaLower;VerifyAnchors(strict=true)";
 }
 // VerifyAnchors(strict) after ArenaView asserts every opaque-origin access resolved to an arena view
 // (logical SPIR-V cannot deref a raw pointer) - a missed deref becomes a compile error, not a device fault.
@@ -29,7 +29,8 @@ inline std::string deviceArena(std::optional<int> stackDepth = {}) {
 // root-anchors derived-pointer temps; it runs after StructuredExit so the temps that lowering injects are
 // canonicalised too, without disturbing the assert/#error side-channel writes
 inline std::string deviceArenaLogical(std::optional<int> stackDepth = {}) {
-  return fullOpt(stackDepth) + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
+  return fullOpt(stackDepth)
+         + ";SubgroupLower;StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
 }
 
 inline std::string hostMirror(const std::string &mirrorId) { return fmt::format("Mirror(id={})", mirrorId); }

@@ -114,7 +114,7 @@ const static std::string CapturedThis = "#captured_this";
         return path | map([&](const auto &def) { return baseMember(*def); }) | prepend(base) | to_vector();
       }
       const auto sd = r.findStruct(repr(s.name), "select");
-      const auto memberDump = sd->members | mk_string(", ", [](const auto &m) { return m.symbol + ":" + repr(m.tpe); });
+      const auto memberDump = sd->members ^ mk_string(", ", [](const auto &m) { return m.symbol + ":" + repr(m.tpe); });
       raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]", member.symbol,
                         repr(member.tpe), repr(s), memberDump));
     };
@@ -142,7 +142,7 @@ const static std::string CapturedThis = "#captured_this";
       }
       if (!sname) return Type::Nothing();
       auto def = r.findStruct(repr(sname->name), "select-walk");
-      auto m = def->members | find([&](const auto &mm) { return mm.symbol == n.symbol; });
+      auto m = def->members ^ find([&](const auto &mm) { return mm.symbol == n.symbol; });
       return m ? m->tpe : Type::Nothing();
     };
     Vector<Named> rehydrated;
@@ -1035,7 +1035,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     }
     // XXX largest member first = canonical storage spanning the whole union
     if (decl->isUnion() && all.size() > 1) {
-      const auto maxIdx = (all | index_of_max_by([](const auto &m) { return m.sizeInBytes; })).value();
+      const auto maxIdx = (all ^ index_of_max_by([](const auto &m) { return m.sizeInBytes; })).value();
       return all | slice(maxIdx, maxIdx + 1) | concat(all | take(maxIdx)) | concat(all | drop(maxIdx + 1)) | to_vector();
     }
     return all;
@@ -1084,6 +1084,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     for (const auto *base : baseDecls) {
       clang::CXXBasePaths paths(/*FindAmbiguities*/ true, /*RecordPaths*/ true, /*DetectVirtual*/ false);
       if (!cxxRecord->isDerivedFrom(base, paths) || paths.isAmbiguous(context.getCanonicalTagType(base))) continue;
+      // Clang's CXXBasePaths is a range adapter, not an eager Aspartame container.
       if (paths | none_match([](const auto &path) { return path.Access == clang::AS_public; })) continue;
       catchableParents.emplace_back(handleRecord(base, r));
     }
@@ -2156,8 +2157,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const auto fieldName = decl->getDeclName().isEmpty() //
                                      ? refDeclName
                                      : decl->getDeclName().getAsString();
-          const auto field = Vector<std::string>{fieldName, packCaptureName(decl), refDeclName} | collect_first([&](const auto &candidate) {
-                               return r.parent->members | find([&](const auto &member) { return member.symbol == candidate; });
+          const auto field = Vector<std::string>{fieldName, packCaptureName(decl), refDeclName} ^ collect_first([&](const auto &candidate) {
+                               return r.parent->members ^ find([&](const auto &member) { return member.symbol == candidate; });
                              });
           if (field) {
             return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, *field));
@@ -2432,7 +2433,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const auto var = capture.getCapturedVar();
           if (!var && !capture.capturesThis()) continue;
           const auto name = var ? lambdaCaptureName(expr->getLambdaClass(), var) : CapturedThis;
-          const auto field = def->members | find([&](const auto &m) { return m.symbol == name; });
+          const auto field = def->members ^ find([&](const auto &m) { return m.symbol == name; });
           if (!field) continue;
           const auto member = select(r, {instance}, *field);
           if (const auto arr = field->tpe.get<Type::Arr>()) copyArray(r, member, r.newVar(handleExpr(init, r)), *arr);
@@ -2714,7 +2715,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                         }) //
                       | to_vector();
 
-        const auto actualReceiverTpe = fn->decl.args | collect_first([&](const auto &arg) -> Opt<Type::Any> {
+        const auto actualReceiverTpe = fn->decl.args ^ collect_first([&](const auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
                                        });
@@ -2748,7 +2749,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         // XXX member operators carry an implicit `this` (a Ptr arg); free/friend operators do not - arg 0 is the
         // receiver itself, so conform it to the first declaration argument.
-        const auto actualReceiverTpe = fn->decl.args | collect_first([&](const auto &arg) -> Opt<Type::Any> {
+        const auto actualReceiverTpe = fn->decl.args ^ collect_first([&](const auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
                                        });
@@ -2758,7 +2759,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) -> Expr::Any { //  method(...)
-        const static std::string builtinPrefix = "__polyregion_builtin_";
+        const static std::string intrinsicPrefix = "__polyregion_gpu_";
         if (llvm::isa<clang::CXXPseudoDestructorExpr>(expr->getCallee()->IgnoreParenImpCasts()))
           return Expr::Any(Expr::Alias(Term::Unit0Const()));
         const auto target = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
@@ -2768,8 +2769,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         // device body; elide the call rather than lift its string-literal args into the kernel
         if (target->isNoReturn() && !target->hasBody() && expr->getType()->isVoidType()) return Expr::Any(Expr::Alias(Term::Unit0Const()));
         const auto qualifiedName = target->getQualifiedNameAsString();
-        if (qualifiedName ^ starts_with(builtinPrefix)) { // builtins are unqualified free functions
-          auto builtinName = qualifiedName.substr(builtinPrefix.size());
+        const bool assertIntrinsic = qualifiedName == "__polyregion_builtin_assert";
+        if ((qualifiedName ^ starts_with(intrinsicPrefix)) || assertIntrinsic) {
+          auto builtinName = assertIntrinsic
+                                 ? std::string{"assert"}
+                                 : qualifiedName.substr((qualifiedName ^ starts_with(intrinsicPrefix)) ? intrinsicPrefix.size() : 0);
+          if (!assertIntrinsic) builtinName = "gpu_" + builtinName;
 
           auto args = expr->arguments() | map([&](const auto &arg) { return r.newVar(handleExpr(arg, r)); }) | to_vector();
           const auto spec = [&](size_t n, const auto &mk) {
@@ -2778,51 +2783,73 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               return Expr::Any(Expr::SpecOp(mk()));
             });
           };
-          Map<std::string, std::function<Expr::Any()>> specs{{"gpu_global_idx", spec(1, [&] { return Spec::GpuGlobalIdx(args[0]); })},
-                                                             {"gpu_global_size", spec(1, [&] { return Spec::GpuGlobalSize(args[0]); })},
-                                                             {"gpu_group_idx", spec(1, [&] { return Spec::GpuGroupIdx(args[0]); })},
-                                                             {"gpu_group_size", spec(1, [&] { return Spec::GpuGroupSize(args[0]); })},
-                                                             {"gpu_local_idx", spec(1, [&] { return Spec::GpuLocalIdx(args[0]); })},
-                                                             {"gpu_local_size", spec(1, [&] { return Spec::GpuLocalSize(args[0]); })},
-                                                             {"gpu_barrier_global", spec(0, [&] { return Spec::GpuBarrierGlobal(); })},
-                                                             {"gpu_barrier_local", spec(0, [&] { return Spec::GpuBarrierLocal(); })},
-                                                             {"gpu_barrier_all", spec(0, [&] { return Spec::GpuBarrierAll(); })},
-                                                             {"gpu_fence_global", spec(0, [&] { return Spec::GpuFenceGlobal(); })},
-                                                             {"gpu_fence_local", spec(0, [&] { return Spec::GpuFenceLocal(); })},
-                                                             {"gpu_fence_all", spec(0, [&] { return Spec::GpuFenceAll(); })},
-                                                             {"assert", spec(2, [&] { return Spec::Assert(args[0], args[1]); })}};
+          const auto atomic = [&](const AtomicOp::Any &op) {
+            return Spec::GpuAtomicRMW(op, args[0], args[1], MemScope::Device(), MemOrder::Relaxed(), handleType(expr->getType(), r));
+          };
+          Map<std::string, std::function<Expr::Any()>> specs{
+              {"gpu_global_idx", spec(1, [&] { return Spec::GpuGlobalIdx(args[0]); })},
+              {"gpu_global_size", spec(1, [&] { return Spec::GpuGlobalSize(args[0]); })},
+              {"gpu_group_idx", spec(1, [&] { return Spec::GpuGroupIdx(args[0]); })},
+              {"gpu_group_size", spec(1, [&] { return Spec::GpuGroupSize(args[0]); })},
+              {"gpu_local_idx", spec(1, [&] { return Spec::GpuLocalIdx(args[0]); })},
+              {"gpu_local_size", spec(1, [&] { return Spec::GpuLocalSize(args[0]); })},
+              {"gpu_barrier_global", spec(0, [&] { return Spec::GpuBarrierGlobal(); })},
+              {"gpu_barrier_local", spec(0, [&] { return Spec::GpuBarrierLocal(); })},
+              {"gpu_barrier_all", spec(0, [&] { return Spec::GpuBarrierAll(); })},
+              {"gpu_fence_global", spec(0, [&] { return Spec::GpuFenceGlobal(); })},
+              {"gpu_fence_local", spec(0, [&] { return Spec::GpuFenceLocal(); })},
+              {"gpu_fence_all", spec(0, [&] { return Spec::GpuFenceAll(); })},
+              {"gpu_lane_idx", spec(0, [&] { return Spec::GpuLaneIdx(); })},
+              {"gpu_subgroup_size", spec(0, [&] { return Spec::GpuSubgroupSize(); })},
+              {"gpu_shuffle_down_u32",
+               spec(4, [&] { return Spec::GpuShuffleDown(args[0], args[1], args[2], args[3], handleType(expr->getType(), r)); })},
+              {"gpu_shuffle_up_u32",
+               spec(4, [&] { return Spec::GpuShuffleUp(args[0], args[1], args[2], args[3], handleType(expr->getType(), r)); })},
+              {"gpu_shuffle_idx_u32",
+               spec(4, [&] { return Spec::GpuShuffleIdx(args[0], args[1], args[2], args[3], handleType(expr->getType(), r)); })},
+              {"gpu_shuffle_xor_u32",
+               spec(4, [&] { return Spec::GpuShuffleXor(args[0], args[1], args[2], args[3], handleType(expr->getType(), r)); })},
+              {"gpu_subgroup_barrier", spec(1, [&] { return Spec::GpuSubgroupBarrier(args[0]); })},
+              {"gpu_ballot", spec(2, [&] { return Spec::GpuBallot(args[0], args[1]); })},
+              {"gpu_vote_any", spec(2, [&] { return Spec::GpuVoteAny(args[0], args[1]); })},
+              {"gpu_vote_all", spec(2, [&] { return Spec::GpuVoteAll(args[0], args[1]); })},
+              {"gpu_atomic_xchg_u32", spec(2, [&] { return atomic(AtomicOp::Xchg()); })},
+              {"gpu_atomic_add_u32", spec(2, [&] { return atomic(AtomicOp::Add()); })},
+              {"gpu_atomic_sub_u32", spec(2, [&] { return atomic(AtomicOp::Sub()); })},
+              {"gpu_atomic_min_u32", spec(2, [&] { return atomic(AtomicOp::Min()); })},
+              {"gpu_atomic_max_u32", spec(2, [&] { return atomic(AtomicOp::Max()); })},
+              {"gpu_atomic_and_u32", spec(2, [&] { return atomic(AtomicOp::And()); })},
+              {"gpu_atomic_or_u32", spec(2, [&] { return atomic(AtomicOp::Or()); })},
+              {"gpu_atomic_xor_u32", spec(2, [&] { return atomic(AtomicOp::Xor()); })},
+              {"gpu_volatile_load_u32", spec(1, [&] { return Spec::GpuVolatileLoad(args[0], handleType(expr->getType(), r)); })},
+              {"gpu_volatile_store_u32", spec(2, [&] { return Spec::GpuVolatileStore(args[0], args[1]); })},
+              {"assert", spec(2, [&] { return Spec::Assert(args[0], args[1]); })}};
 
-          return specs                                     //
-                 ^ get_maybe(builtinName)                  //
-                 ^ fold([](const auto &f) { return f(); }, //
-                        [&]() -> Expr::Any {               //
-                          return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
-                        });
-        } else {
-          if (isTrapBuiltin(target->getBuiltinID())) return Expr::Any(Expr::Alias(Term::Unit0Const()));
-          // a kernel arg is never a compile-time constant here, so __builtin_constant_p folds to 0
-          if (target->getBuiltinID() == clang::Builtin::BI__builtin_constant_p)
-            return integralConstOfType(handleType(expr->getType(), r), 0);
-          auto [name, fn] = handleCall(target, r);
-          if (fn->decl.args.size() != expr->getNumArgs())
-            raise("Arg count mismatch for " + qualifiedName + ", expected " + std::to_string(fn->decl.args.size()) + " but was "
-                  + std::to_string(expr->getNumArgs()));
-          auto ivArgs = expr->arguments()                                        //
-                        | zip_with_index<size_t>()                               //
-                        | map([&](const auto &arg, const auto &i) -> Term::Any { //
-                            return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i].named.tpe));
-                          }) //
-                        | to_vector();
-          return Expr::Any(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
-                                        handleType(expr->getCallReturnType(context), r)));
+          if (const auto f = specs ^ get_maybe(builtinName)) return (*f)();
+          return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
         }
+        if (isTrapBuiltin(target->getBuiltinID())) return Expr::Any(Expr::Alias(Term::Unit0Const()));
+        // a kernel arg is never a compile-time constant here, so __builtin_constant_p folds to 0
+        if (target->getBuiltinID() == clang::Builtin::BI__builtin_constant_p) return integralConstOfType(handleType(expr->getType(), r), 0);
+        auto [name, fn] = handleCall(target, r);
+        if (fn->decl.args.size() != expr->getNumArgs())
+          raise("Arg count mismatch for " + qualifiedName + ", expected " + std::to_string(fn->decl.args.size()) + " but was "
+                + std::to_string(expr->getNumArgs()));
+        auto ivArgs = expr->arguments()                                        //
+                      | zip_with_index<size_t>()                               //
+                      | map([&](const auto &arg, const auto &i) -> Term::Any { //
+                          return r.newVar(conform(r, handleExpr(arg, r), fn->decl.args[i].named.tpe));
+                        }) //
+                      | to_vector();
+        return Expr::Any(Expr::Invoke(Type::FnRef(Sym({name})), std::vector<Type::Any>{}, std::optional<Term::Any>{}, ivArgs,
+                                      handleType(expr->getCallReturnType(context), r)));
       },
       [&](const clang::CXXThisExpr *expr) -> Expr::Any {
         const auto thisTpe = handleType(expr->getType(), r);
         if (r.parent)
           if (const auto ptr = thisTpe.get<Type::Ptr>())
             if (const auto owner = ptr->comp.get<Type::Struct>(); owner && owner->name != r.parent->name)
-              if (const auto field = r.parent->members | find([&](const auto &member) { return member.symbol == CapturedThis; })) {
+              if (const auto field = r.parent->members ^ find([&](const auto &member) { return member.symbol == CapturedThis; })) {
                 const auto tpeVars = r.parent->tpeVars | map([](const auto &v) { return Type::Var(v).widen(); }) | to_vector();
                 return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, tpeVars), r.thisSpace))}, *field));
               }
@@ -2914,7 +2941,7 @@ void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record
   }
   if (record->isUnion()) return;
   const auto fields = record->fields() | to_vector();
-  for (const auto *field : fields | reverse()) {
+  for (const auto *field : fields ^ reverse()) {
     const auto memberRecord = field->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
     if (!memberRecord || memberRecord->hasTrivialDestructor()) continue;
     auto steps = instance.steps;

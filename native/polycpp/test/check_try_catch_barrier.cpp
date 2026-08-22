@@ -25,7 +25,7 @@ int main() {
     for (int i = 0; i < 4; i++) {
       if (i == 2) throw i;
       p[i] = i;
-      __polyregion_builtin_gpu_barrier_global();
+      __polyregion_gpu_barrier_global();
     }
     return 0;
   });
@@ -41,7 +41,7 @@ int main() {
       } catch (int e) {
         hits = e;
       }
-      __polyregion_builtin_gpu_barrier_global();
+      __polyregion_gpu_barrier_global();
     }
     p[lid] = hits;
   });

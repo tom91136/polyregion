@@ -15,6 +15,7 @@ foreach (TARGET polystl polystl-static)
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
             FILES
             include/polystl/algorithm_impl.h
+            include/polystl/intrinsics.h
             include/polystl/polystl.h
             include/execution
             include/execution.impl

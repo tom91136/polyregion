@@ -16,7 +16,7 @@ int main() {
   __polyregion_offload_workgroup__(2, [=, &slot, &out](uint32_t lid) {
     if (lid == 0) __polyregion_builtin_assert(static_cast<uint32_t>(polyregion::invoke::AssertCode::Assert), "lane 0 tripped");
     if (lid < 2) slot[lid] = static_cast<int>(lid) + 10;
-    __polyregion_builtin_gpu_barrier_global();
+    __polyregion_gpu_barrier_global();
     if (lid < 2) out[lid] = slot[1 - lid];
   });
   const auto a = polyregion::polystl::details::lastAssert();

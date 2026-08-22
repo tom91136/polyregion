@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -12,26 +13,8 @@
 #include "polyregion/conventions.h"
 #include "polyrt/rt.h"
 
+#include "intrinsics.h"
 #include "polystl.h"
-
-[[nodiscard]] uint32_t __polyregion_builtin_gpu_global_idx(uint32_t);  // NOLINT(*-reserved-identifier)
-[[nodiscard]] uint32_t __polyregion_builtin_gpu_global_size(uint32_t); // NOLINT(*-reserved-identifier)
-
-[[nodiscard]] uint32_t __polyregion_builtin_gpu_group_idx(uint32_t);  // NOLINT(*-reserved-identifier)
-[[nodiscard]] uint32_t __polyregion_builtin_gpu_group_size(uint32_t); // NOLINT(*-reserved-identifier)
-
-[[nodiscard]] uint32_t __polyregion_builtin_gpu_local_idx(uint32_t);  // NOLINT(*-reserved-identifier)
-[[nodiscard]] uint32_t __polyregion_builtin_gpu_local_size(uint32_t); // NOLINT(*-reserved-identifier)
-
-void __polyregion_builtin_gpu_barrier_global(); // NOLINT(*-reserved-identifier)
-void __polyregion_builtin_gpu_barrier_local();  // NOLINT(*-reserved-identifier)
-void __polyregion_builtin_gpu_barrier_all();    // NOLINT(*-reserved-identifier)
-
-void __polyregion_builtin_gpu_fence_global(); // NOLINT(*-reserved-identifier)
-void __polyregion_builtin_gpu_fence_local();  // NOLINT(*-reserved-identifier)
-void __polyregion_builtin_gpu_fence_all();    // NOLINT(*-reserved-identifier)
-
-extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message); // NOLINT(*-reserved-identifier)
 
 namespace polyregion::polystl::details {
 
@@ -94,8 +77,8 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
     case polyregion::runtime::PlatformKind::Managed: {
       auto kernel = [f, global]() {
         const auto lim = static_cast<uint32_t>(global);
-        const auto gid = __polyregion_builtin_gpu_global_idx(0);
-        const auto gs = __polyregion_builtin_gpu_global_size(0);
+        const auto gid = __polyregion_gpu_global_idx(0);
+        const auto gs = __polyregion_gpu_global_size(0);
         for (uint32_t i = gid; i < lim; i += gs) {
           f(static_cast<int64_t>(i));
         }
@@ -200,21 +183,21 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       auto kernel = [out = groupPartial.data(), init, f, reduce,
                      global]([[clang::annotate(POLYREGION_LOCAL_ANNOTATION)]] T *localPartialSum) {
         const auto lim = static_cast<uint32_t>(global);
-        const auto localIdx = __polyregion_builtin_gpu_local_idx(0);
+        const auto localIdx = __polyregion_gpu_local_idx(0);
         localPartialSum[localIdx] = init;
-        const auto gid = __polyregion_builtin_gpu_global_idx(0);
-        const auto gs = __polyregion_builtin_gpu_global_size(0);
+        const auto gid = __polyregion_gpu_global_idx(0);
+        const auto gs = __polyregion_gpu_global_size(0);
         for (uint32_t i = gid; i < lim; i += gs) {
           localPartialSum[localIdx] = reduce(localPartialSum[localIdx], f(static_cast<int64_t>(i)));
         }
-        for (uint32_t offset = __polyregion_builtin_gpu_local_size(0) / 2; offset > 0; offset /= 2) {
-          __polyregion_builtin_gpu_barrier_local();
+        for (uint32_t offset = __polyregion_gpu_local_size(0) / 2; offset > 0; offset /= 2) {
+          __polyregion_gpu_barrier_local();
           if (localIdx < offset) {
             localPartialSum[localIdx] = reduce(localPartialSum[localIdx], localPartialSum[localIdx + offset]);
           }
         }
         if (localIdx == 0) {
-          out[__polyregion_builtin_gpu_group_idx(0)] = localPartialSum[localIdx];
+          out[__polyregion_gpu_group_idx(0)] = localPartialSum[localIdx];
         }
       };
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
