@@ -379,8 +379,10 @@ object compiletime {
               perConfigLayouts.zipWithIndex.map { case ((config, configLayouts), i) =>
                 val layouts0 = configLayouts.map(l => p.Sym(l.name) -> l).toMap
 
-                val lut     = prog.defs.map(s => s.name -> s).toMap
-                val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap
+                val lut = prog.defs.map(s => s.name -> s).toMap
+                val layouts = prog.defs.flatMap { sd =>
+                  layouts0.get(sd.name).map(layout => sd -> (layout, prismRefs.get(sd.name)))
+                }.toMap
                 val allReprsInCaptures = capturesWithStructDefs
                   .collect { case (_, Some(sdef), term) =>
                     Pickler.deriveAllRepr(lut.map((s, sd) => s -> (sd, prismRefs.get(s))), sdef, term.tpe)

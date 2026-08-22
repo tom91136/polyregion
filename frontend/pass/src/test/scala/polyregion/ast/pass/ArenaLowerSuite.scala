@@ -185,6 +185,255 @@ class ArenaLowerSuite extends munit.FunSuite {
     })
   }
 
+  test("pointer loaded through an arena offset remains an arena offset") {
+    val capSym    = sym("Cap")
+    val ptrTpe    = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val ptrPtrTpe = p.Type.Ptr(ptrTpe, p.Type.Space.Global)
+    val capTpe    = p.Type.Struct(capSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val outer     = named("outer", ptrPtrTpe)
+    val inner     = named("inner", ptrTpe)
+    val value     = named("value", p.Type.IntS32)
+    val capDef    = p.StructDef(capSym, Nil, List(named("data", ptrPtrTpe)), Nil)
+    val data      = p.Term.Select(cap, List(p.PathStep.Field("data")), ptrPtrTpe)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(outer, Some(p.Expr.Alias(data)), isMutable = false),
+        p.Stmt.Var(
+          inner,
+          Some(p.Expr.Index(p.Term.Select(outer, Nil, ptrPtrTpe), p.Term.IntS64Const(0), ptrTpe)),
+          isMutable = false
+        ),
+        p.Stmt.Var(
+          value,
+          Some(p.Expr.Index(p.Term.Select(inner, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+
+    assert(
+      out.body.collectFirst { case p.Stmt.Var(`value`, Some(expr), _) => expr }.exists {
+        case p.Expr.Index(p.Term.Select(root, Nil, _), _, p.Type.IntS32) => root.symbol.startsWith("#ab")
+        case _                                                           => false
+      },
+      out.repr
+    )
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef))), Nil)
+  }
+
+  test("arena offset stored through a local aggregate alias remains an arena offset") {
+    val capSym    = sym("Cap")
+    val holderSym = sym("Holder")
+    val ptrTpe    = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val capTpe    = p.Type.Struct(capSym, Nil)
+    val holderTpe = p.Type.Struct(holderSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val holder    = named("holder", holderTpe)
+    val holderPtr = named("holderPtr", p.Type.Ptr(holderTpe, p.Type.Space.Private))
+    val loaded    = named("loaded", ptrTpe)
+    val value     = named("value", p.Type.IntS32)
+    val capDef    = p.StructDef(capSym, Nil, List(named("data", ptrTpe)), Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("data", ptrTpe)), Nil)
+    val data      = p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)
+    val slot =
+      p.Term.Select(holderPtr, List(p.PathStep.Field("data")), ptrTpe).asInstanceOf[p.Term.Select]
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(holder, None, isMutable = true),
+        p.Stmt.Var(
+          holderPtr,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(holder, Nil, holderTpe),
+              None,
+              holderTpe,
+              p.Type.Space.Private,
+              p.Region.Rooted(holder)
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Mut(slot, p.Expr.Alias(data)),
+        p.Stmt.Var(
+          loaded,
+          Some(p.Expr.Cast(p.Term.Select(holder, List(p.PathStep.Field("data")), ptrTpe), ptrTpe)),
+          isMutable = false
+        ),
+        p.Stmt.Var(
+          value,
+          Some(p.Expr.Index(p.Term.Select(loaded, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef, holderDef)), NoopLog).entry
+
+    assert(out.body.exists {
+      case p.Stmt.Mut(`slot`, p.Expr.Alias(p.Term.Select(root, Nil, _))) => root.symbol.startsWith("#ab")
+      case _                                                             => false
+    })
+    assert(out.body.collectFirst { case p.Stmt.Var(`value`, Some(expr), _) => expr }.exists {
+      case p.Expr.Index(p.Term.Select(`loaded`, Nil, _), _, p.Type.IntS32) => true
+      case _                                                               => false
+    })
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef, holderDef))), Nil)
+  }
+
+  test("arena pointer fields stay real across aggregate copies and mutations") {
+    val capSym    = sym("Cap")
+    val holderSym = sym("Holder")
+    val nodeSym   = sym("Node")
+    val nodeTpe   = p.Type.Struct(nodeSym, Nil)
+    val ptrTpe    = p.Type.Ptr(nodeTpe, p.Type.Space.Global)
+    val capTpe    = p.Type.Struct(capSym, Nil)
+    val holderTpe = p.Type.Struct(holderSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val holder    = named("holder", holderTpe)
+    val holderPtr = named("holderPtr", p.Type.Ptr(holderTpe, p.Type.Space.Private))
+    val copied    = named("copied", holderTpe)
+    val loaded    = named("loaded", ptrTpe)
+    val value     = named("value", p.Type.IntS32)
+    val capDef    = p.StructDef(capSym, Nil, List(named("head", ptrTpe)), Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("node", ptrTpe)), Nil)
+    val nodeDef = p.StructDef(
+      nodeSym,
+      Nil,
+      List(named("next", ptrTpe), named("value", p.Type.IntS32)),
+      Nil
+    )
+    val holderSlot = p.Term.Select(holderPtr, List(p.PathStep.Field("node")), ptrTpe).asInstanceOf[p.Term.Select]
+    val copiedSlot = p.Term.Select(copied, List(p.PathStep.Field("node")), ptrTpe).asInstanceOf[p.Term.Select]
+    val next = p.Term.Select(
+      copied,
+      List(p.PathStep.Field("node"), p.PathStep.Field("next")),
+      ptrTpe
+    )
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(holder, None, isMutable = true),
+        p.Stmt.Var(
+          holderPtr,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(holder, Nil, holderTpe),
+              None,
+              holderTpe,
+              p.Type.Space.Private,
+              p.Region.Rooted(holder)
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Mut(
+          holderSlot,
+          p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("head")), ptrTpe))
+        ),
+        p.Stmt.Var(copied, Some(p.Expr.Alias(p.Term.Select(holder, Nil, holderTpe))), isMutable = true),
+        p.Stmt.Mut(copiedSlot, p.Expr.Alias(next)),
+        p.Stmt.Var(loaded, Some(p.Expr.Cast(copiedSlot, ptrTpe)), isMutable = false),
+        p.Stmt.Var(
+          value,
+          Some(
+            p.Expr.Alias(
+              p.Term.Select(loaded, List(p.PathStep.Field("value")), p.Type.IntS32)
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef, holderDef, nodeDef)), NoopLog).entry
+
+    assert(out.body.exists {
+      case p.Stmt.Mut(`copiedSlot`, p.Expr.Alias(p.Term.Select(root, Nil, _))) => root.symbol.startsWith("#ab")
+      case _                                                                   => false
+    })
+    assert(out.body.collectFirst { case p.Stmt.Var(`value`, Some(expr), _) => expr }.exists {
+      case p.Expr.Alias(p.Term.Select(`loaded`, List(p.PathStep.Field("value")), p.Type.IntS32)) => true
+      case _                                                                                     => false
+    })
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef, holderDef, nodeDef))), Nil)
+  }
+
+  test("arena offset loaded through a private pointer slot is rebased") {
+    val capSym      = sym("Cap")
+    val closureSym  = sym("Closure")
+    val ptrTpe      = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val ptrSlotTpe  = p.Type.Ptr(ptrTpe, p.Type.Space.Private)
+    val capTpe      = p.Type.Struct(capSym, Nil)
+    val closureTpe  = p.Type.Struct(closureSym, Nil)
+    val cap         = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val offset      = named("offset", ptrTpe)
+    val closure     = named("closure", closureTpe)
+    val loaded      = named("loaded", ptrTpe)
+    val value       = named("value", p.Type.IntS32)
+    val capDef      = p.StructDef(capSym, Nil, List(named("value", p.Type.IntS32)), Nil)
+    val closureDef  = p.StructDef(closureSym, Nil, List(named("slot", ptrSlotTpe)), Nil)
+    val closureSlot = p.Term.Select(closure, List(p.PathStep.Field("slot")), ptrSlotTpe)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(
+          offset,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(cap, List(p.PathStep.Field("value")), p.Type.IntS32),
+              None,
+              p.Type.IntS32,
+              p.Type.Space.Global,
+              p.Region.Rooted(cap)
+            )
+          ),
+          isMutable = true
+        ),
+        p.Stmt.Var(closure, None, isMutable = true),
+        p.Stmt.Mut(
+          closureSlot.asInstanceOf[p.Term.Select],
+          p.Expr.RefTo(
+            p.Term.Select(offset, Nil, ptrTpe),
+            None,
+            ptrTpe,
+            p.Type.Space.Private,
+            p.Region.Rooted(cap)
+          )
+        ),
+        p.Stmt.Var(
+          loaded,
+          Some(p.Expr.Index(closureSlot, p.Term.IntS64Const(0), ptrTpe)),
+          isMutable = false
+        ),
+        p.Stmt.Var(
+          value,
+          Some(p.Expr.Index(p.Term.Select(loaded, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef, closureDef)), NoopLog).entry
+
+    assert(
+      out.body.collectFirst { case p.Stmt.Var(`value`, Some(expr), _) => expr }.exists {
+        case p.Expr.Index(p.Term.Select(root, Nil, _), _, p.Type.IntS32) => root.symbol.startsWith("#ab")
+        case _                                                           => false
+      },
+      out.repr
+    )
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef, closureDef))), Nil)
+  }
+
   test("encoded arena pointer arithmetic remains an arena offset") {
     val capSym    = sym("Cap")
     val holderSym = sym("Holder")
@@ -195,9 +444,12 @@ class ArenaLowerSuite extends munit.FunSuite {
     val address   = named("address", p.Type.IntU64)
     val advanced  = named("advanced", p.Type.IntU64)
     val ptr       = named("ptr", ptrTpe)
+    val moving    = named("moving", ptrTpe)
+    val next      = named("next", ptrTpe)
     val holder    = named("holder", holderTpe)
     val holderPtr = named("holderPtr", p.Type.Ptr(holderTpe, p.Type.Space.Private))
     val value     = named("value", p.Type.IntS32)
+    val moved     = named("moved", p.Type.IntS32)
     val capDef    = p.StructDef(capSym, Nil, List(named("data", ptrTpe)), Nil)
     val holderDef = p.StructDef(holderSym, Nil, List(named("data", ptrTpe), named("direct", ptrTpe)), Nil)
     val data      = p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe)
@@ -226,6 +478,21 @@ class ArenaLowerSuite extends munit.FunSuite {
           Some(p.Expr.Cast(p.Term.Select(advanced, Nil, p.Type.IntU64), ptrTpe)),
           isMutable = false
         ),
+        p.Stmt.Var(moving, Some(p.Expr.Alias(data)), isMutable = true),
+        p.Stmt.Var(
+          next,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(moving, Nil, ptrTpe),
+              Some(p.Term.IntS64Const(1)),
+              p.Type.IntS32,
+              p.Type.Space.Global,
+              p.Region.Rooted(cap)
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Mut(p.Term.Select(moving, Nil, ptrTpe), p.Expr.Alias(p.Term.Select(next, Nil, ptrTpe))),
         p.Stmt.Var(holder, None, isMutable = true),
         p.Stmt.Var(
           holderPtr,
@@ -247,6 +514,11 @@ class ArenaLowerSuite extends munit.FunSuite {
           Some(p.Expr.Index(slot, p.Term.IntS64Const(0), p.Type.IntS32)),
           isMutable = false
         ),
+        p.Stmt.Var(
+          moved,
+          Some(p.Expr.Index(p.Term.Select(moving, Nil, ptrTpe), p.Term.IntS64Const(0), p.Type.IntS32)),
+          isMutable = false
+        ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       )
     )
@@ -260,6 +532,10 @@ class ArenaLowerSuite extends munit.FunSuite {
     assert(out.body.exists {
       case p.Stmt.Mut(`directSlot`, p.Expr.Alias(p.Term.Select(root, Nil, _))) => root.symbol.startsWith("#ab")
       case _                                                                   => false
+    })
+    assert(out.body.collectFirst { case p.Stmt.Var(`moved`, Some(expr), _) => expr }.exists {
+      case p.Expr.Index(p.Term.Select(root, Nil, _), _, p.Type.IntS32) => root.symbol.startsWith("#ab")
+      case _                                                           => false
     })
   }
 
