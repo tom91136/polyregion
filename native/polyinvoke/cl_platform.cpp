@@ -2,6 +2,7 @@
 
 #include <cinttypes>
 #include <cstring>
+#include <limits>
 #include <thread>
 
 #include "aspartame/all.hpp"
@@ -22,6 +23,7 @@ using namespace polyregion::invoke::cl;
 namespace cl_details = polyregion::invoke::cl::details;
 
 static constexpr const char *PREFIX = "OpenCL";
+static constexpr cl_ulong NullPointerOffset = std::numeric_limits<cl_ulong>::max();
 
 auto cl_details::SVMTracker::owner(uintptr_t ptr) {
   const auto next = entries.upper_bound(ptr);
@@ -247,20 +249,20 @@ std::string programIdentity(cl_device_id device, const std::string &deviceName, 
 bool deviceSupportsIL(cl_device_id device) {
   size_t size = 0;
   if (clGetDeviceInfo(device, /*CL_DEVICE_IL_VERSION=*/0x105B, 0, nullptr, &size) == CL_SUCCESS && size > 1) return true;
-  return queryDeviceInfo(device, CL_DEVICE_EXTENSIONS).find("cl_khr_il_program") != std::string::npos;
+  return queryDeviceInfo(device, CL_DEVICE_EXTENSIONS) ^ aspartame::contains_slice("cl_khr_il_program");
 }
 
 // memflags to OR into clSVMAlloc (0 = coarse-grain, FINE_GRAIN otherwise); nullopt = fall back to cl_mem
 std::optional<cl_bitfield> resolveSVM(cl_device_id device, const std::string &platformName) {
   if (const char *off = std::getenv(polyregion::env::PolyinvokeDisableSvm); off && *off && *off != '0') return std::nullopt;
   // XXX rusticl advertises SVM caps but indirect SVM access faults; force the buffer path
-  if (platformName.find("rusticl") != std::string::npos) return std::nullopt;
+  if (platformName ^ aspartame::contains_slice("rusticl")) return std::nullopt;
   // gfx1036 (Raphael) / gfx1037 (Mendocino) - the minimal 2-CU RDNA2 desktop/low-power iGPUs - silently
   // corrupt fine-grain SVM under concurrent oversubscription (validated: cl_mem clean, fine-grain SVM
   // ~12/30 stale-read mismatches; gfx1103/gfx1034 and matched oversubscription+clock are unaffected). The
   // defect is specific to this 2-CU RDNA part, so gate on RDNA (gfx>=1000) + <=2 CU and fall back to plain
   // cl_mem buffers; low-CU Vega (gfx9xx) APUs are a different arch and stay on the SVM path
-  if (const std::string name = queryDeviceInfo(device, CL_DEVICE_NAME); name.rfind("gfx", 0) == 0) {
+  if (const std::string name = queryDeviceInfo(device, CL_DEVICE_NAME); name ^ aspartame::starts_with("gfx")) {
     cl_uint cus = 0;
     clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cus), &cus, nullptr);
     if (std::strtol(name.c_str() + 3, nullptr, 10) >= 1000 && cus <= 2) return std::nullopt;
@@ -347,7 +349,7 @@ ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 // ---
 
 static DeviceQuirks resolveQuirks(const std::string &deviceName) {
-  const bool llvmpipe = deviceName.find("llvmpipe") != std::string::npos;
+  const bool llvmpipe = deviceName ^ aspartame::contains_slice("llvmpipe");
   return DeviceQuirks{/*nativeTrig*/ llvmpipe, /*overReadPad*/ llvmpipe ? size_t{4096} : size_t{0}};
 }
 
@@ -506,7 +508,7 @@ PhysicalDevice ClDevice::physicalDevice() {
                                static_cast<uint8_t>(pci.function));
   // XXX AMD runtimes predate cl_khr_pci_bus_info; without the BDF from cl_amd_device_topology the
   // APU device gets a synthetic key and never serialises with HIP/HSA on the same device
-  if (queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS).find("cl_amd_device_attribute_query") != std::string::npos) {
+  if (queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS) ^ aspartame::contains_slice("cl_amd_device_attribute_query")) {
     constexpr cl_device_info TOPOLOGY_AMD = 0x4037;
     constexpr cl_uint TOPOLOGY_TYPE_PCIE_AMD = 1;
     struct { // cl_device_topology_amd::pcie; no padding possible, all members align <= 4
@@ -566,7 +568,7 @@ std::vector<std::string> ClDevice::features() {
   out.push_back(normaliseVendor(queryDeviceInfo(*device, CL_DEVICE_VENDOR)));
   out.emplace_back(format == ModuleFormat::SPIRV_Kernel ? "spirv_kernel" : "source");
   const auto exts = queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS);
-  const auto hasExt = [&](std::string_view e) { return exts.find(e) != std::string::npos; };
+  const auto hasExt = [&](std::string_view e) { return exts ^ aspartame::contains_slice(e); };
   if (hasExt("cl_khr_fp64")) out.emplace_back("fp64");
   if (hasExt("cl_khr_fp16")) out.emplace_back("fp16");
   // XXX int64 is behind cles_khr_int64 for embedded profiles
@@ -659,21 +661,39 @@ std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<i
           return *mem;
         } else POLYINVOKE_FATAL(PREFIX, "Illegal memory object: %" PRIuPTR, ptr);
       },
-      alignBits / 8, deviceName, svm, svmTracker);
+      format, alignBits / 8, deviceName, svm, svmTracker);
 }
 ClDevice::~ClDevice() { POLYINVOKE_TRACE(); }
 
 // ---
 
 ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                             decltype(queryMemObject) queryMemObject, size_t memBaseAddrAlign, std::string deviceName,
+                             decltype(queryMemObject) queryMemObject, ModuleFormat format, size_t memBaseAddrAlign, std::string deviceName,
                              std::optional<cl_bitfield> svm, std::shared_ptr<cl_details::SVMTracker> svmTracker)
-    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), memBaseAddrAlign(memBaseAddrAlign),
-      deviceName(std::move(deviceName)), svm(svm), svmTracker(std::move(svmTracker)) {
+    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)), format(format),
+      memBaseAddrAlign(memBaseAddrAlign), deviceName(std::move(deviceName)), svm(svm), svmTracker(std::move(svmTracker)) {
   POLYINVOKE_TRACE();
+  CHECKED(clGetCommandQueueInfo(queue, CL_QUEUE_CONTEXT, sizeof(context), &context, nullptr));
+}
+void *ClDeviceQueue::ensureNullArgStub() {
+  if (!nullArgStub && svm) {
+    nullArgStub = clSVMAlloc(context, /*CL_MEM_READ_WRITE*/ 1 << 0 | *svm, 256, 0);
+    if (!nullArgStub) POLYINVOKE_FATAL(PREFIX, "clSVMAlloc failed for the null-argument stub (%zu bytes)", size_t(256));
+  }
+  return nullArgStub;
+}
+cl_mem ClDeviceQueue::ensureNullArgBuffer() {
+  if (!nullArgBuffer) nullArgBuffer = OUT_CHECKED(clCreateBuffer(context, CL_MEM_READ_WRITE, 256, nullptr, OUT_ERR));
+  return nullArgBuffer;
 }
 ClDeviceQueue::~ClDeviceQueue() {
   POLYINVOKE_TRACE();
+  // Internal argument storage must outlive every command that can reference it. clFinish also makes
+  // teardown safe when the caller drops a queue immediately after an asynchronous launch.
+  CHECKED(clFinish(queue));
+  (void)latch.waitAll();
+  if (nullArgStub) clSVMFree(context, nullArgStub);
+  if (nullArgBuffer) CHECKED(clReleaseMemObject(nullArgBuffer));
   CHECKED(clReleaseCommandQueue(queue));
 }
 bool ClDeviceQueue::mapSvmForHost(void *ptr) {
@@ -784,6 +804,7 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, vo
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                        std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
+  const bool trace = std::getenv(polyregion::env::PolyinvokeTrace) != nullptr;
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported, was %s", magic_enum::enum_name(types.back()).data());
   auto kernel = store.resolveFunction(moduleName, symbol, types);
@@ -798,41 +819,87 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   const auto args = detail::argDataAsPointers(types, argData);
   const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   std::vector<cl_mem> subBuffers;
+  const cl_uint logicalArgCount = static_cast<cl_uint>(types.size() - 1);
+  const cl_uint pointerArgCount =
+      static_cast<cl_uint>(types | aspartame::take(logicalArgCount) | aspartame::count([](const Type type) { return type == Type::Ptr; }));
+  cl_uint physicalArgCount = logicalArgCount;
+  bool expandedPointerAbi = false;
+  if (format == ModuleFormat::Source) {
+    CHECKED(clGetKernelInfo(kernel, CL_KERNEL_NUM_ARGS, sizeof(physicalArgCount), &physicalArgCount, nullptr));
+    const cl_uint expandedArgCount = logicalArgCount + pointerArgCount;
+    if (physicalArgCount == expandedArgCount) expandedPointerAbi = true;
+    else if (physicalArgCount != logicalArgCount)
+      POLYINVOKE_FATAL(PREFIX, "OpenCL source kernel `%s` has %u physical args; expected %u legacy args or %u owner+offset ABI args",
+                       symbol.c_str(), physicalArgCount, logicalArgCount, expandedArgCount);
+  }
+  if (trace)
+    fmt::print(stderr,
+               "[OpenCL launch] {} device={} groups={}x{}x{} local={}x{}x{} shared={} logical_args={} physical_args={} expanded={}\n",
+               symbol, deviceName, policy.global.x, policy.global.y, policy.global.z, local.x, local.y, local.z, sharedMem, logicalArgCount,
+               physicalArgCount, expandedPointerAbi);
 
-  for (cl_uint i = 0; i < types.size() - 1; ++i) {
-    const auto rawPtr = args[i];
-    switch (const auto tpe = types[i]) {
+  cl_uint physicalIdx = 0;
+  for (cl_uint logicalIdx = 0; logicalIdx < logicalArgCount; ++logicalIdx) {
+    const auto rawPtr = args[logicalIdx];
+    switch (const auto tpe = types[logicalIdx]) {
       case Type::Ptr: {
         static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
         uintptr_t ptr = {};
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
         if (svm) {
-          CHECKED(clSetKernelArgSVMPointer(kernel, i, reinterpret_cast<void *>(ptr)));
+          void *value = reinterpret_cast<void *>(ptr);
+          if (!value && expandedPointerAbi) value = ensureNullArgStub();
+          CHECKED(clSetKernelArgSVMPointer(kernel, physicalIdx++, value));
+          if (expandedPointerAbi) {
+            // Some OpenCL implementations reject a null physical pointer argument. Expanded source
+            // kernels reconstruct logical null from this reserved offset and never observe the stub.
+            const cl_ulong byteOffset = ptr ? 0 : NullPointerOffset;
+            CHECKED(clSetKernelArg(kernel, physicalIdx++, sizeof(byteOffset), &byteOffset));
+          }
         } else {
-          const auto resolved = queryMemObject(ptr);
-          cl_mem mem = resolved.value;
-          if (resolved.offset != 0) {
-            if (resolved.remaining == 0) POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is at the end of its allocation", ptr);
-            if (memBaseAddrAlign != 0 && resolved.offset % memBaseAddrAlign != 0)
+          cl_mem mem = {};
+          size_t offset = 0, remaining = 0;
+          if (!ptr && expandedPointerAbi) mem = ensureNullArgBuffer();
+          else {
+            if (ptr) {
+              const auto resolved = queryMemObject(ptr);
+              mem = resolved.value;
+              offset = resolved.offset;
+              remaining = resolved.remaining;
+            }
+          }
+          if (trace)
+            fmt::print(stderr, "  ptr[{}] logical=0x{:x} owner={} offset={} remaining={} physical={}{}\n", logicalIdx, ptr,
+                       static_cast<const void *>(mem), offset, remaining, physicalIdx, expandedPointerAbi ? "+offset" : "");
+          if (!expandedPointerAbi && offset != 0) {
+            if (remaining == 0) POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is at the end of its allocation", ptr);
+            if (memBaseAddrAlign != 0 && offset % memBaseAddrAlign != 0)
               POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is %zu bytes into its allocation, not aligned to %zu bytes on %s",
-                               ptr, resolved.offset, memBaseAddrAlign, deviceName.c_str());
-            cl_buffer_region region{resolved.offset, resolved.remaining};
-            mem = OUT_CHECKED(clCreateSubBuffer(resolved.value, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, OUT_ERR));
+                               ptr, offset, memBaseAddrAlign, deviceName.c_str());
+            cl_buffer_region region{offset, remaining};
+            mem = OUT_CHECKED(clCreateSubBuffer(mem, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, OUT_ERR));
             subBuffers.push_back(mem);
           }
-          CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));
+          CHECKED(clSetKernelArg(kernel, physicalIdx++, toSize(tpe), &mem));
+          if (expandedPointerAbi) {
+            const cl_ulong byteOffset = ptr ? static_cast<cl_ulong>(offset) : NullPointerOffset;
+            CHECKED(clSetKernelArg(kernel, physicalIdx++, sizeof(byteOffset), &byteOffset));
+          }
         }
       } break;
       case Type::Scratch: {
-        CHECKED(clSetKernelArg(kernel, i, sharedMem, nullptr));
+        CHECKED(clSetKernelArg(kernel, physicalIdx++, sharedMem, nullptr));
         break;
       }
       default: {
-        CHECKED(clSetKernelArg(kernel, i, toSize(tpe), rawPtr));
+        CHECKED(clSetKernelArg(kernel, physicalIdx++, toSize(tpe), rawPtr));
         break;
       }
     }
   }
+  if (physicalIdx != physicalArgCount)
+    POLYINVOKE_FATAL(PREFIX, "OpenCL kernel `%s` bound %u physical args but its ABI reports %u", symbol.c_str(), physicalIdx,
+                     physicalArgCount);
   if (svm) {
     // indirect SVM allocs need CL_KERNEL_EXEC_INFO_SVM_PTRS or the driver skips coherency; some drivers
     // reject the batched call but accept it per-pointer, so on CL_INVALID_VALUE retry per-pointer
@@ -843,8 +910,11 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
       if (types[i] != Type::Ptr) continue;
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
-      // NVIDIA OpenCL rejects clSetKernelExecInfo on a null entry with CL_INVALID_VALUE.
+      // NVIDIA OpenCL rejects null pointer args and null SVM declarations. Expanded source kernels recover
+      // logical null from NullPointerOffset, so declaring the physical stub does not alter program semantics.
       if (ptr) allSvmPtrs.push_back(reinterpret_cast<void *>(ptr));
+      else if (expandedPointerAbi)
+        if (void *stub = ensureNullArgStub()) allSvmPtrs.push_back(stub);
     }
     allSvmPtrs.insert(allSvmPtrs.end(), tracked.begin(), tracked.end());
     auto declare = [&](void *const *ptrs, size_t n) {
@@ -884,8 +954,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     size_t kernelMax = 0;
     if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(device), &device, nullptr) == CL_SUCCESS
         && clGetKernelWorkGroupInfo(kernel, device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelMax), &kernelMax, nullptr) == CL_SUCCESS) {
-      cl_details::retryLaunchDimensions(result, policy.global, local, kernelMax)
-          | aspartame::for_each([&](const auto &retry) { result = enqueue(retry); });
+      if (const auto retry = cl_details::retryLaunchDimensions(result, policy.global, local, kernelMax)) result = enqueue(*retry);
     }
   }
   CHECKED(result);

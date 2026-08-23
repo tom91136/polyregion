@@ -256,9 +256,8 @@ void polyregion::polyrt::initialise() {
             currentDevice ? currentDevice->name().c_str() : "(none)", //
             currentDevice ? magic_enum::enum_name(currentDevice->moduleFormat()).data() : "(no device)");
         if (currentDevice)
-          currentDevice->features() //
-              ^ grouped(10)         //
-              ^ for_each([](const auto &chunk) { log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str()); });
+          for (const auto &chunk : currentDevice->features() ^ grouped(10))
+            log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str());
       }
     }
   });
@@ -281,6 +280,14 @@ polyregion::polyrt::ExecutionContext &requireContext(void *context, const char *
 
 POLYREGION_EXPORT extern "C" void polyrt_context_acquire(void *context) { requireContext(context, __func__).transaction.lock(); }
 POLYREGION_EXPORT extern "C" void polyrt_context_release(void *context) { requireContext(context, __func__).transaction.unlock(); }
+POLYREGION_EXPORT extern "C" size_t polyrt_device_max_threads_per_block(void *context) {
+  return requireContext(context, __func__).device->maxThreadsPerBlock();
+}
+POLYREGION_EXPORT extern "C" polyregion::polyrt::DeviceKind polyrt_device_kind(void *context) {
+  return requireContext(context, __func__).device->physicalDevice().scheme == PhysicalDevice::Scheme::Host
+             ? polyregion::polyrt::DeviceKind::CPU
+             : polyregion::polyrt::DeviceKind::GPU;
+}
 
 POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) {
   if (bytes == 0) return 0;
@@ -410,13 +417,11 @@ static const JitAbi &resolveJitAbi() {
 #else
     constexpr auto defaultJitLib = "libpolyc.so";
 #endif
-    const auto resolved = std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib} //
-                          | collect_first([&](const auto &name) -> std::optional<JitAbi> {
-                              if (!name || !name[0]) return std::nullopt;
-                              if (auto h = polyregion_dl_open(name)) return select(from(h));
-                              return std::nullopt;
-                            });
-    return resolved ? *resolved : incompatible.value_or(JitAbi{});
+    for (const auto *name : std::array<const char *, 2>{std::getenv(polyregion::env::PolyrtJitLib), defaultJitLib})
+      if (name && name[0])
+        if (auto handle = polyregion_dl_open(name))
+          if (const auto resolved = select(from(handle))) return *resolved;
+    return incompatible.value_or(JitAbi{});
   }();
   return abi;
 }
@@ -425,8 +430,8 @@ static const JitAbi &resolveJitAbi() {
 static void collectSpecScalars(const unsigned char *base, const polyregion::runtime::TypeLayout *layout, const std::string &prefix,
                                int depth, std::deque<std::string> &names, std::vector<polyc_jit_spec_const_t> &out) {
   if (!base || !layout || depth > 4) return;
-  view(layout->members, layout->memberCount ? layout->members + layout->memberCount : layout->members) | for_each([&](const auto &m) {
-    if (!m.type) return;
+  for (const auto &m : view(layout->members, layout->memberCount ? layout->members + layout->memberCount : layout->members)) {
+    if (!m.type) continue;
     const auto name = prefix.empty() ? std::string(m.name) : prefix + "." + m.name;
     if (m.ptrIndirection == 0) {
       if (polyregion::runtime::isSet(m.type->attrs, polyregion::runtime::LayoutAttrs::Primitive)) {
@@ -437,7 +442,7 @@ static void collectSpecScalars(const unsigned char *base, const polyregion::runt
       } else if (m.type->memberCount > 0) collectSpecScalars(base + m.offsetInBytes, m.type, name, depth + 1, names, out);
     } else if (m.ptrIndirection == 1 && m.type->memberCount > 0)
       collectSpecScalars(*reinterpret_cast<const unsigned char *const *>(base + m.offsetInBytes), m.type, name, depth + 1, names, out);
-  });
+  }
 }
 
 struct SpecConsts {
@@ -454,11 +459,10 @@ static SpecConsts collectSpecConsts(const void *capture, const polyregion::runti
 static uint64_t hashSpecs(const std::vector<polyc_jit_spec_const_t> &specs) {
   const auto add = [](uint64_t h, const void *p, size_t n) {
     const auto *begin = static_cast<const unsigned char *>(p);
-    return view(begin,
-                n ? begin + n : begin) //
+    return view(begin, n ? begin + n : begin)
            | fold_left(h, [](const uint64_t acc, const unsigned char x) { return (acc ^ x) * 1099511628211ull; });
   };
-  return specs | fold_left(uint64_t{1469598103934665603ull}, [&](uint64_t h, const auto &s) {
+  return specs ^ fold_left(uint64_t{1469598103934665603ull}, [&](uint64_t h, const auto &s) {
            const auto fieldLen = std::strlen(s.field);
            const auto reprLen = std::strlen(s.repr);
            h = add(h, &fieldLen, sizeof(fieldLen));

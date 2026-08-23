@@ -1,5 +1,8 @@
 #pragma once
 
+#include <chrono>
+#include <optional>
+
 #include "polyregion/compat.h"
 
 #include "hipew.h"
@@ -21,7 +24,17 @@ public:
 
 namespace details {
 using HipModuleStore = detail::ModuleStore<hipModule_t, hipFunction_t>;
+
+template <typename Query, typename Now, typename Pause>
+std::optional<hipError_t> pollStreamUntil(const std::chrono::steady_clock::time_point deadline, Query query, Now now, Pause pause) {
+  for (;;) {
+    const auto result = query();
+    if (result != hipErrorNotReady) return result;
+    if (now() >= deadline) return {};
+    pause();
+  }
 }
+} // namespace details
 
 class POLYREGION_EXPORT HipDevice final : public Device {
 
@@ -57,8 +70,10 @@ class POLYREGION_EXPORT HipDeviceQueue final : public DeviceQueue {
 
   details::HipModuleStore &store;
   hipStream_t stream{};
+  const std::chrono::duration<int64_t> timeout;
 
   void enqueueCallback(const MaybeCallback &cb);
+  void waitStream();
 
 public:
   POLYREGION_EXPORT explicit HipDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store);

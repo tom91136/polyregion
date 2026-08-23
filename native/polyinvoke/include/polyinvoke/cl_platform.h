@@ -125,21 +125,27 @@ class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
 
   details::ClModuleStore &store;
   cl_command_queue queue = {};
+  cl_context context = {};
   std::function<detail::MemoryObjects<cl_mem>::Resolved(uintptr_t)> queryMemObject;
+  ModuleFormat format;
   size_t memBaseAddrAlign;
   std::string deviceName;
   std::optional<cl_bitfield> svm; // forwarded from ClDevice; when set, use SVM ops instead of cl_mem
   std::shared_ptr<details::SVMTracker> svmTracker;
+  void *nullArgStub = nullptr;
+  cl_mem nullArgBuffer = {};
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
+  void *ensureNullArgStub();
+  cl_mem ensureNullArgBuffer();
   bool mapSvmForHost(void *ptr);
   void unmapAllSvmForDevice();
   void mapAllSvmForHost();
 
 public:
   POLYREGION_EXPORT ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                                  decltype(queryMemObject) queryMemObject, size_t memBaseAddrAlign, std::string deviceName,
-                                  std::optional<cl_bitfield> svm, std::shared_ptr<details::SVMTracker> svmTracker);
+                                  decltype(queryMemObject) queryMemObject, ModuleFormat format, size_t memBaseAddrAlign,
+                                  std::string deviceName, std::optional<cl_bitfield> svm, std::shared_ptr<details::SVMTracker> svmTracker);
   POLYREGION_EXPORT ~ClDeviceQueue() override;
   POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                     const MaybeCallback &cb) override;

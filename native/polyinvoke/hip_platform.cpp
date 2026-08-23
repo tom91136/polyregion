@@ -1,5 +1,7 @@
 #include "polyinvoke/hip_platform.h"
 
+#include <thread>
+
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
@@ -207,7 +209,8 @@ HipDevice::~HipDevice() { POLYINVOKE_TRACE(); }
 
 // ---
 
-HipDeviceQueue::HipDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store) : latch(timeout), store(store) {
+HipDeviceQueue::HipDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store)
+    : latch(timeout), store(store), timeout(timeout) {
   POLYINVOKE_TRACE();
   CHECKED(hipStreamCreate(&stream));
 }
@@ -231,6 +234,16 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
       }),
       0));
 }
+void HipDeviceQueue::waitStream() {
+  const auto result = details::pollStreamUntil(
+      std::chrono::steady_clock::now() + timeout, [&] { return hipStreamQuery(stream); }, [] { return std::chrono::steady_clock::now(); },
+      [] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
+  if (!result) {
+    const auto timeoutMillis = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
+    POLYINVOKE_FATAL(PREFIX, "Stream did not complete within %lld ms", static_cast<long long>(timeoutMillis));
+  }
+  CHECKED(*result);
+}
 void HipDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                 const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
@@ -241,7 +254,7 @@ void HipDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset,
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   CHECKED(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst + dstOffset), const_cast<void *>(src), size, stream));
-  CHECKED(hipStreamSynchronize(stream));
+  waitStream();
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
@@ -249,7 +262,7 @@ void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, v
   CHECKED(hipMemcpyDtoHAsync(dst, reinterpret_cast<hipDeviceptr_t>(src + srcOffset), size, stream));
   // XXX hipStreamAddCallback can fire before a pageable async copy is host-visible; sync so a caller
   // waiting on the callback doesn't read stale data.
-  CHECKED(hipStreamSynchronize(stream));
+  waitStream();
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -271,12 +284,12 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 #ifdef _WIN32
   hipStreamQuery(stream);
 #endif
-  CHECKED(hipStreamSynchronize(stream));
+  waitStream();
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
-  CHECKED(hipStreamSynchronize(stream));
+  waitStream();
 }
 
 #undef CHECKED

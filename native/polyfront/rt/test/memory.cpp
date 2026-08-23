@@ -18,11 +18,15 @@ namespace {
 
 struct StubDevice final : object::ObjectDevice {
   bool shared;
+  bool cpu;
+  size_t threads;
   size_t sharedAllocs = 0, sharedFrees = 0;
 
-  explicit StubDevice(const bool shared) : shared(shared) {}
+  explicit StubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024) : shared(shared), cpu(cpu), threads(threads) {}
   std::string name() override { return "stub"; }
+  PhysicalDevice physicalDevice() override { return cpu ? PhysicalDevice::host() : PhysicalDevice::synthetic(Backend::Metal, 0); }
   bool sharedAddressSpace() override { return shared; }
+  size_t maxThreadsPerBlock() override { return threads; }
   void loadModule(const std::string &, const std::string &) override {}
   bool moduleLoaded(const std::string &) override { return false; }
   std::optional<void *> mallocShared(size_t size, Access access) override {
@@ -41,10 +45,10 @@ struct WithStubDevice {
   std::unique_ptr<Device> previous;
   StubDevice *stub;
 
-  explicit WithStubDevice(const bool shared) {
+  explicit WithStubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024) {
     polyregion::polyrt::initialise();
     previous = std::move(polyregion::polyrt::currentDevice);
-    auto owned = std::make_unique<StubDevice>(shared);
+    auto owned = std::make_unique<StubDevice>(shared, cpu, threads);
     stub = owned.get();
     polyregion::polyrt::currentDevice = std::move(owned);
   }
@@ -52,6 +56,21 @@ struct WithStubDevice {
 };
 
 } // namespace
+
+TEST_CASE("device queries describe the selected runtime device") {
+  {
+    WithStubDevice device(false, true, 73);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
+    CHECK(polyrt_device_max_threads_per_block(&context) == 73);
+    CHECK(polyrt_device_kind(&context) == polyregion::polyrt::DeviceKind::CPU);
+  }
+  {
+    WithStubDevice device(false, false, 511);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
+    CHECK(polyrt_device_max_threads_per_block(&context) == 511);
+    CHECK(polyrt_device_kind(&context) == polyregion::polyrt::DeviceKind::GPU);
+  }
+}
 
 TEST_CASE("usm free returns a host fallback allocation to the host heap") {
   WithStubDevice device(false);

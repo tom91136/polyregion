@@ -33,6 +33,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Device> currentDe
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> currentQueue;
 
 enum class DebugLevel : uint8_t { None = 0, Info = 1, Debug = 2, Trace = 3 };
+enum class DeviceKind : uint8_t { CPU = 0, GPU = 1 };
 
 #if defined(__GNUC__) || defined(__clang__)
   #define POLYREGION_PRINTF_FORMAT(fmt_index, first_arg) __attribute__((format(printf, fmt_index, first_arg)))
@@ -63,6 +64,8 @@ extern "C" {
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_acquire(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_release(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT size_t polyrt_device_max_threads_per_block(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT polyregion::polyrt::DeviceKind polyrt_device_kind(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uintptr_t polyrt_remote_malloc(void *context, size_t bytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_free(void *context, uintptr_t ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
