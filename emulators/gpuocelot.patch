@@ -679,3 +679,100 @@ index 32ab8e38..73158a6f 100644
  guard : TOKEN_PREDICATE_IDENTIFIER
  {
  	state.guard( $<text>1, @1, false );
+diff --git a/ocelot/include/ocelot/executive/CooperativeThreadArray.h b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
+index a50178e..5fbbcd1 100644
+--- a/ocelot/include/ocelot/executive/CooperativeThreadArray.h
++++ b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
+@@ -508,6 +508,7 @@ namespace executive {
+ 		void eval_SetP(CTAContext &context, const ir::PTXInstruction &instr);
+ 		void eval_Set(CTAContext &context, const ir::PTXInstruction &instr);
+ 		void eval_Shf(CTAContext &context, const ir::PTXInstruction &instr);		
++		void eval_Shfl(CTAContext &context, const ir::PTXInstruction &instr);
+ 		void eval_Shl(CTAContext &context, const ir::PTXInstruction &instr);		
+ 		void eval_Shr(CTAContext &context, const ir::PTXInstruction &instr);		
+ 		void eval_Sin(CTAContext &context, const ir::PTXInstruction &instr);		
+diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
+index 66543e0..9f5c9c0 100644
+--- a/ocelot/src/executive/CooperativeThreadArray.cpp
++++ b/ocelot/src/executive/CooperativeThreadArray.cpp
+@@ -569,6 +569,8 @@ void executive::CooperativeThreadArray::execute(int PC)
+ 				eval_SetP(context, instr); break;
+ 			case ir::PTXInstruction::Shf:
+ 				eval_Shf(context, instr); break;
++			case ir::PTXInstruction::Shfl:
++				eval_Shfl(context, instr); break;
+ 			case ir::PTXInstruction::Shr:
+ 				eval_Shr(context, instr); break;
+ 			case ir::PTXInstruction::Shl:
+@@ -7831,6 +7833,71 @@ void executive::CooperativeThreadArray::eval_Shf(CTAContext &context, const ir::P
+     }
+ }
+ 
++void executive::CooperativeThreadArray::eval_Shfl(CTAContext &context,
++	const ir::PTXInstruction &instr) {
++	trace();
++	if (instr.type != ir::PTXOperand::b32) {
++		throw RuntimeException("unsupported data type", context.PC, instr);
++	}
++
++	// Read every lane before writing any destination.  PTX permits d and a to
++	// name the same register, while a shuffle observes all source lanes at once.
++	std::vector<ir::PTXB32> source(threadCount);
++	for (int threadID = 0; threadID < threadCount; ++threadID) {
++		source[threadID] = operandAsB32(threadID, instr.a);
++	}
++
++	for (int threadID = 0; threadID < threadCount; ++threadID) {
++		if (!context.predicated(threadID, instr)) continue;
++
++		const unsigned int lane = threadID & 0x1f;
++		const unsigned int b = operandAsB32(threadID, instr.b) & 0x1f;
++		const unsigned int c = operandAsB32(threadID, instr.c);
++		const unsigned int clamp = c & 0x1f;
++		const unsigned int mask = (c >> 8) & 0x1f;
++		const unsigned int maxLane = (lane & mask) | (clamp & ~mask);
++		const unsigned int minLane = lane & mask;
++
++		int sourceLane = lane;
++		bool inRange = false;
++		switch (instr.shuffleMode) {
++			case ir::PTXInstruction::Up:
++				sourceLane = static_cast<int>(lane) - static_cast<int>(b);
++				inRange = sourceLane >= static_cast<int>(maxLane);
++				break;
++			case ir::PTXInstruction::Down:
++				sourceLane = lane + b;
++				inRange = sourceLane <= static_cast<int>(maxLane);
++				break;
++			case ir::PTXInstruction::Bfly:
++				sourceLane = lane ^ b;
++				inRange = sourceLane <= static_cast<int>(maxLane);
++				break;
++			case ir::PTXInstruction::Idx:
++				sourceLane = minLane | (b & ~mask);
++				inRange = sourceLane <= static_cast<int>(maxLane);
++				break;
++			default:
++				throw RuntimeException("unsupported shuffle mode", context.PC,
++					instr);
++		}
++
++		if (!inRange) sourceLane = lane;
++
++		const int warpBase = threadID & ~0x1f;
++		const int sourceThread = warpBase + sourceLane;
++		// Reading an inactive or nonexistent lane has undefined PTX behavior.
++		// Keep the emulator memory-safe and deterministic for a partial warp.
++		const ir::PTXB32 result = sourceThread < threadCount
++			? source[sourceThread] : source[threadID];
++		setRegAsB32(threadID, instr.d.reg, result);
++
++		if (instr.pq.addressMode == ir::PTXOperand::Register) {
++			setRegAsPredicate(threadID, instr.pq.reg, inRange);
++		}
++	}
++}
++
+ /*!
+ 
+ */

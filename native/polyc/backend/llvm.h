@@ -115,6 +115,7 @@ struct CodeGen;
 struct PointerModel {
   virtual ValPtr selectPtr(CodeGen &gen, const Term::Select &select) = 0;
   virtual void copyAggregate(CodeGen &gen, ValPtr dst, ValPtr src, const AnyType &tpe) = 0;
+  virtual void zeroAggregate(CodeGen &gen, ValPtr dst, const AnyType &tpe) = 0;
   virtual ValPtr indexVal(CodeGen &gen, const Expr::Index &index, const std::string &key) = 0;
   virtual ValPtr refToVal(CodeGen &gen, const Expr::RefTo &refTo, const std::string &key) = 0;
   virtual void storeUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) = 0;
@@ -175,6 +176,7 @@ struct CodeGen {
   // structs travel by pointer on every SPIR-V target (no legalisable aggregate load)
   [[nodiscard]] bool structByPtr() const { return spirvStructByMemcpy() || C.isVulkan(); }
   void copyStruct(llvm::Value *dst, llvm::Value *src, const AnyType &tpe);
+  void zeroStruct(llvm::Value *dst, const AnyType &tpe);
 
   explicit CodeGen(const LLVMBackend::Options &options, const std::string &moduleName);
   ~CodeGen();

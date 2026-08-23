@@ -157,6 +157,21 @@ void VulkanLowering::physicalFieldCopy(llvm::Value *dst, llvm::Value *src, llvm:
   }
 }
 
+void VulkanLowering::physicalFieldZero(llvm::Value *dst, llvm::Type *rootTy, llvm::Type *tpe, std::vector<llvm::Value *> idxs) {
+  if (auto *s = llvm::dyn_cast<llvm::StructType>(tpe)) {
+    iota(0u, s->getNumElements()) | for_each([&](const auto &i) {
+      physicalFieldZero(dst, rootTy, s->getElementType(i), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
+    });
+  } else if (auto *a = llvm::dyn_cast<llvm::ArrayType>(tpe)) {
+    iota(uint64_t{0}, a->getNumElements()) | for_each([&](const auto &i) {
+      physicalFieldZero(dst, rootTy, a->getElementType(), idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
+    });
+  } else {
+    auto *ptr = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkzero_dst");
+    const auto _ = cg.C.store(cg.B, llvm::Constant::getNullValue(tpe), ptr);
+  }
+}
+
 void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, const AnyType &tpe,
                                      std::vector<llvm::Value *> idxs) {
   if (auto s = tpe.template get<Type::Struct>()) {
@@ -176,6 +191,26 @@ void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::T
     auto *dstP = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkcopy_dst");
     auto *srcP = cg.B.CreateInBoundsGEP(rootTy, src, idxs, "vkcopy_src");
     const auto _ = cg.C.store(cg.B, cg.C.load(cg.B, srcP, scalarTy), dstP);
+  }
+}
+
+void VulkanLowering::structFieldZero(llvm::Value *dst, llvm::Type *rootTy, const AnyType &tpe, std::vector<llvm::Value *> idxs) {
+  if (auto s = tpe.template get<Type::Struct>()) {
+    const auto &info = cg.structTypes.at(repr(s->name));
+    if (info.def.isUnion) {
+      physicalFieldZero(dst, rootTy, info.tpe, std::move(idxs));
+      return;
+    }
+    info.def.members | zip_with_index<size_t>() | for_each([&](const auto &m, const auto &i) {
+      structFieldZero(dst, rootTy, m.tpe, idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), i)));
+    });
+  } else if (auto a = tpe.template get<Type::Arr>()) {
+    iota(int32_t{0}, a->length)
+        | for_each([&](const auto &e) { structFieldZero(dst, rootTy, a->comp, idxs ^ append(llvm::ConstantInt::get(cg.C.i32Ty(), e))); });
+  } else {
+    auto *scalarTy = tpe.template is<Type::Bool1>() ? llvm::Type::getInt8Ty(cg.C.actual) : cg.resolveType(tpe);
+    auto *ptr = cg.B.CreateInBoundsGEP(rootTy, dst, idxs, "vkzero_dst");
+    const auto _ = cg.C.store(cg.B, llvm::Constant::getNullValue(scalarTy), ptr);
   }
 }
 

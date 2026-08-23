@@ -423,6 +423,9 @@ struct PhysicalPointerModel final : PointerModel {
       if (!size.isZero()) gen.B.CreateMemCpy(dst, al, src, al, size);
     }
   }
+  void zeroAggregate(CodeGen &gen, ValPtr dst, const AnyType &tpe) override {
+    const auto _ = gen.C.store(gen.B, llvm::Constant::getNullValue(gen.resolveType(tpe)), dst);
+  }
   ValPtr indexVal(CodeGen &gen, const Expr::Index &index, const std::string &key) override { return physicalIndexVal(gen, index, key); }
   ValPtr refToVal(CodeGen &gen, const Expr::RefTo &refTo, const std::string &key) override { return physicalRefToVal(gen, refTo, key); }
   void storeUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) override {
@@ -435,6 +438,9 @@ struct LogicalPointerModel final : VulkanLowering {
   ValPtr selectPtr(CodeGen &gen, const Term::Select &select) override { return selectPtrImpl(gen, select, /*oneGep*/ true); }
   void copyAggregate(CodeGen &gen, ValPtr dst, ValPtr src, const AnyType &tpe) override {
     structFieldCopy(dst, src, gen.resolveType(tpe), tpe, {llvm::ConstantInt::get(gen.C.i32Ty(), 0)});
+  }
+  void zeroAggregate(CodeGen &gen, ValPtr dst, const AnyType &tpe) override {
+    structFieldZero(dst, gen.resolveType(tpe), tpe, {llvm::ConstantInt::get(gen.C.i32Ty(), 0)});
   }
   ValPtr indexVal(CodeGen &gen, const Expr::Index &index, const std::string &key) override {
     if (const auto lhs = index.lhs.template get<Term::Select>())
@@ -584,6 +590,8 @@ ValPtr CodeGen::findStackVar(const Named &named) {
 ValPtr CodeGen::mkSelectPtr(const Term::Select &select) { return ptrModel->selectPtr(*this, select); }
 
 void CodeGen::copyStruct(llvm::Value *dst, llvm::Value *src, const AnyType &tpe) { ptrModel->copyAggregate(*this, dst, src, tpe); }
+
+void CodeGen::zeroStruct(llvm::Value *dst, const AnyType &tpe) { ptrModel->zeroAggregate(*this, dst, tpe); }
 
 ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
   using llvm::ConstantFP;
@@ -1133,7 +1141,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           } else if (x.name.tpe.template is<Type::Struct>() && !localArr) {
             // zero an uninitialised struct declaration: a ctor that sets only some members otherwise leaves the
             // rest at stale stack bytes, and a later by-value copy or destruction derefs the garbage
-            const auto _ = C.store(B, llvm::Constant::getNullValue(allocTy), stackPtr);
+            zeroStruct(stackPtr, x.name.tpe);
           }
         }
         return BlockKind::Normal;

@@ -39,7 +39,9 @@ struct VulkanLowering : PointerModel {
   [[nodiscard]] static std::pair<llvm::ArrayType *, std::vector<uint64_t>> flattenArray(llvm::Type *arrTy);
 
   void physicalFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, llvm::Type *tpe, std::vector<llvm::Value *> idxs);
+  void physicalFieldZero(llvm::Value *dst, llvm::Type *rootTy, llvm::Type *tpe, std::vector<llvm::Value *> idxs);
   void structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, const AnyType &tpe, std::vector<llvm::Value *> idxs);
+  void structFieldZero(llvm::Value *dst, llvm::Type *rootTy, const AnyType &tpe, std::vector<llvm::Value *> idxs);
 
   [[nodiscard]] std::optional<ValPtr> termSelectVal(CodeGen &, const Term::Select &select) override;
   [[nodiscard]] std::optional<ValPtr> mkIndex(const Term::Select &lhs, const Term::Any &idx);

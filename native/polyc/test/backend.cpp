@@ -1157,6 +1157,27 @@ TEST_CASE("Vulkan uses byte-backed workgroup booleans", "[backend][subgroup][vul
   CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store i8"));
 }
 
+TEST_CASE("Vulkan zeroes Boolean struct fields through their byte storage", "[backend][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym flagName({"Flag"});
+  const auto flagTpe = Type::Struct(flagName, {}).widen();
+  const StructDef flag(flagName, {}, {Named("set", Type::Bool1())}, {}, false);
+  const Named value("value", flagTpe);
+  const Function entry = mkFn("kernel", {}, Type::Unit0(), {Var(value, std::optional<Expr::Any>{}, true).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV_GLCompute, ""};
+  opts.pipelineSpec = "StructuredExit";
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {flag}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store i8 0"));
+  CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("store %Flag zeroinitializer"));
+}
+
 TEST_CASE("Vulkan retains multidimensional workgroup-array strides", "[backend][subgroup][vulkan]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
