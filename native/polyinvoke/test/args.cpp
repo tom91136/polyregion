@@ -41,11 +41,11 @@ kernel void offset_alias(global uchar *a_base, ulong a_offset,
   global uchar *nullable = nullable_offset == (ulong)-1 ? (global uchar *)0 : nullable_base + nullable_offset;
   out[0] = nullable == 0 ? a[0] + b[0] : 1000;
 }
-kernel void compare_alias(global double *a_base, ulong a_offset,
-                          global double *b_base, ulong b_offset,
+kernel void compare_alias(global int *a_base, ulong a_offset,
+                          global int *b_base, ulong b_offset,
                           global uint *out_base, ulong out_offset, uint n) {
-  global double *a = (global double *)((global uchar *)a_base + a_offset);
-  global double *b = (global double *)((global uchar *)b_base + b_offset);
+  global int *a = (global int *)((global uchar *)a_base + a_offset);
+  global int *b = (global int *)((global uchar *)b_base + b_offset);
   global uint *out = (global uint *)((global uchar *)out_base + out_offset);
   uint i = get_global_id(0);
   if (i < n) out[i] = (a + i) != (b + i);

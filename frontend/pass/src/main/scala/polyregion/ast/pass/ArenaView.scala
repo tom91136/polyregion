@@ -152,7 +152,10 @@ object ArenaView extends ProgramPass {
     }
     def localIdentity(t: p.Term): Boolean = t match {
       case _: p.Term.NullPtrConst => true
-      case _                      => isLocal(t) && stableLocal(t)
+      // Stable locals are seeded only from locally rooted RefTo expressions or casts from local arrays.
+      // Inlining can conservatively widen an alias's provenance to Opaque, so do not discard that stronger
+      // construction proof when classifying an identity-only field write.
+      case _ => stableLocal(t)
     }
     def selectedField(t: p.Term): Option[Field] = t match {
       case p.Term.Select(root, steps, _: p.Type.Ptr) if steps.nonEmpty =>
@@ -164,10 +167,15 @@ object ArenaView extends ProgramPass {
     // Logical SPIR-V cannot store a local pointer in an aggregate, but a field used only for identity can retain
     // C++ equality semantics as an i64 token. Arena-reachable or otherwise-observed fields keep normal lowering.
     // A write source is either an already-tokenisable local value or another identity field.
+    def identityWriteSource(expr: p.Expr): Option[Either[Field, Boolean]] = expr match {
+      case p.Expr.Alias(rhs)               => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
+      case p.Expr.Cast(rhs, _: p.Type.Ptr) => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
+      case _                               => None
+    }
     val writes = program.entry
       .collectAll[p.Stmt]
-      .collect { case p.Stmt.Mut(target: p.Term.Select, p.Expr.Alias(rhs)) =>
-        selectedField(target).map(field => field -> selectedField(rhs).toLeft(localIdentity(rhs)))
+      .collect { case p.Stmt.Mut(target: p.Term.Select, expr) =>
+        selectedField(target).flatMap(field => identityWriteSource(expr).map(field -> _))
       }
       .flatten
     def traversedPointerFields(t: p.Term): List[Field] = t match {
@@ -306,6 +314,61 @@ object ArenaView extends ProgramPass {
         key -> (i.toLong + 1L)
       }.toMap
 
+      // Inlined nullable base-pointer adjustments retain their source-level null guard after their actual argument
+      // becomes either an immutable RefTo of stack storage or an immutable null binding. Keeping those guards
+      // creates Function-pointer phis which logical SPIR-V cannot represent and some physical SPIR-V runtimes
+      // miscompile for non-zero multiple-inheritance base offsets. Fold only guards with stable local proofs.
+      def definitelyNonNullLocal(t: p.Term): Boolean = t match {
+        case p.Term.Select(root, Nil, _: p.Type.Ptr) => !reassignedPointers(root) && rootedLocally(t)
+        case _                                       => false
+      }
+      val stableNullPointers = f.collectAll[p.Stmt].foldLeft(Set.empty[p.Named]) {
+        case (known, p.Stmt.Var(n, Some(p.Expr.Alias(_: p.Term.NullPtrConst)), _))
+            if isPtr(n.tpe) && !reassignedPointers(n) =>
+          known + n
+        case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
+            if isPtr(n.tpe) && !reassignedPointers(n) && known(root) =>
+          known + n
+        case (known, _) => known
+      }
+      def definitelyNull(t: p.Term): Boolean = t match {
+        case _: p.Term.NullPtrConst      => true
+        case p.Term.Select(root, Nil, _) => stableNullPointers(root)
+        case _                           => false
+      }
+      val constantConditions = f
+        .collectAll[p.Stmt]
+        .collect {
+          case p.Stmt.Var(n, Some(p.Expr.IntrOp(p.Intr.LogicNeq(x, _: p.Term.NullPtrConst))), false)
+              if definitelyNonNullLocal(x) =>
+            n -> true
+          case p.Stmt.Var(n, Some(p.Expr.IntrOp(p.Intr.LogicNeq(_: p.Term.NullPtrConst, y))), false)
+              if definitelyNonNullLocal(y) =>
+            n -> true
+          case p.Stmt.Var(n, Some(p.Expr.IntrOp(p.Intr.LogicEq(x, y))), false)
+              if definitelyNull(x) && definitelyNull(y) =>
+            n -> true
+          case p.Stmt.Var(n, Some(p.Expr.IntrOp(p.Intr.LogicNeq(x, y))), false)
+              if definitelyNull(x) && definitelyNull(y) =>
+            n -> false
+        }
+        .toMap
+      def simplifyStablePointerGuards(stmts: List[p.Stmt]): List[p.Stmt] = stmts.flatMap {
+        case p.Stmt.Cond(p.Term.Select(root, Nil, _), whenTrue, whenFalse) if constantConditions.contains(root) =>
+          simplifyStablePointerGuards(if (constantConditions(root)) whenTrue else whenFalse)
+        case p.Stmt.Cond(c, whenTrue, whenFalse) =>
+          List(p.Stmt.Cond(c, simplifyStablePointerGuards(whenTrue), simplifyStablePointerGuards(whenFalse)))
+        case p.Stmt.While(c, body) => List(p.Stmt.While(c, simplifyStablePointerGuards(body)))
+        case p.Stmt.ForRange(i, lb, ub, step, body) =>
+          List(p.Stmt.ForRange(i, lb, ub, step, simplifyStablePointerGuards(body)))
+        case t: p.Stmt.Try => List(t.mapBlocks(simplifyStablePointerGuards))
+        case p.Stmt.Raise(value, exceptionKind, cleanup) =>
+          List(p.Stmt.Raise(value, exceptionKind, simplifyStablePointerGuards(cleanup)))
+        case p.Stmt.Annotated(inner, pos, comment) =>
+          simplifyStablePointerGuards(List(inner)).map(p.Stmt.Annotated(_, pos, comment))
+        case stmt => List(stmt)
+      }
+
       def arenaRegion(r: p.Region): Boolean = r match {
         case p.Region.Opaque       => true
         case p.Region.Rooted(root) => root == capN
@@ -317,7 +380,7 @@ object ArenaView extends ProgramPass {
       // ForRange bounds / Cond conditions hold terms inline (not in a visited leaf); hoist any stepped Select
       // into a preceding Var. bounds are loop-invariant so hoisting once is sound; While conds are plain vars
       val body =
-        mapStmtsRec(hoistInlineTerms(f.body))(
+        mapStmtsRec(hoistInlineTerms(simplifyStablePointerGuards(f.body)))(
           rewriteLeaf(
             members,
             unions,
@@ -760,6 +823,8 @@ object ArenaView extends ProgramPass {
               case p.Expr.Alias(_: p.Term.NullPtrConst) if identityField => p.Expr.Alias(i64(0))
               case p.Expr.Alias(p.Term.Select(root, Nil, _)) if identityField && localPointerTokens.contains(root) =>
                 p.Expr.Alias(i64(localPointerTokens(root)))
+              case p.Expr.Cast(source, _: p.Type.Ptr) if identityField =>
+                identityComparable(source).map(p.Expr.Alias.apply).getOrElse(rwExpr(e))
               case _ => rwExpr(e)
             }
             List(p.Stmt.Mut(p.Term.Select(n, steps.map(rwStep), lhsT), rhs))

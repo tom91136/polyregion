@@ -475,6 +475,8 @@ static Expr::Any adjustBasePointer(const Remapper &self, Remapper::RemapContext 
                                    const Type::Any &targetTpe, const clang::CastExpr &cast) {
   const auto targetPtr = targetTpe.get<Type::Ptr>();
   if (!targetPtr) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
+  if (const auto alias = sourceExpr.get<Expr::Alias>(); alias && alias->ref.is<Term::NullPtrConst>())
+    return Expr::Alias(Term::NullPtrConst(targetPtr->comp, targetPtr->space, Region::Opaque()));
   const auto source = r.newVar(sourceExpr);
   auto sourceQual = cast.getSubExpr()->getType().getNonReferenceType();
   if (const auto pointer = sourceQual->getAs<clang::PointerType>()) sourceQual = pointer->getPointeeType().getNonReferenceType();
@@ -1900,9 +1902,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::CXXNewExpr *expr) -> Expr::Any {
         if (expr->getNumPlacementArgs() == 1 && !expr->isArray() && expr->getPlacementArg(0)->getType()->isPointerType()) {
           const auto allocatedTpe = handleType(expr->getAllocatedType(), r);
-          const auto raw = r.newVar(handleExpr(expr->getPlacementArg(0)->IgnoreImpCasts(), r));
-          const auto space =
-              raw.tpe().get<Type::Ptr>() ^ fold([](const auto &ptr) { return ptr.space; }, [] { return TypeSpace::Global().widen(); });
+          const auto rawExpr = handleExpr(expr->getPlacementArg(0)->IgnoreImpCasts(), r);
+          const auto raw = r.newVar(rawExpr);
+          const auto space = raw.tpe().get<Type::Ptr>()
+                             ^ fold([](const auto &ptr) { return ptr.space; },
+                                    [&] {
+                                      return raw.get<Term::Select>()
+                                             ^ fold([](const auto &selection) { return storageSpace(selection); },
+                                                    [] { return TypeSpace::Global().widen(); });
+                                    });
           const auto placementValue = r.newVar(Expr::Cast(raw, Type::Ptr(allocatedTpe, space)));
           const auto placement = r.newName(placementValue.tpe());
           r.push(Stmt::Var(placement, Expr::Alias(placementValue), /*isMutable*/ false));
@@ -1929,22 +1937,35 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           const auto destination = r.constructInto;
           r.constructInto.reset();
           const auto allocated = destination.value_or(r.newVar(tpe));
-          const auto previousThis = r.aggregateThis;
-          r.aggregateThis = allocated;
           defaultInitialiseStruct(r, *structTpe, allocated);
           auto initialiseMember = [&](const Term::Select &member, const Type::Any &memberTpe, const clang::Expr *init) {
             const clang::Expr *core = init;
-            while (const auto next = transparentExceptionExpr(core))
-              core = next;
+            bool defaultMemberInit = false;
+            while (true) {
+              if (const auto defaultInit = llvm::dyn_cast<clang::CXXDefaultInitExpr>(core)) {
+                defaultMemberInit = true;
+                core = defaultInit->getExpr();
+                break;
+              }
+              if (const auto next = transparentExceptionExpr(core)) core = next;
+              else break;
+            }
+            auto lowerInit = [&]() {
+              const auto previousThis = r.aggregateThis;
+              if (defaultMemberInit) r.aggregateThis = allocated;
+              auto lowered = handleExpr(init, r);
+              r.aggregateThis = previousThis;
+              return lowered;
+            };
             if (memberTpe.is<Type::Struct>() && llvm::isa<clang::CXXConstructExpr, clang::InitListExpr>(core)) {
               const auto memberDestination = r.newName(Type::Ptr(memberTpe, storageSpace(member)));
               r.push(Stmt::Var(memberDestination, Expr::RefTo(member, {}, memberTpe, storageSpace(member), Region::Opaque()),
                                /*isMutable*/ false));
               const auto previous = r.constructInto;
               r.constructInto = memberDestination;
-              (void)r.newVar(handleExpr(init, r));
+              (void)r.newVar(lowerInit());
               r.constructInto = previous;
-            } else r.push(Stmt::Mut(member, conform(r, handleExpr(init, r), memberTpe)));
+            } else r.push(Stmt::Mut(member, conform(r, lowerInit(), memberTpe)));
           };
           if (const auto rd = expr->getType()->getAsRecordDecl()) {
             unsigned i = 0;
@@ -1974,7 +1995,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               initialiseMember(member, ftpe, init);
             }
           }
-          r.aggregateThis = previousThis;
           return Expr::Alias(select(r, {}, allocated));
         }
         if (const auto arrTpe = tpe.get<Type::Arr>()) {
@@ -2130,9 +2150,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 return adjustBasePointer(*this, r, sourceExpr, *srcPtr, Type::Ptr(targetTpe, srcPtr->space), *stmt);
             }
             if (const auto srcPtr = srcTpe.get<Type::Ptr>(); srcPtr && targetTpe.is<Type::Ptr>()) {
+              const auto targetPtr = targetTpe.get<Type::Ptr>();
+              const auto preserved = Type::Ptr(targetPtr->comp, srcPtr->space).widen();
               if (srcPtr->comp.is<Type::Struct>() && stmt->path_begin() != stmt->path_end())
-                return adjustBasePointer(*this, r, sourceExpr, *srcPtr, targetTpe, *stmt);
-              return Expr::Cast(r.newVar(sourceExpr), targetTpe);
+                return adjustBasePointer(*this, r, sourceExpr, *srcPtr, preserved, *stmt);
+              return Expr::Cast(r.newVar(sourceExpr), preserved);
             }
             return sourceExpr;
           }
@@ -2143,7 +2165,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             const auto srcTpe = sourceExpr.tpe();
             const auto bothPtr = srcTpe.is<Type::Ptr>() && targetTpe.is<Type::Ptr>();
             const auto bothStruct = srcTpe.is<Type::Struct>() && targetTpe.is<Type::Struct>();
-            if (bothPtr || bothStruct) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
+            if (bothPtr) {
+              const auto srcPtr = srcTpe.get<Type::Ptr>();
+              const auto targetPtr = targetTpe.get<Type::Ptr>();
+              const auto castTpe =
+                  stmt->getCastKind() == clang::CK_AddressSpaceConversion ? targetTpe : Type::Ptr(targetPtr->comp, srcPtr->space).widen();
+              return Expr::Cast(r.newVar(sourceExpr), castTpe);
+            }
+            if (bothStruct) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
             return sourceExpr;
           }
           // Materialise the implicit `x != 0` / `p != null`: polyc's LLVM backend requires `i1`
@@ -2624,11 +2653,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           else {
             const auto value = [&]() -> Expr::Any {
               if (!var || capture.getCaptureKind() != clang::LCK_ByRef) return handleExpr(init, r);
-              const auto initValue = r.newVar(handleExpr(init, r));
-              if (var->getType()->isReferenceType()) return Expr::Alias(initValue);
+              const auto initExpr = handleExpr(init, r);
+              if (var->getType()->isReferenceType()) return Expr::Alias(r.newVar(initExpr));
               const auto ptr = field->tpe.get<Type::Ptr>();
               if (!ptr) raise("By-reference capture field resulted in a non-pointer type: " + repr(field->tpe));
-              return Expr::RefTo(termToSel(initValue), {}, ptr->comp, ptr->space, Region::Opaque());
+              // A by-reference capture needs an addressable slot even when inlining later turns the captured
+              // parameter into a constant. newVar deliberately returns constants unchanged, which would otherwise
+              // produce invalid source such as `&(20)` on Metal.
+              const auto binding = Stmt::Var(r.newName(initExpr.tpe()), initExpr, /*isMutable*/ false);
+              r.push(binding);
+              return Expr::RefTo(select(r, {}, binding.name), {}, ptr->comp, ptr->space, Region::Opaque());
             }();
             r.push(Stmt::Mut(member, conform(r, value, field->tpe)));
           }

@@ -47,6 +47,11 @@ static bool isPoisonInit(const Expr::Any &e) {
   return alias && alias->ref.template is<Term::Poison>();
 }
 
+static bool isNullPtrInit(const Expr::Any &e) {
+  const auto alias = e.template get<Expr::Alias>();
+  return alias && alias->ref.template is<Term::NullPtrConst>();
+}
+
 static std::optional<Sym> structNameOf(const Type::Any &t) {
   Type::Any base = t;
   if (const auto ptr = base.template get<Type::Ptr>()) base = ptr->comp;
@@ -306,8 +311,10 @@ struct CLAddressSpaceTracePass {
             if (auto var = s.template get<Stmt::Var>()) {
               auto name = var->name;
               if (auto expr = var->expr ^ map([&](const auto &e) { return mapExpr(e, scan); })) {
-                if (auto ptr = expr->actual.tpe().template get<Type::Ptr>())
-                  name = Named(var->name.symbol, Type::Ptr(ptr->comp, expr->space));
+                if (auto ptr = expr->actual.tpe().template get<Type::Ptr>()) {
+                  const auto space = isNullPtrInit(*var->expr) ? phiSpace ^ get_or_default(var->name.symbol, expr->space) : expr->space;
+                  name = Named(var->name.symbol, Type::Ptr(ptr->comp, space));
+                }
               } else if (auto ptr = var->name.tpe.template get<Type::Ptr>()) {
                 if (auto sp = phiSpace ^ get_maybe(var->name.symbol)) name = Named(var->name.symbol, Type::Ptr(ptr->comp, *sp));
               }
@@ -358,7 +365,9 @@ struct CLAddressSpaceTracePass {
                         if (auto expr = var.expr ^ map([&](const auto &e) { return mapExpr(e, scope); })) {
                           auto name = var.name;
                           if (auto ptr = expr->actual.tpe().template get<Type::Ptr>()) {
-                            name = Named(var.name.symbol, Type::Ptr(ptr->comp, expr->space));
+                            const auto space =
+                                isNullPtrInit(*var.expr) ? phiSpace ^ get_or_default(var.name.symbol, expr->space) : expr->space;
+                            name = Named(var.name.symbol, Type::Ptr(ptr->comp, space));
                           }
                           scope.vars.emplace(name.symbol, name);
                           return Stmt::Var(name, expr->actual, var.isMutable);
@@ -539,8 +548,17 @@ struct CLAddressSpaceTracePass {
         const auto structure = owner.template get<Type::Struct>();
         const auto tpe = structure ? fieldType(owner, field->name) : std::nullopt;
         if (structure && tpe && tpe->template is<Type::Ptr>() && (conflicted ^ contains(structure->name))) {
-          if (select.steps.size() != 1) throw backend::BackendException("cannot specialise indirect conflicting pointer field");
-          colours.emplace_back(registerVariable(fn, select.root.symbol, structure->name), field->name, expressionSpace(mut->expr));
+          std::optional<std::string> slot;
+          if (select.steps.size() == 1) {
+            slot = registerVariable(fn, select.root.symbol, structure->name);
+          } else {
+            auto ownerSteps = select.steps;
+            ownerSteps.pop_back();
+            const Term::Select ownerSelect(select.root, ownerSteps, walkPath(select.root.tpe, ownerSteps, ownerSteps.size()).type);
+            slot = designated(fn, ownerSelect);
+          }
+          if (!slot) throw backend::BackendException("cannot specialise indirect conflicting pointer field");
+          colours.emplace_back(*slot, field->name, expressionSpace(mut->expr));
         } else if (structure && tpe) {
           if (const auto carried = carries(*tpe)) {
             const auto source = aliasSelect(mut->expr);
@@ -1319,10 +1337,10 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                                      [](const AtomicOp::Min &) { return "atomic_fetch_min_explicit"s; },
                                                      [](const AtomicOp::Max &) { return "atomic_fetch_max_explicit"s; });
               if (!v.order.template is<MemOrder::Relaxed>()) throw BackendException("MSL atomic RMW supports only relaxed ordering");
-              const auto atomic = v.rtn.template is<Type::IntU32>() ? "atomic_uint" : "atomic_int";
+              const auto atomic = v.rtn.template is<Type::IntU32>() ? "metal::atomic_uint" : "metal::atomic_int";
               const auto value = v.rtn.template is<Type::IntU32>() ? "uint32_t" : "int32_t";
-              return fmt::format("{}(({} {}*){}, ({}){}, metal::memory_order_relaxed)", function, space, atomic, mkTerm(v.ptr), value,
-                                 mkTerm(v.value));
+              return fmt::format("metal::{}(({} {}*){}, ({}){}, metal::memory_order_relaxed)", function, space, atomic, mkTerm(v.ptr),
+                                 value, mkTerm(v.value));
             },
             [&](const Spec::RemoteLaunch &) -> std::string {
               throw BackendException("Spec::RemoteLaunch is a local orchestration operation");
@@ -1377,6 +1395,9 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         );
       },
       [&](const Expr::IntrOp &x) {
+        const auto intrFn = [&](std::string_view name) {
+          return dialect == Dialect::MSL1_0 ? "metal::" + std::string(name) : std::string(name);
+        };
         return x.op.match_total([&](const Intr::Pos &v) { return fmt::format("(+{})", mkTerm(v.x)); },
                                 [&](const Intr::Neg &v) { return fmt::format("(-{})", mkTerm(v.x)); },
                                 [&](const Intr::BNot &v) { return fmt::format("(~{})", mkTerm(v.x)); },
@@ -1386,8 +1407,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                 [&](const Intr::Mul &v) { return fmt::format("({} * {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::Div &v) { return fmt::format("({} / {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::Rem &v) { return fmt::format("({} % {})", mkTerm(v.x), mkTerm(v.y)); },
-                                [&](const Intr::Min &v) { return fmt::format("min({}, {})", mkTerm(v.x), mkTerm(v.y)); },
-                                [&](const Intr::Max &v) { return fmt::format("max({}, {})", mkTerm(v.x), mkTerm(v.y)); },
+                                [&](const Intr::Min &v) { return fmt::format("{}({}, {})", intrFn("min"), mkTerm(v.x), mkTerm(v.y)); },
+                                [&](const Intr::Max &v) { return fmt::format("{}({}, {})", intrFn("max"), mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BAnd &v) { return fmt::format("({} & {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BOr &v) { return fmt::format("({} | {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BXor &v) { return fmt::format("({} ^ {})", mkTerm(v.x), mkTerm(v.y)); },

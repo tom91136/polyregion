@@ -58,6 +58,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
 #include "llvm/Transforms/Scalar/InferAddressSpaces.h"
 #include "llvm/Transforms/Scalar/SROA.h"
+#include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
@@ -700,8 +701,10 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
 
   // SROA above promotes the `const int&` of std::max/min into a pointer phi (OpPhi of pointers needs the
   // excluded VariablePointers capability); sink the load through it, then re-run SROA to promote the
-  // freed scalar allocas and drop the now-dead pointer phi
+  // freed scalar allocas and drop the now-dead pointer phi. Fold constant guard branches first so
+  // an unreachable null edge cannot pin an otherwise scalarisable private aggregate.
   llvm::FunctionPassManager cleanup;
+  if (logical) cleanup.addPass(llvm::SimplifyCFGPass());
   cleanup.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
   cleanup.addPass(llvm::InferAddressSpacesPass());
   cleanup.addPass(llvm::EarlyCSEPass());

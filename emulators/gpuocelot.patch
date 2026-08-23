@@ -289,7 +289,7 @@ index 925572c9..99662dc9 100644
  
  //////////////////////////////////////////////////////////////////////////////////////////////////
  //
-@@ -68,6 +71,39 @@
+@@ -68,6 +71,47 @@
  // shared object or to invoke Ocelot's Driver API frontend
  typedef cuda::CudaDriverInterface CudaApi;
  
@@ -297,7 +297,9 @@ index 925572c9..99662dc9 100644
 +typedef void (*OcelotHostFn)(void *userData);
 +typedef void (*OcelotStreamCallback)(CUstream, CUresult, void *);
 +
-+// strip .param attributes (.ptr/.align etc.) the PTX parser rejects
++// Strip .param attributes (.ptr/.align etc.) the PTX parser rejects and map newer
++// target declarations to the newest capability its grammar understands. The target
++// directive is descriptive; unsupported instructions are still rejected normally.
 +static std::string sanitisePtxParams(const void *image) {
 +	const char *ptx = static_cast<const char *>(image);
 +	std::string in(ptx ? ptx : ""), out;
@@ -307,6 +309,12 @@ index 925572c9..99662dc9 100644
 +		size_t eol = in.find('\n', pos);
 +		if (eol == std::string::npos) eol = in.size();
 +		std::string line = in.substr(pos, eol - pos);
++		if (size_t p = line.find(".target sm_"); p != std::string::npos) {
++			p += std::strlen(".target sm_");
++			size_t q = p;
++			while (q < line.size() && std::isdigit((unsigned char)line[q])) q++;
++			line.replace(p, q - p, "35");
++		}
 +		if (line.find(".param") != std::string::npos) {
 +			for (const char *tok : {" .ptr", " .global", " .const", " .shared", " .local"}) {
 +				size_t p;

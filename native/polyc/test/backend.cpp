@@ -605,6 +605,39 @@ TEST_CASE("C source propagates address-space specialisation through stored struc
   CHECK(metalSource ^ contains_slice("_v7 = _v6;"));
 }
 
+TEST_CASE("C source specialises pointer fields written through nested structs", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto boxSym = Sym({"Box"}), wrapperSym = Sym({"Wrapper"});
+  const auto box = Type::Struct(boxSym, {}).widen(), wrapper = Type::Struct(wrapperSym, {}).widen();
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const StructDef wrapperDef(wrapperSym, {}, {Named("box", box)}, {}, false);
+  const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), nested("nested", wrapper);
+  const auto ptrMember = [&](const Named &owner) { return Term::Select(owner, {PathStep::Field("ptr").widen()}, globalPtr); };
+  const Term::Select nestedPtr(nested, {PathStep::Field("box").widen(), PathStep::Field("ptr").widen()}, globalPtr);
+  const auto poison = [](const Type::Any &tpe) { return Expr::Alias(Term::Poison(tpe).widen()).widen(); };
+  const Function entry = mkFn(
+      "kernel", {Arg(input, {})}, Type::Unit0(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Var(globalBox, poison(box), true).widen(),
+       Mut(ptrMember(globalBox), Expr::Alias(Term::Select(input, {}, globalPtr).widen()).widen()).widen(),
+       Var(nested, poison(wrapper), true).widen(),
+       Mut(nestedPtr,
+           Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen())
+           .widen(),
+       Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef, wrapperDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source ^ contains_slice("typedef struct Box_asp Box_asp;"));
+  CHECK(source ^ contains_slice("Box_asp box;"));
+  CHECK(source ^ contains_slice("private int* ptr;"));
+}
+
 TEST_CASE("C source combines nested struct specialisations deterministically", "[backend]") {
   polyregion::compiler::initialise();
 
@@ -674,6 +707,30 @@ TEST_CASE("C source rejects cross-space pointer merges before dereference", "[ba
   opts.pipelineSpec = "Mirror";
   REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
                       Catch::Matchers::ContainsSubstring("cross-address-space pointer merge"));
+}
+
+TEST_CASE("C source respaces a pointer phi from its private assignment", "[backend]") {
+  polyregion::compiler::initialise();
+
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named value("value", Type::IntS32()), merged("merged", globalPtr), result("result", Type::IntS32());
+  const auto privateRef =
+      Expr::RefTo(Term::Select(value, {}, Type::IntS32()).widen(), {}, Type::IntS32(), TypeSpace::Private(), Region::Opaque()).widen();
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(value, std::optional<Expr::Any>{}, true).widen(),
+            Var(merged, Expr::Alias(Term::NullPtrConst(Type::IntS32(), TypeSpace::Global(), Region::Opaque())).widen(), true).widen(),
+            Stmt::Cond(Term::Bool1Const(true).widen(), {Mut(Term::Select(merged, {}, globalPtr), privateRef).widen()}, {}).widen(),
+            Var(result, Expr::Alias(Term::Select(merged, {PathStep::Deref().widen()}, Type::IntS32()).widen()).widen(), false).widen(),
+            Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const std::string source(c.binary->begin(), c.binary->end());
+  CHECK(source ^ contains_slice("private int* _v1 = 0;"));
 }
 
 TEST_CASE("C source rejects cross-space pointer merges that escape", "[backend]") {
@@ -959,18 +1016,38 @@ TEST_CASE("MSL lowers 32-bit atomic read-modify-write operations", "[backend][me
     INFO(repr(c));
     REQUIRE(c.binary);
     const std::string source(c.binary->begin(), c.binary->end());
-    CHECK(source ^ contains_slice(name + "((device atomic_int*)"));
+    CHECK(source ^ contains_slice("metal::" + name + "((device metal::atomic_int*)"));
   }
 
   const auto local = compile(AtomicOp::Add(), MemOrder::Relaxed(), Type::IntU32(), TypeSpace::Local());
   INFO(repr(local));
   REQUIRE(local.binary);
   const std::string source(local.binary->begin(), local.binary->end());
-  CHECK(source ^ contains_slice("atomic_fetch_add_explicit((threadgroup atomic_uint*)"));
+  CHECK(source ^ contains_slice("metal::atomic_fetch_add_explicit((threadgroup metal::atomic_uint*)"));
   CHECK(source ^ contains_slice("metal::memory_order_relaxed"));
   for (const auto &order : std::vector<MemOrder::Any>{MemOrder::Acquire(), MemOrder::Release(), MemOrder::AcqRel(), MemOrder::SeqCst()})
     REQUIRE_THROWS_WITH(compile(AtomicOp::Add(), order, Type::IntU32(), TypeSpace::Local()),
                         Catch::Matchers::ContainsSubstring("MSL atomic RMW supports only relaxed ordering"));
+}
+
+TEST_CASE("MSL qualifies min and max intrinsics", "[backend][metal][intrinsic]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named x("x", Type::IntS32()), y("y", Type::IntS32()), minimum("minimum", Type::IntS32()), maximum("maximum", Type::IntS32());
+  const Function entry = mkFn("kernel", {Arg(x, {}), Arg(y, {})}, Type::Unit0(),
+                              {Var(minimum, Expr::IntrOp(Intr::Min(selectNamed(x), selectNamed(y), Type::IntS32())).widen(), false).widen(),
+                               Var(maximum, Expr::IntrOp(Intr::Max(selectNamed(x), selectNamed(y), Type::IntS32())).widen(), false).widen(),
+                               Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const std::string source(c.binary->begin(), c.binary->end());
+  CHECK(source ^ contains_slice("metal::min("));
+  CHECK(source ^ contains_slice("metal::max("));
 }
 
 TEST_CASE("MSL rejects unsupported atomic types", "[backend][metal][atomic]") {
@@ -2330,6 +2407,49 @@ TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backe
   REQUIRE(c.binary != std::nullopt);
 
   CHECK_FALSE(llvmIrOf(c) ^ contains_slice("br i1 true"));
+}
+
+TEST_CASE("Vulkan drops dead null edges from private pointer phis", "[backend][spirv][vulkan]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const Sym pairSym({"Pair"});
+  const auto pairTpe = Type::Struct(pairSym, {}).widen();
+  const auto ptrTpe = Type::Ptr(pairTpe, TypeSpace::Private());
+  const auto outputTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const StructDef pairDef(pairSym, {}, {Named("x", Type::IntS32()), Named("y", Type::IntS32())}, {}, false);
+  const Named value("value", pairTpe), merged("merged", ptrTpe), output("output", outputTpe);
+  const auto privateRef = Expr::RefTo(selectNamed(value).widen(), {}, pairTpe, TypeSpace::Private(), Region::Opaque()).widen();
+  Function entry = mkFn(
+      "kernel", {Arg(output, {})}, Type::Unit0(),
+      {
+          Var(value, std::optional<Expr::Any>{}, true).widen(),
+          Mut(Term::Select(value, {PathStep::Field("x").widen()}, Type::IntS32()), Expr::Alias(Term::IntS32Const(42).widen()).widen())
+              .widen(),
+          Mut(Term::Select(value, {PathStep::Field("y").widen()}, Type::IntS32()), Expr::Alias(Term::IntS32Const(73).widen()).widen())
+              .widen(),
+          Var(merged, Expr::Alias(Term::NullPtrConst(pairTpe, TypeSpace::Private(), Region::Opaque())).widen(), true).widen(),
+          Stmt::Cond(Term::Bool1Const(true).widen(), {Mut(selectNamed(merged), privateRef).widen()}, {}).widen(),
+          Update(selectNamed(output), Term::IntS32Const(0).widen(), Term::Select(merged, {PathStep::Field("x").widen()}, Type::IntS32()))
+              .widen(),
+          Update(selectNamed(output), Term::IntS32Const(1).widen(), Term::Select(merged, {PathStep::Field("y").widen()}, Type::IntS32()))
+              .widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*isEntry*/ true);
+  Program p(entry, {}, {pairDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV_GLCompute, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+  const auto &ir = eventDataOf(c, "llvm_to_obj_opt");
+  CHECK_FALSE(ir ^ contains_slice("br i1 true"));
+  CHECK_FALSE(ir ^ contains_slice("load i32, ptr null"));
+  CHECK_FALSE(ir ^ contains_slice("alloca %Pair"));
 }
 
 TEST_CASE("integral to pointer casts lower to inttoptr", "[backend]") {

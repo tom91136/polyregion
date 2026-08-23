@@ -133,6 +133,7 @@ class ArenaViewSuite extends munit.FunSuite {
     val selfTpe    = p.Type.Struct(selfSym, Nil)
     val selfPtr    = p.Type.Ptr(selfTpe, p.Type.Space.Global)
     val storage    = named("storage", p.Type.Arr(p.Type.IntU8, 16, p.Type.Space.Global))
+    val rawPointer = named("rawPointer", selfPtr)
     val pointer    = named("pointer", selfPtr)
     val same       = named("same", p.Type.Bool1)
     val capArg     = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
@@ -142,10 +143,11 @@ class ArenaViewSuite extends munit.FunSuite {
         args = List(capArg),
         body = List(
           p.Stmt.Var(storage, None, isMutable = true),
-          p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(storage), selfPtr)), isMutable = false),
+          p.Stmt.Var(rawPointer, Some(p.Expr.Cast(selectT(storage), selfPtr)), isMutable = false),
+          p.Stmt.Var(pointer, Some(p.Expr.Alias(selectT(rawPointer))), isMutable = false),
           p.Stmt.Mut(
             p.Term.Select(pointer, List(p.PathStep.Field(selfMember.symbol)), selfPtr),
-            p.Expr.Alias(selectT(pointer))
+            p.Expr.Cast(selectT(pointer), selfPtr)
           ),
           p.Stmt.Var(
             same,
@@ -176,6 +178,110 @@ class ArenaViewSuite extends munit.FunSuite {
     val comparison = result.entry.collectAll[p.Expr].collectFirst { case p.Expr.IntrOp(x: p.Intr.LogicEq) => x }
     assertEquals(comparison.map(_.x.tpe), Some(p.Type.IntS64))
     assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
+  }
+
+  test("a nullable base adjustment from immutable local storage drops its null guard") {
+    val baseSym                   = p.Sym("Base")
+    val derivedSym                = p.Sym("Derived")
+    val baseTpe: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedTpe: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val derivedPtr                = p.Type.Ptr(derivedTpe, p.Type.Space.Global)
+    val basePtr                   = p.Type.Ptr(baseTpe, p.Type.Space.Global)
+    val local                     = named("local", derivedTpe)
+    val source                    = named("source", derivedPtr)
+    val adjusted                  = named("adjusted", basePtr)
+    val nonNull                   = named("nonNull", p.Type.Bool1)
+    val nullSource                = named("nullSource", derivedPtr)
+    val isNull                    = named("isNull", p.Type.Bool1)
+    val flag                      = named("flag", p.Type.IntS32)
+    val capArg                    = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(local, None, isMutable = true),
+          p.Stmt.Var(
+            source,
+            Some(p.Expr.RefTo(selectT(local), None, derivedTpe, p.Type.Space.Private, p.Region.Opaque)),
+            isMutable = false
+          ),
+          p.Stmt.Var(
+            adjusted,
+            Some(p.Expr.Alias(p.Term.NullPtrConst(baseTpe, p.Type.Space.Global, p.Region.Opaque))),
+            isMutable = true
+          ),
+          p.Stmt.Var(
+            nonNull,
+            Some(
+              p.Expr.IntrOp(
+                p.Intr.LogicNeq(selectT(source), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Cond(
+            selectT(nonNull),
+            List(
+              p.Stmt.Mut(
+                selectT(adjusted),
+                p.Expr.RefTo(
+                  p.Term.Select(local, List(p.PathStep.Field("base")), baseTpe),
+                  None,
+                  baseTpe,
+                  p.Type.Space.Private,
+                  p.Region.Opaque
+                )
+              )
+            ),
+            Nil
+          ),
+          p.Stmt.Var(
+            nullSource,
+            Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))),
+            false
+          ),
+          p.Stmt.Var(
+            isNull,
+            Some(
+              p.Expr.IntrOp(
+                p.Intr
+                  .LogicEq(selectT(nullSource), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
+              )
+            ),
+            false
+          ),
+          p.Stmt.Var(flag, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true),
+          p.Stmt.Cond(
+            selectT(isNull),
+            List(p.Stmt.Mut(selectT(flag), p.Expr.Alias(p.Term.IntS32Const(1)))),
+            List(p.Stmt.Mut(selectT(flag), p.Expr.Alias(p.Term.IntS32Const(2))))
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(
+        p.StructDef(capSym, Nil, Nil, Nil),
+        p.StructDef(baseSym, Nil, List(named("value", p.Type.IntS32)), Nil),
+        p.StructDef(derivedSym, Nil, List(named("padding", p.Type.IntS32), named("base", baseTpe)), List(baseTpe))
+      )
+    )
+
+    val result = ArenaView(program, NoopLog)
+    assertEquals(
+      result.entry.collectAll[p.Stmt].collect { case c: p.Stmt.Cond => c },
+      Nil,
+      result.entry.body.map(_.repr).mkString("\n")
+    )
+    assert(
+      result.entry.collectAll[p.Stmt].collect { case m: p.Stmt.Mut => m }.exists(_.name.root.symbol == adjusted.symbol)
+    )
+    val flagWrites = result.entry.collectAll[p.Stmt].collect {
+      case p.Stmt.Mut(p.Term.Select(root, Nil, _), p.Expr.Alias(p.Term.IntS32Const(value)))
+          if root.symbol == flag.symbol =>
+        value
+    }
+    assertEquals(flagWrites, List(1))
   }
 
   test("a private pointer to a local arena-offset slot keeps only its outer pointer") {
