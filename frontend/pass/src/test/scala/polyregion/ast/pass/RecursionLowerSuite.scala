@@ -471,6 +471,38 @@ class RecursionLowerSuite extends munit.FunSuite {
     assert(!hasOverflowGuard(lower(program(entry(), List(fact)))), "the TCO path is a bounded loop, no overflow guard")
   }
 
+  test("the generic driver uses sibling branchless dispatch cases and an overflow sentinel") {
+    val maxDepth = 8
+    val out      = RecursionLower(maxDepth)(program(entry(), List(ack)), PassTest.NoopLog)
+    val lowered  = out.functions.find(_.name == sym("ack")).get
+    val loopBody = lowered.body.collectFirst { case p.Stmt.While(_, body) => body }.get
+    val cases    = loopBody.collect { case c: p.Stmt.Cond => c }
+
+    assert(cases.sizeIs > 1, "ackermann must produce multiple dispatch cases")
+    cases.foreach { case p.Stmt.Cond(_, body, otherwise) =>
+      assert(otherwise.isEmpty, "dispatch cases must be sibling guards, not a nested else-if chain")
+      assert(
+        body.collectWhere[p.Stmt] { case _: p.Stmt.Cond => () }.isEmpty,
+        "a dispatch case must not contain a conditional state transition"
+      )
+    }
+
+    val stackLengths = lowered.body.collect {
+      case p.Stmt.Var(p.Named(_, p.Type.Arr(_, length, p.Type.Space.Private), _), _, _) => length
+    }
+    assert(stackLengths.contains(maxDepth + 1), "the private stack must reserve one undispatched overflow frame")
+
+    val loopIndex = lowered.body.indexWhere(_.isInstanceOf[p.Stmt.While])
+    assert(
+      lowered.body
+        .drop(loopIndex + 1)
+        .exists(_.collectWhere[p.Expr] { case p.Expr.SpecOp(_: p.Spec.Assert) =>
+          ()
+        }.nonEmpty),
+      "the overflow guard must be outside the dispatch loop"
+    )
+  }
+
   test("tail call that swaps params is correct (snapshot, not in-order clobber)") {
     val in  = program(entry(), List(swapCount))
     val out = lower(in)

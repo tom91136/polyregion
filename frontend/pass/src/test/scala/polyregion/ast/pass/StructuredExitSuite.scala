@@ -120,6 +120,32 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(decode(vm, err), (code, "λ failed"))
   }
 
+  test("runtime messages use a structured copy loop without a break back-edge") {
+    val code = p.Enums.AssertCode.Assert.value
+    val msgT = p.Type.Ptr(p.Type.IntS8, g)
+    val msg  = named("msg", msgT)
+    val assertion = p.Stmt.Var(
+      named("_a", p.Type.Unit0),
+      Some(p.Expr.SpecOp(p.Spec.Assert(p.Term.IntU32Const(code), selectT(msg))))
+    )
+    val out = lower(List(p.Arg(msg)), List(assertion, ret))
+
+    assert(out.entry.collectWhere[p.Stmt] { case _: p.Stmt.While => () }.nonEmpty)
+    assertEquals(
+      out.entry.collectWhere[p.Stmt] { case p.Stmt.Break => () },
+      Nil,
+      "the message loop must exit through its condition so SPIR-V gets a legal back-edge"
+    )
+
+    val vm      = Interpreter.Vm(out)
+    val err     = vm.alloc(4L + limit)
+    val bytes   = "dynamic".getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
+    val message = vm.alloc(bytes.length.toLong)
+    bytes.zipWithIndex.foreach((byte, i) => vm.store(message + i, V.I(byte & 0xff), p.Type.IntS8))
+    vm.call(p.Conventions.EntryName, List(errT -> V.I(err), msgT -> V.I(message)))
+    assertEquals(decode(vm, err), (code, "dynamic"))
+  }
+
   test("lowering is deterministic across repeated pass runs") {
     val in = program(entry(body = List(assertStmt(), ret)))
     assertEquals(StructuredExit(in, NoopLog), StructuredExit(in, NoopLog))

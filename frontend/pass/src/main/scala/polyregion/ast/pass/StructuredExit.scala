@@ -356,7 +356,8 @@ object StructuredExit extends ProgramPass {
 
     private def slotOf(t: p.ExceptionKind): p.Named = p.Named(s"$SlotPrefix${tagOf(t)}", t.tpe)
 
-    private val messageBuffer = p.Named(ExceptionWhatBufferSym, ExceptionWhatBuffer)
+    private val messageBuffer          = p.Named(ExceptionWhatBufferSym, ExceptionWhatBuffer)
+    private val deferredAssertMessages = ListBuffer.empty[(p.Named, p.Named)]
 
     private def messageRef(buffer: p.Named): p.Expr =
       p.Expr.RefTo(
@@ -385,6 +386,57 @@ object StructuredExit extends ProgramPass {
         .toList
         .flatten
 
+    private def copyCString(
+        source: p.Term,
+        bound: Int,
+        initiallyActive: p.Term = p.Term.Bool1Const(true)
+    )(write: (p.Term, p.Term) => List[p.Stmt]): List[p.Stmt] = {
+      require(bound > 0)
+      val i      = fresh(p.Type.IntU32)
+      val active = fresh(p.Type.Bool1)
+      val body   = ListBuffer.empty[p.Stmt]
+      val ch     = let(p.Type.IntS8, p.Expr.Index(source, sel(i), p.Type.IntS8), body)
+      body ++= write(sel(i), ch)
+      val next = let(
+        p.Type.IntU32,
+        p.Expr.IntrOp(p.Intr.Add(sel(i), p.Term.IntU32Const(1), p.Type.IntU32)),
+        body
+      )
+      body += p.Stmt.Mut(sel(i), p.Expr.Alias(next))
+      val notNul = let(p.Type.Bool1, p.Expr.IntrOp(p.Intr.LogicNeq(ch, p.Term.IntS8Const(0))), body)
+      val within = let(
+        p.Type.Bool1,
+        p.Expr.IntrOp(p.Intr.LogicLt(next, p.Term.IntU32Const(bound))),
+        body
+      )
+      body += p.Stmt.Mut(sel(active), p.Expr.IntrOp(p.Intr.LogicAnd(notNul, within)))
+      List(
+        p.Stmt.Var(i, Some(p.Expr.Alias(p.Term.IntU32Const(0))), isMutable = true),
+        p.Stmt.Var(active, Some(p.Expr.Alias(initiallyActive)), isMutable = true),
+        p.Stmt.While(sel(active), body.toList)
+      )
+    }
+
+    def assertMessageDecls: List[p.Stmt] = deferredAssertMessages.toList.flatMap { (message, active) =>
+      List(
+        p.Stmt.Var(message, None, isMutable = true),
+        p.Stmt.Var(active, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true)
+      )
+    }
+
+    def assertMessageEpilogue: List[p.Stmt] = deferredAssertMessages.toList.flatMap { (message, enabled) =>
+      copyCString(sel(message), MessageLimit, sel(enabled)) { (i, ch) =>
+        val write = ListBuffer.empty[p.Stmt]
+        val off = let(
+          p.Type.IntU32,
+          p.Expr.IntrOp(p.Intr.Add(p.Term.IntU32Const(CodeBytes), i, p.Type.IntU32)),
+          write
+        )
+        write += p.Stmt.Update(error, off, ch)
+        write.toList
+      }
+    }
+
     private def copyMessage(source: p.Term, target: p.Named = messageBuffer): List[p.Stmt] = {
       source match {
         case p.Term.StringConst(s) =>
@@ -394,22 +446,8 @@ object StructuredExit extends ProgramPass {
           ) :+ p.Stmt.Update(sel(target), p.Term.IntU32Const(bytes.size), p.Term.IntS8Const(0))
         case _ =>
       }
-      val i    = fresh(p.Type.IntU32)
-      val body = ListBuffer.empty[p.Stmt]
-      val ch   = let(p.Type.IntS8, p.Expr.Index(source, sel(i), p.Type.IntS8), body)
-      body += p.Stmt.Update(sel(target), sel(i), ch)
-      val atNul = let(p.Type.Bool1, p.Expr.IntrOp(p.Intr.LogicEq(ch, p.Term.IntS8Const(0))), body)
-      body += p.Stmt.Cond(atNul, List(p.Stmt.Break), Nil)
-      List(
-        p.Stmt.ForRange(
-          i,
-          p.Term.IntU32Const(0),
-          p.Term.IntU32Const(MessageLimit - 1),
-          p.Term.IntU32Const(1),
-          body.toList
-        ),
+      copyCString(source, MessageLimit - 1)((i, ch) => List(p.Stmt.Update(sel(target), i, ch))) :+
         p.Stmt.Update(sel(target), p.Term.IntU32Const(MessageLimit - 1), p.Term.IntS8Const(0))
-      )
     }
 
     private def copyBuffer(source: p.Named, target: p.Named): List[p.Stmt] = {
@@ -442,22 +480,11 @@ object StructuredExit extends ProgramPass {
       message match {
         case p.Term.StringConst(s) => out ++= writeMessage(s)
         case _ =>
-          val msg   = let(message.tpe, p.Expr.Alias(message), out)
-          val i     = fresh(p.Type.IntU32)
-          val body  = ListBuffer.empty[p.Stmt]
-          val ch    = let(p.Type.IntS8, p.Expr.Index(msg, sel(i), p.Type.IntS8), body)
-          val atNul = let(p.Type.Bool1, p.Expr.IntrOp(p.Intr.LogicEq(ch, p.Term.IntS8Const(0))), body)
-          body += p.Stmt.Cond(atNul, List(p.Stmt.Break), Nil)
-          val off =
-            let(p.Type.IntU32, p.Expr.IntrOp(p.Intr.Add(p.Term.IntU32Const(CodeBytes), sel(i), p.Type.IntU32)), body)
-          body += p.Stmt.Update(error, off, ch)
-          out += p.Stmt.ForRange(
-            i,
-            p.Term.IntU32Const(0),
-            p.Term.IntU32Const(MessageLimit),
-            p.Term.IntU32Const(1),
-            body.toList
-          )
+          val saved  = fresh(message.tpe)
+          val active = fresh(p.Type.Bool1)
+          deferredAssertMessages += saved -> active
+          out += p.Stmt.Mut(sel(saved), p.Expr.Alias(message))
+          out += p.Stmt.Mut(sel(active), p.Expr.Alias(p.Term.Bool1Const(true)))
       }
       out.toList
     }
@@ -855,10 +882,12 @@ object StructuredExit extends ProgramPass {
                 true
               ) :: lower.slotDecls
         val decls =
-          p.Stmt.Var(p.Named(AssertedSym, p.Type.Bool1), Some(p.Expr.Alias(p.Term.Bool1Const(false))), true) :: tagDecls
+          p.Stmt.Var(p.Named(AssertedSym, p.Type.Bool1), Some(p.Expr.Alias(p.Term.Bool1Const(false))), true) ::
+            tagDecls ::: lower.assertMessageDecls
         val sentinel = if (e.rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Poison(e.rtn)
         val exit     = p.Stmt.Return(p.Expr.Alias(sentinel))
-        val epilogue = if (e.body.exists(flow.escapes)) lower.escapeReport ::: List(exit) else Nil
+        val epilogue =
+          if (e.body.exists(flow.escapes)) lower.assertMessageEpilogue ::: lower.escapeReport ::: List(exit) else Nil
         log.info(s"${e.signatureRepr}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
         val needsError = e.body.exists(mayAssert) || e.body.exists(flow.escapes)
         val args =

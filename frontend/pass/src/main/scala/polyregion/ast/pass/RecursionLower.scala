@@ -10,7 +10,8 @@ import polyregion.ast.Traversal.*
 // lowers self- and mutually-recursive offload functions to an iterative explicit-stack driver so they run on
 // backends with no call stack (SPIR-V/OpenCL/Metal); must run before FnInline, which would otherwise try to
 // flatten a self-Invoke that never converges. `f` keeps its signature - its body becomes a `while(sp>0)` loop
-// over a private fixed-depth `Frame[maxDepth]` stack. the body is already in ANF (each call is its own
+// over a private fixed-depth `Frame[maxDepth + 1]` stack (the extra slot is an undispatched overflow sentinel).
+// the body is already in ANF (each call is its own
 // `Var(t, Invoke)`), so it splits into pc-numbered blocks at every recursive call; a var live across a block
 // boundary (and every param) is promoted to a frame field, the rest stay loop-locals. each block ends in a
 // branch (set pc), a recursive call (set resume pc, push a callee frame) or a return (write the return
@@ -373,7 +374,10 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     val members  = p.Named(pcName, i32) :: promoted.sortBy(_.symbol)
     val frameDef = p.StructDef(frameSym, Nil, members, Nil)
     val frameTpe = p.Type.Struct(frameSym, Nil)
-    val stackTpe = p.Type.Arr(frameTpe, maxDepth, p.Type.Space.Private)
+    // Reserve one sentinel frame: a recursive push may advance past maxDepth,
+    // then the driver stops before dispatching that frame and reports the
+    // overflow from one top-level exit instead of from inside every pc case.
+    val stackTpe = p.Type.Arr(frameTpe, maxDepth + 1, p.Type.Space.Private)
 
     val stackName = p.Named(fresh("#rec_stack"), stackTpe)
     val spName    = p.Named(fresh("#rec_sp"), i32)
@@ -403,7 +407,8 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     def overflowGuard: List[p.Stmt] = {
       val g = p.Named(fresh("#rec_ovf"), bool)
       // StructuredExit lowers this `'assert` to the flag + error-buffer drain; the RecursionLimit code lets the
-      // host tell a stack overflow apart from a user assert
+      // host tell a stack overflow apart from a user assert. This runs after the driver loop has stopped, so the
+      // exit does not cross any of the dispatch cases.
       val trap = p.Stmt.Var(
         p.Named(fresh("#rec_trap"), p.Type.Unit0),
         Some(
@@ -416,46 +421,55 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
         )
       )
       List(
-        assignVar(g, p.Expr.IntrOp(p.Intr.LogicGte(sel(spName), i32c(maxDepth)))),
+        assignVar(g, p.Expr.IntrOp(p.Intr.LogicGt(sel(spName), i32c(maxDepth)))),
         p.Stmt.Cond(sel(g), List(trap), Nil)
       )
     }
 
     def pushFrame(args: List[p.Term]): List[p.Stmt] = {
       require(args.size == params.size, s"RecursionLower: arity mismatch in ${f.name.repr}")
-      overflowGuard ++
-        (setSel(newField(pcName, i32), alias(i32c(bodyEntry))) ::
-          params.zip(args).map { case (pp, a) => setSel(newField(pp.symbol, pp.tpe), alias(termRw(a))) }) :+
+      (setSel(newField(pcName, i32), alias(i32c(bodyEntry))) ::
+        params.zip(args).map { case (pp, a) => setSel(newField(pp.symbol, pp.tpe), alias(termRw(a))) }) :+
         setVar(spName, add1(spName))
     }
 
     // initial push seeds the entry pc and copies the real incoming parameters into the first frame
     def pushFrameInitial(entryPc: Int): List[p.Stmt] =
-      overflowGuard ++
-        (setSel(newField(pcName, i32), alias(i32c(entryPc))) ::
-          params.map(pp => setSel(newField(pp.symbol, pp.tpe), alias(sel(pp))))) :+
+      (setSel(newField(pcName, i32), alias(i32c(entryPc))) ::
+        params.map(pp => setSel(newField(pp.symbol, pp.tpe), alias(sel(pp))))) :+
         setVar(spName, add1(spName))
 
     def setPc(idx: p.Named, target: Int): p.Stmt = setSel(frameField(idx, pcName, i32), alias(i32c(target)))
 
     def terminatorStmts(t: Terminator): List[p.Stmt] = t match {
       case Terminator.Goto(target)    => List(setPc(ciName, target))
-      case Terminator.CondBr(c, a, b) => List(p.Stmt.Cond(termRw(c), List(setPc(ciName, a)), List(setPc(ciName, b))))
+      case Terminator.CondBr(c, a, b) =>
+        // pc = b + int(c) * (a - b): keeping the state transition branchless avoids a conditional whose two
+        // arms both leave the current dispatch case, a shape LLVM's SPIR-V structurizer cannot represent.
+        val bit    = p.Named(fresh("#rec_cond"), i32)
+        val offset = p.Named(fresh("#rec_offset"), i32)
+        List(
+          assignVar(bit, p.Expr.Cast(termRw(c), i32)),
+          assignVar(offset, p.Expr.IntrOp(p.Intr.Mul(sel(bit), i32c(a - b), i32))),
+          setSel(curField(pcName, i32), p.Expr.IntrOp(p.Intr.Add(i32c(b), sel(offset), i32)))
+        )
       case Terminator.Call(args, resume) =>
         setPc(ciName, resume) :: pushFrame(args)
       case Terminator.Ret(value) => List(setVar(retName, exprRw(value)), setVar(spName, sub1(spName)))
       case Terminator.Pop        => List(setVar(spName, sub1(spName)))
     }
 
-    // dispatch chain: if (pc==0) {b0} else if (pc==1) {b1} ... else {bLast}
+    // pcLocal is an immutable snapshot for this iteration, so independent guards are equivalent to an else-if
+    // chain. Keeping every case as a sibling gives each one a local structured merge on SPIR-V instead of a
+    // deeply nested construct whose exits all cross the enclosing cases.
     val byId = blocks.toMap
-    val dispatch = ids.sorted.foldRight(List.empty[p.Stmt]) { (id, elseBr) =>
+    val dispatch = ids.sorted.flatMap { id =>
       val b      = byId(id)
       val body   = rewriteStmts(b.stmts) ++ terminatorStmts(b.end)
       val isName = p.Named(fresh("#rec_is"), bool)
       List(
         assignVar(isName, p.Expr.IntrOp(p.Intr.LogicEq(sel(pcLocal), i32c(id)))),
-        p.Stmt.Cond(sel(isName), body, elseBr)
+        p.Stmt.Cond(sel(isName), body, Nil)
       )
     }
 
@@ -463,11 +477,20 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
     // `while(cond)` instead of `while(true){ if(empty) break }`; a structured Break inside a Cond branch
     // double-terminates the block in the LLVM backend
     val moreName = p.Named(fresh("#rec_more"), bool)
-    val nonEmpty = p.Expr.IntrOp(p.Intr.LogicGt(sel(spName), i32c(0)))
+    def updateMore(initial: Boolean): List[p.Stmt] = {
+      val nonEmpty    = p.Named(fresh("#rec_nonempty"), bool)
+      val withinLimit = p.Named(fresh("#rec_within"), bool)
+      val value       = p.Expr.IntrOp(p.Intr.LogicAnd(sel(nonEmpty), sel(withinLimit)))
+      List(
+        assignVar(nonEmpty, p.Expr.IntrOp(p.Intr.LogicGt(sel(spName), i32c(0)))),
+        assignVar(withinLimit, p.Expr.IntrOp(p.Intr.LogicLte(sel(spName), i32c(maxDepth)))),
+        if (initial) assignVar(moreName, value) else setVar(moreName, value)
+      )
+    }
     val loopBody = List(
       assignVar(ciName, sub1(spName)),
       assignVar(pcLocal, alias(curField(pcName, i32)))
-    ) ++ dispatch ++ List(setVar(moreName, nonEmpty))
+    ) ++ dispatch ++ updateMore(initial = false)
 
     val newBody =
       List(
@@ -476,11 +499,10 @@ final case class RecursionLower(maxDepth: Int = 1024) extends ProgramPass derive
         assignVar(retName, defaultExpr(f.rtn))
       ) ++
         pushFrameInitial(bodyEntry) ++
-        List(
-          assignVar(moreName, nonEmpty),
-          p.Stmt.While(sel(moreName), loopBody),
-          p.Stmt.Return(alias(sel(retName)))
-        )
+        updateMore(initial = true) ++
+        List(p.Stmt.While(sel(moreName), loopBody)) ++
+        overflowGuard ++
+        List(p.Stmt.Return(alias(sel(retName))))
 
     (f.copy(body = newBody), frameDef)
   }

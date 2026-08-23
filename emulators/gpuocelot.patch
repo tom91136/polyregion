@@ -474,7 +474,54 @@ index c52ac0e3..8825a20b 100644
  			break;
  	}
  	
-@@ -1004,7 +1010,8 @@ CUresult cuda::CudaDriverFrontend::cuMemcpyHtoD (CUdeviceptr dstDevice,
+@@ -745,7 +751,13 @@ CUresult cuda::CudaDriverFrontend::cuModuleUnload(CUmodule hmod) {
+ CUresult cuda::CudaDriverFrontend::cuModuleUnload(CUmodule hmod) {
+-	CUresult result = CUDA_ERROR_NOT_FOUND;
+-	Context *context = _bind();
+-	if (context) {
+-		void* id = reinterpret_cast<const ir::Module *>(hmod)->id();
+-		context->_getDevice().unload(id);
++	CUresult result = CUDA_ERROR_NOT_FOUND;
++	Context *context = _bind();
++	if (context) {
++		ir::Module *target = reinterpret_cast<ir::Module *>(hmod);
++		ModuleMap::iterator module = context->_modules.begin();
++		while (module != context->_modules.end() && &module->second != target) {
++			++module;
++		}
++		if (module != context->_modules.end()) {
++			void* id = module->second.id();
++			context->_getDevice().unload(id);
+ 		
+@@ -752,12 +764,16 @@ CUresult cuda::CudaDriverFrontend::cuModuleUnload(CUmodule hmod) {
+-		// Our id is allocated on the heap.
+-		free(id);
+-
+-		result = CUDA_SUCCESS;
+-	}
+-	else {
+-		report("cuModuleLoad() - context not valid");
+-		result = CUDA_ERROR_INVALID_CONTEXT;
+-	}
+-	_unbind();
+-	return result;
++			// The id and module are both owned by the context.
++			free(id);
++			context->_modules.erase(module);
++			result = CUDA_SUCCESS;
++		}
++		else {
++			result = CUDA_ERROR_INVALID_HANDLE;
++		}
++	}
++	else {
++		report("cuModuleLoad() - context not valid");
++		result = CUDA_ERROR_INVALID_CONTEXT;
++	}
++	_unbind();
++	return result;
+ }
+@@ -1004,7 +1020,8 @@ CUresult cuda::CudaDriverFrontend::cuMemcpyHtoD (CUdeviceptr dstDevice,
  		executive::Device &device = context->_getDevice();
  		executive::Device::MemoryAllocation * allocation = device.getMemoryAllocation((void *)dstDevice);
  		if (allocation) {
@@ -484,7 +531,7 @@ index c52ac0e3..8825a20b 100644
  			result = CUDA_SUCCESS;
  		}
  		else {
-@@ -1028,7 +1035,8 @@ CUresult cuda::CudaDriverFrontend::cuMemcpyDtoH (void *dstHost, CUdeviceptr srcD
+@@ -1028,7 +1045,8 @@ CUresult cuda::CudaDriverFrontend::cuMemcpyDtoH (void *dstHost, CUdeviceptr srcD
  		executive::Device &device = context->_getDevice();
  		executive::Device::MemoryAllocation * allocation = device.getMemoryAllocation((void *)srcDevice);
  		if (allocation) {
@@ -494,7 +541,7 @@ index c52ac0e3..8825a20b 100644
  			result = CUDA_SUCCESS;
  		}
  		else {
-@@ -1158,16 +1166,14 @@ CUresult cuda::CudaDriverFrontend::cuMemcpy3D( const CUDA_MEMCPY3D *pCopy ) {
+@@ -1158,16 +1176,14 @@ CUresult cuda::CudaDriverFrontend::cuMemcpy3D( const CUDA_MEMCPY3D *pCopy ) {
  
  // 1D functions
  // system <-> device memory
@@ -515,7 +562,7 @@ index c52ac0e3..8825a20b 100644
  }
  
  // system <-> array memory
-@@ -1604,13 +1610,10 @@ CUresult cuda::CudaDriverFrontend::cuLaunch(CUfunction hfunc) {
+@@ -1604,13 +1620,10 @@ CUresult cuda::CudaDriverFrontend::cuLaunch(CUfunction hfunc) {
  				<< ") on thread " << boost::this_thread::get_id());
  	
  			try {
@@ -531,7 +578,7 @@ index c52ac0e3..8825a20b 100644
  				context->_getDevice().launch(ptxKernel->module->id(), 
  					ptxKernel->name, 
  					convert(context->_launchConfiguration.gridDim), 
-@@ -1679,13 +1682,10 @@ CUresult cuda::CudaDriverFrontend::cuLaunchGrid (CUfunction hfunc, int grid_widt
+@@ -1679,13 +1692,10 @@ CUresult cuda::CudaDriverFrontend::cuLaunchGrid (CUfunction hfunc, int grid_widt
  				<< ") on thread " << boost::this_thread::get_id());
  	
  			try {
