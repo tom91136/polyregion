@@ -39,6 +39,7 @@ struct Remapper {
     bool ctorChain = false;
     Opt<Named> constructInto{};
     Opt<Term::Select> constructArrayInto{};
+    Opt<Named> aggregateThis{};
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
     Vector<Stmt::Any> stmts{};
@@ -71,6 +72,7 @@ struct Remapper {
       r.ctorChain = scopeCtorChain.value_or(ctorChain);
       r.constructInto.reset();
       r.constructArrayInto.reset();
+      r.aggregateThis.reset();
       r.rtnType = scopeRtnType.value_or(rtnType);
       r.stmts.clear();
       if (!persistFunctionState) {
@@ -127,8 +129,8 @@ struct Remapper {
   [[nodiscard]] Expr::Any conform(RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe);
   [[nodiscard]] Expr::Any zeroInitialise(RemapContext &r, const Type::Any &tpe);
   void recordExceptionCode(const clang::Stmt &stmt, const Named &code, RemapContext &r) const;
-  [[nodiscard]] Opt<Expr::Any> lowerCoreStdCall(const clang::CallExpr &call, const clang::FunctionDecl &decl, RemapContext &r);
-  [[nodiscard]] bool coreStdCallPreservesExceptionMetadata(const clang::CallExpr &call, const clang::FunctionDecl &decl) const;
+  [[nodiscard]] Opt<Expr::Any> lowerSpecialCall(const clang::CallExpr &call, const clang::FunctionDecl &decl, RemapContext &r);
+  [[nodiscard]] bool specialCallPreservesExceptionMetadata(const clang::CallExpr &call, const clang::FunctionDecl &decl) const;
   [[nodiscard]] Type::Any annotateLocalSpace(const clang::ValueDecl *decl, RemapContext &r) const;
   [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);

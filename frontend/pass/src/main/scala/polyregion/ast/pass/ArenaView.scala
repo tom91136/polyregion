@@ -39,6 +39,7 @@ object ArenaView extends ProgramPass {
     List(p.Type.IntS8, p.Type.IntS16, p.Type.IntS32, p.Type.IntS64, p.Type.Float32, p.Type.Float64, p.Type.Float16)
 
   private def isPtr(t: p.Type): Boolean  = t match { case _: p.Type.Ptr => true; case _ => false }
+  private def isArr(t: p.Type): Boolean  = t match { case _: p.Type.Arr => true; case _ => false }
   private def pointee(t: p.Type): p.Type = t match { case p.Type.Ptr(c, _) => c; case _ => t }
   private def elem(t: p.Type): p.Type = t match {
     case p.Type.Ptr(c, _) => c; case p.Type.Arr(c, _, _) => c; case _ => t
@@ -138,8 +139,9 @@ object ArenaView extends ProgramPass {
       case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
           if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known(root) =>
         known + n
-      case (known, p.Stmt.Var(n, Some(p.Expr.Cast(p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
-          if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known(root) =>
+      case (known, p.Stmt.Var(n, Some(p.Expr.Cast(source @ p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
+          if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) &&
+            (known(root) || (isArr(root.tpe) && isLocal(source))) =>
         known + n
       case (known, _) => known
     }
@@ -294,9 +296,10 @@ object ArenaView extends ProgramPass {
         case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
             if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known.contains(root) =>
           known + (n -> known(root))
-        case (known, p.Stmt.Var(n, Some(p.Expr.Cast(p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
-            if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known.contains(root) =>
-          known + (n -> known(root))
+        case (known, p.Stmt.Var(n, Some(p.Expr.Cast(source @ p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
+            if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) &&
+              (known.contains(root) || (isArr(root.tpe) && rootedLocally(source))) =>
+          known + (n -> known.getOrElse(root, s"${root.symbol}:array"))
         case (known, _) => known
       }
       val localPointerTokens = localPointerKeys.values.toList.distinct.sorted.zipWithIndex.map { case (key, i) =>

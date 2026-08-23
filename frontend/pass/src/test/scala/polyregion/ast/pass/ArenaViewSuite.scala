@@ -128,6 +128,56 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(loadedVar.flatMap(_.expr).map(_.tpe), Some(privatePtr))
   }
 
+  test("a pointer cast from stack array storage keeps identity through a pointer field") {
+    val selfSym    = p.Sym("SelfPointer")
+    val selfTpe    = p.Type.Struct(selfSym, Nil)
+    val selfPtr    = p.Type.Ptr(selfTpe, p.Type.Space.Global)
+    val storage    = named("storage", p.Type.Arr(p.Type.IntU8, 16, p.Type.Space.Global))
+    val pointer    = named("pointer", selfPtr)
+    val same       = named("same", p.Type.Bool1)
+    val capArg     = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val selfMember = named("self", selfPtr)
+    val program = p.Program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(storage, None, isMutable = true),
+          p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(storage), selfPtr)), isMutable = false),
+          p.Stmt.Mut(
+            p.Term.Select(pointer, List(p.PathStep.Field(selfMember.symbol)), selfPtr),
+            p.Expr.Alias(selectT(pointer))
+          ),
+          p.Stmt.Var(
+            same,
+            Some(
+              p.Expr.IntrOp(
+                p.Intr.LogicEq(
+                  p.Term.Select(pointer, List(p.PathStep.Field(selfMember.symbol)), selfPtr),
+                  selectT(pointer)
+                )
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(p.StructDef(capSym, Nil, Nil, Nil), p.StructDef(selfSym, Nil, List(selfMember), Nil))
+    )
+
+    val result = ArenaView(program, NoopLog)
+    assertEquals(result.defs.find(_.name == selfSym).flatMap(_.members.headOption).map(_.tpe), Some(p.Type.IntS64))
+    val fieldMut = result.entry.collectAll[p.Stmt].collectFirst {
+      case m @ p.Stmt.Mut(p.Term.Select(_, List(p.PathStep.Field("self")), _), _) => m
+    }
+    assertEquals(fieldMut.map(_.name.tpe), Some(p.Type.IntS64))
+    assertEquals(fieldMut.map(_.expr.tpe), Some(p.Type.IntS64))
+    val comparison = result.entry.collectAll[p.Expr].collectFirst { case p.Expr.IntrOp(x: p.Intr.LogicEq) => x }
+    assertEquals(comparison.map(_.x.tpe), Some(p.Type.IntS64))
+    assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
+  }
+
   test("a private pointer to a local arena-offset slot keeps only its outer pointer") {
     val closureSym   = p.Sym("MixedClosure")
     val closureTpe   = p.Type.Struct(closureSym, Nil)

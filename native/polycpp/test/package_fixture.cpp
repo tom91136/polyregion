@@ -3,14 +3,19 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "aspartame/all.hpp"
 
 #include "polyfront/package.hpp"
 #include "polyfront/package_program.hpp"
 
 #include "ast.h"
 #include "polyast_codec.h"
+
+using namespace aspartame;
 
 int main(int argc, char **argv) {
   using namespace polyregion::polyast;
@@ -34,6 +39,21 @@ int main(int argc, char **argv) {
     for (llvm::sys::fs::directory_iterator it(path, ec), end; it != end && !ec; it.increment(ec))
       if (llvm::sys::path::filename(it->path()).starts_with(prefix)) return 7;
     return ec ? 6 : 0;
+  }
+  if (argc == 5 && std::string(argv[1]) == "--assert-function-substring-count") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 8;
+    const auto *begin = reinterpret_cast<const uint8_t *>((*source)->getBufferStart());
+    const auto *end = reinterpret_cast<const uint8_t *>((*source)->getBufferEnd());
+    const auto program = hashed_program_from_msgpack(begin, end);
+    const std::string needle = argv[3];
+    const auto actual = program.functions ^ count([&](const auto &fn) { return repr(fn.decl.name) ^ contains_slice(needle); });
+    const auto expected = std::stoul(argv[4]);
+    if (actual != expected) {
+      llvm::errs() << "Expected " << expected << " functions containing `" << needle << "`, found " << actual << '\n';
+      return 9;
+    }
+    return 0;
   }
   if (argc != 2) return 2;
 

@@ -9,6 +9,10 @@ add_llvm_library(polycpp-clang-plugin
         MODULE
         plugin.cpp
         call_prism.cpp
+        call_prism_core.cpp
+        call_prism_cuda.cpp
+        call_prism_hip.cpp
+        call_prism_polyregion.cpp
         remapper.cpp
         clang_utils.cpp
         ast_visitors.cpp
