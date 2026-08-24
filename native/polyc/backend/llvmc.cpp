@@ -33,6 +33,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Linker/Linker.h"
@@ -746,6 +747,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         // guards, which releases otherwise unreachable null edges that pin private pointer phis.
         foldConstantBranches(F);
         sinkLoadsThroughPointerPhis(F); // a pointer OpPhi is only invalid under Vulkan's logical model
+        FAM.invalidate(F, llvm::PreservedAnalyses::none());
       }
       cleanup.run(F, FAM);
       if (logical) {
@@ -753,6 +755,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         // narrow cleanup to a fixed shape without simplifying non-constant structured branches.
         foldConstantBranches(F);
         sinkLoadsThroughPointerPhis(F);
+        FAM.invalidate(F, llvm::PreservedAnalyses::none());
         cleanup.run(F, FAM);
         normaliseUnitSignSelects(F);
       }

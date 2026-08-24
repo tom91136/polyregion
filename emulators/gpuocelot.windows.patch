@@ -52,16 +52,17 @@ index d58ea47..d4564df 100644
  
  if ("x${BUILD_LLVM}" STREQUAL "xOFF")
  find_package(LLVM REQUIRED CONFIG)
-@@ -47,6 +61,8 @@ find_package(LLVM REQUIRED CONFIG)
+@@ -47,6 +61,9 @@ find_package(LLVM REQUIRED CONFIG)
  # shared libLLVM.so when built as a dylib, else the static archives
  if (TARGET LLVM)
  	set(LLVM_LIBRARIES LLVM)
 +elseif (WIN32)
 +	file(GLOB LLVM_LIBRARIES ${LLVM_LIBRARY_DIR}/LLVM*.lib)
++	list(FILTER LLVM_LIBRARIES EXCLUDE REGEX "LLVM-C[.]lib$")
  else()
  	file(GLOB LLVM_LIBRARIES ${LLVM_LIBRARY_DIR}/*.a)
  endif()
-@@ -249,15 +265,23 @@ set(${PROJECT_NAME}_INCLUDE_DIRS
+@@ -249,15 +266,23 @@ set(${PROJECT_NAME}_INCLUDE_DIRS
  	${CMAKE_CURRENT_SOURCE_DIR}/include
  	${CMAKE_CURRENT_BINARY_DIR})
  
@@ -94,7 +95,7 @@ index d58ea47..d4564df 100644
  
  if ("x${BUILD_LLVM}" STREQUAL "xON")
  list(APPEND ${PROJECT_NAME}_LINK_LIBRARIES llvm)
-@@ -561,8 +585,11 @@ set(${PROJECT_NAME}_static_libs
+@@ -561,8 +586,11 @@ set(${PROJECT_NAME}_static_libs
  	${PROJECT_NAME}_util
  )
  
@@ -108,7 +109,7 @@ index d58ea47..d4564df 100644
  	foreach(lib ${${PROJECT_NAME}_static_libs})
  		target_link_libraries(${PROJECT_NAME} PRIVATE
  			"-Wl,-force_load" ${lib}
-@@ -579,7 +606,13 @@ endif()
+@@ -579,7 +607,13 @@ endif()
  target_link_libraries(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LINK_LIBRARIES})
  
  # link llvm and remove unused sections
@@ -123,7 +124,7 @@ index d58ea47..d4564df 100644
  	target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,-dead_strip ${LLVM_LIBRARIES})
  else()
  	target_link_libraries(${PROJECT_NAME} PRIVATE -Wl,--gc-sections -Wl,--start-group ${LLVM_LIBRARIES} -Wl,--end-group)
-@@ -592,8 +625,10 @@ endif()
+@@ -592,8 +626,10 @@ endif()
  
  target_link_directories(${PROJECT_NAME} PUBLIC ${${PROJECT_NAME}_LIBRARY_DIRS})
  target_link_libraries(${PROJECT_NAME} PUBLIC ${ZLIB_LIBRARIES} ${CURSES_LIBRARIES})

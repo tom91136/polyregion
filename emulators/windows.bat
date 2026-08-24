@@ -168,7 +168,7 @@ rem reset superproject + submodule working trees, then apply the base and window
 git -C "%OCELOT%" reset --hard -q %GPUOCELOT_COMMIT% || (echo OCELOT-RESET-FAIL & exit /b 1)
 git -C "%OCELOT%" submodule foreach --recursive "git checkout -q -- ." >nul
 if exist "%OCELOT%\ocelot\cu_exports.map" del /q "%OCELOT%\ocelot\cu_exports.map"
-git -C "%OCELOT%" apply "%DIR%gpuocelot.patch" || (echo OCELOT-BASE-PATCH-FAIL & exit /b 1)
+git -C "%OCELOT%" apply --unidiff-zero "%DIR%gpuocelot.patch" || (echo OCELOT-BASE-PATCH-FAIL & exit /b 1)
 git -C "%OCELOT%" apply "%DIR%gpuocelot.windows.patch" || (echo OCELOT-WIN-PATCH-FAIL & exit /b 1)
 rem res_embed GAS path: 4-align hex_size so arm64's scaled LDR reloc (PAGEOFFSET_12L) is valid for link.exe
 if "%ARM%"=="1" "%SED%" -i "/^\.byte 0$/a .balign 4" "%OCELOT%\ocelot\ThirdParty\res_embed\include\res_embed.gas.in" || (echo RES-EMBED-ALIGN-FAIL & exit /b 1)
@@ -187,7 +187,7 @@ set "PATH=%MSVCPATH%"
 rem SwiftShader (second Vulkan; vendored static LLVM + static CRT, self-contained, hidden symbols)
 if not defined SS goto :collect
 if not exist "%WORK%\swiftshader\.git" git clone --filter=blob:none https://github.com/google/swiftshader "%WORK%\swiftshader" || exit /b 1
-git -C "%WORK%\swiftshader" checkout -q %SWIFTSHADER_REF% || (echo SS-CHECKOUT-FAIL & exit /b 1)
+git -C "%WORK%\swiftshader" reset --hard -q %SWIFTSHADER_REF% || (echo SS-RESET-FAIL & exit /b 1)
 rem Windows reports CMAKE_SYSTEM_PROCESSOR=ARM64 (uppercase); SwiftShader's case-sensitive arch regex
 rem misses it, defaults ARCH=x86_64 and builds X86 LLVM the AArch64 Reactor JIT can't link - widen it
 powershell -NoProfile -Command "$f='%WORK%\swiftshader\CMakeLists.txt'; (Get-Content -Raw $f) -replace 'MATCHES \"arm\" OR CMAKE_SYSTEM_PROCESSOR MATCHES \"aarch\"', 'MATCHES \"[Aa][Rr][Mm]\" OR CMAKE_SYSTEM_PROCESSOR MATCHES \"[Aa][Aa][Rr][Cc][Hh]\"' | Set-Content -NoNewline $f" || (echo SS-PATCH-FAIL & exit /b 1)
@@ -232,19 +232,19 @@ dir /b "%OUT%\bin"
 
 :check
 echo === smoke ===
-cl /nologo /MT /EHsc /std:c++17 /I"%WORK%\vkinstall\include" "%DIR%vecadd.vk.cpp" /Fe:"%OUT%\bin\vk_vecadd.exe" /link "%WORK%\vkinstall\lib\vulkan-1.lib" >nul || (echo VK-COMPILE-FAIL & exit /b 1)
-cl /nologo /MT /EHsc /std:c++17 /I"%WORK%\pocl-prefix\include" "%DIR%vecadd.cl.cpp" /Fe:"%OUT%\bin\clvec.exe" /link "%WORK%\pocl-prefix\lib\OpenCL.lib" >nul || (echo CL-COMPILE-FAIL & exit /b 1)
+cl /nologo /MT /EHsc /std:c++17 /I"%WORK%\vkinstall\include" "%DIR%vecadd.vk.cpp" /Fo"%OUT%\bin\vk_vecadd.obj" /Fe:"%OUT%\bin\vk_vecadd.exe" /link "%WORK%\vkinstall\lib\vulkan-1.lib" >nul || (echo VK-COMPILE-FAIL & exit /b 1)
+cl /nologo /MT /EHsc /std:c++17 /I"%WORK%\pocl-prefix\include" "%DIR%vecadd.cl.cpp" /Fo"%OUT%\bin\clvec.obj" /Fe:"%OUT%\bin\clvec.exe" /link "%WORK%\pocl-prefix\lib\OpenCL.lib" >nul || (echo CL-COMPILE-FAIL & exit /b 1)
 call "%OUT%\env.bat"
 rem registry ICDs may also appear; the VK_DRIVER_FILES override needs a non-elevated context
 echo == Vulkan (lavapipe + swiftshader) ==
-"%OUT%\bin\vk_vecadd.exe"
+"%OUT%\bin\vk_vecadd.exe" || (echo VK-SMOKE-FAIL & exit /b 1)
 echo == OpenCL (pocl) ==
-"%OUT%\bin\clvec.exe"
+"%OUT%\bin\clvec.exe" || (echo CL-SMOKE-FAIL & exit /b 1)
 echo == CUDA (gpuocelot via nvcuda.dll) ==
 if not exist "%OUT%\bin\nvcuda.dll" (echo   no nvcuda.dll in bundle, skipping & goto :smoke_done)
 rem device-only PTX via clang's NVPTX backend (no CUDA SDK); host harness loads nvcuda.dll by name
 "%WORK%\llvm\bin\clang++.exe" -x cuda --cuda-device-only -nocudainc -nocudalib --cuda-gpu-arch=sm_35 -O2 -S "%DIR%vecadd.cu" -o "%OUT%\bin\vecadd.ptx" || (echo CU-PTX-FAIL & exit /b 1)
-cl /nologo /MT /EHsc /std:c++17 /Tp "%DIR%vecadd.cu" /Fe:"%OUT%\bin\cu_vecadd.exe" >nul || (echo CU-COMPILE-FAIL & exit /b 1)
-"%OUT%\bin\cu_vecadd.exe" "%OUT%\bin"
+cl /nologo /MT /EHsc /std:c++17 /Tp "%DIR%vecadd.cu" /Fo"%OUT%\bin\cu_vecadd.obj" /Fe:"%OUT%\bin\cu_vecadd.exe" >nul || (echo CU-COMPILE-FAIL & exit /b 1)
+"%OUT%\bin\cu_vecadd.exe" "%OUT%\bin" || (echo CU-SMOKE-FAIL & exit /b 1)
 :smoke_done
 echo SMOKE DONE
