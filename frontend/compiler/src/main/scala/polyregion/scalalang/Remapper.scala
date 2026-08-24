@@ -10,11 +10,11 @@ import scala.annotation.tailrec
 object Remapper {
 
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
-    val tpeTable = exec.tpeVars.zip(tpeArgs).toMap
+    val tpeTable = exec.tpeVars.map(_.name).zip(tpeArgs).toMap
     // Recurse fully so type vars nested inside Struct args, Ptr components, or curried inner Execs
     // (e.g. `<T>(Int) => <>(ClassTag[T]) => Array[T]`) are all rewritten.
     def resolve(t: p.Type): p.Type = t match {
-      case p.Type.Var(name) =>
+      case p.Type.Var(name, _) =>
         tpeTable.get(name) match {
           case Some(value) => value
           case None        => ???
@@ -145,12 +145,16 @@ object Remapper {
         owningClass  <- Retyper.clsSymTyper0(owningSymbol)
         (receiver, receiverTpeVars) <- owningClass match {
           case t @ p.Type.Struct(_, args) =>
-            (Some(p.Named("this", t)), args.collect { case p.Type.Var(n) => n }).success
+            (
+              Some(p.Named("this", t)),
+              args.collect { case p.Type.Var(name, size) => p.Type.Var(name, size) }: List[p.Type.Var]
+            ).success
           case x => s"Illegal receiver: $x".fail
         }
         // Fuse receiver's tpe vars with what's explicitly defined
-        fnTpeVars  = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
-        allTpeArgs = (receiverTpeVars ::: fnTpeVars).distinct
+        fnTpeVars: List[p.Type.Var] =
+          f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
+        allTpeArgs: List[p.Type.Var] = (receiverTpeVars ::: fnTpeVars).distinct
 
         // Finally, we compile the def body like a closure or return the term if we have one.
         (fnStmts, c) <- fnRtnTerm match {
@@ -163,7 +167,7 @@ object Remapper {
               c <- c
                 .copy(depth = 0, stmts = Nil, thisCls = None)
                 .success
-              (term, c)         <- c.mapTerm(rhs, Some(fnRtnTpe), allTpeArgs.map(p.Type.Var(_)))
+              (term, c)         <- c.mapTerm(rhs, Some(fnRtnTpe), allTpeArgs)
               ((_, termTpe), _) <- Retyper.typer0(rhs.tpe)
               _ <-
                 if (termTpe == term.tpe) ().success
@@ -187,7 +191,7 @@ object Remapper {
           body = fnStmts,
           visibility = p.Function.Visibility.Exported,
           fpMode = p.Function.FpMode.Relaxed,
-          isEntry = false
+          convention = p.CallConvention.RegularCall
         )
 
       } yield fn -> c
@@ -228,7 +232,7 @@ object Remapper {
               // ctor's expected return type (`rtnTpe.args`) and align with the call-site's
               // tpeArgs. Concrete (non-Var) args don't bind: the caller may have already
               // monomorphised them.
-              val varNames = ts.collect { case p.Type.Var(n) => n }
+              val varNames = ts.collect { case p.Type.Var(n, _) => n }
               val table    = varNames.zip(tpeArgs).toMap
               table.success
             case bad => s"Requested a ctor with a non-struct type: ${bad.repr}".fail
@@ -241,8 +245,8 @@ object Remapper {
 
           stmts = fieldNames.zip(args).map { (name, rhs) =>
             val appliedTpe = rhs.tpe.mapLeaf {
-              case p.Type.Var(name) => tpeVarTable.getOrElse(name, p.Type.Var(name))
-              case x                => x
+              case variable @ p.Type.Var(name, _) => tpeVarTable.getOrElse(name, variable)
+              case x                              => x
             }
             val fieldSelect: p.Term.Select = p.Term.Select(
               instanceSelect.root,
@@ -323,8 +327,8 @@ object Remapper {
                     (tss.flatten, ess.flatten) match {
                       case (ts, es) if ts.size == es.size =>
                         ts.zip(es).traverse {
-                          case (t, e) if t == e   => t.success // same type
-                          case (t, p.Type.Var(_)) => t.success // applied type
+                          case (t, e) if t == e      => t.success // same type
+                          case (t, p.Type.Var(_, _)) => t.success // applied type
                           case (p.Type.Struct(termSym, termArgs), p.Type.Struct(execSym, execArgs)) =>
                             if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
                             else if (termArgs.size != execArgs.size)

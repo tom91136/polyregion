@@ -21,6 +21,11 @@ using polyregion::Vector;
 
 using Bytes = Vector<char>;
 
+std::string fqcn(const Sym &);
+std::string canonicalName(const TypeSpace::Any &);
+std::string canonicalName(const Type::Any &);
+std::string signatureKey(const Signature &);
+
 const static auto show_repr = [](auto &x) { return repr(x); };
 
 template <typename T> auto to_string(const T &x) -> decltype(repr(x)) { return repr(x); }
@@ -164,7 +169,8 @@ SpecOp call(const Spec::Any &);
 
 std::function<Function(Vector<Stmt::Any>)> function(const std::string &name, const Vector<Arg> &args, const Type::Any &rtn,
                                                     FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
-                                                    FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false);
+                                                    FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(),
+                                                    CallConvention::Any convention = CallConvention::RegularCall());
 
 Program program(const Vector<StructDef> &structs = {}, const Vector<Function> &functions = {});
 Program program(const Function &function);

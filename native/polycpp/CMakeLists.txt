@@ -117,7 +117,7 @@ if (POLYREGION_FUSED_DRIVER)
     target_link_libraries(polycpp PRIVATE
             ${POLYCPP_CLANG_LIBS}
             ${POLYCPP_LLVM_LIBS}
-            polycommon polyc-driver polyfront-options PolyAST
+            polycommon polyc-driver polyfront-options polyfront-package-service PolyAST
             Aspartame::Aspartame fmt::fmt)
     target_precompile_headers(polycpp PRIVATE
             <optional> <ostream> <unordered_map> <unordered_set> <utility> <vector>
@@ -148,8 +148,16 @@ endif ()
 
 add_executable(polycpp-package-fixture test/package_fixture.cpp)
 target_include_directories(polycpp-package-fixture SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
-target_link_libraries(polycpp-package-fixture PRIVATE polyfront-options PolyAST Aspartame::Aspartame)
+target_link_libraries(polycpp-package-fixture PRIVATE polyfront-options polyfront-package-service PolyAST Aspartame::Aspartame)
 polyregion_apply_common_options(polycpp-package-fixture)
+
+add_test(
+        NAME polypackage-emit-cli
+        COMMAND ${CMAKE_COMMAND}
+        "-DFIXTURE=$<TARGET_FILE:polycpp-package-fixture>"
+        "-DEMIT=$<TARGET_FILE:polypackage-emit>"
+        "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/package-emit-cli-test"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/../polyfront/rt/test/package_emit_cli.cmake)
 
 add_executable(polycpp-tests test/test_all.cpp)
 add_dependencies(polycpp-tests polycpp polystl polycpp-package-fixture)

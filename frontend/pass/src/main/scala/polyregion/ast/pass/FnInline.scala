@@ -32,7 +32,7 @@ object FnInline extends ProgramPass {
         depth: Int
     ): Boolean = (x, y) match {
       case (p.Type.Nothing, _) | (_, p.Type.Nothing) => true
-      case (p.Type.Var(xName), p.Type.Var(yName)) =>
+      case (p.Type.Var(xName, _), p.Type.Var(yName, _)) =>
         (xBound.get(xName), yBound.get(yName)) match {
           case (Some(xId), Some(yId)) => xId == yId
           case (None, None)           => xName == yName
@@ -47,8 +47,8 @@ object FnInline extends ProgramPass {
         xLength == yLength && xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
       case (p.Type.Exec(xVars, xArgs, xRtn), p.Type.Exec(yVars, yArgs, yRtn)) =>
         val ids       = xVars.indices.map(depth + _)
-        val nestedX   = xBound ++ xVars.zip(ids)
-        val nestedY   = yBound ++ yVars.zip(ids)
+        val nestedX   = xBound ++ xVars.map(_.name).zip(ids)
+        val nestedY   = yBound ++ yVars.map(_.name).zip(ids)
         val nestedEnd = depth + xVars.size
         xVars.size == yVars.size && xArgs.size == yArgs.size &&
         xArgs.zip(yArgs).forall((a, b) => loop(a, b, nestedX, nestedY, nestedEnd)) &&
@@ -78,28 +78,30 @@ object FnInline extends ProgramPass {
 
   private def protectExecBinders(tpe: p.Type): p.Type = {
     def rename(t: p.Type, env: Map[String, String]): p.Type = t match {
-      case p.Type.Var(name)                => p.Type.Var(env.getOrElse(name, name))
+      case variable @ p.Type.Var(name, _)  => variable.copy(name = env.getOrElse(name, name))
       case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(rename(_, env)))
       case p.Type.Ptr(comp, space)         => p.Type.Ptr(rename(comp, env), space)
       case p.Type.Arr(comp, length, space) => p.Type.Arr(rename(comp, env), length, space)
       case p.Type.Exec(vars, args, rtn) =>
-        val nested = env -- vars
+        val nested = env -- vars.map(_.name)
         p.Type.Exec(vars, args.map(rename(_, nested)), rename(rtn, nested))
       case other => other
     }
     tpe match {
-      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.startsWith(ExecBinderPrefix)) =>
-        val renamed = vars.map(ExecBinderPrefix + _)
-        val env     = vars.zip(renamed).toMap
+      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.name.startsWith(ExecBinderPrefix)) =>
+        val renamed: List[p.Type.Var] =
+          vars.map(variable => p.Type.Var(ExecBinderPrefix + variable.name, variable.exactSizeInBytes))
+        val env = vars.map(_.name).zip(renamed.map(_.name)).toMap
         p.Type.Exec(renamed, args.map(rename(_, env)), rename(rtn, env))
       case other => other
     }
   }
 
   private def unprotectExecBinders(tpe: p.Type): p.Type = tpe match {
-    case p.Type.Var(name) if name.startsWith(ExecBinderPrefix) => p.Type.Var(name.stripPrefix(ExecBinderPrefix))
+    case variable @ p.Type.Var(name, _) if name.startsWith(ExecBinderPrefix) =>
+      variable.copy(name = name.stripPrefix(ExecBinderPrefix))
     case p.Type.Exec(vars, args, rtn) =>
-      p.Type.Exec(vars.map(_.stripPrefix(ExecBinderPrefix)), args, rtn)
+      p.Type.Exec(vars.map(variable => variable.copy(name = variable.name.stripPrefix(ExecBinderPrefix))), args, rtn)
     case other => other
   }
 
@@ -145,7 +147,7 @@ object FnInline extends ProgramPass {
       body,
       f.visibility,
       f.fpMode,
-      f.isEntry
+      f.convention
     )
   }
 
@@ -157,14 +159,14 @@ object FnInline extends ProgramPass {
 
     val concreteTpeArgs = appliedTypeArgs(ivk, f.tpeVars.size)
 
-    val table = f.tpeVars.zip(concreteTpeArgs).toMap
+    val table = f.tpeVars.map(_.name).zip(concreteTpeArgs).toMap
 
     val renamed = renameAll(
       f
         .modifyAll[p.Type](protectExecBinders)
         .modifyAll[p.Type](_.mapLeaf {
-          case p.Type.Var(name) if table.contains(name) => table(name)
-          case x                                        => x
+          case p.Type.Var(name, _) if table.contains(name) => table(name)
+          case x                                           => x
         })
         .modifyAll[p.Type](unprotectExecBinders),
       ctr
@@ -355,12 +357,12 @@ object FnInline extends ProgramPass {
   private def resolveOverload(ivk: p.Expr.Invoke, overloads: OverloadLut): p.Function = {
     val candidates = overloads.getOrElse((ivk.calleeName, ivk.args.size), Nil)
     candidates.filter { f =>
-      val varToTpeLut = f.tpeVars.zip(appliedTypeArgs(ivk, f.tpeVars.size)).toMap
+      val varToTpeLut = f.tpeVars.map(_.name).zip(appliedTypeArgs(ivk, f.tpeVars.size)).toMap
       val sig = f.signature
         .modifyAll[p.Type](protectExecBinders)
         .modifyAll[p.Type](_.mapLeaf {
-          case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
-          case x                 => x
+          case v @ p.Type.Var(n, _) => varToTpeLut.getOrElse(n, v)
+          case x                    => x
         })
         .modifyAll[p.Type](unprotectExecBinders)
       val flatSigParams = sig.moduleCaptures ++ sig.termCaptures ++ sig.args
@@ -390,7 +392,7 @@ object FnInline extends ProgramPass {
     expr match {
       case ivk: p.Expr.Invoke =>
         val callee    = resolveOverload(ivk, overloads)
-        val calleeKey = callee.signatureRepr
+        val calleeKey = callee.signatureKey
         if (active.contains(calleeKey))
           throw IllegalStateException(
             s"FnInline: recursive call cycle is unsupported: ${(calleeKey :: active).reverse.mkString(" -> ")}"
@@ -452,7 +454,8 @@ object FnInline extends ProgramPass {
     // is independent of process compile order (the names embed into emitted kernel images)
     val ctr       = new java.util.concurrent.atomic.AtomicLong(0L)
     val overloads = program.functions.distinct.groupBy(f => (f.name, flatParams(f).size))
-    val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
+    val source    = program.entry.getOrElse(throw IllegalArgumentException("FnInline requires a program entry"))
+    val (n, f) = doUntilNotEq(source, limit = 10) { (i, f) =>
       val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, overloads, ctr, Nil))
       f.copy(
         decl = f.decl.copy(moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct),
@@ -466,7 +469,7 @@ object FnInline extends ProgramPass {
         s"FnInline did not converge after $n iteration(s); remaining calls: ${remaining.map(_.calleeName.repr).distinct.mkString(", ")}"
       )
     log.info(s"converged in $n iteration(s)")
-    program.copy(entry = f, functions = Nil)
+    program.copy(entry = Some(f), functions = Nil)
 
   }
 

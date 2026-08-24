@@ -11,16 +11,16 @@
 
 namespace polyregion::polystl {
 
-using DriverBitcode = std::vector<std::vector<int8_t>>;
+using ResolvedSymBitcode = std::vector<std::vector<int8_t>>;
 
 class OffloadRewriteConsumer : public clang::ASTConsumer {
   clang::CompilerInstance &CI;
   polyregion::polyfront::Options opts;
-  std::shared_ptr<DriverBitcode> driverBitcode;
+  std::shared_ptr<ResolvedSymBitcode> resolvedSymBitcode;
 
 public:
   OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyregion::polyfront::Options &opts,
-                         std::shared_ptr<DriverBitcode> driverBitcode);
+                         std::shared_ptr<ResolvedSymBitcode> resolvedSymBitcode);
   void HandleTranslationUnit(clang::ASTContext &C) override;
 };
 

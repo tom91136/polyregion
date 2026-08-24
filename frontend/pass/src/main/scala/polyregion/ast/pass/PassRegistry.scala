@@ -43,6 +43,7 @@ object PassRegistry {
     PassDef.singleton(MonoStruct),
     PassDef.singleton(Specialisation),
     PassDef.singleton(KernelCaptureFlatten),
+    PassDef.singleton(OffloadEntryInline),
     PassDef.configured(SubgroupLower()),
     PassDef.configured(VerifyAnchors()),
     PassDef.singleton(ArenaLower),
@@ -54,13 +55,13 @@ object PassRegistry {
 
   private val byName = definitions.map(d => d.name -> d).toMap
 
-  def build(spec: p.PassSpec): Either[String, ProgramPass | BoundaryPass[?]] =
+  def build(spec: p.Pass.Spec): Either[String, ProgramPass | BoundaryPass[?]] =
     byName.get(spec.name) match {
       case Some(defn) => PassArgs.from(spec).flatMap(defn.build).left.map(e => s"${spec.name}: $e")
       case None       => Left(s"unknown pass: ${spec.name}")
     }
 
-  def build(pipeline: p.PassPipeline): Either[String, Vector[ProgramPass | BoundaryPass[?]]] =
+  def build(pipeline: p.Pass.Pipeline): Either[String, Vector[ProgramPass | BoundaryPass[?]]] =
     pipeline.steps.foldLeft[Either[String, Vector[ProgramPass | BoundaryPass[?]]]](Right(Vector.empty)) { (acc, spec) =>
       acc.flatMap(xs => build(spec).map(xs :+ _))
     }

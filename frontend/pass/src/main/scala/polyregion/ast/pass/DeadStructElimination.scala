@@ -14,7 +14,7 @@ object DeadStructElimination extends ProgramPass {
   override def apply(program: p.Program, log: Log): p.Program = {
 
     val roots: Set[p.Sym] =
-      (program.entry :: program.functions)
+      (program.entry.toList ::: program.functions)
         .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s.name })
         .toSet
 

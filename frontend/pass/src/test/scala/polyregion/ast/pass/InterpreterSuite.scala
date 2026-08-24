@@ -700,7 +700,7 @@ class InterpreterSuite extends munit.FunSuite {
     val derivedSym              = sym("DerivedError")
     val baseT: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
     val derivedT: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
-    val baseField               = s"${p.Conventions.BaseFieldPrefix}_${baseSym.repr}"
+    val baseField               = s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}"
     val baseDef                 = p.StructDef(baseSym, Nil, List(named("code", i32)), Nil)
     val derivedDef              = p.StructDef(derivedSym, Nil, List(named(baseField, baseT)), List(baseT))
     val value                   = named("value", derivedT)
@@ -737,7 +737,7 @@ class InterpreterSuite extends munit.FunSuite {
     val midT: p.Type.Struct     = p.Type.Struct(midSym, Nil)
     val derivedT: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
     val marker                  = named(p.Conventions.EmptyStructStorageField, p.Type.IntU8)
-    val midField                = s"${p.Conventions.BaseFieldPrefix}_${midSym.repr}"
+    val midField                = s"${p.Conventions.BaseFieldPrefix}_${midSym.fqcn}"
     val defs = List(
       p.StructDef(storageSym, Nil, List(marker), Nil),
       p.StructDef(baseSym, Nil, List(marker), Nil),
@@ -990,7 +990,7 @@ class InterpreterSuite extends munit.FunSuite {
     val derivedT: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
     val basePtr                 = p.Type.Ptr(baseT, g)
     val derivedPtr              = p.Type.Ptr(derivedT, g)
-    val baseField               = s"${p.Conventions.BaseFieldPrefix}_${baseSym.repr}"
+    val baseField               = s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}"
     val defs = List(
       p.StructDef(baseSym, Nil, List(named("code", i32)), Nil),
       p.StructDef(derivedSym, Nil, List(named("prefix", i32), named(baseField, baseT)), List(baseT))

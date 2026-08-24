@@ -20,10 +20,32 @@ class MonoStructSuite extends munit.FunSuite {
     )
   }
 
+  test("rejects malformed complete struct binders before substitution") {
+    val name = sym("Box")
+    val malformed = p.StructDef(
+      name,
+      List(p.Type.Var("T", Some(4))),
+      List(named("value", p.Type.Var("T", Some(8)))),
+      Nil
+    )
+    val error = intercept[IllegalArgumentException](MonoStruct(program(entry(), defs = List(malformed)), NoopLog))
+    assert(error.getMessage.contains("differs from its binder"))
+  }
+
+  test("rejects struct applications with the wrong type-argument count") {
+    val name       = sym("Box")
+    val definition = p.StructDef(name, List(p.Type.Var("T")), List(named("value", p.Type.Var("T"))), Nil)
+    val applied    = p.Type.Struct(name, List(p.Type.IntS32, p.Type.Float32))
+    val error = intercept[IllegalArgumentException](
+      MonoStruct(program(entry(args = List(arg("box", applied))), defs = List(definition)), NoopLog)
+    )
+    assert(error.getMessage.contains("type-argument count differs"))
+  }
+
   test("monomorphic instantiation produces a renamed StructDef and reverse-lookup entry") {
     // Generic struct Box[T] { v: T }, used as Box[Int] in entry.
     val genericName   = sym("Box")
-    val genericDef    = p.StructDef(genericName, List("T"), List(named("v", p.Type.Var("T"))), Nil)
+    val genericDef    = p.StructDef(genericName, List(p.Type.Var("T")), List(named("v", p.Type.Var("T"))), Nil)
     val mono          = p.Type.Struct(genericName, List(p.Type.IntS32))
     val a             = arg("b", mono)
     val (lookup, out) = MonoStruct(program(entry(args = List(a)), defs = List(genericDef)), NoopLog)
@@ -35,7 +57,7 @@ class MonoStructSuite extends munit.FunSuite {
 
   test("monomorphic instantiation preserves member identities in declarations and selects") {
     val genericName = sym("Box")
-    val genericDef  = p.StructDef(genericName, List("T"), List(named("Box::value", p.Type.Var("T"))), Nil)
+    val genericDef  = p.StructDef(genericName, List(p.Type.Var("T")), List(named("Box::value", p.Type.Var("T"))), Nil)
     val mono        = p.Type.Struct(genericName, List(p.Type.IntS32))
     val box         = arg("box", mono)
     val read        = p.Term.Select(box.named, List(p.PathStep.Field("Box::value")), p.Type.IntS32)
@@ -58,13 +80,13 @@ class MonoStructSuite extends munit.FunSuite {
     val outerName = sym("Outer")
     val inner = p.StructDef(
       innerName,
-      List("T"),
+      List(p.Type.Var("T")),
       List(named("Inner::value", p.Type.Var("T"))),
       Nil
     )
     val outer = p.StructDef(
       outerName,
-      List("T"),
+      List(p.Type.Var("T")),
       List(named("Outer::inner", p.Type.Struct(innerName, List(p.Type.Var("T"))))),
       Nil
     )
@@ -73,7 +95,7 @@ class MonoStructSuite extends munit.FunSuite {
     val (_, out) = MonoStruct(program(entry(args = List(arg("outer", outerInt))), defs = List(inner, outer)), NoopLog)
 
     assertEquals(out.defs.flatMap(_.collectAll[p.Type].collect { case x: p.Type.Var => x }), Nil)
-    assert(out.defs.exists(_.name.repr == p.Type.Struct(innerName, List(p.Type.IntS32)).monomorphicName))
+    assert(out.defs.exists(_.name.fqcn == p.Type.Struct(innerName, List(p.Type.IntS32)).monomorphicName))
   }
 
   test("retains non-generic inherited struct identities") {
@@ -107,16 +129,16 @@ class MonoStructSuite extends munit.FunSuite {
     val boxName    = sym("Box")
     val parentName = sym("Parent")
     val childName  = sym("Child")
-    val box        = p.StructDef(boxName, List("T"), List(named("value", p.Type.Var("T"))), Nil)
+    val box        = p.StructDef(boxName, List(p.Type.Var("T")), List(named("value", p.Type.Var("T"))), Nil)
     val parent = p.StructDef(
       parentName,
-      List("T"),
+      List(p.Type.Var("T")),
       List(named("value", p.Type.Var("T"))),
       Nil
     )
     val child = p.StructDef(
       childName,
-      List("T"),
+      List(p.Type.Var("T")),
       Nil,
       List(p.Type.Struct(parentName, List(p.Type.Struct(boxName, List(p.Type.Var("T"))))))
     )
@@ -139,7 +161,7 @@ class MonoStructSuite extends munit.FunSuite {
     )
     val node = p.StructDef(
       nodeName,
-      List("T"),
+      List(p.Type.Var("T")),
       List(named("next", p.Type.Ptr(nested, p.Type.Space.Private))),
       Nil
     )
@@ -154,7 +176,7 @@ class MonoStructSuite extends munit.FunSuite {
 
   test("allows many independent instantiations of one generic struct") {
     val boxName = sym("ManyBox")
-    val box     = p.StructDef(boxName, List("T"), List(named("value", p.Type.Var("T"))), Nil)
+    val box     = p.StructDef(boxName, List(p.Type.Var("T")), List(named("value", p.Type.Var("T"))), Nil)
     val uses = List.tabulate(65) { index =>
       arg(s"box$index", p.Type.Struct(boxName, List(p.Type.Struct(sym(s"Value$index"), Nil))))
     }
@@ -169,7 +191,7 @@ class MonoStructSuite extends munit.FunSuite {
     val boxedInt = p.Type.Struct(sym("StableBox"), List(p.Type.IntS32))
     val node = p.StructDef(
       nodeName,
-      List("T"),
+      List(p.Type.Var("T")),
       List(named("next", p.Type.Ptr(p.Type.Struct(nodeName, List(boxedInt)), p.Type.Space.Private))),
       Nil
     )
@@ -185,7 +207,7 @@ class MonoStructSuite extends munit.FunSuite {
   test("generic uses in retained concrete structs seed the monomorphic closure") {
     val boxName    = sym("RetainedBox")
     val holderName = sym("RetainedHolder")
-    val box        = p.StructDef(boxName, List("T"), List(named("value", p.Type.Var("T"))), Nil)
+    val box        = p.StructDef(boxName, List(p.Type.Var("T")), List(named("value", p.Type.Var("T"))), Nil)
     val holder = p.StructDef(
       holderName,
       Nil,
@@ -202,10 +224,10 @@ class MonoStructSuite extends munit.FunSuite {
 
   test("does not substitute type variables shadowed by callable binders") {
     val holderName = sym("CallableHolder")
-    val callable   = p.Type.Exec(List("T"), List(p.Type.Var("T")), p.Type.Var("T"))
+    val callable   = p.Type.Exec(List(p.Type.Var("T")), List(p.Type.Var("T")), p.Type.Var("T"))
     val holder = p.StructDef(
       holderName,
-      List("T"),
+      List(p.Type.Var("T")),
       List(named("callback", callable), named("value", p.Type.Var("T"))),
       Nil
     )

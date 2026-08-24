@@ -8,30 +8,13 @@ using namespace std::string_literals;
 
 namespace polyregion::polyast {
 
-std::string repr(const Sym &s) { return (s.fqn | mk_string("."s)); }
+std::string repr(const Sym &s) { return fqcn(s); }
 
 std::string repr(const SourcePosition &t) {
   return fmt::format("{}:{}{}", t.file, t.line, t.col ^ map([&](const int32_t &c) { return fmt::format(":{}", c); }) ^ get_or_else(""s));
 }
 
-std::string repr(const TypeSpace::Any &t) {
-  return [&] {
-    if (t.is<TypeSpace::Global>()) {
-      return ""s;
-    }
-    if (t.is<TypeSpace::Local>()) {
-      return "^Local"s;
-    }
-    if (t.is<TypeSpace::Private>()) {
-      return "^Private"s;
-    }
-    if (t.is<TypeSpace::Constant>()) {
-      return "^Constant"s;
-    }
-
-    throw std::logic_error(fmt::format("Unhandled match case for t (of type TypeSpace::Any) at {}:{})", __FILE__, __LINE__));
-  }();
-}
+std::string repr(const TypeSpace::Any &t) { return canonicalName(t); }
 
 std::string repr(const AtomicOp::Any &o) {
   return [&] {
@@ -172,73 +155,7 @@ std::string repr(const PathStep::Any &s) {
   }();
 }
 
-std::string repr(const Type::Any &t) {
-  return [&] {
-    if (t.is<Type::Float16>()) {
-      return "F16"s;
-    }
-    if (t.is<Type::Float32>()) {
-      return "F32"s;
-    }
-    if (t.is<Type::Float64>()) {
-      return "F64"s;
-    }
-    if (t.is<Type::IntU8>()) {
-      return "U8"s;
-    }
-    if (t.is<Type::IntU16>()) {
-      return "U16"s;
-    }
-    if (t.is<Type::IntU32>()) {
-      return "U32"s;
-    }
-    if (t.is<Type::IntU64>()) {
-      return "U64"s;
-    }
-    if (t.is<Type::IntS8>()) {
-      return "I8"s;
-    }
-    if (t.is<Type::IntS16>()) {
-      return "I16"s;
-    }
-    if (t.is<Type::IntS32>()) {
-      return "I32"s;
-    }
-    if (t.is<Type::IntS64>()) {
-      return "I64"s;
-    }
-    if (t.is<Type::Nothing>()) {
-      return "Nothing"s;
-    }
-    if (t.is<Type::Unit0>()) {
-      return "Unit0"s;
-    }
-    if (t.is<Type::Bool1>()) {
-      return "Bool1"s;
-    }
-    if (auto _x = t.get<Type::Struct>()) {
-      return fmt::format("{}<{}>", repr(_x->name), (_x->args | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)));
-    }
-    if (auto _x = t.get<Type::Ptr>()) {
-      return fmt::format("{}*{}", repr(_x->comp), repr(_x->space));
-    }
-    if (auto _x = t.get<Type::Arr>()) {
-      return fmt::format("{}[{}]{}", repr(_x->comp), _x->length, repr(_x->space));
-    }
-    if (auto _x = t.get<Type::Var>()) {
-      return fmt::format("#{}", _x->name);
-    }
-    if (auto _x = t.get<Type::Exec>()) {
-      return fmt::format("<{}>({}) => {}", (_x->tpeVars | mk_string(","s)),
-                         (_x->args | map([&](const Type::Any &_v7_0) { return repr(_v7_0); }) | mk_string(","s)), repr(_x->rtn));
-    }
-    if (auto _x = t.get<Type::FnRef>()) {
-      return fmt::format("&{}", repr(_x->name));
-    }
-
-    throw std::logic_error(fmt::format("Unhandled match case for t (of type Type::Any) at {}:{})", __FILE__, __LINE__));
-  }();
-}
+std::string repr(const Type::Any &t) { return canonicalName(t); }
 
 std::string repr(const Named &n) { return fmt::format("{}", n.symbol); }
 
@@ -380,6 +297,19 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Spec::GpuAtomicRMW>()) {
           return fmt::format("'gpuAtomic{}({}, {}, {}, {})", repr(_z->op), repr(_z->ptr), repr(_z->value), repr(_z->scope),
                              repr(_z->order));
+        }
+        if (auto _z = _x->op.get<Spec::GpuAtomicCAS>()) {
+          return fmt::format("'gpuAtomicCAS({}, {}, {}, {}, {})", repr(_z->ptr), repr(_z->expected), repr(_z->desired), repr(_z->scope),
+                             repr(_z->order));
+        }
+        if (auto _z = _x->op.get<Spec::GpuGroupReduce>()) {
+          return fmt::format("'gpuGroupReduce{}({})", repr(_z->op), repr(_z->value));
+        }
+        if (auto _z = _x->op.get<Spec::GpuGroupInclusiveScan>()) {
+          return fmt::format("'gpuGroupInclusiveScan{}({})", repr(_z->op), repr(_z->value));
+        }
+        if (auto _z = _x->op.get<Spec::GpuGroupExclusiveScan>()) {
+          return fmt::format("'gpuGroupExclusiveScan{}({})", repr(_z->op), repr(_z->value));
         }
         if (auto _z = _x->op.get<Spec::RemoteLaunch>()) {
           return fmt::format("'remoteLaunch({}, {}[{}], <{}, {}, {}>, <{}, {}, {}>, {}, [{}])", repr(_z->context), repr(_z->kernel),
@@ -680,7 +610,7 @@ std::string repr(const Handler &h) {
 }
 
 std::string repr(const Arg &a) {
-  return fmt::format("{}: {}{}{}", a.named.symbol, repr(a.named.tpe), a.boundary ^ map([&](const Boundary &b) {
+  return fmt::format("{}: {}{}{}", a.named.symbol, repr(a.named.tpe), a.boundary ^ map([&](const ArgBoundary &b) {
                                                                         return fmt::format(" /* {} {} */", repr(b.access), repr(b.extent));
                                                                       }) ^ get_or_else(""s),
                      a.pos ^ map([&](const SourcePosition &s) { return fmt::format(" /* {} */", repr(s)); }) ^ get_or_else(""s));
@@ -715,6 +645,9 @@ std::string repr(const ArgSizeExpr::Any &s) {
     }
     if (auto _x = s.get<ArgSizeExpr::Mul>()) {
       return fmt::format("({} * {})", repr(_x->lhs), repr(_x->rhs));
+    }
+    if (auto _x = s.get<ArgSizeExpr::Min>()) {
+      return fmt::format("min({}, {})", repr(_x->lhs), repr(_x->rhs));
     }
 
     throw std::logic_error(fmt::format("Unhandled match case for s (of type ArgSizeExpr::Any) at {}:{})", __FILE__, __LINE__));
@@ -773,44 +706,63 @@ std::string repr(const FunctionAffinity::Any &a) {
   }();
 }
 
+std::string repr(const CallConvention::Any &c) {
+  return [&] {
+    if (c.is<CallConvention::RegularCall>()) {
+      return "RegularCall"s;
+    }
+    if (c.is<CallConvention::OffloadEntry>()) {
+      return "OffloadEntry"s;
+    }
+
+    throw std::logic_error(fmt::format("Unhandled match case for c (of type CallConvention::Any) at {}:{})", __FILE__, __LINE__));
+  }();
+}
+
 std::string repr(const Signature &f) {
   return fmt::format("def {}{}<{}>({}): {} /* mod={} term={} */",
                      f.receiver ^ map([&](const Type::Any &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s), repr(f.name),
-                     (f.tpeVars | mk_string(","s)), (f.args | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)),
-                     repr(f.rtn), (f.moduleCaptures | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
+                     (f.tpeVars | map([&](const Type::Var &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
+                     (f.args | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)), repr(f.rtn),
+                     (f.moduleCaptures | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
                      (f.termCaptures | map([&](const Type::Any &_v5_0) { return repr(_v5_0); }) | mk_string(","s)));
 }
 
 std::string repr(const Function &f) {
-  return fmt::format("{} /* vis={} fp={} entry={} */ {}\n{}\n{}", repr(f.decl), repr(f.visibility), repr(f.fpMode), f.isEntry, "{"s,
+  return fmt::format("{} /* vis={} fp={} convention={} implements={} requires={} */ {}\n{}\n{}", repr(f.decl), repr(f.visibility),
+                     repr(f.fpMode), repr(f.convention),
+                     f.implements ^ map([&](const Sym &_v5_0) { return repr(_v5_0); }) ^ get_or_else(""s),
+                     (f.requiredCapabilities | mk_string(","s)), "{"s,
                      (f.body | map([&](const Stmt::Any &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 }
 
 std::string repr(const FunctionDecl &f) {
   return fmt::format("def {}{}<{}>({}): {} /* affinity={} mod={} term={} */",
                      f.receiver ^ map([&](const Arg &r) { return fmt::format("{}.", repr(r)); }) ^ get_or_else(""s), repr(f.name),
-                     (f.tpeVars | mk_string(","s)), (f.args | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)),
-                     repr(f.rtn), repr(f.affinity),
+                     (f.tpeVars | map([&](const Type::Var &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
+                     (f.args | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)), repr(f.rtn), repr(f.affinity),
                      (f.moduleCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
                      (f.termCaptures | map([&](const Arg &_v5_0) { return repr(_v5_0); }) | mk_string(","s)));
 }
 
 std::string repr(const MetaEntry &m) { return fmt::format("{}={}", m.key, m.value); }
 
-std::string repr(const InterfaceDef &l) {
+std::string repr(const Interface &l) {
   return fmt::format("interface {} {}\n{}\n{}\n{}", repr(l.name), "{"s,
-                     (l.decls | map([&](const FunctionDecl &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2),
+                     (l.declarations | map([&](const FunctionDecl &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2),
                      (l.metadata | map([&](const MetaEntry &_v6_0) { return repr(_v6_0); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 }
 
 std::string repr(const StructDef &s) {
-  return fmt::format("class {}<{}>({}) <: {}", repr(s.name), (s.tpeVars | mk_string(","s)),
+  return fmt::format("class {}<{}>({}) <: {}", repr(s.name),
+                     (s.tpeVars | map([&](const Type::Var &_v5_0) { return repr(_v5_0); }) | mk_string(","s)),
                      (s.members | map([&](const Named &m) { return fmt::format("{}: {}", m.symbol, repr(m.tpe)); }) | mk_string(", "s)),
                      (s.parents | map([&](const Type::Struct &_v5_0) { return repr(_v5_0); }) | mk_string(", "s)));
 }
 
 std::string repr(const Program &s) {
-  return fmt::format("{}\n{}\n{}", (s.defs | map([&](const StructDef &_v5_0) { return repr(_v5_0); }) | mk_string("\n"s)), repr(s.entry),
+  return fmt::format("{}\n{}\n{}", (s.defs | map([&](const StructDef &_v5_0) { return repr(_v5_0); }) | mk_string("\n"s)),
+                     s.entry ^ map([&](const Function &_v5_0) { return repr(_v5_0); }) ^ get_or_else(""s),
                      (s.functions | map([&](const Function &_v5_0) { return repr(_v5_0); }) | mk_string("\n"s)));
 }
 

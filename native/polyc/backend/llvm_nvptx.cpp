@@ -27,7 +27,7 @@ uint64_t nvptxShuffleWords(CodeGen &cg, llvm::Type *valTy) {
 } // namespace
 
 void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
-  if (source.isEntry) {
+  if (source.convention.is<CallConvention::OffloadEntry>()) {
     // XXX as of LLVM 21, it seems that the annotation method of marking kernel entries is now standardised to normal calling conventions,
     // keeping both for compatibility reasons
     fn.setCallingConv(llvm::CallingConv::PTX_Kernel);
@@ -267,6 +267,14 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
         return cg.B.CreateICmpEQ(cg.B.CreateAnd(ballot(active, v.pred), mask), mask);
       },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, nvptxScope(v.scope)); },
+      [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, nvptxScope(v.scope)); },
+      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce lowering not yet implemented"); },
+      [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupInclusiveScan lowering not yet implemented");
+      },
+      [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupExclusiveScan lowering not yet implemented");
+      },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },

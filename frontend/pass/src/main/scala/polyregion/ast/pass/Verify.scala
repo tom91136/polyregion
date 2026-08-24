@@ -43,7 +43,7 @@ object Verify {
       case _: p.Term.IntS32Const | _: p.Term.IntS64Const | _: p.Term.IntU32Const | _: p.Term.IntU64Const => true
       case _                                                                                             => false
     }
-    (program.entry :: program.functions)
+    (program.entry.toList ::: program.functions)
       .flatMap { f =>
         f.collectWhere[p.Expr] { case a: p.Expr.Alloc => (f, a) }
       }
@@ -54,12 +54,12 @@ object Verify {
   }
 
   def validatePostMono(program: p.Program): List[String] =
-    if (program.phase != p.PassPhase.PostMono) Nil
+    if (program.phase != p.Pass.Phase.PostMono) Nil
     else {
-      val fns = program.entry :: program.functions
+      val fns = program.entry.toList ::: program.functions
       val typeViolations = fns.flatMap { f =>
         f.collectWhere[p.Type] {
-          case t @ p.Type.Var(_)        => s"PostMono: ${f.name.repr} contains Type.Var ${t.repr}"
+          case t @ p.Type.Var(_, _)     => s"PostMono: ${f.name.repr} contains Type.Var ${t.repr}"
           case t @ p.Type.Exec(_, _, _) => s"PostMono: ${f.name.repr} contains Type.Exec ${t.repr}"
         }
       }
@@ -70,14 +70,14 @@ object Verify {
     }
 
   def validatePoison(program: p.Program): List[String] =
-    (program.entry :: program.functions).flatMap { f =>
+    (program.entry.toList ::: program.functions).flatMap { f =>
       f.collectWhere[p.Term] { case x: p.Term.Poison =>
         s"${f.name.repr}: unlowered poison value of type ${x.tpe.repr}"
       }
     }
 
   def validateRegions(program: p.Program): List[String] =
-    (program.entry :: program.functions).flatMap { f =>
+    (program.entry.toList ::: program.functions).flatMap { f =>
       val derived = Provenance.derivedIn(f)
       f.collectWhere[p.Expr] {
         case p.Expr.Index(ptr, _, _) if Provenance.at(derived, ptr) == p.Region.Opaque =>
@@ -93,7 +93,7 @@ object Verify {
     }
 
   def validateRegionSpaces(program: p.Program): List[String] =
-    (program.entry :: program.functions).flatMap { f =>
+    (program.entry.toList ::: program.functions).flatMap { f =>
       Provenance.spaceMismatches(f).map { (n, r, sn, sr) =>
         s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr"
       }
@@ -140,11 +140,11 @@ object Verify {
                     case None =>
                       (acc ~ s"Unknown struct type ${sym.repr} in `$termRepr`", currTpe)
                     case Some(sdef) =>
-                      val apTable = sdef.tpeVars.zip(args).toMap
+                      val apTable = sdef.tpeVars.map(_.name).zip(args).toMap
                       val members = sdef.members.map(m =>
                         m.modifyAll[p.Type](_.mapLeaf {
-                          case p.Type.Var(n) => apTable.getOrElse(n, p.Type.Var(n))
-                          case x             => x
+                          case variable @ p.Type.Var(n, _) => apTable.getOrElse(n, variable)
+                          case x                           => x
                         })
                       )
                       members.find(_.symbol == name) match {
@@ -247,7 +247,7 @@ object Verify {
         val c0 = expr.map(e => validateExpr(_: Context, e)).getOrElse(identity[Context])(c + name)
         def varCompatible(t: p.Type, u: p.Type): Boolean = (t, u) match {
           case (a, b) if a == b                                 => true
-          case (p.Type.Var(_), _) | (_, p.Type.Var(_))          => true
+          case (p.Type.Var(_, _), _) | (_, p.Type.Var(_, _))    => true
           case (p.Type.Ptr(c1, s1), p.Type.Ptr(c2, s2))         => s1 == s2 && varCompatible(c1, c2)
           case (p.Type.Arr(c1, l1, s1), p.Type.Arr(c2, l2, s2)) => l1 == l2 && s1 == s2 && varCompatible(c1, c2)
           case (p.Type.Struct(n1, a1), p.Type.Struct(n2, a2)) =>
@@ -364,17 +364,17 @@ object Verify {
                 case None | Some(Nil) => s"launch references an undefined kernel `${name.repr}`" :: Nil
                 case Some(candidates) =>
                   def resolve(tpe: p.Type, bindings: Map[String, p.Type]): p.Type = tpe match {
-                    case p.Type.Var(name)                     => bindings.getOrElse(name, tpe)
+                    case p.Type.Var(name, _)                  => bindings.getOrElse(name, tpe)
                     case p.Type.Struct(name, args)            => p.Type.Struct(name, args.map(resolve(_, bindings)))
                     case p.Type.Ptr(component, space)         => p.Type.Ptr(resolve(component, bindings), space)
                     case p.Type.Arr(component, length, space) => p.Type.Arr(resolve(component, bindings), length, space)
                     case p.Type.Exec(vars, args, rtn) =>
-                      val nested = bindings -- vars
+                      val nested = bindings -- vars.map(_.name)
                       p.Type.Exec(vars, args.map(resolve(_, nested)), resolve(rtn, nested))
                     case other => other
                   }
                   val matching = candidates.exists { candidate =>
-                    val bindings = candidate.tpeVars.zip(launch.tpeArgs).toMap
+                    val bindings = candidate.tpeVars.map(_.name).zip(launch.tpeArgs).toMap
                     val parameters = (candidate.moduleCaptures ::: candidate.termCaptures ::: candidate.args)
                       .map(arg => resolve(arg.named.tpe, bindings))
                       .filterNot(tpe => tpe == p.Type.Unit0 || tpe == p.Type.Nothing)
@@ -398,7 +398,7 @@ object Verify {
   }
 
   def apply(program: p.Program, log: Log, verifyFunction: Boolean): List[(p.Function, List[String])] = {
-    val allFunctions = program.entry :: program.functions
+    val allFunctions = program.entry.toList ::: program.functions
     val sdefLUT      = program.defs.iterator.map(d => d.name -> d).toMap
     val allFnLUT     = allFunctions.groupBy(_.name)
     val perFn =
@@ -408,7 +408,7 @@ object Verify {
     else
       perFn match {
         case (entry, errs) :: rest => (entry, errs ::: global) :: rest
-        case Nil                   => (program.entry, global) :: Nil
+        case Nil                   => program.entry.map(_ -> global).toList
       }
   }
 }

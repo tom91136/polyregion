@@ -56,6 +56,20 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
     assertEquals(p.Direction.RemoteToRemote.repr, "remoteToRemote")
   }
 
+  test("GPU atomic and group operations round-trip with their complete operands") {
+    val ptr   = p.Term.Poison(p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global))
+    val value = p.Term.IntU32Const(7)
+    val operations: List[p.Spec] = List(
+      p.Spec.GpuAtomicCAS(ptr, value, value, p.MemScope.Device, p.MemOrder.Relaxed, p.Type.IntU32),
+      p.Spec.GpuGroupReduce(p.AtomicOp.Add, value, p.Type.IntU32),
+      p.Spec.GpuGroupInclusiveScan(p.AtomicOp.Max, value, p.Type.IntU32),
+      p.Spec.GpuGroupExclusiveScan(p.AtomicOp.Min, value, p.Type.IntU32)
+    )
+
+    operations.foreach(operation => assertEquals(MsgPack.decode[p.Spec](MsgPack.encode(operation)), Right(operation)))
+    assertEquals(operations.map(_.terms), List(List(ptr, value, value), List(value), List(value), List(value)))
+  }
+
   test("heterogeneous orchestration operands are verified") {
     val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     def launch(kernel: p.Term, args: List[p.Term] = Nil) = p.Spec.RemoteLaunch(

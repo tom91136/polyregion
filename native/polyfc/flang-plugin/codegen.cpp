@@ -142,6 +142,7 @@ void polyfc::compilePackageProgram(clang::DiagnosticsEngine &diag, const polyfro
     const auto name = f.getSymName().str();
     if (const auto it = r.userFuncs.find(name); it != r.userFuncs.end()) {
       it->second.visibility = FunctionVisibility::Exported();
+      it->second.implements = Sym(name ^ split('.'));
       exported++;
       if (opts.verbose) emit(diag, Level::Remark, POLYREGION_DIAG_POLYDCO "Exporting package symbol: %0", name);
     }

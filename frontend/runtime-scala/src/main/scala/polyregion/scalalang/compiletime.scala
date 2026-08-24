@@ -235,14 +235,12 @@ object compiletime {
         case (n @ p.Named(_, tpe, _), term) => (n, None, term).success
       }
 
-      prog: p.Program = prog0.copy(entry =
-        prog0.entry.copy(
-          decl = prog0.entry.decl.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}"))
-        )
-      )
+      entry0 <- prog0.entry.failIfEmpty("compiled expression has no program entry")
+      entry           = entry0.copy(decl = entry0.decl.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
+      prog: p.Program = prog0.copy(entry = Some(entry))
 
       _ = debug(log.render(1).mkString("\n"))
-      _ = debug(prog.entry.repr)
+      _ = debug(entry.repr)
       _ = debug(prog.functions.map(_.repr).mkString("\n"))
 
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.programVersioned(prog)))
@@ -278,8 +276,8 @@ object compiletime {
 
       given Quotes = q.underlying
 
-      val fnName     = Expr(prog.entry.name.repr)
-      val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
+      val fnName     = Expr(entry.name.fqcn)
+      val moduleName = Expr(s"${entry0.name.fqcn}@${ProgramCounter.getAndIncrement()}")
       val (captureTpeOrdinals, captureTpeSizes) = capturesWithStructDefs.map { (name, _, _) =>
         val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
         tpe.value -> tpe.sizeInBytes
@@ -288,8 +286,8 @@ object compiletime {
       val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).value
       val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).sizeInBytes
 
-      val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
-      val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
+      val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(entry.rtn).value
+      val returnTpeSize    = Pickler.tpeAsRuntimeTpe(entry.rtn).sizeInBytes
 
       debug(s"Prog defs: ${prog.defs}")
 

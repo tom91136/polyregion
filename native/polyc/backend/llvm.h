@@ -38,7 +38,7 @@ public:
   [[nodiscard]] CompileResult compileProgram(const Program &program, const compiletime::OptLevel &opt) override;
 };
 
-// device kernel entry symbol: repr(sym) with every non-alnum/'_' byte mapped to '_' (NVPTX has a limited
+// device kernel entry symbol: fqcn(sym) with every non-alnum/'_' byte mapped to '_' (NVPTX has a limited
 // legal-character set). the host launcher's module/kernel string must equal this exactly
 [[nodiscard]] std::string normaliseSymbol(const Sym &sym);
 
@@ -218,6 +218,7 @@ struct CodeGen {
 
   // shared atomic lowering; the target handler supplies the syncscope string for the memory scope
   [[nodiscard]] ValPtr mkAtomicRMW(const polyast::Spec::GpuAtomicRMW &op, const std::string &scope);
+  [[nodiscard]] ValPtr mkAtomicCAS(const polyast::Spec::GpuAtomicCAS &op, const std::string &scope);
   [[nodiscard]] ValPtr mkVolatileLoad(const polyast::Spec::GpuVolatileLoad &op);
   [[nodiscard]] ValPtr mkVolatileStore(const polyast::Spec::GpuVolatileStore &op);
 

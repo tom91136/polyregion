@@ -15,6 +15,7 @@ object PolyAST {
     infix def :+(s: String): Sym = Sym(fqn :+ s)
     infix def ~(s: Sym): Sym     = Sym(fqn ++ s.fqn)
     def last: String             = fqn.last
+    def fqcn: String             = fqn.mkString(".")
   }
   object Sym {
     def apply(raw: String): Sym = {
@@ -64,9 +65,9 @@ object PolyAST {
     case Ptr(comp: Type, space: Type.Space)              extends Type(Type.Kind.Ref)
     case Arr(comp: Type, length: Int, space: Type.Space) extends Type(Type.Kind.Ref)
 
-    case Var(name: String)                                        extends Type(Type.Kind.None)
-    case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
-    case FnRef(name: Sym)                                         extends Type(Type.Kind.None)
+    case Var(name: String, exactSizeInBytes: Option[Int] = None)    extends Type(Type.Kind.None)
+    case Exec(tpeVars: List[Type.Var], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
+    case FnRef(name: Sym)                                           extends Type(Type.Kind.None)
   }
 
   enum Region derives MsgPack.Codec {
@@ -227,7 +228,12 @@ object PolyAST {
         extends Spec(List(Overload(List(Type.IntU32, Type.Bool1), Type.Bool1)), List(mask, pred), Type.Bool1)
     case GpuAtomicRMW(op: AtomicOp, ptr: Term, value: Term, scope: MemScope, order: MemOrder, rtn: Type)
         extends Spec(Spec.Unchecked, List(ptr, value), rtn)
-    case GpuVolatileLoad(ptr: Term, rtn: Type)    extends Spec(Spec.Unchecked, List(ptr), rtn)
+    case GpuAtomicCAS(ptr: Term, expected: Term, desired: Term, scope: MemScope, order: MemOrder, rtn: Type)
+        extends Spec(Spec.Unchecked, List(ptr, expected, desired), rtn)
+    case GpuGroupReduce(op: AtomicOp, value: Term, rtn: Type)        extends Spec(Spec.Unchecked, List(value), rtn)
+    case GpuGroupInclusiveScan(op: AtomicOp, value: Term, rtn: Type) extends Spec(Spec.Unchecked, List(value), rtn)
+    case GpuGroupExclusiveScan(op: AtomicOp, value: Term, rtn: Type) extends Spec(Spec.Unchecked, List(value), rtn)
+    case GpuVolatileLoad(ptr: Term, rtn: Type)                       extends Spec(Spec.Unchecked, List(ptr), rtn)
     case GpuVolatileStore(ptr: Term, value: Term) extends Spec(Spec.Unchecked, List(ptr, value), Type.Unit0)
     case RemoteLaunch(
         context: Term,
@@ -399,7 +405,7 @@ object PolyAST {
 
   case class Signature(
       name: Sym,
-      tpeVars: List[String],
+      tpeVars: List[Type.Var],
       receiver: Option[Type],
       args: List[Type],
       moduleCaptures: List[Type],
@@ -423,6 +429,7 @@ object PolyAST {
       case Const(value: Long)
       case Add(lhs: SizeExpr, rhs: SizeExpr)
       case Mul(lhs: SizeExpr, rhs: SizeExpr)
+      case Min(lhs: SizeExpr, rhs: SizeExpr)
     }
 
     enum Extent derives MsgPack.Codec {
@@ -436,7 +443,7 @@ object PolyAST {
       derives MsgPack.Codec
   case class StructDef(
       name: Sym,
-      tpeVars: List[String],
+      tpeVars: List[Type.Var],
       members: List[Named],
       parents: List[Type.Struct],
       isUnion: Boolean = false
@@ -457,7 +464,7 @@ object PolyAST {
   }
   case class FunctionDecl(
       name: Sym,
-      tpeVars: List[String],
+      tpeVars: List[Type.Var],
       receiver: Option[Arg],
       args: List[Arg],
       moduleCaptures: List[Arg],
@@ -466,34 +473,29 @@ object PolyAST {
       affinity: Function.Affinity
   ) derives MsgPack.Codec
 
+  enum CallConvention derives MsgPack.Codec { case RegularCall, OffloadEntry }
+
   case class Function(
       decl: FunctionDecl,
       body: List[Stmt],
       visibility: Function.Visibility,
       fpMode: Function.FpMode,
-      isEntry: Boolean
+      convention: CallConvention,
+      implements: Option[Sym] = None,
+      requiredCapabilities: List[String] = Nil
   ) derives MsgPack.Codec {
     export decl.{affinity, args, moduleCaptures, name, receiver, rtn, termCaptures, tpeVars}
   }
 
-  enum PassPhase derives MsgPack.Codec { case Initial, PostMono }
-
   case class MetaEntry(key: String, value: String) derives MsgPack.Codec
-  case class InterfaceDef(name: Sym, decls: List[FunctionDecl], metadata: List[MetaEntry] = Nil) derives MsgPack.Codec
-  case class TypeSizeConstraint(typeVariable: String, sizeInBytes: Int) derives MsgPack.Codec
-  case class ImplementationCandidate(
-      publicName: Sym,
-      implementation: FunctionDecl,
-      requiredCapabilities: List[String],
-      typeSizes: List[TypeSizeConstraint]
-  ) derives MsgPack.Codec
-  case class PackageIndex(interface: InterfaceDef, candidates: List[ImplementationCandidate]) derives MsgPack.Codec
+  case class Interface(name: Sym, declarations: List[FunctionDecl], metadata: List[MetaEntry] = Nil)
+      derives MsgPack.Codec
 
   case class Program(
-      entry: Function,
+      entry: Option[Function],
       functions: List[Function],
       defs: List[StructDef],
-      phase: PassPhase = PassPhase.Initial,
+      phase: Pass.Phase = Pass.Phase.Initial,
       metadata: List[MetaEntry] = Nil
   ) derives MsgPack.Codec {
     def hostFunctions: List[Function]     = functions.filter(_.affinity == Function.Affinity.Host)
@@ -501,37 +503,79 @@ object PolyAST {
     def meta(key: String): Option[String] = metadata.find(_.key == key).map(_.value)
   }
 
-  case class Package(index: PackageIndex, program: Program) derives MsgPack.Codec
+  case class Package(interface: Interface, program: Program) derives MsgPack.Codec
+  object Package {
+    case class TypeSize(tpe: Type, sizeInBytes: Int) derives MsgPack.Codec
 
-  case class StructLayoutMember(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec
+    case class LinkRequest(
+        interface: Interface,
+        programFragments: List[Program],
+        capabilities: List[String] = Nil
+    ) derives MsgPack.Codec
+
+    case class SymRequest(
+        pkg: Package,
+        signature: InvokeSignature,
+        callerDecls: List[FunctionDecl],
+        callerFns: List[Function],
+        callerDefs: List[StructDef],
+        capabilities: List[String],
+        typeSizes: List[TypeSize],
+        entryName: String,
+        returnConvention: ReturnConvention = ReturnConvention.Return
+    ) derives MsgPack.Codec
+
+    enum ReturnConvention derives MsgPack.Codec {
+      case Return
+      case OutParam(index: Int)
+    }
+
+    enum EntryArgBinding derives MsgPack.Codec {
+      case Context
+      case CallValue(index: Int)
+      case CallAddress(index: Int)
+      case ResultAddress
+    }
+
+    case class SymResolvedProgram(program: Program, entryArgs: List[EntryArgBinding]) derives MsgPack.Codec
+  }
+
+  object StructLayout {
+    case class Member(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec
+  }
   case class StructLayout(
       name: String,
       sizeInBytes: Long,
       alignment: Long,
-      members: List[StructLayoutMember]
+      members: List[StructLayout.Member]
   ) derives MsgPack.Codec
 
-  case class CompileEvent(
-      epochMillis: Long,
-      elapsedNanos: Long,
-      name: String,
-      data: String,
-      items: List[CompileEvent] = Nil
-  ) derives MsgPack.Codec
+  object Compile {
+    case class Event(
+        epochMillis: Long,
+        elapsedNanos: Long,
+        name: String,
+        data: String,
+        items: List[Event] = Nil
+    ) derives MsgPack.Codec
 
-  case class PassArg(name: String, value: String) derives MsgPack.Codec
-  case class PassSpec(name: String, args: List[PassArg]) derives MsgPack.Codec
-  case class PassPipeline(steps: List[PassSpec]) derives MsgPack.Codec
-  case class PassRunResult(program: Program, event: CompileEvent) derives MsgPack.Codec
+    case class Result(
+        binary: Option[ArraySeq[Byte]],
+        features: List[String],
+        events: List[Event],
+        layouts: List[StructLayout],
+        messages: String,
+        entryArgs: List[Named] = Nil
+    ) derives MsgPack.Codec
+  }
 
-  case class CompileResult(
-      binary: Option[ArraySeq[Byte]],
-      features: List[String],
-      events: List[CompileEvent],
-      layouts: List[StructLayout],
-      messages: String,
-      entryArgs: List[Named] = Nil
-  ) derives MsgPack.Codec
+  object Pass {
+    enum Phase derives MsgPack.Codec { case Initial, PostMono }
+    case class Arg(name: String, value: String) derives MsgPack.Codec
+    case class Spec(name: String, args: List[Arg]) derives MsgPack.Codec
+    case class Pipeline(steps: List[Spec]) derives MsgPack.Codec
+    case class RunResult(program: Program, event: Compile.Event) derives MsgPack.Codec
+  }
 
   object PolyPassAbi {
 
@@ -592,6 +636,51 @@ object PolyAST {
     }
   }
 
+  object PolyPackageAbi {
+
+    inline val Version = 1
+    inline val Prefix  = "polypackage_"
+
+    object Status {
+      inline val Ok          = 0
+      inline val AllocFailed = 1
+      inline val Invalid     = 2
+      inline val AbiMismatch = 3
+    }
+    def docs(d: String): Nothing = ???
+
+    object AbiVersion {
+      def apply(): Int                    = docs("ABI version of the non-composable package service.")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object LinkPackage {
+      def apply(request: Array[Byte]): Array[Byte] = docs(
+        "Link a versioned PackageLinkRequest into a Package encoded with the package-service wire schema."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object ResolveSym {
+      def apply(request: Array[Byte]): Array[Byte] = docs(
+        "Resolve a versioned PackageSymRequest into a versioned PackageSymResolvedProgram."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object LastError {
+      def apply(): String = docs(
+        "NUL-terminated diagnostic for the most recent failed package operation; NULL when no error is set."
+      )
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+
+    object Free {
+      def apply(ptr: Any): Unit           = docs("Release a buffer returned by a package operation.")
+      transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
+    }
+  }
+
   object PolyJitAbi {
 
     inline val Version = 3
@@ -610,8 +699,8 @@ object PolyAST {
       transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
     }
 
-    // Runtime capture constant keyed by #this field path and Type.repr.
-    case class SpecConst(field: String, repr: String, data: Array[Byte])
+    // Runtime capture constant keyed by #this field path and canonical type name.
+    case class SpecConst(field: String, typeName: String, data: Array[Byte])
 
     object Compile {
       def apply(
@@ -823,7 +912,7 @@ object PolyAST {
   }
 
   extension (s: Sym) {
-    def repr: String = s.fqn.mkString(".")
+    def repr: String = s.fqcn
   }
 
   extension (t: SourcePosition) {
@@ -831,12 +920,7 @@ object PolyAST {
   }
 
   extension (t: Type.Space) {
-    def repr: String = t match {
-      case Space.Global   => ""
-      case Space.Local    => "^Local"
-      case Space.Private  => "^Private"
-      case Space.Constant => "^Constant"
-    }
+    def repr: String = t.canonicalName
   }
 
   extension (o: AtomicOp) {
@@ -905,34 +989,7 @@ object PolyAST {
   }
 
   extension (t: Type) {
-    def repr: String = t match {
-      case Type.Float16 => "F16"
-      case Type.Float32 => "F32"
-      case Type.Float64 => "F64"
-
-      case Type.IntU8  => "U8"
-      case Type.IntU16 => "U16"
-      case Type.IntU32 => "U32"
-      case Type.IntU64 => "U64"
-
-      case Type.IntS8  => "I8"
-      case Type.IntS16 => "I16"
-      case Type.IntS32 => "I32"
-      case Type.IntS64 => "I64"
-
-      case Type.Nothing => "Nothing"
-      case Type.Unit0   => "Unit0"
-      case Type.Bool1   => "Bool1"
-
-      case Type.Struct(name, args) =>
-        s"${name.repr}<${args.map(_.repr).mkString(",")}>"
-      case Type.Ptr(comp, space)         => s"${comp.repr}*${space.repr}"
-      case Type.Arr(comp, length, space) => s"${comp.repr}[$length]${space.repr}"
-      case Type.Var(name)                => s"#$name"
-      case Type.Exec(tpeVars, args, rtn) =>
-        s"<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
-      case Type.FnRef(name) => s"&${name.repr}"
-    }
+    def repr: String = t.canonicalName
   }
 
   extension (n: Named) {
@@ -995,6 +1052,11 @@ object PolyAST {
           case Spec.GpuVoteAll(m, p)              => s"'gpuVoteAll(${m.repr}, ${p.repr})"
           case Spec.GpuAtomicRMW(op, p, v, s, o, _) =>
             s"'gpuAtomic${op.repr}(${p.repr}, ${v.repr}, ${s.repr}, ${o.repr})"
+          case Spec.GpuAtomicCAS(p, e, d, s, o, _) =>
+            s"'gpuAtomicCAS(${p.repr}, ${e.repr}, ${d.repr}, ${s.repr}, ${o.repr})"
+          case Spec.GpuGroupReduce(op, v, _)        => s"'gpuGroupReduce${op.repr}(${v.repr})"
+          case Spec.GpuGroupInclusiveScan(op, v, _) => s"'gpuGroupInclusiveScan${op.repr}(${v.repr})"
+          case Spec.GpuGroupExclusiveScan(op, v, _) => s"'gpuGroupExclusiveScan${op.repr}(${v.repr})"
           case Spec.RemoteLaunch(c, k, ts, gx, gy, gz, bx, by, bz, sh, as) =>
             s"'remoteLaunch(${c.repr}, ${k.repr}[${ts
                 .map(_.repr)
@@ -1146,6 +1208,7 @@ object PolyAST {
       case Arg.SizeExpr.Const(value)  => value.toString
       case Arg.SizeExpr.Add(lhs, rhs) => s"(${lhs.repr} + ${rhs.repr})"
       case Arg.SizeExpr.Mul(lhs, rhs) => s"(${lhs.repr} * ${rhs.repr})"
+      case Arg.SizeExpr.Min(lhs, rhs) => s"min(${lhs.repr}, ${rhs.repr})"
     }
   }
 
@@ -1177,9 +1240,17 @@ object PolyAST {
     }
   }
 
+  extension (c: CallConvention) {
+    def repr: String = c match {
+      case CallConvention.RegularCall  => "RegularCall"
+      case CallConvention.OffloadEntry => "OffloadEntry"
+    }
+  }
+
   extension (f: Signature) {
     def repr: String =
       s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars
+          .map(_.repr)
           .mkString(",")}>(${f.args.map(_.repr).mkString(", ")}): ${f.rtn.repr} /* mod=${f.moduleCaptures
           .map(_.repr)
           .mkString(",")} term=${f.termCaptures.map(_.repr).mkString(",")} */"
@@ -1187,7 +1258,9 @@ object PolyAST {
 
   extension (f: Function) {
     def repr: String =
-      s"${f.decl.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} entry=${f.isEntry} */ ${"{"}\n${f.body
+      s"${f.decl.repr} /* vis=${f.visibility.repr} fp=${f.fpMode.repr} convention=${f.convention.repr} implements=${f.implements
+          .map(_.repr)
+          .getOrElse("")} requires=${f.requiredCapabilities.mkString(",")} */ ${"{"}\n${f.body
           .map(_.repr)
           .mkString("\n")
           .indent(2)}\n${"}"}"
@@ -1195,7 +1268,7 @@ object PolyAST {
 
   extension (f: FunctionDecl) {
     def repr: String =
-      s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.mkString(",")}>(${f.args
+      s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.map(_.repr).mkString(",")}>(${f.args
           .map(_.repr)
           .mkString(", ")}): ${f.rtn.repr} /* affinity=${f.affinity.repr} mod=${f.moduleCaptures
           .map(_.repr)
@@ -1206,9 +1279,9 @@ object PolyAST {
     def repr: String = s"${m.key}=${m.value}"
   }
 
-  extension (l: InterfaceDef) {
+  extension (l: Interface) {
     def repr: String =
-      s"interface ${l.name.repr} ${"{"}\n${l.decls.map(_.repr).mkString("\n").indent(2)}\n${l.metadata
+      s"interface ${l.name.repr} ${"{"}\n${l.declarations.map(_.repr).mkString("\n").indent(2)}\n${l.metadata
           .map(_.repr)
           .mkString("\n")
           .indent(2)}\n${"}"}"
@@ -1216,14 +1289,14 @@ object PolyAST {
 
   extension (s: StructDef) {
     def repr: String =
-      s"class ${s.name.repr}<${s.tpeVars.mkString(",")}>(${s.members
+      s"class ${s.name.repr}<${s.tpeVars.map(_.repr).mkString(",")}>(${s.members
           .map(m => s"${m.symbol}: ${m.tpe.repr}")
           .mkString(", ")}) <: ${s.parents.map(_.repr).mkString(", ")}"
   }
 
   extension (s: Program) {
     def repr: String =
-      s"${s.defs.map(_.repr).mkString("\n")}\n${s.entry.repr}\n${s.functions.map(_.repr).mkString("\n")}"
+      s"${s.defs.map(_.repr).mkString("\n")}\n${s.entry.map(_.repr).getOrElse("")}\n${s.functions.map(_.repr).mkString("\n")}"
   }
 
   extension (l: StructLayout) {

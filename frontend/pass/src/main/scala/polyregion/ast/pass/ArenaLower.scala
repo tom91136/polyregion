@@ -60,7 +60,7 @@ object ArenaLower extends ProgramPass {
     def offsetRoots: Set[String]             = roots.collect { case (symbol, ArenaRep.Offset) => symbol }.toSet
   }
 
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private val ctr = new AtomicLong(0L)
 
@@ -89,7 +89,7 @@ object ArenaLower extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {
     val members = program.defs.iterator.map(d => d.name -> d.members).toMap
-    program.copy(entry = run(members, program.entry), functions = program.functions.map(run(members, _)))
+    program.copy(entry = program.entry.map(run(members, _)), functions = program.functions.map(run(members, _)))
   }
 
   private def run(members: Map[p.Sym, List[p.Named]], f: p.Function): p.Function = captureRoot(f) match {

@@ -71,6 +71,10 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_free(void *context, u
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
                                                                   int32_t direction);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_sync(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_load(void *context, const char *moduleName, int32_t kind, int32_t format,
+                                                                size_t featureCount, const char **features, size_t imageLength,
+                                                                const uint8_t *image);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_require_loaded(void *context, const char *moduleName, bool loaded);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName,
                                                                   size_t gridX, size_t gridY, size_t gridZ, size_t blockX, size_t blockY,
                                                                   size_t blockZ, size_t localMemBytes, size_t argCount,

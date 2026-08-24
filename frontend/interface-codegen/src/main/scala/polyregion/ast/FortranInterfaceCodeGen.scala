@@ -106,7 +106,7 @@ private[ast] object FortranInterfaceCodeGen {
     Iterator.iterate("polyregion_result")(_ + "_").find(name => !used(name.toLowerCase)).get
   }
 
-  private def procedure(interfaceDef: p.InterfaceDef, decl: p.FunctionDecl, overload: String): String = {
+  private def procedure(interfaceDef: p.Interface, decl: p.FunctionDecl, overload: String): String = {
     val name         = s"polyregion_${decl.name.last}$overload"
     val erasedResult = erased(decl.rtn)
     val outName      = resultName(decl)
@@ -132,7 +132,7 @@ private[ast] object FortranInterfaceCodeGen {
          |  end function $name""".stripMargin
   }
 
-  def apply(interfaceDef: p.InterfaceDef, config: InterfaceCodeGen.FortranConfig): String = {
+  def apply(interfaceDef: p.Interface, config: InterfaceCodeGen.FortranConfig): String = {
     identifier(config.moduleName, "module")
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "Fortran")
@@ -162,7 +162,7 @@ private[ast] object FortranInterfaceCodeGen {
       .toList
       .sortBy(_._1.fqn.mkString("."))
       .flatMap { case (_, overloads) =>
-        val sorted = overloads.sortBy(_.toString)
+        val sorted = overloads.sortBy(_.signatureKey)
         sorted.zipWithIndex.map { case (decl, index) =>
           decl -> Option.when(sorted.size > 1)(s"_o$index").getOrElse("")
         }

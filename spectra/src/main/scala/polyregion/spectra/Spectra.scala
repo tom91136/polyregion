@@ -44,7 +44,7 @@ object Spectra {
 
   private def declaration(
       name: String,
-      typeVariables: List[String],
+      typeVariables: List[p.Type.Var],
       args: List[p.Arg],
       rtn: p.Type
   ): p.FunctionDecl =
@@ -59,10 +59,10 @@ object Spectra {
       p.Function.Affinity.Host
     )
 
-  private val T   = List("T")
-  private val TU  = List("T", "U")
-  private val TUV = List("T", "U", "V")
-  private val KV  = List("K", "V")
+  private val T: List[p.Type.Var]   = List(p.Type.Var("T"))
+  private val TU: List[p.Type.Var]  = List(p.Type.Var("T"), p.Type.Var("U"))
+  private val TUV: List[p.Type.Var] = List(p.Type.Var("T"), p.Type.Var("U"), p.Type.Var("V"))
+  private val KV: List[p.Type.Var]  = List(p.Type.Var("K"), p.Type.Var("V"))
 
   private val declarations: List[p.FunctionDecl] = List(
     declaration(
@@ -610,11 +610,11 @@ object Spectra {
     )
   )
 
-  val interfaceDef: p.InterfaceDef = p.InterfaceDef(p.Sym("spectra"), declarations)
+  val interfaceDef: p.Interface = p.Interface(p.Sym("spectra"), declarations)
 
-  def implementationCandidates(variants: ImplementationVariants): List[p.ImplementationCandidate] =
+  def implementationCandidates(variants: ImplementationVariants): List[p.Function] =
     SpectraImplementations.candidates(interfaceDef, variants)
 
-  def packageIndex(variants: List[ImplementationVariants]): p.PackageIndex =
-    SpectraImplementations.index(interfaceDef, variants)
+  def implementationPackage(variants: List[ImplementationVariants]): p.Package =
+    SpectraImplementations.packageFor(interfaceDef, variants)
 }

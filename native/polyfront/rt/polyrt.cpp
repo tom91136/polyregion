@@ -312,6 +312,30 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_memcpy(void *context, const uint
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_sync(void *context) { requireContext(context, __func__).queue->enqueueWaitBlocking(); }
 
+POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *moduleName, const int32_t kind, const int32_t format,
+                                                     const size_t featureCount, const char **features, const size_t imageLength,
+                                                     const uint8_t *image) {
+  (void)requireContext(context, __func__);
+  const polyregion::runtime::KernelObject object{static_cast<polyregion::runtime::PlatformKind>(kind),
+                                                 static_cast<polyregion::runtime::ModuleFormat>(format),
+                                                 featureCount,
+                                                 features,
+                                                 imageLength,
+                                                 image,
+                                                 polyregion::compiletime::Target::Object_LLVM_HOST,
+                                                 "",
+                                                 "",
+                                                 polyregion::compiletime::OptLevel::O3,
+                                                 0,
+                                                 nullptr};
+  return polyregion::polyrt::loadKernelObject(moduleName, object);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, const char *moduleName, const bool loaded) {
+  (void)requireContext(context, __func__);
+  if (!loaded) polyregion::polyrt::noCompatibleKernelExit(moduleName);
+}
+
 POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName, const size_t gridX,
                                                        const size_t gridY, const size_t gridZ, const size_t blockX, const size_t blockY,
                                                        const size_t blockZ, const size_t localMemBytes, const size_t argCount,
@@ -464,11 +488,11 @@ static uint64_t hashSpecs(const std::vector<polyc_jit_spec_const_t> &specs) {
   };
   return specs ^ fold_left(uint64_t{1469598103934665603ull}, [&](uint64_t h, const auto &s) {
            const auto fieldLen = std::strlen(s.field);
-           const auto reprLen = std::strlen(s.repr);
+           const auto typeNameLen = std::strlen(s.typeName);
            h = add(h, &fieldLen, sizeof(fieldLen));
            h = add(h, s.field, fieldLen);
-           h = add(h, &reprLen, sizeof(reprLen));
-           h = add(h, s.repr, reprLen);
+           h = add(h, &typeNameLen, sizeof(typeNameLen));
+           h = add(h, s.typeName, typeNameLen);
            h = add(h, &s.dataLen, sizeof(s.dataLen));
            return add(h, s.data, s.dataLen);
          });

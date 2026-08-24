@@ -28,7 +28,7 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   fn.addFnAttr(llvm::Attribute::NoInline);
 
   // SPIR_KERNEL requires void return, so internal helpers (lambdas etc.) get SPIR_FUNC instead.
-  if (!source.isEntry) {
+  if (!source.convention.is<CallConvention::OffloadEntry>()) {
     fn.setCallingConv(llvm::CallingConv::SPIR_FUNC);
     return;
   }
@@ -64,7 +64,7 @@ void SPIRVOpenCLTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
             [&](const Type::Bool1 &) -> std::string { return "char"; },                                                     //
             [&](const Type::Unit0 &) -> std::string { return "void"; },                                                     //
             [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                            //
-            [&](const Type::Struct &s) -> std::string { return repr(s.name); },                                             //
+            [&](const Type::Struct &s) -> std::string { return fqcn(s.name); },                                             //
             [&](const Type::Ptr &p) -> std::string { return thunk(p.comp, thunk) + "*"; },                                  //
             [&](const Type::Arr &a) -> std::string { return thunk(a.comp, thunk) + "[" + std::to_string(a.length) + "]"; }, //
             [&](const Type::Var &v) -> std::string { throw std::logic_error("Type::Var should be erased"); },               //
@@ -385,6 +385,14 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
+      [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, ""); },
+      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce unsupported for SPIRV-CL"); },
+      [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupInclusiveScan unsupported for SPIRV-CL");
+      },
+      [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupExclusiveScan unsupported for SPIRV-CL");
+      },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
@@ -410,7 +418,7 @@ void SPIRVVulkanTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn
   fn.setMemoryEffects(llvm::MemoryEffects::unknown());
 
   // entry points use the hlsl.shader attribute, not SPIR_KERNEL; no optnone (it forces an unsupported capability)
-  if (source.isEntry) {
+  if (source.convention.is<CallConvention::OffloadEntry>()) {
     fn.addFnAttr("hlsl.shader", "compute");
     fn.addFnAttr("hlsl.numthreads", std::to_string(program_meta::VkWorkgroupSizeXValue) + ",1,1");
   } else fn.setCallingConv(llvm::CallingConv::SPIR_FUNC);
@@ -479,6 +487,14 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, atomicScope(v.scope)); },
+      [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, atomicScope(v.scope)); },
+      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce unsupported for SPIRV-Vulkan"); },
+      [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupInclusiveScan unsupported for SPIRV-Vulkan");
+      },
+      [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupExclusiveScan unsupported for SPIRV-Vulkan");
+      },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },

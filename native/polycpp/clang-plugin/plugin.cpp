@@ -63,54 +63,54 @@ public:
   }
 };
 
-bool linkDriverModule(llvm::Module &module, std::unique_ptr<llvm::Module> driver, clang::DiagnosticsEngine &clangDiagnostics) {
+bool linkResolvedSymModule(llvm::Module &module, std::unique_ptr<llvm::Module> resolved, clang::DiagnosticsEngine &clangDiagnostics) {
   auto &context = module.getContext();
   auto previous = context.getDiagnosticHandler();
-  const auto identifier = driver->getModuleIdentifier();
+  const auto identifier = resolved->getModuleIdentifier();
   std::vector<CapturedLinkDiagnostic> diagnostics;
   context.setDiagnosticHandler(std::make_unique<LinkDiagnosticHandler>(previous.get(), diagnostics));
-  const bool failed = llvm::Linker(module).linkInModule(std::move(driver));
+  const bool failed = llvm::Linker(module).linkInModule(std::move(resolved));
   context.setDiagnosticHandler(std::move(previous));
-  diagnostics | for_each([&](const auto &diagnostic) {
+  for (const auto &diagnostic : diagnostics) {
     unsigned id;
     switch (diagnostic.severity) {
       case llvm::DS_Error: id = clang::diag::err_fe_linking_module; break;
       case llvm::DS_Warning: id = clang::diag::warn_fe_linking_module; break;
       case llvm::DS_Note: id = clang::diag::note_fe_linking_module; break;
-      case llvm::DS_Remark: return;
+      case llvm::DS_Remark: continue;
     }
     clangDiagnostics.Report(id) << identifier << diagnostic.message;
-  });
+  }
   return failed;
 }
 
-class LinkDriverBitcodePass final : public llvm::PassInfoMixin<LinkDriverBitcodePass> {
-  std::shared_ptr<polystl::DriverBitcode> bitcode;
+class LinkResolvedSymBitcodePass final : public llvm::PassInfoMixin<LinkResolvedSymBitcodePass> {
+  std::shared_ptr<polystl::ResolvedSymBitcode> bitcode;
   clang::DiagnosticsEngine &diagnostics;
 
 public:
-  LinkDriverBitcodePass(std::shared_ptr<polystl::DriverBitcode> bitcode, clang::DiagnosticsEngine &diagnostics)
+  LinkResolvedSymBitcodePass(std::shared_ptr<polystl::ResolvedSymBitcode> bitcode, clang::DiagnosticsEngine &diagnostics)
       : bitcode(std::move(bitcode)), diagnostics(diagnostics) {}
 
   llvm::PreservedAnalyses run(llvm::Module &module, llvm::ModuleAnalysisManager &) {
     for (const auto &bytes : *bitcode) {
       const auto data = llvm::StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-      auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, "polyregion-interface-driver"), module.getContext());
+      auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, "polyregion-resolved-package-sym"), module.getContext());
       if (!parsed) {
         module.getContext().emitError(llvm::toString(parsed.takeError()));
         return llvm::PreservedAnalyses::none();
       }
-      auto driver = std::move(*parsed);
-      const llvm::Triple sourceTriple(driver->getTargetTriple()), targetTriple(module.getTargetTriple());
+      auto resolved = std::move(*parsed);
+      const llvm::Triple sourceTriple(resolved->getTargetTriple()), targetTriple(module.getTargetTriple());
       if (!polyfront::objectTargetsCompatible(sourceTriple, targetTriple)
-          || !polyfront::objectLayoutsCompatible(*driver, module.getDataLayout())) {
-        module.getContext().emitError("PolyAST interface driver target is incompatible with the translation unit");
+          || !polyfront::objectLayoutsCompatible(*resolved, module.getDataLayout())) {
+        module.getContext().emitError("resolved package Sym target is incompatible with the translation unit");
         return llvm::PreservedAnalyses::none();
       }
-      driver->setTargetTriple(module.getTargetTriple());
-      driver->setDataLayout(module.getDataLayout());
-      if (linkDriverModule(module, std::move(driver), diagnostics)) {
-        module.getContext().emitError("cannot link PolyAST interface driver");
+      resolved->setTargetTriple(module.getTargetTriple());
+      resolved->setDataLayout(module.getDataLayout());
+      if (linkResolvedSymModule(module, std::move(resolved), diagnostics)) {
+        module.getContext().emitError("cannot link resolved package Sym");
         return llvm::PreservedAnalyses::none();
       }
     }
@@ -124,11 +124,11 @@ class PolyCppFrontendAction final : public clang::PluginASTAction {
 
 protected:
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef InFile) override {
-    auto driverBitcode = std::make_shared<polystl::DriverBitcode>();
+    auto resolvedSymBitcode = std::make_shared<polystl::ResolvedSymBitcode>();
     auto &diagnostics = CI.getDiagnostics();
-    CI.getCodeGenOpts().PassBuilderCallbacks.push_back([driverBitcode, &diagnostics](llvm::PassBuilder &PB) {
-      PB.registerPipelineStartEPCallback([driverBitcode, &diagnostics](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
-        MPM.addPass(LinkDriverBitcodePass(driverBitcode, diagnostics));
+    CI.getCodeGenOpts().PassBuilderCallbacks.push_back([resolvedSymBitcode, &diagnostics](llvm::PassBuilder &PB) {
+      PB.registerPipelineStartEPCallback([resolvedSymBitcode, &diagnostics](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
+        MPM.addPass(LinkResolvedSymBitcodePass(resolvedSymBitcode, diagnostics));
       });
     });
 #ifdef POLYREGION_FUSED_DRIVER
@@ -137,7 +137,7 @@ protected:
     CI.getCodeGenOpts().PassBuilderCallbacks.push_back([info](llvm::PassBuilder &PB) { info.RegisterPassBuilderCallbacks(PB); });
 #endif
     if (std::getenv(polyregion::env::PolycppNoRewrite)) return std::make_unique<clang::ASTConsumer>();
-    return std::make_unique<polystl::OffloadRewriteConsumer>(CI, opts, std::move(driverBitcode));
+    return std::make_unique<polystl::OffloadRewriteConsumer>(CI, opts, std::move(resolvedSymBitcode));
   }
 
   bool ParseArgs(const clang::CompilerInstance &CI, const std::vector<std::string> &args) override {
@@ -145,9 +145,8 @@ protected:
         ^ foreach_total([&](const polyfront::Options &x) { opts = x; },
                         [&](const std::vector<std::string> &errors) {
                           auto &diag = CI.getDiagnostics();
-                          errors | for_each([&](const auto &error) {
+                          for (const auto &error : errors)
                             diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "%0")) << error;
-                          });
                         });
     return true;
   }

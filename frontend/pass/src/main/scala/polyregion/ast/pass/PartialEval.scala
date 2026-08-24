@@ -49,7 +49,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
 
   override def apply(program: p.Program, log: Log): p.Program =
     if (canonicaliseAddresses) {
-      val (entry, ec)      = canonicaliseFn(program.entry)
+      val (entry, ec) =
+        program.entry.map(canonicaliseFn).map((function, count) => Some(function) -> count).getOrElse(None -> 0)
       val (functions, fcs) = program.functions.map(canonicaliseFn).unzip
       val total            = ec + fcs.sum
       if (total > 0) log.info(s"canonicalised $total derived-pointer temp(s) to root-anchored accesses")
@@ -57,7 +58,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     } else {
       val defs = program.defs.map(d => d.name -> d).toMap
       program.copy(
-        entry = foldFn(program.entry, defs, log.subLog(s"PartialEval on ${program.entry.name}")),
+        entry = program.entry.map(f => foldFn(f, defs, log.subLog(s"PartialEval on ${f.name}"))),
         functions = program.functions.map(f => foldFn(f, defs, log.subLog(s"PartialEval on ${f.name}")))
       )
     }

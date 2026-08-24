@@ -70,14 +70,14 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
               | append(recv)                                                                                       //
               | to_vector();
 
-  auto f0 = std::make_shared<Function>(FunctionDecl(Sym({conventions::EntryName}), std::vector<std::string>{}, std::optional<Arg>{}, args,
+  auto f0 = std::make_shared<Function>(FunctionDecl(Sym({conventions::EntryName}), std::vector<Type::Var>{}, std::optional<Arg>{}, args,
                                                     std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, FunctionAffinity::Offload()),
-                                       stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+                                       stmts, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
 
   auto program = Program(*f0, r.functions | values() | map([&](const auto &x) { return *x; }) | to_vector(),
                          r.structs | values() | map([&](const auto &x) { return *x; }) | to_vector(), PassPhase::Initial(), {});
 
-  auto exportedStructNames = std::unordered_set<std::string>{repr(parentDef->name)};
+  auto exportedStructNames = std::unordered_set<std::string>{fqcn(parentDef->name)};
 
   auto layouts = r.layouts                                                                                    //
                  | values()                                                                                   //
@@ -215,14 +215,18 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,            /
   Remapper::RemapContext r;
   Map<Sym, Sym> exportNames;
 
-  for (const auto &[decl, exportName] : exports) {
+  for (const auto &exportedFunction : exports) {
+    const auto *decl = exportedFunction.decl;
+    const auto &exportName = exportedFunction.name;
     auto fn = remapper.handleCall(decl, r).second;
     exportNames.emplace(fn->decl.name, exportName);
     fn->visibility = FunctionVisibility::Exported();
     fn->decl.name = exportName;
+    fn->implements = exportedFunction.implements;
+    fn->requiredCapabilities = exportedFunction.requiredCapabilities;
     if (opts.verbose)
       emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Exporting package symbol: %0",
-           repr(exportName));
+           fqcn(exportName));
   }
 
   const auto functions =
@@ -230,7 +234,7 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,            /
       | values()  //
       | map([&](const auto &x) {
           return x->template modify_all<Type::FnRef>([&](const auto &ref) {
-            return exportNames ^ get_maybe(ref.name) ^ map([&](const auto &name) { return ref.withName(name); }) ^ get_or_else(ref);
+            return exportNames ^ get_maybe(ref.name) | map([&](const auto &name) { return ref.withName(name); }) | get_or_else(ref);
           });
         }) //
       | to_vector();
@@ -245,7 +249,7 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,            /
                         return {};
                       });
     emit(diag, site ? (*site)->getBeginLoc() : clang::SourceLocation{}, clang::DiagnosticsEngine::Level::Error,
-         POLYREGION_DIAG_POLYSTL "Duplicate package function identity: %0", repr(*duplicateName));
+         POLYREGION_DIAG_POLYSTL "Duplicate package function identity: %0", fqcn(*duplicateName));
     return;
   }
   const auto program =

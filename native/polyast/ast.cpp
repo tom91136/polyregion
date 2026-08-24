@@ -14,6 +14,44 @@ using std::string;
 
 using namespace aspartame;
 
+string polyast::fqcn(const Sym &symbol) { return symbol.fqn ^ mk_string("."); }
+
+string polyast::canonicalName(const TypeSpace::Any &space) {
+  return space.match_total([](const TypeSpace::Global &) { return ""s; }, [](const TypeSpace::Local &) { return "^Local"s; },
+                           [](const TypeSpace::Private &) { return "^Private"s; },
+                           [](const TypeSpace::Constant &) { return "^Constant"s; });
+}
+
+string polyast::canonicalName(const Type::Any &tpe) {
+  return tpe.match_total(
+      [](const Type::Float16 &) { return "F16"s; }, [](const Type::Float32 &) { return "F32"s; },
+      [](const Type::Float64 &) { return "F64"s; }, [](const Type::IntU8 &) { return "U8"s; }, [](const Type::IntU16 &) { return "U16"s; },
+      [](const Type::IntU32 &) { return "U32"s; }, [](const Type::IntU64 &) { return "U64"s; }, [](const Type::IntS8 &) { return "I8"s; },
+      [](const Type::IntS16 &) { return "I16"s; }, [](const Type::IntS32 &) { return "I32"s; }, [](const Type::IntS64 &) { return "I64"s; },
+      [](const Type::Nothing &) { return "Nothing"s; }, [](const Type::Unit0 &) { return "Unit0"s; },
+      [](const Type::Bool1 &) { return "Bool1"s; },
+      [](const Type::Struct &s) {
+        return fmt::format("{}<{}>", fqcn(s.name), s.args ^ mk_string(",", [](const auto &arg) { return canonicalName(arg); }));
+      },
+      [](const Type::Ptr &p) { return fmt::format("{}*{}", canonicalName(p.comp), canonicalName(p.space)); },
+      [](const Type::Arr &a) { return fmt::format("{}[{}]{}", canonicalName(a.comp), a.length, canonicalName(a.space)); },
+      [](const Type::Var &v) {
+        return v.exactSizeInBytes ? fmt::format("#{}:size={}", v.name, *v.exactSizeInBytes) : fmt::format("#{}", v.name);
+      },
+      [](const Type::Exec &e) {
+        return fmt::format("<{}>({}) => {}", e.tpeVars ^ mk_string(",", [](const auto &v) { return canonicalName(v); }),
+                           e.args ^ mk_string(",", [](const auto &arg) { return canonicalName(arg); }), canonicalName(e.rtn));
+      },
+      [](const Type::FnRef &f) { return "&" + fqcn(f.name); });
+}
+
+string polyast::signatureKey(const Signature &signature) {
+  const auto types = [](const auto &xs) { return xs ^ mk_string(",", [](const auto &tpe) { return canonicalName(tpe); }); };
+  return fmt::format("{}{}<{}>({})[{};{}]:{}", signature.receiver ? canonicalName(*signature.receiver) + "." : "", fqcn(signature.name),
+                     types(signature.tpeVars), types(signature.args), types(signature.moduleCaptures), types(signature.termCaptures),
+                     canonicalName(signature.rtn));
+}
+
 std::variant<std::string, Package> polyregion::polyast::decodePackage(const uint8_t *begin, const uint8_t *end) noexcept {
   try {
     return package_from_msgpack(begin, end);
@@ -39,13 +77,13 @@ static void renderCompileEvent(std::string &out, const CompileEvent &e, size_t d
     fmt::format_to(std::back_inserter(out), ": {}\n", e.data);
   } else {
     out += ":\n";
-    e.data                          //
-            ^ lines()               //
-        | zip_with_index(size_t{1}) //
-        | for_each([&](const auto &line, const auto &ln) { fmt::format_to(std::back_inserter(out), "{}{:>3}│{}\n", prefix, ln, line); });
+    const auto lines = e.data ^ aspartame::lines();
+    for (size_t i = 0; i < lines.size(); ++i)
+      fmt::format_to(std::back_inserter(out), "{}{:>3}│{}\n", prefix, i + 1, lines[i]);
     fmt::format_to(std::back_inserter(out), "{}   ╰───\n", prefix);
   }
-  e.items ^ for_each([&](const auto &child) { renderCompileEvent(out, child, depth + 1); });
+  for (const auto &child : e.items)
+    renderCompileEvent(out, child, depth + 1);
 }
 
 string polyast::qualified(const Term::Select &select) {
@@ -73,7 +111,7 @@ Term::Select polyast::selectField(const Term::Select &base, const Named &field) 
 }
 
 Type::Struct polyast::typeOf(const StructDef &def) {
-  return Type::Struct(def.name, def.tpeVars ^ map([](const auto &v) -> Type::Any { return Type::Var(v); }));
+  return Type::Struct(def.name, def.tpeVars ^ map([](const auto &variable) -> Type::Any { return variable; }));
 }
 
 string polyast::repr(const CompileResult &compilation) {
@@ -89,7 +127,8 @@ string polyast::repr(const CompileResult &compilation) {
   if (compilation.events.empty()) out += " (none)";
   else out += '\n';
 
-  compilation.events ^ for_each([&](const auto &e) { renderCompileEvent(out, e, 0); });
+  for (const auto &e : compilation.events)
+    renderCompileEvent(out, e, 0);
   out += "}";
   return out;
 }
@@ -138,7 +177,7 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
 }
 
 Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table) {
-  if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) ^ map([](const auto &sl) { return sl.sizeInBytes; })};
+  if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) | map([](const auto &sl) { return sl.sizeInBytes; })};
   if (const auto p = t.get<Type::Ptr>()) {
     auto [indirection, componentSize] = countIndirectionsAndComponentSize(p->comp, table);
     return {indirection + 1, componentSize};
@@ -166,7 +205,7 @@ bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::St
               return m.name.tpe.template get<Type::Struct>() //
                      ^ fold(
                          [&](const auto &s) {
-                           return table ^ get_maybe(s) ^ map([&](const auto &x) { return isOpaque(x, table); }) ^ get_or_else(false);
+                           return table ^ get_maybe(s) | map([&](const auto &x) { return isOpaque(x, table); }) | get_or_else(false);
                          },
                          []() { return true; });
             });
@@ -260,11 +299,12 @@ Expr::MathOp dsl::call(const Math::Any &intr) { return Expr::MathOp(intr); }
 Expr::SpecOp dsl::call(const Spec::Any &intr) { return Expr::SpecOp(intr); }
 
 std::function<Function(Vector<Stmt::Any>)> dsl::function(const string &name, const Vector<Arg> &args, const Type::Any &rtn,
-                                                         FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode, bool isEntry) {
+                                                         FunctionVisibility::Any visibility, FunctionFpMode::Any fpMode,
+                                                         CallConvention::Any convention) {
   return [=](const auto &stmts) {
     return Function(
         FunctionDecl(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, FunctionAffinity::Offload()),
-        stmts, visibility, fpMode, isEntry);
+        stmts, visibility, fpMode, convention);
   };
 }
 

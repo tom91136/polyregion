@@ -31,8 +31,8 @@ object Interpreter {
     var foreign: Foreign = Vm.noForeign
 
     private val defs        = program.defs.map(d => d.name -> d).toMap
-    private val baseByField = program.defs.map(d => s"${p.Conventions.BaseFieldPrefix}_${d.name.repr}" -> d).toMap
-    private val fns         = (program.entry :: program.functions).map(f => f.name -> f).toMap
+    private val baseByField = program.defs.map(d => s"${p.Conventions.BaseFieldPrefix}_${d.name.fqcn}" -> d).toMap
+    private val fns         = (program.entry.toList ::: program.functions).map(f => f.name -> f).toMap
 
     // device allocations live in a disjoint range so the kernel cannot reach host memory by accident;
     // an unmirrored or unpatched pointer surviving into the kernel trips the deviceMode guard below

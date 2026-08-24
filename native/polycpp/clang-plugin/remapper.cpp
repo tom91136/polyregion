@@ -71,7 +71,7 @@ const static std::string CapturedThis = "#captured_this";
 [[nodiscard]] static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
                                       const std::function<bool(const StructDef &)> &predicate, Vector<std::shared_ptr<StructDef>> &chain) {
 
-  const auto parents = r.parents ^ get_maybe(repr(derived.name));
+  const auto parents = r.parents ^ get_maybe(fqcn(derived.name));
   if (!parents) return false;
 
   if (const auto directBases = *parents ^ filter([&](const auto &p) { return predicate(*p); }); directBases.empty()) {
@@ -90,8 +90,8 @@ const static std::string CapturedThis = "#captured_this";
   } else if (directBases.size() != 1) {
     // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
     raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
-                      directBases ^ mk_string(", ", [](const auto &s) { return repr(s->name); }), repr(derived),
-                      chain ^ mk_string("->", [](const auto &s) { return repr(s->name); })));
+                      directBases ^ mk_string(", ", [](const auto &s) { return fqcn(s->name); }), repr(derived),
+                      chain ^ mk_string("->", [](const auto &s) { return fqcn(s->name); })));
   } else {
     chain.emplace_back(directBases[0]);
     return true;
@@ -99,7 +99,7 @@ const static std::string CapturedThis = "#captured_this";
 }
 
 [[nodiscard]] static Named baseMember(const StructDef &s) {
-  return Named(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, repr(s.name)), Type::Struct(s.name, {}));
+  return Named(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(s.name)), Type::Struct(s.name, {}));
 }
 
 [[nodiscard]] static Term::Select select(Remapper::RemapContext &r, const Vector<Named> &init, const Named &last) {
@@ -109,12 +109,12 @@ const static std::string CapturedThis = "#captured_this";
   const auto memberSymbolMatches = [](const Named &member) { return [&member](const Named &m) { return m.symbol == member.symbol; }; };
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
     auto expand = [&](const Type::Struct &s) -> Vector<Named> {
-      if (r.findStruct(repr(s.name), "select")->members ^ exists(memberSymbolMatches(member))) return {base};
+      if (r.findStruct(fqcn(s.name), "select")->members ^ exists(memberSymbolMatches(member))) return {base};
       if (Vector<std::shared_ptr<StructDef>> path;
           walkParents(r, s, [&](const auto &p) { return p.members ^ exists(memberSymbolMatches(member)); }, path)) {
         return path | map([&](const auto &def) { return baseMember(*def); }) | prepend(base) | to_vector();
       }
-      const auto sd = r.findStruct(repr(s.name), "select");
+      const auto sd = r.findStruct(fqcn(s.name), "select");
       const auto memberDump = sd->members ^ mk_string(", ", [](const auto &m) { return m.symbol + ":" + repr(m.tpe); });
       raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]", member.symbol,
                         repr(member.tpe), repr(s), memberDump));
@@ -142,7 +142,7 @@ const static std::string CapturedThis = "#captured_this";
         if (auto p = fallback.get<Type::Ptr>()) sname = p->comp.get<Type::Struct>();
       }
       if (!sname) return Type::Nothing();
-      auto def = r.findStruct(repr(sname->name), "select-walk");
+      auto def = r.findStruct(fqcn(sname->name), "select-walk");
       auto m = def->members ^ find([&](const auto &mm) { return mm.symbol == n.symbol; });
       return m ? m->tpe : Type::Nothing();
     };
@@ -161,7 +161,7 @@ const static std::string CapturedThis = "#captured_this";
 }
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const Named &root) {
-  if (auto def = r.structs ^ get_maybe(repr(tpe.name))) {
+  if (auto def = r.structs ^ get_maybe(fqcn(tpe.name))) {
     // XXX zero-init the synthesised placeholder byte, otherwise it's poison @ O3+LTO as it propagates through empty-struct copies into
     // adjacent stack slots
     if (r.emptyStruct(**def)) {
@@ -240,7 +240,7 @@ static Opt<Term::Any> findCharacterPointer(Remapper::RemapContext &r, const Term
   const auto structTpe =
       value.tpe().get<Type::Struct>() ^ or_else([&] { return direct ? direct->comp.get<Type::Struct>() : Opt<Type::Struct>{}; });
   if (!structTpe) return {};
-  const auto name = repr(structTpe->name);
+  const auto name = fqcn(structTpe->name);
   if (seen ^ contains(name)) return {};
   seen.insert(name);
   const auto def = r.findStruct(name, "standard exception string message");
@@ -348,7 +348,7 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
 }
 
 bool Remapper::RemapContext::isEmpty(const Type::Struct &s) {
-  return structs ^ get_maybe(repr(s.name)) ^ exists([&](const auto &def) { return def && emptyStruct(*def); });
+  return structs ^ get_maybe(fqcn(s.name)) | exists([&](const auto &def) { return def && emptyStruct(*def); });
 }
 
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
@@ -465,7 +465,7 @@ static Opt<Type::Any> appendBaseSteps(const Remapper &self, Remapper::RemapConte
   for (auto it = begin; it != end; ++it) {
     const auto base = self.handleType((*it)->getType(), r).get<Type::Struct>();
     if (!base || r.isEmpty(*base)) return {};
-    steps.emplace_back(PathStep::Field(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, repr(base->name))));
+    steps.emplace_back(PathStep::Field(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(base->name))));
     current = base->widen();
   }
   return current;
@@ -504,7 +504,7 @@ static Expr::Any adjustBasePointer(const Remapper &self, Remapper::RemapContext 
       } else {
         const auto seed = seedSelect(r_, Expr::Alias(current));
         auto steps = seed.steps;
-        steps.emplace_back(PathStep::Field(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, repr(base->name))));
+        steps.emplace_back(PathStep::Field(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(base->name))));
         current =
             r_.newVar(Expr::RefTo(Term::Select(seed.root, steps, base->widen()), {}, base->widen(), sourcePtr.space, Region::Opaque()));
       }
@@ -690,12 +690,12 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::Bool1 &) -> std::string { return "bool"; },                                                 //
       [&](const Type::Unit0 &) -> std::string { return "void"; },                                                 //
       [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                                        //
-      [&](const Type::Struct &x) -> std::string { return repr(x.name); },                                         //
+      [&](const Type::Struct &x) -> std::string { return fqcn(x.name); },                                         //
       [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; },                                  //
       [&](const Type::Arr &x) -> std::string { return typeName(x.comp) + "[" + std::to_string(x.length) + "]"; }, //
       [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; },                                //
       [&](const Type::Exec &) -> std::string { return "/*exec*/"; },                                              //
-      [&](const Type::FnRef &x) -> std::string { return "&" + repr(x.name); }                                     //
+      [&](const Type::FnRef &x) -> std::string { return "&" + fqcn(x.name); }                                     //
   );
 }
 Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -771,10 +771,10 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   };
 
   // stub before lowering the body so a recursive call resolves here, not into endless plugin recursion
-  auto fn = std::make_shared<Function>(FunctionDecl(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{},
-                                                    receiver ^ to_vector() ^ concat(args), std::vector<Arg>{}, std::vector<Arg>{}, rtnType,
-                                                    FunctionAffinity::Offload()),
-                                       Vector<Stmt::Any>{}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+  auto fn = std::make_shared<Function>(
+      FunctionDecl(Sym({name}), std::vector<Type::Var>{}, std::optional<Arg>{}, receiver ^ to_vector() ^ concat(args), std::vector<Arg>{},
+                   std::vector<Arg>{}, rtnType, FunctionAffinity::Offload()),
+      Vector<Stmt::Any>{}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   r.functions.emplace(name, fn);
 
   auto fnBody = r.scoped(
@@ -859,7 +859,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       auto fieldNamed = [&](const clang::FieldDecl *field) {
                         const auto owner = handleType(context.getCanonicalTagType(field->getParent()), r).template get<Type::Struct>();
                         if (!owner) raise("Field owner is not a struct: " + field->getNameAsString());
-                        return Named(fieldSymbolName(field, repr(owner->name)), annotateLocalSpace(field, r));
+                        return Named(fieldSymbolName(field, fqcn(owner->name)), annotateLocalSpace(field, r));
                       };
                       // an anonymous struct/union member initialises indirectly, so the leaf is reached through every
                       // enclosing anonymous record rather than named on the ctor's own struct
@@ -900,7 +900,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                       // reference a `#base_<Name>` field that no longer exists; the call itself
                       // is a no-op anyway since the Base ctor body is empty. Skip it.
                       auto baseStruct = baseTpe.template get<Type::Struct>();
-                      auto baseDef = baseStruct ? r.structs ^ get_maybe(repr(baseStruct->name)) : Opt<std::shared_ptr<StructDef>>{};
+                      auto baseDef = baseStruct ? r.structs ^ get_maybe(fqcn(baseStruct->name)) : Opt<std::shared_ptr<StructDef>>{};
                       if (baseDef && r.emptyStruct(**baseDef)) {
                       } else {
                         auto chainedCtorStmts = r.scoped(
@@ -937,7 +937,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                                   r.ctorChain = false;
                                   const auto base =
                                       select(r, {receiver->named},
-                                             Named(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, repr(baseStruct->name)),
+                                             Named(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(baseStruct->name)),
                                                    baseTpe));
                                   const auto destination = r.newName(Type::Ptr(baseTpe, storageSpace(base)));
                                   r.push(Stmt::Var(destination, Expr::RefTo(base, {}, baseTpe, storageSpace(base), Region::Opaque()),
@@ -1009,7 +1009,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   if (fnBody.empty()) {
   }
 
-  if (rtnType.is<Type::Unit0>() && !(body ^ last_maybe() ^ exists([](const auto &x) { return x.template is<Stmt::Return>(); }))) {
+  if (rtnType.is<Type::Unit0>() && !(body | last_maybe() | exists([](const auto &x) { return x.template is<Stmt::Return>(); }))) {
     body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
   }
 
@@ -1028,7 +1028,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   // the *name* (we form `Type::Struct(name)` in handleType, never reading members), so an empty
   // stub is enough to break the cycle. Members and parents are filled in below by overwriting the
   // shared_ptr's contents in place.
-  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
+  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<Type::Var>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
   r.structs.emplace(name, stub);
 
   // a forward-declared record stays opaque: only pointers to it are legal and bases()/layout would read garbage. the
@@ -1068,7 +1068,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
           auto original = baseMember(*p);
           if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
           auto e = get_or_emplace(r.structs, Empty, [](const auto &k) {
-            return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
+            return std::make_shared<StructDef>(Sym({k}), std::vector<Type::Var>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
           });
           return std::pair{Named(original.symbol, Type::Struct(e->name, {})), offsetAndSize};
         }) //
@@ -1084,11 +1084,11 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     // the polyc-side struct picks up the 1-byte size that C++ ABI requires.
     const auto inheritedAllEmpty = !inherited.empty() && (inherited ^ forall([&](const auto &p, const auto &) {
                                                             auto s = p.tpe.template get<Type::Struct>();
-                                                            return s && repr(s->name) == Empty;
+                                                            return s && fqcn(s->name) == Empty;
                                                           }));
     const auto emptyStruct = members.empty() && (inherited.empty() || (inheritedAllEmpty && sizeInBytes == 1));
-    *stub = StructDef(                           //
-        Sym({name}), std::vector<std::string>{}, //
+    *stub = StructDef(                         //
+        Sym({name}), std::vector<Type::Var>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
                     : inherited | keys() | concat(members | map([](const auto &m) { return m.name; })) | to_vector(),
         catchableParents ^ map([](const auto &p) { return Type::Struct(p->name, std::vector<Type::Any>{}); }),
@@ -1119,7 +1119,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   auto resolveFields = [&] {
     auto emptyStruct = [&] {
       return get_or_emplace(r.structs, Empty, [](const auto &k) {
-        return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
+        return std::make_shared<StructDef>(Sym({k}), std::vector<Type::Var>{}, Vector<Named>{}, std::vector<Type::Struct>{}, false);
       });
     };
     Vector<StructLayoutMember> all;
@@ -1765,7 +1765,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     auto fieldOwnerName = [&](const clang::FieldDecl *field) {
       const auto *recordDecl = llvm::dyn_cast<clang::RecordDecl>(field->getDeclContext());
       if (!recordDecl) raise("Field decl with non-record context: " + field->getNameAsString());
-      if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>()) return repr(s->name);
+      if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>()) return fqcn(s->name);
       raise("Field owner is not a struct: " + field->getNameAsString());
     };
 
@@ -1985,7 +1985,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               const auto *init = expr->getInit(i++);
               if (llvm::isa<clang::ImplicitValueInitExpr>(init)) continue;
               const auto ftpe = annotateLocalSpace(field, r);
-              const auto member = select(r, {allocated}, Named(fieldSymbolName(field, repr(structTpe->name)), ftpe));
+              const auto member = select(r, {allocated}, Named(fieldSymbolName(field, fqcn(structTpe->name)), ftpe));
               if (const auto arrTpe = ftpe.get<Type::Arr>()) {
                 if (const auto elems = llvm::dyn_cast<clang::InitListExpr>(init)) {
                   initArray(member, *arrTpe, elems);
@@ -2641,7 +2641,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!structTpe) raise("Lambda closure resulted in a non-struct type: " + repr(tpe));
         const auto instance = r.newVar(tpe);
         defaultInitialiseStruct(r, *structTpe, instance);
-        const auto def = r.findStruct(repr(structTpe->name), "lambda captures");
+        const auto def = r.findStruct(fqcn(structTpe->name), "lambda captures");
         for (auto &&[capture, init] : expr->getLambdaClass()->captures() | zip(expr->capture_inits())) {
           const auto var = capture.getCapturedVar();
           if (!var && !capture.capturesThis()) continue;
@@ -3094,7 +3094,7 @@ void Remapper::destroyRecord(RemapContext &r, const clang::CXXRecordDecl *record
     if (!memberRecord || memberRecord->hasTrivialDestructor()) continue;
     auto steps = instance.steps;
     const auto owner = handleRecord(record, r);
-    steps.emplace_back(PathStep::Field(fieldSymbolName(field, repr(owner->name))));
+    steps.emplace_back(PathStep::Field(fieldSymbolName(field, fqcn(owner->name))));
     destroyValue(r, field->getType(), Term::Select(instance.root, steps, handleType(field->getType(), r)));
   }
   for (auto base = record->bases_end(); base != record->bases_begin();) {

@@ -24,7 +24,7 @@ object Specialisation extends ProgramPass {
         depth: Int
     ): Boolean = (x, y) match {
       case (p.Type.Nothing, _) | (_, p.Type.Nothing) => true
-      case (p.Type.Var(xName), p.Type.Var(yName)) =>
+      case (p.Type.Var(xName, _), p.Type.Var(yName, _)) =>
         (xBound.get(xName), yBound.get(yName)) match {
           case (Some(xId), Some(yId)) => xId == yId
           case (None, None)           => xName == yName
@@ -39,8 +39,8 @@ object Specialisation extends ProgramPass {
         xLength == yLength && xSpace == ySpace && loop(xComp, yComp, xBound, yBound, depth)
       case (p.Type.Exec(xVars, xArgs, xRtn), p.Type.Exec(yVars, yArgs, yRtn)) =>
         val ids       = xVars.indices.map(depth + _)
-        val nestedX   = xBound ++ xVars.zip(ids)
-        val nestedY   = yBound ++ yVars.zip(ids)
+        val nestedX   = xBound ++ xVars.map(_.name).zip(ids)
+        val nestedY   = yBound ++ yVars.map(_.name).zip(ids)
         val nestedEnd = depth + xVars.size
         xVars.size == yVars.size && xArgs.size == yArgs.size &&
         xArgs.zip(yArgs).forall((a, b) => loop(a, b, nestedX, nestedY, nestedEnd)) &&
@@ -72,12 +72,12 @@ object Specialisation extends ProgramPass {
 
   private def containsFreeVariable(tpe: p.Type, variables: Set[String], bound: Set[String] = Set.empty): Boolean =
     tpe match {
-      case p.Type.Var(name)       => variables(name) && !bound(name)
+      case p.Type.Var(name, _)    => variables(name) && !bound(name)
       case p.Type.Struct(_, args) => args.exists(containsFreeVariable(_, variables, bound))
       case p.Type.Ptr(comp, _)    => containsFreeVariable(comp, variables, bound)
       case p.Type.Arr(comp, _, _) => containsFreeVariable(comp, variables, bound)
       case p.Type.Exec(vars, args, rtn) =>
-        val nested = bound ++ vars
+        val nested = bound ++ vars.map(_.name)
         args.exists(containsFreeVariable(_, variables, nested)) || containsFreeVariable(rtn, variables, nested)
       case _ => false
     }
@@ -89,7 +89,7 @@ object Specialisation extends ProgramPass {
       variables: Set[String]
   ): Option[Map[String, p.Type]] =
     pattern match {
-      case p.Type.Var(name) if variables(name) =>
+      case p.Type.Var(name, _) if variables(name) =>
         bindings.get(name) match {
           case Some(bound) if !sameType(bound, actual) => None
           case Some(_)                                 => Some(bindings)
@@ -118,19 +118,19 @@ object Specialisation extends ProgramPass {
           case p.Type.Exec(actualVars, actualArgs, actualRtn)
               if patternVars.size == actualVars.size && args.size == actualArgs.size =>
             def align(t: p.Type, env: Map[String, String]): p.Type = t match {
-              case p.Type.Var(name)                => p.Type.Var(env.getOrElse(name, name))
+              case variable @ p.Type.Var(name, _)  => variable.copy(name = env.getOrElse(name, name))
               case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(align(_, env)))
               case p.Type.Ptr(comp, space)         => p.Type.Ptr(align(comp, env), space)
               case p.Type.Arr(comp, length, space) => p.Type.Arr(align(comp, env), length, space)
               case p.Type.Exec(vars, args, rtn) =>
-                val nested = env -- vars
+                val nested = env -- vars.map(_.name)
                 p.Type.Exec(vars, args.map(align(_, nested)), align(rtn, nested))
               case other => other
             }
-            val env             = actualVars.zip(patternVars).toMap
+            val env             = actualVars.map(_.name).zip(patternVars.map(_.name)).toMap
             val alignedArgs     = actualArgs.map(align(_, env))
             val alignedRtn      = align(actualRtn, env)
-            val nestedVariables = variables -- patternVars
+            val nestedVariables = variables -- patternVars.map(_.name)
             args
               .zip(alignedArgs)
               .foldLeft(Option(bindings)) { case (acc, (expected, found)) =>
@@ -153,14 +153,18 @@ object Specialisation extends ProgramPass {
       kernel.receiver.nonEmpty || kernel.rtn != p.Type.Unit0
     ) None
     else {
-      val variables = kernel.tpeVars.toSet
+      val variables = kernel.tpeVars.map(_.name).toSet
       params
         .zip(args)
         .foldLeft(Option(Map.empty[String, p.Type])) { case (acc, (param, arg)) =>
           if (!containsFreeVariable(param.named.tpe, variables)) acc.filter(_ => sameType(param.named.tpe, arg))
           else acc.flatMap(bind(param.named.tpe, arg, _, variables))
         }
-        .flatMap(bindings => Option.when(kernel.tpeVars.forall(bindings.contains))(kernel.tpeVars.map(bindings)))
+        .flatMap(bindings =>
+          Option.when(kernel.tpeVars.forall(variable => bindings.contains(variable.name)))(
+            kernel.tpeVars.map(variable => bindings(variable.name))
+          )
+        )
     }
   }
 
@@ -219,10 +223,10 @@ object Specialisation extends ProgramPass {
       overloads: Map[p.Sym, List[p.Function]]
   ): p.Sym = {
     val base     = monomorphicName(fn.name, tpeArgs)
-    val siblings = overloads.getOrElse(fn.name, Nil).sortBy(_.signatureRepr)
+    val siblings = overloads.getOrElse(fn.name, Nil).sortBy(_.signatureKey)
     if (siblings.size <= 1) base
     else {
-      val ordinal = siblings.indexWhere(_.signatureRepr == fn.signatureRepr)
+      val ordinal = siblings.indexWhere(_.signatureKey == fn.signatureKey)
       base.fqn match {
         case xs :+ x => p.Sym(xs :+ s"overload${ordinal.max(0)}" :+ x)
         case xs      => p.Sym(s"overload${ordinal.max(0)}" :: xs)
@@ -234,40 +238,42 @@ object Specialisation extends ProgramPass {
 
   private def protectExecBinders(tpe: p.Type): p.Type = {
     def rename(t: p.Type, env: Map[String, String]): p.Type = t match {
-      case p.Type.Var(name)                => p.Type.Var(env.getOrElse(name, name))
+      case variable @ p.Type.Var(name, _)  => variable.copy(name = env.getOrElse(name, name))
       case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(rename(_, env)))
       case p.Type.Ptr(comp, space)         => p.Type.Ptr(rename(comp, env), space)
       case p.Type.Arr(comp, length, space) => p.Type.Arr(rename(comp, env), length, space)
       case p.Type.Exec(vars, args, rtn) =>
-        val nested = env -- vars
+        val nested = env -- vars.map(_.name)
         p.Type.Exec(vars, args.map(rename(_, nested)), rename(rtn, nested))
       case other => other
     }
     tpe match {
-      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.startsWith(ExecBinderPrefix)) =>
-        val renamed = vars.map(ExecBinderPrefix + _)
-        val env     = vars.zip(renamed).toMap
+      case p.Type.Exec(vars, args, rtn) if !vars.forall(_.name.startsWith(ExecBinderPrefix)) =>
+        val renamed: List[p.Type.Var] =
+          vars.map(variable => p.Type.Var(ExecBinderPrefix + variable.name, variable.exactSizeInBytes))
+        val env = vars.map(_.name).zip(renamed.map(_.name)).toMap
         p.Type.Exec(renamed, args.map(rename(_, env)), rename(rtn, env))
       case other => other
     }
   }
 
   private def unprotectExecBinders(tpe: p.Type): p.Type = tpe match {
-    case p.Type.Var(name) if name.startsWith(ExecBinderPrefix) => p.Type.Var(name.stripPrefix(ExecBinderPrefix))
+    case variable @ p.Type.Var(name, _) if name.startsWith(ExecBinderPrefix) =>
+      variable.copy(name = name.stripPrefix(ExecBinderPrefix))
     case p.Type.Exec(vars, args, rtn) =>
-      p.Type.Exec(vars.map(_.stripPrefix(ExecBinderPrefix)), args, rtn)
+      p.Type.Exec(vars.map(variable => variable.copy(name = variable.name.stripPrefix(ExecBinderPrefix))), args, rtn)
     case other => other
   }
 
   private def instantiate(fn: p.Function, tpeArgs: List[p.Type], newName: p.Sym): Option[p.Function] =
     Option.when(fn.tpeVars.nonEmpty && fn.tpeVars.size == tpeArgs.size) {
-      val tpeLut = fn.tpeVars.zip(tpeArgs).toMap
+      val tpeLut = fn.tpeVars.map(_.name).zip(tpeArgs).toMap
       fn
         .copy(decl = fn.decl.copy(name = newName, tpeVars = Nil))
         .modifyAll[p.Type](protectExecBinders)
         .modifyAll[p.Type] {
-          case v @ p.Type.Var(name) => tpeLut.getOrElse(name, v)
-          case x                    => x
+          case v @ p.Type.Var(name, _) => tpeLut.getOrElse(name, v)
+          case x                       => x
         }
         .modifyAll[p.Type](unprotectExecBinders)
     }
@@ -307,7 +313,7 @@ object Specialisation extends ProgramPass {
       .flatMap(fn =>
         typeArgsFor(callsite, fn).flatMap(args =>
           instantiate(fn, args, monomorphicName(fn, args, overloads))
-            .map(Candidate(args, fn.signatureRepr, _))
+            .map(Candidate(args, fn.signatureKey, _))
         )
       )
       .filter(candidate => matches(callsite, candidate.function))
@@ -331,7 +337,7 @@ object Specialisation extends ProgramPass {
       .foldLeft(done) { case (acc, callsite) =>
         candidates(callsite, fnOverloads).foldLeft(acc) { case (overloadAcc, candidate) =>
           val specialisedFnImpl = inferLaunchArguments(candidate.function, fnOverloads)
-          val key               = specialisedFnImpl.signatureRepr
+          val key               = specialisedFnImpl.signatureKey
           if (overloadAcc.contains(key)) overloadAcc
           else {
             val history = ancestry.getOrElse(candidate.templateKey, Nil)
@@ -363,7 +369,10 @@ object Specialisation extends ProgramPass {
     val fnOverloads = program.functions.distinct.groupBy(_.name)
 
     val allCallsites =
-      (program.entry :: program.functions).map(inferLaunchArguments(_, fnOverloads)).flatMap(callsites).distinct
+      (program.entry.toList ::: program.functions)
+        .map(inferLaunchArguments(_, fnOverloads))
+        .flatMap(callsites)
+        .distinct
 
     log.info("functions", fnOverloads.keys.toSeq.map(_.repr)*)
     log.info(
@@ -372,11 +381,11 @@ object Specialisation extends ProgramPass {
     )
 
     val specialisations =
-      (program.entry :: program.functions.filter(_.tpeVars.isEmpty)).foldLeft(Map.empty[String, p.Function]) {
+      (program.entry.toList ::: program.functions.filter(_.tpeVars.isEmpty)).foldLeft(Map.empty[String, p.Function]) {
         case (done, root) => recursiveSpecialise(fnOverloads, root, done)
       }
 
-    log.info("Specialisations", specialisations.values.map(_.signatureRepr).toList.sorted*)
+    log.info("Specialisations", specialisations.values.map(_.signatureKey).toList.sorted*)
 
     def doReplace(f: p.Function) = inferLaunchArguments(f, fnOverloads).modifyAll[p.Expr] {
       case ivk: p.Expr.Invoke =>
@@ -411,7 +420,7 @@ object Specialisation extends ProgramPass {
     }
 
     program.copy(
-      entry = doReplace(program.entry),
+      entry = program.entry.map(doReplace),
       functions = (program.functions.filter(_.tpeVars.isEmpty) ++ specialisations.values).map(doReplace(_))
     )
 

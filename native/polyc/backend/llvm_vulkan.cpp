@@ -175,7 +175,7 @@ void VulkanLowering::physicalFieldZero(llvm::Value *dst, llvm::Type *rootTy, llv
 void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, const AnyType &tpe,
                                      std::vector<llvm::Value *> idxs) {
   if (auto s = tpe.template get<Type::Struct>()) {
-    const auto &info = cg.structTypes.at(repr(s->name));
+    const auto &info = cg.structTypes.at(fqcn(s->name));
     if (info.def.isUnion) {
       physicalFieldCopy(dst, src, rootTy, info.tpe, std::move(idxs));
       return;
@@ -196,7 +196,7 @@ void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::T
 
 void VulkanLowering::structFieldZero(llvm::Value *dst, llvm::Type *rootTy, const AnyType &tpe, std::vector<llvm::Value *> idxs) {
   if (auto s = tpe.template get<Type::Struct>()) {
-    const auto &info = cg.structTypes.at(repr(s->name));
+    const auto &info = cg.structTypes.at(fqcn(s->name));
     if (info.def.isUnion) {
       physicalFieldZero(dst, rootTy, info.tpe, std::move(idxs));
       return;

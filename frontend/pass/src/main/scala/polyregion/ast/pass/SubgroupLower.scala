@@ -21,7 +21,7 @@ import polyregion.ast.Traversal.*
 //                                         whole-workgroup-uniform participation because it synchronises local scratch
 //   width / maxGroupSize               ->  require a power-of-two width <= 32 and a divisible ceiling
 case class SubgroupLower(width: Int = 32, maxGroupSize: Int = 1024) extends ProgramPass derives PassArgCodec {
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   override def apply(program: p.Program, log: Log): p.Program = {
     require(
@@ -93,7 +93,7 @@ private final class Lowering(program: p.Program, width: Int, maxGroupSize: Int) 
       }
       function.copy(body = pool.declarations ::: body)
     }
-    program.copy(entry = lower(program.entry), functions = program.functions.map(lower))
+    program.copy(entry = program.entry.map(lower), functions = program.functions.map(lower))
   }
 
   private def barrier: p.Stmt =

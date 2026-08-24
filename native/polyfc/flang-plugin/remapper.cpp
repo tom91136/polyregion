@@ -157,7 +157,7 @@ StructLayout polyfc::Remapper::resolveLayout(const StructDef &def) {
     raise(fmt::format(
         "Type offset mismatch for {}: field size arithmetic gave last element offset = {} but max size from mlir::DataLayout gave {}",
         repr(def), offset, size));
-  return StructLayout(repr(def.name), size, L.getTypeABIAlignment(mirror), ms);
+  return StructLayout(fqcn(def.name), size, L.getTypeABIAlignment(mirror), ms);
 }
 
 Term::Select polyfc::Remapper::newVar(const std::variant<Expr::Any, Type::Any> &x) {
@@ -471,9 +471,9 @@ void polyfc::Remapper::handleFunc(mlir::func::FuncOp funcOp) {
   const Type::Any rtn = funcOp.getNumResults() > 0 ? handleType(funcOp.getResultTypes()[0]) : Type::Unit0().widen();
 
   const auto mk = [&](const std::vector<Stmt::Any> &body) -> Function {
-    return Function(FunctionDecl(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{}, args, std::vector<Arg>{},
-                                 std::vector<Arg>{}, rtn, FunctionAffinity::Offload()),
-                    body, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+    return Function(FunctionDecl(Sym({name}), std::vector<Type::Var>{}, std::optional<Arg>{}, args, std::vector<Arg>{}, std::vector<Arg>{},
+                                 rtn, FunctionAffinity::Offload()),
+                    body, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   };
   userFuncs.insert_or_assign(name, mk({}));
 
@@ -778,15 +778,15 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
           }
           const auto select = selectAny(base, field);
           const auto expr = field.tpe.get<Type::Ptr>()                                                     //
-                            ^ flat_map([&](const auto &p) { return p.comp.template get<Type::Struct>(); }) //
-                            ^ or_else([&]() { return field.tpe.get<Type::Struct>(); })                     //
-                            ^ flat_map([&](const auto &s) { return boxTypes ^ get_maybe(s); })             //
-                            ^ map([&](const auto &m) { // we're pointing to a Ptr|FBox field, retain boxed semantic
+                            | flat_map([&](const auto &p) { return p.comp.template get<Type::Struct>(); }) //
+                            | or_else([&]() { return field.tpe.get<Type::Struct>(); })                     //
+                            | flat_map([&](const auto &s) { return boxTypes ^ get_maybe(s); })             //
+                            | map([&](const auto &m) { // we're pointing to a Ptr|FBox field, retain boxed semantic
                                 return m               //
                                        ^ fold_total([&](const FBoxedMirror &bm) -> FExpr { return FBoxed(select, bm); },
                                                     [&](const FBoxedNoneMirror &) -> FExpr { return FBoxedNone{select}; });
                               })                    //
-                            ^ fold([&]() -> FExpr { // pointing to scalar, like fir.alloca, use FVar semantic
+                            | fold([&]() -> FExpr { // pointing to scalar, like fir.alloca, use FVar semantic
                                 if (auto a = select.template get<Expr::Alias>()) {
                                   if (auto s = a->ref.template get<Term::Select>()) return FVar{*s};
                                 }
@@ -1334,10 +1334,10 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                  | to_vector();
         });
 
-  exprWithReductions ^ for_each([&](const auto &expr, const auto &rd) {
+  for (const auto &[expr, rd] : exprWithReductions) {
     r.valuesLUT ^=
         map_values([&](const auto &v) { return v == expr ? Expr::Any(Expr::Alias(Term::Select(rd.named, {}, rd.named.tpe))) : v; });
-  });
+  }
 
   // Then inject induction
   r.valuesLUT.insert({op.getInductionVar(), Expr::Any(Expr::Alias(selectNamed(MappedInduction)))});
@@ -1400,7 +1400,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   const auto defLayouts = program.defs ^ map([&](const auto &d) { return r.resolveLayout(d); });
 
   const auto findNamedLayout = [&](const auto &symbol) {
-    const auto target = repr(symbol);
+    const auto target = fqcn(symbol);
     return defLayouts                                              //
            ^ find([&](const auto &d) { return d.name == target; }) //
            ^ fold([&]() -> StructLayout { raise("Capture type missing"); });
@@ -1408,11 +1408,11 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
 
   return DoConcurrentRegion{
       .program = program,
-      .layouts = defLayouts | map([&](const auto &l) { return std::pair{l.name == repr(capturesDef.name), l}; }) | to_vector(),
+      .layouts = defLayouts | map([&](const auto &l) { return std::pair{l.name == fqcn(capturesDef.name), l}; }) | to_vector(),
       .captures = captures,
       .reductions = exprWithReductions ^ map([](const auto &, const auto &rd) { return rd; }),
       .boxes = r.boxTypes | collect([](const auto &k, const auto &f) {
-                 return f ^ get_maybe<FBoxedMirror>() ^ map([&](const auto &v) { return std::pair{repr(k.name), v}; });
+                 return f ^ get_maybe<FBoxedMirror>() | map([&](const auto &v) { return std::pair{fqcn(k.name), v}; });
                })                          //
                | to<std::unordered_map>(), //
       .preludeLayout = findNamedLayout(preludeDef.name),

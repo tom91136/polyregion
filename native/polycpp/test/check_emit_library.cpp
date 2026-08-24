@@ -65,6 +65,8 @@
 
 #define POLYREGION_EXPORT_FN [[clang::annotate("polyregion_export")]]
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
+#define POLYREGION_IMPLEMENTS(name) [[clang::annotate("polyregion_implements:" name)]]
+#define POLYREGION_REQUIRES(name) [[clang::annotate("polyregion_requires:" name)]]
 
 struct Effect {
   int *sink;
@@ -89,7 +91,8 @@ static int helper(const int x) { return x * 2; }
 static int unrelated(const int x) { return x + 1; }
 
 #if CHECK_KIND == 0
-POLYREGION_EXPORT_AS("foo.implementation.exportedA") int exportedA(const int x) { return x <= 0 ? 0 : exportedA(x - 1) + 1; }
+POLYREGION_EXPORT_AS("foo.implementation.exportedA")
+POLYREGION_IMPLEMENTS("foo.exportedA") POLYREGION_REQUIRES("gpu") int exportedA(const int x) { return x <= 0 ? 0 : exportedA(x - 1) + 1; }
 POLYREGION_EXPORT_FN int exportedB(const int x) { return helper(x) + 2; }
 #elif CHECK_KIND == 1
 POLYREGION_EXPORT_FN int relaxed(Diamond *d) { return d == nullptr ? 0 : 1; }

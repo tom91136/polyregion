@@ -24,7 +24,7 @@ class DeadFunctionEliminationSuite extends munit.FunSuite {
     )
 
   private def kept(fns: List[p.Function]): Set[String] =
-    DeadFunctionElimination(program(entry(), functions = fns), NoopLog).functions.map(_.name.repr).toSet
+    DeadFunctionElimination(program(entry(), functions = fns), NoopLog).functions.map(_.name.fqcn).toSet
 
   test("function no export reaches is dropped") {
     val out = kept(List(exported("a", List(callTo("shared"))), internal("shared"), internal("orphan")))
@@ -40,7 +40,7 @@ class DeadFunctionEliminationSuite extends munit.FunSuite {
     )
     assertEquals(kept(all), Set("a", "b", "shared"))
 
-    val onlyA = all.map(f => if (f.name.repr == "b") f.copy(visibility = p.Function.Visibility.Internal) else f)
+    val onlyA = all.map(f => if (f.name.fqcn == "b") f.copy(visibility = p.Function.Visibility.Internal) else f)
     assertEquals(kept(onlyA), Set("a", "shared"))
   }
 
@@ -69,8 +69,8 @@ class DeadFunctionEliminationSuite extends munit.FunSuite {
       internal("orphan")
     )
     val out = DeadFunctionElimination(program(entry(), functions = all), NoopLog).functions
-    assertEquals(out.count(_.name.repr == "shared"), 2)
-    assert(!out.exists(_.name.repr == "orphan"))
+    assertEquals(out.count(_.name.fqcn == "shared"), 2)
+    assert(!out.exists(_.name.fqcn == "orphan"))
   }
 
   test("no exports keeps nothing") {

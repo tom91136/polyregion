@@ -16,20 +16,20 @@ private object SpectraImplementations {
       yield width :: tail
 
   private def substitute(tpe: p.Type, bindings: Map[String, p.Type]): p.Type = tpe match {
-    case p.Type.Var(name)                     => bindings.getOrElse(name, tpe)
+    case p.Type.Var(name, _)                  => bindings.getOrElse(name, tpe)
     case p.Type.Ptr(component, space)         => p.Type.Ptr(substitute(component, bindings), space)
     case p.Type.Arr(component, length, space) => p.Type.Arr(substitute(component, bindings), length, space)
     case p.Type.Struct(name, args)            => p.Type.Struct(name, args.map(substitute(_, bindings)))
     case p.Type.Exec(tpeVars, args, rtn) =>
-      val nested = bindings -- tpeVars
+      val nested = bindings -- tpeVars.map(_.name)
       p.Type.Exec(tpeVars, args.map(substitute(_, nested)), substitute(rtn, nested))
     case _ => tpe
   }
 
   def candidates(
-      interfaceDef: p.InterfaceDef,
+      interfaceDef: p.Interface,
       variants: Spectra.ImplementationVariants
-  ): List[p.ImplementationCandidate] = {
+  ): List[p.Function] = {
     val widths       = variants.widths.sorted
     val capabilities = variants.requiredCapabilities.sorted
     require(variantName.matches(variants.name), s"invalid implementation variant name `${variants.name}`")
@@ -48,20 +48,23 @@ private object SpectraImplementations {
       "implementation capabilities must be distinct"
     )
     require(
-      interfaceDef.decls.groupBy(_.name).forall(_._2.size == 1),
+      interfaceDef.declarations.groupBy(_.name).forall(_._2.size == 1),
       "implementation generation does not support overloaded public declarations"
     )
 
-    interfaceDef.decls.flatMap { publicDecl =>
+    interfaceDef.declarations.flatMap { publicDecl =>
       val specialised =
         if publicDecl.tpeVars.isEmpty then Nil else combinations(widths, publicDecl.tpeVars.size).map(Some.apply)
       val sizes = specialised ::: Option.when(variants.includeFallback || publicDecl.tpeVars.isEmpty)(None).toList
       sizes.map { sizes =>
-        val implementationVariables = sizes match {
-          case Some(widths) => publicDecl.tpeVars.zip(widths).map((name, width) => s"$name$width")
-          case None         => publicDecl.tpeVars
+        val implementationVariables: List[p.Type.Var] = sizes match {
+          case Some(widths) =>
+            publicDecl.tpeVars
+              .zip(widths)
+              .map((variable, width) => p.Type.Var(s"${variable.name}$width", Some(width)): p.Type.Var)
+          case None => publicDecl.tpeVars
         }
-        val bindings      = publicDecl.tpeVars.zip(implementationVariables.map(p.Type.Var.apply)).toMap
+        val bindings      = publicDecl.tpeVars.map(_.name).zip(implementationVariables).toMap
         var callableIndex = 0
         val implementationArgs = publicDecl.args.map { arg =>
           val tpe = arg.named.tpe match {
@@ -73,7 +76,8 @@ private object SpectraImplementations {
           }
           arg.copy(named = arg.named.copy(tpe = tpe))
         }
-        val callableVariables = List.tabulate(callableIndex)(index => s"Callable$index")
+        val callableVariables: List[p.Type.Var] =
+          List.tabulate(callableIndex)(index => p.Type.Var(s"Callable$index"): p.Type.Var)
         val suffix = sizes match {
           case Some(widths) => widths.map(width => s"w$width").mkString("_")
           case None         => "fallback"
@@ -93,19 +97,22 @@ private object SpectraImplementations {
           substitute(publicDecl.rtn, bindings),
           publicDecl.affinity
         )
-        p.ImplementationCandidate(
-          publicDecl.name,
+        p.Function(
           implementation,
-          capabilities,
-          sizes.toList.flatMap(widths => implementationVariables.zip(widths).map(p.TypeSizeConstraint.apply))
+          Nil,
+          p.Function.Visibility.Exported,
+          p.Function.FpMode.Relaxed,
+          p.CallConvention.RegularCall,
+          Some(publicDecl.name),
+          capabilities
         )
       }
     }
   }
 
-  def index(interfaceDef: p.InterfaceDef, variants: List[Spectra.ImplementationVariants]): p.PackageIndex = {
+  def packageFor(interfaceDef: p.Interface, variants: List[Spectra.ImplementationVariants]): p.Package = {
     require(variants.nonEmpty, "at least one implementation variant set is required")
     require(variants.map(_.name).distinct.size == variants.size, "implementation variant names must be distinct")
-    p.PackageIndex(interfaceDef, variants.sortBy(_.name).flatMap(candidates(interfaceDef, _)))
+    p.Package(interfaceDef, p.Program(None, variants.sortBy(_.name).flatMap(candidates(interfaceDef, _)), Nil))
   }
 }

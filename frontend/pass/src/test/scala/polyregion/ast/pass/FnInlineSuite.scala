@@ -98,7 +98,7 @@ class FnInlineSuite extends munit.FunSuite {
   test("recursive helpers fail promptly with a deterministic diagnostic") {
     val helperName = sym("recursive.helper")
     val recursive  = p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0)
-    val helper     = fn(helperName.repr, body = List(p.Stmt.Return(recursive)))
+    val helper     = fn(helperName.fqcn, body = List(p.Stmt.Return(recursive)))
     val invoke     = p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0)
 
     val error = intercept[IllegalStateException] {
@@ -111,13 +111,13 @@ class FnInlineSuite extends munit.FunSuite {
   test("same-name overload delegation is not mistaken for recursion") {
     val name = sym("delegating.overload")
     val leaf = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("value", p.Type.Float32)),
       rtn = p.Type.IntS32,
       body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(7))))
     )
     val delegating = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("value", p.Type.IntS32)),
       rtn = p.Type.IntS32,
       body = List(
@@ -226,7 +226,7 @@ class FnInlineSuite extends munit.FunSuite {
   }
 
   test("inlining preserves type variables shadowed by callable binders") {
-    val callable = p.Type.Exec(List("T"), List(p.Type.Var("T")), p.Type.Var("T"))
+    val callable = p.Type.Exec(List(p.Type.Var("T")), List(p.Type.Var("T")), p.Type.Var("T"))
     val helper = fn(
       "callable.shadow",
       args = List(arg("value", p.Type.Var("T"))),

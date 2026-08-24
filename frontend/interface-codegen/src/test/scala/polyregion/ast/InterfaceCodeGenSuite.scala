@@ -15,7 +15,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   private val u = p.Type.Var("U")
   private val transform = p.FunctionDecl(
     p.Sym("example.transform"),
-    List("T", "U"),
+    List(p.Type.Var("T"), p.Type.Var("U")),
     None,
     List(
       p.Arg(
@@ -36,7 +36,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   )
   private val count = p.FunctionDecl(
     p.Sym("example.count"),
-    List("T"),
+    List(p.Type.Var("T")),
     None,
     List(
       p.Arg(
@@ -51,7 +51,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     p.Function.Affinity.Host
   )
   private val countValue   = count.copy(args = count.args :+ p.Arg(p.Named("value", t)))
-  private val interfaceDef = p.InterfaceDef(p.Sym("example"), List(transform, count))
+  private val interfaceDef = p.Interface(p.Sym("example"), List(transform, count))
   private val fortran      = InterfaceCodeGen.FortranConfig("example_ffi")
   private val scala        = InterfaceCodeGen.ScalaConfig("example.bindings", "ExampleInterface")
 
@@ -86,7 +86,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   test("Fortran adapts erased generic results to output arguments") {
     val reduce = p.FunctionDecl(
       p.Sym("example.reduce"),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(
         transform.args.head.copy(
@@ -101,7 +101,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       t,
       p.Function.Affinity.Host
     )
-    val f90 = InterfaceCodeGen.fortranModule(interfaceDef.copy(decls = List(reduce)), fortran)
+    val f90 = InterfaceCodeGen.fortranModule(interfaceDef.copy(declarations = List(reduce)), fortran)
 
     assert(f90.contains("subroutine polyregion_reduce(in, n, init, op, polyregion_result)"))
     assert(f90.contains("type(*), intent(in) :: init"))
@@ -110,7 +110,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assert(!f90.contains("function polyregion_reduce"))
 
     val collision = reduce.copy(args = reduce.args :+ p.Arg(p.Named("polyregion_result", p.Type.IntS32)))
-    val renamed   = InterfaceCodeGen.fortranModule(interfaceDef.copy(decls = List(collision)), fortran)
+    val renamed   = InterfaceCodeGen.fortranModule(interfaceDef.copy(declarations = List(collision)), fortran)
     assert(renamed.contains("polyregion_result, polyregion_result_)"))
     assert(renamed.contains("type(*), intent(inout) :: polyregion_result_"))
   }
@@ -118,7 +118,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   test("Fortran rejects overloads that collide after generic result adaptation") {
     val returned = p.FunctionDecl(
       p.Sym("example.select"),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(p.Arg(p.Named("value", t))),
       Nil,
@@ -128,7 +128,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     )
     val unit = returned.copy(args = List(p.Arg(p.Named("lhs", t)), p.Arg(p.Named("rhs", t))), rtn = p.Type.Unit0)
     val error = intercept[IllegalArgumentException](
-      InterfaceCodeGen.fortranModule(interfaceDef.copy(decls = List(returned, unit)), fortran)
+      InterfaceCodeGen.fortranModule(interfaceDef.copy(declarations = List(returned, unit)), fortran)
     )
 
     assert(error.getMessage.contains("after result adaptation with 2 arguments"))
@@ -150,7 +150,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       rtn = p.Type.Unit0
     )
     val error = intercept[IllegalArgumentException](
-      InterfaceCodeGen.fortranModule(interfaceDef.copy(decls = List(function, subroutine)), fortran)
+      InterfaceCodeGen.fortranModule(interfaceDef.copy(declarations = List(function, subroutine)), fortran)
     )
 
     assert(error.getMessage.contains("cannot combine function and subroutine overloads"))
@@ -175,14 +175,14 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    val f90 = InterfaceCodeGen.fortranModule(interfaceDef.copy(decls = List(inspect)), fortran)
+    val f90 = InterfaceCodeGen.fortranModule(interfaceDef.copy(declarations = List(inspect)), fortran)
 
     assert(f90.contains("type(*), dimension(*), intent(in) :: points"))
     assert(f90.contains("type(*), intent(in) :: point"))
   }
 
   test("projection order and stale-output checks are deterministic") {
-    val reversed = interfaceDef.copy(decls = interfaceDef.decls.reverse)
+    val reversed = interfaceDef.copy(declarations = interfaceDef.declarations.reverse)
     val cpp      = InterfaceCodeGen.cppHeader(interfaceDef)
 
     assertEquals(InterfaceCodeGen.cppHeader(reversed), cpp)
@@ -201,17 +201,22 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   }
 
   test("overloads retain distinct Fortran procedures") {
-    val overloaded = interfaceDef.copy(decls = countValue :: interfaceDef.decls)
+    val overloaded = interfaceDef.copy(declarations = countValue :: interfaceDef.declarations)
     val f90        = InterfaceCodeGen.fortranModule(overloaded, fortran)
 
     assert(f90.contains("module procedure polyregion_count_o0"))
     assert(f90.contains("module procedure polyregion_count_o1"))
-    assertEquals(InterfaceCodeGen.fortranModule(overloaded.copy(decls = overloaded.decls.reverse), fortran), f90)
+    assertEquals(
+      InterfaceCodeGen.fortranModule(overloaded.copy(declarations = overloaded.declarations.reverse), fortran),
+      f90
+    )
   }
 
   test("pointer declarations require boundary metadata") {
     val invalid =
-      interfaceDef.copy(decls = List(count.copy(args = count.args.updated(0, count.args.head.copy(boundary = None)))))
+      interfaceDef.copy(declarations =
+        List(count.copy(args = count.args.updated(0, count.args.head.copy(boundary = None))))
+      )
     val error = intercept[IllegalArgumentException](InterfaceCodeGen.cppHeader(invalid))
 
     assert(error.getMessage.contains("has no boundary"))
@@ -228,7 +233,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    val cpp = InterfaceCodeGen.cppHeader(interfaceDef.copy(decls = List(array)))
+    val cpp = InterfaceCodeGen.cppHeader(interfaceDef.copy(declarations = List(array)))
 
     assertEquals(cpp, golden("example-array.hpp"))
     assert(cpp.contains("inline void array(std::int32_t (&values)[4])"))
@@ -237,7 +242,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
   test("C++ callables are checked against const lvalue arguments") {
     val inspect = p.FunctionDecl(
       p.Sym("example.inspect"),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), t)))),
       Nil,
@@ -245,7 +250,7 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    val cpp = InterfaceCodeGen.cppHeader(interfaceDef.copy(decls = List(inspect)))
+    val cpp = InterfaceCodeGen.cppHeader(interfaceDef.copy(declarations = List(inspect)))
 
     assert(cpp.contains("std::invoke_result_t<Op &, const T &>"))
   }
@@ -269,37 +274,40 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    val source = InterfaceCodeGen.scalaObject(interfaceDef.copy(decls = List(nested)), scala)
+    val source = InterfaceCodeGen.scalaObject(interfaceDef.copy(declarations = List(nested)), scala)
 
     assert(source.contains("op: (Int => Int) => Boolean"))
     assert(source.contains("value: _root_.model.Value"))
   }
 
   test("lossy overloads and Fortran case collisions are rejected") {
-    val sameArity     = interfaceDef.copy(decls = List(count, count.copy(rtn = p.Type.IntS64)))
+    val sameArity     = interfaceDef.copy(declarations = List(count, count.copy(rtn = p.Type.IntS64)))
     val overloadError = intercept[IllegalArgumentException](InterfaceCodeGen.scalaObject(sameArity, scala))
     assert(overloadError.getMessage.contains("cannot portably distinguish overloads"))
 
     val lower = count.copy(name = p.Sym("example.lookup"))
     val upper = countValue.copy(name = p.Sym("example.Lookup"))
     val caseError = intercept[IllegalArgumentException](
-      InterfaceCodeGen.fortranModule(interfaceDef.copy(decls = List(lower, upper)), fortran)
+      InterfaceCodeGen.fortranModule(interfaceDef.copy(declarations = List(lower, upper)), fortran)
     )
     assert(caseError.getMessage.contains("differ only by case"))
   }
 
   test("target identifiers are validated before source emission") {
-    val cppReserved = interfaceDef.copy(name = p.Sym("class"), decls = List(count.copy(name = p.Sym("class.count"))))
+    val cppReserved =
+      interfaceDef.copy(name = p.Sym("class"), declarations = List(count.copy(name = p.Sym("class.count"))))
     assert(intercept[IllegalArgumentException](InterfaceCodeGen.cppHeader(cppReserved)).getMessage.contains("reserved"))
 
-    val scalaReserved = interfaceDef.copy(decls = List(count.copy(name = p.Sym("example.match"))))
+    val scalaReserved = interfaceDef.copy(declarations = List(count.copy(name = p.Sym("example.match"))))
     assert(
       intercept[IllegalArgumentException](InterfaceCodeGen.scalaObject(scalaReserved, scala)).getMessage
         .contains("reserved")
     )
 
     val fortranInvalid =
-      interfaceDef.copy(decls = List(count.copy(args = count.args.updated(1, p.Arg(p.Named("_n", p.Type.IntS32))))))
+      interfaceDef.copy(
+        declarations = List(count.copy(args = count.args.updated(1, p.Arg(p.Named("_n", p.Type.IntS32)))))
+      )
     assert(
       intercept[IllegalArgumentException](InterfaceCodeGen.fortranModule(fortranInvalid, fortran)).getMessage.contains(
         "invalid Fortran"

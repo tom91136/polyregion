@@ -1,5 +1,5 @@
 
-add_library(PolyAST generated/polyast.cpp generated/polyast_codec.cpp generated/polyast_repr.cpp ast.cpp )
+add_library(PolyAST generated/polyast.cpp generated/polyast_codec.cpp generated/polyast_repr.cpp ast.cpp msgpack.hpp)
 target_include_directories(PolyAST PUBLIC . generated)
 polyregion_apply_common_options(PolyAST)
 polyregion_strip_asan_on_darwin(PolyAST) # embedded in the dlopen'd plugins

@@ -27,10 +27,10 @@ Package fixture(int32_t increment) {
   const auto publicDecl = FunctionDecl(publicName, {}, {}, {Arg(Named("x", i32), {})}, {}, {}, i32, FunctionAffinity::Host());
   const auto implementationDecl = publicDecl.withName(implementationName);
   const auto x = NamedBuilder(Named("x", i32));
-  const auto implementation = Function(implementationDecl, {ret(call(Intr::Add(x, Term::IntS32Const(increment).widen(), i32)))},
-                                       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
-  return {PackageIndex(InterfaceDef(Sym({"foo"}), {publicDecl}, {}), {ImplementationCandidate(publicName, implementationDecl, {}, {})}),
-          packageProgram({implementation}, {})};
+  const auto implementation =
+      Function(implementationDecl, {ret(call(Intr::Add(x, Term::IntS32Const(increment).widen(), i32)))}, FunctionVisibility::Exported(),
+               FunctionFpMode::Relaxed(), CallConvention::RegularCall(), publicName);
+  return {Interface(Sym({"foo"}), {publicDecl}, {}), packageProgram({implementation}, {})};
 }
 
 class TemporaryDirectory {
@@ -110,65 +110,79 @@ TEST_CASE("package emission rejects incomplete implementations without replacing
   incomplete.program = packageProgram({}, {});
   const auto rejected = emitPackage(incomplete, root.path.str().str());
   REQUIRE_FALSE(rejected);
-  CHECK(rejected.errors == std::vector<std::string>{"implementation `foo.implementation.apply` is absent from the package program"});
+  CHECK(rejected.errors == std::vector<std::string>{"public declaration `foo.bar.apply` has no compatible implementation"});
 
   const auto loaded = loadPackage("foo", {root.path.str().str()});
   REQUIRE(loaded);
   CHECK(*loaded.value == current);
 }
 
-TEST_CASE("package emission rejects unsafe identities and duplicate candidates") {
+TEST_CASE("package emission rejects unsafe identities") {
   TemporaryDirectory root;
   CHECK(safePathComponent("foo$bar"));
   auto unsafe = fixture(1);
-  unsafe.index = unsafe.index.withInterface(unsafe.index.interface.withName(Sym({".."})));
+  unsafe.interface = unsafe.interface.withName(Sym({".."}));
   const auto unsafeResult = emitPackage(unsafe, root.path.str().str());
   REQUIRE_FALSE(unsafeResult);
   CHECK(unsafeResult.errors == std::vector<std::string>{"invalid package identity `..`"});
 
   auto reserved = fixture(1);
-  reserved.index = reserved.index.withInterface(reserved.index.interface.withName(Sym({"CON.txt"})));
+  reserved.interface = reserved.interface.withName(Sym({"CON.txt"}));
   const auto reservedResult = emitPackage(reserved, root.path.str().str());
   REQUIRE_FALSE(reservedResult);
   CHECK(reservedResult.errors == std::vector<std::string>{"invalid package identity `CON.txt`"});
 
   auto trailing = fixture(1);
-  trailing.index = trailing.index.withInterface(trailing.index.interface.withName(Sym({"foo."})));
+  trailing.interface = trailing.interface.withName(Sym({"foo."}));
   const auto trailingResult = emitPackage(trailing, root.path.str().str());
   REQUIRE_FALSE(trailingResult);
   CHECK(trailingResult.errors == std::vector<std::string>{"invalid package identity `foo.`"});
-
-  auto duplicate = fixture(1);
-  duplicate.index = duplicate.index.withCandidates({duplicate.index.candidates.front(), duplicate.index.candidates.front()});
-  const auto duplicateResult = emitPackage(duplicate, root.path.str().str());
-  REQUIRE_FALSE(duplicateResult);
-  CHECK(duplicateResult.errors == std::vector<std::string>{"package index contains duplicate implementation candidates"});
 }
 
 TEST_CASE("package emission rejects invalid type-size constraints") {
   TemporaryDirectory root;
   auto invalid = fixture(1);
-  const auto candidate = invalid.index.candidates.front().withTypeSizes({TypeSizeConstraint("Missing", 4)});
-  invalid.index = invalid.index.withCandidates({candidate});
+  const auto candidate = invalid.program.functions.front();
+  invalid.program.functions.front() = candidate.withDecl(candidate.decl.withTpeVars({Type::Var("Missing", 4)}));
   const auto result = emitPackage(invalid, root.path.str().str());
   REQUIRE_FALSE(result);
-  CHECK(
-      result.errors
-      == std::vector<std::string>{"implementation `foo.implementation.apply` type-size constraint references unbound variable `Missing`"});
+  CHECK(result.errors ^ exists([](const auto &error) { return error ^ contains_slice("type variable `Missing` is not bound"); }));
+  CHECK(result.errors
+        ^ exists([](const auto &error) { return error ^ contains_slice("public declaration `foo.bar.apply` has no compatible"); }));
+}
+
+TEST_CASE("package emission rejects malformed complete struct binders and applications") {
+  TemporaryDirectory root;
+  const auto structName = Sym({"foo", "Box"});
+  const auto applied = Type::Struct(structName, {Type::IntS32(), Type::Float32()}).widen();
+  const auto malformed = StructDef(structName, {Type::Var("T", 4)}, {Named("value", Type::Var("T", 8))}, {}, false);
+  const auto publicName = Sym({"foo", "bar", "struct"});
+  const auto publicDecl =
+      FunctionDecl(publicName, {}, {}, {Arg(Named("box", applied), {})}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto implementationDecl = publicDecl.withName(Sym({"foo", "implementation", "struct"}));
+  const auto implementation = Function(implementationDecl, {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                                       CallConvention::RegularCall(), publicName);
+  const auto package = Package(Interface(Sym({"foo"}), {publicDecl}, {}), packageProgram({implementation}, {malformed}));
+
+  const auto result = emitPackage(package, root.path.str().str());
+  REQUIRE_FALSE(result);
+  CHECK(result.errors ^ exists([](const auto &error) { return error ^ contains_slice("differs from its binder"); }));
+  CHECK(result.errors ^ exists([](const auto &error) { return error ^ contains_slice("type-argument count differs"); }));
 }
 
 TEST_CASE("package emission rejects partial type-size constraints") {
   TemporaryDirectory root;
   const auto name = Sym({"foo", "bar", "transform"});
-  const auto publicDecl = FunctionDecl(name, {"T", "U"}, {}, {Arg(Named("in", Type::Var("T")), {}), Arg(Named("out", Type::Var("U")), {})},
-                                       {}, {}, Type::Unit0(), FunctionAffinity::Host());
-  const auto implementationDecl = FunctionDecl(Sym({"foo", "implementation", "transform"}), {"Input", "Output"}, {},
-                                               {Arg(Named("in", Type::Var("Input")), {}), Arg(Named("out", Type::Var("Output")), {})}, {},
-                                               {}, Type::Unit0(), FunctionAffinity::Host());
-  const auto implementation = Function(implementationDecl, {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
-  const auto candidate = ImplementationCandidate(name, implementationDecl, {}, {TypeSizeConstraint("Input", 4)});
-  const auto package =
-      Package(PackageIndex(InterfaceDef(Sym({"foo"}), {publicDecl}, {}), {candidate}), packageProgram({implementation}, {}));
+  const auto publicDecl = FunctionDecl(name, {Type::Var("T"), Type::Var("U")}, {},
+                                       {Arg(Named("in", Type::Var("T")), {}), Arg(Named("out", Type::Var("U")), {})}, {}, {}, Type::Unit0(),
+                                       FunctionAffinity::Host());
+  const auto implementationDecl =
+      FunctionDecl(Sym({"foo", "implementation", "transform"}), {Type::Var("Input", 4), Type::Var("Output")}, {},
+                   {Arg(Named("in", Type::Var("Input", 4)), {}), Arg(Named("out", Type::Var("Output")), {})}, {}, {}, Type::Unit0(),
+                   FunctionAffinity::Host());
+  const auto implementation =
+      Function(implementationDecl, {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall(), name);
+  const auto package = Package(Interface(Sym({"foo"}), {publicDecl}, {}), packageProgram({implementation}, {}));
 
   const auto result = emitPackage(package, root.path.str().str());
   REQUIRE_FALSE(result);
@@ -189,20 +203,21 @@ TEST_CASE("package emission rejects an incomplete implementation closure") {
   CHECK(result.errors == std::vector<std::string>{"implementation closure references absent function `foo.implementation.helper`"});
 }
 
-TEST_CASE("package emission rejects an ambiguous implementation closure") {
+TEST_CASE("package emission deduplicates identical implementation helpers") {
   TemporaryDirectory root;
   auto ambiguous = fixture(1);
   const auto i32 = Type::IntS32().widen();
   const auto x = NamedBuilder(Named("x", i32));
   const auto helperName = Sym({"foo", "implementation", "helper"});
   const auto helperDecl = FunctionDecl(helperName, {}, {}, {Arg(Named("x", i32), {})}, {}, {}, i32, FunctionAffinity::Host());
-  const auto helper = Function(helperDecl, {ret(x)}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+  const auto helper =
+      Function(helperDecl, {ret(x)}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   const auto implementation =
       ambiguous.program.functions.front().withBody({ret(Expr::Invoke(Type::FnRef(helperName), {}, {}, {x}, i32).widen())});
   ambiguous.program = packageProgram({implementation, helper, helper}, {});
   const auto result = emitPackage(ambiguous, root.path.str().str());
-  REQUIRE_FALSE(result);
-  CHECK(result.errors == std::vector<std::string>{"implementation closure references ambiguous function `foo.implementation.helper`"});
+  REQUIRE(result);
+  CHECK(result.value->program.functions.size() == 2);
 }
 
 TEST_CASE("package emission validates helper declarations") {
@@ -212,14 +227,15 @@ TEST_CASE("package emission validates helper declarations") {
   const auto helperName = Sym({"foo", "implementation", "helper"});
   const auto helperDecl =
       FunctionDecl(helperName, {}, {}, {Arg(Named("x", Type::Var("Missing")), {})}, {}, {}, i32, FunctionAffinity::Host());
-  const auto helper = Function(helperDecl, {ret(Term::IntS32Const(0))}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+  const auto helper = Function(helperDecl, {ret(Term::IntS32Const(0))}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
+                               CallConvention::RegularCall());
   const auto x = NamedBuilder(Named("x", i32));
   const auto implementation =
       invalid.program.functions.front().withBody({ret(Expr::Invoke(Type::FnRef(helperName), {}, {}, {x}, i32).widen())});
   invalid.program = packageProgram({implementation, helper}, {});
   const auto result = emitPackage(invalid, root.path.str().str());
   REQUIRE_FALSE(result);
-  CHECK(result.errors | exists([](const auto &error) { return error ^ contains_slice("undeclared type variable `Missing`"); }));
+  CHECK(result.errors ^ exists([](const auto &error) { return error ^ contains_slice("undeclared type variable `Missing`"); }));
 }
 
 TEST_CASE("package emission distinguishes structural symbols in implementation closure") {
@@ -229,7 +245,8 @@ TEST_CASE("package emission distinguishes structural symbols in implementation c
   const auto presentName = Sym({"a.b"});
   const auto absentName = Sym({"a", "b"});
   const auto helperDecl = FunctionDecl(presentName, {}, {}, {}, {}, {}, i32, FunctionAffinity::Host());
-  const auto helper = Function(helperDecl, {ret(Term::IntS32Const(0))}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), false);
+  const auto helper = Function(helperDecl, {ret(Term::IntS32Const(0))}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
+                               CallConvention::RegularCall());
   const auto implementation = incomplete.program.functions.front().withBody(
       {Stmt::Var(Named("present", i32), Expr::Invoke(Type::FnRef(presentName), {}, {}, {}, i32), false),
        Stmt::Var(Named("absent", i32), Expr::Invoke(Type::FnRef(absentName), {}, {}, {}, i32), false), ret(Term::IntS32Const(0))});
@@ -245,16 +262,14 @@ TEST_CASE("package emission rejects an incomplete struct closure") {
   const auto record = Type::Struct(Sym({"foo", "Record"}), {}).widen();
   const auto implementation = incomplete.program.functions.front();
   incomplete.program = packageProgram({implementation.withDecl(implementation.decl.withArgs({Arg(Named("record", record), {})}))}, {});
-  const auto publicDecl = incomplete.program.functions.front().decl.withName(incomplete.index.interface.decls.front().name);
-  incomplete.index = incomplete.index.withInterface(incomplete.index.interface.withDecls({publicDecl}));
-  incomplete.index =
-      incomplete.index.withCandidates({incomplete.index.candidates.front().withImplementation(incomplete.program.functions.front().decl)});
+  const auto publicDecl = incomplete.program.functions.front().decl.withName(incomplete.interface.declarations.front().name);
+  incomplete.interface = incomplete.interface.withDeclarations({publicDecl});
   const auto result = emitPackage(incomplete, root.path.str().str());
   REQUIRE_FALSE(result);
   CHECK(result.errors == std::vector<std::string>{"struct definition `foo.Record` is absent"});
 }
 
-TEST_CASE("package emission rejects an ambiguous struct closure") {
+TEST_CASE("package emission deduplicates identical struct definitions") {
   TemporaryDirectory root;
   auto ambiguous = fixture(1);
   const auto name = Sym({"foo", "Record"});
@@ -263,13 +278,11 @@ TEST_CASE("package emission rejects an ambiguous struct closure") {
   const auto definition = StructDef(name, {}, {Named("value", Type::IntS32())}, {}, false);
   ambiguous.program =
       packageProgram({implementation.withDecl(implementation.decl.withArgs({Arg(Named("record", record), {})}))}, {definition, definition});
-  const auto publicDecl = ambiguous.program.functions.front().decl.withName(ambiguous.index.interface.decls.front().name);
-  ambiguous.index = ambiguous.index.withInterface(ambiguous.index.interface.withDecls({publicDecl}));
-  ambiguous.index =
-      ambiguous.index.withCandidates({ambiguous.index.candidates.front().withImplementation(ambiguous.program.functions.front().decl)});
+  const auto publicDecl = ambiguous.program.functions.front().decl.withName(ambiguous.interface.declarations.front().name);
+  ambiguous.interface = ambiguous.interface.withDeclarations({publicDecl});
   const auto result = emitPackage(ambiguous, root.path.str().str());
-  REQUIRE_FALSE(result);
-  CHECK(result.errors == std::vector<std::string>{"struct definition `foo.Record` is ambiguous"});
+  REQUIRE(result);
+  CHECK(result.value->program.defs.size() == 1);
 }
 
 #ifndef _WIN32

@@ -1,6 +1,5 @@
 package polyregion.ast
 
-import polyregion.ast.CppNlohmannJsonCodecGen
 import polyregion.ast.CppStructGen.*
 import polyregion.ast.{MsgPack, PolyAST}
 
@@ -40,6 +39,38 @@ private[polyregion] object CodeGen {
       s"$name/${n.tpe.kind}<$parent>[$members]{$vars}"
     }
     nodes.map(go).mkString("\n")
+  }
+
+  private[ast] def generatedNameCollisions(
+      nodes: List[StructNode],
+      roots: List[CppMsgPackCodecGen.Root]
+  ): List[String] = {
+    def flatten(node: StructNode): List[StructNode] = node :: node.variants.flatMap(flatten)
+    val flattened                                   = nodes.flatMap(flatten)
+    val typeCollisions = flattened
+      .groupBy(node => (node.tpe.namespace, node.tpe.name))
+      .collect {
+        case ((namespace, name), duplicates) if duplicates.size > 1 =>
+          s"type ${(namespace :+ name).mkString("::")}"
+      }
+      .toList
+    val codecCollisions = flattened
+      .groupBy(node => (node.tpe.namespace, node.tpe.name.toLowerCase))
+      .collect {
+        case ((namespace, stem), duplicates) if duplicates.map(_.tpe.name).distinct.size > 1 =>
+          s"codec ${(namespace :+ stem).mkString("::")}"
+      }
+      .toList
+    val rootCollisions = roots
+      .groupBy(_.stem)
+      .collect { case (stem, duplicates) if duplicates.size > 1 => s"MsgPack root $stem" }
+      .toList
+    (typeCollisions ::: codecCollisions ::: rootCollisions).sorted
+  }
+
+  private def validateGeneratedNames(nodes: List[StructNode], roots: List[CppMsgPackCodecGen.Root]): Unit = {
+    val collisions = generatedNameCollisions(nodes, roots)
+    require(collisions.isEmpty, s"Generated C++ symbol collisions: ${collisions.mkString(", ")}")
   }
 
   private def overwrite(path: Path)(content: String) = Files.write(
@@ -156,28 +187,38 @@ private[polyregion] object CodeGen {
       :: deriveStruct[Arg.Boundary]()
       :: deriveStruct[Arg]()
       :: deriveStruct[FunctionDecl]()
+      :: deriveStruct[CallConvention]()
       :: deriveStruct[Function]()
       :: deriveStruct[StructDef]()
       :: deriveStruct[Mirror]()
-      :: deriveStruct[PassPhase]()
+      :: deriveStruct[Pass.Phase]()
       :: deriveStruct[MetaEntry]()
       :: deriveStruct[Program]()
-      :: deriveStruct[StructLayoutMember]()
+      :: deriveStruct[StructLayout.Member]()
       :: deriveStruct[StructLayout]()
-      :: deriveStruct[CompileEvent]()
-      :: deriveStruct[PassArg]()
-      :: deriveStruct[PassSpec]()
-      :: deriveStruct[PassPipeline]()
-      :: deriveStruct[PassRunResult]()
-      :: deriveStruct[CompileResult]()
+      :: deriveStruct[Compile.Event]()
+      :: deriveStruct[Pass.Arg]()
+      :: deriveStruct[Pass.Spec]()
+      :: deriveStruct[Pass.Pipeline]()
+      :: deriveStruct[Pass.RunResult]()
+      :: deriveStruct[Compile.Result]()
       :: Nil
 
   private def astPackageStructs: List[StructNode] =
-    deriveStruct[InterfaceDef]()
-      :: deriveStruct[TypeSizeConstraint]()
-      :: deriveStruct[ImplementationCandidate]()
-      :: deriveStruct[PackageIndex]()
+    deriveStruct[Interface]()
       :: deriveStruct[Package]()
+      :: Nil
+
+  // These are transport envelopes for the one-off package service, not part
+  // of the persistent Package schema. Keep their fingerprint independent so
+  // adding a service operation cannot invalidate stored Program/Package data.
+  private def packageWireStructs: List[StructNode] =
+    deriveStruct[Package.TypeSize]()
+      :: deriveStruct[Package.LinkRequest]()
+      :: deriveStruct[Package.SymRequest]()
+      :: deriveStruct[Package.ReturnConvention]()
+      :: deriveStruct[Package.EntryArgBinding]()
+      :: deriveStruct[Package.SymResolvedProgram]()
       :: Nil
 
   private def generateAstBindings() = {
@@ -186,7 +227,8 @@ private[polyregion] object CodeGen {
 
     val programStructs = astCoreStructs ::: astProgramStructs
     val packageStructs = programStructs ::: astPackageStructs
-    val structs        = packageStructs
+    val wireStructs    = packageWireStructs
+    val structs        = packageStructs ::: wireStructs
 
     val (reprProtos, reprImpls): (String, String) = compiletime.generateReprSource[PolyAST.type]
 
@@ -194,8 +236,52 @@ private[polyregion] object CodeGen {
     val adtFileName       = "polyast"
     val jsonCodecFileName = "polyast_codec"
 
-    val adtSources       = structs.flatMap(_.emit())
-    val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit(_))
+    val adtSources          = structs.flatMap(_.emit())
+    val jsonCodecSources    = structs.flatMap(CppNlohmannJsonCodecGen.emit)
+    val msgpackCodecSources = structs.flatMap(CppMsgPackCodecGen.emit)
+    val msgpackRoots = {
+      import CppMsgPackCodecGen.{Root, Schema}
+      List(
+        Root.raw[Program]("program"),
+        Root.versioned[Program]("hashed_program", Schema.Program, "Program", "Program"),
+        Root.versioned[Interface]("interface", Schema.Package, "Interface", "Interface"),
+        Root.versioned[Package]("package", Schema.Package, "Package", "Package"),
+        Root.versioned[Package](
+          "package_service_result",
+          Schema.PackageWire,
+          "package-service Package",
+          "package-service wire"
+        ),
+        Root.versioned[Package.LinkRequest](
+          "packagelinkrequest",
+          Schema.PackageWire,
+          "PackageLinkRequest",
+          "package-service wire"
+        ),
+        Root.versioned[Package.SymRequest](
+          "packagesymrequest",
+          Schema.PackageWire,
+          "PackageSymRequest",
+          "package-service wire"
+        ),
+        Root.versioned[Package.SymResolvedProgram](
+          "resolvedsymprogram",
+          Schema.PackageWire,
+          "PackageSymResolvedProgram",
+          "package-service wire"
+        ),
+        Root.raw[List[StructDef]]("structdefs"),
+        Root.versioned[List[StructDef]](
+          "hashed_structdefs",
+          Schema.Program,
+          "StructDef list",
+          "Program"
+        ),
+        Root.raw[Compile.Result]("compileresult"),
+        Root.raw[Pass.RunResult]("passrunresult")
+      )
+    }
+    validateGeneratedNames(structs, msgpackRoots)
 
     val adtHeader = StructSource.emitHeader(namespace, adtSources)
     val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)
@@ -222,7 +308,7 @@ private[polyregion] object CodeGen {
                        |}
                        |""".stripMargin
 
-    // Keep Type.repr and its Term constructor in sync.
+    // Keep Type.canonicalName and its Term constructor in sync.
     val jitConsts: List[(PolyAST.Type, String, String)] = List(
       (PolyAST.Type.Bool1, "std::int8_t", "rd(std::int8_t{}) != 0"),
       (PolyAST.Type.IntU8, "std::int8_t", "rd(std::int8_t{})"),
@@ -238,7 +324,7 @@ private[polyregion] object CodeGen {
     )
     val jitCases = jitConsts
       .map((t, cTpe, readExpr) =>
-        s"""  if (repr == "${t.repr}") return n == sizeof($cTpe) ? std::optional<Term::Any>(Term::${t}Const($readExpr)) : std::nullopt;"""
+        s"""  if (typeName == "${t.canonicalName}") return n == sizeof($cTpe) ? std::optional<Term::Any>(Term::${t}Const($readExpr)) : std::nullopt;"""
       )
       .mkString("\n")
     val jitHeader = s"""|#pragma once
@@ -252,7 +338,7 @@ private[polyregion] object CodeGen {
                         |#include "ast.h"
                         |
                         |namespace $namespace {
-                        |[[nodiscard]] inline std::optional<Term::Any> jitConstFromRepr(std::string_view repr, const void *bytes, size_t n) {
+                        |[[nodiscard]] inline std::optional<Term::Any> jitConstFromTypeName(std::string_view typeName, const void *bytes, size_t n) {
                         |  const auto rd = [&](auto z) { decltype(z) x{}; if (n >= sizeof(x)) std::memcpy(&x, bytes, sizeof(x)); return x; };
                         |$jitCases
                         |  return std::nullopt;
@@ -260,18 +346,22 @@ private[polyregion] object CodeGen {
                         |}
                         |""".stripMargin
 
-    val adtHash     = md5(adtFingerprint(structs))
-    val programHash = md5(adtFingerprint(programStructs))
-    val packageHash = md5(adtFingerprint(packageStructs))
+    val adtHash         = md5(adtFingerprint(structs))
+    val programHash     = md5(adtFingerprint(programStructs))
+    val packageHash     = md5(adtFingerprint(packageStructs))
+    val packageWireHash = md5(packageHash + "\n" + adtFingerprint(wireStructs))
 
-    val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
-    val jsonCodecImpl = CppNlohmannJsonCodecGen.emitImpl(
+    val jsonCodecHeader = CppCodecGen.emitHeader(namespace, jsonCodecSources, msgpackRoots)
+    val jsonCodecImpl = CppCodecGen.emitImpl(
       namespace,
       jsonCodecFileName,
       adtHash,
       programHash,
       packageHash,
-      jsonCodecSources
+      packageWireHash,
+      jsonCodecSources,
+      msgpackCodecSources,
+      msgpackRoots
     )
 
     println(
@@ -283,6 +373,10 @@ private[polyregion] object CodeGen {
       val target = Paths.get("../native/polyast/generated/").toAbsolutePath.normalize
       val scalaTarget = Paths
         .get("compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala")
+        .toAbsolutePath
+        .normalize
+      val packageWireScalaTarget = Paths
+        .get("ast/src/main/scala/polyregion/ast/generated/PolyPackageWireSchema.scala")
         .toAbsolutePath
         .normalize
       println(s"Writing to $target")
@@ -306,6 +400,18 @@ private[polyregion] object CodeGen {
            |}
            |""".stripMargin
       )
+      Files.createDirectories(packageWireScalaTarget.getParent)
+      overwrite(packageWireScalaTarget)(
+        s"""package polyregion.ast.generated
+           |
+           |import javax.annotation.processing.Generated
+           |
+           |@Generated(Array("polyregion.ast.CodeGen"))
+           |private[polyregion] object PolyPackageWireSchema {
+           |  inline val Hash = "$packageWireHash"
+           |}
+           |""".stripMargin
+      )
       println("Done")
     })
   }
@@ -314,6 +420,7 @@ private[polyregion] object CodeGen {
 
   def programVersioned(x: Program)            = MsgPack.Versioned(programHash, x)
   def structDefsVersioned(x: List[StructDef]) = MsgPack.Versioned(programHash, x)
+  def interfaceVersioned(x: Interface)        = MsgPack.Versioned(packageHash, x)
   def packageVersioned(x: Package)            = MsgPack.Versioned(packageHash, x)
 
   private def writeConventions(): Unit = {
@@ -368,6 +475,15 @@ private[polyregion] object CodeGen {
       CAbiCodeGen.polyPassHeader,
       CAbiCodeGen.polyPassSymbolsHeader,
       CAbiCodeGen.polyPassExportsList
+    )
+    writeAbiSources(
+      "PolyPackage",
+      "../native/common/generated/polyregion/polypackage.h",
+      "../native/common/generated/polyregion/polypackage_symbols.h",
+      "../native/polyc/generated/polypackage-exports.txt",
+      CAbiCodeGen.polyPackageHeader,
+      CAbiCodeGen.polyPackageSymbolsHeader,
+      CAbiCodeGen.polyPackageExportsList
     )
     writeAbiSources(
       "polyc_jit",

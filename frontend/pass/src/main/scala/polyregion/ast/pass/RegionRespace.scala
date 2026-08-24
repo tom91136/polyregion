@@ -11,7 +11,7 @@ import polyregion.ast.Traversal.*
 //   p = &g[i]; q = &p[j]  (g Global)      ->  unchanged
 object RegionRespace extends ProgramPass {
 
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private def run(f: p.Function): (p.Function, Int) = {
     val respace: Map[String, p.Type.Space] =
@@ -43,7 +43,7 @@ object RegionRespace extends ProgramPass {
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
-    val (entry, ec)      = run(program.entry)
+    val (entry, ec)      = program.entry.map(run).map((function, count) => Some(function) -> count).getOrElse(None -> 0)
     val (functions, fcs) = program.functions.map(run).unzip
     val total            = ec + fcs.sum
     if (total > 0) log.info(s"respaced $total rooted pointer(s) to their resource's address space")

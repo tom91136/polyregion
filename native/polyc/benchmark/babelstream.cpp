@@ -42,7 +42,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
                            const std::function<Stmts(Term::Any, Term::Any)> &mkEpilogue) {
     std::vector<Arg> args = {"a"_(Ptr(type))(), "b"_(Ptr(type))(), "c"_(Ptr(type))()};
     if (!gpu) {
-      // XXX polyc auto-prepends `__tid` for CPU isEntry kernels; the user list omits it.
+      // XXX polyc auto-prepends `__tid` for CPU offload-entry kernels; the user list omits it.
       // begin/end are the work-steal slice pointers, tid indexes into them.
       std::vector<Arg> cpuArgs = {"begin"_(Ptr(Long))(), "end"_(Ptr(Long))()};
       args.insert(args.begin(), cpuArgs.begin(), cpuArgs.end());
@@ -76,7 +76,8 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
 
     stmts.push_back(ret(Term::Unit0Const()));
 
-    return function("stream_" + name + suffix, args, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true)(stmts);
+    return function("stream_" + name + suffix, args, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                    CallConvention::OffloadEntry())(stmts);
   };
 
   auto copy = mkCpuStreamFn( //

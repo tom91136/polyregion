@@ -42,8 +42,8 @@ class SpecialisationSuite extends munit.FunSuite {
     val name         = sym("overloaded.constructor")
     val tpe          = p.Type.Var("T")
     val self         = p.Type.Ptr(p.Type.Struct(sym("box"), List(tpe)), p.Type.Space.Global)
-    val defaultCtor  = fn(name.repr, args = List(arg("#this", self)), tpeVars = List("T"))
-    val valueCtor    = fn(name.repr, args = List(arg("#this", self), arg("value", tpe)), tpeVars = List("T"))
+    val defaultCtor  = fn(name.fqcn, args = List(arg("#this", self)), tpeVars = List("T"))
+    val valueCtor    = fn(name.fqcn, args = List(arg("#this", self), arg("value", tpe)), tpeVars = List("T"))
     val concreteSelf = p.Type.Ptr(p.Type.Struct(sym("box"), List(p.Type.IntS32)), p.Type.Space.Global)
     val callDefault = p.Expr.Invoke(
       p.Type.FnRef(name),
@@ -77,9 +77,9 @@ class SpecialisationSuite extends munit.FunSuite {
 
   test("specialisation selects overloads by complete call signature") {
     val name  = sym("mixed.overload")
-    val unary = fn(name.repr, args = List(arg("x", p.Type.Var("T"))), tpeVars = List("T"))
+    val unary = fn(name.fqcn, args = List(arg("x", p.Type.Var("T"))), tpeVars = List("T"))
     val binary = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("x", p.Type.Var("T")), arg("y", p.Type.Var("U"))),
       tpeVars = List("T", "U")
     )
@@ -176,12 +176,12 @@ class SpecialisationSuite extends munit.FunSuite {
   test("remote launch inference selects the matching overloaded kernel") {
     val name = sym("overloaded.kernel")
     val unary = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("value", p.Type.Var("T"))),
       tpeVars = List("T")
     )
     val binary = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("left", p.Type.Var("T")), arg("right", p.Type.Var("T"))),
       tpeVars = List("T")
     )
@@ -433,7 +433,7 @@ class SpecialisationSuite extends munit.FunSuite {
   }
 
   test("does not substitute type variables shadowed by callable binders") {
-    val callable = p.Type.Exec(List("T"), List(p.Type.Var("T")), p.Type.Var("T"))
+    val callable = p.Type.Exec(List(p.Type.Var("T")), List(p.Type.Var("T")), p.Type.Var("T"))
     val generic = fn(
       "callable.shadow",
       args = List(arg("callback", callable), arg("value", p.Type.Var("T"))),
@@ -493,12 +493,12 @@ class SpecialisationSuite extends munit.FunSuite {
   test("same-name generic overload delegation is not polymorphic recursion") {
     val name = sym("generic.delegation")
     val leaf = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("left", p.Type.Var("U")), arg("right", p.Type.Var("U"))),
       tpeVars = List("U")
     )
     val delegating = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("value", p.Type.Var("T"))),
       tpeVars = List("T"),
       body = List(
@@ -531,7 +531,7 @@ class SpecialisationSuite extends munit.FunSuite {
     val name     = sym("stable.recursion")
     val boxedInt = p.Type.Struct(sym("StableBox"), List(p.Type.IntS32))
     val generic = fn(
-      name.repr,
+      name.fqcn,
       args = List(arg("value", p.Type.Var("T"))),
       tpeVars = List("T"),
       body = List(

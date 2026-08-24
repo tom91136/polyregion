@@ -107,7 +107,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
 
                  const auto exportsOf = [](const polyast::Program &p) {
                    return p.functions ^ collect([](const auto &f) {
-                            return f.visibility.template is<polyast::FunctionVisibility::Exported>() ? std::optional{repr(f.decl.name)}
+                            return f.visibility.template is<polyast::FunctionVisibility::Exported>() ? std::optional{fqcn(f.decl.name)}
                                                                                                      : std::nullopt;
                           });
                  };
@@ -136,7 +136,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                        return EXIT_FAILURE;
                      }
                      for (auto &f : program.functions)
-                       if (f.visibility.template is<polyast::FunctionVisibility::Exported>() && repr(f.decl.name) != exportName)
+                       if (f.visibility.template is<polyast::FunctionVisibility::Exported>() && fqcn(f.decl.name) != exportName)
                          f.visibility = polyast::FunctionVisibility::Internal();
                    }
                    // an empty spec means no passes here, not the compile default: FullOpt on an entry-less library

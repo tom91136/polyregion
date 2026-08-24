@@ -1,6 +1,9 @@
 package polyregion.ast.pass
 
-import polyregion.ast.PolyAST.PolyPassAbi
+import polyregion.ast.{MsgPack, PackageLinker, PackageSymResolver}
+import polyregion.ast.PolyAST.{PolyPackageAbi, PolyPassAbi}
+import polyregion.ast.PolyAST as p
+import polyregion.ast.generated.PolyPackageWireSchema
 
 import scala.scalanative.unsafe.*
 import scala.scalanative.unsigned.*
@@ -10,9 +13,11 @@ object NativeBundle {
 
   private val plugin: PluginEntry = DefaultPlugin
 
-  private var errorZone: Zone       = null
-  private var errorCString: CString = null
-  private val nameZone              = Zone.open()
+  private var errorZone: Zone              = null
+  private var errorCString: CString        = null
+  private var packageErrorZone: Zone       = null
+  private var packageErrorCString: CString = null
+  private val nameZone                     = Zone.open()
   private val nameStrings: Array[CString] = {
     val arr = new Array[CString](plugin.passNames.length)
     var i   = 0
@@ -30,6 +35,15 @@ object NativeBundle {
     else {
       errorZone = Zone.open()
       errorCString = toCString(msg)(using errorZone)
+    }
+  }
+
+  private def setPackageError(msg: String): Unit = {
+    if (packageErrorZone != null) packageErrorZone.close()
+    if (msg.isEmpty) { packageErrorZone = null; packageErrorCString = null }
+    else {
+      packageErrorZone = Zone.open()
+      packageErrorCString = toCString(msg)(using packageErrorZone)
     }
   }
 
@@ -109,5 +123,102 @@ object NativeBundle {
 
   @exported(PolyPassAbi.Free.Name)
   def freeBuffer(p: Ptr[Byte]): Unit =
+    if (p != null) stdlib.free(p)
+
+  private def readBytes(inPtr: Ptr[Byte], inLen: CSize): Array[Byte] = {
+    val bytes = new Array[Byte](inLen.toInt)
+    var i     = 0
+    while (i < bytes.length) {
+      bytes(i) = !(inPtr + i)
+      i += 1
+    }
+    bytes
+  }
+
+  private def writeBytes(bytes: Array[Byte], outPtr: Ptr[Ptr[Byte]], outLen: Ptr[CSize]): CInt = {
+    val buffer = stdlib.malloc(bytes.length.toCSize).asInstanceOf[Ptr[Byte]]
+    if (buffer == null) {
+      setPackageError(s"PolyPackage: malloc(${bytes.length}) returned null")
+      PolyPackageAbi.Status.AllocFailed
+    } else {
+      var i = 0
+      while (i < bytes.length) {
+        !(buffer + i) = bytes(i)
+        i += 1
+      }
+      !outPtr = buffer
+      !outLen = bytes.length.toCSize
+      setPackageError("")
+      PolyPackageAbi.Status.Ok
+    }
+  }
+
+  private def packageOperation[A: MsgPack.Codec, B: MsgPack.Codec](
+      label: String,
+      inPtr: Ptr[Byte],
+      inLen: CSize,
+      outPtr: Ptr[Ptr[Byte]],
+      outLen: Ptr[CSize]
+  )(operation: A => Either[List[String], B]): CInt =
+    try
+      MsgPack.decode[MsgPack.Versioned[A]](readBytes(inPtr, inLen)) match {
+        case Left(error) =>
+          setPackageError(s"PolyPackage $label: cannot decode request: ${error.getMessage}")
+          PolyPackageAbi.Status.Invalid
+        case Right(envelope) if envelope.hash != PolyPackageWireSchema.Hash =>
+          setPackageError(
+            s"PolyPackage $label: package-service wire hash differs: expected ${PolyPackageWireSchema.Hash}, got ${envelope.hash}"
+          )
+          PolyPackageAbi.Status.AbiMismatch
+        case Right(envelope) =>
+          val request = envelope.t
+          operation(request) match {
+            case Left(errors) =>
+              setPackageError(s"PolyPackage $label: ${errors.mkString("\n")}")
+              PolyPackageAbi.Status.Invalid
+            case Right(result) =>
+              writeBytes(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, result)), outPtr, outLen)
+          }
+      }
+    catch {
+      case error: Throwable =>
+        val sw = java.io.StringWriter()
+        error.printStackTrace(java.io.PrintWriter(sw))
+        setPackageError(
+          s"PolyPackage $label: ${error.getClass.getName}: ${Option(error.getMessage).getOrElse("<no message>")}\n${sw.toString}"
+        )
+        PolyPackageAbi.Status.Invalid
+    }
+
+  @exported(PolyPackageAbi.AbiVersion.Name)
+  def packageAbiVersion(): CUnsignedInt = PolyPackageAbi.Version.toUInt
+
+  @exported(PolyPackageAbi.LinkPackage.Name)
+  def linkPackage(
+      inPtr: Ptr[Byte],
+      inLen: CSize,
+      outPtr: Ptr[Ptr[Byte]],
+      outLen: Ptr[CSize]
+  ): CInt =
+    packageOperation[p.Package.LinkRequest, p.Package]("link package", inPtr, inLen, outPtr, outLen)(
+      PackageLinker.link
+    )
+
+  @exported(PolyPackageAbi.ResolveSym.Name)
+  def resolvePackageSym(
+      inPtr: Ptr[Byte],
+      inLen: CSize,
+      outPtr: Ptr[Ptr[Byte]],
+      outLen: Ptr[CSize]
+  ): CInt =
+    packageOperation[p.Package.SymRequest, p.Package.SymResolvedProgram]("resolve Sym", inPtr, inLen, outPtr, outLen)(
+      PackageSymResolver.resolveSym
+    )
+
+  @exported(PolyPackageAbi.LastError.Name)
+  def packageLastErrorPtr(): CString = packageErrorCString
+
+  @exported(PolyPackageAbi.Free.Name)
+  def freePackageBuffer(p: Ptr[Byte]): Unit =
     if (p != null) stdlib.free(p)
 }

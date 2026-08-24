@@ -15,12 +15,15 @@ import polyregion.ast.{PolyAST as p, *, given}
 //                           structurally (same name + same recursively-replaced args) for a nested use
 object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
-  override def phase = p.PassPhase.PostMono
+  override def phase = p.Pass.Phase.PostMono
 
   override def apply(program: p.Program, log: Log): (Map[p.Sym, p.Sym], p.Program) = {
+    val definitionErrors =
+      program.defs.flatMap(definition => definition.validate.map(error => s"struct `${definition.name.repr}`: $error"))
+    if (definitionErrors.nonEmpty) throw IllegalArgumentException(definitionErrors.mkString("; "))
 
     val rootStructs: List[p.Type.Struct] =
-      ((program.entry :: program.functions).flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s }) ++
+      ((program.entry.toList ::: program.functions).flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s }) ++
         program.defs
           .filter(_.tpeVars.isEmpty)
           .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s })).distinct
@@ -28,14 +31,18 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
     val sdefByName = program.defs.map(d => d.name -> d).toMap
 
     def instantiate(struct: p.Type.Struct): Option[p.StructDef] = sdefByName.get(struct.name).map { sdef =>
-      val table = sdef.tpeVars.zip(struct.args).toMap
+      if (sdef.tpeVars.size != struct.args.size)
+        throw IllegalArgumentException(
+          s"struct `${struct.name.repr}` type-argument count differs: expected ${sdef.tpeVars.size}, got ${struct.args.size}"
+        )
+      val table = sdef.tpeVars.map(_.name).zip(struct.args).toMap
       def subst(t: p.Type, env: Map[String, p.Type] = table): p.Type = t match {
-        case variable @ p.Type.Var(name)     => env.getOrElse(name, variable)
+        case variable @ p.Type.Var(name, _)  => env.getOrElse(name, variable)
         case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(subst(_, env)))
         case p.Type.Ptr(comp, space)         => p.Type.Ptr(subst(comp, env), space)
         case p.Type.Arr(comp, length, space) => p.Type.Arr(subst(comp, env), length, space)
         case p.Type.Exec(tpeVars, args, rtn) =>
-          val nested = env -- tpeVars
+          val nested = env -- tpeVars.map(_.name)
           p.Type.Exec(tpeVars, args.map(subst(_, nested)), subst(rtn, nested))
         case x => x
       }
@@ -142,10 +149,10 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
     (
       replacementTable.map((struct, sdef) => sdef.name -> struct.name),
       program.copy(
-        entry = program.entry.modifyAll[p.Type](doReplacement(_)),
+        entry = program.entry.map(_.modifyAll[p.Type](doReplacement(_))),
         functions = program.functions.map(_.modifyAll[p.Type](doReplacement(_))),
         defs = (rootStructDefs ++ concreteStructDefs).distinctBy(_.name),
-        phase = p.PassPhase.PostMono
+        phase = p.Pass.Phase.PostMono
       )
     )
 

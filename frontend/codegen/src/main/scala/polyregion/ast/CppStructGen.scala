@@ -24,7 +24,7 @@ private[polyregion] object CppStructGen {
       if (xs.isEmpty) "" else xs.mkString(prefix, delim, suffix)
   }
 
-  enum CppAttrs(val repr: String) {
+  enum CppAttrs(val spelling: String) {
     case Constexpr extends CppAttrs("constexpr")
     case Explicit  extends CppAttrs("explicit")
     case Const     extends CppAttrs("const")
@@ -235,7 +235,7 @@ private[polyregion] object CppStructGen {
       def ctorArg(n: String, t: CppType, default: Boolean) =
         s"${t.ref(qualified = true)} $n${if (default) " = {}" else ""}"
       val ctorArgExpr     = ctorArgs.map((n, t) => ctorArg(n, t, default = false)).csv
-      val ctorAttrExpr    = ctorAttrs.map(_.repr).sym("", " ", " ")
+      val ctorAttrExpr    = ctorAttrs.map(_.spelling).sym("", " ", " ")
       val defaultFrom     = ctorArgs.lastIndexWhere((_, t) => !t.isDefaultable) + 1
       val ctorArgDeclExpr = ctorArgs.zipWithIndex.map { case ((n, t), i) => ctorArg(n, t, i >= defaultFrom) }.csv
       val ctorStmt = s"$ctorAttrExpr${clsName(qualified = false)}($ctorArgDeclExpr)${ctorChain match {
@@ -714,12 +714,13 @@ private[polyregion] object CppStructGen {
       mapOp: Option[(String, String, String => String) => List[String]] = None,
       include: List[String] = Nil,
       ctors: List[CppType] = Nil,
-      noIdentity: Boolean = false
+      noIdentity: Boolean = false,
+      defaultable: Boolean = false
   ) {
     def ns(name: String) = s"${namespace.sym("", "::", "::")}${name}"
     def isOptional       = namespace == List("std") && name == "optional"
     // both carry an empty value and neither contributes to identity, so a trailing run of them can default
-    def isDefaultable = isOptional || noIdentity
+    def isDefaultable = isOptional || noIdentity || defaultable
     // def qualified        = ns(name)
 
     def applied(qualified: Boolean): String = ctors match {
@@ -805,7 +806,8 @@ private[polyregion] object CppStructGen {
             Nil
         ),
         include = List("vector"),
-        ctors = tpe :: Nil
+        ctors = tpe :: Nil,
+        defaultable = true
       )
     }
 
@@ -887,8 +889,14 @@ private[polyregion] object CppStructGen {
 
     inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] = ToCppTypeImpl { () =>
       val (ns, kind) = compiletime.mirrorMeta[m.MirroredMonoType]
-      val name       = constValue[m.MirroredLabel]
-      val noId       = summonFrom { case _: (T <:< PolyAST.NoIdentity) => true; case _ => false }
+      val label      = constValue[m.MirroredLabel]
+      val name = kind match {
+        case compiletime.MirrorKind.CaseClass =>
+          val owners = compiletime.symbolNames[m.MirroredMonoType].dropWhile(_ != "PolyAST").drop(1).dropRight(1)
+          (owners :+ label).mkString
+        case _ => label
+      }
+      val noId = summonFrom { case _: (T <:< PolyAST.NoIdentity) => true; case _ => false }
       inline m match {
         case s: Mirror.SumOf[T] =>
           CppType(

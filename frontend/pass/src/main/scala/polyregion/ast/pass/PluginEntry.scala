@@ -6,13 +6,13 @@ trait PluginEntry {
   def passNames: Vector[String]
   def passDescr(name: String): Option[String] = None
 
-  def runSteps(steps: Vector[String], program: p.Program, log: Log): p.PassRunResult = {
+  def runSteps(steps: Vector[String], program: p.Program, log: Log): p.Pass.RunResult = {
     val specs = steps.zipWithIndex
-      .foldRight(Right(Nil): Either[String, List[p.PassSpec]]) { case ((s, idx), acc) =>
+      .foldRight(Right(Nil): Either[String, List[p.Pass.Spec]]) { case ((s, idx), acc) =>
         PassPipelineParser.parseStep(s.trim).left.map(e => s"step ${idx + 1}: $e").flatMap(spec => acc.map(spec :: _))
       }
       .fold(e => throw IllegalArgumentException(e), identity)
-    val passes = PassRegistry.build(p.PassPipeline(specs)).fold(e => throw IllegalArgumentException(e), identity)
+    val passes = PassRegistry.build(p.Pass.Pipeline(specs)).fold(e => throw IllegalArgumentException(e), identity)
     PassRunner(PluginEntry.clock).runPipeline(passes, program, log)
   }
 
@@ -25,7 +25,7 @@ trait PluginEntry {
         MsgPack.decodeInput[p.Program](MsgPack.ArrayByteInput(inBytes)).fold(throw _, identity)
       }
     val passRun = runSteps(steps, prog, PluginEntry.defaultLog)
-    val rootEvent = p.CompileEvent(
+    val rootEvent = p.Compile.Event(
       rootEpoch,
       math.max(0L, clock.nanoTime() - rootNanos),
       "PolyPass",
@@ -33,7 +33,7 @@ trait PluginEntry {
       deserialiseEvent :: passRun.event.items
     )
     val out = MsgPack.ArrayByteOutput()
-    MsgPack.encodeTo(p.PassRunResult(passRun.program, rootEvent), out)
+    MsgPack.encodeTo(p.Pass.RunResult(passRun.program, rootEvent), out)
     out.toByteArray
   }
 }
@@ -56,11 +56,11 @@ object PluginEntry {
 
   def defaultLog: Log = if (sys.env.contains(Env.PolyregionPassLog)) StderrLog("") else NoopLog
 
-  def timed[A](clock: PassClock, name: String, data: String)(f: => A): (A, p.CompileEvent) = {
+  def timed[A](clock: PassClock, name: String, data: String)(f: => A): (A, p.Compile.Event) = {
     val epoch = clock.epochMillis()
     val start = clock.nanoTime()
     val out   = f
-    out -> p.CompileEvent(epoch, math.max(0L, clock.nanoTime() - start), name, data, Nil)
+    out -> p.Compile.Event(epoch, math.max(0L, clock.nanoTime() - start), name, data, Nil)
   }
 }
 

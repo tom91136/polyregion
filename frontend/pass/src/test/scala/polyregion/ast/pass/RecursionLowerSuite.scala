@@ -555,7 +555,7 @@ class RecursionLowerSuite extends munit.FunSuite {
     val in  = program(entry(), List(isEven, isOdd))
     val out = lower(in)
     assert(!hasFrame(out), "tail-mutual recursion merges to a tail driver -> TCO, no frame struct")
-    assertEquals(out.functions.count(_.name.repr.startsWith("_scc")), 1, "one merged driver for the cluster")
+    assertEquals(out.functions.count(_.name.fqcn.startsWith("_scc")), 1, "one merged driver for the cluster")
     for (n <- 0 to 8) {
       val gotE = Interpreter.Vm(out).call("is_even", List(i32 -> V.I(n)))
       val gotO = Interpreter.Vm(out).call("is_odd", List(i32 -> V.I(n)))

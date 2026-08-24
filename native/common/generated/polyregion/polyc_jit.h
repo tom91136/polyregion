@@ -24,7 +24,7 @@ typedef enum polyc_jit_status { POLYC_JIT_OK = 0, POLYC_JIT_FAILED = 1 } polyc_j
 
 typedef struct polyc_jit_spec_const {
   const char *field;
-  const char *repr;
+  const char *typeName;
   const uint8_t *data;
   size_t dataLen;
 } polyc_jit_spec_const_t;

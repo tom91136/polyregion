@@ -1,375 +1,6 @@
 #include "polyast_codec.h"
 
-#include <cmath>
-#include <cstring>
-#include <limits>
-#include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <utility>
-
-constexpr auto AdtHash = "4f13ee6dcd5f5d0dcd0e4cf9ed641cd2";
-constexpr auto ProgramHash = "1330d953c1f1fc11b41203660d349da7";
-constexpr auto PackageHash = "4f13ee6dcd5f5d0dcd0e4cf9ed641cd2";
-
-namespace {
-
-constexpr int32_t MsgpackInternedMagic = 0x4d504349; // "MPCI"
-
-class StringInterner {
-  std::unordered_map<std::string, int32_t> ids_;
-  std::vector<std::string> entries_;
-
-public:
-  int32_t id(const std::string &x) {
-    if (auto it = ids_.find(x); it != ids_.end()) return it->second;
-    if (entries_.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) throw std::runtime_error("String table too large");
-    auto next = static_cast<int32_t>(entries_.size());
-    entries_.push_back(x);
-    ids_.emplace(entries_.back(), next);
-    return next;
-  }
-
-  [[nodiscard]] const std::vector<std::string> &entries() const { return entries_; }
-};
-
-class MsgpackWriter {
-  std::vector<uint8_t> bytes_;
-  StringInterner *interner_ = nullptr;
-  bool collectOnly_ = false;
-
-  void byte(uint8_t x) {
-    if (!collectOnly_) bytes_.push_back(x);
-  }
-
-  void raw16(uint16_t x) {
-    byte(static_cast<uint8_t>(x >> 8));
-    byte(static_cast<uint8_t>(x));
-  }
-
-  void raw32(uint32_t x) {
-    byte(static_cast<uint8_t>(x >> 24));
-    byte(static_cast<uint8_t>(x >> 16));
-    byte(static_cast<uint8_t>(x >> 8));
-    byte(static_cast<uint8_t>(x));
-  }
-
-  void raw64(uint64_t x) {
-    byte(static_cast<uint8_t>(x >> 56));
-    byte(static_cast<uint8_t>(x >> 48));
-    byte(static_cast<uint8_t>(x >> 40));
-    byte(static_cast<uint8_t>(x >> 32));
-    byte(static_cast<uint8_t>(x >> 24));
-    byte(static_cast<uint8_t>(x >> 16));
-    byte(static_cast<uint8_t>(x >> 8));
-    byte(static_cast<uint8_t>(x));
-  }
-
-public:
-  explicit MsgpackWriter(size_t initialSize = 256, StringInterner *interner = nullptr, bool collectOnly = false)
-      : interner_(interner), collectOnly_(collectOnly) {
-    if (!collectOnly_) bytes_.reserve(initialSize);
-  }
-
-  void setStringInterner(StringInterner *interner) { interner_ = interner; }
-  [[nodiscard]] std::vector<uint8_t> take() { return std::move(bytes_); }
-
-  void writeNil() { byte(0xc0); }
-  void writeBoolean(bool x) { byte(x ? 0xc3 : 0xc2); }
-
-  void writeInt32(int32_t x) {
-    if (x >= 0 && x <= 0x7f) byte(static_cast<uint8_t>(x));
-    else if (x >= -32 && x < 0) byte(static_cast<uint8_t>(x));
-    else if (x >= std::numeric_limits<int8_t>::min() && x <= std::numeric_limits<int8_t>::max()) {
-      byte(0xd0);
-      byte(static_cast<uint8_t>(x));
-    } else if (x >= std::numeric_limits<int16_t>::min() && x <= std::numeric_limits<int16_t>::max()) {
-      byte(0xd1);
-      raw16(static_cast<uint16_t>(x));
-    } else {
-      byte(0xd2);
-      raw32(static_cast<uint32_t>(x));
-    }
-  }
-
-  void writeInt64(int64_t x) {
-    if (x >= std::numeric_limits<int32_t>::min() && x <= std::numeric_limits<int32_t>::max()) writeInt32(static_cast<int32_t>(x));
-    else {
-      byte(0xd3);
-      raw64(static_cast<uint64_t>(x));
-    }
-  }
-
-  void writeFloat32(float x) {
-    uint32_t bits;
-    std::memcpy(&bits, &x, sizeof(bits));
-    byte(0xca);
-    raw32(bits);
-  }
-
-  void writeFloat64(double x) {
-    uint64_t bits;
-    std::memcpy(&bits, &x, sizeof(bits));
-    byte(0xcb);
-    raw64(bits);
-  }
-
-  void writeString(const std::string &x) {
-    if (interner_) {
-      const auto n = interner_->id(x);
-      if (!collectOnly_) writeInt32(n);
-    } else writeStringLiteral(x);
-  }
-
-  void writeStringLiteral(const std::string &x) {
-    const auto n = x.size();
-    if (n <= 31) byte(static_cast<uint8_t>(0xa0 | n));
-    else if (n <= 0xff) {
-      byte(0xd9);
-      byte(static_cast<uint8_t>(n));
-    } else if (n <= 0xffff) {
-      byte(0xda);
-      raw16(static_cast<uint16_t>(n));
-    } else if (n <= std::numeric_limits<uint32_t>::max()) {
-      byte(0xdb);
-      raw32(static_cast<uint32_t>(n));
-    } else throw std::runtime_error("String too large");
-    if (!collectOnly_) bytes_.insert(bytes_.end(), x.begin(), x.end());
-  }
-
-  void writeArrayHeader(size_t n) {
-    if (n <= 15) byte(static_cast<uint8_t>(0x90 | n));
-    else if (n <= 0xffff) {
-      byte(0xdc);
-      raw16(static_cast<uint16_t>(n));
-    } else if (n <= std::numeric_limits<uint32_t>::max()) {
-      byte(0xdd);
-      raw32(static_cast<uint32_t>(n));
-    } else throw std::runtime_error("Array too large");
-  }
-};
-
-class MsgpackReader {
-  const uint8_t *begin_;
-  const uint8_t *cursor_;
-  const uint8_t *end_;
-  const std::vector<std::string> *stringTable_ = nullptr;
-
-  [[noreturn]] void fail(const std::string &message) const { throw std::runtime_error(message + " at byte " + std::to_string(offset())); }
-
-  void require(size_t n) const {
-    if (static_cast<size_t>(end_ - cursor_) < n) fail("Unexpected end of input");
-  }
-
-  uint8_t u8() {
-    require(1);
-    return *cursor_++;
-  }
-
-  int8_t i8() { return static_cast<int8_t>(u8()); }
-
-  uint16_t u16() {
-    require(2);
-    uint16_t x = (static_cast<uint16_t>(cursor_[0]) << 8) | static_cast<uint16_t>(cursor_[1]);
-    cursor_ += 2;
-    return x;
-  }
-
-  int16_t i16() { return static_cast<int16_t>(u16()); }
-
-  uint32_t u32() {
-    require(4);
-    uint32_t x = (static_cast<uint32_t>(cursor_[0]) << 24) | (static_cast<uint32_t>(cursor_[1]) << 16)
-                 | (static_cast<uint32_t>(cursor_[2]) << 8) | static_cast<uint32_t>(cursor_[3]);
-    cursor_ += 4;
-    return x;
-  }
-
-  int32_t i32() { return static_cast<int32_t>(u32()); }
-
-  uint64_t u64() {
-    require(8);
-    uint64_t x = (static_cast<uint64_t>(cursor_[0]) << 56) | (static_cast<uint64_t>(cursor_[1]) << 48)
-                 | (static_cast<uint64_t>(cursor_[2]) << 40) | (static_cast<uint64_t>(cursor_[3]) << 32)
-                 | (static_cast<uint64_t>(cursor_[4]) << 24) | (static_cast<uint64_t>(cursor_[5]) << 16)
-                 | (static_cast<uint64_t>(cursor_[6]) << 8) | static_cast<uint64_t>(cursor_[7]);
-    cursor_ += 8;
-    return x;
-  }
-
-  int64_t i64() { return static_cast<int64_t>(u64()); }
-
-  int64_t readIntegralLong() {
-    const auto m = u8();
-    if (m <= 0x7f) return static_cast<int64_t>(m);
-    if (m >= 0xe0) return static_cast<int64_t>(static_cast<int8_t>(m));
-    switch (m) {
-      case 0xcc: return static_cast<int64_t>(u8());
-      case 0xcd: return static_cast<int64_t>(u16());
-      case 0xce: return static_cast<int64_t>(u32());
-      case 0xcf: {
-        const auto x = u64();
-        if (x > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) fail("uint64 value exceeds int64_t");
-        return static_cast<int64_t>(x);
-      }
-      case 0xd0: return static_cast<int64_t>(i8());
-      case 0xd1: return static_cast<int64_t>(i16());
-      case 0xd2: return static_cast<int64_t>(i32());
-      case 0xd3: return i64();
-      default: fail("Expected integer");
-    }
-  }
-
-public:
-  MsgpackReader(const uint8_t *begin, const uint8_t *end) : begin_(begin), cursor_(begin), end_(end) {}
-
-  [[nodiscard]] size_t offset() const { return static_cast<size_t>(cursor_ - begin_); }
-  [[nodiscard]] bool isAtEnd() const { return cursor_ == end_; }
-  void setStringTable(const std::vector<std::string> *table) { stringTable_ = table; }
-
-  [[nodiscard]] bool nextIsArray() const {
-    if (cursor_ >= end_) return false;
-    const auto m = *cursor_;
-    return (m & 0xf0) == 0x90 || m == 0xdc || m == 0xdd;
-  }
-
-  void readNil() {
-    if (u8() != 0xc0) fail("Expected nil");
-  }
-
-  bool tryReadNil() {
-    if (cursor_ < end_ && *cursor_ == 0xc0) {
-      ++cursor_;
-      return true;
-    }
-    return false;
-  }
-
-  bool readBoolean() {
-    switch (u8()) {
-      case 0xc2: return false;
-      case 0xc3: return true;
-      default: fail("Expected boolean");
-    }
-  }
-
-  int32_t readInt32() {
-    const auto x = readIntegralLong();
-    if (x < std::numeric_limits<int32_t>::min() || x > std::numeric_limits<int32_t>::max()) fail("Integer out of int32_t range");
-    return static_cast<int32_t>(x);
-  }
-
-  int64_t readInt64() { return readIntegralLong(); }
-
-  float readFloat32() {
-    switch (u8()) {
-      case 0xca: {
-        const auto bits = u32();
-        float out;
-        std::memcpy(&out, &bits, sizeof(out));
-        return out;
-      }
-      case 0xcb: {
-        const auto bits = u64();
-        double d;
-        std::memcpy(&d, &bits, sizeof(d));
-        const auto f = static_cast<float>(d);
-        if (std::isnan(d) || static_cast<double>(f) == d) return f;
-        fail("Float64 to Float32 conversion with loss of precision");
-      }
-      default: fail("Expected float32/float64");
-    }
-  }
-
-  double readFloat64() {
-    if (u8() != 0xcb) fail("Expected float64");
-    const auto bits = u64();
-    double out;
-    std::memcpy(&out, &bits, sizeof(out));
-    return out;
-  }
-
-  std::string readString() {
-    if (!stringTable_) return readStringLiteral();
-    const auto id = readInt32();
-    if (id < 0 || static_cast<size_t>(id) >= stringTable_->size()) fail("Bad string table id");
-    return stringTable_->at(static_cast<size_t>(id));
-  }
-
-  std::string readStringLiteral() {
-    const auto m = u8();
-    size_t n;
-    if ((m & 0xe0) == 0xa0) n = m & 0x1f;
-    else {
-      switch (m) {
-        case 0xd9: n = u8(); break;
-        case 0xda: n = u16(); break;
-        case 0xdb: n = u32(); break;
-        default: fail("Expected string");
-      }
-    }
-    require(n);
-    std::string out(reinterpret_cast<const char *>(cursor_), n);
-    cursor_ += n;
-    return out;
-  }
-
-  size_t readArrayHeader() {
-    const auto m = u8();
-    if ((m & 0xf0) == 0x90) return m & 0x0f;
-    switch (m) {
-      case 0xdc: return u16();
-      case 0xdd: return u32();
-      default: fail("Expected array");
-    }
-  }
-};
-
-bool isInternedEnvelope(const uint8_t *begin, const uint8_t *end) {
-  return end - begin >= 6 && begin[0] == 0x93 && begin[1] == 0xd2 && begin[2] == 0x4d && begin[3] == 0x50 && begin[4] == 0x43
-         && begin[5] == 0x49;
-}
-
-template <typename F> std::vector<uint8_t> encodeInterned(F &&writeValue) {
-  StringInterner table;
-  MsgpackWriter collect(16, &table, true);
-  writeValue(collect);
-
-  MsgpackWriter w;
-  w.writeArrayHeader(3);
-  w.writeInt32(MsgpackInternedMagic);
-  w.writeArrayHeader(table.entries().size());
-  for (const auto &s : table.entries())
-    w.writeStringLiteral(s);
-  w.setStringInterner(&table);
-  writeValue(w);
-  return w.take();
-}
-
-template <typename F>
-auto decodeMaybeInterned(const uint8_t *begin, const uint8_t *end, F &&readValue) -> decltype(readValue(std::declval<MsgpackReader &>())) {
-  MsgpackReader r(begin, end);
-  if (isInternedEnvelope(begin, end)) {
-    const auto n = r.readArrayHeader();
-    if (n != 3) throw std::runtime_error("Expected interned envelope array of size 3");
-    const auto magic = r.readInt32();
-    if (magic != MsgpackInternedMagic) throw std::runtime_error("Bad interned envelope magic");
-    const auto tableSize = r.readArrayHeader();
-    std::vector<std::string> table;
-    table.reserve(tableSize);
-    for (size_t i = 0; i < tableSize; ++i)
-      table.emplace_back(r.readStringLiteral());
-    r.setStringTable(&table);
-    auto out = readValue(r);
-    if (!r.isAtEnd()) throw std::runtime_error("Trailing bytes after MessagePack value");
-    return out;
-  }
-  auto out = readValue(r);
-  if (!r.isAtEnd()) throw std::runtime_error("Trailing bytes after MessagePack value");
-  return out;
-}
-
-} // namespace
+#include "msgpack.hpp"
 
 template <class... Ts> struct overloaded : Ts... {
   using Ts::operator()...;
@@ -377,6 +8,14 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
+constexpr auto AdtHash = "d16a2e878a0ea80d1c37404a09471b2b";
+constexpr auto ProgramHash = "d26672bb976d05fbb7ad92b45dc2c75b";
+constexpr auto PackageHash = "fa088a1942c4cec8fc2386ca9cf4da89";
+constexpr auto PackageWireHash = "d7a9920f3d4675d9d86d15c80693fed7";
+using msgpack::decodeMaybeInterned;
+using msgpack::encodeInterned;
+using msgpack::MsgpackReader;
+using msgpack::MsgpackWriter;
 
 Sym sym_from_json(const json &j_) {
   auto fqn = j_.at(0).get<std::vector<std::string>>();
@@ -602,16 +241,21 @@ json Type::arr_to_json(const Type::Arr &x_) {
 
 Type::Var Type::var_from_json(const json &j_) {
   auto name = j_.at(0).get<std::string>();
-  return Type::Var(name);
+  auto exactSizeInBytes = j_.at(1).is_null() ? std::nullopt : std::make_optional(j_.at(1).get<int32_t>());
+  return {name, exactSizeInBytes};
 }
 
 json Type::var_to_json(const Type::Var &x_) {
   auto name = x_.name;
-  return json::array({name});
+  auto exactSizeInBytes = x_.exactSizeInBytes ? json(*x_.exactSizeInBytes) : json();
+  return json::array({name, exactSizeInBytes});
 }
 
 Type::Exec Type::exec_from_json(const json &j_) {
-  auto tpeVars = j_.at(0).get<std::vector<std::string>>();
+  std::vector<Type::Var> tpeVars;
+  for (const auto &v_ : j_.at(0)) {
+    tpeVars.emplace_back(Type::var_from_json(v_));
+  }
   std::vector<Type::Any> args;
   for (const auto &v_ : j_.at(1)) {
     args.emplace_back(Type::any_from_json(v_));
@@ -621,7 +265,10 @@ Type::Exec Type::exec_from_json(const json &j_) {
 }
 
 json Type::exec_to_json(const Type::Exec &x_) {
-  auto tpeVars = x_.tpeVars;
+  std::vector<json> tpeVars;
+  for (const auto &v_ : x_.tpeVars) {
+    tpeVars.emplace_back(Type::var_to_json(v_));
+  }
   std::vector<json> args;
   for (const auto &v_ : x_.args) {
     args.emplace_back(Type::any_to_json(v_));
@@ -1627,6 +1274,68 @@ json Spec::gpuatomicrmw_to_json(const Spec::GpuAtomicRMW &x_) {
   return json::array({op, ptr, value, scope, order, rtn});
 }
 
+Spec::GpuAtomicCAS Spec::gpuatomiccas_from_json(const json &j_) {
+  auto ptr = Term::any_from_json(j_.at(0));
+  auto expected = Term::any_from_json(j_.at(1));
+  auto desired = Term::any_from_json(j_.at(2));
+  auto scope = MemScope::any_from_json(j_.at(3));
+  auto order = MemOrder::any_from_json(j_.at(4));
+  auto rtn = Type::any_from_json(j_.at(5));
+  return {ptr, expected, desired, scope, order, rtn};
+}
+
+json Spec::gpuatomiccas_to_json(const Spec::GpuAtomicCAS &x_) {
+  auto ptr = Term::any_to_json(x_.ptr);
+  auto expected = Term::any_to_json(x_.expected);
+  auto desired = Term::any_to_json(x_.desired);
+  auto scope = MemScope::any_to_json(x_.scope);
+  auto order = MemOrder::any_to_json(x_.order);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({ptr, expected, desired, scope, order, rtn});
+}
+
+Spec::GpuGroupReduce Spec::gpugroupreduce_from_json(const json &j_) {
+  auto op = AtomicOp::any_from_json(j_.at(0));
+  auto value = Term::any_from_json(j_.at(1));
+  auto rtn = Type::any_from_json(j_.at(2));
+  return {op, value, rtn};
+}
+
+json Spec::gpugroupreduce_to_json(const Spec::GpuGroupReduce &x_) {
+  auto op = AtomicOp::any_to_json(x_.op);
+  auto value = Term::any_to_json(x_.value);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({op, value, rtn});
+}
+
+Spec::GpuGroupInclusiveScan Spec::gpugroupinclusivescan_from_json(const json &j_) {
+  auto op = AtomicOp::any_from_json(j_.at(0));
+  auto value = Term::any_from_json(j_.at(1));
+  auto rtn = Type::any_from_json(j_.at(2));
+  return {op, value, rtn};
+}
+
+json Spec::gpugroupinclusivescan_to_json(const Spec::GpuGroupInclusiveScan &x_) {
+  auto op = AtomicOp::any_to_json(x_.op);
+  auto value = Term::any_to_json(x_.value);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({op, value, rtn});
+}
+
+Spec::GpuGroupExclusiveScan Spec::gpugroupexclusivescan_from_json(const json &j_) {
+  auto op = AtomicOp::any_from_json(j_.at(0));
+  auto value = Term::any_from_json(j_.at(1));
+  auto rtn = Type::any_from_json(j_.at(2));
+  return {op, value, rtn};
+}
+
+json Spec::gpugroupexclusivescan_to_json(const Spec::GpuGroupExclusiveScan &x_) {
+  auto op = AtomicOp::any_to_json(x_.op);
+  auto value = Term::any_to_json(x_.value);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({op, value, rtn});
+}
+
 Spec::GpuVolatileLoad Spec::gpuvolatileload_from_json(const json &j_) {
   auto ptr = Term::any_from_json(j_.at(0));
   auto rtn = Type::any_from_json(j_.at(1));
@@ -1773,13 +1482,17 @@ Spec::Any Spec::any_from_json(const json &j_) {
     case 21: return Spec::gpuvoteany_from_json(t_);
     case 22: return Spec::gpuvoteall_from_json(t_);
     case 23: return Spec::gpuatomicrmw_from_json(t_);
-    case 24: return Spec::gpuvolatileload_from_json(t_);
-    case 25: return Spec::gpuvolatilestore_from_json(t_);
-    case 26: return Spec::remotelaunch_from_json(t_);
-    case 27: return Spec::remotealloc_from_json(t_);
-    case 28: return Spec::remotefree_from_json(t_);
-    case 29: return Spec::remotememcpy_from_json(t_);
-    case 30: return Spec::remotesync_from_json(t_);
+    case 24: return Spec::gpuatomiccas_from_json(t_);
+    case 25: return Spec::gpugroupreduce_from_json(t_);
+    case 26: return Spec::gpugroupinclusivescan_from_json(t_);
+    case 27: return Spec::gpugroupexclusivescan_from_json(t_);
+    case 28: return Spec::gpuvolatileload_from_json(t_);
+    case 29: return Spec::gpuvolatilestore_from_json(t_);
+    case 30: return Spec::remotelaunch_from_json(t_);
+    case 31: return Spec::remotealloc_from_json(t_);
+    case 32: return Spec::remotefree_from_json(t_);
+    case 33: return Spec::remotememcpy_from_json(t_);
+    case 34: return Spec::remotesync_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1809,13 +1522,17 @@ json Spec::any_to_json(const Spec::Any &x_) {
                         [](const Spec::GpuVoteAny &y_) -> json { return {21, Spec::gpuvoteany_to_json(y_)}; },
                         [](const Spec::GpuVoteAll &y_) -> json { return {22, Spec::gpuvoteall_to_json(y_)}; },
                         [](const Spec::GpuAtomicRMW &y_) -> json { return {23, Spec::gpuatomicrmw_to_json(y_)}; },
-                        [](const Spec::GpuVolatileLoad &y_) -> json { return {24, Spec::gpuvolatileload_to_json(y_)}; },
-                        [](const Spec::GpuVolatileStore &y_) -> json { return {25, Spec::gpuvolatilestore_to_json(y_)}; },
-                        [](const Spec::RemoteLaunch &y_) -> json { return {26, Spec::remotelaunch_to_json(y_)}; },
-                        [](const Spec::RemoteAlloc &y_) -> json { return {27, Spec::remotealloc_to_json(y_)}; },
-                        [](const Spec::RemoteFree &y_) -> json { return {28, Spec::remotefree_to_json(y_)}; },
-                        [](const Spec::RemoteMemcpy &y_) -> json { return {29, Spec::remotememcpy_to_json(y_)}; },
-                        [](const Spec::RemoteSync &y_) -> json { return {30, Spec::remotesync_to_json(y_)}; });
+                        [](const Spec::GpuAtomicCAS &y_) -> json { return {24, Spec::gpuatomiccas_to_json(y_)}; },
+                        [](const Spec::GpuGroupReduce &y_) -> json { return {25, Spec::gpugroupreduce_to_json(y_)}; },
+                        [](const Spec::GpuGroupInclusiveScan &y_) -> json { return {26, Spec::gpugroupinclusivescan_to_json(y_)}; },
+                        [](const Spec::GpuGroupExclusiveScan &y_) -> json { return {27, Spec::gpugroupexclusivescan_to_json(y_)}; },
+                        [](const Spec::GpuVolatileLoad &y_) -> json { return {28, Spec::gpuvolatileload_to_json(y_)}; },
+                        [](const Spec::GpuVolatileStore &y_) -> json { return {29, Spec::gpuvolatilestore_to_json(y_)}; },
+                        [](const Spec::RemoteLaunch &y_) -> json { return {30, Spec::remotelaunch_to_json(y_)}; },
+                        [](const Spec::RemoteAlloc &y_) -> json { return {31, Spec::remotealloc_to_json(y_)}; },
+                        [](const Spec::RemoteFree &y_) -> json { return {32, Spec::remotefree_to_json(y_)}; },
+                        [](const Spec::RemoteMemcpy &y_) -> json { return {33, Spec::remotememcpy_to_json(y_)}; },
+                        [](const Spec::RemoteSync &y_) -> json { return {34, Spec::remotesync_to_json(y_)}; });
 }
 
 Intr::BNot Intr::bnot_from_json(const json &j_) {
@@ -2837,7 +2554,10 @@ json Stmt::any_to_json(const Stmt::Any &x_) {
 
 Signature signature_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
-  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  std::vector<Type::Var> tpeVars;
+  for (const auto &v_ : j_.at(1)) {
+    tpeVars.emplace_back(Type::var_from_json(v_));
+  }
   auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j_.at(2)));
   std::vector<Type::Any> args;
   for (const auto &v_ : j_.at(3)) {
@@ -2857,7 +2577,10 @@ Signature signature_from_json(const json &j_) {
 
 json signature_to_json(const Signature &x_) {
   auto name = sym_to_json(x_.name);
-  auto tpeVars = x_.tpeVars;
+  std::vector<json> tpeVars;
+  for (const auto &v_ : x_.tpeVars) {
+    tpeVars.emplace_back(Type::var_to_json(v_));
+  }
   auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
   for (const auto &v_ : x_.args) {
@@ -3047,6 +2770,18 @@ json ArgSizeExpr::mul_to_json(const ArgSizeExpr::Mul &x_) {
   return json::array({lhs, rhs});
 }
 
+ArgSizeExpr::Min ArgSizeExpr::min_from_json(const json &j_) {
+  auto lhs = ArgSizeExpr::any_from_json(j_.at(0));
+  auto rhs = ArgSizeExpr::any_from_json(j_.at(1));
+  return {lhs, rhs};
+}
+
+json ArgSizeExpr::min_to_json(const ArgSizeExpr::Min &x_) {
+  auto lhs = ArgSizeExpr::any_to_json(x_.lhs);
+  auto rhs = ArgSizeExpr::any_to_json(x_.rhs);
+  return json::array({lhs, rhs});
+}
+
 ArgSizeExpr::Any ArgSizeExpr::any_from_json(const json &j_) {
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
@@ -3055,6 +2790,7 @@ ArgSizeExpr::Any ArgSizeExpr::any_from_json(const json &j_) {
     case 1: return ArgSizeExpr::const_from_json(t_);
     case 2: return ArgSizeExpr::add_from_json(t_);
     case 3: return ArgSizeExpr::mul_from_json(t_);
+    case 4: return ArgSizeExpr::min_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -3063,7 +2799,8 @@ json ArgSizeExpr::any_to_json(const ArgSizeExpr::Any &x_) {
   return x_.match_total([](const ArgSizeExpr::Param &y_) -> json { return {0, ArgSizeExpr::param_to_json(y_)}; },
                         [](const ArgSizeExpr::Const &y_) -> json { return {1, ArgSizeExpr::const_to_json(y_)}; },
                         [](const ArgSizeExpr::Add &y_) -> json { return {2, ArgSizeExpr::add_to_json(y_)}; },
-                        [](const ArgSizeExpr::Mul &y_) -> json { return {3, ArgSizeExpr::mul_to_json(y_)}; });
+                        [](const ArgSizeExpr::Mul &y_) -> json { return {3, ArgSizeExpr::mul_to_json(y_)}; },
+                        [](const ArgSizeExpr::Min &y_) -> json { return {4, ArgSizeExpr::min_to_json(y_)}; });
 }
 
 ArgExtent::Elements ArgExtent::elements_from_json(const json &j_) {
@@ -3101,13 +2838,13 @@ json ArgExtent::any_to_json(const ArgExtent::Any &x_) {
                         [](const ArgExtent::Bytes &y_) -> json { return {1, ArgExtent::bytes_to_json(y_)}; });
 }
 
-Boundary boundary_from_json(const json &j_) {
+ArgBoundary argboundary_from_json(const json &j_) {
   auto access = ArgAccess::any_from_json(j_.at(0));
   auto extent = ArgExtent::any_from_json(j_.at(1));
   return {access, extent};
 }
 
-json boundary_to_json(const Boundary &x_) {
+json argboundary_to_json(const ArgBoundary &x_) {
   auto access = ArgAccess::any_to_json(x_.access);
   auto extent = ArgExtent::any_to_json(x_.extent);
   return json::array({access, extent});
@@ -3116,20 +2853,23 @@ json boundary_to_json(const Boundary &x_) {
 Arg arg_from_json(const json &j_) {
   auto named = named_from_json(j_.at(0));
   auto pos = j_.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j_.at(1)));
-  auto boundary = j_.at(2).is_null() ? std::nullopt : std::make_optional(boundary_from_json(j_.at(2)));
+  auto boundary = j_.at(2).is_null() ? std::nullopt : std::make_optional(argboundary_from_json(j_.at(2)));
   return {named, pos, boundary};
 }
 
 json arg_to_json(const Arg &x_) {
   auto named = named_to_json(x_.named);
   auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json();
-  auto boundary = x_.boundary ? boundary_to_json(*x_.boundary) : json();
+  auto boundary = x_.boundary ? argboundary_to_json(*x_.boundary) : json();
   return json::array({named, pos, boundary});
 }
 
 FunctionDecl functiondecl_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
-  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  std::vector<Type::Var> tpeVars;
+  for (const auto &v_ : j_.at(1)) {
+    tpeVars.emplace_back(Type::var_from_json(v_));
+  }
   auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(arg_from_json(j_.at(2)));
   std::vector<Arg> args;
   for (const auto &v_ : j_.at(3)) {
@@ -3150,7 +2890,10 @@ FunctionDecl functiondecl_from_json(const json &j_) {
 
 json functiondecl_to_json(const FunctionDecl &x_) {
   auto name = sym_to_json(x_.name);
-  auto tpeVars = x_.tpeVars;
+  std::vector<json> tpeVars;
+  for (const auto &v_ : x_.tpeVars) {
+    tpeVars.emplace_back(Type::var_to_json(v_));
+  }
   auto receiver = x_.receiver ? arg_to_json(*x_.receiver) : json();
   std::vector<json> args;
   for (const auto &v_ : x_.args) {
@@ -3169,6 +2912,29 @@ json functiondecl_to_json(const FunctionDecl &x_) {
   return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, affinity});
 }
 
+CallConvention::RegularCall CallConvention::regularcall_from_json(const json &j_) { return {}; }
+
+json CallConvention::regularcall_to_json(const CallConvention::RegularCall &x_) { return json::array({}); }
+
+CallConvention::OffloadEntry CallConvention::offloadentry_from_json(const json &j_) { return {}; }
+
+json CallConvention::offloadentry_to_json(const CallConvention::OffloadEntry &x_) { return json::array({}); }
+
+CallConvention::Any CallConvention::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return CallConvention::regularcall_from_json(t_);
+    case 1: return CallConvention::offloadentry_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json CallConvention::any_to_json(const CallConvention::Any &x_) {
+  return x_.match_total([](const CallConvention::RegularCall &y_) -> json { return {0, CallConvention::regularcall_to_json(y_)}; },
+                        [](const CallConvention::OffloadEntry &y_) -> json { return {1, CallConvention::offloadentry_to_json(y_)}; });
+}
+
 Function function_from_json(const json &j_) {
   auto decl = functiondecl_from_json(j_.at(0));
   std::vector<Stmt::Any> body;
@@ -3177,8 +2943,10 @@ Function function_from_json(const json &j_) {
   }
   auto visibility = FunctionVisibility::any_from_json(j_.at(2));
   auto fpMode = FunctionFpMode::any_from_json(j_.at(3));
-  auto isEntry = j_.at(4).get<bool>();
-  return {decl, body, visibility, fpMode, isEntry};
+  auto convention = CallConvention::any_from_json(j_.at(4));
+  auto implements = j_.at(5).is_null() ? std::nullopt : std::make_optional(sym_from_json(j_.at(5)));
+  auto requiredCapabilities = j_.at(6).get<std::vector<std::string>>();
+  return {decl, body, visibility, fpMode, convention, implements, requiredCapabilities};
 }
 
 json function_to_json(const Function &x_) {
@@ -3189,13 +2957,18 @@ json function_to_json(const Function &x_) {
   }
   auto visibility = FunctionVisibility::any_to_json(x_.visibility);
   auto fpMode = FunctionFpMode::any_to_json(x_.fpMode);
-  auto isEntry = x_.isEntry;
-  return json::array({decl, body, visibility, fpMode, isEntry});
+  auto convention = CallConvention::any_to_json(x_.convention);
+  auto implements = x_.implements ? sym_to_json(*x_.implements) : json();
+  auto requiredCapabilities = x_.requiredCapabilities;
+  return json::array({decl, body, visibility, fpMode, convention, implements, requiredCapabilities});
 }
 
 StructDef structdef_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
-  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  std::vector<Type::Var> tpeVars;
+  for (const auto &v_ : j_.at(1)) {
+    tpeVars.emplace_back(Type::var_from_json(v_));
+  }
   std::vector<Named> members;
   for (const auto &v_ : j_.at(2)) {
     members.emplace_back(named_from_json(v_));
@@ -3210,7 +2983,10 @@ StructDef structdef_from_json(const json &j_) {
 
 json structdef_to_json(const StructDef &x_) {
   auto name = sym_to_json(x_.name);
-  auto tpeVars = x_.tpeVars;
+  std::vector<json> tpeVars;
+  for (const auto &v_ : x_.tpeVars) {
+    tpeVars.emplace_back(Type::var_to_json(v_));
+  }
   std::vector<json> members;
   for (const auto &v_ : x_.members) {
     members.emplace_back(named_to_json(v_));
@@ -3295,7 +3071,7 @@ json metaentry_to_json(const MetaEntry &x_) {
 }
 
 Program program_from_json(const json &j_) {
-  auto entry = function_from_json(j_.at(0));
+  auto entry = j_.at(0).is_null() ? std::nullopt : std::make_optional(function_from_json(j_.at(0)));
   std::vector<Function> functions;
   for (const auto &v_ : j_.at(1)) {
     functions.emplace_back(function_from_json(v_));
@@ -3313,7 +3089,7 @@ Program program_from_json(const json &j_) {
 }
 
 json program_to_json(const Program &x_) {
-  auto entry = function_to_json(x_.entry);
+  auto entry = x_.entry ? function_to_json(*x_.entry) : json();
   std::vector<json> functions;
   for (const auto &v_ : x_.functions) {
     functions.emplace_back(function_to_json(v_));
@@ -3486,94 +3262,220 @@ json compileresult_to_json(const CompileResult &x_) {
   return json::array({binary, features, events, layouts, messages, entryArgs});
 }
 
-InterfaceDef interfacedef_from_json(const json &j_) {
+Interface interface_from_json(const json &j_) {
   auto name = sym_from_json(j_.at(0));
-  std::vector<FunctionDecl> decls;
+  std::vector<FunctionDecl> declarations;
   for (const auto &v_ : j_.at(1)) {
-    decls.emplace_back(functiondecl_from_json(v_));
+    declarations.emplace_back(functiondecl_from_json(v_));
   }
   std::vector<MetaEntry> metadata;
   for (const auto &v_ : j_.at(2)) {
     metadata.emplace_back(metaentry_from_json(v_));
   }
-  return {name, decls, metadata};
+  return {name, declarations, metadata};
 }
 
-json interfacedef_to_json(const InterfaceDef &x_) {
+json interface_to_json(const Interface &x_) {
   auto name = sym_to_json(x_.name);
-  std::vector<json> decls;
-  for (const auto &v_ : x_.decls) {
-    decls.emplace_back(functiondecl_to_json(v_));
+  std::vector<json> declarations;
+  for (const auto &v_ : x_.declarations) {
+    declarations.emplace_back(functiondecl_to_json(v_));
   }
   std::vector<json> metadata;
   for (const auto &v_ : x_.metadata) {
     metadata.emplace_back(metaentry_to_json(v_));
   }
-  return json::array({name, decls, metadata});
-}
-
-TypeSizeConstraint typesizeconstraint_from_json(const json &j_) {
-  auto typeVariable = j_.at(0).get<std::string>();
-  auto sizeInBytes = j_.at(1).get<int32_t>();
-  return {typeVariable, sizeInBytes};
-}
-
-json typesizeconstraint_to_json(const TypeSizeConstraint &x_) {
-  auto typeVariable = x_.typeVariable;
-  auto sizeInBytes = x_.sizeInBytes;
-  return json::array({typeVariable, sizeInBytes});
-}
-
-ImplementationCandidate implementationcandidate_from_json(const json &j_) {
-  auto publicName = sym_from_json(j_.at(0));
-  auto implementation = functiondecl_from_json(j_.at(1));
-  auto requiredCapabilities = j_.at(2).get<std::vector<std::string>>();
-  std::vector<TypeSizeConstraint> typeSizes;
-  for (const auto &v_ : j_.at(3)) {
-    typeSizes.emplace_back(typesizeconstraint_from_json(v_));
-  }
-  return {publicName, implementation, requiredCapabilities, typeSizes};
-}
-
-json implementationcandidate_to_json(const ImplementationCandidate &x_) {
-  auto publicName = sym_to_json(x_.publicName);
-  auto implementation = functiondecl_to_json(x_.implementation);
-  auto requiredCapabilities = x_.requiredCapabilities;
-  std::vector<json> typeSizes;
-  for (const auto &v_ : x_.typeSizes) {
-    typeSizes.emplace_back(typesizeconstraint_to_json(v_));
-  }
-  return json::array({publicName, implementation, requiredCapabilities, typeSizes});
-}
-
-PackageIndex packageindex_from_json(const json &j_) {
-  auto interface = interfacedef_from_json(j_.at(0));
-  std::vector<ImplementationCandidate> candidates;
-  for (const auto &v_ : j_.at(1)) {
-    candidates.emplace_back(implementationcandidate_from_json(v_));
-  }
-  return {interface, candidates};
-}
-
-json packageindex_to_json(const PackageIndex &x_) {
-  auto interface = interfacedef_to_json(x_.interface);
-  std::vector<json> candidates;
-  for (const auto &v_ : x_.candidates) {
-    candidates.emplace_back(implementationcandidate_to_json(v_));
-  }
-  return json::array({interface, candidates});
+  return json::array({name, declarations, metadata});
 }
 
 Package package_from_json(const json &j_) {
-  auto index = packageindex_from_json(j_.at(0));
+  auto interface = interface_from_json(j_.at(0));
   auto program = program_from_json(j_.at(1));
-  return {index, program};
+  return {interface, program};
 }
 
 json package_to_json(const Package &x_) {
-  auto index = packageindex_to_json(x_.index);
+  auto interface = interface_to_json(x_.interface);
   auto program = program_to_json(x_.program);
-  return json::array({index, program});
+  return json::array({interface, program});
+}
+
+PackageTypeSize packagetypesize_from_json(const json &j_) {
+  auto tpe = Type::any_from_json(j_.at(0));
+  auto sizeInBytes = j_.at(1).get<int32_t>();
+  return {tpe, sizeInBytes};
+}
+
+json packagetypesize_to_json(const PackageTypeSize &x_) {
+  auto tpe = Type::any_to_json(x_.tpe);
+  auto sizeInBytes = x_.sizeInBytes;
+  return json::array({tpe, sizeInBytes});
+}
+
+PackageLinkRequest packagelinkrequest_from_json(const json &j_) {
+  auto interface = interface_from_json(j_.at(0));
+  std::vector<Program> programFragments;
+  for (const auto &v_ : j_.at(1)) {
+    programFragments.emplace_back(program_from_json(v_));
+  }
+  auto capabilities = j_.at(2).get<std::vector<std::string>>();
+  return {interface, programFragments, capabilities};
+}
+
+json packagelinkrequest_to_json(const PackageLinkRequest &x_) {
+  auto interface = interface_to_json(x_.interface);
+  std::vector<json> programFragments;
+  for (const auto &v_ : x_.programFragments) {
+    programFragments.emplace_back(program_to_json(v_));
+  }
+  auto capabilities = x_.capabilities;
+  return json::array({interface, programFragments, capabilities});
+}
+
+PackageSymRequest packagesymrequest_from_json(const json &j_) {
+  auto pkg = package_from_json(j_.at(0));
+  auto signature = invokesignature_from_json(j_.at(1));
+  std::vector<FunctionDecl> callerDecls;
+  for (const auto &v_ : j_.at(2)) {
+    callerDecls.emplace_back(functiondecl_from_json(v_));
+  }
+  std::vector<Function> callerFns;
+  for (const auto &v_ : j_.at(3)) {
+    callerFns.emplace_back(function_from_json(v_));
+  }
+  std::vector<StructDef> callerDefs;
+  for (const auto &v_ : j_.at(4)) {
+    callerDefs.emplace_back(structdef_from_json(v_));
+  }
+  auto capabilities = j_.at(5).get<std::vector<std::string>>();
+  std::vector<PackageTypeSize> typeSizes;
+  for (const auto &v_ : j_.at(6)) {
+    typeSizes.emplace_back(packagetypesize_from_json(v_));
+  }
+  auto entryName = j_.at(7).get<std::string>();
+  auto returnConvention = PackageReturnConvention::any_from_json(j_.at(8));
+  return {pkg, signature, callerDecls, callerFns, callerDefs, capabilities, typeSizes, entryName, returnConvention};
+}
+
+json packagesymrequest_to_json(const PackageSymRequest &x_) {
+  auto pkg = package_to_json(x_.pkg);
+  auto signature = invokesignature_to_json(x_.signature);
+  std::vector<json> callerDecls;
+  for (const auto &v_ : x_.callerDecls) {
+    callerDecls.emplace_back(functiondecl_to_json(v_));
+  }
+  std::vector<json> callerFns;
+  for (const auto &v_ : x_.callerFns) {
+    callerFns.emplace_back(function_to_json(v_));
+  }
+  std::vector<json> callerDefs;
+  for (const auto &v_ : x_.callerDefs) {
+    callerDefs.emplace_back(structdef_to_json(v_));
+  }
+  auto capabilities = x_.capabilities;
+  std::vector<json> typeSizes;
+  for (const auto &v_ : x_.typeSizes) {
+    typeSizes.emplace_back(packagetypesize_to_json(v_));
+  }
+  auto entryName = x_.entryName;
+  auto returnConvention = PackageReturnConvention::any_to_json(x_.returnConvention);
+  return json::array({pkg, signature, callerDecls, callerFns, callerDefs, capabilities, typeSizes, entryName, returnConvention});
+}
+
+PackageReturnConvention::Return PackageReturnConvention::return_from_json(const json &j_) { return {}; }
+
+json PackageReturnConvention::return_to_json(const PackageReturnConvention::Return &x_) { return json::array({}); }
+
+PackageReturnConvention::OutParam PackageReturnConvention::outparam_from_json(const json &j_) {
+  auto index = j_.at(0).get<int32_t>();
+  return PackageReturnConvention::OutParam(index);
+}
+
+json PackageReturnConvention::outparam_to_json(const PackageReturnConvention::OutParam &x_) {
+  auto index = x_.index;
+  return json::array({index});
+}
+
+PackageReturnConvention::Any PackageReturnConvention::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return PackageReturnConvention::return_from_json(t_);
+    case 1: return PackageReturnConvention::outparam_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json PackageReturnConvention::any_to_json(const PackageReturnConvention::Any &x_) {
+  return x_.match_total(
+      [](const PackageReturnConvention::Return &y_) -> json { return {0, PackageReturnConvention::return_to_json(y_)}; },
+      [](const PackageReturnConvention::OutParam &y_) -> json { return {1, PackageReturnConvention::outparam_to_json(y_)}; });
+}
+
+PackageEntryArgBinding::Context PackageEntryArgBinding::context_from_json(const json &j_) { return {}; }
+
+json PackageEntryArgBinding::context_to_json(const PackageEntryArgBinding::Context &x_) { return json::array({}); }
+
+PackageEntryArgBinding::CallValue PackageEntryArgBinding::callvalue_from_json(const json &j_) {
+  auto index = j_.at(0).get<int32_t>();
+  return PackageEntryArgBinding::CallValue(index);
+}
+
+json PackageEntryArgBinding::callvalue_to_json(const PackageEntryArgBinding::CallValue &x_) {
+  auto index = x_.index;
+  return json::array({index});
+}
+
+PackageEntryArgBinding::CallAddress PackageEntryArgBinding::calladdress_from_json(const json &j_) {
+  auto index = j_.at(0).get<int32_t>();
+  return PackageEntryArgBinding::CallAddress(index);
+}
+
+json PackageEntryArgBinding::calladdress_to_json(const PackageEntryArgBinding::CallAddress &x_) {
+  auto index = x_.index;
+  return json::array({index});
+}
+
+PackageEntryArgBinding::ResultAddress PackageEntryArgBinding::resultaddress_from_json(const json &j_) { return {}; }
+
+json PackageEntryArgBinding::resultaddress_to_json(const PackageEntryArgBinding::ResultAddress &x_) { return json::array({}); }
+
+PackageEntryArgBinding::Any PackageEntryArgBinding::any_from_json(const json &j_) {
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto &t_ = j_.at(1);
+  switch (ord_) {
+    case 0: return PackageEntryArgBinding::context_from_json(t_);
+    case 1: return PackageEntryArgBinding::callvalue_from_json(t_);
+    case 2: return PackageEntryArgBinding::calladdress_from_json(t_);
+    case 3: return PackageEntryArgBinding::resultaddress_from_json(t_);
+    default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+  }
+}
+
+json PackageEntryArgBinding::any_to_json(const PackageEntryArgBinding::Any &x_) {
+  return x_.match_total(
+      [](const PackageEntryArgBinding::Context &y_) -> json { return {0, PackageEntryArgBinding::context_to_json(y_)}; },
+      [](const PackageEntryArgBinding::CallValue &y_) -> json { return {1, PackageEntryArgBinding::callvalue_to_json(y_)}; },
+      [](const PackageEntryArgBinding::CallAddress &y_) -> json { return {2, PackageEntryArgBinding::calladdress_to_json(y_)}; },
+      [](const PackageEntryArgBinding::ResultAddress &y_) -> json { return {3, PackageEntryArgBinding::resultaddress_to_json(y_)}; });
+}
+
+PackageSymResolvedProgram packagesymresolvedprogram_from_json(const json &j_) {
+  auto program = program_from_json(j_.at(0));
+  std::vector<PackageEntryArgBinding::Any> entryArgs;
+  for (const auto &v_ : j_.at(1)) {
+    entryArgs.emplace_back(PackageEntryArgBinding::any_from_json(v_));
+  }
+  return {program, entryArgs};
+}
+
+json packagesymresolvedprogram_to_json(const PackageSymResolvedProgram &x_) {
+  auto program = program_to_json(x_.program);
+  std::vector<json> entryArgs;
+  for (const auto &v_ : x_.entryArgs) {
+    entryArgs.emplace_back(PackageEntryArgBinding::any_to_json(v_));
+  }
+  return json::array({program, entryArgs});
 }
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
@@ -3866,18 +3768,6 @@ void constant_to_msgpack(MsgpackWriter &, const TypeSpace::Constant &);
 TypeSpace::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const TypeSpace::Any &);
 } // namespace TypeSpace
-namespace PassPhase {
-PassPhase::Initial initial_fields_from_msgpack(MsgpackReader &, size_t);
-void initial_fields_to_msgpack(MsgpackWriter &, const PassPhase::Initial &);
-PassPhase::Initial initial_from_msgpack(MsgpackReader &);
-void initial_to_msgpack(MsgpackWriter &, const PassPhase::Initial &);
-PassPhase::PostMono postmono_fields_from_msgpack(MsgpackReader &, size_t);
-void postmono_fields_to_msgpack(MsgpackWriter &, const PassPhase::PostMono &);
-PassPhase::PostMono postmono_from_msgpack(MsgpackReader &);
-void postmono_to_msgpack(MsgpackWriter &, const PassPhase::PostMono &);
-PassPhase::Any any_from_msgpack(MsgpackReader &);
-void any_to_msgpack(MsgpackWriter &, const PassPhase::Any &);
-} // namespace PassPhase
 namespace Spec {
 Spec::Assert assert_fields_from_msgpack(MsgpackReader &, size_t);
 void assert_fields_to_msgpack(MsgpackWriter &, const Spec::Assert &);
@@ -3975,6 +3865,22 @@ Spec::GpuAtomicRMW gpuatomicrmw_fields_from_msgpack(MsgpackReader &, size_t);
 void gpuatomicrmw_fields_to_msgpack(MsgpackWriter &, const Spec::GpuAtomicRMW &);
 Spec::GpuAtomicRMW gpuatomicrmw_from_msgpack(MsgpackReader &);
 void gpuatomicrmw_to_msgpack(MsgpackWriter &, const Spec::GpuAtomicRMW &);
+Spec::GpuAtomicCAS gpuatomiccas_fields_from_msgpack(MsgpackReader &, size_t);
+void gpuatomiccas_fields_to_msgpack(MsgpackWriter &, const Spec::GpuAtomicCAS &);
+Spec::GpuAtomicCAS gpuatomiccas_from_msgpack(MsgpackReader &);
+void gpuatomiccas_to_msgpack(MsgpackWriter &, const Spec::GpuAtomicCAS &);
+Spec::GpuGroupReduce gpugroupreduce_fields_from_msgpack(MsgpackReader &, size_t);
+void gpugroupreduce_fields_to_msgpack(MsgpackWriter &, const Spec::GpuGroupReduce &);
+Spec::GpuGroupReduce gpugroupreduce_from_msgpack(MsgpackReader &);
+void gpugroupreduce_to_msgpack(MsgpackWriter &, const Spec::GpuGroupReduce &);
+Spec::GpuGroupInclusiveScan gpugroupinclusivescan_fields_from_msgpack(MsgpackReader &, size_t);
+void gpugroupinclusivescan_fields_to_msgpack(MsgpackWriter &, const Spec::GpuGroupInclusiveScan &);
+Spec::GpuGroupInclusiveScan gpugroupinclusivescan_from_msgpack(MsgpackReader &);
+void gpugroupinclusivescan_to_msgpack(MsgpackWriter &, const Spec::GpuGroupInclusiveScan &);
+Spec::GpuGroupExclusiveScan gpugroupexclusivescan_fields_from_msgpack(MsgpackReader &, size_t);
+void gpugroupexclusivescan_fields_to_msgpack(MsgpackWriter &, const Spec::GpuGroupExclusiveScan &);
+Spec::GpuGroupExclusiveScan gpugroupexclusivescan_from_msgpack(MsgpackReader &);
+void gpugroupexclusivescan_to_msgpack(MsgpackWriter &, const Spec::GpuGroupExclusiveScan &);
 Spec::GpuVolatileLoad gpuvolatileload_fields_from_msgpack(MsgpackReader &, size_t);
 void gpuvolatileload_fields_to_msgpack(MsgpackWriter &, const Spec::GpuVolatileLoad &);
 Spec::GpuVolatileLoad gpuvolatileload_from_msgpack(MsgpackReader &);
@@ -4126,10 +4032,10 @@ InvokeSignature invokesignature_fields_from_msgpack(MsgpackReader &, size_t);
 void invokesignature_fields_to_msgpack(MsgpackWriter &, const InvokeSignature &);
 InvokeSignature invokesignature_from_msgpack(MsgpackReader &);
 void invokesignature_to_msgpack(MsgpackWriter &, const InvokeSignature &);
-Boundary boundary_fields_from_msgpack(MsgpackReader &, size_t);
-void boundary_fields_to_msgpack(MsgpackWriter &, const Boundary &);
-Boundary boundary_from_msgpack(MsgpackReader &);
-void boundary_to_msgpack(MsgpackWriter &, const Boundary &);
+ArgBoundary argboundary_fields_from_msgpack(MsgpackReader &, size_t);
+void argboundary_fields_to_msgpack(MsgpackWriter &, const ArgBoundary &);
+ArgBoundary argboundary_from_msgpack(MsgpackReader &);
+void argboundary_to_msgpack(MsgpackWriter &, const ArgBoundary &);
 Arg arg_fields_from_msgpack(MsgpackReader &, size_t);
 void arg_fields_to_msgpack(MsgpackWriter &, const Arg &);
 Arg arg_from_msgpack(MsgpackReader &);
@@ -4190,26 +4096,30 @@ CompileResult compileresult_fields_from_msgpack(MsgpackReader &, size_t);
 void compileresult_fields_to_msgpack(MsgpackWriter &, const CompileResult &);
 CompileResult compileresult_from_msgpack(MsgpackReader &);
 void compileresult_to_msgpack(MsgpackWriter &, const CompileResult &);
-InterfaceDef interfacedef_fields_from_msgpack(MsgpackReader &, size_t);
-void interfacedef_fields_to_msgpack(MsgpackWriter &, const InterfaceDef &);
-InterfaceDef interfacedef_from_msgpack(MsgpackReader &);
-void interfacedef_to_msgpack(MsgpackWriter &, const InterfaceDef &);
-TypeSizeConstraint typesizeconstraint_fields_from_msgpack(MsgpackReader &, size_t);
-void typesizeconstraint_fields_to_msgpack(MsgpackWriter &, const TypeSizeConstraint &);
-TypeSizeConstraint typesizeconstraint_from_msgpack(MsgpackReader &);
-void typesizeconstraint_to_msgpack(MsgpackWriter &, const TypeSizeConstraint &);
-ImplementationCandidate implementationcandidate_fields_from_msgpack(MsgpackReader &, size_t);
-void implementationcandidate_fields_to_msgpack(MsgpackWriter &, const ImplementationCandidate &);
-ImplementationCandidate implementationcandidate_from_msgpack(MsgpackReader &);
-void implementationcandidate_to_msgpack(MsgpackWriter &, const ImplementationCandidate &);
-PackageIndex packageindex_fields_from_msgpack(MsgpackReader &, size_t);
-void packageindex_fields_to_msgpack(MsgpackWriter &, const PackageIndex &);
-PackageIndex packageindex_from_msgpack(MsgpackReader &);
-void packageindex_to_msgpack(MsgpackWriter &, const PackageIndex &);
+Interface interface_fields_from_msgpack(MsgpackReader &, size_t);
+void interface_fields_to_msgpack(MsgpackWriter &, const Interface &);
+Interface interface_from_msgpack(MsgpackReader &);
+void interface_to_msgpack(MsgpackWriter &, const Interface &);
 Package package_fields_from_msgpack(MsgpackReader &, size_t);
 void package_fields_to_msgpack(MsgpackWriter &, const Package &);
 Package package_from_msgpack(MsgpackReader &);
 void package_to_msgpack(MsgpackWriter &, const Package &);
+PackageTypeSize packagetypesize_fields_from_msgpack(MsgpackReader &, size_t);
+void packagetypesize_fields_to_msgpack(MsgpackWriter &, const PackageTypeSize &);
+PackageTypeSize packagetypesize_from_msgpack(MsgpackReader &);
+void packagetypesize_to_msgpack(MsgpackWriter &, const PackageTypeSize &);
+PackageLinkRequest packagelinkrequest_fields_from_msgpack(MsgpackReader &, size_t);
+void packagelinkrequest_fields_to_msgpack(MsgpackWriter &, const PackageLinkRequest &);
+PackageLinkRequest packagelinkrequest_from_msgpack(MsgpackReader &);
+void packagelinkrequest_to_msgpack(MsgpackWriter &, const PackageLinkRequest &);
+PackageSymRequest packagesymrequest_fields_from_msgpack(MsgpackReader &, size_t);
+void packagesymrequest_fields_to_msgpack(MsgpackWriter &, const PackageSymRequest &);
+PackageSymRequest packagesymrequest_from_msgpack(MsgpackReader &);
+void packagesymrequest_to_msgpack(MsgpackWriter &, const PackageSymRequest &);
+PackageSymResolvedProgram packagesymresolvedprogram_fields_from_msgpack(MsgpackReader &, size_t);
+void packagesymresolvedprogram_fields_to_msgpack(MsgpackWriter &, const PackageSymResolvedProgram &);
+PackageSymResolvedProgram packagesymresolvedprogram_from_msgpack(MsgpackReader &);
+void packagesymresolvedprogram_to_msgpack(MsgpackWriter &, const PackageSymResolvedProgram &);
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
 void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
@@ -4415,6 +4325,10 @@ ArgSizeExpr::Mul mul_fields_from_msgpack(MsgpackReader &, size_t);
 void mul_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Mul &);
 ArgSizeExpr::Mul mul_from_msgpack(MsgpackReader &);
 void mul_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Mul &);
+ArgSizeExpr::Min min_fields_from_msgpack(MsgpackReader &, size_t);
+void min_fields_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Min &);
+ArgSizeExpr::Min min_from_msgpack(MsgpackReader &);
+void min_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Min &);
 ArgSizeExpr::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const ArgSizeExpr::Any &);
 } // namespace ArgSizeExpr
@@ -4438,6 +4352,62 @@ void indexdyn_to_msgpack(MsgpackWriter &, const PathStep::IndexDyn &);
 PathStep::Any any_from_msgpack(MsgpackReader &);
 void any_to_msgpack(MsgpackWriter &, const PathStep::Any &);
 } // namespace PathStep
+namespace CallConvention {
+CallConvention::RegularCall regularcall_fields_from_msgpack(MsgpackReader &, size_t);
+void regularcall_fields_to_msgpack(MsgpackWriter &, const CallConvention::RegularCall &);
+CallConvention::RegularCall regularcall_from_msgpack(MsgpackReader &);
+void regularcall_to_msgpack(MsgpackWriter &, const CallConvention::RegularCall &);
+CallConvention::OffloadEntry offloadentry_fields_from_msgpack(MsgpackReader &, size_t);
+void offloadentry_fields_to_msgpack(MsgpackWriter &, const CallConvention::OffloadEntry &);
+CallConvention::OffloadEntry offloadentry_from_msgpack(MsgpackReader &);
+void offloadentry_to_msgpack(MsgpackWriter &, const CallConvention::OffloadEntry &);
+CallConvention::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const CallConvention::Any &);
+} // namespace CallConvention
+namespace PackageReturnConvention {
+PackageReturnConvention::Return return_fields_from_msgpack(MsgpackReader &, size_t);
+void return_fields_to_msgpack(MsgpackWriter &, const PackageReturnConvention::Return &);
+PackageReturnConvention::Return return_from_msgpack(MsgpackReader &);
+void return_to_msgpack(MsgpackWriter &, const PackageReturnConvention::Return &);
+PackageReturnConvention::OutParam outparam_fields_from_msgpack(MsgpackReader &, size_t);
+void outparam_fields_to_msgpack(MsgpackWriter &, const PackageReturnConvention::OutParam &);
+PackageReturnConvention::OutParam outparam_from_msgpack(MsgpackReader &);
+void outparam_to_msgpack(MsgpackWriter &, const PackageReturnConvention::OutParam &);
+PackageReturnConvention::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const PackageReturnConvention::Any &);
+} // namespace PackageReturnConvention
+namespace PassPhase {
+PassPhase::Initial initial_fields_from_msgpack(MsgpackReader &, size_t);
+void initial_fields_to_msgpack(MsgpackWriter &, const PassPhase::Initial &);
+PassPhase::Initial initial_from_msgpack(MsgpackReader &);
+void initial_to_msgpack(MsgpackWriter &, const PassPhase::Initial &);
+PassPhase::PostMono postmono_fields_from_msgpack(MsgpackReader &, size_t);
+void postmono_fields_to_msgpack(MsgpackWriter &, const PassPhase::PostMono &);
+PassPhase::PostMono postmono_from_msgpack(MsgpackReader &);
+void postmono_to_msgpack(MsgpackWriter &, const PassPhase::PostMono &);
+PassPhase::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const PassPhase::Any &);
+} // namespace PassPhase
+namespace PackageEntryArgBinding {
+PackageEntryArgBinding::Context context_fields_from_msgpack(MsgpackReader &, size_t);
+void context_fields_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::Context &);
+PackageEntryArgBinding::Context context_from_msgpack(MsgpackReader &);
+void context_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::Context &);
+PackageEntryArgBinding::CallValue callvalue_fields_from_msgpack(MsgpackReader &, size_t);
+void callvalue_fields_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::CallValue &);
+PackageEntryArgBinding::CallValue callvalue_from_msgpack(MsgpackReader &);
+void callvalue_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::CallValue &);
+PackageEntryArgBinding::CallAddress calladdress_fields_from_msgpack(MsgpackReader &, size_t);
+void calladdress_fields_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::CallAddress &);
+PackageEntryArgBinding::CallAddress calladdress_from_msgpack(MsgpackReader &);
+void calladdress_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::CallAddress &);
+PackageEntryArgBinding::ResultAddress resultaddress_fields_from_msgpack(MsgpackReader &, size_t);
+void resultaddress_fields_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::ResultAddress &);
+PackageEntryArgBinding::ResultAddress resultaddress_from_msgpack(MsgpackReader &);
+void resultaddress_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::ResultAddress &);
+PackageEntryArgBinding::Any any_from_msgpack(MsgpackReader &);
+void any_to_msgpack(MsgpackWriter &, const PackageEntryArgBinding::Any &);
+} // namespace PackageEntryArgBinding
 namespace TypeKind {
 TypeKind::None none_fields_from_msgpack(MsgpackReader &, size_t);
 void none_fields_to_msgpack(MsgpackWriter &, const TypeKind::None &);
@@ -5220,12 +5190,24 @@ void Type::arr_to_msgpack(MsgpackWriter &w_, const Type::Arr &x_) {
 }
 
 Type::Var Type::var_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 1) throw std::runtime_error("Expected Type::Var with 1 field(s)");
+  if (n_ != 2) throw std::runtime_error("Expected Type::Var with 2 field(s)");
   auto name = r_.readString();
-  return Type::Var(name);
+  std::optional<int32_t> exactSizeInBytes;
+  if (!r_.tryReadNil()) {
+    auto exactSizeInBytes_value = static_cast<int32_t>(r_.readInt32());
+    exactSizeInBytes = std::move(exactSizeInBytes_value);
+  }
+  return {name, exactSizeInBytes};
 }
 
-void Type::var_fields_to_msgpack(MsgpackWriter &w_, const Type::Var &x_) { w_.writeString(x_.name); }
+void Type::var_fields_to_msgpack(MsgpackWriter &w_, const Type::Var &x_) {
+  w_.writeString(x_.name);
+  if (x_.exactSizeInBytes) {
+    w_.writeInt32(static_cast<int32_t>((*x_.exactSizeInBytes)));
+  } else {
+    w_.writeNil();
+  }
+}
 
 Type::Var Type::var_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
@@ -5233,18 +5215,18 @@ Type::Var Type::var_from_msgpack(MsgpackReader &r_) {
 }
 
 void Type::var_to_msgpack(MsgpackWriter &w_, const Type::Var &x_) {
-  w_.writeArrayHeader(1);
+  w_.writeArrayHeader(2);
   Type::var_fields_to_msgpack(w_, x_);
 }
 
 Type::Exec Type::exec_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 3) throw std::runtime_error("Expected Type::Exec with 3 field(s)");
-  std::vector<std::string> tpeVars;
+  std::vector<Type::Var> tpeVars;
   {
     auto tpeVars_size = r_.readArrayHeader();
     tpeVars.reserve(tpeVars_size);
     for (size_t tpeVars_idx = 0; tpeVars_idx < tpeVars_size; ++tpeVars_idx) {
-      auto tpeVars_elem = r_.readString();
+      auto tpeVars_elem = Type::var_from_msgpack(r_);
       tpeVars.emplace_back(std::move(tpeVars_elem));
     }
   }
@@ -5264,7 +5246,7 @@ Type::Exec Type::exec_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
 void Type::exec_fields_to_msgpack(MsgpackWriter &w_, const Type::Exec &x_) {
   w_.writeArrayHeader(x_.tpeVars.size());
   for (const auto &v0_ : x_.tpeVars) {
-    w_.writeString(v0_);
+    Type::var_to_msgpack(w_, v0_);
   }
   w_.writeArrayHeader(x_.args.size());
   for (const auto &v0_ : x_.args) {
@@ -5381,7 +5363,7 @@ void Type::any_to_msgpack(MsgpackWriter &w_, const Type::Any &x_) {
                    Type::arr_fields_to_msgpack(w_, y_);
                  },
                  [&](const Type::Var &y_) -> void {
-                   w_.writeArrayHeader(2);
+                   w_.writeArrayHeader(3);
                    w_.writeInt32(17);
                    Type::var_fields_to_msgpack(w_, y_);
                  },
@@ -7454,6 +7436,108 @@ void Spec::gpuatomicrmw_to_msgpack(MsgpackWriter &w_, const Spec::GpuAtomicRMW &
   Spec::gpuatomicrmw_fields_to_msgpack(w_, x_);
 }
 
+Spec::GpuAtomicCAS Spec::gpuatomiccas_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 6) throw std::runtime_error("Expected Spec::GpuAtomicCAS with 6 field(s)");
+  auto ptr = Term::any_from_msgpack(r_);
+  auto expected = Term::any_from_msgpack(r_);
+  auto desired = Term::any_from_msgpack(r_);
+  auto scope = MemScope::any_from_msgpack(r_);
+  auto order = MemOrder::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {ptr, expected, desired, scope, order, rtn};
+}
+
+void Spec::gpuatomiccas_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuAtomicCAS &x_) {
+  Term::any_to_msgpack(w_, x_.ptr);
+  Term::any_to_msgpack(w_, x_.expected);
+  Term::any_to_msgpack(w_, x_.desired);
+  MemScope::any_to_msgpack(w_, x_.scope);
+  MemOrder::any_to_msgpack(w_, x_.order);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuAtomicCAS Spec::gpuatomiccas_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpuatomiccas_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpuatomiccas_to_msgpack(MsgpackWriter &w_, const Spec::GpuAtomicCAS &x_) {
+  w_.writeArrayHeader(6);
+  Spec::gpuatomiccas_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuGroupReduce Spec::gpugroupreduce_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Spec::GpuGroupReduce with 3 field(s)");
+  auto op = AtomicOp::any_from_msgpack(r_);
+  auto value = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {op, value, rtn};
+}
+
+void Spec::gpugroupreduce_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuGroupReduce &x_) {
+  AtomicOp::any_to_msgpack(w_, x_.op);
+  Term::any_to_msgpack(w_, x_.value);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuGroupReduce Spec::gpugroupreduce_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpugroupreduce_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpugroupreduce_to_msgpack(MsgpackWriter &w_, const Spec::GpuGroupReduce &x_) {
+  w_.writeArrayHeader(3);
+  Spec::gpugroupreduce_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuGroupInclusiveScan Spec::gpugroupinclusivescan_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Spec::GpuGroupInclusiveScan with 3 field(s)");
+  auto op = AtomicOp::any_from_msgpack(r_);
+  auto value = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {op, value, rtn};
+}
+
+void Spec::gpugroupinclusivescan_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuGroupInclusiveScan &x_) {
+  AtomicOp::any_to_msgpack(w_, x_.op);
+  Term::any_to_msgpack(w_, x_.value);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuGroupInclusiveScan Spec::gpugroupinclusivescan_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpugroupinclusivescan_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpugroupinclusivescan_to_msgpack(MsgpackWriter &w_, const Spec::GpuGroupInclusiveScan &x_) {
+  w_.writeArrayHeader(3);
+  Spec::gpugroupinclusivescan_fields_to_msgpack(w_, x_);
+}
+
+Spec::GpuGroupExclusiveScan Spec::gpugroupexclusivescan_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Spec::GpuGroupExclusiveScan with 3 field(s)");
+  auto op = AtomicOp::any_from_msgpack(r_);
+  auto value = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {op, value, rtn};
+}
+
+void Spec::gpugroupexclusivescan_fields_to_msgpack(MsgpackWriter &w_, const Spec::GpuGroupExclusiveScan &x_) {
+  AtomicOp::any_to_msgpack(w_, x_.op);
+  Term::any_to_msgpack(w_, x_.value);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Spec::GpuGroupExclusiveScan Spec::gpugroupexclusivescan_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::gpugroupexclusivescan_fields_from_msgpack(r_, n_);
+}
+
+void Spec::gpugroupexclusivescan_to_msgpack(MsgpackWriter &w_, const Spec::GpuGroupExclusiveScan &x_) {
+  w_.writeArrayHeader(3);
+  Spec::gpugroupexclusivescan_fields_to_msgpack(w_, x_);
+}
+
 Spec::GpuVolatileLoad Spec::gpuvolatileload_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Spec::GpuVolatileLoad with 2 field(s)");
   auto ptr = Term::any_from_msgpack(r_);
@@ -7680,13 +7764,17 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 21: return Spec::gpuvoteany_fields_from_msgpack(r_, n_ - 1);
       case 22: return Spec::gpuvoteall_fields_from_msgpack(r_, n_ - 1);
       case 23: return Spec::gpuatomicrmw_fields_from_msgpack(r_, n_ - 1);
-      case 24: return Spec::gpuvolatileload_fields_from_msgpack(r_, n_ - 1);
-      case 25: return Spec::gpuvolatilestore_fields_from_msgpack(r_, n_ - 1);
-      case 26: return Spec::remotelaunch_fields_from_msgpack(r_, n_ - 1);
-      case 27: return Spec::remotealloc_fields_from_msgpack(r_, n_ - 1);
-      case 28: return Spec::remotefree_fields_from_msgpack(r_, n_ - 1);
-      case 29: return Spec::remotememcpy_fields_from_msgpack(r_, n_ - 1);
-      case 30: return Spec::remotesync_fields_from_msgpack(r_, n_ - 1);
+      case 24: return Spec::gpuatomiccas_fields_from_msgpack(r_, n_ - 1);
+      case 25: return Spec::gpugroupreduce_fields_from_msgpack(r_, n_ - 1);
+      case 26: return Spec::gpugroupinclusivescan_fields_from_msgpack(r_, n_ - 1);
+      case 27: return Spec::gpugroupexclusivescan_fields_from_msgpack(r_, n_ - 1);
+      case 28: return Spec::gpuvolatileload_fields_from_msgpack(r_, n_ - 1);
+      case 29: return Spec::gpuvolatilestore_fields_from_msgpack(r_, n_ - 1);
+      case 30: return Spec::remotelaunch_fields_from_msgpack(r_, n_ - 1);
+      case 31: return Spec::remotealloc_fields_from_msgpack(r_, n_ - 1);
+      case 32: return Spec::remotefree_fields_from_msgpack(r_, n_ - 1);
+      case 33: return Spec::remotememcpy_fields_from_msgpack(r_, n_ - 1);
+      case 34: return Spec::remotesync_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -7723,6 +7811,10 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 28: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 29: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 30: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 31: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 32: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 33: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 34: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -7815,39 +7907,59 @@ void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         w_.writeInt32(23);
         Spec::gpuatomicrmw_fields_to_msgpack(w_, y_);
       },
+      [&](const Spec::GpuAtomicCAS &y_) -> void {
+        w_.writeArrayHeader(7);
+        w_.writeInt32(24);
+        Spec::gpuatomiccas_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuGroupReduce &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(25);
+        Spec::gpugroupreduce_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuGroupInclusiveScan &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(26);
+        Spec::gpugroupinclusivescan_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::GpuGroupExclusiveScan &y_) -> void {
+        w_.writeArrayHeader(4);
+        w_.writeInt32(27);
+        Spec::gpugroupexclusivescan_fields_to_msgpack(w_, y_);
+      },
       [&](const Spec::GpuVolatileLoad &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(24);
+        w_.writeInt32(28);
         Spec::gpuvolatileload_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::GpuVolatileStore &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(25);
+        w_.writeInt32(29);
         Spec::gpuvolatilestore_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteLaunch &y_) -> void {
         w_.writeArrayHeader(12);
-        w_.writeInt32(26);
+        w_.writeInt32(30);
         Spec::remotelaunch_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteAlloc &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(27);
+        w_.writeInt32(31);
         Spec::remotealloc_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteFree &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(28);
+        w_.writeInt32(32);
         Spec::remotefree_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteMemcpy &y_) -> void {
         w_.writeArrayHeader(6);
-        w_.writeInt32(29);
+        w_.writeInt32(33);
         Spec::remotememcpy_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteSync &y_) -> void {
         w_.writeArrayHeader(2);
-        w_.writeInt32(30);
+        w_.writeInt32(34);
         Spec::remotesync_fields_to_msgpack(w_, y_);
       });
 }
@@ -9941,12 +10053,12 @@ void Stmt::any_to_msgpack(MsgpackWriter &w_, const Stmt::Any &x_) {
 Signature signature_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 7) throw std::runtime_error("Expected Signature with 7 field(s)");
   auto name = sym_from_msgpack(r_);
-  std::vector<std::string> tpeVars;
+  std::vector<Type::Var> tpeVars;
   {
     auto tpeVars_size = r_.readArrayHeader();
     tpeVars.reserve(tpeVars_size);
     for (size_t tpeVars_idx = 0; tpeVars_idx < tpeVars_size; ++tpeVars_idx) {
-      auto tpeVars_elem = r_.readString();
+      auto tpeVars_elem = Type::var_from_msgpack(r_);
       tpeVars.emplace_back(std::move(tpeVars_elem));
     }
   }
@@ -9990,7 +10102,7 @@ void signature_fields_to_msgpack(MsgpackWriter &w_, const Signature &x_) {
   sym_to_msgpack(w_, x_.name);
   w_.writeArrayHeader(x_.tpeVars.size());
   for (const auto &v0_ : x_.tpeVars) {
-    w_.writeString(v0_);
+    Type::var_to_msgpack(w_, v0_);
   }
   if (x_.receiver) {
     Type::any_to_msgpack(w_, (*x_.receiver));
@@ -10418,6 +10530,28 @@ void ArgSizeExpr::mul_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Mul &x_) 
   ArgSizeExpr::mul_fields_to_msgpack(w_, x_);
 }
 
+ArgSizeExpr::Min ArgSizeExpr::min_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected ArgSizeExpr::Min with 2 field(s)");
+  auto lhs = ArgSizeExpr::any_from_msgpack(r_);
+  auto rhs = ArgSizeExpr::any_from_msgpack(r_);
+  return {lhs, rhs};
+}
+
+void ArgSizeExpr::min_fields_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Min &x_) {
+  ArgSizeExpr::any_to_msgpack(w_, x_.lhs);
+  ArgSizeExpr::any_to_msgpack(w_, x_.rhs);
+}
+
+ArgSizeExpr::Min ArgSizeExpr::min_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return ArgSizeExpr::min_fields_from_msgpack(r_, n_);
+}
+
+void ArgSizeExpr::min_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Min &x_) {
+  w_.writeArrayHeader(2);
+  ArgSizeExpr::min_fields_to_msgpack(w_, x_);
+}
+
 ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
   if (r_.nextIsArray()) {
     auto n_ = r_.readArrayHeader();
@@ -10428,6 +10562,7 @@ ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
       case 1: return ArgSizeExpr::const_fields_from_msgpack(r_, n_ - 1);
       case 2: return ArgSizeExpr::add_fields_from_msgpack(r_, n_ - 1);
       case 3: return ArgSizeExpr::mul_fields_from_msgpack(r_, n_ - 1);
+      case 4: return ArgSizeExpr::min_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -10437,6 +10572,7 @@ ArgSizeExpr::Any ArgSizeExpr::any_from_msgpack(MsgpackReader &r_) {
       case 1: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 2: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 3: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 4: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -10463,6 +10599,11 @@ void ArgSizeExpr::any_to_msgpack(MsgpackWriter &w_, const ArgSizeExpr::Any &x_) 
         w_.writeArrayHeader(3);
         w_.writeInt32(3);
         ArgSizeExpr::mul_fields_to_msgpack(w_, y_);
+      },
+      [&](const ArgSizeExpr::Min &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(4);
+        ArgSizeExpr::min_fields_to_msgpack(w_, y_);
       });
 }
 
@@ -10536,26 +10677,26 @@ void ArgExtent::any_to_msgpack(MsgpackWriter &w_, const ArgExtent::Any &x_) {
       });
 }
 
-Boundary boundary_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected Boundary with 2 field(s)");
+ArgBoundary argboundary_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected ArgBoundary with 2 field(s)");
   auto access = ArgAccess::any_from_msgpack(r_);
   auto extent = ArgExtent::any_from_msgpack(r_);
   return {access, extent};
 }
 
-void boundary_fields_to_msgpack(MsgpackWriter &w_, const Boundary &x_) {
+void argboundary_fields_to_msgpack(MsgpackWriter &w_, const ArgBoundary &x_) {
   ArgAccess::any_to_msgpack(w_, x_.access);
   ArgExtent::any_to_msgpack(w_, x_.extent);
 }
 
-Boundary boundary_from_msgpack(MsgpackReader &r_) {
+ArgBoundary argboundary_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
-  return boundary_fields_from_msgpack(r_, n_);
+  return argboundary_fields_from_msgpack(r_, n_);
 }
 
-void boundary_to_msgpack(MsgpackWriter &w_, const Boundary &x_) {
+void argboundary_to_msgpack(MsgpackWriter &w_, const ArgBoundary &x_) {
   w_.writeArrayHeader(2);
-  boundary_fields_to_msgpack(w_, x_);
+  argboundary_fields_to_msgpack(w_, x_);
 }
 
 Arg arg_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -10566,9 +10707,9 @@ Arg arg_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
     auto pos_value = sourceposition_from_msgpack(r_);
     pos = std::move(pos_value);
   }
-  std::optional<Boundary> boundary;
+  std::optional<ArgBoundary> boundary;
   if (!r_.tryReadNil()) {
-    auto boundary_value = boundary_from_msgpack(r_);
+    auto boundary_value = argboundary_from_msgpack(r_);
     boundary = std::move(boundary_value);
   }
   return {named, pos, boundary};
@@ -10582,7 +10723,7 @@ void arg_fields_to_msgpack(MsgpackWriter &w_, const Arg &x_) {
     w_.writeNil();
   }
   if (x_.boundary) {
-    boundary_to_msgpack(w_, (*x_.boundary));
+    argboundary_to_msgpack(w_, (*x_.boundary));
   } else {
     w_.writeNil();
   }
@@ -10601,12 +10742,12 @@ void arg_to_msgpack(MsgpackWriter &w_, const Arg &x_) {
 FunctionDecl functiondecl_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 8) throw std::runtime_error("Expected FunctionDecl with 8 field(s)");
   auto name = sym_from_msgpack(r_);
-  std::vector<std::string> tpeVars;
+  std::vector<Type::Var> tpeVars;
   {
     auto tpeVars_size = r_.readArrayHeader();
     tpeVars.reserve(tpeVars_size);
     for (size_t tpeVars_idx = 0; tpeVars_idx < tpeVars_size; ++tpeVars_idx) {
-      auto tpeVars_elem = r_.readString();
+      auto tpeVars_elem = Type::var_from_msgpack(r_);
       tpeVars.emplace_back(std::move(tpeVars_elem));
     }
   }
@@ -10651,7 +10792,7 @@ void functiondecl_fields_to_msgpack(MsgpackWriter &w_, const FunctionDecl &x_) {
   sym_to_msgpack(w_, x_.name);
   w_.writeArrayHeader(x_.tpeVars.size());
   for (const auto &v0_ : x_.tpeVars) {
-    w_.writeString(v0_);
+    Type::var_to_msgpack(w_, v0_);
   }
   if (x_.receiver) {
     arg_to_msgpack(w_, (*x_.receiver));
@@ -10684,8 +10825,67 @@ void functiondecl_to_msgpack(MsgpackWriter &w_, const FunctionDecl &x_) {
   functiondecl_fields_to_msgpack(w_, x_);
 }
 
+CallConvention::RegularCall CallConvention::regularcall_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected CallConvention::RegularCall with 0 field(s)");
+  return {};
+}
+
+void CallConvention::regularcall_fields_to_msgpack(MsgpackWriter &w_, const CallConvention::RegularCall &x_) {}
+
+CallConvention::RegularCall CallConvention::regularcall_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return CallConvention::regularcall_fields_from_msgpack(r_, n_);
+}
+
+void CallConvention::regularcall_to_msgpack(MsgpackWriter &w_, const CallConvention::RegularCall &x_) {
+  w_.writeArrayHeader(0);
+  CallConvention::regularcall_fields_to_msgpack(w_, x_);
+}
+
+CallConvention::OffloadEntry CallConvention::offloadentry_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected CallConvention::OffloadEntry with 0 field(s)");
+  return {};
+}
+
+void CallConvention::offloadentry_fields_to_msgpack(MsgpackWriter &w_, const CallConvention::OffloadEntry &x_) {}
+
+CallConvention::OffloadEntry CallConvention::offloadentry_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return CallConvention::offloadentry_fields_from_msgpack(r_, n_);
+}
+
+void CallConvention::offloadentry_to_msgpack(MsgpackWriter &w_, const CallConvention::OffloadEntry &x_) {
+  w_.writeArrayHeader(0);
+  CallConvention::offloadentry_fields_to_msgpack(w_, x_);
+}
+
+CallConvention::Any CallConvention::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return CallConvention::regularcall_fields_from_msgpack(r_, n_ - 1);
+      case 1: return CallConvention::offloadentry_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return CallConvention::regularcall_fields_from_msgpack(r_, 0);
+      case 1: return CallConvention::offloadentry_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void CallConvention::any_to_msgpack(MsgpackWriter &w_, const CallConvention::Any &x_) {
+  x_.match_total([&](const CallConvention::RegularCall &y_) -> void { w_.writeInt32(0); },
+                 [&](const CallConvention::OffloadEntry &y_) -> void { w_.writeInt32(1); });
+}
+
 Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 5) throw std::runtime_error("Expected Function with 5 field(s)");
+  if (n_ != 7) throw std::runtime_error("Expected Function with 7 field(s)");
   auto decl = functiondecl_from_msgpack(r_);
   std::vector<Stmt::Any> body;
   {
@@ -10698,8 +10898,22 @@ Function function_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   }
   auto visibility = FunctionVisibility::any_from_msgpack(r_);
   auto fpMode = FunctionFpMode::any_from_msgpack(r_);
-  auto isEntry = r_.readBoolean();
-  return {decl, body, visibility, fpMode, isEntry};
+  auto convention = CallConvention::any_from_msgpack(r_);
+  std::optional<Sym> implements;
+  if (!r_.tryReadNil()) {
+    auto implements_value = sym_from_msgpack(r_);
+    implements = std::move(implements_value);
+  }
+  std::vector<std::string> requiredCapabilities;
+  {
+    auto requiredCapabilities_size = r_.readArrayHeader();
+    requiredCapabilities.reserve(requiredCapabilities_size);
+    for (size_t requiredCapabilities_idx = 0; requiredCapabilities_idx < requiredCapabilities_size; ++requiredCapabilities_idx) {
+      auto requiredCapabilities_elem = r_.readString();
+      requiredCapabilities.emplace_back(std::move(requiredCapabilities_elem));
+    }
+  }
+  return {decl, body, visibility, fpMode, convention, implements, requiredCapabilities};
 }
 
 void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
@@ -10710,7 +10924,16 @@ void function_fields_to_msgpack(MsgpackWriter &w_, const Function &x_) {
   }
   FunctionVisibility::any_to_msgpack(w_, x_.visibility);
   FunctionFpMode::any_to_msgpack(w_, x_.fpMode);
-  w_.writeBoolean(x_.isEntry);
+  CallConvention::any_to_msgpack(w_, x_.convention);
+  if (x_.implements) {
+    sym_to_msgpack(w_, (*x_.implements));
+  } else {
+    w_.writeNil();
+  }
+  w_.writeArrayHeader(x_.requiredCapabilities.size());
+  for (const auto &v0_ : x_.requiredCapabilities) {
+    w_.writeString(v0_);
+  }
 }
 
 Function function_from_msgpack(MsgpackReader &r_) {
@@ -10719,19 +10942,19 @@ Function function_from_msgpack(MsgpackReader &r_) {
 }
 
 void function_to_msgpack(MsgpackWriter &w_, const Function &x_) {
-  w_.writeArrayHeader(5);
+  w_.writeArrayHeader(7);
   function_fields_to_msgpack(w_, x_);
 }
 
 StructDef structdef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 5) throw std::runtime_error("Expected StructDef with 5 field(s)");
   auto name = sym_from_msgpack(r_);
-  std::vector<std::string> tpeVars;
+  std::vector<Type::Var> tpeVars;
   {
     auto tpeVars_size = r_.readArrayHeader();
     tpeVars.reserve(tpeVars_size);
     for (size_t tpeVars_idx = 0; tpeVars_idx < tpeVars_size; ++tpeVars_idx) {
-      auto tpeVars_elem = r_.readString();
+      auto tpeVars_elem = Type::var_from_msgpack(r_);
       tpeVars.emplace_back(std::move(tpeVars_elem));
     }
   }
@@ -10761,7 +10984,7 @@ void structdef_fields_to_msgpack(MsgpackWriter &w_, const StructDef &x_) {
   sym_to_msgpack(w_, x_.name);
   w_.writeArrayHeader(x_.tpeVars.size());
   for (const auto &v0_ : x_.tpeVars) {
-    w_.writeString(v0_);
+    Type::var_to_msgpack(w_, v0_);
   }
   w_.writeArrayHeader(x_.members.size());
   for (const auto &v0_ : x_.members) {
@@ -10928,7 +11151,11 @@ void metaentry_to_msgpack(MsgpackWriter &w_, const MetaEntry &x_) {
 
 Program program_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 5) throw std::runtime_error("Expected Program with 5 field(s)");
-  auto entry = function_from_msgpack(r_);
+  std::optional<Function> entry;
+  if (!r_.tryReadNil()) {
+    auto entry_value = function_from_msgpack(r_);
+    entry = std::move(entry_value);
+  }
   std::vector<Function> functions;
   {
     auto functions_size = r_.readArrayHeader();
@@ -10961,7 +11188,11 @@ Program program_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
 }
 
 void program_fields_to_msgpack(MsgpackWriter &w_, const Program &x_) {
-  function_to_msgpack(w_, x_.entry);
+  if (x_.entry) {
+    function_to_msgpack(w_, (*x_.entry));
+  } else {
+    w_.writeNil();
+  }
   w_.writeArrayHeader(x_.functions.size());
   for (const auto &v0_ : x_.functions) {
     function_to_msgpack(w_, v0_);
@@ -11288,16 +11519,16 @@ void compileresult_to_msgpack(MsgpackWriter &w_, const CompileResult &x_) {
   compileresult_fields_to_msgpack(w_, x_);
 }
 
-InterfaceDef interfacedef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected InterfaceDef with 3 field(s)");
+Interface interface_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected Interface with 3 field(s)");
   auto name = sym_from_msgpack(r_);
-  std::vector<FunctionDecl> decls;
+  std::vector<FunctionDecl> declarations;
   {
-    auto decls_size = r_.readArrayHeader();
-    decls.reserve(decls_size);
-    for (size_t decls_idx = 0; decls_idx < decls_size; ++decls_idx) {
-      auto decls_elem = functiondecl_from_msgpack(r_);
-      decls.emplace_back(std::move(decls_elem));
+    auto declarations_size = r_.readArrayHeader();
+    declarations.reserve(declarations_size);
+    for (size_t declarations_idx = 0; declarations_idx < declarations_size; ++declarations_idx) {
+      auto declarations_elem = functiondecl_from_msgpack(r_);
+      declarations.emplace_back(std::move(declarations_elem));
     }
   }
   std::vector<MetaEntry> metadata;
@@ -11309,13 +11540,13 @@ InterfaceDef interfacedef_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
       metadata.emplace_back(std::move(metadata_elem));
     }
   }
-  return {name, decls, metadata};
+  return {name, declarations, metadata};
 }
 
-void interfacedef_fields_to_msgpack(MsgpackWriter &w_, const InterfaceDef &x_) {
+void interface_fields_to_msgpack(MsgpackWriter &w_, const Interface &x_) {
   sym_to_msgpack(w_, x_.name);
-  w_.writeArrayHeader(x_.decls.size());
-  for (const auto &v0_ : x_.decls) {
+  w_.writeArrayHeader(x_.declarations.size());
+  for (const auto &v0_ : x_.declarations) {
     functiondecl_to_msgpack(w_, v0_);
   }
   w_.writeArrayHeader(x_.metadata.size());
@@ -11324,128 +11555,25 @@ void interfacedef_fields_to_msgpack(MsgpackWriter &w_, const InterfaceDef &x_) {
   }
 }
 
-InterfaceDef interfacedef_from_msgpack(MsgpackReader &r_) {
+Interface interface_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
-  return interfacedef_fields_from_msgpack(r_, n_);
+  return interface_fields_from_msgpack(r_, n_);
 }
 
-void interfacedef_to_msgpack(MsgpackWriter &w_, const InterfaceDef &x_) {
+void interface_to_msgpack(MsgpackWriter &w_, const Interface &x_) {
   w_.writeArrayHeader(3);
-  interfacedef_fields_to_msgpack(w_, x_);
-}
-
-TypeSizeConstraint typesizeconstraint_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected TypeSizeConstraint with 2 field(s)");
-  auto typeVariable = r_.readString();
-  auto sizeInBytes = static_cast<int32_t>(r_.readInt32());
-  return {typeVariable, sizeInBytes};
-}
-
-void typesizeconstraint_fields_to_msgpack(MsgpackWriter &w_, const TypeSizeConstraint &x_) {
-  w_.writeString(x_.typeVariable);
-  w_.writeInt32(static_cast<int32_t>(x_.sizeInBytes));
-}
-
-TypeSizeConstraint typesizeconstraint_from_msgpack(MsgpackReader &r_) {
-  auto n_ = r_.readArrayHeader();
-  return typesizeconstraint_fields_from_msgpack(r_, n_);
-}
-
-void typesizeconstraint_to_msgpack(MsgpackWriter &w_, const TypeSizeConstraint &x_) {
-  w_.writeArrayHeader(2);
-  typesizeconstraint_fields_to_msgpack(w_, x_);
-}
-
-ImplementationCandidate implementationcandidate_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected ImplementationCandidate with 4 field(s)");
-  auto publicName = sym_from_msgpack(r_);
-  auto implementation = functiondecl_from_msgpack(r_);
-  std::vector<std::string> requiredCapabilities;
-  {
-    auto requiredCapabilities_size = r_.readArrayHeader();
-    requiredCapabilities.reserve(requiredCapabilities_size);
-    for (size_t requiredCapabilities_idx = 0; requiredCapabilities_idx < requiredCapabilities_size; ++requiredCapabilities_idx) {
-      auto requiredCapabilities_elem = r_.readString();
-      requiredCapabilities.emplace_back(std::move(requiredCapabilities_elem));
-    }
-  }
-  std::vector<TypeSizeConstraint> typeSizes;
-  {
-    auto typeSizes_size = r_.readArrayHeader();
-    typeSizes.reserve(typeSizes_size);
-    for (size_t typeSizes_idx = 0; typeSizes_idx < typeSizes_size; ++typeSizes_idx) {
-      auto typeSizes_elem = typesizeconstraint_from_msgpack(r_);
-      typeSizes.emplace_back(std::move(typeSizes_elem));
-    }
-  }
-  return {publicName, implementation, requiredCapabilities, typeSizes};
-}
-
-void implementationcandidate_fields_to_msgpack(MsgpackWriter &w_, const ImplementationCandidate &x_) {
-  sym_to_msgpack(w_, x_.publicName);
-  functiondecl_to_msgpack(w_, x_.implementation);
-  w_.writeArrayHeader(x_.requiredCapabilities.size());
-  for (const auto &v0_ : x_.requiredCapabilities) {
-    w_.writeString(v0_);
-  }
-  w_.writeArrayHeader(x_.typeSizes.size());
-  for (const auto &v0_ : x_.typeSizes) {
-    typesizeconstraint_to_msgpack(w_, v0_);
-  }
-}
-
-ImplementationCandidate implementationcandidate_from_msgpack(MsgpackReader &r_) {
-  auto n_ = r_.readArrayHeader();
-  return implementationcandidate_fields_from_msgpack(r_, n_);
-}
-
-void implementationcandidate_to_msgpack(MsgpackWriter &w_, const ImplementationCandidate &x_) {
-  w_.writeArrayHeader(4);
-  implementationcandidate_fields_to_msgpack(w_, x_);
-}
-
-PackageIndex packageindex_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected PackageIndex with 2 field(s)");
-  auto interface = interfacedef_from_msgpack(r_);
-  std::vector<ImplementationCandidate> candidates;
-  {
-    auto candidates_size = r_.readArrayHeader();
-    candidates.reserve(candidates_size);
-    for (size_t candidates_idx = 0; candidates_idx < candidates_size; ++candidates_idx) {
-      auto candidates_elem = implementationcandidate_from_msgpack(r_);
-      candidates.emplace_back(std::move(candidates_elem));
-    }
-  }
-  return {interface, candidates};
-}
-
-void packageindex_fields_to_msgpack(MsgpackWriter &w_, const PackageIndex &x_) {
-  interfacedef_to_msgpack(w_, x_.interface);
-  w_.writeArrayHeader(x_.candidates.size());
-  for (const auto &v0_ : x_.candidates) {
-    implementationcandidate_to_msgpack(w_, v0_);
-  }
-}
-
-PackageIndex packageindex_from_msgpack(MsgpackReader &r_) {
-  auto n_ = r_.readArrayHeader();
-  return packageindex_fields_from_msgpack(r_, n_);
-}
-
-void packageindex_to_msgpack(MsgpackWriter &w_, const PackageIndex &x_) {
-  w_.writeArrayHeader(2);
-  packageindex_fields_to_msgpack(w_, x_);
+  interface_fields_to_msgpack(w_, x_);
 }
 
 Package package_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Package with 2 field(s)");
-  auto index = packageindex_from_msgpack(r_);
+  auto interface = interface_from_msgpack(r_);
   auto program = program_from_msgpack(r_);
-  return {index, program};
+  return {interface, program};
 }
 
 void package_fields_to_msgpack(MsgpackWriter &w_, const Package &x_) {
-  packageindex_to_msgpack(w_, x_.index);
+  interface_to_msgpack(w_, x_.interface);
   program_to_msgpack(w_, x_.program);
 }
 
@@ -11459,19 +11587,375 @@ void package_to_msgpack(MsgpackWriter &w_, const Package &x_) {
   package_fields_to_msgpack(w_, x_);
 }
 
-static void structdefs_value_to_msgpack(MsgpackWriter &w_, const std::vector<StructDef> &xs_) {
-  w_.writeArrayHeader(xs_.size());
-  for (const auto &x_ : xs_)
-    structdef_to_msgpack(w_, x_);
+PackageTypeSize packagetypesize_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PackageTypeSize with 2 field(s)");
+  auto tpe = Type::any_from_msgpack(r_);
+  auto sizeInBytes = static_cast<int32_t>(r_.readInt32());
+  return {tpe, sizeInBytes};
 }
 
-static std::vector<StructDef> structdefs_value_from_msgpack(MsgpackReader &r_) {
+void packagetypesize_fields_to_msgpack(MsgpackWriter &w_, const PackageTypeSize &x_) {
+  Type::any_to_msgpack(w_, x_.tpe);
+  w_.writeInt32(static_cast<int32_t>(x_.sizeInBytes));
+}
+
+PackageTypeSize packagetypesize_from_msgpack(MsgpackReader &r_) {
   auto n_ = r_.readArrayHeader();
-  std::vector<StructDef> xs_;
-  xs_.reserve(n_);
-  for (size_t i_ = 0; i_ < n_; ++i_)
-    xs_.emplace_back(structdef_from_msgpack(r_));
-  return xs_;
+  return packagetypesize_fields_from_msgpack(r_, n_);
+}
+
+void packagetypesize_to_msgpack(MsgpackWriter &w_, const PackageTypeSize &x_) {
+  w_.writeArrayHeader(2);
+  packagetypesize_fields_to_msgpack(w_, x_);
+}
+
+PackageLinkRequest packagelinkrequest_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected PackageLinkRequest with 3 field(s)");
+  auto interface = interface_from_msgpack(r_);
+  std::vector<Program> programFragments;
+  {
+    auto programFragments_size = r_.readArrayHeader();
+    programFragments.reserve(programFragments_size);
+    for (size_t programFragments_idx = 0; programFragments_idx < programFragments_size; ++programFragments_idx) {
+      auto programFragments_elem = program_from_msgpack(r_);
+      programFragments.emplace_back(std::move(programFragments_elem));
+    }
+  }
+  std::vector<std::string> capabilities;
+  {
+    auto capabilities_size = r_.readArrayHeader();
+    capabilities.reserve(capabilities_size);
+    for (size_t capabilities_idx = 0; capabilities_idx < capabilities_size; ++capabilities_idx) {
+      auto capabilities_elem = r_.readString();
+      capabilities.emplace_back(std::move(capabilities_elem));
+    }
+  }
+  return {interface, programFragments, capabilities};
+}
+
+void packagelinkrequest_fields_to_msgpack(MsgpackWriter &w_, const PackageLinkRequest &x_) {
+  interface_to_msgpack(w_, x_.interface);
+  w_.writeArrayHeader(x_.programFragments.size());
+  for (const auto &v0_ : x_.programFragments) {
+    program_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.capabilities.size());
+  for (const auto &v0_ : x_.capabilities) {
+    w_.writeString(v0_);
+  }
+}
+
+PackageLinkRequest packagelinkrequest_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packagelinkrequest_fields_from_msgpack(r_, n_);
+}
+
+void packagelinkrequest_to_msgpack(MsgpackWriter &w_, const PackageLinkRequest &x_) {
+  w_.writeArrayHeader(3);
+  packagelinkrequest_fields_to_msgpack(w_, x_);
+}
+
+PackageSymRequest packagesymrequest_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 9) throw std::runtime_error("Expected PackageSymRequest with 9 field(s)");
+  auto pkg = package_from_msgpack(r_);
+  auto signature = invokesignature_from_msgpack(r_);
+  std::vector<FunctionDecl> callerDecls;
+  {
+    auto callerDecls_size = r_.readArrayHeader();
+    callerDecls.reserve(callerDecls_size);
+    for (size_t callerDecls_idx = 0; callerDecls_idx < callerDecls_size; ++callerDecls_idx) {
+      auto callerDecls_elem = functiondecl_from_msgpack(r_);
+      callerDecls.emplace_back(std::move(callerDecls_elem));
+    }
+  }
+  std::vector<Function> callerFns;
+  {
+    auto callerFns_size = r_.readArrayHeader();
+    callerFns.reserve(callerFns_size);
+    for (size_t callerFns_idx = 0; callerFns_idx < callerFns_size; ++callerFns_idx) {
+      auto callerFns_elem = function_from_msgpack(r_);
+      callerFns.emplace_back(std::move(callerFns_elem));
+    }
+  }
+  std::vector<StructDef> callerDefs;
+  {
+    auto callerDefs_size = r_.readArrayHeader();
+    callerDefs.reserve(callerDefs_size);
+    for (size_t callerDefs_idx = 0; callerDefs_idx < callerDefs_size; ++callerDefs_idx) {
+      auto callerDefs_elem = structdef_from_msgpack(r_);
+      callerDefs.emplace_back(std::move(callerDefs_elem));
+    }
+  }
+  std::vector<std::string> capabilities;
+  {
+    auto capabilities_size = r_.readArrayHeader();
+    capabilities.reserve(capabilities_size);
+    for (size_t capabilities_idx = 0; capabilities_idx < capabilities_size; ++capabilities_idx) {
+      auto capabilities_elem = r_.readString();
+      capabilities.emplace_back(std::move(capabilities_elem));
+    }
+  }
+  std::vector<PackageTypeSize> typeSizes;
+  {
+    auto typeSizes_size = r_.readArrayHeader();
+    typeSizes.reserve(typeSizes_size);
+    for (size_t typeSizes_idx = 0; typeSizes_idx < typeSizes_size; ++typeSizes_idx) {
+      auto typeSizes_elem = packagetypesize_from_msgpack(r_);
+      typeSizes.emplace_back(std::move(typeSizes_elem));
+    }
+  }
+  auto entryName = r_.readString();
+  auto returnConvention = PackageReturnConvention::any_from_msgpack(r_);
+  return {pkg, signature, callerDecls, callerFns, callerDefs, capabilities, typeSizes, entryName, returnConvention};
+}
+
+void packagesymrequest_fields_to_msgpack(MsgpackWriter &w_, const PackageSymRequest &x_) {
+  package_to_msgpack(w_, x_.pkg);
+  invokesignature_to_msgpack(w_, x_.signature);
+  w_.writeArrayHeader(x_.callerDecls.size());
+  for (const auto &v0_ : x_.callerDecls) {
+    functiondecl_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.callerFns.size());
+  for (const auto &v0_ : x_.callerFns) {
+    function_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.callerDefs.size());
+  for (const auto &v0_ : x_.callerDefs) {
+    structdef_to_msgpack(w_, v0_);
+  }
+  w_.writeArrayHeader(x_.capabilities.size());
+  for (const auto &v0_ : x_.capabilities) {
+    w_.writeString(v0_);
+  }
+  w_.writeArrayHeader(x_.typeSizes.size());
+  for (const auto &v0_ : x_.typeSizes) {
+    packagetypesize_to_msgpack(w_, v0_);
+  }
+  w_.writeString(x_.entryName);
+  PackageReturnConvention::any_to_msgpack(w_, x_.returnConvention);
+}
+
+PackageSymRequest packagesymrequest_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packagesymrequest_fields_from_msgpack(r_, n_);
+}
+
+void packagesymrequest_to_msgpack(MsgpackWriter &w_, const PackageSymRequest &x_) {
+  w_.writeArrayHeader(9);
+  packagesymrequest_fields_to_msgpack(w_, x_);
+}
+
+PackageReturnConvention::Return PackageReturnConvention::return_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected PackageReturnConvention::Return with 0 field(s)");
+  return {};
+}
+
+void PackageReturnConvention::return_fields_to_msgpack(MsgpackWriter &w_, const PackageReturnConvention::Return &x_) {}
+
+PackageReturnConvention::Return PackageReturnConvention::return_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PackageReturnConvention::return_fields_from_msgpack(r_, n_);
+}
+
+void PackageReturnConvention::return_to_msgpack(MsgpackWriter &w_, const PackageReturnConvention::Return &x_) {
+  w_.writeArrayHeader(0);
+  PackageReturnConvention::return_fields_to_msgpack(w_, x_);
+}
+
+PackageReturnConvention::OutParam PackageReturnConvention::outparam_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected PackageReturnConvention::OutParam with 1 field(s)");
+  auto index = static_cast<int32_t>(r_.readInt32());
+  return PackageReturnConvention::OutParam(index);
+}
+
+void PackageReturnConvention::outparam_fields_to_msgpack(MsgpackWriter &w_, const PackageReturnConvention::OutParam &x_) {
+  w_.writeInt32(static_cast<int32_t>(x_.index));
+}
+
+PackageReturnConvention::OutParam PackageReturnConvention::outparam_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PackageReturnConvention::outparam_fields_from_msgpack(r_, n_);
+}
+
+void PackageReturnConvention::outparam_to_msgpack(MsgpackWriter &w_, const PackageReturnConvention::OutParam &x_) {
+  w_.writeArrayHeader(1);
+  PackageReturnConvention::outparam_fields_to_msgpack(w_, x_);
+}
+
+PackageReturnConvention::Any PackageReturnConvention::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return PackageReturnConvention::return_fields_from_msgpack(r_, n_ - 1);
+      case 1: return PackageReturnConvention::outparam_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return PackageReturnConvention::return_fields_from_msgpack(r_, 0);
+      case 1: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void PackageReturnConvention::any_to_msgpack(MsgpackWriter &w_, const PackageReturnConvention::Any &x_) {
+  x_.match_total([&](const PackageReturnConvention::Return &y_) -> void { w_.writeInt32(0); },
+                 [&](const PackageReturnConvention::OutParam &y_) -> void {
+                   w_.writeArrayHeader(2);
+                   w_.writeInt32(1);
+                   PackageReturnConvention::outparam_fields_to_msgpack(w_, y_);
+                 });
+}
+
+PackageEntryArgBinding::Context PackageEntryArgBinding::context_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected PackageEntryArgBinding::Context with 0 field(s)");
+  return {};
+}
+
+void PackageEntryArgBinding::context_fields_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::Context &x_) {}
+
+PackageEntryArgBinding::Context PackageEntryArgBinding::context_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PackageEntryArgBinding::context_fields_from_msgpack(r_, n_);
+}
+
+void PackageEntryArgBinding::context_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::Context &x_) {
+  w_.writeArrayHeader(0);
+  PackageEntryArgBinding::context_fields_to_msgpack(w_, x_);
+}
+
+PackageEntryArgBinding::CallValue PackageEntryArgBinding::callvalue_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected PackageEntryArgBinding::CallValue with 1 field(s)");
+  auto index = static_cast<int32_t>(r_.readInt32());
+  return PackageEntryArgBinding::CallValue(index);
+}
+
+void PackageEntryArgBinding::callvalue_fields_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::CallValue &x_) {
+  w_.writeInt32(static_cast<int32_t>(x_.index));
+}
+
+PackageEntryArgBinding::CallValue PackageEntryArgBinding::callvalue_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PackageEntryArgBinding::callvalue_fields_from_msgpack(r_, n_);
+}
+
+void PackageEntryArgBinding::callvalue_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::CallValue &x_) {
+  w_.writeArrayHeader(1);
+  PackageEntryArgBinding::callvalue_fields_to_msgpack(w_, x_);
+}
+
+PackageEntryArgBinding::CallAddress PackageEntryArgBinding::calladdress_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected PackageEntryArgBinding::CallAddress with 1 field(s)");
+  auto index = static_cast<int32_t>(r_.readInt32());
+  return PackageEntryArgBinding::CallAddress(index);
+}
+
+void PackageEntryArgBinding::calladdress_fields_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::CallAddress &x_) {
+  w_.writeInt32(static_cast<int32_t>(x_.index));
+}
+
+PackageEntryArgBinding::CallAddress PackageEntryArgBinding::calladdress_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PackageEntryArgBinding::calladdress_fields_from_msgpack(r_, n_);
+}
+
+void PackageEntryArgBinding::calladdress_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::CallAddress &x_) {
+  w_.writeArrayHeader(1);
+  PackageEntryArgBinding::calladdress_fields_to_msgpack(w_, x_);
+}
+
+PackageEntryArgBinding::ResultAddress PackageEntryArgBinding::resultaddress_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 0) throw std::runtime_error("Expected PackageEntryArgBinding::ResultAddress with 0 field(s)");
+  return {};
+}
+
+void PackageEntryArgBinding::resultaddress_fields_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::ResultAddress &x_) {}
+
+PackageEntryArgBinding::ResultAddress PackageEntryArgBinding::resultaddress_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return PackageEntryArgBinding::resultaddress_fields_from_msgpack(r_, n_);
+}
+
+void PackageEntryArgBinding::resultaddress_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::ResultAddress &x_) {
+  w_.writeArrayHeader(0);
+  PackageEntryArgBinding::resultaddress_fields_to_msgpack(w_, x_);
+}
+
+PackageEntryArgBinding::Any PackageEntryArgBinding::any_from_msgpack(MsgpackReader &r_) {
+  if (r_.nextIsArray()) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ == 0) throw std::runtime_error("Expected non-empty sum payload");
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return PackageEntryArgBinding::context_fields_from_msgpack(r_, n_ - 1);
+      case 1: return PackageEntryArgBinding::callvalue_fields_from_msgpack(r_, n_ - 1);
+      case 2: return PackageEntryArgBinding::calladdress_fields_from_msgpack(r_, n_ - 1);
+      case 3: return PackageEntryArgBinding::resultaddress_fields_from_msgpack(r_, n_ - 1);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  } else {
+    auto ord_ = r_.readInt32();
+    switch (ord_) {
+      case 0: return PackageEntryArgBinding::context_fields_from_msgpack(r_, 0);
+      case 1: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 2: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 3: return PackageEntryArgBinding::resultaddress_fields_from_msgpack(r_, 0);
+      default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
+    }
+  }
+}
+
+void PackageEntryArgBinding::any_to_msgpack(MsgpackWriter &w_, const PackageEntryArgBinding::Any &x_) {
+  x_.match_total([&](const PackageEntryArgBinding::Context &y_) -> void { w_.writeInt32(0); },
+                 [&](const PackageEntryArgBinding::CallValue &y_) -> void {
+                   w_.writeArrayHeader(2);
+                   w_.writeInt32(1);
+                   PackageEntryArgBinding::callvalue_fields_to_msgpack(w_, y_);
+                 },
+                 [&](const PackageEntryArgBinding::CallAddress &y_) -> void {
+                   w_.writeArrayHeader(2);
+                   w_.writeInt32(2);
+                   PackageEntryArgBinding::calladdress_fields_to_msgpack(w_, y_);
+                 },
+                 [&](const PackageEntryArgBinding::ResultAddress &y_) -> void { w_.writeInt32(3); });
+}
+
+PackageSymResolvedProgram packagesymresolvedprogram_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PackageSymResolvedProgram with 2 field(s)");
+  auto program = program_from_msgpack(r_);
+  std::vector<PackageEntryArgBinding::Any> entryArgs;
+  {
+    auto entryArgs_size = r_.readArrayHeader();
+    entryArgs.reserve(entryArgs_size);
+    for (size_t entryArgs_idx = 0; entryArgs_idx < entryArgs_size; ++entryArgs_idx) {
+      auto entryArgs_elem = PackageEntryArgBinding::any_from_msgpack(r_);
+      entryArgs.emplace_back(std::move(entryArgs_elem));
+    }
+  }
+  return {program, entryArgs};
+}
+
+void packagesymresolvedprogram_fields_to_msgpack(MsgpackWriter &w_, const PackageSymResolvedProgram &x_) {
+  program_to_msgpack(w_, x_.program);
+  w_.writeArrayHeader(x_.entryArgs.size());
+  for (const auto &v0_ : x_.entryArgs) {
+    PackageEntryArgBinding::any_to_msgpack(w_, v0_);
+  }
+}
+
+PackageSymResolvedProgram packagesymresolvedprogram_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packagesymresolvedprogram_fields_from_msgpack(r_, n_);
+}
+
+void packagesymresolvedprogram_to_msgpack(MsgpackWriter &w_, const PackageSymResolvedProgram &x_) {
+  w_.writeArrayHeader(2);
+  packagesymresolvedprogram_fields_to_msgpack(w_, x_);
 }
 
 std::vector<uint8_t> program_to_msgpack(const Program &x_) {
@@ -11479,7 +11963,10 @@ std::vector<uint8_t> program_to_msgpack(const Program &x_) {
 }
 
 Program program_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
-  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) { return program_from_msgpack(r_); });
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto value_ = program_from_msgpack(r_);
+    return value_;
+  });
 }
 
 Program program_from_msgpack(const std::vector<uint8_t> &xs_) { return program_from_msgpack(xs_.data(), xs_.data() + xs_.size()); }
@@ -11498,13 +11985,35 @@ Program hashed_program_from_msgpack(const uint8_t *begin_, const uint8_t *end_) 
     if (n_ != 2) throw std::runtime_error("Expected versioned Program array of size 2");
     auto hash_ = r_.readString();
     if (hash_ != ProgramHash) throw std::runtime_error("Expecting Program hash to be " + std::string(ProgramHash) + ", but was " + hash_);
-    return program_from_msgpack(r_);
+    auto value_ = program_from_msgpack(r_);
+    return value_;
   });
 }
 
 Program hashed_program_from_msgpack(const std::vector<uint8_t> &xs_) {
   return hashed_program_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
+
+std::vector<uint8_t> interface_to_msgpack(const Interface &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageHash));
+    interface_to_msgpack(w_, x_);
+  });
+}
+
+Interface interface_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned Interface array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageHash) throw std::runtime_error("Expecting Interface hash to be " + std::string(PackageHash) + ", but was " + hash_);
+    auto value_ = interface_from_msgpack(r_);
+    return value_;
+  });
+}
+
+Interface interface_from_msgpack(const std::vector<uint8_t> &xs_) { return interface_from_msgpack(xs_.data(), xs_.data() + xs_.size()); }
 
 std::vector<uint8_t> package_to_msgpack(const Package &x_) {
   return encodeInterned([&](MsgpackWriter &w_) {
@@ -11520,29 +12029,145 @@ Package package_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
     if (n_ != 2) throw std::runtime_error("Expected versioned Package array of size 2");
     auto hash_ = r_.readString();
     if (hash_ != PackageHash) throw std::runtime_error("Expecting Package hash to be " + std::string(PackageHash) + ", but was " + hash_);
-    return package_from_msgpack(r_);
+    auto value_ = package_from_msgpack(r_);
+    return value_;
   });
 }
 
 Package package_from_msgpack(const std::vector<uint8_t> &xs_) { return package_from_msgpack(xs_.data(), xs_.data() + xs_.size()); }
 
-std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
-  return encodeInterned([&](MsgpackWriter &w_) { structdefs_value_to_msgpack(w_, xs_); });
+std::vector<uint8_t> package_service_result_to_msgpack(const Package &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageWireHash));
+    package_to_msgpack(w_, x_);
+  });
+}
+
+Package package_service_result_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned package-service Package array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageWireHash)
+      throw std::runtime_error("Expecting package-service wire hash to be " + std::string(PackageWireHash) + ", but was " + hash_);
+    auto value_ = package_from_msgpack(r_);
+    return value_;
+  });
+}
+
+Package package_service_result_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return package_service_result_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> packagelinkrequest_to_msgpack(const PackageLinkRequest &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageWireHash));
+    packagelinkrequest_to_msgpack(w_, x_);
+  });
+}
+
+PackageLinkRequest packagelinkrequest_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned PackageLinkRequest array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageWireHash)
+      throw std::runtime_error("Expecting package-service wire hash to be " + std::string(PackageWireHash) + ", but was " + hash_);
+    auto value_ = packagelinkrequest_from_msgpack(r_);
+    return value_;
+  });
+}
+
+PackageLinkRequest packagelinkrequest_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return packagelinkrequest_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> packagesymrequest_to_msgpack(const PackageSymRequest &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageWireHash));
+    packagesymrequest_to_msgpack(w_, x_);
+  });
+}
+
+PackageSymRequest packagesymrequest_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned PackageSymRequest array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageWireHash)
+      throw std::runtime_error("Expecting package-service wire hash to be " + std::string(PackageWireHash) + ", but was " + hash_);
+    auto value_ = packagesymrequest_from_msgpack(r_);
+    return value_;
+  });
+}
+
+PackageSymRequest packagesymrequest_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return packagesymrequest_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> resolvedsymprogram_to_msgpack(const PackageSymResolvedProgram &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageWireHash));
+    packagesymresolvedprogram_to_msgpack(w_, x_);
+  });
+}
+
+PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned PackageSymResolvedProgram array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageWireHash)
+      throw std::runtime_error("Expecting package-service wire hash to be " + std::string(PackageWireHash) + ", but was " + hash_);
+    auto value_ = packagesymresolvedprogram_from_msgpack(r_);
+    return value_;
+  });
+}
+
+PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return resolvedsymprogram_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(x_.size());
+    for (const auto &v0_ : x_) {
+      structdef_to_msgpack(w_, v0_);
+    }
+  });
 }
 
 std::vector<StructDef> structdefs_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
-  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) { return structdefs_value_from_msgpack(r_); });
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    std::vector<StructDef> value_;
+    {
+      auto value__size = r_.readArrayHeader();
+      value_.reserve(value__size);
+      for (size_t value__idx = 0; value__idx < value__size; ++value__idx) {
+        auto value__elem = structdef_from_msgpack(r_);
+        value_.emplace_back(std::move(value__elem));
+      }
+    }
+    return value_;
+  });
 }
 
 std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t> &xs_) {
   return structdefs_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
 
-std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef> &xs_) {
+std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef> &x_) {
   return encodeInterned([&](MsgpackWriter &w_) {
     w_.writeArrayHeader(2);
     w_.writeString(std::string(ProgramHash));
-    structdefs_value_to_msgpack(w_, xs_);
+    w_.writeArrayHeader(x_.size());
+    for (const auto &v0_ : x_) {
+      structdef_to_msgpack(w_, v0_);
+    }
   });
 }
 
@@ -11552,7 +12177,16 @@ std::vector<StructDef> hashed_structdefs_from_msgpack(const uint8_t *begin_, con
     if (n_ != 2) throw std::runtime_error("Expected versioned StructDef list array of size 2");
     auto hash_ = r_.readString();
     if (hash_ != ProgramHash) throw std::runtime_error("Expecting Program hash to be " + std::string(ProgramHash) + ", but was " + hash_);
-    return structdefs_value_from_msgpack(r_);
+    std::vector<StructDef> value_;
+    {
+      auto value__size = r_.readArrayHeader();
+      value_.reserve(value__size);
+      for (size_t value__idx = 0; value__idx < value__size; ++value__idx) {
+        auto value__elem = structdef_from_msgpack(r_);
+        value_.emplace_back(std::move(value__elem));
+      }
+    }
+    return value_;
   });
 }
 
@@ -11565,7 +12199,10 @@ std::vector<uint8_t> compileresult_to_msgpack(const CompileResult &x_) {
 }
 
 CompileResult compileresult_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
-  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) { return compileresult_from_msgpack(r_); });
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto value_ = compileresult_from_msgpack(r_);
+    return value_;
+  });
 }
 
 CompileResult compileresult_from_msgpack(const std::vector<uint8_t> &xs_) {
@@ -11577,11 +12214,13 @@ std::vector<uint8_t> passrunresult_to_msgpack(const PassRunResult &x_) {
 }
 
 PassRunResult passrunresult_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
-  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) { return passrunresult_from_msgpack(r_); });
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto value_ = passrunresult_from_msgpack(r_);
+    return value_;
+  });
 }
 
 PassRunResult passrunresult_from_msgpack(const std::vector<uint8_t> &xs_) {
   return passrunresult_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
-
 } // namespace polyregion::polyast

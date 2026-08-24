@@ -31,6 +31,7 @@ target_link_libraries(polycpp-clang-plugin
         PRIVATE
         polycommon
         polyfront-options
+        polyfront-package-service
         PolyAST
         Aspartame::Aspartame
         fmt::fmt-header-only

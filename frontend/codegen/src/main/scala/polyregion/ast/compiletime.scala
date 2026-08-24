@@ -122,6 +122,15 @@ private[polyregion] object compiletime {
     val tpe = TypeRepr.of[T].dealias.simplified
 
     def normalise(s: String) = s.replaceAll("\\$", "_")
+    def productName(r: TypeRepr): String =
+      List
+        .unfold(r.typeSymbol)(s =>
+          if (s.isNoSymbol || s == tpe.typeSymbol) None
+          else Some((s.name.replace("$", ""), s.owner))
+        )
+        .reverse
+        .mkString
+
     def retype(t: TypeRepr, const: Boolean = false): String = {
       val r = t.dealias.simplified
 
@@ -134,7 +143,7 @@ private[polyregion] object compiletime {
           sumParent match {
             case Some(parent) =>
               s"${retype(r.baseType(parent)).stripSuffix("::Any")}::${r.typeSymbol.name}"
-            case None if r.typeSymbol.flags.is(Flags.Case) => r.typeSymbol.name
+            case None if r.typeSymbol.flags.is(Flags.Case) => productName(r)
             case None =>
               val fqcnTail = List
                 .unfold(r.typeSymbol)(s => if (s.isNoSymbol) None else Some((s, s.maybeOwner)))
@@ -205,7 +214,12 @@ private[polyregion] object compiletime {
              term.tpe.widenTermRefByName
            )}) at {}:{})", __FILE__, __LINE__));
             |}()""".stripMargin
-      case Apply(Ident("repr"), x :: Nil) => s"repr(${remap(x, scope, depth + 1)})"
+      case Apply(Ident("repr"), x :: Nil)          => s"repr(${remap(x, scope, depth + 1)})"
+      case Apply(Ident("canonicalName"), x :: Nil) => s"canonicalName(${remap(x, scope, depth + 1)})"
+      case Apply(Select(x, "fqcn"), Nil)           => s"fqcn(${remap(x, scope, depth + 1)})"
+      case Select(x, "fqcn")                       => s"fqcn(${remap(x, scope, depth + 1)})"
+      case Apply(Select(x, "canonicalName"), Nil)  => s"canonicalName(${remap(x, scope, depth + 1)})"
+      case Select(x, "canonicalName")              => s"canonicalName(${remap(x, scope, depth + 1)})"
       case Apply(Select(xs, "mkString"), sep :: Nil) =>
         s"(${remap(xs, scope, depth + 1)} | mk_string(${remap(sep, scope, depth + 1)}))"
       case Select(xs, "mkString") => s"(${remap(xs, scope, depth + 1)} | mk_string(\"\"s))"

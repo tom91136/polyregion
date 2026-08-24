@@ -12,13 +12,10 @@
 
 namespace polyregion::polyfront {
 
-inline constexpr auto PackageRootName = "__package_root";
 inline constexpr auto PackageExportAnnotation = "polyregion_export";
 
 inline polyast::Program packageProgram(std::vector<polyast::Function> functions, std::vector<polyast::StructDef> defs) {
-  using namespace polyast::dsl;
-  auto root = function(PackageRootName, {}, polyast::Type::Unit0(), polyast::FunctionVisibility::Internal())({ret()});
-  return polyast::Program(std::move(root), std::move(functions), std::move(defs), polyast::PassPhase::Initial(), {});
+  return polyast::Program({}, std::move(functions), std::move(defs), polyast::PassPhase::Initial(), {});
 }
 
 inline std::variant<std::error_code, size_t> writeProgramMsgpack(const polyast::Program &program, const std::string &path) {

@@ -45,12 +45,12 @@ object PassTest {
       termCaptures: List[p.Arg] = Nil,
       visibility: p.Function.Visibility = p.Function.Visibility.Exported,
       fpMode: p.Function.FpMode = p.Function.FpMode.Relaxed,
-      isEntry: Boolean = false
+      convention: p.CallConvention = p.CallConvention.RegularCall
   ): p.Function =
     p.Function(
       p.FunctionDecl(
         sym(name),
-        tpeVars,
+        tpeVars.map(p.Type.Var(_)),
         None,
         args,
         moduleCaptures,
@@ -61,7 +61,7 @@ object PassTest {
       body,
       visibility,
       fpMode,
-      isEntry
+      convention
     )
 
   def entry(
@@ -70,11 +70,31 @@ object PassTest {
       moduleCaptures: List[p.Arg] = Nil,
       termCaptures: List[p.Arg] = Nil
   ): p.Function =
-    fn(p.Conventions.EntryName, args, p.Type.Unit0, body, Nil, moduleCaptures, termCaptures, isEntry = true)
+    fn(
+      p.Conventions.EntryName,
+      args,
+      p.Type.Unit0,
+      body,
+      Nil,
+      moduleCaptures,
+      termCaptures,
+      convention = p.CallConvention.OffloadEntry
+    )
 
   def program(
       entry: p.Function,
       functions: List[p.Function] = Nil,
       defs: List[p.StructDef] = Nil
-  ): p.Program = p.Program(entry, functions, defs)
+  ): p.Program = p.Program(Some(entry), functions, defs)
+
+  def program(entry: Option[p.Function], functions: List[p.Function], defs: List[p.StructDef]): p.Program =
+    p.Program(entry, functions, defs)
+  def program(entry: Option[p.Function], defs: List[p.StructDef]): p.Program = p.Program(entry, Nil, defs)
+
+  extension (entry: Option[p.Function]) {
+    def required: p.Function        = entry.getOrElse(throw AssertionError("expected program entry"))
+    def args: List[p.Arg]           = required.args
+    def moduleCaptures: List[p.Arg] = required.moduleCaptures
+    def body: List[p.Stmt]          = required.body
+  }
 }

@@ -13,9 +13,11 @@ class RegionRespaceSuite extends munit.FunSuite {
       f.collectAll[p.Term].collect { case p.Term.Select(n, _, _) if n.symbol == sym => n.tpe }).collect {
       case p.Type.Ptr(_, s) => s
     }.toSet
+  private def ptrSpacesOf(f: Option[p.Function], sym: String): Set[p.Type.Space] = ptrSpacesOf(f.required, sym)
 
   private def refToSpaces(f: p.Function): Set[p.Type.Space] =
     f.collectAll[p.Expr].collect { case p.Expr.RefTo(_, _, _, s, _) => s }.toSet
+  private def refToSpaces(f: Option[p.Function]): Set[p.Type.Space] = refToSpaces(f.required)
 
   test("a Global pointer rooted at a Local resource is re-stamped Local (decl, uses, and the RefTo)") {
     val local = named("local", ptr(p.Type.Space.Local))

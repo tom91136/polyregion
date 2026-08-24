@@ -1,0 +1,5 @@
+polypackage_abi_version
+polypackage_link_package
+polypackage_resolve_sym
+polypackage_last_error
+polypackage_free

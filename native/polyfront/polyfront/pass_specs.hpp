@@ -15,6 +15,16 @@ inline std::string fullOpt(std::optional<int> stackDepth) {
   return stackDepth ? fmt::format("FullOpt(stackDepth={})", *stackDepth) : std::string("FullOpt");
 }
 
+inline std::string deviceOpt(std::optional<int> stackDepth) { return "DeadFunctionElimination;" + fullOpt(stackDepth); }
+
+inline std::string packageEntryOpt(std::optional<int> stackDepth) {
+  return stackDepth
+             ? fmt::format("DeadFunctionElimination;Intrinsify;RecursionLower(stackDepth={});FnInline;Intrinsify;KernelCaptureFlatten;"
+                           "FullOpt(level=1)",
+                           *stackDepth)
+             : std::string("DeadFunctionElimination;Intrinsify;RecursionLower;FnInline;Intrinsify;KernelCaptureFlatten;FullOpt(level=1)");
+}
+
 // single-arena lowering: the dispatch marshals the capture graph into one device arena (pointers -> i64
 // offsets) and the pass rewrites every opaque-pointer deref. flat backends (c_source/OpenCL 1.2) use byte
 // addressing `(T*)&arena[off]`; SPIR-V cannot cast int<->ptr, so it reads through typed scalar views.
@@ -45,6 +55,22 @@ inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target
     case compiletime::Target::Source_C_OpenCL1_1:
     case compiletime::Target::Source_C_Metal1_0: return {"--passes", deviceArena(stackDepth)};
     default: return stackDepth ? std::vector<std::string>{"--passes", fullOpt(stackDepth) + ";StructuredExit"} : std::vector<std::string>{};
+  }
+}
+
+inline std::vector<std::string> packageEntryPassesFor(const compiletime::Target &target, std::optional<int> stackDepth = {}) {
+  const auto opt = packageEntryOpt(stackDepth);
+  switch (target) {
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+      return {"--passes",
+              opt + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)"};
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      return {"--passes", opt + ";SubgroupLower;StructuredExit;RegionRespace;ArenaLower"};
+    case compiletime::Target::Source_C_OpenCL1_1: return {"--passes", opt + ";SubgroupLower;StructuredExit;RegionRespace;ArenaLower"};
+    case compiletime::Target::Source_C_Metal1_0:
+      return {"--passes", opt + ";SubgroupLower(lowerGroups=true);StructuredExit;RegionRespace;ArenaLower"};
+    default: return {"--passes", opt + ";StructuredExit"};
   }
 }
 

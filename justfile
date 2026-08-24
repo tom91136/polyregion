@@ -96,7 +96,8 @@ _format mode sbt_task_a sbt_task_b:
         *) echo "unknown format mode: {{ mode }}" >&2; exit 2 ;;
     esac
     echo "Native:  clang-format {{ mode }} via $CF"
-    git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' \
+    git ls-files -z --cached --others --exclude-standard -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' \
+        | while IFS= read -r -d '' path; do [ -f "$path" ] && printf '%s\0' "$path"; done \
         | grep -zvE '^(native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)|spectra/generated/cpp/include/polyregion/spectra_api\.hpp$)' \
         | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
@@ -269,6 +270,9 @@ test-native *args='': build-pass-native
     set -euo pipefail
     {{ msvc_reenter }}
     BUILD=$(just _native-build)
+    for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
+        if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
+    done
     rm -f "$BUILD"/*/polytest-discover/*.ids
     rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
     find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,8 @@ namespace polyregion::polystl {
 struct PackageExport {
   const clang::FunctionDecl *decl;
   polyregion::polyast::Sym name;
+  std::optional<polyregion::polyast::Sym> implements;
+  std::vector<std::string> requiredCapabilities;
 };
 
 polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,

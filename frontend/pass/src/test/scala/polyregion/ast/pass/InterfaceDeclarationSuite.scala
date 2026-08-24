@@ -3,20 +3,33 @@ package polyregion.ast.pass
 import polyregion.ast.{
   InterfaceBinding,
   MsgPack,
+  PackageSymResolver,
   PolyAST as p,
-  bind,
-  classifyArguments,
-  conformsTo,
   modifyDecl,
   remapArgs,
-  resolve,
   signature,
   validate,
+  validateInterfaceDeclaration,
   given
 }
 import polyregion.ast.Traversal.*
 
 class InterfaceDeclarationSuite extends munit.FunSuite {
+
+  extension (decl: p.FunctionDecl) {
+    private def bind(signature: p.InvokeSignature, callerDecls: List[p.FunctionDecl]) =
+      PackageSymResolver.bindCall(decl, signature, callerDecls)
+    private def conformsTo(publicDecl: p.FunctionDecl) = PackageSymResolver.bindImplementation(decl, publicDecl)
+  }
+
+  extension (pkg: p.Package) {
+    private def resolve(
+        signature: p.InvokeSignature,
+        callerDecls: List[p.FunctionDecl],
+        capabilities: Set[String],
+        typeSizes: Map[p.Type, Int]
+    ) = PackageSymResolver.resolve(pkg, signature, callerDecls, capabilities, typeSizes)
+  }
 
   private def transformDecl = {
     val t = p.Type.Var("T")
@@ -42,7 +55,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     val op = p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), t)))
     p.FunctionDecl(
       p.Sym(List("foo", "transform")),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(in, out, n, op),
       Nil,
@@ -59,9 +72,9 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
 
     assertEquals(MsgPack.decode[p.FunctionDecl](MsgPack.encode(decl)), Right(decl))
 
-    val library = p.InterfaceDef(p.Sym(List("foo")), List(decl), Nil)
-    assertEquals(MsgPack.decode[p.InterfaceDef](MsgPack.encode(library)), Right(library))
-    assertEquals(library.decls, List(decl))
+    val library = p.Interface(p.Sym(List("foo")), List(decl), Nil)
+    assertEquals(MsgPack.decode[p.Interface](MsgPack.encode(library)), Right(library))
+    assertEquals(library.declarations, List(decl))
     assertNotEquals(
       decl.args.head.repr,
       decl.args.head.copy(boundary = decl.args.head.boundary.map(_.copy(access = p.Arg.Access.Write))).repr
@@ -77,7 +90,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       p.Function.Visibility.Internal,
       p.Function.FpMode.Relaxed,
-      false
+      p.CallConvention.RegularCall
     )
     val renamed = fn.modifyDecl(_.copy(name = p.Sym(List("foo", "renamed"))))
     val call = p.InvokeSignature(
@@ -96,6 +109,78 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     assertEquals(MsgPack.decode[p.Function](MsgPack.encode(fn)), Right(fn))
   }
 
+  test("an interface-backed package round-trips implementation metadata and an entryless program") {
+    val declaration = transformDecl
+    val implementation = p.Function(
+      declaration.copy(
+        name = p.Sym("foo.implementation.transform"),
+        tpeVars = List(p.Type.Var("Element", Some(4)))
+      ),
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      convention = p.CallConvention.OffloadEntry,
+      implements = Some(declaration.name),
+      requiredCapabilities = List("subgroup.shuffle")
+    )
+    val pkg = p.Package(
+      p.Interface(p.Sym("foo"), List(declaration), List(p.MetaEntry("source", "vendor-neutral"))),
+      p.Program(None, List(implementation), Nil)
+    )
+
+    assertEquals(MsgPack.decode[p.Package](MsgPack.encode(pkg)), Right(pkg))
+    assertEquals(pkg.program.entry, None)
+    assertEquals(implementation.convention, p.CallConvention.OffloadEntry)
+    assertEquals(implementation.implements, Some(declaration.name))
+    assertEquals(implementation.requiredCapabilities, List("subgroup.shuffle"))
+    assertEquals(implementation.tpeVars.head.exactSizeInBytes, Some(4))
+  }
+
+  test("constrained binders and minimum extents validate and round-trip") {
+    val constrainedBinder: p.Type.Var = p.Type.Var("T", Some(4))
+    val constrainedBase = transformDecl
+      .modifyAll[p.Type] {
+        case p.Type.Var("T", _) => constrainedBinder
+        case other              => other
+      }
+      .copy(tpeVars = List(constrainedBinder))
+    val constrained = constrainedBase.copy(
+      args = constrainedBase.args.updated(
+        0,
+        constrainedBase.args.head.copy(boundary =
+          Some(
+            p.Arg.Boundary(
+              p.Arg.Access.Read,
+              p.Arg.Extent.Elements(p.Arg.SizeExpr.Min(p.Arg.SizeExpr.Param(2), p.Arg.SizeExpr.Const(64)))
+            )
+          )
+        )
+      )
+    )
+    val invalidCallable = constrained.copy(args =
+      constrained.args :+ p.Arg(
+        p.Named("bad", p.Type.Exec(List(p.Type.Var("E", Some(4))), List(p.Type.Var("E")), p.Type.Unit0))
+      )
+    )
+    val mismatchedCallable = constrained.copy(args =
+      constrained.args :+ p.Arg(
+        p.Named("bad", p.Type.Exec(List(p.Type.Var("E")), List(p.Type.Var("E", Some(4))), p.Type.Unit0))
+      )
+    )
+    val shadowedCallable = constrained.copy(args =
+      constrained.args :+ p.Arg(
+        p.Named("shadowed", p.Type.Exec(List(p.Type.Var("T")), List(p.Type.Var("T")), p.Type.Unit0))
+      )
+    )
+
+    assertEquals(constrained.validate, Nil)
+    assertEquals(MsgPack.decode[p.FunctionDecl](MsgPack.encode(constrained)), Right(constrained))
+    assert(invalidCallable.validate.exists(_.contains("cannot have an exact-size constraint")))
+    assert(invalidCallable.validate.exists(_.contains("differs from its binder")))
+    assert(mismatchedCallable.validate.exists(_.contains("differs from its binder")))
+    assertEquals(shadowedCallable.validate, Nil)
+  }
+
   test("function traversal includes declaration types") {
     val decl = transformDecl
     val fn = p.Function(
@@ -103,11 +188,11 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       p.Function.Visibility.Internal,
       p.Function.FpMode.Relaxed,
-      false
+      p.CallConvention.RegularCall
     )
     val rewritten = fn.modifyAll[p.Type] {
-      case p.Type.Var("T") => p.Type.Float64
-      case other           => other
+      case p.Type.Var("T", _) => p.Type.Float64
+      case other              => other
     }
 
     assert(fn.collectAll[p.Type].contains(p.Type.Var("T")))
@@ -210,7 +295,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
 
     assertEquals(
       decl.bind(call, List(lambda)),
-      Right(InterfaceBinding.Binding(Map("T" -> p.Type.Float32), Map(3 -> lambda.name)))
+      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map(3 -> lambda.name)))
     )
   }
 
@@ -251,7 +336,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     val name = p.Sym(List("caller", "overloaded"))
     val decl = p.FunctionDecl(
       p.Sym(List("foo", "apply")),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(
         p.Arg(p.Named("op", p.Type.Exec(Nil, List(t), t))),
@@ -282,17 +367,17 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
 
     assertEquals(
       decl.bind(call, List(callable(p.Type.IntS32), callable(p.Type.Float32))),
-      Right(InterfaceBinding.Binding(Map("T" -> p.Type.Float32), Map(0 -> name)))
+      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map(0 -> name)))
     )
   }
 
-  test("callable arguments do not infer public type variables") {
+  test("ambiguous callable overloads are rejected independently") {
     val t     = p.Type.Var("T")
     val first = p.Sym(List("caller", "first"))
     val last  = p.Sym(List("caller", "last"))
     val decl = p.FunctionDecl(
       p.Sym(List("foo", "zip")),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(
         p.Arg(p.Named("first", p.Type.Exec(Nil, List(t), t))),
@@ -321,19 +406,15 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Unit0
     )
 
-    assert(
-      decl
-        .bind(
-          call,
-          List(
-            callable(first, p.Type.IntS32),
-            callable(first, p.Type.Float32),
-            callable(last, p.Type.Float32)
-          )
-        )
-        .left
-        .exists(_.contains("declaration type variable `T` is not bound by the call"))
+    val bound = decl.bind(
+      call,
+      List(
+        callable(first, p.Type.IntS32),
+        callable(first, p.Type.Float32),
+        callable(last, p.Type.Float32)
+      )
     )
+    assert(bound.left.exists(_.exists(_.contains("has 2 matching declarations for callable `caller.first`"))), bound)
   }
 
   test("explicit public types make callable overload checks independent") {
@@ -342,7 +423,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     val last  = p.Sym(List("caller", "last"))
     val decl = p.FunctionDecl(
       p.Sym(List("foo", "zip")),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(
         p.Arg(p.Named("first", p.Type.Exec(Nil, List(t), t))),
@@ -380,7 +461,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
           callable(last, p.Type.Float32)
         )
       ),
-      Right(InterfaceBinding.Binding(Map("T" -> p.Type.Float32), Map(0 -> first, 1 -> last)))
+      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map(0 -> first, 1 -> last)))
     )
   }
 
@@ -407,30 +488,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
   }
 
-  test("a boundary declaration yields a structural argument plan") {
-    import InterfaceBinding.ArgumentKind
-
-    assertEquals(
-      transformDecl.classifyArguments,
-      Right(
-        List(
-          ArgumentKind.Buffer(
-            p.Arg.Access.Read,
-            p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))
-          ),
-          ArgumentKind.Buffer(
-            p.Arg.Access.Write,
-            p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))
-          ),
-          ArgumentKind.ExtentScalar,
-          ArgumentKind.Callable(p.Type.Exec(Nil, List(p.Type.Var("T")), p.Type.Var("T")))
-        )
-      )
-    )
+  test("an interface declaration requires pointer boundaries") {
+    assertEquals(transformDecl.validateInterfaceDeclaration, Nil)
 
     val missingBoundary =
       transformDecl.copy(args = transformDecl.args.updated(0, transformDecl.args.head.copy(boundary = None)))
-    assert(missingBoundary.classifyArguments.left.exists(_.exists(_.contains("has no boundary"))))
+    assert(missingBoundary.validateInterfaceDeclaration.exists(_.contains("has no boundary")))
   }
 
   test("binding rejects a conflicting element type and callable signature") {
@@ -464,7 +527,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     val decl = transformDecl.copy(args =
       transformDecl.args.updated(
         3,
-        p.Arg(p.Named("op", p.Type.Exec(List("T"), List(p.Type.Var("T")), p.Type.Var("T"))))
+        p.Arg(p.Named("op", p.Type.Exec(List(p.Type.Var("T")), List(p.Type.Var("T")), p.Type.Var("T"))))
       )
     )
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
@@ -476,19 +539,19 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
         f32Ptr,
         f32Ptr,
         p.Type.IntS32,
-        p.Type.Exec(List("Element"), List(p.Type.Var("Element")), p.Type.Var("Element"))
+        p.Type.Exec(List(p.Type.Var("Element")), List(p.Type.Var("Element")), p.Type.Var("Element"))
       ),
       p.Type.Unit0
     )
 
     assertEquals(
       decl.bind(call, Nil),
-      Right(InterfaceBinding.Binding(Map("T" -> p.Type.Float32), Map.empty))
+      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map.empty))
     )
   }
 
   test("binding rejects declaration type variables that cannot be inferred") {
-    val decl   = transformDecl.copy(tpeVars = List("T", "Unused"))
+    val decl   = transformDecl.copy(tpeVars = List(p.Type.Var("T"), p.Type.Var("Unused")))
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
     val call = p.InvokeSignature(
       decl.name,
@@ -507,14 +570,14 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       decl
         .bind(call, Nil)
         .left
-        .exists(_.contains("declaration type variable `Unused` is not bound by the call"))
+        .exists(_.contains("declaration type variable `Unused` is not bound by the signature"))
     )
   }
 
   test("binding resolves consistent chained type substitutions") {
     val decl = p.FunctionDecl(
       p.Sym("foo.chain"),
-      List("T", "U"),
+      List(p.Type.Var("T"), p.Type.Var("U")),
       None,
       List(p.Arg(p.Named("x", p.Type.Var("T")))),
       Nil,
@@ -532,7 +595,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
 
     assertEquals(
       decl.bind(call, Nil),
-      Right(InterfaceBinding.Binding(Map("T" -> p.Type.Float32, "U" -> p.Type.Float32), Map.empty))
+      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32, "U" -> p.Type.Float32), Map.empty))
     )
   }
 
@@ -559,17 +622,17 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     val call = p.InvokeSignature(decl.name, Nil, None, Nil, p.Type.FnRef(callable.name))
 
-    assertEquals(decl.bind(call, List(callable)), Right(InterfaceBinding.Binding(Map.empty, Map.empty)))
+    assertEquals(decl.bind(call, List(callable)), Right(InterfaceBinding.BoundCall(Map.empty, Map.empty)))
   }
 
   test("binding rejects duplicate binders in an actual callable type") {
     val expected = p.Type.Exec(
-      List("A", "B"),
+      List(p.Type.Var("A"), p.Type.Var("B")),
       List(p.Type.Var("A"), p.Type.Var("B")),
       p.Type.Unit0
     )
     val malformed = p.Type.Exec(
-      List("Element", "Element"),
+      List(p.Type.Var("Element"), p.Type.Var("Element")),
       List(p.Type.Var("Element"), p.Type.Var("Element")),
       p.Type.Unit0
     )
@@ -593,14 +656,21 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       transformDecl.args.updated(
         3,
         p.Arg(
-          p.Named("op", p.Type.Exec(List("Element", "Element"), List(p.Type.Var("Element")), p.Type.Var("Element")))
+          p.Named(
+            "op",
+            p.Type.Exec(
+              List(p.Type.Var("Element"), p.Type.Var("Element")),
+              List(p.Type.Var("Element")),
+              p.Type.Var("Element")
+            )
+          )
         )
       )
     )
     val empty = transformDecl.copy(args =
       transformDecl.args.updated(
         3,
-        p.Arg(p.Named("op", p.Type.Exec(List(" "), List(p.Type.Var(" ")), p.Type.Var(" "))))
+        p.Arg(p.Named("op", p.Type.Exec(List(p.Type.Var(" ")), List(p.Type.Var(" ")), p.Type.Var(" "))))
       )
     )
 
@@ -608,7 +678,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     assert(empty.validate.exists(_.contains("callable type variable 0 is empty")))
   }
 
-  test("receiver extents classify referenced arguments") {
+  test("receiver extents validate referenced arguments") {
     val receiver = p.Arg(
       p.Named("self", p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)),
       boundary = Some(
@@ -629,30 +699,28 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Function.Affinity.Host
     )
 
-    assertEquals(
-      decl.classifyArguments,
-      Right(List(InterfaceBinding.ArgumentKind.ExtentScalar))
-    )
+    assertEquals(decl.validateInterfaceDeclaration, Nil)
   }
 
   test("implementation conformance accepts alpha-renamed direct declarations") {
     val public = transformDecl
     val impl = public.copy(
       name = p.Sym(List("implementation", "transform")),
-      tpeVars = List("Element"),
+      tpeVars = List(p.Type.Var("Element")),
       args = public.args.map(_.modifyAll[p.Type] {
-        case p.Type.Var("T") => p.Type.Var("Element")
-        case other           => other
+        case p.Type.Var("T", _) => p.Type.Var("Element")
+        case other              => other
       })
     )
 
     assertEquals(
       impl.conformsTo(public),
       Right(
-        InterfaceBinding.ImplementationBinding(
+        InterfaceBinding.BoundImplementation(
           Map("Element" -> p.Type.Var("T")),
           Map.empty,
-          InterfaceBinding.ResultBinding.Direct
+          InterfaceBinding.ReturnConvention.Direct,
+          0
         )
       )
     )
@@ -661,7 +729,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
   test("implementation conformance keeps public type variables rigid") {
     val public = p.FunctionDecl(
       p.Sym("foo.rigid"),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(
         p.Arg(p.Named("x", p.Type.Var("T"))),
@@ -693,7 +761,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
           p.Named(
             "op",
             p.Type.Exec(
-              List("B"),
+              List(p.Type.Var("B")),
               List(p.Type.Ptr(p.Type.Var("B"), p.Type.Space.Global)),
               p.Type.Unit0
             )
@@ -707,12 +775,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     val implementation = public.copy(
       name = p.Sym("implementation.poly"),
-      tpeVars = List("E"),
+      tpeVars = List(p.Type.Var("E")),
       args = List(
         p.Arg(
           p.Named(
             "op",
-            p.Type.Exec(List("A"), List(p.Type.Var("E")), p.Type.Unit0)
+            p.Type.Exec(List(p.Type.Var("A")), List(p.Type.Var("E")), p.Type.Unit0)
           )
         )
       )
@@ -724,7 +792,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
   test("implementation conformance keeps stored public variables rigid") {
     val public = p.FunctionDecl(
       p.Sym("foo.namespaces"),
-      List("B"),
+      List(p.Type.Var("B")),
       None,
       List(
         p.Arg(p.Named("x", p.Type.Var("B"))),
@@ -738,7 +806,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     val implementation = public.copy(
       name = p.Sym("implementation.namespaces"),
-      tpeVars = List("A", "B"),
+      tpeVars = List(p.Type.Var("A"), p.Type.Var("B")),
       args = List(
         p.Arg(p.Named("x", p.Type.Var("A"))),
         p.Arg(p.Named("y", p.Type.Var("A"))),
@@ -771,12 +839,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     val implementation = p.FunctionDecl(
       p.Sym(List("implementation", "reduce")),
-      List("Element"),
+      List(p.Type.Var("Element")),
       None,
       List(
         public.args.head.modifyAll[p.Type] {
-          case p.Type.Var("T") => p.Type.Var("Element")
-          case other           => other
+          case p.Type.Var("T", _) => p.Type.Var("Element")
+          case other              => other
         },
         public.args(1),
         result
@@ -790,10 +858,11 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     assertEquals(
       implementation.conformsTo(public),
       Right(
-        InterfaceBinding.ImplementationBinding(
+        InterfaceBinding.BoundImplementation(
           Map("Element" -> p.Type.Var("T")),
           Map.empty,
-          InterfaceBinding.ResultBinding.TrailingOutput(2)
+          InterfaceBinding.ReturnConvention.TrailingOutput(2),
+          0
         )
       )
     )
@@ -860,84 +929,76 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       List(f32Ptr, f32Ptr, p.Type.IntS32, p.Type.FnRef(lambda.name)),
       p.Type.Unit0
     )
-    def implementation(name: String) = public.copy(
+    def implementation(name: String, size: Option[Int]) = public.copy(
       name = p.Sym(List("implementation", name)),
-      tpeVars = List("Element"),
+      tpeVars = List(p.Type.Var("Element", size)),
       args = public.args.map(_.modifyAll[p.Type] {
-        case p.Type.Var("T") => p.Type.Var("Element")
-        case other           => other
+        case p.Type.Var("T", _) => p.Type.Var("Element", size)
+        case other              => other
       })
     )
-    val w4 = p.ImplementationCandidate(
-      public.name,
-      implementation("transform_w4"),
-      List("gpu"),
-      List(p.TypeSizeConstraint("Element", 4))
+    def variant(decl: p.FunctionDecl, capabilities: List[String] = List("gpu")) = p.Function(
+      decl,
+      Nil,
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.RegularCall,
+      Some(public.name),
+      capabilities
     )
-    val w8 = p.ImplementationCandidate(
-      public.name,
-      implementation("transform_w8"),
-      List("gpu"),
-      List(p.TypeSizeConstraint("Element", 8))
+    def pkgOf(implementations: List[p.Function]) = p.Package(
+      p.Interface(p.Sym("foo"), List(public)),
+      p.Program(None, implementations, Nil)
     )
-    val index = p.PackageIndex(
-      p.InterfaceDef(p.Sym("foo"), List(public)),
-      List(w8, w4)
-    )
+    val w4  = variant(implementation("transform_w4", Some(4)))
+    val w8  = variant(implementation("transform_w8", Some(8)))
+    val pkg = pkgOf(List(w8, w4))
     assertEquals(
-      MsgPack.decode[p.PackageIndex](MsgPack.encode(index)),
-      Right(index)
+      MsgPack.decode[p.Package](MsgPack.encode(pkg)),
+      Right(pkg)
     )
 
-    val resolved = index.resolve(
+    val resolved = pkg.resolve(
       call,
       List(lambda),
       Set("gpu"),
       Map(p.Type.Float32 -> 4, p.Type.Float64 -> 8)
     )
-    assertEquals(resolved.map(_.candidate), Right(w4))
+    assertEquals(resolved.map(_.implementation), Right(w4))
 
-    val fallback = w4.copy(
-      implementation = implementation("transform_fallback"),
-      typeSizes = Nil
-    )
+    val fallback = variant(implementation("transform_fallback", None))
     assertEquals(
-      index
-        .copy(candidates = List(fallback, w4))
+      pkgOf(List(fallback, w4))
         .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 4))
-        .map(_.candidate),
+        .map(_.implementation),
       Right(w4)
     )
     assertEquals(
-      index
-        .copy(candidates = List(w4, fallback))
+      pkgOf(List(w4, fallback))
         .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
-        .map(_.candidate),
+        .map(_.implementation),
       Right(fallback)
     )
     assert(
-      index
-        .copy(candidates = List(w4))
+      pkgOf(List(w4))
         .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
         .isLeft
     )
     assert(
-      index
-        .copy(candidates = List(fallback, fallback.copy(implementation = implementation("transform_fallback_alt"))))
+      pkgOf(List(fallback, variant(implementation("transform_fallback_alt", None))))
         .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
         .left
         .exists(_.exists(_.contains("ambiguous")))
     )
-    val nonPositive = w4.copy(typeSizes = List(p.TypeSizeConstraint("Element", 0)))
+    val nonPositive = variant(implementation("transform_w4", Some(0)))
     assertEquals(
-      index
-        .copy(candidates = List(nonPositive, fallback))
+      pkgOf(List(nonPositive, fallback))
         .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 0))
-        .map(_.candidate),
+        .map(_.implementation),
       Right(fallback)
     )
 
-    val unavailable = index.resolve(
+    val unavailable = pkg.resolve(
       call,
       List(lambda),
       Set.empty,
@@ -945,8 +1006,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     assert(unavailable.left.exists(_.exists(_.contains("requires capability `gpu`"))))
 
-    val ambiguous = index
-      .copy(candidates = List(w4, w4.copy(implementation = implementation("transform_w4_alt"))))
+    val ambiguous = pkgOf(List(w4, variant(implementation("transform_w4_alt", Some(4)))))
       .resolve(
         call,
         List(lambda),
@@ -955,8 +1015,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       )
     assert(ambiguous.left.exists(_.exists(_.contains("ambiguous"))))
 
-    val ambiguousReversed = index
-      .copy(candidates = List(w4.copy(implementation = implementation("transform_w4_alt")), w4))
+    val ambiguousReversed = pkgOf(List(variant(implementation("transform_w4_alt", Some(4))), w4))
       .resolve(
         call,
         List(lambda),
@@ -965,7 +1024,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       )
     assertEquals(ambiguousReversed, ambiguous)
 
-    val wrongSymbol = index.resolve(
+    val wrongSymbol = pkg.resolve(
       call.copy(name = p.Sym("foo.other")),
       List(lambda),
       Set("gpu"),
@@ -989,17 +1048,25 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     val f32            = declaration(p.Type.Float32)
     val f64            = declaration(p.Type.Float64)
     val implementation = f32.copy(name = p.Sym(List("implementation", "overloaded_f32")))
-    val candidate      = p.ImplementationCandidate(name, implementation, Nil, Nil)
-    val index          = p.PackageIndex(p.InterfaceDef(p.Sym("foo"), List(f64, f32)), List(candidate))
-    val call           = p.InvokeSignature(name, Nil, None, List(p.Type.Float32), p.Type.Float32)
+    val variant =
+      p.Function(
+        implementation,
+        Nil,
+        p.Function.Visibility.Exported,
+        p.Function.FpMode.Relaxed,
+        p.CallConvention.RegularCall,
+        Some(name)
+      )
+    val pkg  = p.Package(p.Interface(p.Sym("foo"), List(f64, f32)), p.Program(None, List(variant), Nil))
+    val call = p.InvokeSignature(name, Nil, None, List(p.Type.Float32), p.Type.Float32)
 
     assertEquals(
-      index.resolve(call, Nil, Set.empty, Map.empty).map(_.publicDecl),
+      pkg.resolve(call, Nil, Set.empty, Map.empty).map(_.publicDeclaration),
       Right(f32)
     )
     assert(
-      index
-        .copy(interface = index.interface.copy(decls = List(f32, f32)))
+      pkg
+        .copy(interface = pkg.interface.copy(declarations = List(f32, f32)))
         .resolve(
           call,
           Nil,
@@ -1024,20 +1091,23 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     val implementation = public.copy(
       name = p.Sym("implementation.transform"),
-      tpeVars = List("Element"),
+      tpeVars = List(p.Type.Var("Element", Some(4))),
       args = public.args.map(_.modifyAll[p.Type] {
-        case p.Type.Var("T") => p.Type.Var("Element")
-        case other           => other
+        case p.Type.Var("T", _) => p.Type.Var("Element", Some(4))
+        case other              => other
       })
     )
-    val candidate = p.ImplementationCandidate(
-      public.name,
+    val candidate = p.Function(
       implementation,
       Nil,
-      List(p.TypeSizeConstraint("Element", 4))
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.RegularCall,
+      Some(public.name),
+      Nil
     )
     val result = p
-      .PackageIndex(p.InterfaceDef(p.Sym("foo"), List(public)), List(candidate))
+      .Package(p.Interface(p.Sym("foo"), List(public)), p.Program(None, List(candidate), Nil))
       .resolve(call, Nil, Set.empty, Map.empty)
 
     assert(result.left.exists(_.exists(_.contains("not concrete"))))

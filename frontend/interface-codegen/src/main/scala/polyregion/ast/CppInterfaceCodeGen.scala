@@ -114,7 +114,7 @@ private[ast] object CppInterfaceCodeGen {
     case p.Type.IntS64            => "std::int64_t"
     case p.Type.Bool1             => "bool"
     case p.Type.Unit0             => "void"
-    case p.Type.Var(name)         => identifier(name, "type variable")
+    case p.Type.Var(name, _)      => identifier(name, "type variable")
     case p.Type.Struct(name, Nil) => s"::${name.fqn.map(identifier(_, "type")).mkString("::")}"
     case p.Type.Struct(name, args) =>
       s"::${name.fqn.map(identifier(_, "type")).mkString("::")}<${args.map(tpe).mkString(", ")}>"
@@ -149,7 +149,7 @@ private[ast] object CppInterfaceCodeGen {
     case _ => Nil
   }
 
-  private def declaration(interfaceDef: p.InterfaceDef, decl: p.FunctionDecl): String = {
+  private def declaration(interfaceDef: p.Interface, decl: p.FunctionDecl): String = {
     decl.rtn match {
       case p.Type.Ptr(_, _) | p.Type.Arr(_, _, _) => fail(s"interface return type is not supported yet: ${decl.rtn}")
       case _                                      => ()
@@ -157,7 +157,7 @@ private[ast] object CppInterfaceCodeGen {
     val callableTemplates = decl.args.collect {
       case arg if arg.named.tpe.isInstanceOf[p.Type.Exec] => s"class ${pascalCase(arg.named.symbol)}"
     }
-    val templates = decl.tpeVars.map(name => s"class $name") ++ callableTemplates
+    val templates = decl.tpeVars.map(variable => s"class ${variable.name}") ++ callableTemplates
     if (templates.distinct.size != templates.size)
       fail(s"declaration `${decl.name.fqn.mkString(".")}` has colliding C++ template parameters")
     val template = if (templates.nonEmpty) s"template <${templates.mkString(", ")}>\n" else ""
@@ -171,13 +171,13 @@ private[ast] object CppInterfaceCodeGen {
        |}""".stripMargin
   }
 
-  def apply(interfaceDef: p.InterfaceDef): String = {
+  def apply(interfaceDef: p.Interface): String = {
     val decls = declarations(interfaceDef)
     validatePortableOverloads(decls, "C++")
     interfaceDef.name.fqn.foreach(identifier(_, "namespace"))
     decls.foreach { decl =>
       identifier(decl.name.last, "function")
-      decl.tpeVars.foreach(identifier(_, "type variable"))
+      decl.tpeVars.foreach(variable => identifier(variable.name, "type variable"))
       decl.args.foreach(arg => identifier(arg.named.symbol, "parameter"))
       decl.args
         .collect { case arg if arg.named.tpe.isInstanceOf[p.Type.Exec] => pascalCase(arg.named.symbol) }

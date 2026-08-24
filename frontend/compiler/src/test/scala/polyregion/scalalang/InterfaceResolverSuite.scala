@@ -67,19 +67,11 @@ class InterfaceResolverSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.IntrOp(p.Intr.Add(x, p.Term.IntS32Const(1), i32)))),
       p.Function.Visibility.Exported,
       p.Function.FpMode.Relaxed,
-      false
+      p.CallConvention.RegularCall
     )
-    val entry = implementation.copy(
-      decl = implementationDecl.copy(name = p.Sym("package.entry"), args = Nil, rtn = p.Type.Unit0),
-      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
-      isEntry = true
-    )
-    val pack = p.Package(
-      p.PackageIndex(
-        p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
-        List(p.ImplementationCandidate(publicName, implementationDecl, Nil, Nil))
-      ),
-      p.Program(entry, List(implementation), Nil)
+    val pkg = p.Package(
+      p.Interface(p.Sym("foo"), List(publicDecl)),
+      p.Program(None, List(implementation.copy(implements = Some(publicName))), Nil)
     )
     val targetName = p.Sym("foo.bindings.increment")
     val target: p.Expr.Invoke = p.Expr.Invoke(
@@ -91,13 +83,13 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
 
     val (functions, defs) =
-      InterfaceResolver.link(pack, "bar.increment", target).fold(errors => fail(errors.mkString("\n")), identity)
-    val linked = functions.find(_.name == targetName).getOrElse(fail("missing linked function"))
+      InterfaceResolver.resolve(pkg, "bar.increment", target).fold(errors => fail(errors.mkString("\n")), identity)
+    val resolved = functions.find(_.name == targetName).getOrElse(fail("missing resolved function"))
     val program = p.Program(
-      linked.copy(isEntry = true),
-      functions.filterNot(_ == linked),
+      Some(resolved.copy(convention = p.CallConvention.OffloadEntry)),
+      functions.filterNot(_ == resolved),
       defs.toList,
-      p.PassPhase.Initial,
+      p.Pass.Phase.Initial,
       Nil
     )
 
@@ -110,7 +102,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     val operation = p.Type.Exec(Nil, List(p.Type.Var("T")), p.Type.Var("T"))
     val publicDecl = p.FunctionDecl(
       p.Sym("bar.apply"),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(p.Arg(p.Named("x", p.Type.Var("T")), None), p.Arg(p.Named("op", operation), None)),
       Nil,
@@ -120,7 +112,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
     val implementationDecl = p.FunctionDecl(
       p.Sym("bar.implementation.apply"),
-      List("Element", "Op"),
+      List(p.Type.Var("Element"), p.Type.Var("Op")),
       None,
       List(p.Arg(p.Named("x", element), None), p.Arg(p.Named("op", p.Type.Var("Op")), None)),
       Nil,
@@ -134,7 +126,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.Invoke(p.Type.Var("Op"), Nil, None, List(x), element))),
       p.Function.Visibility.Exported,
       p.Function.FpMode.Relaxed,
-      false
+      p.CallConvention.RegularCall
     )
     val callableName = p.Sym("foo.callable.increment")
     val callableDecl = p.FunctionDecl(
@@ -147,12 +139,9 @@ class InterfaceResolverSuite extends munit.FunSuite {
       i32,
       p.Function.Affinity.Host
     )
-    val pack = p.Package(
-      p.PackageIndex(
-        p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
-        List(p.ImplementationCandidate(publicDecl.name, implementationDecl, Nil, Nil))
-      ),
-      p.Program(implementation.copy(isEntry = true), List(implementation), Nil)
+    val pkg = p.Package(
+      p.Interface(p.Sym("foo"), List(publicDecl)),
+      p.Program(None, List(implementation.copy(implements = Some(publicDecl.name))), Nil)
     )
     val callable = p.Term.Select(p.Named("op", p.Type.FnRef(callableName)), Nil, p.Type.FnRef(callableName))
     val target: p.Expr.Invoke = p.Expr.Invoke(
@@ -164,23 +153,23 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
 
     val (functions, _) = InterfaceResolver
-      .link(pack, "bar.apply", target, List(callableDecl))
+      .resolve(pkg, "bar.apply", target, List(callableDecl))
       .fold(errors => fail(errors.mkString("\n")), identity)
-    val linked = functions.find(_.name == target.calleeName).getOrElse(fail("missing linked function"))
+    val resolved = functions.find(_.name == target.calleeName).getOrElse(fail("missing resolved function"))
 
-    assertEquals(linked.args.map(_.named.tpe), List(i32, p.Type.FnRef(callableName)))
-    assert(linked.collectAll[p.Expr].exists {
+    assertEquals(resolved.args.map(_.named.tpe), List(i32, p.Type.FnRef(callableName)))
+    assert(resolved.collectAll[p.Expr].exists {
       case p.Expr.Invoke(p.Type.FnRef(`callableName`), Nil, None, List(_), `i32`) => true
       case _                                                                      => false
     })
   }
 
   test("link an exact pointer-element width specialisation") {
-    val element    = p.Type.Var("Element")
+    val element    = p.Type.Var("Element", Some(4))
     val publicName = p.Sym("bar.copy")
     val publicDecl = p.FunctionDecl(
       publicName,
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(p.Arg(p.Named("in", p.Type.Ptr(p.Type.Var("T"), p.Type.Space.Global)), None)),
       Nil,
@@ -190,7 +179,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
     val implementationDecl = publicDecl.copy(
       name = p.Sym("bar.implementation.copy_w4"),
-      tpeVars = List("Element"),
+      tpeVars = List(p.Type.Var("Element", Some(4))),
       args = List(p.Arg(p.Named("in", p.Type.Ptr(element, p.Type.Space.Global)), None))
     )
     val implementation = p.Function(
@@ -198,21 +187,11 @@ class InterfaceResolverSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
       p.Function.Visibility.Exported,
       p.Function.FpMode.Relaxed,
-      true
+      p.CallConvention.OffloadEntry
     )
-    val pack = p.Package(
-      p.PackageIndex(
-        p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
-        List(
-          p.ImplementationCandidate(
-            publicName,
-            implementationDecl,
-            Nil,
-            List(p.TypeSizeConstraint("Element", 4))
-          )
-        )
-      ),
-      p.Program(implementation, List(implementation), Nil)
+    val pkg = p.Package(
+      p.Interface(p.Sym("foo"), List(publicDecl)),
+      p.Program(None, List(implementation.copy(implements = Some(publicName))), Nil)
     )
     val pointer = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
     val target: p.Expr.Invoke = p.Expr.Invoke(
@@ -223,20 +202,21 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Type.Unit0
     )
 
-    assert(InterfaceResolver.link(pack, "bar.copy", target).isRight)
+    val resolved = InterfaceResolver.resolve(pkg, "bar.copy", target)
+    assert(resolved.isRight, resolved.left.toOption.fold("")(_.mkString("\n")))
   }
 
   test("link exact pointer-width specialisations") {
-    val publicVar         = p.Type.Var("T")
-    val implementationVar = p.Type.Var("Element")
+    val publicVar = p.Type.Var("T")
     val pointerWidth =
       System.getProperty("sun.arch.data.model", "64").toIntOption.filter(_ > 0).getOrElse(64) / 8
+    val implementationVar = p.Type.Var("Element", Some(pointerWidth))
 
     def assertLinked(publicArg: p.Type, implementationArg: p.Type, targetArg: p.Type, name: String): Unit = {
       val publicName = p.Sym(s"bar.$name")
       val publicDecl = p.FunctionDecl(
         publicName,
-        List("T"),
+        List(p.Type.Var("T")),
         None,
         List(p.Arg(p.Named("value", publicArg), None)),
         Nil,
@@ -246,7 +226,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       )
       val implementationDecl = publicDecl.copy(
         name = p.Sym(s"bar.implementation.$name"),
-        tpeVars = List("Element"),
+        tpeVars = List(p.Type.Var("Element", Some(pointerWidth))),
         args = List(p.Arg(p.Named("value", implementationArg), None))
       )
       val implementation = p.Function(
@@ -254,21 +234,11 @@ class InterfaceResolverSuite extends munit.FunSuite {
         List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
         p.Function.Visibility.Exported,
         p.Function.FpMode.Relaxed,
-        true
+        p.CallConvention.OffloadEntry
       )
-      val pack = p.Package(
-        p.PackageIndex(
-          p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
-          List(
-            p.ImplementationCandidate(
-              publicName,
-              implementationDecl,
-              Nil,
-              List(p.TypeSizeConstraint("Element", pointerWidth))
-            )
-          )
-        ),
-        p.Program(implementation, List(implementation), Nil)
+      val pkg = p.Package(
+        p.Interface(p.Sym("foo"), List(publicDecl)),
+        p.Program(None, List(implementation.copy(implements = Some(publicName))), Nil)
       )
       val target: p.Expr.Invoke = p.Expr.Invoke(
         p.Type.FnRef(p.Sym(s"foo.bindings.$name")),
@@ -278,7 +248,8 @@ class InterfaceResolverSuite extends munit.FunSuite {
         p.Type.Unit0
       )
 
-      assert(InterfaceResolver.link(pack, publicName.repr, target).isRight)
+      val resolved = InterfaceResolver.resolve(pkg, publicName.fqcn, target)
+      assert(resolved.isRight, resolved.left.toOption.fold("")(_.mkString("\n")))
     }
 
     val pointer       = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
@@ -297,7 +268,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     val tpe = p.Type.Var("T")
     val publicDecl = p.FunctionDecl(
       p.Sym("bar.identity"),
-      List("T"),
+      List(p.Type.Var("T")),
       None,
       List(p.Arg(p.Named("x", tpe), None)),
       Nil,
@@ -310,14 +281,11 @@ class InterfaceResolverSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(p.Named("x", tpe), Nil, tpe)))),
       p.Function.Visibility.Exported,
       p.Function.FpMode.Relaxed,
-      true
+      p.CallConvention.OffloadEntry
     )
-    val pack = p.Package(
-      p.PackageIndex(
-        p.InterfaceDef(p.Sym("foo"), List(publicDecl)),
-        List(p.ImplementationCandidate(publicDecl.name, implementation.decl, Nil, Nil))
-      ),
-      p.Program(implementation, List(implementation), Nil)
+    val pkg = p.Package(
+      p.Interface(p.Sym("foo"), List(publicDecl)),
+      p.Program(None, List(implementation.copy(implements = Some(publicDecl.name))), Nil)
     )
     val target: p.Expr.Invoke = p.Expr.Invoke(
       p.Type.FnRef(p.Sym("foo.bindings.identity")),
@@ -328,7 +296,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      InterfaceResolver.link(pack, "bar.identity", target).left.toOption,
+      InterfaceResolver.resolve(pkg, "bar.identity", target).left.toOption,
       Some(List("generic Scala interface calls are not yet supported"))
     )
   }

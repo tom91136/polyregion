@@ -99,6 +99,10 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         return cg.B.CreateOr(cg.B.CreateNot(member), cg.toI1(v.pred));
       },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
+      [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, ""); },
+      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce unsupported for CPU"); },
+      [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr { throw BackendException("Spec::GpuGroupInclusiveScan unsupported for CPU"); },
+      [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr { throw BackendException("Spec::GpuGroupExclusiveScan unsupported for CPU"); },
       [&](const Spec::RemoteLaunch &v) -> ValPtr {
         const auto count = v.args.size();
         const auto zero = llvm::ConstantInt::get(i64, 0);
@@ -118,7 +122,8 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
           mirrored.emplace_back(remote);
           return cg.B.CreateIntToPtr(remote, ptr);
         };
-        v.args | zip_with_index(size_t{0}) | for_each([&](const auto &arg, const auto index) {
+        for (size_t index = 0; index < v.args.size(); ++index) {
+          const auto &arg = v.args[index];
           ValPtr value;
           if (arg.tpe().template is<Type::Struct>()) {
             auto *type = cg.resolveType(arg.tpe());
@@ -131,10 +136,10 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
           auto *offset = llvm::ConstantInt::get(i64, index);
           cg.B.CreateStore(cg.B.CreatePointerCast(slot, ptr), cg.B.CreateGEP(argPointersType, argPointers, {zero, offset}));
           cg.B.CreateStore(llvm::ConstantInt::get(i8, runtimeType(arg.tpe())), cg.B.CreateGEP(argTypesType, argTypes, {zero, offset}));
-        });
+        }
         std::string kernelName = "_kernel";
         if (const auto fn = v.kernel.tpe().get<Type::FnRef>()) {
-          kernelName = repr(fn->name) ^ map([](const auto c) { return std::isalnum(c) || c == '_' ? c : '_'; });
+          kernelName = fqcn(fn->name) ^ map([](const auto c) { return std::isalnum(c) || c == '_' ? c : '_'; });
         }
         auto *module = cg.B.CreateGlobalString(kernelName, "remote_module", 0, &cg.M);
         auto *kernel = cg.B.CreateGlobalString(kernelName, "remote_kernel", 0, &cg.M);
@@ -143,9 +148,9 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
                         {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX),
                          asSize(v.blockY), asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count),
                          cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero})});
-        mirrored ^ for_each([&](auto *remote) {
+        for (auto *remote : mirrored) {
           cg.B.CreateCall(external("polyrt_remote_free", unit, {ptr, sizeTy}), {cg.mkTermVal(v.context), remote});
-        });
+        }
         return noop();
       },
       [&](const Spec::RemoteAlloc &v) -> ValPtr {

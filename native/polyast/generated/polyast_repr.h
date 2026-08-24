@@ -28,11 +28,12 @@ namespace polyregion::polyast {
 [[nodiscard]] std::string repr(const FunctionVisibility::Any &v);
 [[nodiscard]] std::string repr(const FunctionFpMode::Any &m);
 [[nodiscard]] std::string repr(const FunctionAffinity::Any &a);
+[[nodiscard]] std::string repr(const CallConvention::Any &c);
 [[nodiscard]] std::string repr(const Signature &f);
 [[nodiscard]] std::string repr(const Function &f);
 [[nodiscard]] std::string repr(const FunctionDecl &f);
 [[nodiscard]] std::string repr(const MetaEntry &m);
-[[nodiscard]] std::string repr(const InterfaceDef &l);
+[[nodiscard]] std::string repr(const Interface &l);
 [[nodiscard]] std::string repr(const StructDef &s);
 [[nodiscard]] std::string repr(const Program &s);
 [[nodiscard]] std::string repr(const StructLayout &l);

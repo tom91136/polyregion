@@ -37,7 +37,7 @@ object Intrinsify extends ProgramPass {
   override def apply(program: p.Program, log: Log): p.Program = {
     val subLog = log.subLog("Intrinsify")
     program.copy(
-      entry = intrinsifyOne(program.entry, subLog),
+      entry = program.entry.map(intrinsifyOne(_, subLog)),
       functions = program.functions.map(intrinsifyOne(_, subLog))
     )
   }
@@ -46,7 +46,7 @@ object Intrinsify extends ProgramPass {
     val counter               = new java.util.concurrent.atomic.AtomicInteger()
     val (xs, instanceInvokes) = f.body.foldMapM(intrinsifyInstanceApply(_, counter))
     val (ys, moduleInvokes)   = xs.foldMapM(intrinsifyModuleApply(_, counter))
-    log.info(s"${f.signatureRepr}: ", (instanceInvokes ++ moduleInvokes).map(_.repr)*)
+    log.info(s"${f.signatureKey}: ", (instanceInvokes ++ moduleInvokes).map(_.repr)*)
     f.copy(body = ys)
   }
 

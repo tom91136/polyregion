@@ -232,7 +232,7 @@ object Pickler {
     val writeSymbols: Map[p.Sym, q.Symbol] = reprs.toList
       .map((sdef, repr) =>
         sdef.name -> mkMethodSym(
-          s"write_${sdef.name.repr}",
+          s"write_${sdef.name.fqcn}",
           q.TypeRepr.of[Long],
           "root"   -> methodParamRepr(sdef, repr),
           "ptrMap" -> q.TypeRepr.of[PtrMapTpe]
@@ -243,7 +243,7 @@ object Pickler {
     val readSymbols: Map[p.Sym, q.Symbol] = reprs.toList
       .map((sdef, repr) =>
         sdef.name -> mkMethodSym(
-          s"read_${sdef.name.repr}",
+          s"read_${sdef.name.fqcn}",
           methodParamRepr(sdef, repr),
           "root"   -> methodParamRepr(sdef, repr),
           "ptr"    -> q.TypeRepr.of[Long],
@@ -256,7 +256,7 @@ object Pickler {
     val updateSymbols: Map[p.Sym, q.Symbol] = reprs.toList
       .map((sdef, repr) =>
         sdef.name -> mkMethodSym(
-          s"update_${sdef.name.repr}",
+          s"update_${sdef.name.fqcn}",
           q.TypeRepr.of[Unit],
           "root"   -> methodParamRepr(sdef, repr),
           "ptr"    -> q.TypeRepr.of[Long],
@@ -663,7 +663,7 @@ object Pickler {
                       case (Some((_, write)), Some((mirror, read))) =>
                         // XXX To derive the type of the prism's mirror, we need to  reconstruct it from the mirror's symbol.
                         // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
-                        // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.repr))` should work
+                        // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.fqcn))` should work
                         // but most often then not we get a symbol that exists but does not have a tree.
 
                         // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
@@ -695,7 +695,7 @@ object Pickler {
                           case (Some((_, write)), Some((mirror, read))) =>
                             // XXX To derive the type of the prism's mirror, we need to reconstruct it from the mirror's symbol.
                             // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
-                            // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.repr))` should work
+                            // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.fqcn))` should work
                             // but most often then not we get a symbol that exists but does not have a tree.
 
                             // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type

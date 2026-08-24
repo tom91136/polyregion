@@ -118,8 +118,8 @@ object RefOutliner {
     // remove anything we can't use, like ClassTag
     filteredTypedRefs = uniqueTypedRefs.filter {
       // case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag,_, q.ClassKind.Class, Nil)) => false
-      case (_, _, _ -> p.Type.Struct(Symbols.ClassTag, p.Type.Var(_) :: Nil)) => false
-      case _                                                                  => true
+      case (_, _, _ -> p.Type.Struct(Symbols.ClassTag, p.Type.Var(_, _) :: Nil)) => false
+      case _                                                                     => true
     }
 
     _ = log.info(

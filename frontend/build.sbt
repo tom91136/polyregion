@@ -186,8 +186,11 @@ lazy val codegen = project
     scalacOptions ++=
       Seq("-Yretain-trees") ++
         Seq("-Xmax-inlines", "80"),
-    Compile / mainClass                  := Some("polyregion.ast.CodeGen"),
-    libraryDependencies += "com.lihaoyi" %% "pprint" % "0.9.6",
+    Compile / mainClass := Some("polyregion.ast.CodeGen"),
+    libraryDependencies ++= Seq(
+      "com.lihaoyi"   %% "pprint" % "0.9.6",
+      "org.scalameta" %% "munit"  % munitVersion % Test
+    ),
     genCodegen := Def.uncached {
       (Compile / runMain).toTask(" polyregion.ast.CodeGen").value
     }
@@ -314,13 +317,14 @@ lazy val pass = (projectMatrix in file("pass"))
           // Windows hides non-exported symbols via @exported / __declspec(dllexport).
           Seq(gcLpath, "-Wl,/opt:icf,/opt:ref", "-Wl,/debug:none")
         } else {
-          val exportsList = {
-            val f = nativeDir / "polyc" / "generated" / "polypass-exports.txt"
+          val exportFiles = List("polypass-exports.txt", "polypackage-exports.txt").map { name =>
+            val f = nativeDir / "polyc" / "generated" / name
             if (!f.exists)
-              sys.error(s"PolyPass exports list missing: $f - run `sbt genCodegen` to regenerate")
-            IO.readLines(f).map(_.trim).filter(_.nonEmpty)
+              sys.error(s"Scala Native exports list missing: $f - run `sbt genCodegen` to regenerate")
+            f
           }
-          val exportsDir = (Compile / target).value / "polypass-exports"
+          val exportsList = exportFiles.flatMap(file => IO.readLines(file)).map(_.trim).filter(_.nonEmpty).distinct
+          val exportsDir  = (Compile / target).value / "polypass-exports"
           IO.createDirectory(exportsDir)
           if (isMac) {
             val f = exportsDir / "polypass-exports.txt"
@@ -335,7 +339,7 @@ lazy val pass = (projectMatrix in file("pass"))
             )
           } else {
             val f = exportsDir / "polypass-exports.ver"
-            IO.write(f, "{\n  global:\n    polypass_*;\n  local:\n    *;\n};\n")
+            IO.write(f, "{\n  global:\n    polypass_*;\n    polypackage_*;\n  local:\n    *;\n};\n")
             // --undefined roots survive SN's --start-lib/--end-lib lazy archives.
             val keepRoots = exportsList.map("-Wl,--undefined=" + _)
             val stripFlag =

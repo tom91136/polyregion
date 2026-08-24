@@ -37,7 +37,9 @@ Type::Any polyfc::FBoxedMirror::comp() const {
   return addr.tpe.get<Type::Ptr>() ^ fold([&](const auto &t) { return t.comp; }, [&] { return Type::Nothing().widen(); });
 }
 
-Type::Struct polyfc::FBoxedMirror::tpe() const { return Type::Struct(Sym({fmt::format("FBoxed<{}, {}>", repr(comp()), ranks)}), {}); }
+Type::Struct polyfc::FBoxedMirror::tpe() const {
+  return Type::Struct(Sym({fmt::format("FBoxed<{}, {}>", canonicalName(comp()), ranks)}), {});
+}
 StructDef polyfc::FBoxedMirror::def() const {
   // XXX A zero-length `dims` lowers to OpTypeRuntimeArray, rejected by OpenCL Kernel SPIR-V.
   std::vector<Named> members{addr, sizeInBytes, version, rank, type, attributes, extra};

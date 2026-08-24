@@ -49,10 +49,11 @@ object Compiler {
     (fnArgsTpeWithTerms, _) <- typer0N(f.paramss.flatMap(_.params).collect { case d: q.ValDef => d.tpt.tpe })
     owningClass             <- clsSymTyper0(f.symbol.owner)
     fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
-    fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
+    fnTypeVars: List[p.Type.Var] =
+      f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
     (receiver, receiverTpeVars) <- owningClass match {
       case t @ p.Type.Struct(_, args) =>
-        (Some(t), args.collect { case p.Type.Var(n) => n }).success
+        (Some(t), args.collect { case p.Type.Var(name, size) => p.Type.Var(name, size) }: List[p.Type.Var]).success
       case x => s"Illegal receiver: $x".fail
     }
     // TODO run outliner here
@@ -75,7 +76,7 @@ object Compiler {
               sig.args.size == target.args.size           // then finally term arity
             =>
           val appliedTypes = // we then apply any type variables to form an applied signature
-            sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
+            sig.tpeVars.zip(target.tpeArgs).map((variable, tpe) => (variable: p.Type) -> tpe).toMap
           sig.modifyAll[p.Type](_.mapLeaf(t => appliedTypes.getOrElse(t, t))) -> sig
       }
       .collect {
@@ -158,16 +159,16 @@ object Compiler {
                         interfaceIdentity(actualDefDef.symbol) match {
                           case Some((packageName, declaration)) =>
                             for {
-                              pack <- InterfaceResolver
+                              pkg <- InterfaceResolver
                                 .loadPackage(packageName)
                                 .leftMap(errors => CompilerException(errors.mkString("\n")))
-                              linked <- InterfaceResolver
-                                .link(pack, declaration, target, (existing ::: xs).map(_.decl))
+                              resolved <- InterfaceResolver
+                                .resolve(pkg, declaration, target, (existing ::: xs).map(_.decl))
                                 .leftMap(errors => CompilerException(errors.mkString("\n")))
                             } yield (
-                              linked._1 ::: xs,
+                              resolved._1 ::: xs,
                               depss,
-                              linked._2 ++ clsDepss,
+                              resolved._2 ++ clsDepss,
                               moduleSymDepss
                             )
                           case None if actualDefDef.rhs.isEmpty =>
@@ -285,7 +286,8 @@ object Compiler {
         Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
       }
 
-      fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
+      fnTypeVars: List[p.Type.Var] =
+        f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
 
       // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
       // class defs will have a `this` receiver arg with the appropriate type.
@@ -297,14 +299,17 @@ object Compiler {
       _ = log.info(s"Method owner: $owningClass")
       (receiver, receiverTpeVars) <- owningClass match {
         case t @ p.Type.Struct(_, args) =>
-          (Some(p.Named("this", t)), args.collect { case p.Type.Var(n) => n }).success
+          (
+            Some(p.Named("this", t)),
+            args.collect { case p.Type.Var(name, size) => p.Type.Var(name, size) }: List[p.Type.Var]
+          ).success
         case x => s"Illegal receiver: $x".fail
       }
 
       allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
 
       _ = log.info("DefDef arguments", fnArgs.map((a, n) => s"$a(symbol=${a.symbol}) ~> $n")*)
-      _ = log.info("DefDef tpe vars (recv+fn)", allTypeVars*)
+      _ = log.info("DefDef tpe vars (recv+fn)", allTypeVars.map(_.repr)*)
 
       // Finally, we compile the def body like a closure or just return the term if we have one.
       (rhsStmts, rhsDeps, rhsThisCls) <- fnRtnTerm match {
@@ -316,7 +321,7 @@ object Compiler {
             term = rhs,
             root = f.symbol,
             scope = scope, // We pass an empty scope table as we are compiling an independent fn.
-            tpeArgs = allTypeVars.map(p.Type.Var(_)),
+            tpeArgs = allTypeVars,
             intrinsify = intrinsify
           ).map((stmts, _, deps, thisCls) => (stmts, deps, thisCls))
       }
@@ -345,7 +350,7 @@ object Compiler {
         body = rhsStmts,
         visibility = p.Function.Visibility.Exported,
         fpMode = p.Function.FpMode.Relaxed,
-        isEntry = false
+        convention = p.CallConvention.RegularCall
       )
       _ = log.info("Result", compiledFn.repr)
     } yield (compiledFn, deps)
@@ -512,7 +517,7 @@ object Compiler {
       body = exprStmts,
       visibility = p.Function.Visibility.Exported,
       fpMode = p.Function.FpMode.Relaxed,
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     )
 
     symbolToMacroDefinedDefDefs = q
@@ -636,7 +641,7 @@ object Compiler {
         body = p.Stmt.Return(p.Expr.Alias(p.Term.Poison(sig.rtn))) :: Nil,
         visibility = p.Function.Visibility.Exported,
         fpMode = p.Function.FpMode.Relaxed,
-        isEntry = false
+        convention = p.CallConvention.RegularCall
       )
       log.info(s"Abstract (trait function)", sig.repr)
       fn
@@ -822,7 +827,7 @@ object Compiler {
       }
 
     unopt = p.Program(
-      rootFn0,
+      Some(rootFn0),
       abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0,
       ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
     )
@@ -833,13 +838,13 @@ object Compiler {
     unoptLog <- log.subLog("Unopt").success
     _ = unoptLog.info(s"Structures = ${unopt.defs.size}", unopt.defs.map(_.repr)*)
     _ = unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.repr)*)
-    _ = unoptLog.info(s"Entry", unopt.entry.repr)
+    _ = unoptLog.info(s"Entry", unopt.entry.map(_.repr).getOrElse("<none>"))
 
     // verify before optimisation
     unoptVerification <- Verify(unopt, unoptLog, verifyFunction = false).success
     _ = unoptLog.info(
       s"Verifier",
-      unoptVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
+      unoptVerification.map((f, xs) => s"${f.signatureKey}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
     )
     _ <-
       if (unoptVerification.exists(_._2.nonEmpty))
@@ -871,7 +876,8 @@ object Compiler {
     // entry's own captures cover the transitive closure of all module captures any reachable
     // function needs.
     opt <- {
-      val fnByName: Map[p.Sym, p.Function] = (opt.entry :: opt.functions).map(fn => fn.name -> fn).toMap
+      val entry = opt.entry.getOrElse(throw IllegalStateException("compiler optimisation removed the program entry"))
+      val fnByName: Map[p.Sym, p.Function] = (entry :: opt.functions).map(fn => fn.name -> fn).toMap
       // Transitive module-capture types each function needs, including those from its callees.
       // The call graph is invariant across iterations: only the per-fn capture sets grow;
       // we collect callees once up front rather than re-walking every body each iteration.
@@ -896,8 +902,8 @@ object Compiler {
         current
       }
       val transitive   = computeTransitiveModuleCaps()
-      val entryAllCaps = transitive.getOrElse(opt.entry.name, opt.entry.moduleCaptures)
-      val newEntry     = opt.entry.copy(decl = opt.entry.decl.copy(moduleCaptures = entryAllCaps))
+      val entryAllCaps = transitive.getOrElse(entry.name, entry.moduleCaptures)
+      val newEntry     = entry.copy(decl = entry.decl.copy(moduleCaptures = entryAllCaps))
       val entryCapByTpe: Map[p.Type, p.Named] =
         (newEntry.moduleCaptures ++ newEntry.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
 
@@ -940,7 +946,7 @@ object Compiler {
       }
       opt
         .copy(
-          entry = patchFn(newEntry),
+          entry = Some(patchFn(newEntry)),
           functions = updatedFns.tail.map(patchFn)
         )
         .success
@@ -952,11 +958,11 @@ object Compiler {
 
     _ = optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
     _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.repr)*)
-    _ = optLog.info(s"Entry", opt.entry.repr)
+    _ = optLog.info(s"Entry", opt.entry.map(_.repr).getOrElse("<none>"))
 
     _ = optLog.info(
       s"Verifier",
-      optVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
+      optVerification.map((f, xs) => s"${f.signatureKey}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
     )
     _ <-
       if (optVerification.exists(_._2.nonEmpty))
@@ -968,7 +974,8 @@ object Compiler {
       else ().success
 
     capturedNameTable = capturedNames.map((name, ref) => name.symbol -> (name.tpe, ref)).toMap
-    captured <- (opt.entry.moduleCaptures ++ opt.entry.termCaptures).traverse { n =>
+    finalEntry <- opt.entry.failIfEmpty("compiler optimisation removed the program entry")
+    captured <- (finalEntry.moduleCaptures ++ finalEntry.termCaptures).traverse { n =>
       // Struct type of symbols may have been modified through specialisation so we just validate whether it's still a struct for now
       capturedNameTable.get(n.named.symbol) match {
         case None => (n -> captureNameToModuleRefTable(n.named.symbol)).success

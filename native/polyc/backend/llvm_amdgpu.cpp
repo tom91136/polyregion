@@ -5,7 +5,7 @@
 using namespace polyregion::backend::details;
 
 void AMDGPUTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
-  if (source.isEntry) {
+  if (source.convention.is<CallConvention::OffloadEntry>()) {
     fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
     // without this the AMDGPUAttributor skips the multi-dim workitem/workgroup-id ABI and y/z ids read 0
     fn.addFnAttr("amdgpu-flat-work-group-size", "1,1024");
@@ -244,6 +244,14 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
         return cg.B.CreateICmpEQ(cg.B.CreateAnd(votes, mask), mask);
       },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, amdgpuScope(v.scope)); },
+      [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, amdgpuScope(v.scope)); },
+      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce lowering not yet implemented"); },
+      [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupInclusiveScan lowering not yet implemented");
+      },
+      [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupExclusiveScan lowering not yet implemented");
+      },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },

@@ -23,8 +23,8 @@ using namespace polyregion::polyast::dsl;
 TEST_CASE("polyc JIT reports its wire ABI", "[jit]") { CHECK(polyc_jit_abi_version() == POLYC_JIT_ABI_VERSION); }
 
 TEST_CASE("polyc JIT C ABI compiles and owns its result", "[jit]") {
-  const auto entry =
-      function("jit_test", {}, Type::Unit0(), FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true)({ret(Term::Unit0Const())});
+  const auto entry = function("jit_test", {}, Type::Unit0(), FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                              CallConvention::OffloadEntry())({ret(Term::Unit0Const())});
   const auto packed = hashed_program_to_msgpack(program({}, {entry}));
 
   uint8_t *image = nullptr;
@@ -43,8 +43,8 @@ TEST_CASE("polyc JIT cache rebuilds from a damaged entry", "[jit]") {
   REQUIRE(!llvm::sys::fs::createUniqueDirectory("polyc-jit-cache-test", dir));
   env::put(env::PolyregionCacheDir, dir.c_str(), true);
 
-  const auto entry =
-      function("jit_cached", {}, Type::Unit0(), FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true)({ret(Term::Unit0Const())});
+  const auto entry = function("jit_cached", {}, Type::Unit0(), FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                              CallConvention::OffloadEntry())({ret(Term::Unit0Const())});
   const auto packed = hashed_program_to_msgpack(program({}, {entry}));
   const auto compile = [&](uint8_t **image, size_t *len) {
     return polyc_jit_compile(packed.data(), packed.size(), static_cast<uint32_t>(Target::Object_LLVM_HOST), "native", nullptr,

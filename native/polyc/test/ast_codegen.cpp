@@ -25,9 +25,10 @@ using namespace polyast::dsl;
 
 static Function mkFn(const std::string &name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body,
                      FunctionVisibility::Any visibility = FunctionVisibility::Exported(),
-                     FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool isEntry = false) {
+                     FunctionFpMode::Any fpMode = FunctionFpMode::Relaxed(), bool offloadEntry = false) {
   return Function(FunctionDecl(Sym({name}), {}, {}, std::move(args), {}, {}, std::move(rtn), FunctionAffinity::Offload()), std::move(body),
-                  std::move(visibility), std::move(fpMode), isEntry);
+                  std::move(visibility), std::move(fpMode),
+                  offloadEntry ? CallConvention::OffloadEntry().widen() : CallConvention::RegularCall().widen());
 }
 
 static Expr::Invoke mkInvoke(const std::string &name, std::vector<Term::Any> args, Type::Any rtn) {
@@ -159,7 +160,8 @@ TEST_CASE("initialise more than once", "[compiler]") {
 
 TEST_CASE("spirv64 minimal", "[compiler]") {
   compiler::initialise();
-  auto fn = function("k", {"p"_(Ptr(SInt))()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Strict(), true)({
+  auto fn = function("k", {"p"_(Ptr(SInt))()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Strict(),
+                     CallConvention::OffloadEntry())({
       "p"_(Ptr(SInt))[0_(SInt)] = 42_(SInt), //
       ret()                                  //
   });
@@ -961,7 +963,7 @@ static Function mkMathKernel(const Type::Any &tpe) {
   auto outPtr = "out"_(Ptr(tpe));
   const Term::Select inSel = "in"_(tpe);
   return function("k", {"out"_(Ptr(tpe))(), "in"_(tpe)()}, Unit, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
-                  /*isEntry*/ true)({
+                  CallConvention::OffloadEntry())({
       let("rsin") = call(Sin(inSel, tpe)),            //
       let("rcos") = call(Cos(inSel, tpe)),            //
       let("rtan") = call(Tan(inSel, tpe)),            //

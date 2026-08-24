@@ -166,14 +166,6 @@ namespace TypeSpace {
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const TypeSpace::Any &);
 } // namespace TypeSpace
-namespace PassPhase {
-[[nodiscard]] POLYREGION_EXPORT PassPhase::Initial initial_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json initial_to_json(const PassPhase::Initial &);
-[[nodiscard]] POLYREGION_EXPORT PassPhase::PostMono postmono_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json postmono_to_json(const PassPhase::PostMono &);
-[[nodiscard]] POLYREGION_EXPORT PassPhase::Any any_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json any_to_json(const PassPhase::Any &);
-} // namespace PassPhase
 namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT Spec::Assert assert_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json assert_to_json(const Spec::Assert &);
@@ -223,6 +215,14 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT json gpuvoteall_to_json(const Spec::GpuVoteAll &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuAtomicRMW gpuatomicrmw_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json gpuatomicrmw_to_json(const Spec::GpuAtomicRMW &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuAtomicCAS gpuatomiccas_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpuatomiccas_to_json(const Spec::GpuAtomicCAS &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuGroupReduce gpugroupreduce_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpugroupreduce_to_json(const Spec::GpuGroupReduce &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuGroupInclusiveScan gpugroupinclusivescan_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpugroupinclusivescan_to_json(const Spec::GpuGroupInclusiveScan &);
+[[nodiscard]] POLYREGION_EXPORT Spec::GpuGroupExclusiveScan gpugroupexclusivescan_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json gpugroupexclusivescan_to_json(const Spec::GpuGroupExclusiveScan &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuVolatileLoad gpuvolatileload_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json gpuvolatileload_to_json(const Spec::GpuVolatileLoad &);
 [[nodiscard]] POLYREGION_EXPORT Spec::GpuVolatileStore gpuvolatilestore_from_json(const json &);
@@ -304,8 +304,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json signature_to_json(const Signature &);
 [[nodiscard]] POLYREGION_EXPORT InvokeSignature invokesignature_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json invokesignature_to_json(const InvokeSignature &);
-[[nodiscard]] POLYREGION_EXPORT Boundary boundary_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json boundary_to_json(const Boundary &);
+[[nodiscard]] POLYREGION_EXPORT ArgBoundary argboundary_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json argboundary_to_json(const ArgBoundary &);
 [[nodiscard]] POLYREGION_EXPORT Arg arg_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json arg_to_json(const Arg &);
 [[nodiscard]] POLYREGION_EXPORT FunctionDecl functiondecl_from_json(const json &);
@@ -336,16 +336,18 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json passrunresult_to_json(const PassRunResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
-[[nodiscard]] POLYREGION_EXPORT InterfaceDef interfacedef_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json interfacedef_to_json(const InterfaceDef &);
-[[nodiscard]] POLYREGION_EXPORT TypeSizeConstraint typesizeconstraint_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json typesizeconstraint_to_json(const TypeSizeConstraint &);
-[[nodiscard]] POLYREGION_EXPORT ImplementationCandidate implementationcandidate_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json implementationcandidate_to_json(const ImplementationCandidate &);
-[[nodiscard]] POLYREGION_EXPORT PackageIndex packageindex_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json packageindex_to_json(const PackageIndex &);
+[[nodiscard]] POLYREGION_EXPORT Interface interface_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json interface_to_json(const Interface &);
 [[nodiscard]] POLYREGION_EXPORT Package package_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json package_to_json(const Package &);
+[[nodiscard]] POLYREGION_EXPORT PackageTypeSize packagetypesize_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagetypesize_to_json(const PackageTypeSize &);
+[[nodiscard]] POLYREGION_EXPORT PackageLinkRequest packagelinkrequest_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagelinkrequest_to_json(const PackageLinkRequest &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymRequest packagesymrequest_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagesymrequest_to_json(const PackageSymRequest &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymResolvedProgram packagesymresolvedprogram_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagesymresolvedprogram_to_json(const PackageSymResolvedProgram &);
 namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
@@ -459,6 +461,8 @@ namespace ArgSizeExpr {
 [[nodiscard]] POLYREGION_EXPORT json add_to_json(const ArgSizeExpr::Add &);
 [[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Mul mul_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json mul_to_json(const ArgSizeExpr::Mul &);
+[[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Min min_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json min_to_json(const ArgSizeExpr::Min &);
 [[nodiscard]] POLYREGION_EXPORT ArgSizeExpr::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const ArgSizeExpr::Any &);
 } // namespace ArgSizeExpr
@@ -474,6 +478,42 @@ namespace PathStep {
 [[nodiscard]] POLYREGION_EXPORT PathStep::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const PathStep::Any &);
 } // namespace PathStep
+namespace CallConvention {
+[[nodiscard]] POLYREGION_EXPORT CallConvention::RegularCall regularcall_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json regularcall_to_json(const CallConvention::RegularCall &);
+[[nodiscard]] POLYREGION_EXPORT CallConvention::OffloadEntry offloadentry_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json offloadentry_to_json(const CallConvention::OffloadEntry &);
+[[nodiscard]] POLYREGION_EXPORT CallConvention::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const CallConvention::Any &);
+} // namespace CallConvention
+namespace PackageReturnConvention {
+[[nodiscard]] POLYREGION_EXPORT PackageReturnConvention::Return return_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json return_to_json(const PackageReturnConvention::Return &);
+[[nodiscard]] POLYREGION_EXPORT PackageReturnConvention::OutParam outparam_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json outparam_to_json(const PackageReturnConvention::OutParam &);
+[[nodiscard]] POLYREGION_EXPORT PackageReturnConvention::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const PackageReturnConvention::Any &);
+} // namespace PackageReturnConvention
+namespace PassPhase {
+[[nodiscard]] POLYREGION_EXPORT PassPhase::Initial initial_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json initial_to_json(const PassPhase::Initial &);
+[[nodiscard]] POLYREGION_EXPORT PassPhase::PostMono postmono_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json postmono_to_json(const PassPhase::PostMono &);
+[[nodiscard]] POLYREGION_EXPORT PassPhase::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const PassPhase::Any &);
+} // namespace PassPhase
+namespace PackageEntryArgBinding {
+[[nodiscard]] POLYREGION_EXPORT PackageEntryArgBinding::Context context_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json context_to_json(const PackageEntryArgBinding::Context &);
+[[nodiscard]] POLYREGION_EXPORT PackageEntryArgBinding::CallValue callvalue_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json callvalue_to_json(const PackageEntryArgBinding::CallValue &);
+[[nodiscard]] POLYREGION_EXPORT PackageEntryArgBinding::CallAddress calladdress_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json calladdress_to_json(const PackageEntryArgBinding::CallAddress &);
+[[nodiscard]] POLYREGION_EXPORT PackageEntryArgBinding::ResultAddress resultaddress_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json resultaddress_to_json(const PackageEntryArgBinding::ResultAddress &);
+[[nodiscard]] POLYREGION_EXPORT PackageEntryArgBinding::Any any_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json any_to_json(const PackageEntryArgBinding::Any &);
+} // namespace PackageEntryArgBinding
 namespace TypeKind {
 [[nodiscard]] POLYREGION_EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json none_to_json(const TypeKind::None &);
@@ -557,22 +597,33 @@ namespace Direction {
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> hashed_program_to_msgpack(const Program &);
 [[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT Program hashed_program_from_msgpack(const std::vector<uint8_t> &);
-
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> interface_to_msgpack(const Interface &);
+[[nodiscard]] POLYREGION_EXPORT Interface interface_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT Interface interface_from_msgpack(const std::vector<uint8_t> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> package_to_msgpack(const Package &);
 [[nodiscard]] POLYREGION_EXPORT Package package_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT Package package_from_msgpack(const std::vector<uint8_t> &);
-
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> package_service_result_to_msgpack(const Package &);
+[[nodiscard]] POLYREGION_EXPORT Package package_service_result_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT Package package_service_result_from_msgpack(const std::vector<uint8_t> &);
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packagelinkrequest_to_msgpack(const PackageLinkRequest &);
+[[nodiscard]] POLYREGION_EXPORT PackageLinkRequest packagelinkrequest_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT PackageLinkRequest packagelinkrequest_from_msgpack(const std::vector<uint8_t> &);
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packagesymrequest_to_msgpack(const PackageSymRequest &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymRequest packagesymrequest_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT PackageSymRequest packagesymrequest_from_msgpack(const std::vector<uint8_t> &);
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> resolvedsymprogram_to_msgpack(const PackageSymResolvedProgram &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const std::vector<uint8_t> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> hashed_structdefs_to_msgpack(const std::vector<StructDef> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> hashed_structdefs_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> hashed_structdefs_from_msgpack(const std::vector<uint8_t> &);
-
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> compileresult_to_msgpack(const CompileResult &);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_msgpack(const std::vector<uint8_t> &);
-
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> passrunresult_to_msgpack(const PassRunResult &);
 [[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT PassRunResult passrunresult_from_msgpack(const std::vector<uint8_t> &);

@@ -28,12 +28,11 @@ Function internal(const std::string &name, const Vector<Stmt::Any> &body = {}) {
 }
 
 Program library(const Vector<Function> &fns, const Vector<StructDef> &defs = {}) {
-  return Program(function("__library_root", {}, Type::Unit0(), FunctionVisibility::Internal())({ret()}), fns, defs, PassPhase::Initial(),
-                 {});
+  return Program({}, fns, defs, PassPhase::Initial(), {});
 }
 
 Vector<std::string> namesOf(const Vector<Function> &fns) {
-  return fns ^ map([](const auto &f) { return repr(f.decl.name); }) ^ distinct() ^ sort();
+  return fns ^ map([](const auto &f) { return fqcn(f.decl.name); }) ^ distinct() ^ sort();
 }
 
 Vector<std::string> shake(const Program &p) { return namesOf(compiler::runPipeline(p, Treeshake).functions); }
@@ -57,7 +56,7 @@ TEST_CASE("treeshake dead-strips structs left unreferenced") {
   const StructDef unusedDef(Sym({"Unused"}), {}, {Named("y", Type::IntS32())}, {}, false);
 
   const auto lib = library({exported("a", {}, {Arg(Named("s", used), {})})}, {usedDef, unusedDef});
-  const auto defs = compiler::runPipeline(lib, Treeshake).defs ^ map([](const auto &d) { return repr(d.name); });
+  const auto defs = compiler::runPipeline(lib, Treeshake).defs ^ map([](const auto &d) { return fqcn(d.name); });
   CHECK((defs ^ contains("Used")));
   CHECK(!(defs ^ contains("Unused")));
 }
@@ -73,5 +72,5 @@ TEST_CASE("a treeshaken library round-trips through msgpack") {
   const auto decoded = hashed_program_from_msgpack(hashed_program_to_msgpack(compiler::runPipeline(lib, Treeshake)));
   CHECK(namesOf(decoded.functions) == Vector<std::string>{"a", "shared"});
   CHECK((decoded.functions //
-         ^ exists([](const auto &f) { return repr(f.decl.name) == "a" && f.visibility.template is<FunctionVisibility::Exported>(); })));
+         ^ exists([](const auto &f) { return fqcn(f.decl.name) == "a" && f.visibility.template is<FunctionVisibility::Exported>(); })));
 }

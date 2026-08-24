@@ -8,6 +8,12 @@ object CAbiCodeGen {
   inline def polyPassSymbolsHeader: String = ${ symbolsImpl("polyregion.ast.PolyAST.PolyPassAbi") }
   inline def polyPassExportsList: String   = ${ exportsImpl("polyregion.ast.PolyAST.PolyPassAbi") }
 
+  inline def polyPackageHeader: String = ${ headerImpl("polyregion.ast.PolyAST.PolyPackageAbi") }
+  inline def polyPackageSymbolsHeader: String = ${
+    symbolsImpl("polyregion.ast.PolyAST.PolyPackageAbi")
+  }
+  inline def polyPackageExportsList: String = ${ exportsImpl("polyregion.ast.PolyAST.PolyPackageAbi") }
+
   inline def polyJitHeader: String        = ${ headerImpl("polyregion.ast.PolyAST.PolyJitAbi") }
   inline def polyJitSymbolsHeader: String = ${ symbolsImpl("polyregion.ast.PolyAST.PolyJitAbi") }
   inline def polyJitExportsList: String   = ${ exportsImpl("polyregion.ast.PolyAST.PolyJitAbi") }

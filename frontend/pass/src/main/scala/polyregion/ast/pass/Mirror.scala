@@ -21,7 +21,7 @@ import polyregion.ast.PolyAST.Conventions.RuntimeAbi
 //   postlude read-alloc dedup   ->  visit_clear resets the visited set per postlude
 final case class Mirror(id: String = "") extends ProgramPass derives PassArgCodec {
 
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private def add(a: p.Term, b: p.Term): p.Expr                = p.Expr.IntrOp(p.Intr.Add(a, b, U64))
   private def u64v(name: String, e: p.Expr): (p.Named, p.Stmt) = vlet(name, U64, e)
@@ -46,7 +46,7 @@ final case class Mirror(id: String = "") extends ProgramPass derives PassArgCode
   }
 
   private def captureStruct(program: p.Program): Option[(p.Type.Struct, p.StructDef)] =
-    captureRoot(program.entry).flatMap((_, s) => program.defs.find(_.name == s.name).map(s -> _))
+    program.entry.flatMap(captureRoot).flatMap((_, s) => program.defs.find(_.name == s.name).map(s -> _))
 
   def apply(program: p.Program, log: Log): p.Program = {
     val capture = p.Named("capture", BytePtr)
@@ -308,7 +308,7 @@ def hostFn(name: String, rtn: p.Type, body: List[p.Stmt]): p.Function =
     body,
     p.Function.Visibility.Exported,
     p.Function.FpMode.Relaxed,
-    isEntry = false
+    convention = p.CallConvention.RegularCall
   )
 
 def selfPtrMembers(sdef: p.StructDef): List[p.Named] = sdef.members.filter { m =>

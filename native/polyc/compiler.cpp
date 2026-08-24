@@ -259,6 +259,7 @@ polyast::Program compiler::runPipeline(const polyast::Program &program, const st
 
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
   initialise();
+  const bool hadEntry = program.entry.has_value();
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
     switch (options.target) {
       case compiletime::Target::Object_LLVM_HOST:
@@ -282,7 +283,7 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   };
 
   const bool isGpuTarget = runtime::targetPlatformKind(options.target) == runtime::PlatformKind::Managed;
-  if (isGpuTarget && !program.entry.decl.affinity.is<polyast::FunctionAffinity::Offload>())
+  if (isGpuTarget && program.entry && !program.entry->decl.affinity.is<polyast::FunctionAffinity::Offload>())
     throw std::logic_error(
         fmt::format("GPU target {} requires an Offload-affinity entry function; got Host-affinity", magic_enum::enum_name(options.target)));
 
@@ -295,7 +296,8 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   }
 
   if (options.hostMirroring) {
-    auto hostFns = std::vector<polyast::Function>{effective.entry}                                                        //
+    if (!effective.entry) return {{}, {}, preEvents, {}, "hostMirroring: pipeline removed the Program entry", {}};
+    auto hostFns = std::vector<polyast::Function>{*effective.entry}                                                       //
                    | concat(effective.functions)                                                                          //
                    | filter([](const auto &f) { return f.decl.affinity.template is<polyast::FunctionAffinity::Host>(); }) //
                    | to_vector();
@@ -305,7 +307,8 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   }
 
   polyast::CompileResult c = mkBackend()->compileProgram(effective, opt);
-  c.entryArgs = effective.entry.decl.args ^ map([](const auto &a) { return a.named; });
+  if (hadEntry && !effective.entry) throw std::logic_error("pipeline removed the Program entry");
+  if (effective.entry) c.entryArgs = effective.entry->decl.args ^ map([](const auto &a) { return a.named; });
   c.events ^= concat(preEvents);
   std::stable_sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
   return c;

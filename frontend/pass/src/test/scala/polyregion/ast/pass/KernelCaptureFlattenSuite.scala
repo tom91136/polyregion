@@ -46,7 +46,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(named("s"), Some(p.Expr.Alias(scalar))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
 
@@ -94,7 +94,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true,
+      convention = p.CallConvention.OffloadEntry,
       moduleCaptures = List(module)
     ).modifyDecl(_.copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
@@ -150,11 +150,11 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true,
+      convention = p.CallConvention.OffloadEntry,
       moduleCaptures = List(arg("moduleA", p.Type.IntU32), arg("moduleB", p.Type.IntU64))
     ).modifyDecl(
       _.copy(
-        tpeVars = List("T"),
+        tpeVars = List(p.Type.Var("T")),
         args = List(arg("erased", p.Type.Var("T")), p.Arg(capArg)),
         affinity = p.Function.Affinity.Offload
       )
@@ -260,7 +260,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Update(data, p.Term.IntS32Const(0), p.Term.IntS32Const(42)),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
     val outKernel =
@@ -278,7 +278,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     val capDef = p.StructDef(capSym, Nil, List(named("value", p.Type.IntS32)), Nil)
     val self   = named(p.Conventions.ThisReceiver, p.Type.Ptr(capTpe, global))
     val kernel =
-      fn("scalarKernel", isEntry = true)
+      fn("scalarKernel", convention = p.CallConvention.OffloadEntry)
         .modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
     val in      = program(host(kernel, capture), List(kernel), List(capDef))
@@ -300,7 +300,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       "graphKernel",
       body =
         List(p.Stmt.Var(named("h", nodePtr), Some(p.Expr.Alias(head))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
 
@@ -323,7 +323,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     val kernel = fn(
       "escapeKernel",
       body = List(p.Stmt.Var(copy, Some(p.Expr.Alias(inner))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
     val outKernel =
@@ -378,7 +378,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(named("y"), Some(p.Expr.Index(direct, p.Term.IntS32Const(0), p.Type.IntS32))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture   = named("capture", p.Type.Ptr(capTpe, global))
     val out       = KernelCaptureFlatten(program(host(kernel, capture), List(kernel), List(innerDef, capDef)), NoopLog)
@@ -427,7 +427,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         p.Stmt.Var(named("captureAlias", capPtr), Some(p.Expr.Alias(p.Term.Select(self, Nil, capPtr)))),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
 
@@ -448,7 +448,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       "badCallKernel",
       body =
         List(p.Stmt.Var(named("p", i32p), Some(p.Expr.Alias(data))), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
 
@@ -476,7 +476,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
           .Var(named("slot", p.Type.Ptr(i32p, global)), Some(p.Expr.RefTo(data, None, i32p, global, p.Region.Opaque))),
         ret
       ),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", capPtr)
     val addressEx = intercept[RuntimeException] {
@@ -487,7 +487,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     val mutateKernel = fn(
       "mutateKernel",
       body = List(p.Stmt.Mut(data, p.Expr.Alias(p.Term.NullPtrConst(p.Type.IntS32, global, p.Region.Opaque))), ret),
-      isEntry = true
+      convention = p.CallConvention.OffloadEntry
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val mutationEx = intercept[RuntimeException] {
       KernelCaptureFlatten(program(host(mutateKernel, capture), List(mutateKernel), List(capDef)), NoopLog)
@@ -509,7 +509,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
           p.Stmt.Var(named("use", member.tpe), Some(p.Expr.Alias(field))),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         ),
-        isEntry = true
+        convention = p.CallConvention.OffloadEntry
       ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
       val capture = named("capture", capPtr)
       intercept[RuntimeException] {

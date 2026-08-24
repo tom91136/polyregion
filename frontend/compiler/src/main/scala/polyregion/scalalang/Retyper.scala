@@ -108,7 +108,7 @@ object Retyper {
         } yield sm
 
       }
-      .map(p.StructDef(p.Sym(clsSym.fullName), clsTypeCtorNames(clsSym), _, deriveParents(clsSym)))
+      .map(p.StructDef(p.Sym(clsSym.fullName), clsTypeCtorNames(clsSym).map(p.Type.Var(_)), _, deriveParents(clsSym)))
   }
 
   // Ctor rules
@@ -195,13 +195,14 @@ object Retyper {
       case q.PolyType(vars, _, method @ q.MethodType(_, _, _)) =>
         // this shows up from reference to generic methods
         typer0(method).flatMap {
-          case (term -> (e @ p.Type.Exec(Nil, args, rtn)), wit) => (term -> p.Type.Exec(vars, args, rtn), wit).success
-          case (_ -> bad, wit)                                  => ???
+          case (term -> (e @ p.Type.Exec(Nil, args, rtn)), wit) =>
+            (term -> p.Type.Exec(vars.map(p.Type.Var(_)), args, rtn), wit).success
+          case (_ -> bad, wit) => ???
         }
       case poly @ q.PolyType(vars, _, tpe) =>
         // this shows up from reference to generic no-arg methods (i.e. getters)
         typer0(tpe).flatMap { case (term -> rtn, wit) =>
-          (term -> p.Type.Exec(vars, Nil, rtn), wit).success
+          (term -> p.Type.Exec(vars.map(p.Type.Var(_)), Nil, rtn), wit).success
         }
 
       case m @ q.MethodType(argNames, argTpes, rtn) =>
@@ -227,7 +228,7 @@ object Retyper {
             case _ => (Nil, Map.empty).success
           }
 
-          receiverCtorTpeVars = receiverCtorTpes.collect { case p.Type.Var(name) => name }
+          receiverCtorTpeVars = receiverCtorTpes.collect { case variable: p.Type.Var => variable }
 
           // receiverTpes = clsTypeCtorNames(repr.termSymbol.maybeOwner) // XXX use the not yet widened `repr`, not `m`!
         } yield (None -> p.Type.Exec(receiverCtorTpeVars, argTpes.map(_._2), rtnTpe), wit0 |+| wit1 |+| wit2)

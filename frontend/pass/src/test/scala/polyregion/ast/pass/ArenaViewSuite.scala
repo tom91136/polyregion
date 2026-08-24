@@ -45,7 +45,7 @@ class ArenaViewSuite extends munit.FunSuite {
   }
 
   test("mutation through a stack-local iterator's node pointer resolves to an arena store, not a stale field select") {
-    val program = p.Program(buildEntry(), Nil, defs)
+    val program = PassTest.program(buildEntry(), Nil, defs)
     val result  = ArenaView(program, NoopLog)
     // no surviving select may reach through a field ArenaView retyped to i64
     val staleFieldSelects = result.entry.collectAll[p.Term].collect {
@@ -61,7 +61,7 @@ class ArenaViewSuite extends munit.FunSuite {
     )
     val count  = arg("count", p.Type.IntS32)
     val entry  = base.copy(decl = base.decl.copy(args = base.args ::: List(output, count)))
-    val result = ArenaView(p.Program(entry, Nil, defs), NoopLog)
+    val result = ArenaView(PassTest.program(entry, Nil, defs), NoopLog)
 
     assertEquals(
       result.entry.args.find(_.named.symbol == output.named.symbol).flatMap(_.boundary).map(_.extent),
@@ -79,7 +79,7 @@ class ArenaViewSuite extends munit.FunSuite {
     val pointer       = named("pointer", privatePtr)
     val loaded        = named("loaded", privatePtr)
     val capArg        = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
-    val program = p.Program(
+    val program = PassTest.program(
       entry(
         args = List(capArg),
         body = List(
@@ -138,7 +138,7 @@ class ArenaViewSuite extends munit.FunSuite {
     val same       = named("same", p.Type.Bool1)
     val capArg     = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
     val selfMember = named("self", selfPtr)
-    val program = p.Program(
+    val program = PassTest.program(
       entry(
         args = List(capArg),
         body = List(
@@ -196,67 +196,70 @@ class ArenaViewSuite extends munit.FunSuite {
     val flag                      = named("flag", p.Type.IntS32)
     val capArg                    = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
     val program = p.Program(
-      entry(
-        args = List(capArg),
-        body = List(
-          p.Stmt.Var(local, None, isMutable = true),
-          p.Stmt.Var(
-            source,
-            Some(p.Expr.RefTo(selectT(local), None, derivedTpe, p.Type.Space.Private, p.Region.Opaque)),
-            isMutable = false
-          ),
-          p.Stmt.Var(
-            adjusted,
-            Some(p.Expr.Alias(p.Term.NullPtrConst(baseTpe, p.Type.Space.Global, p.Region.Opaque))),
-            isMutable = true
-          ),
-          p.Stmt.Var(
-            nonNull,
-            Some(
-              p.Expr.IntrOp(
-                p.Intr.LogicNeq(selectT(source), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
-              )
+      Some(
+        entry(
+          args = List(capArg),
+          body = List(
+            p.Stmt.Var(local, None, isMutable = true),
+            p.Stmt.Var(
+              source,
+              Some(p.Expr.RefTo(selectT(local), None, derivedTpe, p.Type.Space.Private, p.Region.Opaque)),
+              isMutable = false
             ),
-            isMutable = false
-          ),
-          p.Stmt.Cond(
-            selectT(nonNull),
-            List(
-              p.Stmt.Mut(
-                selectT(adjusted),
-                p.Expr.RefTo(
-                  p.Term.Select(local, List(p.PathStep.Field("base")), baseTpe),
-                  None,
-                  baseTpe,
-                  p.Type.Space.Private,
-                  p.Region.Opaque
+            p.Stmt.Var(
+              adjusted,
+              Some(p.Expr.Alias(p.Term.NullPtrConst(baseTpe, p.Type.Space.Global, p.Region.Opaque))),
+              isMutable = true
+            ),
+            p.Stmt.Var(
+              nonNull,
+              Some(
+                p.Expr.IntrOp(
+                  p.Intr
+                    .LogicNeq(selectT(source), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
                 )
-              )
+              ),
+              isMutable = false
             ),
-            Nil
-          ),
-          p.Stmt.Var(
-            nullSource,
-            Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))),
-            false
-          ),
-          p.Stmt.Var(
-            isNull,
-            Some(
-              p.Expr.IntrOp(
-                p.Intr
-                  .LogicEq(selectT(nullSource), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
-              )
+            p.Stmt.Cond(
+              selectT(nonNull),
+              List(
+                p.Stmt.Mut(
+                  selectT(adjusted),
+                  p.Expr.RefTo(
+                    p.Term.Select(local, List(p.PathStep.Field("base")), baseTpe),
+                    None,
+                    baseTpe,
+                    p.Type.Space.Private,
+                    p.Region.Opaque
+                  )
+                )
+              ),
+              Nil
             ),
-            false
-          ),
-          p.Stmt.Var(flag, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true),
-          p.Stmt.Cond(
-            selectT(isNull),
-            List(p.Stmt.Mut(selectT(flag), p.Expr.Alias(p.Term.IntS32Const(1)))),
-            List(p.Stmt.Mut(selectT(flag), p.Expr.Alias(p.Term.IntS32Const(2))))
-          ),
-          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+            p.Stmt.Var(
+              nullSource,
+              Some(p.Expr.Alias(p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))),
+              false
+            ),
+            p.Stmt.Var(
+              isNull,
+              Some(
+                p.Expr.IntrOp(
+                  p.Intr
+                    .LogicEq(selectT(nullSource), p.Term.NullPtrConst(derivedTpe, p.Type.Space.Global, p.Region.Opaque))
+                )
+              ),
+              false
+            ),
+            p.Stmt.Var(flag, Some(p.Expr.Alias(p.Term.IntS32Const(0))), true),
+            p.Stmt.Cond(
+              selectT(isNull),
+              List(p.Stmt.Mut(selectT(flag), p.Expr.Alias(p.Term.IntS32Const(1)))),
+              List(p.Stmt.Mut(selectT(flag), p.Expr.Alias(p.Term.IntS32Const(2))))
+            ),
+            p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+          )
         )
       ),
       Nil,
@@ -294,7 +297,7 @@ class ArenaViewSuite extends munit.FunSuite {
     val pointer      = named("pointer", globalPtr)
     val closure      = named("closure", closureTpe)
     val loaded       = named("loaded", globalPtr)
-    val program = p.Program(
+    val program = PassTest.program(
       entry(
         args = List(capArg),
         body = List(
@@ -353,7 +356,7 @@ class ArenaViewSuite extends munit.FunSuite {
   test("an arena pointer compares with null as an offset") {
     val capArg = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
     val isNull = named("isNull", p.Type.Bool1)
-    val program = p.Program(
+    val program = PassTest.program(
       entry(
         args = List(capArg),
         body = List(
@@ -390,7 +393,7 @@ class ArenaViewSuite extends munit.FunSuite {
     val loaded  = named("loaded", p.Type.IntU32)
     val stored  = named("stored", p.Type.Unit0)
     val swapped = named("swapped", p.Type.IntU32)
-    val program = p.Program(
+    val program = PassTest.program(
       entry(
         args = List(capArg),
         body = List(
@@ -466,7 +469,7 @@ class ArenaViewSuite extends munit.FunSuite {
     val pointer = named("pointer", pairPtr)
     val loaded  = named("loaded", pairTpe)
     val stored  = named("stored", p.Type.Unit0)
-    val program = p.Program(
+    val program = PassTest.program(
       entry(
         args = List(capArg),
         body = List(

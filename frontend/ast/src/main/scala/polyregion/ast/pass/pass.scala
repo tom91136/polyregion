@@ -14,7 +14,7 @@ final case class PassArgs(values: Map[String, String]) {
 }
 
 object PassArgs {
-  def from(spec: p.PassSpec): Either[String, PassArgs] = {
+  def from(spec: p.Pass.Spec): Either[String, PassArgs] = {
     val duplicates = spec.args.groupBy(_.name).collect { case (k, xs) if xs.size > 1 => k }.toVector.sorted
     if (duplicates.nonEmpty) Left(s"${spec.name}: duplicate argument(s): ${duplicates.mkString(", ")}")
     else Right(PassArgs(spec.args.map(a => a.name -> a.value).toMap))
@@ -114,13 +114,13 @@ object PassName {
 
 trait ProgramPass extends ((p.Program, Log) => p.Program) {
   def name: String                                         = PassName.derive(getClass)
-  def phase: p.PassPhase                                   = p.PassPhase.Initial
+  def phase: p.Pass.Phase                                  = p.Pass.Phase.Initial
   def run(program: p.Program, ctx: PassContext): p.Program = apply(program, ctx.log)
 }
 
 trait BoundaryPass[A] extends ((p.Program, Log) => (A, p.Program)) {
   def name: String                                              = PassName.derive(getClass)
-  def phase: p.PassPhase                                        = p.PassPhase.Initial
+  def phase: p.Pass.Phase                                       = p.Pass.Phase.Initial
   def run(program: p.Program, ctx: PassContext): (A, p.Program) = apply(program, ctx.log)
 }
 
@@ -145,7 +145,7 @@ object PassClock {
 }
 
 final class PassRunner(clock: PassClock = PassClock.system) {
-  private val eventStack = mutable.ArrayBuffer.empty[mutable.ArrayBuffer[p.CompileEvent]]
+  private val eventStack = mutable.ArrayBuffer.empty[mutable.ArrayBuffer[p.Compile.Event]]
 
   def run(pass: ProgramPass, program: p.Program, parent: PassContext): p.Program = {
     val log = parent.log.subLog(pass.name)
@@ -161,10 +161,10 @@ final class PassRunner(clock: PassClock = PassClock.system) {
     }
   }
 
-  def runPipeline(steps: Vector[ProgramPass | BoundaryPass[?]], program: p.Program, log: Log): p.PassRunResult = {
+  def runPipeline(steps: Vector[ProgramPass | BoundaryPass[?]], program: p.Program, log: Log): p.Pass.RunResult = {
     val startEpoch = clock.epochMillis()
     val startNanos = clock.nanoTime()
-    val rootItems  = mutable.ArrayBuffer.empty[p.CompileEvent]
+    val rootItems  = mutable.ArrayBuffer.empty[p.Compile.Event]
     eventStack += rootItems
     val out =
       try {
@@ -179,19 +179,22 @@ final class PassRunner(clock: PassClock = PassClock.system) {
           throw t
       }
     val items = eventStack.remove(eventStack.size - 1).toList
-    p.PassRunResult(out, p.CompileEvent(startEpoch, math.max(0L, clock.nanoTime() - startNanos), "polypass", "", items))
+    p.Pass.RunResult(
+      out,
+      p.Compile.Event(startEpoch, math.max(0L, clock.nanoTime() - startNanos), "polypass", "", items)
+    )
   }
 
   private def timed[A](name: String)(f: => A): A = {
     val startEpoch = clock.epochMillis()
     val startNanos = clock.nanoTime()
-    val items      = mutable.ArrayBuffer.empty[p.CompileEvent]
+    val items      = mutable.ArrayBuffer.empty[p.Compile.Event]
     eventStack += items
     try f
     finally {
       eventStack.remove(eventStack.size - 1)
       if (eventStack.nonEmpty)
-        eventStack.last += p.CompileEvent(
+        eventStack.last += p.Compile.Event(
           startEpoch,
           math.max(0L, clock.nanoTime() - startNanos),
           PassName.eventName(name),
@@ -204,14 +207,14 @@ final class PassRunner(clock: PassClock = PassClock.system) {
 
 final case class PassDef(
     name: String,
-    phase: p.PassPhase,
+    phase: p.Pass.Phase,
     build: PassArgs => Either[String, ProgramPass | BoundaryPass[?]]
 )
 
 object PassDef {
   private type AnyPass = ProgramPass | BoundaryPass[?]
 
-  private def head(pass: AnyPass): (String, p.PassPhase) = pass match {
+  private def head(pass: AnyPass): (String, p.Pass.Phase) = pass match {
     case x: ProgramPass     => (x.name, x.phase)
     case x: BoundaryPass[?] => (x.name, x.phase)
   }
@@ -228,35 +231,35 @@ object PassDef {
 }
 
 object PassPipelineParser {
-  def parseStep(step: String): Either[String, p.PassSpec] = step match {
+  def parseStep(step: String): Either[String, p.Pass.Spec] = step match {
     case "" => Left("empty step")
     case s"$name($body)" =>
       if (body.contains('(') || body.contains(')')) Left(s"nested parentheses in args: '$step'")
       else
         validateName(name.trim).flatMap { n =>
           val args = body.trim
-          if (args.isEmpty) Right(p.PassSpec(n, Nil))
+          if (args.isEmpty) Right(p.Pass.Spec(n, Nil))
           else
             args
               .split(',')
               .toList
-              .foldRight(Right(Nil): Either[String, List[p.PassArg]])((raw, acc) =>
+              .foldRight(Right(Nil): Either[String, List[p.Pass.Arg]])((raw, acc) =>
                 parseArg(raw.trim).flatMap(a => acc.map(a :: _))
               )
-              .map(p.PassSpec(n, _))
+              .map(p.Pass.Spec(n, _))
         }
     case n if n.contains('(') || n.contains(')') => Left(s"unbalanced parentheses: '$n'")
-    case n                                       => validateName(n).map(p.PassSpec(_, Nil))
+    case n                                       => validateName(n).map(p.Pass.Spec(_, Nil))
   }
 
   private val ReservedArgChars = Set(',', ';', '(', ')')
 
-  private def parseArg(arg: String): Either[String, p.PassArg] = arg match {
+  private def parseArg(arg: String): Either[String, p.Pass.Arg] = arg match {
     case s"$key=$value" =>
       val v = value.trim
       v.find(ReservedArgChars.contains) match {
         case Some(c) => Left(s"reserved character '$c' in arg value '$v'")
-        case None    => validateName(key.trim).map(k => p.PassArg(k, v))
+        case None    => validateName(key.trim).map(k => p.Pass.Arg(k, v))
       }
     case _ => Left(s"expected key=value argument, got '$arg'")
   }
@@ -276,7 +279,7 @@ def printPass(pass: ProgramPass): ProgramPass = new ProgramPass {
     val sl = ctx.log.subLog(s"[${pass.name}]")
     sl.info("Structs", r.defs.map(_.repr)*)
     sl.info("Fns", r.functions.map(_.repr)*)
-    sl.info("Entry", r.entry.repr)
+    sl.info("Entry", r.entry.map(_.repr).getOrElse("<none>"))
     r
   }
 }

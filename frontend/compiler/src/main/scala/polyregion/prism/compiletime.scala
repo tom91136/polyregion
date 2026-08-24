@@ -326,7 +326,7 @@ object compiletime {
             Nil,
             p.Function.Visibility.Exported,
             p.Function.FpMode.Relaxed,
-            isEntry = false
+            convention = p.CallConvention.RegularCall
           ),
           deps
         )(Map.empty)

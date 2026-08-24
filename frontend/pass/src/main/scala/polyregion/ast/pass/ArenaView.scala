@@ -27,7 +27,7 @@ import polyregion.ast.Traversal.*
 //   reduction scratch arg            ->  kept leading, a real workgroup pointer ahead of the views
 object ArenaView extends ProgramPass {
 
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private val ctr = new AtomicLong(0L)
 
@@ -101,7 +101,7 @@ object ArenaView extends ProgramPass {
       case p.Type.Exec(_, as, r)    => as.flatMap(refs).toSet ++ refs(r)
       case _                        => Set.empty
     }
-    val roots = captureRoot(program.entry).map(_._2.name).toSet
+    val roots = program.entry.flatMap(captureRoot).map(_._2.name).toSet
     doUntilNotEq(roots) { (_, seen) =>
       seen ++ seen.flatMap(sym => members.getOrElse(sym, Nil).flatMap(m => refs(m.tpe)))
     }._2
@@ -112,8 +112,9 @@ object ArenaView extends ProgramPass {
       members: Map[p.Sym, List[p.Named]],
       arenaDefs: Set[p.Sym]
   ): Set[Field] = {
-    val derived = Provenance.derivedIn(program.entry, arena = true)
-    val cap     = captureRoot(program.entry).map(_._1)
+    val entry   = program.entry.getOrElse(throw IllegalArgumentException("ArenaView requires a program entry"))
+    val derived = Provenance.derivedIn(entry, arena = true)
+    val cap     = captureRoot(entry).map(_._1)
     def isLocal(t: p.Term): Boolean = Provenance.at(derived, t, arena = true) match {
       case p.Region.Rooted(root) if !cap.contains(root) =>
         root.tpe match {
@@ -241,7 +242,8 @@ object ArenaView extends ProgramPass {
     // union: copy only the canonical (largest, head) member
     val unions  = program.defs.iterator.filter(_.isUnion).map(_.name).toSet
     val retyped = program.defs.map(d => d.copy(members = d.members.map(m => m.copy(tpe = i64ify(m.tpe)))))
-    program.copy(defs = retyped, entry = run(members, unions, identityFields, program.entry))
+    val entry   = program.entry.getOrElse(throw IllegalArgumentException("ArenaView requires a program entry"))
+    program.copy(defs = retyped, entry = Some(run(members, unions, identityFields, entry)))
   }
 
   // lift a stepped Select (the only term shape that can carry an arena access) out of a ForRange bound or
@@ -293,6 +295,14 @@ object ArenaView extends ProgramPass {
           n
         }
         .toSet
+      def staticPathKey(steps: List[p.PathStep]): String = steps
+        .map {
+          case p.PathStep.Field(name) => s"field:$name"
+          case p.PathStep.Deref       => "deref"
+          case p.PathStep.Index(idx)  => s"index:$idx"
+          case _: p.PathStep.IndexDyn => throw IllegalArgumentException("dynamic step in static arena path")
+        }
+        .mkString("/")
       val localPointerKeys = f.collectAll[p.Stmt].foldLeft(Map.empty[p.Named, String]) {
         case (known, p.Stmt.Var(n, Some(p.Expr.RefTo(base @ p.Term.Select(_, steps, _), idx, _, _, _)), _))
             if isPtr(n.tpe) && !reassignedPointers(n) && rootedLocally(base) && staticIndex(idx).nonEmpty && !steps
@@ -300,7 +310,7 @@ object ArenaView extends ProgramPass {
                 case _: p.PathStep.IndexDyn => true
                 case _                      => false
               } =>
-          known + (n -> s"${base.root.symbol}:${steps.map(_.repr).mkString("/")}:${staticIndex(idx).get}")
+          known + (n -> s"${base.root.symbol}:${staticPathKey(steps)}:${staticIndex(idx).get}")
         case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
             if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known.contains(root) =>
           known + (n -> known(root))

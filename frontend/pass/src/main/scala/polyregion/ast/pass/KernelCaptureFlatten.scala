@@ -18,7 +18,7 @@ import polyregion.ast.Traversal.*
 //   nested pointer graph / union / slot mutation / unsupported escape  ->  rejected
 object KernelCaptureFlatten extends ProgramPass {
 
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private final case class Leaf(path: List[p.PathStep], tpe: p.Type.Ptr)
   private final case class Binding(leaf: Leaf, arg: p.Arg)
@@ -50,14 +50,17 @@ object KernelCaptureFlatten extends ProgramPass {
     }
 
     def subst(tpe: p.Type, env: Map[String, p.Type]): p.Type =
-      tpe.modifyAll[p.Type] { case variable @ p.Type.Var(name) => env.getOrElse(name, variable); case other => other }
+      tpe.modifyAll[p.Type] {
+        case variable @ p.Type.Var(name, _) => env.getOrElse(name, variable)
+        case other                          => other
+      }
 
     def hasPointers(tpe: p.Type, seen: Set[p.Sym]): Boolean = tpe match {
       case _: p.Type.Ptr          => true
       case p.Type.Arr(comp, _, _) => hasPointers(comp, seen)
       case struct: p.Type.Struct if !seen(struct.name) =>
         defs.get(struct.name).flatMap(_.headOption).exists { definition =>
-          val env = definition.tpeVars.zip(struct.args).toMap
+          val env = definition.tpeVars.map(_.name).zip(struct.args).toMap
           definition.members.exists(member => hasPointers(subst(member.tpe, env), seen + struct.name))
         }
       case _ => false
@@ -81,7 +84,7 @@ object KernelCaptureFlatten extends ProgramPass {
           val definition = structDef(kernel, struct)
           if (definition.tpeVars.size != struct.args.size)
             fail(kernel, s"type argument mismatch for capture member type ${struct.repr}")
-          val env = definition.tpeVars.zip(struct.args).toMap
+          val env = definition.tpeVars.map(_.name).zip(struct.args).toMap
           if (
             definition.isUnion && definition.members
               .exists(member => hasPointers(subst(member.tpe, env), Set(struct.name)))
@@ -97,7 +100,7 @@ object KernelCaptureFlatten extends ProgramPass {
       walk(root, Nil, Set.empty)
     }
 
-    val allFunctions = program.entry :: program.functions
+    val allFunctions = program.entry.toList ::: program.functions
     val calls        = allFunctions.flatMap(_.collectWhere[p.Expr] { case call: p.Expr.Invoke => call })
     val launches = allFunctions.flatMap(
       _.collectWhere[p.Expr] { case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) => launch }
@@ -105,7 +108,7 @@ object KernelCaptureFlatten extends ProgramPass {
     val byName = allFunctions.groupBy(_.name)
 
     def launchParameters(kernel: p.Function, tpeArgs: List[p.Type]): List[p.Arg] = {
-      val env = kernel.tpeVars.zip(tpeArgs).toMap
+      val env = kernel.tpeVars.map(_.name).zip(tpeArgs).toMap
       (kernel.moduleCaptures ::: kernel.termCaptures ::: kernel.args)
         .map(arg => arg.copy(named = arg.named.copy(tpe = subst(arg.named.tpe, env))))
         .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
@@ -298,7 +301,8 @@ object KernelCaptureFlatten extends ProgramPass {
       case expr => expr
     }
 
-    val entry = rewriteCalls(plans.get(program.entry.decl).fold(program.entry)(rewriteKernel(program.entry, _)))
+    val entry =
+      program.entry.map(function => rewriteCalls(plans.get(function.decl).fold(function)(rewriteKernel(function, _))))
     val functions = program.functions.map(function =>
       rewriteCalls(plans.get(function.decl).fold(function)(rewriteKernel(function, _)))
     )

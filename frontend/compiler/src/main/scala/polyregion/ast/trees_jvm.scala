@@ -41,6 +41,9 @@ object PolyAstToExpr {
       p.Type.Struct(${ Expr(x.name) }, ${ Expr(x.args) })
     }
   }
+  given TypeVarToExpr: ToExpr[p.Type.Var] with {
+    def apply(x: p.Type.Var)(using Quotes) = '{ p.Type.Var(${ Expr(x.name) }, ${ Expr(x.exactSizeInBytes) }) }
+  }
 
   given StructDefToExpr: ToExpr[p.StructDef] with {
     def apply(x: p.StructDef)(using Quotes) = '{
@@ -64,20 +67,20 @@ object PolyAstToExpr {
 
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
-      case p.Type.Var(_)  => ???
-      case p.Type.Float16 => '{ p.Type.Float16 }
-      case p.Type.Float32 => '{ p.Type.Float32 }
-      case p.Type.Float64 => '{ p.Type.Float64 }
-      case p.Type.Bool1   => '{ p.Type.Bool1 }
-      case p.Type.IntU8   => '{ p.Type.IntU8 }
-      case p.Type.IntU16  => '{ p.Type.IntU16 }
-      case p.Type.IntU32  => '{ p.Type.IntU32 }
-      case p.Type.IntU64  => '{ p.Type.IntU64 }
-      case p.Type.IntS8   => '{ p.Type.IntS8 }
-      case p.Type.IntS16  => '{ p.Type.IntS16 }
-      case p.Type.IntS32  => '{ p.Type.IntS32 }
-      case p.Type.IntS64  => '{ p.Type.IntS64 }
-      case p.Type.Unit0   => '{ p.Type.Unit0 }
+      case p.Type.Var(name, exactSizeInBytes) => '{ p.Type.Var(${ Expr(name) }, ${ Expr(exactSizeInBytes) }) }
+      case p.Type.Float16                     => '{ p.Type.Float16 }
+      case p.Type.Float32                     => '{ p.Type.Float32 }
+      case p.Type.Float64                     => '{ p.Type.Float64 }
+      case p.Type.Bool1                       => '{ p.Type.Bool1 }
+      case p.Type.IntU8                       => '{ p.Type.IntU8 }
+      case p.Type.IntU16                      => '{ p.Type.IntU16 }
+      case p.Type.IntU32                      => '{ p.Type.IntU32 }
+      case p.Type.IntU64                      => '{ p.Type.IntU64 }
+      case p.Type.IntS8                       => '{ p.Type.IntS8 }
+      case p.Type.IntS16                      => '{ p.Type.IntS16 }
+      case p.Type.IntS32                      => '{ p.Type.IntS32 }
+      case p.Type.IntS64                      => '{ p.Type.IntS64 }
+      case p.Type.Unit0                       => '{ p.Type.Unit0 }
 
       case p.Type.Struct(name, args) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(args) }) }
@@ -85,9 +88,10 @@ object PolyAstToExpr {
         '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(space) }) }
       case p.Type.Arr(component, length, space) =>
         '{ p.Type.Arr(${ Expr(component) }, ${ Expr(length) }, ${ Expr(space) }) }
-      case p.Type.FnRef(name)              => '{ p.Type.FnRef(${ Expr(name) }) }
-      case p.Type.Exec(tpeVars, args, rtn) => ???
-      case p.Type.Nothing                  => ???
+      case p.Type.FnRef(name) => '{ p.Type.FnRef(${ Expr(name) }) }
+      case p.Type.Exec(tpeVars, args, rtn) =>
+        '{ p.Type.Exec(${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(rtn) }) }
+      case p.Type.Nothing => '{ p.Type.Nothing }
     }
   }
 

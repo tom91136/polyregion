@@ -30,7 +30,7 @@ import polyregion.ast.{Log, PolyAST as p, *, given}
 // replaces the pending exit when the finalizer itself exits.
 object StructuredExit extends ProgramPass {
 
-  override def phase: p.PassPhase = p.PassPhase.PostMono
+  override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private val AssertedSym            = p.Conventions.AssertedFlag
   private val ErrorSym               = p.Conventions.ErrorArg
@@ -169,7 +169,7 @@ object StructuredExit extends ProgramPass {
 
   private final class Flow(defs: List[p.StructDef]) {
     private val byName      = defs.map(d => d.name -> d).toMap
-    private val baseByField = defs.map(d => s"${p.Conventions.BaseFieldPrefix}_${d.name.repr}" -> d).toMap
+    private val baseByField = defs.map(d => s"${p.Conventions.BaseFieldPrefix}_${d.name.fqcn}" -> d).toMap
 
     def projection(from: p.Type, to: p.Type): Option[List[p.PathStep]] =
       if (from == to) Some(Nil)
@@ -264,11 +264,11 @@ object StructuredExit extends ProgramPass {
     def tpe: p.Type             = exceptionKind.tpe
   }
 
-  // repr ordering keeps the dense tags stable in emitted images
+  // Canonical type ordering keeps the dense tags stable in emitted images.
   private def tagTable(f: p.Function): List[Raised] =
     f.collectWhere[p.Stmt] { case p.Stmt.Raise(_, exceptionKind, cleanup) => Raised(exceptionKind, cleanup) }
       .distinctBy(_.thrown)
-      .sortBy(x => (x.tpe.repr, x.exceptionKind.sourceName))
+      .sortBy(x => (x.tpe.canonicalName, x.exceptionKind.sourceName))
 
   private def observesExceptionWhat(stmts: List[p.Stmt]): Boolean = {
     def termUsesWhat(s: p.Stmt): Boolean = s
@@ -838,8 +838,12 @@ object StructuredExit extends ProgramPass {
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
-    val finallySymbols = FinallySymbols(program.entry.body)
-    val e              = program.entry.copy(body = materialiseFinally(program.entry.body, finallySymbols))
+    val source = program.entry match {
+      case Some(function) => function
+      case None           => return program
+    }
+    val finallySymbols = FinallySymbols(source.body)
+    val e              = source.copy(body = materialiseFinally(source.body, finallySymbols))
     val flow           = Flow(program.defs)
     val touched = e
       .collectFirst_[p.Stmt] {
@@ -858,7 +862,7 @@ object StructuredExit extends ProgramPass {
       val lower   = Lower(tags, flow, observesExceptionWhat(e.body), finallySymbols)
       val lowered = lower.guard(e.body)
       // the deferred path predicts the #error arg before lowering, so pure try/finally must not change the ABI
-      if (tags.isEmpty && !e.body.exists(mayAssert)) program.copy(entry = e.copy(body = lowered))
+      if (tags.isEmpty && !e.body.exists(mayAssert)) program.copy(entry = Some(e.copy(body = lowered)))
       else {
         val tagDecls =
           if (tags.isEmpty) Nil
@@ -875,20 +879,22 @@ object StructuredExit extends ProgramPass {
         val sentinel = if (e.rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Poison(e.rtn)
         val exit     = p.Stmt.Return(p.Expr.Alias(sentinel))
         val epilogue = if (e.body.exists(flow.escapes)) lower.escapeReport ::: List(exit) else Nil
-        log.info(s"${e.signatureRepr}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
+        log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
         val needsError = e.body.exists(mayAssert) || e.body.exists(flow.escapes)
         val args =
           if (!needsError || e.args.exists(_.named.symbol == ErrorSym)) e.args
           else p.Arg(p.Named(ErrorSym, ErrorPtr)) +: e.args
         program.copy(
-          entry = e.copy(decl = e.decl.remapArgs(args), body = decls ::: lowered ::: epilogue)
+          entry = Some(e.copy(decl = e.decl.remapArgs(args), body = decls ::: lowered ::: epilogue))
         )
       }
     }
   }
 
   private[pass] def lowerHandledFunction(f: p.Function, defs: List[p.StructDef], log: Log): p.Function = {
-    val lowered = apply(p.Program(f, Nil, defs), log).entry
+    val lowered = apply(p.Program(Some(f), Nil, defs), log).entry.getOrElse(
+      throw IllegalStateException(s"RecursionLower: missing lowered function ${f.name.repr}")
+    )
     if (lowered.args != f.args)
       throw IllegalStateException(s"RecursionLower: an exception escapes recursive function ${f.name.repr}")
     lowered

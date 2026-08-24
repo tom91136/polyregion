@@ -278,7 +278,7 @@ public:
                                                | to<std::unordered_map>();
                           const auto maybeLayout = c.named.tpe.template get<polyast::Type::Ptr>()                                         //
                                                    ^ flat_map([](const auto &t) { return t.comp.template get<polyast::Type::Struct>(); }) //
-                                                   ^ flat_map([&](const auto &s) { return layouts ^ get_maybe(repr(s.name)); });          //
+                                                   ^ flat_map([&](const auto &s) { return layouts ^ get_maybe(fqcn(s.name)); });          //
                           std::vector<CaptureField> fields;                                                                               //
                           bindRef(B, c.value, maybeLayout, fields);                                                                       //
                           return fields;                                                                                                  //
@@ -367,9 +367,9 @@ public:
                                  return polyast::primitiveSize(t) ^ map([&](const auto &sizeInBytes) {
                                           return std::pair{t, TypeLayout.global(M, [&](OpBuilder &B0) {
                                                              return std::vector{
-                                                                 std::array{strConst(B0, M, polyast::repr(t)),    //
-                                                                            intConst(B0, i64Ty(B0), sizeInBytes), //
-                                                                            intConst(B0, i64Ty(B0), sizeInBytes), //
+                                                                 std::array{strConst(B0, M, polyast::canonicalName(t)), //
+                                                                            intConst(B0, i64Ty(B0), sizeInBytes),       //
+                                                                            intConst(B0, i64Ty(B0), sizeInBytes),       //
                                                                             intConst(B0, i64Ty(B0),
                                                                                      to_underlying(runtime::LayoutAttrs::Opaque |     //
                                                                                                    runtime::LayoutAttrs::SelfOpaque | //
@@ -472,7 +472,7 @@ public:
                              return primitiveTypeLayouts ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) ^ or_else([&]() {
                                       return t.template get<polyast::Type::Struct>() ^ flat_map([&](const auto &s) {
                                                return structNameToTypeLayoutIdx //
-                                                      ^ get_maybe(repr(s.name)) //
+                                                      ^ get_maybe(fqcn(s.name)) //
                                                       ^ map(
                                                           [&](const auto &layoutIdx) { return structLayoutsArray.gep(B0, layoutIdx); }); //
                                              });

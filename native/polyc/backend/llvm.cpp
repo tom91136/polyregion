@@ -237,7 +237,7 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
 
   auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
     auto findTy = [&](const Type::Struct &s) -> StructInfo {
-      return gen.structTypes ^ get_maybe(repr(s.name)) ^ fold([&]() -> StructInfo {
+      return gen.structTypes ^ get_maybe(fqcn(s.name)) | fold([&]() -> StructInfo {
                throw BackendException("Unseen struct type " + to_string(s.name) + " in select path" + fail());
              });
     };
@@ -411,7 +411,7 @@ struct PhysicalPointerModel final : PointerModel {
       return;
     }
     if (auto s = tpe.get<Type::Struct>()) {
-      const auto &info = gen.structTypes.at(repr(s->name));
+      const auto &info = gen.structTypes.at(fqcn(s->name));
       if (info.layout.sizeInBytes != 0)
         gen.B.CreateMemCpy(dst, llvm::MaybeAlign(info.layout.alignment), src, llvm::MaybeAlign(info.layout.alignment),
                            info.layout.sizeInBytes);
@@ -984,8 +984,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         const auto s = x.structTpe.template get<Type::Struct>();
         if (!s) throw BackendException::semantic("OffsetOf on non-struct type " + to_string(x.structTpe));
         const auto info = structTypes                //
-                          ^ get_maybe(repr(s->name)) //
-                          ^ fold([&]() -> StructInfo { throw BackendException("Unseen struct in OffsetOf: " + repr(s->name)); });
+                          ^ get_maybe(fqcn(s->name)) //
+                          ^ fold([&]() -> StructInfo { throw BackendException("Unseen struct in OffsetOf: " + fqcn(s->name)); });
         const auto idx = info.memberIndices   //
                          ^ get_maybe(x.field) //
                          ^ fold([&]() -> size_t { throw BackendException("Unknown field `" + x.field + "` in OffsetOf"); });
@@ -1299,7 +1299,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           if (C.isVulkan()) {
             copyStruct(currentSretParam, val, rtnTpe); // val is a struct pointer (structByPtr)
           } else {
-            const auto structInfo = structTypes.at(repr(rtnTpe.get<Type::Struct>()->name));
+            const auto structInfo = structTypes.at(fqcn(rtnTpe.get<Type::Struct>()->name));
             auto spill = C.allocaAS(B, structInfo.tpe, C.AllocaAS, "return_sret_spill");
             auto _ = C.store(B, val, spill);
             const auto size = structInfo.layout.sizeInBytes;
@@ -1334,7 +1334,8 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   const auto cpuTarget = LLVMBackend::isCpuTarget(cg.C.options.target);
   auto allArgs = fn.decl.moduleCaptures | concat(fn.decl.termCaptures) | concat(fn.decl.args) | to_vector();
   if (fn.decl.receiver) allArgs ^= prepend(*fn.decl.receiver);
-  if (fn.isEntry && cpuTarget) allArgs ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));
+  const auto offloadEntry = fn.convention.is<CallConvention::OffloadEntry>();
+  if (offloadEntry && cpuTarget) allArgs ^= prepend(Arg(Named("__tid", Type::IntS64()), {}));
 
   // Drop Unit0/Nothing args: both lower to void, which FunctionType::get's isValidArgumentType asserts.
   const auto argsNoUnit = allArgs ^ filter([](const auto &arg) {
@@ -1349,7 +1350,7 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
                       : fn.decl.rtn.is<Type::Struct>()           ? cg.resolveType(fn.decl.rtn, false)
                                                                  : cg.resolveType(fn.decl.rtn, true);
 
-  auto argTys = argsNoUnit ^ map([&](const auto &arg) { return cg.resolveType(arg.named.tpe, true, fn.isEntry); });
+  auto argTys = argsNoUnit ^ map([&](const auto &arg) { return cg.resolveType(arg.named.tpe, true, offloadEntry); });
 
   for (std::size_t i = 0; i < argTys.size(); ++i) {
     if (argTys[i]->isEmptyTy()) {
@@ -1359,7 +1360,7 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
   }
 
   // Vulkan compute entry takes no kernel params; args become descriptor-bound resources in the body
-  if (cg.C.isVulkan() && fn.isEntry) argTys.clear();
+  if (cg.C.isVulkan() && offloadEntry) argTys.clear();
 
   if (useSret) argTys.insert(argTys.begin(), llvm::PointerType::get(cg.C.actual, cg.C.AllocaAS));
   llvm::Type *sretStructTy = useSret ? cg.resolveType(fn.decl.rtn, /*functionBoundary*/ false) : nullptr;
@@ -1401,7 +1402,7 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
 // barrier-separated phase storage, never a cross-member reinterpret; genuine type-punning unions (std::optional,
 // std::variant, SSO string) live in private/global and are left overlaid
 static Set<std::string> localReuseUnionsRaw(const Program &program) {
-  const auto byName = program.defs | map([](const auto &d) { return std::pair{repr(d.name), &d}; }) | to<Map>();
+  const auto byName = program.defs | map([](const auto &d) { return std::pair{fqcn(d.name), &d}; }) | to<Map>();
 
   std::vector<Type::Any> roots;
   const auto addLocalRoots = [&](const auto &node) {
@@ -1412,23 +1413,28 @@ static Set<std::string> localReuseUnionsRaw(const Program &program) {
                       return p.space.template is<TypeSpace::Local>() ? Opt<Type::Any>{p.comp} : std::nullopt;
                     }));
   };
-  addLocalRoots(program.entry);
-  program.functions ^ for_each(addLocalRoots);
-  program.defs ^ for_each([&](const auto &d) { d.members ^ for_each([&](const auto &m) { addLocalRoots(m.tpe); }); });
+  if (program.entry) addLocalRoots(*program.entry);
+  for (const auto &function : program.functions)
+    addLocalRoots(function);
+  for (const auto &definition : program.defs)
+    for (const auto &member : definition.members)
+      addLocalRoots(member.tpe);
 
   Set<std::string> unions, visited;
   std::function<void(const Type::Any &)> taint = [&](const Type::Any &t) {
     if (const auto s = t.template get<Type::Struct>()) {
-      const auto name = repr(s->name);
+      const auto name = fqcn(s->name);
       if (!visited.insert(name).second) return;
       const auto def = byName ^ get_maybe(name);
       if (!def) return;
       if ((*def)->isUnion) unions.insert(name);
-      (*def)->members ^ for_each([&](const auto &m) { taint(m.tpe); }); // inline members share the enclosing object's space
+      for (const auto &member : (*def)->members)
+        taint(member.tpe); // inline members share the enclosing object's space
     } else if (const auto a = t.template get<Type::Arr>()) taint(a->comp);
     // a Ptr member holds an address; its pointee is not inline in this object's LDS storage, so don't follow it
   };
-  roots ^ for_each(taint);
+  for (const auto &root : roots)
+    taint(root);
   return unions;
 }
 
@@ -1453,7 +1459,8 @@ static Set<std::string> localReuseUnions(const Program &program, const LLVMBacke
           return info.deAliased && info.layout.sizeInBytes > options.workgroupMemoryBytes ? Opt<std::string>{name} : std::nullopt;
         });
     if (over.empty()) break;
-    over ^ for_each([&](const auto &name) { deAlias.erase(name); });
+    for (const auto &name : over)
+      deAlias.erase(name);
   }
   return deAlias;
 }
@@ -1464,7 +1471,7 @@ static bool hasSelectReuseUnion(const Set<std::string> &rawLocalUnions) {
 }
 
 std::string polyregion::backend::normaliseSymbol(const Sym &sym) {
-  return repr(sym) ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+  return fqcn(sym) ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
 }
 
 Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, const Set<std::string> &rawLocalUnions) {
@@ -1472,7 +1479,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
   structTypes = C.resolveLayouts(program.defs, deAliasedUnions, isDiscontinuityName);
 
   auto allFns = program.functions;
-  allFns ^= prepend(program.entry);
+  if (program.entry) allFns ^= prepend(*program.entry);
 
   sharedDynamicLocalBytes = 0;
   if (!LLVMBackend::isCpuTarget(C.options.target)) {
@@ -1505,7 +1512,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
 
     uint64_t maxReachableStaticBytes = 0;
     for (size_t root = 0; root < allFns.size(); ++root) {
-      if (!allFns[root].isEntry) continue;
+      if (!allFns[root].convention.is<CallConvention::OffloadEntry>()) continue;
       std::vector<bool> reachable(allFns.size(), false);
       std::vector<size_t> pending{root};
       uint64_t total = 0;
@@ -1533,7 +1540,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
                                                      : arg.tpe();
                                         }),
                                         /*moduleCaptures*/ {}, /*termCaptures*/ {}, invoke.rtn);
-          const auto callee = functionBySignature ^ get_maybe(sig) ^ or_else([&] { return functionBySignature ^ get_maybe(sigPtr); });
+          const auto callee = functionBySignature ^ get_maybe(sig) | or_else([&] { return functionBySignature ^ get_maybe(sigPtr); });
           if (callee && !reachable[*callee]) pending.push_back(*callee);
         }
       }
@@ -1543,17 +1550,17 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
   }
   const auto prototypes = allFns ^ map([&](const auto &fn) { return createPrototype(*this, M, fn); });
 
-  prototypes ^ for_each([&](const auto &llvmFn, const auto &fn, const auto &argsNoUnit) {
+  for (const auto &[llvmFn, fn, argsNoUnit] : prototypes) {
     B.SetInsertPoint(llvm::BasicBlock::Create(C.actual, "entry", llvmFn));
     const bool useSret = shouldUseSret(*this, fn);
     currentSretParam = useSret ? llvmFn->getArg(0) : nullptr;
     const size_t argOffset = useSret ? 1 : 0;
     ptrModel->reset();
     // Vulkan entry: the model binds args as descriptor resources; helpers flow through the generic path below
-    if (fn.isEntry && ptrModel->bindEntryArgs(*llvmFn, argsNoUnit, fn)) {
+    if (fn.convention.is<CallConvention::OffloadEntry>() && ptrModel->bindEntryArgs(*llvmFn, argsNoUnit, fn)) {
       stackVarPtrs.clear();
       currentSretParam = nullptr;
-      return;
+      continue;
     }
     stackVarPtrs = argsNoUnit                                                                                //
                    | zip_with_index()                                                                        //
@@ -1593,7 +1600,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
     stackVarPtrs.clear();
     ptrModel->reset();
     currentSretParam = nullptr;
-  });
+  }
 
   targetHandler->postProcessModule(*this);
 
@@ -1720,6 +1727,16 @@ ValPtr CodeGen::mkAtomicRMW(const Spec::GpuAtomicRMW &op, const std::string &sco
   if (C.isVulkan()) ptr = vulkanResourcePointer(ptr);
   return B.CreateAtomicRMW(binop, ptr, mkTermVal(op.value), llvm::MaybeAlign(), atomicOrdering(op.order),
                            C.actual.getOrInsertSyncScopeID(scope));
+}
+
+ValPtr CodeGen::mkAtomicCAS(const Spec::GpuAtomicCAS &op, const std::string &scope) {
+  const auto ordering = atomicOrdering(op.order);
+  auto *ptr = mkTermVal(op.ptr);
+  if (C.isVulkan()) ptr = vulkanResourcePointer(ptr);
+  auto *exchange =
+      B.CreateAtomicCmpXchg(ptr, mkTermVal(op.expected), mkTermVal(op.desired), llvm::MaybeAlign(), ordering,
+                            llvm::AtomicCmpXchgInst::getStrongestFailureOrdering(ordering), C.actual.getOrInsertSyncScopeID(scope));
+  return B.CreateExtractValue(exchange, 0);
 }
 
 // volatile load/store keep the access uncached and coherent across blocks and, crucially, stop LLVM

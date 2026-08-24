@@ -67,7 +67,7 @@ private[ast] object ScalaInterfaceCodeGen {
     case p.Type.IntS64              => "Long"
     case p.Type.Bool1               => "Boolean"
     case p.Type.Unit0               => "Unit"
-    case p.Type.Var(name)           => name
+    case p.Type.Var(name, _)        => name
     case p.Type.Struct(name, Nil)   => s"_root_.${name.fqn.map(identifier(_, "type")).mkString(".")}"
     case p.Type.Ptr(comp, _)        => s"Array[${tpe(comp)}]"
     case p.Type.Arr(comp, _, _)     => s"Array[${tpe(comp)}]"
@@ -84,11 +84,11 @@ private[ast] object ScalaInterfaceCodeGen {
   }
 
   private def declaration(
-      interfaceDef: p.InterfaceDef,
+      interfaceDef: p.Interface,
       decl: p.FunctionDecl,
       config: InterfaceCodeGen.ScalaConfig
   ): String = {
-    val tpeVars    = if (decl.tpeVars.nonEmpty) decl.tpeVars.mkString("[", ", ", "]") else ""
+    val tpeVars    = if (decl.tpeVars.nonEmpty) decl.tpeVars.map(_.name).mkString("[", ", ", "]") else ""
     val parameters = decl.args.map(arg => s"${arg.named.symbol}: ${tpe(arg.named.tpe)}")
     val prefix     = s"  def ${decl.name.last}$tpeVars("
     val suffix     = s"): ${tpe(decl.rtn)} ="
@@ -104,7 +104,7 @@ private[ast] object ScalaInterfaceCodeGen {
       )}")""".stripMargin
   }
 
-  def apply(interfaceDef: p.InterfaceDef, config: InterfaceCodeGen.ScalaConfig): String = {
+  def apply(interfaceDef: p.Interface, config: InterfaceCodeGen.ScalaConfig): String = {
     if (config.packageName.isEmpty) fail("Scala package name is empty")
     config.packageName.split('.').foreach(identifier(_, "package"))
     identifier(config.objectName, "object")
@@ -112,7 +112,8 @@ private[ast] object ScalaInterfaceCodeGen {
     validatePortableOverloads(decls, "Scala")
     decls.foreach { decl =>
       identifier(decl.name.last, "method")
-      decl.tpeVars.foreach { name =>
+      decl.tpeVars.foreach { variable =>
+        val name = variable.name
         identifier(name, "type variable")
         if (Set("Array", "Boolean", "Byte", "Double", "Float", "Int", "Long", "Short", "Unit")(name))
           fail(s"Scala type variable `$name` shadows a projected built-in type")

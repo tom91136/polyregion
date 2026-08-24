@@ -35,7 +35,7 @@ std::string cachePath(const uint8_t *program, size_t programLen, uint8_t target,
                                             pipelineSpec ? pipelineSpec : ""),
                                 [](std::string acc, const auto &spec) {
                                   return std::move(acc)
-                                      .append(fmt::format("|{}={}:", spec.field, spec.repr))
+                                      .append(fmt::format("|{}={}:", spec.field, spec.typeName))
                                       .append(reinterpret_cast<const char *>(spec.data), spec.dataLen);
                                 });
   return cache::path("jit", {meta, std::string_view(reinterpret_cast<const char *>(program), programLen)}, ".o");
@@ -57,8 +57,8 @@ polyc_jit_status_t deliver(unsigned char *buf, size_t len, uint8_t **out, size_t
 std::unordered_map<std::string, polyast::Term::Any> buildSpecialise(const polyc_jit_spec_const_t *specs, size_t n) {
   return ptrView(specs, n)                                                                             //
          | collect([](const auto &spec) -> std::optional<std::pair<std::string, polyast::Term::Any>> { //
-             return polyast::jitConstFromRepr(spec.repr, spec.data,
-                                              spec.dataLen)                                      //
+             return polyast::jitConstFromTypeName(spec.typeName, spec.data,
+                                                  spec.dataLen)                                  //
                     | map([&](const auto &c) { return std::pair{std::string(spec.field), c}; }); //
            })                                                                                    //
          | to<std::unordered_map>();
@@ -102,7 +102,7 @@ extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t p
       ptrView(specialise, specialiseLen) //
       | zip_with_index()                 //
       | collect_first([](const auto &spec, const auto &i) -> std::optional<size_t> {
-          return !spec.field || !spec.repr || (spec.dataLen > 0 && !spec.data) ? std::optional<size_t>{i} : std::nullopt;
+          return !spec.field || !spec.typeName || (spec.dataLen > 0 && !spec.data) ? std::optional<size_t>{i} : std::nullopt;
         });
   if (invalidSpec) {
     lastError = fmt::format("polyc_jit_compile: invalid specialise entry {}", *invalidSpec);

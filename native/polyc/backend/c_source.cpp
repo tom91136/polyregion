@@ -401,7 +401,8 @@ struct CLAddressSpaceTracePass {
                                | map([&](const auto &r) { return r.value.tpe(); })                               //
                                | distinct()                                                                      //
                                | to_vector();
-    return Function(fn.decl.withRtn(tracedRtnTpes[0]), body, fn.visibility, fn.fpMode, fn.isEntry);
+    return Function(fn.decl.withRtn(tracedRtnTpes[0]), body, fn.visibility, fn.fpMode, fn.convention, fn.implements,
+                    fn.requiredCapabilities);
   }
 
   struct ConflictSplit {
@@ -420,8 +421,8 @@ struct CLAddressSpaceTracePass {
     };
     std::optional<Type::Any> receiver;
     if (fn.decl.receiver) receiver = fn.decl.receiver->named.tpe;
-    return repr(Signature(fn.decl.name, fn.decl.tpeVars, receiver, types(fn.decl.args), types(fn.decl.moduleCaptures),
-                          types(fn.decl.termCaptures), Type::Unit0()));
+    return signatureKey(Signature(fn.decl.name, fn.decl.tpeVars, receiver, types(fn.decl.args), types(fn.decl.moduleCaptures),
+                                  types(fn.decl.termCaptures), Type::Unit0()));
   }
 
   static Type::Any retypeStructOccurrence(const Type::Any &tpe, const Sym &clone) {
@@ -456,7 +457,7 @@ struct CLAddressSpaceTracePass {
     Map<std::string, std::pair<std::string, std::string>> variableSlots;
     Map<std::string, std::pair<Sym, std::string>> memberSlots;
     const auto variableKey = [](const std::string &fn, const std::string &symbol) { return "V\x1f" + fn + "\x1f" + symbol; };
-    const auto memberKey = [](const Sym &owner, const std::string &member) { return "M\x1f" + repr(owner) + "\x1f" + member; };
+    const auto memberKey = [](const Sym &owner, const std::string &member) { return "M\x1f" + fqcn(owner) + "\x1f" + member; };
     const auto registerVariable = [&](const std::string &fn, const std::string &symbol, const Sym &structure) {
       const auto key = variableKey(fn, symbol);
       slotStruct.insert_or_assign(key, structure);
@@ -642,12 +643,12 @@ struct CLAddressSpaceTracePass {
               replacements.insert_or_assign(copy.member, source->second);
           if (replacements.empty()) continue;
 
-          std::string suffix = "_as", key = repr(copies.front().owner);
+          std::string suffix = "_as", key = fqcn(copies.front().owner);
           for (const auto &member : owner->second.members) {
             const auto carried = structNameOf(member.tpe);
             if (!carried || !(conflicted ^ contains(*carried))) continue;
             if (const auto replacement = replacements.find(member.symbol); replacement != replacements.end()) {
-              const auto child = repr(replacement->second);
+              const auto child = fqcn(replacement->second);
               const auto parts = child ^ split("_as");
               const auto code = parts.size() == 1 ? "g" : parts.back();
               suffix += code;
@@ -715,11 +716,11 @@ struct CLAddressSpaceTracePass {
       pass.fields.emplace(def.name, def.members | map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) | to<Map>());
 
     const auto argRespace = [](const Function &f) {
-      const auto kernel = f.isEntry;
+      const auto offloadEntry = f.convention.is<CallConvention::OffloadEntry>();
       auto remapSpace = [&](const auto &s) {
         return s.match_total(
-            [&](const TypeSpace::Global &) { return kernel ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); }, //
-            [&](const TypeSpace::Constant &) { return kernel ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); },
+            [&](const TypeSpace::Global &) { return offloadEntry ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); }, //
+            [&](const TypeSpace::Constant &) { return offloadEntry ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); },
             [&](const TypeSpace::Local &x) { return x.widen(); }, //
             [&](const TypeSpace::Private &x) { return x.widen(); });
       };
@@ -727,11 +728,13 @@ struct CLAddressSpaceTracePass {
           f.decl.withArgs(f.decl.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
     };
 
-    auto seeds = std::vector<Function>{argRespace(p.entry)} ^ concat(p.functions ^ map(argRespace));
+    auto seeds = p.functions ^ map(argRespace);
+    if (p.entry) seeds ^= prepend(argRespace(*p.entry));
     for (bool changed = true; changed;) {
       changed = false;
       MemberStores stores;
-      seeds ^ for_each([&](const auto &function) { pass.mapFn(function, &stores); });
+      for (const auto &function : seeds)
+        pass.mapFn(function, &stores);
       const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
         const auto it = members.find(structure);
         return it != members.end() && (it->second ^ contains(field));
@@ -758,7 +761,9 @@ struct CLAddressSpaceTracePass {
     }
 
     MemberStores stores;
-    if (strictSpaces) seeds ^ for_each([&](const auto &function) { pass.mapFn(function, &stores); });
+    if (strictSpaces)
+      for (const auto &function : seeds)
+        pass.mapFn(function, &stores);
     const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
       const auto it = members.find(structure);
       return it != members.end() && (it->second ^ contains(field));
@@ -798,11 +803,12 @@ struct CLAddressSpaceTracePass {
     };
     auto defs = p.defs ^ map(reify);
     auto cloneDefs = split.clones | values() | map(reify) | to_vector();
-    std::sort(cloneDefs.begin(), cloneDefs.end(), [](const auto &lhs, const auto &rhs) { return repr(lhs.name) < repr(rhs.name); });
+    std::sort(cloneDefs.begin(), cloneDefs.end(), [](const auto &lhs, const auto &rhs) { return fqcn(lhs.name) < fqcn(rhs.name); });
     defs ^= concat(cloneDefs);
 
     const auto remap = [&](const Function &function) { return pass.mapFn(pass.retypeConflicted(argRespace(function), split)); };
-    auto entry = remap(p.entry);
+    auto entry = p.entry;
+    if (entry) entry = remap(*entry);
     auto fns = p.functions ^ map(remap);
 
     auto sigOf = [](const Expr::Invoke &inv) {
@@ -811,12 +817,12 @@ struct CLAddressSpaceTracePass {
     };
 
     Map<Signature, std::shared_ptr<Function>> functionTable;
-    fns ^ for_each([&](const auto &f) {
+    for (const auto &f : fns) {
       const Signature sig(f.decl.name, /*tpeVars*/ {}, /*receiver*/ {}, f.decl.args ^ map([](const auto &e) { return e.named.tpe; }),
                           /*moduleCaptures*/ {},
                           /*termCaptures*/ {}, f.decl.rtn);
       functionTable[sig] = std::make_shared<Function>(f);
-    });
+    }
 
     while (true) {
       const auto specialised = functionTable                                                                                      //
@@ -864,13 +870,16 @@ struct CLAddressSpaceTracePass {
         functionTable                          //
         | values()                             //
         | map([&](const auto &f) -> Function { //
-            const auto name = f->isEntry ? f->decl.name : spaceSpecialisedName(f->decl.name, f->decl.args ^ flat_map(spaces));
+            const auto name = f->convention.template is<CallConvention::OffloadEntry>()
+                                  ? f->decl.name
+                                  : spaceSpecialisedName(f->decl.name, f->decl.args ^ flat_map(spaces));
             const auto renamed = renameInvokes(*f);
             return renamed.withDecl(renamed.decl.withName(name));
           }) //
         | to_vector();
 
-    return Program(renameInvokes(entry), spaceSpecialisedFns, defs, p.phase, p.metadata);
+    if (entry) entry = renameInvokes(*entry);
+    return Program(std::move(entry), spaceSpecialisedFns, defs, p.phase, p.metadata);
   }
 };
 
@@ -893,7 +902,7 @@ std::string backend::CSource::normalise(const std::string &s) const {
   return out;
 }
 
-std::string backend::CSource::normalise(const Sym &s) const { return normalise(repr(s)); }
+std::string backend::CSource::normalise(const Sym &s) const { return normalise(fqcn(s)); }
 
 static std::string sourceIdent(const Origin &origin) {
   if (!origin.source) return {};
@@ -946,8 +955,10 @@ void backend::CSource::bindLocalNames(const Function &fn) {
     used.emplace(name);
     localNames.emplace(named.symbol, name);
   };
-  fn.decl.args ^ for_each([&](const auto &arg) { bind(arg.named); });
-  fn.template collect_all<Named>() ^ for_each(bind);
+  for (const auto &arg : fn.decl.args)
+    bind(arg.named);
+  for (const auto &named : fn.template collect_all<Named>())
+    bind(named);
 }
 
 Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::string &fieldName) const {
@@ -1342,6 +1353,18 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
               return fmt::format("metal::{}(({} {}*){}, ({}){}, metal::memory_order_relaxed)", function, space, atomic, mkTerm(v.ptr),
                                  value, mkTerm(v.value));
             },
+            [&](const Spec::GpuAtomicCAS &) -> std::string {
+              throw BackendException("Spec::GpuAtomicCAS lowering is not available for this C source dialect");
+            },
+            [&](const Spec::GpuGroupReduce &) -> std::string {
+              throw BackendException("Spec::GpuGroupReduce lowering is not available for this C source dialect");
+            },
+            [&](const Spec::GpuGroupInclusiveScan &) -> std::string {
+              throw BackendException("Spec::GpuGroupInclusiveScan lowering is not available for this C source dialect");
+            },
+            [&](const Spec::GpuGroupExclusiveScan &) -> std::string {
+              throw BackendException("Spec::GpuGroupExclusiveScan lowering is not available for this C source dialect");
+            },
             [&](const Spec::RemoteLaunch &) -> std::string {
               throw BackendException("Spec::RemoteLaunch is a local orchestration operation");
             },
@@ -1697,7 +1720,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
 std::string backend::CSource::mkFnProto(const Function &fnTree) {
   bindLocalNames(fnTree);
 
-  const auto entry = fnTree.isEntry;
+  const auto entry = fnTree.convention.is<CallConvention::OffloadEntry>();
 
   std::vector<std::string> argExprs =
       fnTree.decl.args   //
@@ -1768,7 +1791,10 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
   bindLocalNames(fnTree);
   const auto allVars = fnTree.body ^ flat_map([](const auto &s) { return s.template collect_all<Stmt::Var>(); });
   Set<std::string> seen;
-  const auto localVars = allVars ^ filter([&](const auto &v) { return isLocalArr(v.name.tpe) && seen.insert(v.name.symbol).second; });
+  std::vector<Stmt::Var> localVars;
+  localVars.reserve(allVars.size());
+  for (const auto &v : allVars)
+    if (isLocalArr(v.name.tpe) && seen.insert(v.name.symbol).second) localVars.emplace_back(v);
   struct Usage {
     uint64_t fixedBytes = 0;
     std::vector<std::string> fixedSizeExprs;
@@ -1917,7 +1943,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     resolved ^= concat(noDeps ^ map([](const auto &s) { return s.name; }));
   }
 
-  const auto allFns = std::vector<Function>{program.entry} ^ concat(program.functions);
+  auto allFns = program.functions;
+  if (program.entry) allFns ^= prepend(*program.entry);
 
   // hoist string literals to named program-scope constant arrays (collection order is deterministic); an inline
   // OpenCL literal has no addressable storage so reading it through a pointer yields garbage
@@ -1953,10 +1980,12 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       const auto space = mslPtrSpace(ptr), name = volatileHelperName(load, space, mkTpe(tpe));
       if (emitted.insert(name).second) volatileHelpers.push_back(mkVolatileHelper(load, tpe, space));
     };
-    allFns ^ for_each([&](const auto &fn) {
-      fn.template collect_all<Spec::GpuVolatileLoad>() ^ for_each([&](const auto &load) { add(true, load.rtn, load.ptr); });
-      fn.template collect_all<Spec::GpuVolatileStore>() ^ for_each([&](const auto &store) { add(false, store.value.tpe(), store.ptr); });
-    });
+    for (const auto &fn : allFns) {
+      for (const auto &load : fn.template collect_all<Spec::GpuVolatileLoad>())
+        add(true, load.rtn, load.ptr);
+      for (const auto &store : fn.template collect_all<Spec::GpuVolatileStore>())
+        add(false, store.value.tpe(), store.ptr);
+    }
   }
 
   const auto atomicHelpers = dialect == Dialect::C11
