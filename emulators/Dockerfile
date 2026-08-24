@@ -161,7 +161,7 @@ COPY gpuocelot.patch /src/gpuocelot.patch
 # XXX g++ 13, not clang: gcc 16 miscompiles the emulator, gcc 13 predates that.
 RUN git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot /src/gpuocelot \
  && cd /src/gpuocelot && git checkout -q ${GPUOCELOT_COMMIT} && git submodule update --init --recursive \
- && git apply /src/gpuocelot.patch \
+ && git apply --unidiff-zero /src/gpuocelot.patch \
  && cd ocelot && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DBUILD_TOOLS=OFF -DLLVM_DIR=${LLVM_DIR} \
