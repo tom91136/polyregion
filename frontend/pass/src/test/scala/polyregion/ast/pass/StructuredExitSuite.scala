@@ -136,6 +136,14 @@ class StructuredExitSuite extends munit.FunSuite {
       Nil,
       "the message loop must exit through its condition so SPIR-V gets a legal back-edge"
     )
+    val messageLocals = out.entry.body.zipWithIndex.collect {
+      case (p.Stmt.Var(n, None, true), i) if n.tpe == msgT => i
+    }
+    assertEquals(messageLocals.size, 1)
+    assert(
+      out.entry.body.take(messageLocals.head).exists(_.isInstanceOf[p.Stmt.Update]),
+      "the message pointer must be materialised at its assertion site, after the error-code writes"
+    )
 
     val vm      = Interpreter.Vm(out)
     val err     = vm.alloc(4L + limit)

@@ -356,8 +356,7 @@ object StructuredExit extends ProgramPass {
 
     private def slotOf(t: p.ExceptionKind): p.Named = p.Named(s"$SlotPrefix${tagOf(t)}", t.tpe)
 
-    private val messageBuffer          = p.Named(ExceptionWhatBufferSym, ExceptionWhatBuffer)
-    private val deferredAssertMessages = ListBuffer.empty[(p.Named, p.Named)]
+    private val messageBuffer = p.Named(ExceptionWhatBufferSym, ExceptionWhatBuffer)
 
     private def messageRef(buffer: p.Named): p.Expr =
       p.Expr.RefTo(
@@ -417,26 +416,6 @@ object StructuredExit extends ProgramPass {
       )
     }
 
-    def assertMessageDecls: List[p.Stmt] = deferredAssertMessages.toList.flatMap { (message, active) =>
-      List(
-        p.Stmt.Var(message, None, isMutable = true),
-        p.Stmt.Var(active, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true)
-      )
-    }
-
-    def assertMessageEpilogue: List[p.Stmt] = deferredAssertMessages.toList.flatMap { (message, enabled) =>
-      copyCString(sel(message), MessageLimit, sel(enabled)) { (i, ch) =>
-        val write = ListBuffer.empty[p.Stmt]
-        val off = let(
-          p.Type.IntU32,
-          p.Expr.IntrOp(p.Intr.Add(p.Term.IntU32Const(CodeBytes), i, p.Type.IntU32)),
-          write
-        )
-        write += p.Stmt.Update(error, off, ch)
-        write.toList
-      }
-    }
-
     private def copyMessage(source: p.Term, target: p.Named = messageBuffer): List[p.Stmt] = {
       source match {
         case p.Term.StringConst(s) =>
@@ -479,12 +458,22 @@ object StructuredExit extends ProgramPass {
       }
       message match {
         case p.Term.StringConst(s) => out ++= writeMessage(s)
-        case _ =>
-          val saved  = fresh(message.tpe)
-          val active = fresh(p.Type.Bool1)
-          deferredAssertMessages += saved -> active
-          out += p.Stmt.Mut(sel(saved), p.Expr.Alias(message))
-          out += p.Stmt.Mut(sel(active), p.Expr.Alias(p.Term.Bool1Const(true)))
+        case _                     =>
+          // Materialise a complex select once before the loop. Reusing it in every Index can retain
+          // a stale capture-root type after capture flattening.
+          val localMessage = fresh(message.tpe)
+          out += p.Stmt.Var(localMessage, None, isMutable = true)
+          out += p.Stmt.Mut(sel(localMessage), p.Expr.Alias(message))
+          out ++= copyCString(sel(localMessage), MessageLimit) { (i, ch) =>
+            val write = ListBuffer.empty[p.Stmt]
+            val off = let(
+              p.Type.IntU32,
+              p.Expr.IntrOp(p.Intr.Add(p.Term.IntU32Const(CodeBytes), i, p.Type.IntU32)),
+              write
+            )
+            write += p.Stmt.Update(error, off, ch)
+            write.toList
+          }
       }
       out.toList
     }
@@ -882,12 +871,10 @@ object StructuredExit extends ProgramPass {
                 true
               ) :: lower.slotDecls
         val decls =
-          p.Stmt.Var(p.Named(AssertedSym, p.Type.Bool1), Some(p.Expr.Alias(p.Term.Bool1Const(false))), true) ::
-            tagDecls ::: lower.assertMessageDecls
+          p.Stmt.Var(p.Named(AssertedSym, p.Type.Bool1), Some(p.Expr.Alias(p.Term.Bool1Const(false))), true) :: tagDecls
         val sentinel = if (e.rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Poison(e.rtn)
         val exit     = p.Stmt.Return(p.Expr.Alias(sentinel))
-        val epilogue =
-          if (e.body.exists(flow.escapes)) lower.assertMessageEpilogue ::: lower.escapeReport ::: List(exit) else Nil
+        val epilogue = if (e.body.exists(flow.escapes)) lower.escapeReport ::: List(exit) else Nil
         log.info(s"${e.signatureRepr}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
         val needsError = e.body.exists(mayAssert) || e.body.exists(flow.escapes)
         val args =

@@ -28,6 +28,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -58,8 +59,8 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
 #include "llvm/Transforms/Scalar/InferAddressSpaces.h"
 #include "llvm/Transforms/Scalar/SROA.h"
-#include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
@@ -673,6 +674,35 @@ static void sinkLoadsThroughPointerPhis(llvm::Function &F) {
   }
 }
 
+static void normaliseUnitSignSelects(llvm::Function &F) {
+  llvm::SmallVector<llvm::SelectInst *> targets;
+  for (llvm::Instruction &I : llvm::instructions(F)) {
+    auto *select = llvm::dyn_cast<llvm::SelectInst>(&I);
+    auto *negative = select ? llvm::dyn_cast<llvm::ConstantFP>(select->getTrueValue()) : nullptr;
+    auto *positive = select ? llvm::dyn_cast<llvm::ConstantFP>(select->getFalseValue()) : nullptr;
+    if (select && select->hasOneUse() && negative && negative->isExactlyValue(-1.0) && positive && positive->isExactlyValue(1.0)
+        && llvm::isa<llvm::BinaryOperator>(*select->user_begin()))
+      targets.push_back(select);
+  }
+  for (llvm::SelectInst *select : targets) {
+    auto *multiply = llvm::cast<llvm::BinaryOperator>(*select->user_begin());
+    if (multiply->getOpcode() != llvm::Instruction::FMul) continue;
+    llvm::Value *magnitude = multiply->getOperand(multiply->getOperand(0) == select ? 1 : 0);
+    auto *negative = llvm::UnaryOperator::CreateFNeg(magnitude, "", multiply->getIterator());
+    auto *replacement = llvm::SelectInst::Create(select->getCondition(), negative, magnitude, "", multiply->getIterator());
+    multiply->replaceAllUsesWith(replacement);
+    multiply->eraseFromParent();
+    select->eraseFromParent();
+  }
+}
+
+static void foldConstantBranches(llvm::Function &F) {
+  bool changed = false;
+  for (llvm::BasicBlock &BB : F)
+    changed |= llvm::ConstantFoldTerminator(&BB, true);
+  if (changed) llvm::removeUnreachableBlocks(F);
+}
+
 static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bool logical) {
   llvm::PassBuilder PB(&TM);
   llvm::LoopAnalysisManager LAM;
@@ -704,7 +734,6 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
   // freed scalar allocas and drop the now-dead pointer phi. Fold constant guard branches first so
   // an unreachable null edge cannot pin an otherwise scalarisable private aggregate.
   llvm::FunctionPassManager cleanup;
-  if (logical) cleanup.addPass(llvm::SimplifyCFGPass());
   cleanup.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
   cleanup.addPass(llvm::InferAddressSpacesPass());
   cleanup.addPass(llvm::EarlyCSEPass());
@@ -712,8 +741,21 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
   for (llvm::Function &F : M)
     if (!F.isDeclaration() && !F.getEntryBlock().empty()) {
       FPM.run(F, FAM);
-      if (logical) sinkLoadsThroughPointerPhis(F); // a pointer OpPhi is only invalid under Vulkan's logical model
+      if (logical) {
+        // Full SimplifyCFG drops SPIR-V merge structure from some lowered exits. Only fold constant
+        // guards, which releases otherwise unreachable null edges that pin private pointer phis.
+        foldConstantBranches(F);
+        sinkLoadsThroughPointerPhis(F); // a pointer OpPhi is only invalid under Vulkan's logical model
+      }
       cleanup.run(F, FAM);
+      if (logical) {
+        // SROA can expose another constant guard around a now-scalar aggregate; finish the same
+        // narrow cleanup to a fixed shape without simplifying non-constant structured branches.
+        foldConstantBranches(F);
+        sinkLoadsThroughPointerPhis(F);
+        cleanup.run(F, FAM);
+        normaliseUnitSignSelects(F);
+      }
     }
 }
 

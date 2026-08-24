@@ -831,3 +831,13 @@ index 66543e0..9f5c9c0 100644
  /*!
  
  */
+diff --git a/ocelot/src/executive/EmulatorDevice.cpp b/ocelot/src/executive/EmulatorDevice.cpp
+index e61048bd..2c11bea1 100644
+--- a/ocelot/src/executive/EmulatorDevice.cpp
++++ b/ocelot/src/executive/EmulatorDevice.cpp
+@@ -13,0 +14,2 @@
++#include <ocelot/executive/LLVMModuleManager.h>
++#include <ocelot/executive/LLVMState.h>
+@@ -746,0 +749,2 @@ namespace executive
++		LLVMModuleManager* manager = LLVMState::moduleManager();
++		if(manager->isModuleLoaded(id)) manager->unloadModule(id);
