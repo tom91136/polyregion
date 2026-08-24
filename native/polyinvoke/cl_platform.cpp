@@ -350,11 +350,12 @@ ClPlatform::~ClPlatform() { POLYINVOKE_TRACE(); }
 
 static DeviceQuirks resolveQuirks(const std::string &deviceName) {
   const bool llvmpipe = deviceName ^ aspartame::contains_slice("llvmpipe");
-  return DeviceQuirks{/*nativeTrig*/ llvmpipe, /*overReadPad*/ llvmpipe ? size_t{4096} : size_t{0}};
+  const bool rusticl = deviceName ^ aspartame::contains_slice("rusticl");
+  return DeviceQuirks{/*nativeTrig*/ rusticl || llvmpipe, /*overReadPad*/ llvmpipe ? size_t{4096} : size_t{0}};
 }
 
-// llvmpipe's libclc JIT crashes on precise sin/cos/tan range-reduction; rewrite the OpenCL.std trig extinsts to
-// their native_ variants in the SPIR-V blob (a same-size opcode swap); this is the SPIR-V dual of -DPOLY_NATIVE_TRIG
+// Rusticl's libclc JIT fails to link precise sin/cos/tan range-reduction, while llvmpipe historically crashed there;
+// rewrite the OpenCL.std trig extinsts to their native_ variants (a same-size swap), dual to -DPOLY_NATIVE_TRIG.
 static std::string patchSpirvNativeTrig(const char *data, size_t len) {
   std::string out(data, len);
   if (len < 5 * sizeof(uint32_t) || len % sizeof(uint32_t) != 0) return out;
@@ -422,8 +423,8 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreat
           PREFIX,
           [this](auto &&image) {
             POLYINVOKE_TRACE();
-            // XXX llvmpipe libclc crashes its JIT on precise sin/cos/tan range-reduction; route POLY_* trig to
-            // native_ for that device only -- source via this #ifdef, SPIR-V via patchSpirvNativeTrig above
+            // XXX Rusticl libclc fails to link precise sin/cos/tan range-reduction, while llvmpipe historically
+            // crashed there; route POLY_* trig to native_ via this #ifdef or patchSpirvNativeTrig above.
             const std::string compilerArgs =
                 (this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "";
             const auto build = [&](cl_program p) { return clBuildProgram(p, 1, &*this->device, compilerArgs.c_str(), nullptr, nullptr); };

@@ -515,7 +515,7 @@ static Expr::Any adjustBasePointer(const Remapper &self, Remapper::RemapContext 
   // Taking a reference already proves the source non-null. Keep that common path as a direct,
   // stable local pointer so ArenaView can retain its identity; nullable pointer casts use the
   // conditional below because C++ requires a null derived pointer to remain null.
-  if (sourceExpr.is<Expr::RefTo>()) return Expr::Alias(adjust(r));
+  if (sourceExpr.is<Expr::RefTo>() || cast.isGLValue()) return Expr::Alias(adjust(r));
   const auto result = r.newName(targetTpe);
   r.push(Stmt::Var(result, Expr::Alias(Term::NullPtrConst(targetPtr->comp, targetPtr->space, Region::Opaque())), /*isMutable*/ true));
   const auto nonNull =
