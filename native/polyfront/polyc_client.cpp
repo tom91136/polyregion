@@ -34,7 +34,8 @@ std::vector<std::string> diagnosticLines(std::string diagnostic) {
   std::vector<std::string> errors;
   for (size_t offset = 0; offset <= diagnostic.size();) {
     const auto end = diagnostic.find('\n', offset);
-    const auto line = diagnostic.substr(offset, end - offset);
+    auto line = diagnostic.substr(offset, end - offset);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
     if (!line.empty()) errors.emplace_back(line);
     if (end == std::string::npos) break;
     offset = end + 1;

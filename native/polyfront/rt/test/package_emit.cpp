@@ -92,7 +92,8 @@ Checked<Package> linkPackage(const PackageLinkRequest &request, const std::strin
       std::string diagnostic = (*buffer)->getBuffer().str();
       for (size_t offset = 0; offset <= diagnostic.size();) {
         const auto end = diagnostic.find('\n', offset);
-        const auto line = diagnostic.substr(offset, end - offset);
+        auto line = diagnostic.substr(offset, end - offset);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         if (!line.empty()) errors.emplace_back(line);
         if (end == std::string::npos) break;
         offset = end + 1;
