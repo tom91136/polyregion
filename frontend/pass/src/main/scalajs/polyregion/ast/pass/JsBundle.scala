@@ -1,6 +1,9 @@
 package polyregion.ast.pass
 
-import polyregion.ast.PolyAST.PolyPassAbi
+import polyregion.ast.{MsgPack, PackageLinker, PackageSymResolver}
+import polyregion.ast.PolyAST.{PolyPackageAbi, PolyPassAbi}
+import polyregion.ast.PolyAST as p
+import polyregion.ast.generated.PolyPackageWireSchema
 
 import scala.scalajs.js
 import scala.scalajs.js.annotation.JSExportTopLevel
@@ -31,6 +34,38 @@ object JsBundle {
     val outBytes = plugin.runStepsMsgpack(steps.toVector, inBytes)
     JsBytes.fromArray(outBytes)
   }
+
+  private def packageOperation[A: MsgPack.Codec, B: MsgPack.Codec](
+      label: String,
+      bytes: Uint8Array
+  )(operation: A => Either[List[String], B]): Uint8Array =
+    MsgPack.decode[MsgPack.Versioned[A]](JsBytes.toArray(bytes)) match {
+      case Left(error) =>
+        throw js.JavaScriptException(s"PolyPackage $label: cannot decode request: ${error.getMessage}")
+      case Right(envelope) if envelope.hash != PolyPackageWireSchema.Hash =>
+        throw js.JavaScriptException(
+          s"PolyPackage $label: package-service wire hash differs: expected ${PolyPackageWireSchema.Hash}, got ${envelope.hash}"
+        )
+      case Right(envelope) =>
+        operation(envelope.t) match {
+          case Left(errors) => throw js.JavaScriptException(s"PolyPackage $label: ${errors.mkString("\n")}")
+          case Right(result) =>
+            JsBytes.fromArray(MsgPack.encode(MsgPack.Versioned(PolyPackageWireSchema.Hash, result)))
+        }
+    }
+
+  @JSExportTopLevel(PolyPackageAbi.AbiVersion.Name)
+  def packageAbiVersion(): Int = PolyPackageAbi.Version
+
+  @JSExportTopLevel(PolyPackageAbi.LinkPackage.Name)
+  def linkPackage(bytes: Uint8Array): Uint8Array =
+    packageOperation[p.Package.LinkRequest, p.Package]("link package", bytes)(PackageLinker.link)
+
+  @JSExportTopLevel(PolyPackageAbi.ResolveSym.Name)
+  def resolvePackageSym(bytes: Uint8Array): Uint8Array =
+    packageOperation[p.Package.SymRequest, p.Package.SymResolvedProgram]("resolve Sym", bytes)(
+      PackageSymResolver.resolveSym
+    )
 
   private object JsBytes {
     def toArray(bytes: Uint8Array): Array[Byte] = {

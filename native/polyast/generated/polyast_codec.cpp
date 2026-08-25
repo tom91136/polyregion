@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "d16a2e878a0ea80d1c37404a09471b2b";
+constexpr auto AdtHash = "0a0d05e7819162585f0381d82b543518";
 constexpr auto ProgramHash = "d26672bb976d05fbb7ad92b45dc2c75b";
 constexpr auto PackageHash = "fa088a1942c4cec8fc2386ca9cf4da89";
-constexpr auto PackageWireHash = "d7a9920f3d4675d9d86d15c80693fed7";
+constexpr auto PackageWireHash = "8ce5690bde2bad5414a1b1136e084fe8";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
 using msgpack::MsgpackReader;
@@ -3477,6 +3477,44 @@ json packagesymresolvedprogram_to_json(const PackageSymResolvedProgram &x_) {
   }
   return json::array({program, entryArgs});
 }
+
+PackageSymCompiledObject packagesymcompiledobject_from_json(const json &j_) {
+  auto moduleName = j_.at(0).get<std::string>();
+  auto format = j_.at(1).get<int32_t>();
+  auto kind = j_.at(2).get<int32_t>();
+  auto features = j_.at(3).get<std::vector<std::string>>();
+  auto moduleImage = j_.at(4).get<std::vector<int8_t>>();
+  return {moduleName, format, kind, features, moduleImage};
+}
+
+json packagesymcompiledobject_to_json(const PackageSymCompiledObject &x_) {
+  auto moduleName = x_.moduleName;
+  auto format = x_.format;
+  auto kind = x_.kind;
+  auto features = x_.features;
+  auto moduleImage = x_.moduleImage;
+  return json::array({moduleName, format, kind, features, moduleImage});
+}
+
+PackageSymCompileResult packagesymcompileresult_from_json(const json &j_) {
+  auto resolved = packagesymresolvedprogram_from_json(j_.at(0));
+  auto hostObject = j_.at(1).get<std::vector<int8_t>>();
+  std::vector<PackageSymCompiledObject> remoteObjects;
+  for (const auto &v_ : j_.at(2)) {
+    remoteObjects.emplace_back(packagesymcompiledobject_from_json(v_));
+  }
+  return {resolved, hostObject, remoteObjects};
+}
+
+json packagesymcompileresult_to_json(const PackageSymCompileResult &x_) {
+  auto resolved = packagesymresolvedprogram_to_json(x_.resolved);
+  auto hostObject = x_.hostObject;
+  std::vector<json> remoteObjects;
+  for (const auto &v_ : x_.remoteObjects) {
+    remoteObjects.emplace_back(packagesymcompiledobject_to_json(v_));
+  }
+  return json::array({resolved, hostObject, remoteObjects});
+}
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
@@ -4120,6 +4158,14 @@ PackageSymResolvedProgram packagesymresolvedprogram_fields_from_msgpack(MsgpackR
 void packagesymresolvedprogram_fields_to_msgpack(MsgpackWriter &, const PackageSymResolvedProgram &);
 PackageSymResolvedProgram packagesymresolvedprogram_from_msgpack(MsgpackReader &);
 void packagesymresolvedprogram_to_msgpack(MsgpackWriter &, const PackageSymResolvedProgram &);
+PackageSymCompiledObject packagesymcompiledobject_fields_from_msgpack(MsgpackReader &, size_t);
+void packagesymcompiledobject_fields_to_msgpack(MsgpackWriter &, const PackageSymCompiledObject &);
+PackageSymCompiledObject packagesymcompiledobject_from_msgpack(MsgpackReader &);
+void packagesymcompiledobject_to_msgpack(MsgpackWriter &, const PackageSymCompiledObject &);
+PackageSymCompileResult packagesymcompileresult_fields_from_msgpack(MsgpackReader &, size_t);
+void packagesymcompileresult_fields_to_msgpack(MsgpackWriter &, const PackageSymCompileResult &);
+PackageSymCompileResult packagesymcompileresult_from_msgpack(MsgpackReader &);
+void packagesymcompileresult_to_msgpack(MsgpackWriter &, const PackageSymCompileResult &);
 namespace Intr {
 Intr::BNot bnot_fields_from_msgpack(MsgpackReader &, size_t);
 void bnot_fields_to_msgpack(MsgpackWriter &, const Intr::BNot &);
@@ -11958,6 +12004,102 @@ void packagesymresolvedprogram_to_msgpack(MsgpackWriter &w_, const PackageSymRes
   packagesymresolvedprogram_fields_to_msgpack(w_, x_);
 }
 
+PackageSymCompiledObject packagesymcompiledobject_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 5) throw std::runtime_error("Expected PackageSymCompiledObject with 5 field(s)");
+  auto moduleName = r_.readString();
+  auto format = static_cast<int32_t>(r_.readInt32());
+  auto kind = static_cast<int32_t>(r_.readInt32());
+  std::vector<std::string> features;
+  {
+    auto features_size = r_.readArrayHeader();
+    features.reserve(features_size);
+    for (size_t features_idx = 0; features_idx < features_size; ++features_idx) {
+      auto features_elem = r_.readString();
+      features.emplace_back(std::move(features_elem));
+    }
+  }
+  std::vector<int8_t> moduleImage;
+  {
+    auto moduleImage_size = r_.readArrayHeader();
+    moduleImage.reserve(moduleImage_size);
+    for (size_t moduleImage_idx = 0; moduleImage_idx < moduleImage_size; ++moduleImage_idx) {
+      auto moduleImage_elem = static_cast<int8_t>(r_.readInt32());
+      moduleImage.emplace_back(std::move(moduleImage_elem));
+    }
+  }
+  return {moduleName, format, kind, features, moduleImage};
+}
+
+void packagesymcompiledobject_fields_to_msgpack(MsgpackWriter &w_, const PackageSymCompiledObject &x_) {
+  w_.writeString(x_.moduleName);
+  w_.writeInt32(static_cast<int32_t>(x_.format));
+  w_.writeInt32(static_cast<int32_t>(x_.kind));
+  w_.writeArrayHeader(x_.features.size());
+  for (const auto &v0_ : x_.features) {
+    w_.writeString(v0_);
+  }
+  w_.writeArrayHeader(x_.moduleImage.size());
+  for (const auto &v0_ : x_.moduleImage) {
+    w_.writeInt32(static_cast<int32_t>(v0_));
+  }
+}
+
+PackageSymCompiledObject packagesymcompiledobject_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packagesymcompiledobject_fields_from_msgpack(r_, n_);
+}
+
+void packagesymcompiledobject_to_msgpack(MsgpackWriter &w_, const PackageSymCompiledObject &x_) {
+  w_.writeArrayHeader(5);
+  packagesymcompiledobject_fields_to_msgpack(w_, x_);
+}
+
+PackageSymCompileResult packagesymcompileresult_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 3) throw std::runtime_error("Expected PackageSymCompileResult with 3 field(s)");
+  auto resolved = packagesymresolvedprogram_from_msgpack(r_);
+  std::vector<int8_t> hostObject;
+  {
+    auto hostObject_size = r_.readArrayHeader();
+    hostObject.reserve(hostObject_size);
+    for (size_t hostObject_idx = 0; hostObject_idx < hostObject_size; ++hostObject_idx) {
+      auto hostObject_elem = static_cast<int8_t>(r_.readInt32());
+      hostObject.emplace_back(std::move(hostObject_elem));
+    }
+  }
+  std::vector<PackageSymCompiledObject> remoteObjects;
+  {
+    auto remoteObjects_size = r_.readArrayHeader();
+    remoteObjects.reserve(remoteObjects_size);
+    for (size_t remoteObjects_idx = 0; remoteObjects_idx < remoteObjects_size; ++remoteObjects_idx) {
+      auto remoteObjects_elem = packagesymcompiledobject_from_msgpack(r_);
+      remoteObjects.emplace_back(std::move(remoteObjects_elem));
+    }
+  }
+  return {resolved, hostObject, remoteObjects};
+}
+
+void packagesymcompileresult_fields_to_msgpack(MsgpackWriter &w_, const PackageSymCompileResult &x_) {
+  packagesymresolvedprogram_to_msgpack(w_, x_.resolved);
+  w_.writeArrayHeader(x_.hostObject.size());
+  for (const auto &v0_ : x_.hostObject) {
+    w_.writeInt32(static_cast<int32_t>(v0_));
+  }
+  w_.writeArrayHeader(x_.remoteObjects.size());
+  for (const auto &v0_ : x_.remoteObjects) {
+    packagesymcompiledobject_to_msgpack(w_, v0_);
+  }
+}
+
+PackageSymCompileResult packagesymcompileresult_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packagesymcompileresult_fields_from_msgpack(r_, n_);
+}
+
+void packagesymcompileresult_to_msgpack(MsgpackWriter &w_, const PackageSymCompileResult &x_) {
+  w_.writeArrayHeader(3);
+  packagesymcompileresult_fields_to_msgpack(w_, x_);
+}
+
 std::vector<uint8_t> program_to_msgpack(const Program &x_) {
   return encodeInterned([&](MsgpackWriter &w_) { program_to_msgpack(w_, x_); });
 }
@@ -12130,6 +12272,30 @@ PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const uint8_t *begin_,
 
 PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const std::vector<uint8_t> &xs_) {
   return resolvedsymprogram_from_msgpack(xs_.data(), xs_.data() + xs_.size());
+}
+
+std::vector<uint8_t> packagesymcompileresult_to_msgpack(const PackageSymCompileResult &x_) {
+  return encodeInterned([&](MsgpackWriter &w_) {
+    w_.writeArrayHeader(2);
+    w_.writeString(std::string(PackageWireHash));
+    packagesymcompileresult_to_msgpack(w_, x_);
+  });
+}
+
+PackageSymCompileResult packagesymcompileresult_from_msgpack(const uint8_t *begin_, const uint8_t *end_) {
+  return decodeMaybeInterned(begin_, end_, [](MsgpackReader &r_) {
+    auto n_ = r_.readArrayHeader();
+    if (n_ != 2) throw std::runtime_error("Expected versioned PackageSymCompileResult array of size 2");
+    auto hash_ = r_.readString();
+    if (hash_ != PackageWireHash)
+      throw std::runtime_error("Expecting package-service wire hash to be " + std::string(PackageWireHash) + ", but was " + hash_);
+    auto value_ = packagesymcompileresult_from_msgpack(r_);
+    return value_;
+  });
+}
+
+PackageSymCompileResult packagesymcompileresult_from_msgpack(const std::vector<uint8_t> &xs_) {
+  return packagesymcompileresult_from_msgpack(xs_.data(), xs_.data() + xs_.size());
 }
 
 std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &x_) {

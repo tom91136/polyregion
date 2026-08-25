@@ -17,7 +17,6 @@
 #include "fmt/format.h"
 
 #include "polyfront/package.hpp"
-#include "polyfront/package_service.hpp"
 #include "polyfront/resolved_sym_program_compilation.hpp"
 
 #include "mlir_utils.h"
@@ -189,19 +188,14 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     const auto returnConvention = erasedResult ? PackageReturnConvention::OutParam(static_cast<int32_t>(logicalArgumentCount)).widen()
                                                : PackageReturnConvention::Return().widen();
     const auto request = PackageSymRequest(*pkg.value, signature, {}, {}, {}, capabilities, typeSizes, entryName, returnConvention);
-    const auto resolved = PackageService::resolveSym(request);
-    if (!resolved) {
-      emitErrors(diag, function.getLoc(), resolved.errors);
-      continue;
-    }
-    const auto &resolution = *resolved.value;
-    if (const auto errors = validateResolvedSymProgram(request, resolution, sourceArgumentTypes, returnType); !errors.empty()) {
-      emitErrors(diag, function.getLoc(), errors);
-      continue;
-    }
-    const auto compiled = compileResolvedSym(opts, resolution, compiletime::Target::Object_LLVM_HOST, "native");
+    const auto compiled = resolveAndCompileSym(opts, request, compiletime::Target::Object_LLVM_HOST, "native");
     if (!compiled) {
       emitErrors(diag, function.getLoc(), compiled.errors);
+      continue;
+    }
+    const auto &resolution = compiled.value->resolved;
+    if (const auto errors = validateResolvedSymProgram(request, resolution, sourceArgumentTypes, returnType); !errors.empty()) {
+      emitErrors(diag, function.getLoc(), errors);
       continue;
     }
     const auto bitcode = writeBitcode(compiled.value->hostObject);

@@ -37,7 +37,9 @@ target_include_directories(polyc-tests PRIVATE . ../include ../runtime)
 target_include_directories(polyc-benchmarks PRIVATE . ../include ../runtime)
 target_include_directories(polyc-bin PRIVATE . ../include ${fire_SOURCE_DIR})
 
-target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR})
+target_include_directories(polyc-driver
+        PUBLIC . ../include ${fire_SOURCE_DIR}
+        PRIVATE ../polyfront)
 target_include_directories(polyc PUBLIC . ../include include)
 target_include_directories(polyc SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS} ${LLD_INCLUDE_DIRS})
 

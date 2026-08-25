@@ -6,6 +6,7 @@
 #include "quickjs.h"
 
 #include "polyregion/io.hpp"
+#include "polyregion/polypackage_symbols.h"
 #include "polyregion/polypass.h"
 
 #include "generated/polypass_symbols.h"
@@ -74,6 +75,20 @@ JSValue getExportFn(JSContext *ctx, const char *name) {
   return fn;
 }
 
+bool hasExport(JSContext *ctx, const char *name) {
+  JSValue value = getExportFn(ctx, name);
+  const bool present = !JS_IsUndefined(value);
+  JS_FreeValue(ctx, value);
+  return present;
+}
+
+bool hasFunctionExport(JSContext *ctx, const char *name) {
+  JSValue value = getExportFn(ctx, name);
+  const bool present = JS_IsFunction(ctx, value);
+  JS_FreeValue(ctx, value);
+  return present;
+}
+
 int32_t callExportInt(JSContext *ctx, const char *name) {
   JSValue global = JS_GetGlobalObject(ctx);
   JSValue exports = JS_GetPropertyStr(ctx, global, "exports");
@@ -115,6 +130,7 @@ JsPassRunner::~JsPassRunner() {
 }
 
 String JsPassRunner::load() {
+  JS_UpdateStackTop(impl->rt);
   if (impl->loaded) return {};
   if (impl->path.empty()) return "JS plugin path not set";
   const auto source = polyregion::read_string(impl->path);
@@ -126,10 +142,106 @@ String JsPassRunner::load() {
 }
 
 String JsPassRunner::loadModule(std::string_view source) {
+  JS_UpdateStackTop(impl->rt);
   if (auto err = impl->loadFromSource(source, "<inline>"); !err.empty()) return err;
   if (auto err = impl->enumeratePasses(); !err.empty()) return err;
   impl->loaded = true;
   return {};
+}
+
+std::optional<int32_t> JsPassRunner::intExport(const std::string_view name, String &error) const {
+  JS_UpdateStackTop(impl->rt);
+  if (!impl->loaded) {
+    error = "JS plugin not loaded";
+    return std::nullopt;
+  }
+  auto *ctx = impl->ctx;
+  const String exportName(name);
+  JSValue fn = getExportFn(ctx, exportName.c_str());
+  if (!JS_IsFunction(ctx, fn)) {
+    error = fmt::format("PolyPass JS: exports.{} is not a function", name);
+    JS_FreeValue(ctx, fn);
+    return std::nullopt;
+  }
+  JSValue global = JS_GetGlobalObject(ctx);
+  JSValue result = JS_Call(ctx, fn, global, 0, nullptr);
+  JS_FreeValue(ctx, global);
+  JS_FreeValue(ctx, fn);
+  if (JS_IsException(result)) {
+    error = formatException(ctx);
+    JS_FreeValue(ctx, result);
+    return std::nullopt;
+  }
+  int32_t value = 0;
+  if (JS_ToInt32(ctx, &value, result)) {
+    error = fmt::format("PolyPass JS: exports.{} returned a non-integer", name);
+    JS_FreeValue(ctx, result);
+    return std::nullopt;
+  }
+  JS_FreeValue(ctx, result);
+  return value;
+}
+
+Vector<uint8_t> JsPassRunner::bytesExport(const std::string_view name, const Vector<uint8_t> &input, String &error) {
+  JS_UpdateStackTop(impl->rt);
+  if (!impl->loaded) {
+    error = "JS plugin not loaded";
+    return {};
+  }
+  auto *ctx = impl->ctx;
+  Vector<uint8_t> out;
+  const String exportName(name);
+  JSValue fn = getExportFn(ctx, exportName.c_str());
+  if (!JS_IsFunction(ctx, fn)) {
+    error = fmt::format("PolyPass JS: exports.{} is not a function", name);
+    JS_FreeValue(ctx, fn);
+    return out;
+  }
+
+  static uint8_t empty = 0;
+  auto *inputData = input.empty() ? &empty : const_cast<uint8_t *>(input.data());
+  JSValue argument = JS_NewUint8Array(ctx, inputData, input.size(), noopFreeArrayBuffer, nullptr, false);
+  if (JS_IsException(argument)) {
+    error = formatException(ctx);
+    JS_FreeValue(ctx, fn);
+    return out;
+  }
+  JSValue global = JS_GetGlobalObject(ctx);
+  JSValue result = JS_Call(ctx, fn, global, 1, &argument);
+  JS_FreeValue(ctx, global);
+  JS_FreeValue(ctx, argument);
+  JS_FreeValue(ctx, fn);
+  if (JS_IsException(result)) {
+    error = formatException(ctx);
+    JS_FreeValue(ctx, result);
+    return out;
+  }
+  if (JS_GetTypedArrayType(result) != JS_TYPED_ARRAY_UINT8) {
+    error = fmt::format("{}: return value must be Uint8Array", name);
+    JS_FreeValue(ctx, result);
+    return out;
+  }
+  size_t size = 0;
+  uint8_t *data = JS_GetUint8Array(ctx, &size, result);
+  if (!data && size != 0) error = fmt::format("{}: failed to read Uint8Array result", name);
+  if (data && size > 0) out.assign(data, data + size);
+  JS_FreeValue(ctx, result);
+  return out;
+}
+
+std::optional<uint32_t> JsPassRunner::packageAbiVersion() const {
+  String error;
+  const auto version = intExport(polypackage::abi::AbiVersion, error);
+  if (!version || !error.empty()) return std::nullopt;
+  return static_cast<uint32_t>(*version);
+}
+
+Vector<uint8_t> JsPassRunner::runPackage(const std::string_view operation, const Vector<uint8_t> &request, String &error) {
+  if (operation != polypackage::abi::LinkPackage && operation != polypackage::abi::ResolveSym) {
+    error = fmt::format("unknown package operation {}", operation);
+    return {};
+  }
+  return bytesExport(operation, request, error);
 }
 
 String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_view moduleId) {
@@ -176,6 +288,19 @@ String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_v
 }
 
 String JsPassRunner::Impl::enumeratePasses() {
+  const bool anyPass = hasExport(ctx, abi::AbiVersion) || hasExport(ctx, abi::PassCount) || hasExport(ctx, abi::PassName)
+                       || hasExport(ctx, abi::PassDescr) || hasExport(ctx, abi::RunPasses);
+  const bool completePass = hasFunctionExport(ctx, abi::AbiVersion) && hasFunctionExport(ctx, abi::PassCount)
+                            && hasFunctionExport(ctx, abi::PassName) && hasFunctionExport(ctx, abi::RunPasses);
+  const bool anyPackage = hasExport(ctx, polypackage::abi::AbiVersion) || hasExport(ctx, polypackage::abi::LinkPackage)
+                          || hasExport(ctx, polypackage::abi::ResolveSym);
+  const bool completePackage = hasFunctionExport(ctx, polypackage::abi::AbiVersion) && hasFunctionExport(ctx, polypackage::abi::LinkPackage)
+                               && hasFunctionExport(ctx, polypackage::abi::ResolveSym);
+  if (anyPass && !completePass) return "PolyPass JS: incomplete pass capability";
+  if (anyPackage && !completePackage) return "PolyPass JS: incomplete package capability";
+  if (!completePass && !completePackage) return "PolyPass JS: bundle exposes neither pass nor package capability";
+  if (!completePass) return {};
+
   const int32_t reported = callExportInt(ctx, abi::AbiVersion);
   if (reported < 0) return fmt::format("PolyPass JS: missing or non-numeric exports.{}()", abi::AbiVersion);
   if (static_cast<uint32_t>(reported) != POLYPASS_ABI_VERSION)
@@ -240,6 +365,7 @@ const Vector<String> &JsPassRunner::passNames() const { return impl->names; }
 std::optional<String> JsPassRunner::passDescr(std::string_view name) const { return impl->descrs ^ get_maybe(String(name)); }
 
 Vector<uint8_t> JsPassRunner::runPasses(const Vector<String> &steps, const Vector<uint8_t> &programBytes, String &error) {
+  JS_UpdateStackTop(impl->rt);
   if (!impl->loaded) {
     error = "JS plugin not loaded";
     return {};

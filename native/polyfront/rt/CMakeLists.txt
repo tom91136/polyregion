@@ -19,7 +19,7 @@ endif ()
 
 add_executable(polyrt-tests test/memory.cpp test/package_service.cpp test/package_emit.cpp)
 target_include_directories(polyrt-tests PRIVATE ..)
-target_link_libraries(polyrt-tests PRIVATE polyrt-obj polyinvoke-obj polyfront-options polyfront-package-service Catch2::Catch2WithMain
+target_link_libraries(polyrt-tests PRIVATE polyrt-obj polyinvoke-obj polyfront-options polyfront-polyc-client Catch2::Catch2WithMain
                                            Aspartame::Aspartame)
 polyregion_apply_common_options(polyrt-tests)
 if (APPLE)

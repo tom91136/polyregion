@@ -6,6 +6,9 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Program.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,6 +44,64 @@ public:
   llvm::SmallString<128> path;
 };
 
+bool writeBytes(const llvm::StringRef path, const std::vector<uint8_t> &bytes) {
+  std::error_code error;
+  llvm::raw_fd_ostream stream(path, error);
+  if (error) return false;
+  stream.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+  stream.close();
+  return !stream.has_error();
+}
+
+Checked<Package> linkPackage(const PackageLinkRequest &request, const std::string &root) {
+  TemporaryDirectory inputs;
+  llvm::SmallString<128> interfacePath(inputs.path), errorPath(inputs.path);
+  llvm::sys::path::append(interfacePath, "interface.polyast");
+  llvm::sys::path::append(errorPath, "stderr.txt");
+  if (!writeBytes(interfacePath, interface_to_msgpack(request.interface))) return {{}, {"cannot write package interface input"}};
+
+  std::vector<std::string> ownedArgs{POLYC_TEST_EXECUTABLE, "package", "link"};
+  for (const auto &capability : request.capabilities)
+    ownedArgs.emplace_back("--capability=" + capability);
+  ownedArgs.emplace_back(interfacePath.str());
+  ownedArgs.emplace_back(root);
+  for (size_t index = 0; index < request.programFragments.size(); ++index) {
+    llvm::SmallString<128> programPath(inputs.path);
+    llvm::sys::path::append(programPath, "program-" + std::to_string(index) + ".polyast");
+    if (!writeBytes(programPath, hashed_program_to_msgpack(request.programFragments[index])))
+      return {{}, {"cannot write package program input"}};
+    ownedArgs.emplace_back(programPath.str());
+  }
+  std::vector<llvm::StringRef> args;
+  args.reserve(ownedArgs.size());
+  for (const auto &arg : ownedArgs)
+    args.emplace_back(arg);
+  std::string executionError;
+  const int code = llvm::sys::ExecuteAndWait(POLYC_TEST_EXECUTABLE, args, std::nullopt, {std::nullopt, std::nullopt, errorPath.str()}, 0, 0,
+                                             &executionError);
+  if (code != 0) {
+    std::vector<std::string> errors;
+    if (const auto buffer = llvm::MemoryBuffer::getFile(errorPath)) {
+      std::string diagnostic = (*buffer)->getBuffer().str();
+      for (size_t offset = 0; offset <= diagnostic.size();) {
+        const auto end = diagnostic.find('\n', offset);
+        const auto line = diagnostic.substr(offset, end - offset);
+        if (!line.empty()) errors.emplace_back(line);
+        if (end == std::string::npos) break;
+        offset = end + 1;
+      }
+    }
+    if (!executionError.empty()) errors.emplace_back(std::move(executionError));
+    if (errors.empty()) errors.emplace_back("polyc package link exited with code " + std::to_string(code));
+    return {{}, std::move(errors)};
+  }
+  return loadPackage(symbol(request.interface.name), {root});
+}
+
+Checked<Package> emitPackage(const Package &package, const std::string &root) {
+  return linkPackage(PackageLinkRequest(package.interface, {package.program}, {}), root);
+}
+
 } // namespace
 
 TEST_CASE("packages emit as one file") {
@@ -67,8 +128,8 @@ TEST_CASE("concurrent package emitters return their own staged package") {
   std::optional<Checked<Package>> second;
   const auto firstFixture = fixture(1);
   const auto secondFixture = fixture(2);
-  std::thread firstThread([&] { first = emitPackage(firstFixture, root.path.str().str()); });
-  std::thread secondThread([&] { second = emitPackage(secondFixture, root.path.str().str()); });
+  std::thread firstThread([&] { first = publishPackage(firstFixture, root.path.str().str()); });
+  std::thread secondThread([&] { second = publishPackage(secondFixture, root.path.str().str()); });
   firstThread.join();
   secondThread.join();
   REQUIRE(first);
@@ -81,13 +142,13 @@ TEST_CASE("concurrent package emitters return their own staged package") {
 
 TEST_CASE("package readers tolerate concurrent replacement") {
   TemporaryDirectory root;
-  REQUIRE(emitPackage(fixture(0), root.path.str().str()));
+  REQUIRE(publishPackage(fixture(0), root.path.str().str()));
   std::atomic<bool> done = false;
   std::vector<std::string> emitterErrors;
   std::vector<std::string> readerErrors;
   std::thread emitter([&] {
     for (int32_t increment = 1; increment <= 50; ++increment)
-      if (const auto result = emitPackage(fixture(increment), root.path.str().str()); !result) emitterErrors ^= concat(result.errors);
+      if (const auto result = publishPackage(fixture(increment), root.path.str().str()); !result) emitterErrors ^= concat(result.errors);
     done = true;
   });
   std::thread reader([&] {
@@ -99,6 +160,28 @@ TEST_CASE("package readers tolerate concurrent replacement") {
   reader.join();
   CHECK(emitterErrors.empty());
   CHECK(readerErrors.empty());
+}
+
+TEST_CASE("polyc transports a large linked package without truncation") {
+  TemporaryDirectory root;
+  const auto publicName = Sym({"bar", "large"});
+  const auto publicDecl = FunctionDecl(publicName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto implementationDecl = publicDecl.withName(Sym({"implementation", "large"}));
+  std::vector<Function> functions;
+  functions.reserve(4097);
+  functions.emplace_back(implementationDecl, std::vector<Stmt::Any>{}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+                         CallConvention::RegularCall(), publicName);
+  for (int i = 0; i < 4096; ++i) {
+    const auto decl = publicDecl.withName(Sym({"helper", std::to_string(i)}));
+    functions.emplace_back(decl, std::vector<Stmt::Any>{}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
+                           CallConvention::RegularCall());
+  }
+  const auto request = PackageLinkRequest(Interface(Sym({"large"}), {publicDecl}, {}), {packageProgram(std::move(functions), {})}, {});
+  const auto result = linkPackage(request, root.path.str().str());
+  REQUIRE(result);
+  CHECK(result.value->program.functions.size() == 4097);
+  CHECK(std::any_of(result.value->program.functions.begin(), result.value->program.functions.end(),
+                    [](const auto &function) { return function.decl.name == Sym({"helper", "4095"}); }));
 }
 
 TEST_CASE("package emission rejects incomplete implementations without replacing the emitted package") {

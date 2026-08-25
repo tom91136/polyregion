@@ -23,7 +23,6 @@
 #include "polyfront/diag.hpp"
 #include "polyfront/package.hpp"
 #include "polyfront/package_program.hpp"
-#include "polyfront/package_service.hpp"
 #include "polyfront/resolved_sym_program_compilation.hpp"
 #include "polyregion/conventions.h"
 
@@ -275,16 +274,6 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
   const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
   const auto request = PackageSymRequest(pkg, signature, callableDecls, callerFns, callerDefs, capabilities, typeSizes, entryName,
                                          PackageReturnConvention::Return());
-  const auto resolved = PackageService::resolveSym(request);
-  if (!resolved) {
-    emitErrors(resolved.errors);
-    return;
-  }
-  const auto &resolution = *resolved.value;
-  if (const auto errors = validateResolvedSymProgram(request, resolution, argumentTypes, returnType); !errors.empty()) {
-    emitErrors(errors);
-    return;
-  }
   const auto entryTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
   if (!entryTarget) {
     emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
@@ -292,9 +281,14 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
     return;
   }
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
-  const auto compiled = compileResolvedSym(opts, resolution, *entryTarget, polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU));
+  const auto compiled = resolveAndCompileSym(opts, request, *entryTarget, polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU));
   if (!compiled) {
     emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", compiled.errors ^ mk_string("; "));
+    return;
+  }
+  const auto &resolution = compiled.value->resolved;
+  if (const auto errors = validateResolvedSymProgram(request, resolution, argumentTypes, returnType); !errors.empty()) {
+    emitErrors(errors);
     return;
   }
   resolvedSymBitcode.emplace_back(std::move(compiled.value->hostObject));

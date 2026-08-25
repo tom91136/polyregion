@@ -538,6 +538,20 @@ object PolyAST {
     }
 
     case class SymResolvedProgram(program: Program, entryArgs: List[EntryArgBinding]) derives MsgPack.Codec
+
+    case class SymCompiledObject(
+        moduleName: String,
+        format: Int,
+        kind: Int,
+        features: List[String],
+        moduleImage: ArraySeq[Byte]
+    ) derives MsgPack.Codec
+
+    case class SymCompileResult(
+        resolved: SymResolvedProgram,
+        hostObject: ArraySeq[Byte],
+        remoteObjects: List[SymCompiledObject]
+    ) derives MsgPack.Codec
   }
 
   object StructLayout {

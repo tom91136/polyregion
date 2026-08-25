@@ -9,6 +9,8 @@
 
 #include "polyregion/dl.h"
 #include "polyregion/env.h"
+#include "polyregion/polypackage.h"
+#include "polyregion/polypackage_symbols.h"
 #include "polyregion/polypass.h"
 
 #include "generated/polypass_symbols.h"
@@ -28,6 +30,11 @@ struct DsoPassRunner::Impl {
   abi::RunPassesFn run = nullptr;
   abi::LastErrorFn err = nullptr;
   abi::FreeFn free = nullptr;
+  polypackage::abi::AbiVersionFn packageAbi = nullptr;
+  polypackage::abi::LinkPackageFn linkPackage = nullptr;
+  polypackage::abi::ResolveSymFn resolveSym = nullptr;
+  polypackage::abi::LastErrorFn packageErr = nullptr;
+  polypackage::abi::FreeFn packageFree = nullptr;
   Vector<String> names;
   std::unordered_map<String, String> descrs;
   bool loaded = false;
@@ -56,18 +63,33 @@ String DsoPassRunner::load() {
   impl->run = reinterpret_cast<abi::RunPassesFn>(polyregion_dl_find(impl->dso, abi::RunPasses));
   impl->err = reinterpret_cast<abi::LastErrorFn>(polyregion_dl_find(impl->dso, abi::LastError));
   impl->free = reinterpret_cast<abi::FreeFn>(polyregion_dl_find(impl->dso, abi::Free));
-  if (!impl->abi || !impl->count || !impl->name || !impl->run || !impl->err || !impl->free)
-    return fmt::format("dlsym polypass_*: missing entry point in {}", impl->path);
-  if (const uint32_t v = impl->abi(); v != POLYPASS_ABI_VERSION)
-    return fmt::format("PolyPass ABI mismatch in {}: plugin={} polyc={}", impl->path, v, POLYPASS_ABI_VERSION);
-  const size_t n = impl->count();
-  impl->names.reserve(n);
-  for (size_t i = 0; i < n; ++i) {
-    const char *nm = impl->name(i);
-    if (!nm) return fmt::format("polypass_pass_name({}) returned NULL in {}", i, impl->path);
-    impl->names.emplace_back(nm);
-    if (impl->descr)
-      if (const char *d = impl->descr(i); d && *d) impl->descrs.emplace(impl->names.back(), d);
+  namespace packageAbi = polypackage::abi;
+  impl->packageAbi = reinterpret_cast<packageAbi::AbiVersionFn>(polyregion_dl_find(impl->dso, packageAbi::AbiVersion));
+  impl->linkPackage = reinterpret_cast<packageAbi::LinkPackageFn>(polyregion_dl_find(impl->dso, packageAbi::LinkPackage));
+  impl->resolveSym = reinterpret_cast<packageAbi::ResolveSymFn>(polyregion_dl_find(impl->dso, packageAbi::ResolveSym));
+  impl->packageErr = reinterpret_cast<packageAbi::LastErrorFn>(polyregion_dl_find(impl->dso, packageAbi::LastError));
+  impl->packageFree = reinterpret_cast<packageAbi::FreeFn>(polyregion_dl_find(impl->dso, packageAbi::Free));
+
+  const bool anyPass = impl->abi || impl->count || impl->name || impl->descr || impl->run || impl->err || impl->free;
+  const bool completePass = impl->abi && impl->count && impl->name && impl->run && impl->err && impl->free;
+  if (anyPass && !completePass) return fmt::format("dlsym polypass_*: incomplete pass capability in {}", impl->path);
+  const bool anyPackage = impl->packageAbi || impl->linkPackage || impl->resolveSym || impl->packageErr || impl->packageFree;
+  const bool completePackage = impl->packageAbi && impl->linkPackage && impl->resolveSym && impl->packageErr && impl->packageFree;
+  if (anyPackage && !completePackage) return fmt::format("dlsym polypackage_*: incomplete package capability in {}", impl->path);
+  if (!completePass && !completePackage) return fmt::format("{} exposes neither polypass_* nor polypackage_*", impl->path);
+
+  if (completePass) {
+    if (const uint32_t v = impl->abi(); v != POLYPASS_ABI_VERSION)
+      return fmt::format("PolyPass ABI mismatch in {}: plugin={} polyc={}", impl->path, v, POLYPASS_ABI_VERSION);
+    const size_t n = impl->count();
+    impl->names.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+      const char *nm = impl->name(i);
+      if (!nm) return fmt::format("polypass_pass_name({}) returned NULL in {}", i, impl->path);
+      impl->names.emplace_back(nm);
+      if (impl->descr)
+        if (const char *d = impl->descr(i); d && *d) impl->descrs.emplace(impl->names.back(), d);
+    }
   }
   impl->loaded = true;
   return {};
@@ -100,6 +122,42 @@ Vector<uint8_t> DsoPassRunner::runPasses(const Vector<String> &steps, const Vect
   }
   Vector<uint8_t> result(out, out + out_len);
   if (out) impl->free(out);
+  return result;
+}
+
+std::optional<uint32_t> DsoPassRunner::packageAbiVersion() const {
+  if (!impl->loaded || !impl->packageAbi) return std::nullopt;
+  return impl->packageAbi();
+}
+
+Vector<uint8_t> DsoPassRunner::runPackage(const std::string_view operation, const Vector<uint8_t> &request, String &error) {
+  if (!impl->loaded) {
+    error = "DSO not loaded; call load() first";
+    return {};
+  }
+  const auto invoke = operation == polypackage::abi::LinkPackage  ? impl->linkPackage
+                      : operation == polypackage::abi::ResolveSym ? impl->resolveSym
+                                                                  : nullptr;
+  if (!invoke) {
+    error = fmt::format("unknown or unavailable package operation {}", operation);
+    return {};
+  }
+  uint8_t *output = nullptr;
+  size_t outputSize = 0;
+  const auto status = invoke(request.data(), request.size(), &output, &outputSize);
+  if (status != POLYPACKAGE_OK) {
+    const char *message = impl->packageErr();
+    error = message ? message : fmt::format("package operation returned status {}", static_cast<int>(status));
+    if (output) impl->packageFree(output);
+    return {};
+  }
+  if (outputSize > 0 && !output) {
+    error = "package operation returned a null result with non-zero size";
+    return {};
+  }
+  Vector<uint8_t> result;
+  if (outputSize > 0) result.assign(output, output + outputSize);
+  if (output) impl->packageFree(output);
   return result;
 }
 

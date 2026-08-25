@@ -348,6 +348,10 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json packagesymrequest_to_json(const PackageSymRequest &);
 [[nodiscard]] POLYREGION_EXPORT PackageSymResolvedProgram packagesymresolvedprogram_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json packagesymresolvedprogram_to_json(const PackageSymResolvedProgram &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject packagesymcompiledobject_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagesymcompiledobject_to_json(const PackageSymCompiledObject &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult packagesymcompileresult_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagesymcompileresult_to_json(const PackageSymCompileResult &);
 namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT Intr::BNot bnot_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bnot_to_json(const Intr::BNot &);
@@ -615,6 +619,9 @@ namespace Direction {
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> resolvedsymprogram_to_msgpack(const PackageSymResolvedProgram &);
 [[nodiscard]] POLYREGION_EXPORT PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT PackageSymResolvedProgram resolvedsymprogram_from_msgpack(const std::vector<uint8_t> &);
+[[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> packagesymcompileresult_to_msgpack(const PackageSymCompileResult &);
+[[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult packagesymcompileresult_from_msgpack(const uint8_t *, const uint8_t *);
+[[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult packagesymcompileresult_from_msgpack(const std::vector<uint8_t> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<uint8_t> structdefs_to_msgpack(const std::vector<StructDef> &);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const uint8_t *, const uint8_t *);
 [[nodiscard]] POLYREGION_EXPORT std::vector<StructDef> structdefs_from_msgpack(const std::vector<uint8_t> &);

@@ -13,7 +13,6 @@
 
 #include "aspartame/all.hpp"
 
-#include "polyfront/package_service.hpp"
 #include "polyregion/env_keys.h"
 
 #include "ast.h"
@@ -23,7 +22,11 @@ namespace polyregion::polyfront::package {
 
 using namespace aspartame;
 
-template <typename T> using Checked = ServiceResult<T>;
+template <typename T> struct Checked {
+  std::optional<T> value;
+  std::vector<std::string> errors;
+  explicit operator bool() const { return value.has_value(); }
+};
 
 inline std::string symbol(const polyast::Sym &sym) { return sym.fqn ^ mk_string("."); }
 

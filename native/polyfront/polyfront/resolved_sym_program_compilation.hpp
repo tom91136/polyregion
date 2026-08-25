@@ -1,18 +1,17 @@
 #pragma once
 
-#include <cctype>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "polyfront/options_backend.hpp"
-#include "polyfront/package_service.hpp"
-#include "polyfront/pass_specs.hpp"
+#include "polyfront/polyc_client.hpp"
 
 namespace polyregion::polyfront::package {
 
 struct ResolvedSymCompilation {
+  polyast::PackageSymResolvedProgram resolved;
   std::vector<int8_t> hostObject;
   std::vector<std::pair<std::string, polyfront::KernelObject>> remoteObjects;
 };
@@ -100,49 +99,17 @@ inline std::vector<std::string> validateResolvedSymProgram(const polyast::Packag
   return errors;
 }
 
-inline ServiceResult<ResolvedSymCompilation> compileResolvedSym(const polyfront::Options &opts,
-                                                                const polyast::PackageSymResolvedProgram &resolved,
-                                                                const compiletime::Target target, const std::string &cpu) {
-  auto program = resolved.program;
-  for (auto &function : program.functions)
-    if (function.convention.is<polyast::CallConvention::OffloadEntry>()) function.visibility = polyast::FunctionVisibility::Exported();
-
-  const auto compiled = polyfront::compileProgram(opts, program, target, cpu, {"--host-mirroring", "--passes", "FullOpt(level=0)"});
-  if (const auto *error = std::get_if<std::string>(&compiled)) return {{}, {*error}};
-  const auto &result = std::get<polyast::CompileResult>(compiled);
-  if (!result.binary) return {{}, {"resolved Sym program compilation failed: " + result.messages}};
-
-  ResolvedSymCompilation output{*result.binary, {}};
-  for (const auto &entry : program.functions) {
-    if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
-    auto moduleName = polyast::fqcn(entry.decl.name);
-    for (auto &c : moduleName)
-      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
-    auto entryProgram = program.withEntry(entry);
-    std::vector<polyast::Function> functions;
-    functions.reserve(program.functions.size() - 1);
-    for (const auto &function : program.functions) {
-      if (function.decl.name == entry.decl.name) continue;
-      functions.emplace_back(
-          function.convention.is<polyast::CallConvention::OffloadEntry>()
-              ? function.withVisibility(polyast::FunctionVisibility::Internal()).withConvention(polyast::CallConvention::RegularCall())
-              : function);
-    }
-    entryProgram.functions = std::move(functions);
-    for (const auto &[deviceTarget, features] : opts.targets) {
-      const auto device = polyfront::compileProgram(opts, entryProgram, deviceTarget, features,
-                                                    polyfront::passes::packageEntryPassesFor(deviceTarget, opts.stackDepth));
-      if (const auto *error = std::get_if<std::string>(&device)) return {{}, {*error}};
-      const auto &deviceResult = std::get<polyast::CompileResult>(device);
-      if (!deviceResult.binary) return {{}, {"package entry compilation failed for " + moduleName + ": " + deviceResult.messages}};
-      const auto format = runtime::moduleFormatOf(deviceTarget);
-      if (!format) continue;
-      output.remoteObjects.emplace_back(
-          moduleName, polyfront::KernelObject{*format, runtime::targetPlatformKind(deviceTarget), deviceResult.features,
-                                              std::string(deviceResult.binary->begin(), deviceResult.binary->end()), deviceTarget, features,
-                                              polyfront::passes::packageEntryPassesFor(deviceTarget, opts.stackDepth).back()});
-    }
-  }
+inline Checked<ResolvedSymCompilation> resolveAndCompileSym(const polyfront::Options &opts, const polyast::PackageSymRequest &request,
+                                                            const compiletime::Target target, const std::string &cpu) {
+  const auto compiled = PolycClient::compileSym(request, opts.executable, target, cpu, opts.targets, opts.stackDepth);
+  if (!compiled) return {{}, compiled.errors};
+  ResolvedSymCompilation output{compiled.value->resolved, compiled.value->hostObject, {}};
+  output.remoteObjects.reserve(compiled.value->remoteObjects.size());
+  for (const auto &object : compiled.value->remoteObjects)
+    output.remoteObjects.emplace_back(object.moduleName,
+                                      polyfront::KernelObject{static_cast<runtime::ModuleFormat>(object.format),
+                                                              static_cast<runtime::PlatformKind>(object.kind), object.features,
+                                                              std::string(object.moduleImage.begin(), object.moduleImage.end())});
   return {{std::move(output)}, {}};
 }
 

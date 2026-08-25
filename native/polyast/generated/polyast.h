@@ -960,6 +960,8 @@ public:
 } // namespace PackageEntryArgBinding
 
 struct PackageSymResolvedProgram;
+struct PackageSymCompiledObject;
+struct PackageSymCompileResult;
 
 struct POLYREGION_EXPORT Sym {
   std::vector<std::string> fqn;
@@ -11014,6 +11016,92 @@ struct POLYREGION_EXPORT PackageSymResolvedProgram {
   PackageSymResolvedProgram(Program program, std::vector<PackageEntryArgBinding::Any> entryArgs = {}) noexcept;
 };
 
+struct POLYREGION_EXPORT PackageSymCompiledObject {
+  std::string moduleName;
+  int32_t format;
+  int32_t kind;
+  std::vector<std::string> features;
+  std::vector<int8_t> moduleImage;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject withModuleName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject withFormat(const int32_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject withKind(const int32_t &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject withFeatures(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject withModuleImage(const std::vector<int8_t> &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PackageSymCompiledObject>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PackageSymCompiledObject modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PackageSymCompiledObject>) {
+      return f(*this);
+    }
+    return PackageSymCompiledObject(moduleName, format, kind, features, moduleImage);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PackageSymCompiledObject &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PackageSymCompiledObject &) const;
+  PackageSymCompiledObject(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features = {},
+                           std::vector<int8_t> moduleImage = {}) noexcept;
+};
+
+struct POLYREGION_EXPORT PackageSymCompileResult {
+  PackageSymResolvedProgram resolved;
+  std::vector<int8_t> hostObject;
+  std::vector<PackageSymCompiledObject> remoteObjects;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult withResolved(const PackageSymResolvedProgram &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult withHostObject(const std::vector<int8_t> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult withRemoteObjects(const std::vector<PackageSymCompiledObject> &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PackageSymCompileResult>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    resolved.collect_where<T, U>(results_, f);
+    for (auto it = remoteObjects.begin(); it != remoteObjects.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PackageSymCompileResult modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PackageSymCompileResult>) {
+      return f(*this);
+    }
+    std::vector<PackageSymCompiledObject> remoteObjects__;
+    for (auto it = remoteObjects.begin(); it != remoteObjects.end(); ++it) {
+      remoteObjects__.emplace_back((*it).modify_all<T>(f));
+    }
+    return PackageSymCompileResult(resolved.modify_all<T>(f), hostObject, remoteObjects__);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PackageSymCompileResult &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PackageSymCompileResult &) const;
+  PackageSymCompileResult(PackageSymResolvedProgram resolved, std::vector<int8_t> hostObject = {},
+                          std::vector<PackageSymCompiledObject> remoteObjects = {}) noexcept;
+};
+
 } // namespace polyregion::polyast
 #ifndef _MSC_VER
   #pragma clang diagnostic pop // ide google-explicit-constructor
@@ -14027,6 +14115,12 @@ template <> struct hash<polyregion::polyast::PackageEntryArgBinding::ResultAddre
 };
 template <> struct hash<polyregion::polyast::PackageSymResolvedProgram> {
   std::size_t operator()(const polyregion::polyast::PackageSymResolvedProgram &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PackageSymCompiledObject> {
+  std::size_t operator()(const polyregion::polyast::PackageSymCompiledObject &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PackageSymCompileResult> {
+  std::size_t operator()(const polyregion::polyast::PackageSymCompileResult &) const noexcept;
 };
 
 } // namespace std

@@ -8,6 +8,7 @@
 #include "fmt/format.h"
 
 #include "polyregion/io.hpp"
+#include "polyregion/polypackage_symbols.h"
 #include "polyregion/polypass.h"
 
 #include "generated/polypass_symbols.h"
@@ -75,7 +76,7 @@ String hermesCacheTag() { return fmt::format("hermes-bc{}-{}", hermes::hbc::BYTE
 
 String formatException(const jsi::JSError &e) {
   String out = e.getMessage();
-  if (const auto &stack = e.getStack(); !stack.empty()) {
+  if (const auto &stack = e.getStack(); !stack.empty() && stack != "No stack") {
     out += "\n";
     out += stack;
   }
@@ -86,6 +87,13 @@ jsi::Value getExport(jsi::Runtime &rt, const char *name) {
   auto exports = rt.global().getProperty(rt, "exports");
   if (!exports.isObject()) return jsi::Value::undefined();
   return exports.asObject(rt).getProperty(rt, name);
+}
+
+bool hasExport(jsi::Runtime &rt, const char *name) { return !getExport(rt, name).isUndefined(); }
+
+bool hasFunctionExport(jsi::Runtime &rt, const char *name) {
+  auto value = getExport(rt, name);
+  return value.isObject() && value.asObject(rt).isFunction(rt);
 }
 
 // Invoke `exports.<name>()` and return the result, or undefined on missing.
@@ -134,6 +142,98 @@ String JsPassRunner::loadModule(std::string_view source) {
   return {};
 }
 
+std::optional<int32_t> JsPassRunner::intExport(const std::string_view name, String &error) const {
+  if (!impl->loaded) {
+    error = "JS plugin not loaded";
+    return std::nullopt;
+  }
+  auto &rt = *impl->runtime;
+  try {
+    const String exportName(name);
+    auto value = callExport(rt, exportName.c_str());
+    if (!value.isNumber()) {
+      error = fmt::format("PolyPass JS: exports.{} returned a non-integer", name);
+      return std::nullopt;
+    }
+    return static_cast<int32_t>(value.asNumber());
+  } catch (const jsi::JSError &e) {
+    error = formatException(e);
+    return std::nullopt;
+  } catch (const std::exception &e) {
+    error = String("intExport: ") + e.what();
+    return std::nullopt;
+  }
+}
+
+Vector<uint8_t> JsPassRunner::bytesExport(const std::string_view name, const Vector<uint8_t> &input, String &error) {
+  if (!impl->loaded) {
+    error = "JS plugin not loaded";
+    return {};
+  }
+  auto &rt = *impl->runtime;
+  Vector<uint8_t> out;
+  try {
+    const String exportName(name);
+    auto fnValue = getExport(rt, exportName.c_str());
+    if (!fnValue.isObject() || !fnValue.asObject(rt).isFunction(rt)) {
+      error = fmt::format("PolyPass JS: exports.{} is not a function", name);
+      return out;
+    }
+    auto fn = fnValue.asObject(rt).asFunction(rt);
+    auto ctor = rt.global().getPropertyAsFunction(rt, "ArrayBuffer");
+    auto bufferValue = ctor.callAsConstructor(rt, {jsi::Value(static_cast<double>(input.size()))});
+    auto buffer = bufferValue.asObject(rt).getArrayBuffer(rt);
+    if (!input.empty()) std::memcpy(buffer.data(rt), input.data(), input.size());
+    auto uint8Ctor = rt.global().getPropertyAsFunction(rt, "Uint8Array");
+    auto uint8 = uint8Ctor.callAsConstructor(rt, {jsi::Value(rt, bufferValue)});
+    auto result = fn.call(rt, {jsi::Value(rt, uint8)});
+    if (!result.isObject()) {
+      error = fmt::format("{}: return value must be Uint8Array", name);
+      return out;
+    }
+    auto resultObject = result.asObject(rt);
+    auto resultBufferValue = resultObject.getProperty(rt, "buffer");
+    if (!resultBufferValue.isObject() || !resultBufferValue.asObject(rt).isArrayBuffer(rt)) {
+      error = fmt::format("{}: return value must be Uint8Array", name);
+      return out;
+    }
+    auto resultBuffer = resultBufferValue.asObject(rt).getArrayBuffer(rt);
+    const auto offset = static_cast<size_t>(resultObject.getProperty(rt, "byteOffset").asNumber());
+    const auto length = static_cast<size_t>(resultObject.getProperty(rt, "byteLength").asNumber());
+    const auto capacity = resultBuffer.size(rt);
+    if (offset > capacity || length > capacity - offset) {
+      error = fmt::format("{}: typed-array bounds out of range", name);
+      return out;
+    }
+    if (length > 0) {
+      auto *base = resultBuffer.data(rt) + offset;
+      out.assign(base, base + length);
+    }
+    return out;
+  } catch (const jsi::JSError &e) {
+    error = formatException(e);
+    return out;
+  } catch (const std::exception &e) {
+    error = String("bytesExport: ") + e.what();
+    return out;
+  }
+}
+
+std::optional<uint32_t> JsPassRunner::packageAbiVersion() const {
+  String error;
+  const auto version = intExport(polypackage::abi::AbiVersion, error);
+  if (!version || !error.empty()) return std::nullopt;
+  return static_cast<uint32_t>(*version);
+}
+
+Vector<uint8_t> JsPassRunner::runPackage(const std::string_view operation, const Vector<uint8_t> &request, String &error) {
+  if (operation != polypackage::abi::LinkPackage && operation != polypackage::abi::ResolveSym) {
+    error = fmt::format("unknown package operation {}", operation);
+    return {};
+  }
+  return bytesExport(operation, request, error);
+}
+
 String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_view moduleId) {
   auto &rt = *runtime;
   try {
@@ -169,6 +269,19 @@ String JsPassRunner::Impl::loadFromSource(std::string_view source, std::string_v
 String JsPassRunner::Impl::enumeratePasses() {
   auto &rt = *runtime;
   try {
+    const bool anyPass = hasExport(rt, abi::AbiVersion) || hasExport(rt, abi::PassCount) || hasExport(rt, abi::PassName)
+                         || hasExport(rt, abi::PassDescr) || hasExport(rt, abi::RunPasses);
+    const bool completePass = hasFunctionExport(rt, abi::AbiVersion) && hasFunctionExport(rt, abi::PassCount)
+                              && hasFunctionExport(rt, abi::PassName) && hasFunctionExport(rt, abi::RunPasses);
+    const bool anyPackage = hasExport(rt, polypackage::abi::AbiVersion) || hasExport(rt, polypackage::abi::LinkPackage)
+                            || hasExport(rt, polypackage::abi::ResolveSym);
+    const bool completePackage = hasFunctionExport(rt, polypackage::abi::AbiVersion) && hasFunctionExport(rt, polypackage::abi::LinkPackage)
+                                 && hasFunctionExport(rt, polypackage::abi::ResolveSym);
+    if (anyPass && !completePass) return "PolyPass JS: incomplete pass capability";
+    if (anyPackage && !completePackage) return "PolyPass JS: incomplete package capability";
+    if (!completePass && !completePackage) return "PolyPass JS: bundle exposes neither pass nor package capability";
+    if (!completePass) return {};
+
     auto abiVal = callExport(rt, abi::AbiVersion);
     if (!abiVal.isNumber()) return fmt::format("PolyPass JS: missing or non-numeric exports.{}()", abi::AbiVersion);
     const auto reported = static_cast<int64_t>(abiVal.asNumber());

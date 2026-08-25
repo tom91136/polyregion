@@ -1,5 +1,3 @@
-#include "polyfront/package_service.hpp"
-
 #include <algorithm>
 #include <cctype>
 
@@ -7,6 +5,7 @@
 
 #include "polyfront/options_backend.hpp"
 #include "polyfront/package_program.hpp"
+#include "polyfront/polyc_client.hpp"
 #include "polyfront/resolved_sym_program_compilation.hpp"
 
 #include "polyast_codec.h"
@@ -31,11 +30,6 @@ polyast::Function variant(polyast::FunctionDecl decl, const polyast::Sym &public
   using namespace polyast;
   return Function(std::move(decl), {}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall(), publicName,
                   {"gpu"});
-}
-
-polyast::Package packaged(const polyast::FunctionDecl &declaration, polyast::Function implementation) {
-  using namespace polyast;
-  return Package(Interface(Sym({"foo"}), {declaration}, {}), polyfront::packageProgram({std::move(implementation)}, {}));
 }
 
 } // namespace
@@ -67,32 +61,53 @@ TEST_CASE("resolved package Sym targets follow the consumer architecture") {
   CHECK_FALSE(polyfront::objectLayoutsCompatible(consumer, llvm::DataLayout("e-p:32:32")));
 }
 
-TEST_CASE("package service resolves a typed package Sym") {
+TEST_CASE("package service resolves and compiles a typed package Sym") {
   using namespace polyast;
+  using namespace polyast::dsl;
   const auto publicName = Sym({"bar", "transform"});
   const auto publicDecl = transform(publicName, "T");
   const auto implementation = variant(transform(Sym({"implementation", "transform_w4"}), "Element", 4), publicName);
-  const auto pkg = packaged(publicDecl, implementation);
+  const auto remoteKernelName = Sym({"implementation", "transform_kernel"});
+  const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+  const Named context("#context", contextType);
+  auto remoteArgs = implementation.decl.args;
+  const auto remoteExtent = ArgExtent::Elements(ArgSizeExpr::Param(3));
+  remoteArgs[0] = remoteArgs[0].withBoundary(ArgBoundary(ArgAccess::Read(), remoteExtent));
+  remoteArgs[1] = remoteArgs[1].withBoundary(ArgBoundary(ArgAccess::Write(), remoteExtent));
+  remoteArgs.insert(remoteArgs.begin(), Arg(context, {}));
+  const auto one = Term::IntU32Const(1).widen();
+  const auto zero = Term::IntU32Const(0).widen();
+  const auto remoteLaunch = Spec::RemoteLaunch(selectNamed(context).widen(), Term::Poison(Type::FnRef(remoteKernelName)).widen(), {}, one,
+                                               one, one, zero, zero, zero, zero, {});
+  const auto remoteImplementation = implementation.withDecl(implementation.decl.withArgs(remoteArgs))
+                                        .withBody({let("launched") = Expr::SpecOp(remoteLaunch).widen(), ret()});
+  const auto remoteKernel = Function(FunctionDecl(remoteKernelName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
+                                     {ret()}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const auto pkg = Package(Interface(Sym({"foo"}), {publicDecl}, {}), polyfront::packageProgram({remoteImplementation, remoteKernel}, {}));
   const auto f32 = Type::Float32().widen();
   const auto f32Pointer = Type::Ptr(f32, TypeSpace::Global()).widen();
   const auto signature = InvokeSignature(publicName, {}, {}, {f32Pointer, f32Pointer, Type::IntS32()}, Type::Unit0());
   const auto request =
       PackageSymRequest(pkg, signature, {}, {}, {}, {"gpu"}, {PackageTypeSize(f32, 4)}, "__package_sym", PackageReturnConvention::Return());
-  const auto result = polyfront::package::PackageService::resolveSym(request);
-  REQUIRE(result);
-  REQUIRE(result.value->program.entry);
-  const auto &entry = *result.value->program.entry;
+  const auto compiled = polyfront::package::PolycClient::compileSym(request, {}, compiletime::Target::Object_LLVM_HOST, "native",
+                                                                    {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
+  for (const auto &error : compiled.errors)
+    UNSCOPED_INFO(error);
+  REQUIRE(compiled);
+  const auto &resolved = compiled.value->resolved;
+  REQUIRE(resolved.program.entry);
+  const auto &entry = *resolved.program.entry;
   REQUIRE_FALSE(entry.decl.args.empty());
   CHECK(entry.decl.args.front().named.symbol == "#context");
-  CHECK(result.value->entryArgs
+  CHECK(resolved.entryArgs
         == std::vector<PackageEntryArgBinding::Any>{PackageEntryArgBinding::Context(), PackageEntryArgBinding::CallValue(0),
                                                     PackageEntryArgBinding::CallValue(1), PackageEntryArgBinding::CallAddress(2)});
   CHECK(entry.collect_all<Spec::RemoteAlloc>().size() == 2);
   CHECK(entry.collect_all<Spec::RemoteMemcpy>().size() == 2);
   CHECK(entry.collect_all<Spec::RemoteFree>().size() == 2);
-  CHECK(polyfront::package::validateResolvedSymProgram(request, *result.value, signature.args, signature.rtn).empty());
+  CHECK(polyfront::package::validateResolvedSymProgram(request, resolved, signature.args, signature.rtn).empty());
 
-  auto malformed = *result.value;
+  auto malformed = resolved;
   malformed.entryArgs[1] = PackageEntryArgBinding::CallValue(-1);
   CHECK_FALSE(polyfront::package::validateResolvedSymProgram(request, malformed, signature.args, signature.rtn).empty());
 
@@ -103,34 +118,15 @@ TEST_CASE("package service resolves a typed package Sym") {
   const auto erasedEntry = entry.withDecl(entry.decl.withArgs(
       {entry.decl.args.front(), Arg(Named("value", concreteResultPointer), {}), Arg(Named("result", concreteResultPointer), {})}));
   const auto erasedResolved =
-      result.value->withProgram(result.value->program.withEntry(erasedEntry))
+      resolved.withProgram(resolved.program.withEntry(erasedEntry))
           .withEntryArgs({PackageEntryArgBinding::Context(), PackageEntryArgBinding::CallAddress(0), PackageEntryArgBinding::CallValue(1)});
   CHECK(polyfront::package::validateResolvedSymProgram(erasedRequest, erasedResolved, {f32, erasedResultPointer}, Type::Nothing()).empty());
   CHECK_FALSE(
       polyfront::package::validateResolvedSymProgram(erasedRequest, erasedResolved, {f32, concreteResultPointer}, Type::Nothing()).empty());
-}
 
-TEST_CASE("package service transports a large linked package without truncation") {
-  using namespace polyast;
-  const auto publicName = Sym({"bar", "large"});
-  const auto publicDecl = FunctionDecl(publicName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
-  const auto implementationDecl = publicDecl.withName(Sym({"implementation", "large"}));
-  std::vector<Function> functions;
-  functions.reserve(4097);
-  functions.emplace_back(implementationDecl, std::vector<Stmt::Any>{}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
-                         CallConvention::RegularCall(), publicName);
-  for (int i = 0; i < 4096; ++i) {
-    const auto decl = publicDecl.withName(Sym({"helper", std::to_string(i)}));
-    functions.emplace_back(decl, std::vector<Stmt::Any>{}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
-                           CallConvention::RegularCall());
-  }
-  const auto request =
-      PackageLinkRequest(Interface(Sym({"large"}), {publicDecl}, {}), {polyfront::packageProgram(std::move(functions), {})}, {});
-  const auto result = polyfront::package::PackageService::linkPackage(request);
-  REQUIRE(result);
-  CHECK(result.value->program.functions.size() == 4097);
-  CHECK(std::any_of(result.value->program.functions.begin(), result.value->program.functions.end(),
-                    [](const auto &function) { return function.decl.name == Sym({"helper", "4095"}); }));
+  CHECK_FALSE(compiled.value->hostObject.empty());
+  REQUIRE(compiled.value->remoteObjects.size() == 1);
+  CHECK_FALSE(compiled.value->remoteObjects.front().moduleImage.empty());
 }
 
 TEST_CASE("package-service wire envelopes reject a stale fingerprint") {

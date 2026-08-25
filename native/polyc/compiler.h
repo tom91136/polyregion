@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,5 +39,17 @@ POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const polyast::Byt
 POLYREGION_EXPORT polyast::Program runPipeline(const polyast::Program &program, const std::string &spec = {});
 POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt);
 POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt);
+
+template <typename T> struct PackageResult {
+  std::optional<T> value;
+  std::vector<std::string> errors;
+  explicit operator bool() const { return value.has_value(); }
+};
+
+POLYREGION_EXPORT PackageResult<polyast::Package> linkPackage(const polyast::PackageLinkRequest &request);
+POLYREGION_EXPORT PackageResult<polyast::PackageSymResolvedProgram> resolvePackageSym(const polyast::PackageSymRequest &request);
+POLYREGION_EXPORT PackageResult<polyast::PackageSymCompileResult>
+compilePackageSym(const polyast::PackageSymRequest &request, compiletime::Target hostTarget, const std::string &hostArch,
+                  const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets, std::optional<int> stackDepth = {});
 
 } // namespace polyregion::compiler

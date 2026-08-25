@@ -111,7 +111,7 @@ if (POLYREGION_FUSED_DRIVER)
             flangFrontend flangFrontendTool
             ${POLYFC_CLANG_LIBS}
             ${POLYFC_LLVM_LIBS}
-            polycommon polyc-driver polyfront-options polyfront-package-service PolyAST
+            polycommon polyc-driver polyfront-options polyfront-polyc-client PolyAST
             Aspartame::Aspartame fmt::fmt)
     target_precompile_headers(polyfc PRIVATE
             <optional> <unordered_map> <unordered_set> <utility> <vector> <cstdio> <cstdlib>

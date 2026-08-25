@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <mutex>
 #include <unordered_map>
 
 #include "llvm/ADT/SmallString.h"
@@ -17,6 +18,8 @@
 #include "polyregion/compat.h"
 #include "polyregion/io.hpp"
 #include "polyregion/llvm_utils.hpp"
+#include "polyregion/polypackage.h"
+#include "polyregion/polypackage_symbols.h"
 
 #include "ast.h"
 #include "backend/c_source.h"
@@ -151,6 +154,7 @@ namespace {
 struct PluginRegistry {
   std::vector<std::unique_ptr<polypass::PassRunner>> plugins;
   std::unordered_map<std::string, size_t> ownerByPass;
+  std::vector<size_t> packageProviders;
 };
 
 PluginRegistry &sharedPlugins() {
@@ -175,11 +179,54 @@ PluginRegistry &sharedPlugins() {
           result.ownerByPass.emplace(name, idx);
         }
       }
+      if (runner->packageAbiVersion()) result.packageProviders.emplace_back(idx);
       result.plugins.push_back(std::move(runner));
     }
     return result;
   }();
   return reg;
+}
+
+std::vector<std::string> packageErrors(std::string diagnostic) {
+  if (diagnostic.starts_with("PolyPackage "))
+    if (const auto separator = diagnostic.find(": "); separator != std::string::npos) diagnostic.erase(0, separator + 2);
+  std::vector<std::string> errors;
+  for (size_t offset = 0; offset <= diagnostic.size();) {
+    const auto end = diagnostic.find('\n', offset);
+    const auto line = diagnostic.substr(offset, end - offset);
+    if (!line.empty()) errors.emplace_back(line);
+    if (end == std::string::npos) break;
+    offset = end + 1;
+  }
+  return errors;
+}
+
+std::mutex &packageMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+template <typename T, typename Decode>
+compiler::PackageResult<T> invokePackage(const std::vector<uint8_t> &request, const std::string_view operation, Decode decode) {
+  auto &registry = sharedPlugins();
+  if (registry.packageProviders.size() != 1)
+    return {{}, {fmt::format("expected one package-service plugin, found {}", registry.packageProviders.size())}};
+  auto &provider = *registry.plugins[registry.packageProviders.front()];
+  std::lock_guard lock(packageMutex());
+  const auto version = provider.packageAbiVersion();
+  if (!version || *version != POLYPACKAGE_ABI_VERSION)
+    return {{},
+            {fmt::format("PolyPackage ABI mismatch: service={}, polyc={}", version ? std::to_string(*version) : "<missing>",
+                         POLYPACKAGE_ABI_VERSION)}};
+  String error;
+  const auto output = provider.runPackage(operation, request, error);
+  if (!error.empty()) return {{}, packageErrors(std::move(error))};
+  if (output.empty()) return {{}, {"package service returned an empty successful result"}};
+  try {
+    return {{decode(output.data(), output.data() + output.size())}, {}};
+  } catch (const std::exception &error) {
+    return {{}, {std::string("cannot decode package-service result: ") + error.what()}};
+  }
 }
 
 std::string bareName(const std::string &step) {
@@ -188,6 +235,85 @@ std::string bareName(const std::string &step) {
 }
 
 } // namespace
+
+compiler::PackageResult<polyast::Package> compiler::linkPackage(const polyast::PackageLinkRequest &request) {
+  return invokePackage<polyast::Package>(
+      polyast::packagelinkrequest_to_msgpack(request), polypackage::abi::LinkPackage,
+      [](const uint8_t *begin, const uint8_t *end) { return polyast::package_service_result_from_msgpack(begin, end); });
+}
+
+compiler::PackageResult<polyast::PackageSymResolvedProgram> compiler::resolvePackageSym(const polyast::PackageSymRequest &request) {
+  return invokePackage<polyast::PackageSymResolvedProgram>(
+      polyast::packagesymrequest_to_msgpack(request), polypackage::abi::ResolveSym,
+      [](const uint8_t *begin, const uint8_t *end) { return polyast::resolvedsymprogram_from_msgpack(begin, end); });
+}
+
+namespace {
+
+std::string packageEntryPipeline(const compiletime::Target target, const std::optional<int> stackDepth) {
+  const auto opt = stackDepth ? fmt::format("DeadFunctionElimination;Intrinsify;RecursionLower(maxDepth={});FnInline;Intrinsify;"
+                                            "KernelCaptureFlatten;FullOpt(level=1)",
+                                            *stackDepth)
+                              : std::string("DeadFunctionElimination;Intrinsify;RecursionLower;FnInline;Intrinsify;KernelCaptureFlatten;"
+                                            "FullOpt(level=1)");
+  switch (target) {
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+      return opt
+             + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;"
+               "VerifyAnchors(strict=true)";
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+    case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_Metal1_0: return opt + ";SubgroupLower;StructuredExit;RegionRespace;ArenaLower";
+    default: return opt + ";StructuredExit";
+  }
+}
+
+} // namespace
+
+compiler::PackageResult<polyast::PackageSymCompileResult>
+compiler::compilePackageSym(const polyast::PackageSymRequest &request, const compiletime::Target hostTarget, const std::string &hostArch,
+                            const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
+                            const std::optional<int> stackDepth) {
+  auto resolved = resolvePackageSym(request);
+  if (!resolved) return {{}, std::move(resolved.errors)};
+  initialise();
+  auto program = resolved.value->program;
+  for (auto &function : program.functions)
+    if (function.convention.is<polyast::CallConvention::OffloadEntry>()) function.visibility = polyast::FunctionVisibility::Exported();
+
+  const auto host = compile(program, Options{hostTarget, hostArch, "FullOpt(level=0)", true}, compiletime::OptLevel::O3);
+  if (!host.binary) return {{}, {"resolved Sym program compilation failed: " + host.messages}};
+
+  std::vector<polyast::PackageSymCompiledObject> remoteObjects;
+  for (const auto &entry : program.functions) {
+    if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
+    auto moduleName = polyast::fqcn(entry.decl.name);
+    for (auto &c : moduleName)
+      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
+    auto entryProgram = program.withEntry(entry);
+    std::vector<polyast::Function> functions;
+    functions.reserve(program.functions.size() - 1);
+    for (const auto &function : program.functions) {
+      if (function.decl.name == entry.decl.name) continue;
+      functions.emplace_back(
+          function.convention.is<polyast::CallConvention::OffloadEntry>()
+              ? function.withVisibility(polyast::FunctionVisibility::Internal()).withConvention(polyast::CallConvention::RegularCall())
+              : function);
+    }
+    entryProgram.functions = std::move(functions);
+    for (const auto &[target, arch] : deviceTargets) {
+      const auto pipeline = packageEntryPipeline(target, stackDepth);
+      const auto device = compile(entryProgram, Options{target, arch, pipeline}, compiletime::OptLevel::O3);
+      if (!device.binary) return {{}, {"package entry compilation failed for " + moduleName + ": " + device.messages}};
+      const auto format = runtime::moduleFormatOf(target);
+      if (!format) continue;
+      remoteObjects.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
+                                 device.features, *device.binary);
+    }
+  }
+  return {{polyast::PackageSymCompileResult(std::move(*resolved.value), std::move(*host.binary), std::move(remoteObjects))}, {}};
+}
 
 static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view rawSpec) {
   const std::string_view spec = rawSpec.empty() ? std::string_view{compiler::DefaultPipelineSpec} : rawSpec;

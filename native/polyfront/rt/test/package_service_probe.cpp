@@ -1,7 +1,8 @@
 #include <cstdlib>
 #include <string>
 
-#include "polyfront/package_service.hpp"
+#include "polyfront/package_program.hpp"
+#include "polyfront/polyc_client.hpp"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 
@@ -21,8 +22,12 @@ int main(int argc, char **argv) {
   }
   if (argc != expectedIndex + 1) return 2;
   using namespace polyregion::polyast;
+  const auto name = Sym({"probe"});
+  const auto request =
+      PackageSymRequest(Package(Interface(name, {}, {}), polyregion::polyfront::packageProgram({}, {})),
+                        InvokeSignature(name, {}, {}, {}, Type::Unit0()), {}, {}, {}, {}, {}, "__probe", PackageReturnConvention::Return());
   const auto result =
-      polyregion::polyfront::package::PackageService::linkPackage(PackageLinkRequest(Interface(Sym({"probe"}), {}, {}), {}, {}));
+      polyregion::polyfront::package::PolycClient::compileSym(request, {}, polyregion::compiletime::Target::Object_LLVM_HOST, "native", {});
   if (result) return 3;
   const std::string expected = argv[expectedIndex];
   for (const auto &error : result.errors)

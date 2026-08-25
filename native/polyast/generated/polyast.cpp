@@ -5147,6 +5147,63 @@ POLYREGION_EXPORT bool PackageSymResolvedProgram::operator==(const PackageSymRes
                        [](auto &&l, auto &&r) { return l == r; });
 }
 
+PackageSymCompiledObject::PackageSymCompiledObject(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features,
+                                                   std::vector<int8_t> moduleImage) noexcept
+    : moduleName(std::move(moduleName)), format(format), kind(kind), features(std::move(features)), moduleImage(std::move(moduleImage)) {}
+size_t PackageSymCompiledObject::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(moduleName)>()(moduleName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(format)>()(format) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(kind)>()(kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(moduleImage)>()(moduleImage) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+PackageSymCompiledObject PackageSymCompiledObject::withModuleName(const std::string &v_) const {
+  return PackageSymCompiledObject(v_, format, kind, features, moduleImage);
+}
+PackageSymCompiledObject PackageSymCompiledObject::withFormat(const int32_t &v_) const {
+  return PackageSymCompiledObject(moduleName, v_, kind, features, moduleImage);
+}
+PackageSymCompiledObject PackageSymCompiledObject::withKind(const int32_t &v_) const {
+  return PackageSymCompiledObject(moduleName, format, v_, features, moduleImage);
+}
+PackageSymCompiledObject PackageSymCompiledObject::withFeatures(const std::vector<std::string> &v_) const {
+  return PackageSymCompiledObject(moduleName, format, kind, v_, moduleImage);
+}
+PackageSymCompiledObject PackageSymCompiledObject::withModuleImage(const std::vector<int8_t> &v_) const {
+  return PackageSymCompiledObject(moduleName, format, kind, features, v_);
+}
+POLYREGION_EXPORT bool PackageSymCompiledObject::operator!=(const PackageSymCompiledObject &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PackageSymCompiledObject::operator==(const PackageSymCompiledObject &rhs) const {
+  return (moduleName == rhs.moduleName) && (format == rhs.format) && (kind == rhs.kind) && (features == rhs.features)
+         && (moduleImage == rhs.moduleImage);
+}
+
+PackageSymCompileResult::PackageSymCompileResult(PackageSymResolvedProgram resolved, std::vector<int8_t> hostObject,
+                                                 std::vector<PackageSymCompiledObject> remoteObjects) noexcept
+    : resolved(std::move(resolved)), hostObject(std::move(hostObject)), remoteObjects(std::move(remoteObjects)) {}
+size_t PackageSymCompileResult::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(resolved)>()(resolved) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(hostObject)>()(hostObject) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(remoteObjects)>()(remoteObjects) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+PackageSymCompileResult PackageSymCompileResult::withResolved(const PackageSymResolvedProgram &v_) const {
+  return PackageSymCompileResult(v_, hostObject, remoteObjects);
+}
+PackageSymCompileResult PackageSymCompileResult::withHostObject(const std::vector<int8_t> &v_) const {
+  return PackageSymCompileResult(resolved, v_, remoteObjects);
+}
+PackageSymCompileResult PackageSymCompileResult::withRemoteObjects(const std::vector<PackageSymCompiledObject> &v_) const {
+  return PackageSymCompileResult(resolved, hostObject, v_);
+}
+POLYREGION_EXPORT bool PackageSymCompileResult::operator!=(const PackageSymCompileResult &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PackageSymCompileResult::operator==(const PackageSymCompileResult &rhs) const {
+  return (resolved == rhs.resolved) && (hostObject == rhs.hostObject) && (remoteObjects == rhs.remoteObjects);
+}
+
 } // namespace polyregion::polyast
 
 std::size_t std::hash<polyregion::polyast::Sym>::operator()(const polyregion::polyast::Sym &x) const noexcept { return x.hash_code(); }
@@ -5997,5 +6054,13 @@ std::size_t std::hash<polyregion::polyast::PackageEntryArgBinding::ResultAddress
 }
 std::size_t std::hash<polyregion::polyast::PackageSymResolvedProgram>::operator()(
     const polyregion::polyast::PackageSymResolvedProgram &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PackageSymCompiledObject>::operator()(
+    const polyregion::polyast::PackageSymCompiledObject &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::PackageSymCompileResult>::operator()(const polyregion::polyast::PackageSymCompileResult &x) const noexcept {
   return x.hash_code();
 }

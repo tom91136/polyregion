@@ -1,16 +1,17 @@
 #include <string>
 #include <system_error>
 
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "aspartame/all.hpp"
 
 #include "polyfront/package.hpp"
-#include "polyfront/package_emit.hpp"
 #include "polyfront/package_program.hpp"
 
 #include "ast.h"
@@ -147,8 +148,8 @@ int main(int argc, char **argv) {
        remoteImplementation.withImplements(remoteName), remoteKernel},
       {});
 
-  if (writeInputs) {
-    llvm::SmallString<256> directory(argv[2]);
+  const auto writePackageInputs = [&](const llvm::StringRef path) {
+    llvm::SmallString<256> directory(path);
     if (llvm::sys::fs::create_directories(directory)) return 3;
     const auto write = [&](llvm::StringRef name, const std::vector<uint8_t> &bytes) {
       llvm::SmallString<256> path(directory);
@@ -162,10 +163,26 @@ int main(int argc, char **argv) {
     };
     return write("interface.polyast", interface_to_msgpack(interface)) && write("program.polyast", hashed_program_to_msgpack(program)) ? 0
                                                                                                                                        : 5;
-  }
+  };
+  if (writeInputs) return writePackageInputs(argv[2]);
 
-  const auto emitted = polyregion::polyfront::package::linkAndPublish(PackageLinkRequest(interface, {program}, {}), argv[1]);
-  if (emitted) return 0;
-  llvm::errs() << (emitted.errors ^ mk_string("\n")) << '\n';
-  return 4;
+  llvm::SmallString<256> inputs;
+  if (llvm::sys::fs::createUniqueDirectory("polycpp-package-fixture", inputs)) return 3;
+  const llvm::scope_exit cleanup([&] { llvm::sys::fs::remove_directories(inputs); });
+  if (const int result = writePackageInputs(inputs); result != 0) return result;
+
+  llvm::SmallString<256> sibling(argv[0]);
+  llvm::sys::fs::make_absolute(sibling);
+  llvm::sys::path::remove_filename(sibling);
+  llvm::sys::path::append(sibling, llvm::sys::path::filename(POLYC_TEST_EXECUTABLE));
+  const std::string executable = llvm::sys::fs::exists(sibling) ? sibling.str().str() : POLYC_TEST_EXECUTABLE;
+  llvm::SmallString<256> interfacePath(inputs), programPath(inputs);
+  llvm::sys::path::append(interfacePath, "interface.polyast");
+  llvm::sys::path::append(programPath, "program.polyast");
+  const std::vector<std::string> ownedArgs{executable, "package", "link", interfacePath.str().str(), argv[1], programPath.str().str()};
+  std::vector<llvm::StringRef> args;
+  args.reserve(ownedArgs.size());
+  for (const auto &arg : ownedArgs)
+    args.emplace_back(arg);
+  return llvm::sys::ExecuteAndWait(executable, args);
 }

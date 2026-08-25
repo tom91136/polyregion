@@ -38,7 +38,7 @@ target_link_libraries(polyfc-flang-plugin
         PRIVATE
         polycommon
         polyfront-options
-        polyfront-package-service
+        polyfront-polyc-client
         PolyAST
         Aspartame::Aspartame
         fmt::fmt-header-only

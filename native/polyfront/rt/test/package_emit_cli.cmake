@@ -13,13 +13,13 @@ if(NOT fixture_result EQUAL 0)
 endif()
 
 execute_process(
-        COMMAND "${EMIT}" "${WORK}/inputs/interface.polyast" "${WORK}/packages" "${WORK}/inputs/program.polyast"
+        COMMAND "${EMIT}" package link "${WORK}/inputs/interface.polyast" "${WORK}/packages" "${WORK}/inputs/program.polyast"
         RESULT_VARIABLE emit_result
         OUTPUT_VARIABLE emit_out
         ERROR_VARIABLE emit_error)
 if(NOT emit_result EQUAL 0)
-    message(FATAL_ERROR "polypackage-emit failed (${emit_result}): ${emit_out}${emit_error}")
+    message(FATAL_ERROR "polyc package link failed (${emit_result}): ${emit_out}${emit_error}")
 endif()
 if(NOT EXISTS "${WORK}/packages/foo/lib.polyast")
-    message(FATAL_ERROR "polypackage-emit did not atomically publish foo/lib.polyast")
+    message(FATAL_ERROR "polyc package link did not atomically publish foo/lib.polyast")
 endif()

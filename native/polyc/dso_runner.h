@@ -21,6 +21,8 @@ public:
   const Vector<String> &passNames() const override;
   std::optional<String> passDescr(std::string_view name) const override;
   Vector<uint8_t> runPasses(const Vector<String> &steps, const Vector<uint8_t> &programBytes, String &error) override;
+  std::optional<uint32_t> packageAbiVersion() const override;
+  Vector<uint8_t> runPackage(std::string_view operation, const Vector<uint8_t> &request, String &error) override;
   std::string_view tag() const override;
 };
 

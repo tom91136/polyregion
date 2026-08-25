@@ -219,6 +219,8 @@ private[polyregion] object CodeGen {
       :: deriveStruct[Package.ReturnConvention]()
       :: deriveStruct[Package.EntryArgBinding]()
       :: deriveStruct[Package.SymResolvedProgram]()
+      :: deriveStruct[Package.SymCompiledObject]()
+      :: deriveStruct[Package.SymCompileResult]()
       :: Nil
 
   private def generateAstBindings() = {
@@ -268,6 +270,12 @@ private[polyregion] object CodeGen {
           "resolvedsymprogram",
           Schema.PackageWire,
           "PackageSymResolvedProgram",
+          "package-service wire"
+        ),
+        Root.versioned[Package.SymCompileResult](
+          "packagesymcompileresult",
+          Schema.PackageWire,
+          "PackageSymCompileResult",
           "package-service wire"
         ),
         Root.raw[List[StructDef]]("structdefs"),

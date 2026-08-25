@@ -63,15 +63,4 @@ inline Checked<polyast::Package> publishPackage(const polyast::Package &package,
   return out;
 }
 
-inline Checked<polyast::Package> linkAndPublish(const polyast::PackageLinkRequest &request, const std::string &root) {
-  const auto linked = PackageService::linkPackage(request);
-  if (!linked) return {{}, linked.errors};
-  return publishPackage(*linked.value, root);
-}
-
-// Preserve the single-package API while validating through PackageService.
-inline Checked<polyast::Package> emitPackage(const polyast::Package &package, const std::string &root) {
-  return linkAndPublish(polyast::PackageLinkRequest(package.interface, {package.program}, {}), root);
-}
-
 } // namespace polyregion::polyfront::package
