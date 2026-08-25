@@ -291,6 +291,33 @@ TEST_CASE("runtime mirror refreshes cached allocations between launches") {
   CHECK(*remote == 6);
 }
 
+TEST_CASE("runtime mirror preserves an interior offset when refreshing a reused allocation") {
+  struct Pair {
+    int32_t first;
+    int32_t second;
+  };
+  struct Capture {
+    int32_t *result;
+  };
+  auto pairMeta = Struct_(Pair, StructMember_(Pair, first, &int32Type), StructMember_(Pair, second, &int32Type));
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, result, &int32Type));
+
+  Fixture fixture;
+  auto pair = new (fixture.mallocLocal<Pair>()) Pair{3, 4};
+  auto remotePair = fixture.localToRemote(pair, *pairMeta);
+
+  pair->second = 9;
+  REQUIRE(fixture.allocation.invalidateLocal(&pair->second) == std::optional{reinterpret_cast<uintptr_t>(&remotePair->second)});
+  CHECK(fixture.remoteToLocal(&pair->second) == std::optional{reinterpret_cast<uintptr_t>(&remotePair->second)});
+  CHECK(pair->second == 9);
+  Capture capture{&pair->second};
+  auto remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+
+  CHECK(remoteCapture->result == &remotePair->second);
+  CHECK(remotePair->first == 3);
+  CHECK(remotePair->second == 9);
+}
+
 TEST_CASE("ptr-indirect-2-star") {
   struct Foo {
     float **a;

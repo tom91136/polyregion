@@ -221,8 +221,14 @@ class SynchronisedMemAllocation {
         alloc->localModified = false;
         const auto &effLayout = alloc->layout ? *alloc->layout : l;
         const bool ro = hostReadOnly || alloc->hostReadOnly;
-        return ptrIndirections > 1 ? writeIndirect(hostData, alloc->remote.ptr, ptrIndirections, count, effLayout, ro)
-                                   : writeStruct(hostData, 0, alloc->remote.ptr, count, effLayout, true, ro);
+        // Optimisation can reuse an interior stack slot for a new object. Refresh the cached allocation from its
+        // original base and preserve the interior offset returned to the capture, rather than shifting it to the base.
+        const char *baseLocalPtr = hostData - offsetInBytes;
+        const uintptr_t remoteBase =
+            ptrIndirections > 1
+                ? writeIndirect(baseLocalPtr, alloc->remote.ptr, ptrIndirections, cachedSize / sizeof(uintptr_t), effLayout, ro)
+                : writeStruct(baseLocalPtr, 0, alloc->remote.ptr, cachedSize / effLayout.sizeInBytes, effLayout, true, ro);
+        return remoteBase + offsetInBytes;
       }
     }
     if (ptrIndirections > 1) {
@@ -328,9 +334,13 @@ public:
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
       if (!alloc->localModified) return alloc->remote.ptr + offsetInBytes;
-      else
-        return writeStruct(static_cast<const char *>(p), 0, alloc->remote.ptr, alloc->remote.sizeInBytes / alloc->layout->sizeInBytes,
-                           *alloc->layout, true, alloc->hostReadOnly);
+      const char *baseLocalPtr = static_cast<const char *>(p) - offsetInBytes;
+      alloc->localModified = false;
+      if (alloc->layout)
+        writeStruct(baseLocalPtr, 0, alloc->remote.ptr, alloc->remote.sizeInBytes / alloc->layout->sizeInBytes, *alloc->layout, true,
+                    alloc->hostReadOnly);
+      else remoteWrite(baseLocalPtr, alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
+      return alloc->remote.ptr + offsetInBytes;
     }
     return {};
   }
@@ -350,6 +360,8 @@ public:
   std::optional<uintptr_t> syncRemoteToLocal(void *p, const std::optional<size_t> &sizeInByte = {}) {
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
+      // A mapped host write is authoritative until the next upload. Do not restore the older remote snapshot.
+      if (alloc->localModified) return alloc->remote.ptr + offsetInBytes;
       // cycle break for circular structures (a list node's `prev` -> the sentinel embedded in the kernel
       // struct we are already walking); the top-level call clears the set on exit so later calls start fresh
       const bool topLevel = syncVisited.empty();

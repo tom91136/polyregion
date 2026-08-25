@@ -573,6 +573,7 @@ add_subdirectory(bindings)
 set(POLYREGION_DIST_TARGETS
         polyc-bin
         polyinfo
+        polypackage-emit
         polycpp
         polyc-JNI
         polyc-JNIshim
