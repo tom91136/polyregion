@@ -94,12 +94,14 @@ cmake -S "%WORK%\glslang-src" -B "%WORK%\build-glslang" -G Ninja -DCMAKE_BUILD_T
 ninja -C "%WORK%\build-glslang" install || (echo GLSLANG-FAIL & exit /b 1)
 if not exist "%WORK%\glslang-prefix\bin\glslangValidator.exe" copy /y "%WORK%\glslang-prefix\bin\glslang.exe" "%WORK%\glslang-prefix\bin\glslangValidator.exe" >nul
 
-rem Vulkan-Loader (vulkan-1.dll, static CRT)
+rem Vulkan-Loader (vulkan-1.dll, static CRT). Hosted Windows runners are elevated, so the loader's
+rem default security policy ignores VK_DRIVER_FILES; this isolated emulator loader must honour its bundle manifests.
 if not exist "%WORK%\vkh\.git" git clone -b %VKL_REF% --depth 1 https://github.com/KhronosGroup/Vulkan-Headers "%WORK%\vkh" || exit /b 1
 cmake -S "%WORK%\vkh" -B "%WORK%\vkh\b" -G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" -DCMAKE_INSTALL_PREFIX="%WORK%\vkinstall" && cmake --install "%WORK%\vkh\b" || exit /b 1
 if not exist "%WORK%\vkl\.git" git clone -b %VKL_REF% --depth 1 https://github.com/KhronosGroup/Vulkan-Loader "%WORK%\vkl" || exit /b 1
 cmake -S "%WORK%\vkl" -B "%WORK%\vkl\b" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER_AR="%LIBEXE%" -DCMAKE_CXX_COMPILER_AR="%LIBEXE%" -DCMAKE_INSTALL_PREFIX="%WORK%\vkinstall" ^
-  -DVULKAN_HEADERS_INSTALL_DIR="%WORK%\vkinstall" -DBUILD_TESTS=OFF -DUSE_GAS=OFF %MT_CMAKE% || exit /b 1
+  -DVULKAN_HEADERS_INSTALL_DIR="%WORK%\vkinstall" -DBUILD_TESTS=OFF -DUSE_GAS=OFF ^
+  -DLOADER_USE_UNSAFE_FILE_SEARCH=ON %MT_CMAKE% || exit /b 1
 ninja -C "%WORK%\vkl\b" install || (echo VKLOADER-FAIL & exit /b 1)
 
 set "MSVCPATH=%PATH%"
