@@ -175,7 +175,12 @@ int main(int argc, char **argv) {
   llvm::sys::fs::make_absolute(sibling);
   llvm::sys::path::remove_filename(sibling);
   llvm::sys::path::append(sibling, llvm::sys::path::filename(POLYC_TEST_EXECUTABLE));
-  const std::string executable = llvm::sys::fs::exists(sibling) ? sibling.str().str() : POLYC_TEST_EXECUTABLE;
+  const auto executable = [&] {
+    if (llvm::sys::fs::exists(sibling)) return sibling.str().str();
+    if (llvm::sys::fs::exists(POLYC_TEST_EXECUTABLE)) return std::string(POLYC_TEST_EXECUTABLE);
+    if (const auto path = llvm::sys::findProgramByName("polyc")) return *path;
+    return std::string(POLYC_TEST_EXECUTABLE);
+  }();
   llvm::SmallString<256> interfacePath(inputs), programPath(inputs);
   llvm::sys::path::append(interfacePath, "interface.polyast");
   llvm::sys::path::append(programPath, "program.polyast");

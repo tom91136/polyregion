@@ -53,6 +53,12 @@ bool writeBytes(const llvm::StringRef path, const std::vector<uint8_t> &bytes) {
   return !stream.has_error();
 }
 
+std::string polycExecutable() {
+  if (llvm::sys::fs::exists(POLYC_TEST_EXECUTABLE)) return POLYC_TEST_EXECUTABLE;
+  if (const auto path = llvm::sys::findProgramByName("polyc")) return *path;
+  return POLYC_TEST_EXECUTABLE;
+}
+
 Checked<Package> linkPackage(const PackageLinkRequest &request, const std::string &root) {
   TemporaryDirectory inputs;
   llvm::SmallString<128> interfacePath(inputs.path), errorPath(inputs.path);
@@ -60,7 +66,8 @@ Checked<Package> linkPackage(const PackageLinkRequest &request, const std::strin
   llvm::sys::path::append(errorPath, "stderr.txt");
   if (!writeBytes(interfacePath, interface_to_msgpack(request.interface))) return {{}, {"cannot write package interface input"}};
 
-  std::vector<std::string> ownedArgs{POLYC_TEST_EXECUTABLE, "package", "link"};
+  const auto executable = polycExecutable();
+  std::vector<std::string> ownedArgs{executable, "package", "link"};
   for (const auto &capability : request.capabilities)
     ownedArgs.emplace_back("--capability=" + capability);
   ownedArgs.emplace_back(interfacePath.str());
@@ -77,8 +84,8 @@ Checked<Package> linkPackage(const PackageLinkRequest &request, const std::strin
   for (const auto &arg : ownedArgs)
     args.emplace_back(arg);
   std::string executionError;
-  const int code = llvm::sys::ExecuteAndWait(POLYC_TEST_EXECUTABLE, args, std::nullopt, {std::nullopt, std::nullopt, errorPath.str()}, 0, 0,
-                                             &executionError);
+  const int code =
+      llvm::sys::ExecuteAndWait(executable, args, std::nullopt, {std::nullopt, std::nullopt, errorPath.str()}, 0, 0, &executionError);
   if (code != 0) {
     std::vector<std::string> errors;
     if (const auto buffer = llvm::MemoryBuffer::getFile(errorPath)) {
