@@ -2013,7 +2013,7 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
   CHECK(callCount("polyrt_remote_launch_with_cleanup") == 1);
   CHECK(callCount("polyrt_remote_malloc") == 0);
   CHECK(callCount("polyrt_remote_memcpy") == 0);
-  CHECK(ir ^ contains_slice("store i64 4"));
+  CHECK(ir ^ contains_slice("store i" + std::to_string(sizeof(size_t) * 8) + " 4"));
 }
 
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {

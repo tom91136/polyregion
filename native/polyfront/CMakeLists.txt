@@ -35,6 +35,7 @@ target_sources(polyfront-polyc-client
         polyfront/resolved_sym_program_compilation.hpp
         polyfront/polyc_client.hpp)
 polyregion_apply_common_options(polyfront-polyc-client)
+polyregion_strip_asan_on_darwin(polyfront-polyc-client) # embedded in the dlopen'd frontend plugins
 
 add_library(polypackage-stale-service MODULE rt/test/package_service_stale.cpp)
 target_include_directories(polypackage-stale-service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common/generated)

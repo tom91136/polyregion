@@ -3,6 +3,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
 
 #include "polyregion/env_keys.h"
 
@@ -15,14 +16,24 @@ int main(int argc, const char **argv) {
   llvm::sys::path::remove_filename(siblingFixture);
   llvm::sys::path::append(siblingFixture, llvm::sys::path::filename(PackageFixture));
   const auto packageFixture = llvm::sys::fs::exists(siblingFixture) ? siblingFixture.str().str() : std::string(PackageFixture);
-  llvm::SmallString<256> siblingPolyc(argv[0]);
-  llvm::sys::fs::make_absolute(siblingPolyc);
-  llvm::sys::path::remove_filename(siblingPolyc);
+  llvm::SmallString<256> polycDir(argv[0]);
+  llvm::sys::fs::make_absolute(polycDir);
+  llvm::sys::path::remove_filename(polycDir);
 #ifdef _WIN32
-  llvm::sys::path::append(siblingPolyc, "..", "polyc", "polyc.exe");
+  constexpr auto polycFilename = "polyc.exe";
 #else
-  llvm::sys::path::append(siblingPolyc, "..", "polyc", "polyc");
+  constexpr auto polycFilename = "polyc";
 #endif
+  llvm::SmallString<256> sameBinPolyc(polycDir);
+  llvm::sys::path::append(sameBinPolyc, polycFilename);
+  llvm::SmallString<256> buildTreePolyc(polycDir);
+  llvm::sys::path::append(buildTreePolyc, "..", "polyc", polycFilename);
+  const auto polyc = [&] {
+    if (llvm::sys::fs::exists(sameBinPolyc)) return sameBinPolyc.str().str();
+    if (llvm::sys::fs::exists(buildTreePolyc)) return buildTreePolyc.str().str();
+    if (const auto executable = llvm::sys::findProgramByName("polyc")) return *executable;
+    return sameBinPolyc.str().str();
+  }();
   return runMain(
       argc, argv,
       DriverConfig{
@@ -36,7 +47,7 @@ int main(int argc, const char **argv) {
           .defaultsLabelVar = "opt",
           .defaultsVariants = {{"O0", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O0 -g3 -Wall -Wextra -pedantic -std=c++17"},
                                {"O3", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O3 -g3 -Wall -Wextra -pedantic -std=c++17"}},
-          .extraVars = {{"package_fixture", packageFixture}, {"polypackage_emit", siblingPolyc.str().str()}},
+          .extraVars = {{"package_fixture", packageFixture}, {"polypackage_emit", polyc}},
           .stdpar = {"polycpp_stdpar",
 #ifdef _WIN32
                      "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"

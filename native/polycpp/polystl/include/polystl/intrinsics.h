@@ -71,13 +71,13 @@ inline uint32_t atomicMinMax(uint32_t *ptr, uint32_t value, bool minimum) {
   uint32_t previous;
   __atomic_load(ptr, &previous, __ATOMIC_RELAXED);
   for (;;) {
-    uint32_t desired = minimum ? std::min(previous, value) : std::max(previous, value);
+    uint32_t desired = minimum ? (std::min)(previous, value) : (std::max)(previous, value);
     if (__atomic_compare_exchange(ptr, &previous, &desired, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) return previous;
   }
 #else
   AtomicFallbackGuard guard;
   const auto previous = *ptr;
-  *ptr = minimum ? std::min(previous, value) : std::max(previous, value);
+  *ptr = minimum ? (std::min)(previous, value) : (std::max)(previous, value);
   return previous;
 #endif
 }

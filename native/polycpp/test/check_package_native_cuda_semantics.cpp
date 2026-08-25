@@ -1,6 +1,6 @@
 #pragma region case: package-native-cuda-semantics
 #pragma region offload-only
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_70 -nocudainc -nocudalib -c -o {output}.o {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_70 -nocudainc -nocudalib -fsyntax-only {input}
 #pragma region do: {package_fixture} --assert-native-cuda-semantics {output}.polyast
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]

@@ -331,7 +331,7 @@ struct TypeLayout {
       } else {
         const size_t nextOffset = i + 1 < memberCount ? members[i + 1].offsetInBytes : sizeInBytes;
         const size_t cols = nextOffset - m.offsetInBytes;
-        for (size_t c = 0; c < std::min(maxCol, cols); ++c)
+        for (size_t c = 0; c < (std::min)(maxCol, cols); ++c)
           std::fprintf(fd, c < m.sizeInBytes ? "■" : "□");
         if (cols > maxCol) std::fprintf(fd, "...");
         std::fprintf(fd, " %s: %s", m.name, m.type ? m.type->name : "???");
@@ -340,13 +340,13 @@ struct TypeLayout {
 
         std::fprintf(fd, " (%zu bytes) ", m.sizeInBytes);
         if (show && m.type) {
-          const size_t currentColumn = 8 + 3 + 1 +                                      // "+%3zu~%-3zu │"
-                                       level +                                          // "│"
-                                       std::min(maxCol, nextOffset - m.offsetInBytes) + // blocks
-                                       std::strlen(m.name) + 2 +                        // "name: "
-                                       (m.type ? std::strlen(m.type->name) : 3) +       // "type" or "???"
-                                       m.ptrIndirection +                               // '*' pointer indirection
-                                       9;                                               // " (N bytes) "
+          const size_t currentColumn = 8 + 3 + 1 +                                        // "+%3zu~%-3zu │"
+                                       level +                                            // "│"
+                                       (std::min)(maxCol, nextOffset - m.offsetInBytes) + // blocks
+                                       std::strlen(m.name) + 2 +                          // "name: "
+                                       (m.type ? std::strlen(m.type->name) : 3) +         // "type" or "???"
+                                       m.ptrIndirection +                                 // '*' pointer indirection
+                                       9;                                                 // " (N bytes) "
           std::fprintf(fd, "%*s", static_cast<int>(currentColumn < alignColumn ? alignColumn - currentColumn : 1), "");
           show(offset + m.offsetInBytes, m);
         }

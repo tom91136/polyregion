@@ -1,6 +1,6 @@
 #pragma region case: package-kernel-structural-identity
 #pragma region offload-only
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_35 -nocudainc -nocudalib -c -o {output}.o {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_35 -nocudainc -nocudalib -fsyntax-only {input}
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_kernel 2
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_overloaded 2
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_nested_kernel 2

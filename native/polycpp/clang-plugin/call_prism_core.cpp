@@ -202,6 +202,17 @@ static Opt<MatchedCall> thrustNext(const clang::CallExpr &call, const clang::Fun
                      false};
 }
 
+static const clang::CXXMethodDecl *findZeroArgumentMethod(const clang::CXXRecordDecl &record, const llvm::StringRef name) {
+  const auto declarationName = clang::DeclarationName(&record.getASTContext().Idents.get(name));
+  for (const auto *declaration : record.lookup(declarationName)) {
+    const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(declaration);
+    if (const auto *shadow = llvm::dyn_cast<clang::UsingShadowDecl>(declaration))
+      method = llvm::dyn_cast<clang::CXXMethodDecl>(shadow->getTargetDecl());
+    if (method && !method->isStatic() && method->getNumParams() == 0) return method;
+  }
+  return nullptr;
+}
+
 static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (decl.getQualifiedNameAsString() != "std::visit") return {};
   if (call.getNumArgs() < 2)
@@ -239,12 +250,7 @@ static Opt<MatchedCall> standardVisit(const clang::CallExpr &call, const clang::
                 if (element.getKind() == clang::TemplateArgument::Type) appendAlternative(element.getAsType());
           }
           if (alternatives.empty()) raise("std::visit variant has no alternatives");
-          const clang::CXXMethodDecl *indexMethod = nullptr;
-          for (const auto *method : record->methods())
-            if (method->getNumParams() == 0 && method->getName() == "index") {
-              indexMethod = method;
-              break;
-            }
+          const auto *indexMethod = findZeroArgumentMethod(*record, "index");
           if (!indexMethod) raise("std::visit variant has no index method");
           const auto variant = r.newVar(self.handleExpr(variantExpression, r));
           const auto [indexName, indexFunction] = self.handleCall(indexMethod, r);

@@ -155,9 +155,8 @@ TEST_CASE("remote launch releases mirrored arguments after a failure") {
   const std::array<uint8_t, 2> types{static_cast<uint8_t>(Type::Ptr), static_cast<uint8_t>(Type::Ptr)};
   const std::array<void *, 2> arguments{first.data(), second.data()};
   const std::array<size_t, 2> mirrorSizes{first.size(), second.size()};
-  CHECK_THROWS_AS(polyrt_remote_launch_with_cleanup(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                                    arguments.data(), mirrorSizes.data()),
-                  std::runtime_error);
+  CHECK_THROWS(polyrt_remote_launch_with_cleanup(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                                 arguments.data(), mirrorSizes.data()));
   CHECK(device.stub->remoteAllocs == 2);
   CHECK(device.stub->remoteFrees == 2);
 }

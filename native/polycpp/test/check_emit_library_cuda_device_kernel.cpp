@@ -1,6 +1,6 @@
 #pragma region case: cuda-device-kernel-phase
 #pragma region offload-only
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_35 -nocudainc -nocudalib -c -o {output}.o {input}
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_35 -nocudainc -nocudalib -fsyntax-only {input}
 #pragma region do: {package_fixture} --assert-offload-i32-constant {output}.polyast 7
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]

@@ -4038,16 +4038,15 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             if (var->hasInit() && name.tpe.is<Type::Ptr>() && !llvm::isa<clang::InitListExpr>(var->getInit())) {
               auto raw = handleExpr(var->getInit(), r);
               auto target = name.tpe;
-              if (const auto refTo = raw.get<Expr::RefTo>();
-                  emitPackageProgramMode && refTo && storageSpace(refTo->lhs).is<TypeSpace::Private>()) {
+              if (const auto refTo = raw.get<Expr::RefTo>(); refTo && storageSpace(refTo->lhs).is<TypeSpace::Private>()) {
                 raw = refTo->withSpace(TypeSpace::Private());
-              } else if (const auto alias = raw.get<Expr::Alias>(); emitPackageProgramMode && alias) {
+              } else if (const auto alias = raw.get<Expr::Alias>()) {
                 if (const auto targetPtr = target.get<Type::Ptr>()) {
                   if (const auto selection = alias->ref.get<Term::Select>(); selection && targetPtr->comp == raw.tpe())
                     target = Type::Ptr(targetPtr->comp, storageSpace(*selection));
                 }
               }
-              if (emitPackageProgramMode && raw.tpe().is<Type::Ptr>() && sameTypeShape(raw.tpe(), target)) target = raw.tpe();
+              if (raw.tpe().is<Type::Ptr>() && sameTypeShape(raw.tpe(), target)) target = raw.tpe();
               const auto lowered = conform(r, raw, target);
               if (lowered.tpe().is<Type::Ptr>() && sameTypeShape(lowered.tpe(), name.tpe)) name = Named(name.symbol, lowered.tpe());
               pointerInit = lowered;

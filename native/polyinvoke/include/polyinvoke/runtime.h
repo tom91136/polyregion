@@ -239,7 +239,7 @@ template <typename T> class MemoryObjects {
   }
 
   bool overlaps(uintptr_t base, size_t size) const {
-    if (base == 0 || size > std::numeric_limits<uintptr_t>::max() - base) return true;
+    if (base == 0 || size > (std::numeric_limits<uintptr_t>::max)() - base) return true;
     const auto nextRegion = regions.lower_bound(base);
     if (nextRegion != regions.end() && (nextRegion->first == base || nextRegion->first - base < size)) return true;
     if (nextRegion == regions.begin()) return false;
