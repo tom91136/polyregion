@@ -78,6 +78,7 @@ if (POLYREGION_FUSED_DRIVER)
             clang-plugin/call_prism_core.cpp
             clang-plugin/call_prism_cuda.cpp
             clang-plugin/call_prism_hip.cpp
+            clang-plugin/call_prism_sycl.cpp
             clang-plugin/call_prism_polyregion.cpp
             clang-plugin/remapper.cpp
             clang-plugin/clang_utils.cpp
@@ -147,6 +148,7 @@ else ()
 endif ()
 
 add_executable(polycpp-package-fixture test/package_fixture.cpp)
+target_include_directories(polycpp-package-fixture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(polycpp-package-fixture SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(polycpp-package-fixture PRIVATE POLYC_TEST_EXECUTABLE="$<TARGET_FILE:polyc-bin>")
 target_link_libraries(polycpp-package-fixture PRIVATE polyfront-options PolyAST Aspartame::Aspartame)

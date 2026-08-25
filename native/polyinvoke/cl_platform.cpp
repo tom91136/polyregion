@@ -552,6 +552,21 @@ size_t ClDevice::maxThreadsPerBlock() {
   size_t v = 0;
   return clGetDeviceInfo(*device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(v), &v, nullptr) == CL_SUCCESS && v ? v : 1024;
 }
+size_t ClDevice::localMemoryBytes() {
+  cl_ulong value = 0;
+  CHECKED(clGetDeviceInfo(*device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(value), &value, nullptr));
+  return static_cast<size_t>(value);
+}
+size_t ClDevice::globalMemoryBytes() {
+  cl_ulong value = 0;
+  CHECKED(clGetDeviceInfo(*device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(value), &value, nullptr));
+  return static_cast<size_t>(value);
+}
+size_t ClDevice::computeUnits() {
+  cl_uint value = 0;
+  CHECKED(clGetDeviceInfo(*device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(value), &value, nullptr));
+  return static_cast<size_t>(value);
+}
 std::vector<Property> ClDevice::properties() {
   POLYINVOKE_TRACE();
   return {

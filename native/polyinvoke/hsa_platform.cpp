@@ -301,6 +301,45 @@ PhysicalDevice HsaDevice::physicalDevice() {
   return PhysicalDevice::pci(domain, static_cast<uint8_t>((bdfid >> 8) & 0xFF), static_cast<uint8_t>((bdfid >> 3) & 0x1F),
                              static_cast<uint8_t>(bdfid & 0x7));
 }
+size_t HsaDevice::subgroupSize() {
+  uint32_t size = 1;
+  CHECKED("Query agent wavefront size", hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &size));
+  return size;
+}
+size_t HsaDevice::maxThreadsPerBlock() {
+  uint32_t size = 0;
+  CHECKED("Query agent workgroup size", hsa_agent_get_info(agent, HSA_AGENT_INFO_WORKGROUP_MAX_SIZE, &size));
+  return size;
+}
+size_t HsaDevice::localMemoryBytes() {
+  size_t maximum = 0;
+  CHECKED("Enumerate HSA group regions",
+          hsa_agent_iterate_regions(
+              agent,
+              [](const hsa_region_t region, void *data) {
+                hsa_region_segment_t segment;
+                CHECKED("Get HSA region segment", hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment));
+                if (segment != HSA_REGION_SEGMENT_GROUP) return HSA_STATUS_SUCCESS;
+                size_t size = 0;
+                CHECKED("Get HSA group region size", hsa_region_get_info(region, HSA_REGION_INFO_ALLOC_MAX_SIZE, &size));
+                auto &maximum = *static_cast<size_t *>(data);
+                maximum = std::max(maximum, size);
+                return HSA_STATUS_SUCCESS;
+              },
+              &maximum));
+  return maximum;
+}
+size_t HsaDevice::globalMemoryBytes() {
+  size_t size = 0;
+  CHECKED("Get HSA device memory pool size", hsa_amd_memory_pool_get_info(deviceGlobalRegion, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size));
+  return size;
+}
+size_t HsaDevice::computeUnits() {
+  uint32_t count = 0;
+  CHECKED("Get HSA compute unit count",
+          hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &count));
+  return count;
+}
 bool HsaDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;

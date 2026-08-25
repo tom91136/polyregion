@@ -281,8 +281,8 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare {} @polyrt_remote_malloc(ptr, {})", sizeType, sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
                        fmt::format("declare void @polyrt_remote_memcpy(ptr, {}, {}, {}, i32)", sizeType, sizeType, sizeType)));
-    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
-                       fmt::format("declare void @polyrt_remote_launch(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format(
+                       "declare void @polyrt_remote_launch_with_cleanup(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare void @polyrt_remote_free(ptr, {})", sizeType)));
     if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
   };
@@ -374,7 +374,7 @@ TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
            FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   const Program p(entry, {}, {}, PassPhase::Initial(), {});
   polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
-  opts.pipelineSpec = "SubgroupLower(width=8,maxGroupSize=256)";
+  opts.pipelineSpec = "SubgroupLower(width=8,maxGroupSize=256);StructuredExit";
 
   const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
   INFO(repr(c));
@@ -1184,6 +1184,146 @@ TEST_CASE("LLVM GPU targets lower volatile access", "[backend][volatile]") {
   }
 }
 
+TEST_CASE("SPIR-V targets lower workgroup collectives", "[backend][group][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto tpe = Type::IntS32().widen();
+  const Named value("value", tpe), predicate("predicate", Type::Bool1());
+  const auto collective = [&](const std::string &name, const Spec::Any &op) {
+    return Var(Named(name, tpe), Expr::SpecOp(op).widen(), false).widen();
+  };
+  const Function entry = mkFn("kernel", {Arg(value, {}), Arg(predicate, {})}, Type::Unit0(),
+                              {collective("reduce", Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                               collective("inclusive", Spec::GpuGroupInclusiveScan(AtomicOp::Min(), selectNamed(value), tpe)),
+                               collective("exclusive", Spec::GpuGroupExclusiveScan(AtomicOp::Max(), selectNamed(value), tpe)),
+                               Var(Named("any", Type::Bool1()),
+                                   Expr::SpecOp(Spec::GpuGroupReduce(AtomicOp::Or(), selectNamed(predicate), Type::Bool1())).widen(), false)
+                                   .widen(),
+                               ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+
+  const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("work_group_reduce_add"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("work_group_scan_inclusive_min"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("work_group_scan_exclusive_max"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("work_group_any"));
+  CHECK_THROWS_WITH(polyregion::compiler::compile(program, {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupReduce requires SubgroupLower for SPIRV-Vulkan"));
+}
+
+TEST_CASE("MSL rejects subgroup-only implementations for workgroup collectives", "[backend][group][metal]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto tpe = Type::IntS32().widen();
+  const Named value("value", tpe), result("result", tpe);
+  const auto compile = [&](const Spec::Any &op) {
+    const Function entry = mkFn("kernel", {Arg(value, {})}, Type::Unit0(), {Var(result, Expr::SpecOp(op).widen(), false).widen(), ret()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+    opts.pipelineSpec = "Mirror";
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  };
+
+  CHECK_THROWS_WITH(compile(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupReduce lowering is not available"));
+  CHECK_THROWS_WITH(compile(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupInclusiveScan lowering is not available"));
+  CHECK_THROWS_WITH(compile(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupExclusiveScan lowering is not available"));
+}
+
+TEST_CASE("OpenCL C rejects unavailable workgroup collectives", "[backend][group][opencl]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto tpe = Type::IntS32().widen();
+  const Named value("value", tpe), result("result", tpe);
+  const auto compile = [&](const Spec::Any &op) {
+    const Function entry = mkFn("kernel", {Arg(value, {})}, Type::Unit0(), {Var(result, Expr::SpecOp(op).widen(), false).widen(), ret()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+    opts.pipelineSpec = "Mirror";
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  };
+
+  CHECK_THROWS_WITH(compile(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupReduce lowering is not available"));
+  CHECK_THROWS_WITH(compile(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupInclusiveScan lowering is not available"));
+  CHECK_THROWS_WITH(compile(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                    Catch::Matchers::ContainsSubstring("Spec::GpuGroupExclusiveScan lowering is not available"));
+}
+
+TEST_CASE("LLVM CUDA and HIP retain explicit workgroup collective diagnostics", "[backend][group]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto tpe = Type::IntS32().widen();
+  const Named value("value", tpe), result("result", tpe);
+  const auto program = [&](const Spec::Any &op) {
+    const Function entry = mkFn("kernel", {Arg(value, {})}, Type::Unit0(), {Var(result, Expr::SpecOp(op).widen(), false).widen(), ret()},
+                                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+    return Program(entry, {}, {}, PassPhase::Initial(), {});
+  };
+
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_70"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+       }) {
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)), {target, arch},
+                                                    OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("Spec::GpuGroupReduce lowering not yet implemented"));
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                                                    {target, arch}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("Spec::GpuGroupInclusiveScan lowering not yet implemented"));
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                                                    {target, arch}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("Spec::GpuGroupExclusiveScan lowering not yet implemented"));
+  }
+}
+
+TEST_CASE("package entry pipelines lower workgroup collectives on non-native routes", "[backend][group]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto tpe = Type::IntS32().widen();
+  const Named value("value", tpe), result("result", tpe);
+  const Function entry =
+      mkFn("kernel", {Arg(value, {})}, Type::Unit0(),
+           {Var(result, Expr::SpecOp(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  struct Route {
+    Target target;
+    const char *arch;
+    const char *pipeline;
+  };
+  const std::vector<Route> routes{
+      {Target::Source_C_OpenCL1_1, "", "SubgroupLower(lowerGroups=true);StructuredExit;RegionRespace;ArenaLower"},
+      {Target::Source_C_Metal1_0, "", "SubgroupLower(lowerGroups=true);StructuredExit;RegionRespace;ArenaLower"},
+      {Target::Object_LLVM_SPIRV_GLCompute, "",
+       "SubgroupLower(lowerGroups=true);StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors("
+       "strict=true)"},
+      {Target::Object_LLVM_NVPTX64, "sm_70", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
+      {Target::Object_LLVM_AMDGCN, "gfx906", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
+  };
+  for (const auto &[target, arch, pipeline] : routes) {
+    INFO(arch);
+    polyregion::compiler::Options opts{target, arch};
+    opts.pipelineSpec = pipeline;
+    const auto compiled = polyregion::compiler::compile(program, opts, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+  }
+}
+
 TEST_CASE("LLVM aggregate volatile access keeps the pointee alignment", "[backend][volatile]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -1369,6 +1509,23 @@ TEST_CASE("NVPTX subgroup barriers support legacy and synchronised warps", "[bac
   const auto synchronised = polyregion::compiler::compile(program, {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
   REQUIRE(synchronised.binary);
   CHECK_THAT(llvmIrOf(synchronised), Catch::Matchers::ContainsSubstring("llvm.nvvm.bar.warp.sync"));
+
+  const Function maskedEntry =
+      mkFn("masked_kernel", {}, Type::Unit0(),
+           {Var(Named("barrier", Type::Unit0()), Expr::SpecOp(Spec::GpuSubgroupBarrier(Term::IntU32Const(0xFFFF).widen())).widen(), false)
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program maskedProgram(maskedEntry, {}, {}, PassPhase::Initial(), {});
+  CHECK_THROWS_WITH(polyregion::compiler::compile(maskedProgram, {Target::Object_LLVM_NVPTX64, "sm_35"}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("Masked subgroup barriers require sm_70 or newer"));
+  const auto maskedSynchronised = polyregion::compiler::compile(maskedProgram, {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
+  REQUIRE(maskedSynchronised.binary);
+  CHECK_THAT(llvmIrOf(maskedSynchronised), Catch::Matchers::ContainsSubstring("i32 65535"));
+  CHECK_THROWS_WITH(polyregion::compiler::compile(maskedProgram, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("Masked subgroup barriers are unsupported for AMDGPU"));
+  CHECK_THROWS_WITH(polyregion::compiler::compile(maskedProgram, {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0),
+                    Catch::Matchers::ContainsSubstring("Masked subgroup barriers are unsupported for SPIRV-OpenCL"));
 }
 
 TEST_CASE("LLVM GPU shuffles pad narrow values without widening the result", "[backend][subgroup]") {
@@ -1846,16 +2003,17 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
   REQUIRE(compiled.binary);
   const auto &ir = llvmIrOf(compiled);
   INFO(ir);
-  CHECK(ir ^ contains_slice("polyrt_remote_launch"));
+  CHECK(ir ^ contains_slice("polyrt_remote_launch_with_cleanup"));
   const auto callCount = [&](const std::string &callee) {
     const auto needle = "@" + callee + "(";
     const auto lines = ir ^ split('\n');
     return lines ^ count([&](const auto &line) { return (line ^ contains_slice("call ")) && (line ^ contains_slice(needle)); });
   };
-  // The by-value aggregate needs one temporary remote allocation; the pointer argument is forwarded unchanged.
-  CHECK(callCount("polyrt_remote_malloc") == 1);
-  CHECK(callCount("polyrt_remote_memcpy") == 1);
-  CHECK(ir ^ contains_slice("i32 0)"));
+  // The runtime mirrors the by-value aggregate and forwards the pointer argument unchanged.
+  CHECK(callCount("polyrt_remote_launch_with_cleanup") == 1);
+  CHECK(callCount("polyrt_remote_malloc") == 0);
+  CHECK(callCount("polyrt_remote_memcpy") == 0);
+  CHECK(ir ^ contains_slice("store i64 4"));
 }
 
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {

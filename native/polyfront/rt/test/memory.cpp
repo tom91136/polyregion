@@ -1,3 +1,4 @@
+#include <array>
 #include <fstream>
 #include <numeric>
 
@@ -20,13 +21,29 @@ struct StubDevice final : object::ObjectDevice {
   bool shared;
   bool cpu;
   size_t threads;
-  size_t sharedAllocs = 0, sharedFrees = 0;
+  size_t subgroup;
+  size_t localMemory = 12345;
+  size_t globalMemory = 67890;
+  size_t units = 7;
+  uint32_t cudaMajor = 9;
+  uint32_t cudaMinor = 1;
+  ModuleFormat format;
+  size_t sharedAllocs = 0, sharedFrees = 0, remoteAllocs = 0, remoteFrees = 0;
 
-  explicit StubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024) : shared(shared), cpu(cpu), threads(threads) {}
+  explicit StubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024, const size_t subgroup = 1,
+                      const ModuleFormat format = ModuleFormat::Object)
+      : shared(shared), cpu(cpu), threads(threads), subgroup(subgroup), format(format) {}
   std::string name() override { return "stub"; }
   PhysicalDevice physicalDevice() override { return cpu ? PhysicalDevice::host() : PhysicalDevice::synthetic(Backend::Metal, 0); }
   bool sharedAddressSpace() override { return shared; }
+  ModuleFormat moduleFormat() override { return format; }
   size_t maxThreadsPerBlock() override { return threads; }
+  size_t subgroupSize() override { return subgroup; }
+  size_t localMemoryBytes() override { return localMemory; }
+  size_t globalMemoryBytes() override { return globalMemory; }
+  size_t computeUnits() override { return units; }
+  uint32_t cudaArchitectureMajor() override { return cudaMajor; }
+  uint32_t cudaArchitectureMinor() override { return cudaMinor; }
   void loadModule(const std::string &, const std::string &) override {}
   bool moduleLoaded(const std::string &) override { return false; }
   std::optional<void *> mallocShared(size_t size, Access access) override {
@@ -38,17 +55,37 @@ struct StubDevice final : object::ObjectDevice {
     sharedFrees++;
     ObjectDevice::freeShared(ptr);
   }
+  uintptr_t mallocDevice(size_t size, Access access) override {
+    remoteAllocs++;
+    return ObjectDevice::mallocDevice(size, access);
+  }
+  void freeDevice(uintptr_t ptr) override {
+    remoteFrees++;
+    ObjectDevice::freeDevice(ptr);
+  }
   std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &) override { return {}; }
+};
+
+struct StubQueue final : object::ObjectDeviceQueue {
+  using ObjectDeviceQueue::ObjectDeviceQueue;
+
+  bool failInvoke = false;
+
+  void enqueueInvokeAsync(const std::string &, const std::string &, const std::vector<Type> &, std::vector<std::byte>, const Policy &,
+                          const MaybeCallback &) override {
+    if (failInvoke) throw std::runtime_error("injected launch failure");
+  }
 };
 
 struct WithStubDevice {
   std::unique_ptr<Device> previous;
   StubDevice *stub;
 
-  explicit WithStubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024) {
+  explicit WithStubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024, const size_t subgroup = 1,
+                          const ModuleFormat format = ModuleFormat::Object) {
     polyregion::polyrt::initialise();
     previous = std::move(polyregion::polyrt::currentDevice);
-    auto owned = std::make_unique<StubDevice>(shared, cpu, threads);
+    auto owned = std::make_unique<StubDevice>(shared, cpu, threads, subgroup, format);
     stub = owned.get();
     polyregion::polyrt::currentDevice = std::move(owned);
   }
@@ -62,14 +99,67 @@ TEST_CASE("device queries describe the selected runtime device") {
     WithStubDevice device(false, true, 73);
     polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
     CHECK(polyrt_device_max_threads_per_block(&context) == 73);
+    CHECK(polyrt_device_subgroup_size(&context) == 1);
+    CHECK(polyrt_device_local_memory_bytes(&context) == 12345);
+    CHECK(polyrt_device_global_memory_bytes(&context) == 67890);
+    CHECK(polyrt_device_compute_units(&context) == 7);
+    CHECK(polyrt_device_cuda_architecture_major(&context) == 9);
+    CHECK(polyrt_device_cuda_architecture_minor(&context) == 1);
     CHECK(polyrt_device_kind(&context) == polyregion::polyrt::DeviceKind::CPU);
   }
   {
-    WithStubDevice device(false, false, 511);
+    WithStubDevice device(false, false, 511, 64);
     polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
     CHECK(polyrt_device_max_threads_per_block(&context) == 511);
+    CHECK(polyrt_device_subgroup_size(&context) == 64);
     CHECK(polyrt_device_kind(&context) == polyregion::polyrt::DeviceKind::GPU);
   }
+  {
+    WithStubDevice device(false, false, 511, 64, ModuleFormat::SPIRV_GLCompute);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
+    CHECK(polyrt_device_subgroup_size(&context) == 32);
+  }
+  {
+    WithStubDevice device(false, true, 2048, 1, ModuleFormat::Source);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
+    CHECK(polyrt_device_subgroup_size(&context) == 32);
+  }
+}
+
+TEST_CASE("device memset and USM host access use the supplied execution context") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{nullptr, device.stub, &queue, {}};
+  std::array<uint8_t, 5> remote{1, 2, 3, 4, 5};
+
+  polyrt_device_memset(&context, remote.data(), 0xA5, remote.size());
+  CHECK(remote == std::array<uint8_t, 5>{0xA5, 0xA5, 0xA5, 0xA5, 0xA5});
+
+  auto *local = static_cast<uint8_t *>(polyrt_device_usm_host_acquire(&context, remote.data(), remote.size(), 1));
+  REQUIRE(local);
+  for (size_t i = 0; i < remote.size(); ++i) {
+    CHECK(local[i] == remote[i]);
+    local[i] = 0x3C;
+  }
+  polyrt_device_usm_host_release(&context, remote.data(), local, remote.size(), 2);
+  CHECK(remote == std::array<uint8_t, 5>{0x3C, 0x3C, 0x3C, 0x3C, 0x3C});
+}
+
+TEST_CASE("remote launch releases mirrored arguments after a failure") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  queue.failInvoke = true;
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue, {}};
+  std::array<uint8_t, 4> first{};
+  std::array<uint8_t, 8> second{};
+  const std::array<uint8_t, 2> types{static_cast<uint8_t>(Type::Ptr), static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 2> arguments{first.data(), second.data()};
+  const std::array<size_t, 2> mirrorSizes{first.size(), second.size()};
+  CHECK_THROWS_AS(polyrt_remote_launch_with_cleanup(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                                    arguments.data(), mirrorSizes.data()),
+                  std::runtime_error);
+  CHECK(device.stub->remoteAllocs == 2);
+  CHECK(device.stub->remoteFrees == 2);
 }
 
 TEST_CASE("usm free returns a host fallback allocation to the host heap") {

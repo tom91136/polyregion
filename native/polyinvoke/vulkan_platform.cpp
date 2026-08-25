@@ -267,9 +267,9 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
                              .maxMemoryAllocationSize),
       deviceMaxWorkGroupInvocations(device.getProperties().limits.maxComputeWorkGroupInvocations),
       lavapipe(std::string(device.getProperties().deviceName.data()).find("llvmpipe") != std::string::npos),
-      subgroupSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceSubgroupProperties>()
-                       .get<vk::PhysicalDeviceSubgroupProperties>()
-                       .subgroupSize),
+      deviceSubgroupSize(device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceSubgroupProperties>()
+                             .get<vk::PhysicalDeviceSubgroupProperties>()
+                             .subgroupSize),
       transferCmdPool(std::make_shared<vk::raii::CommandPool>(
           ctx.createCommandPool({vk::CommandPoolCreateFlagBits::eResetCommandBuffer, transferQueueId.first}))), //
       transferCmdBuffer(std::make_shared<vk::raii::CommandBuffer>(
@@ -283,7 +283,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             auto module = std::make_shared<vk::raii::ShaderModule>(
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
             uint32_t maxWgX = UINT32_MAX;
-            if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = subgroupSize;
+            if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = deviceSubgroupSize;
             return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX};
           },
           [this](const auto &m, const auto &name, const auto &types) {
@@ -351,6 +351,20 @@ bool VulkanDevice::singleEntryPerModule() {
 size_t VulkanDevice::maxThreadsPerBlock() {
   POLYINVOKE_TRACE();
   return deviceMaxWorkGroupInvocations;
+}
+size_t VulkanDevice::subgroupSize() { return deviceSubgroupSize; }
+size_t VulkanDevice::localMemoryBytes() { return device.getProperties().limits.maxComputeSharedMemorySize; }
+size_t VulkanDevice::globalMemoryBytes() {
+  const auto memory = device.getMemoryProperties();
+  size_t total = 0;
+  for (uint32_t i = 0; i < memory.memoryHeapCount; ++i)
+    if (memory.memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal) total += memory.memoryHeaps[i].size;
+  return total;
+}
+size_t VulkanDevice::computeUnits() {
+  // Vulkan exposes work-group limits but not a portable compute-unit count.
+  // Use one as a conservative policy-sizing floor.
+  return 1;
 }
 std::vector<Property> VulkanDevice::properties() {
   POLYINVOKE_TRACE();

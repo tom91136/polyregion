@@ -224,6 +224,36 @@ bool ZeDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
 }
+size_t ZeDevice::localMemoryBytes() {
+  ze_device_compute_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_COMPUTE_PROPERTIES;
+  CHECKED(zeDeviceGetComputeProperties(device, &properties));
+  return properties.maxSharedLocalMemory;
+}
+size_t ZeDevice::maxThreadsPerBlock() {
+  ze_device_compute_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_COMPUTE_PROPERTIES;
+  CHECKED(zeDeviceGetComputeProperties(device, &properties));
+  return properties.maxTotalGroupSize;
+}
+size_t ZeDevice::globalMemoryBytes() {
+  uint32_t count = 0;
+  CHECKED(zeDeviceGetMemoryProperties(device, &count, nullptr));
+  std::vector<ze_device_memory_properties_t> properties(count);
+  for (auto &property : properties)
+    property.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES;
+  CHECKED(zeDeviceGetMemoryProperties(device, &count, properties.data()));
+  size_t total = 0;
+  for (const auto &property : properties)
+    total += property.totalSize;
+  return total;
+}
+size_t ZeDevice::computeUnits() {
+  ze_device_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  CHECKED(zeDeviceGetProperties(device, &properties));
+  return static_cast<size_t>(properties.numSlices) * properties.numSubslicesPerSlice * properties.numEUsPerSubslice;
+}
 std::vector<Property> ZeDevice::properties() {
   POLYINVOKE_TRACE();
   return {};

@@ -108,34 +108,39 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         const auto zero = llvm::ConstantInt::get(i64, 0);
         auto *argPointersType = llvm::ArrayType::get(ptr, count ? count : 1);
         auto *argTypesType = llvm::ArrayType::get(i8, count ? count : 1);
+        auto *mirrorSizesType = llvm::ArrayType::get(sizeTy, count ? count : 1);
         auto *argPointers = cg.B.CreateAlloca(argPointersType, nullptr, "remote_argptrs");
         auto *argTypes = cg.B.CreateAlloca(argTypesType, nullptr, "remote_argtypes");
-        std::vector<ValPtr> mirrored;
-        const auto mirror = [&](llvm::Type *type, auto &&source) -> ValPtr {
-          const auto allocationSize = cg.M.getDataLayout().getTypeAllocSize(type).getFixedValue();
-          const auto bytes = llvm::ConstantInt::get(sizeTy, allocationSize == 0 ? 1 : allocationSize);
-          auto *remote = cg.B.CreateCall(external("polyrt_remote_malloc", sizeTy, {ptr, sizeTy}), {cg.mkTermVal(v.context), bytes});
-          if (allocationSize > 0)
-            cg.B.CreateCall(external("polyrt_remote_memcpy", unit, {ptr, sizeTy, sizeTy, sizeTy, i32}),
-                            {cg.mkTermVal(v.context), remote, source(), llvm::ConstantInt::get(sizeTy, allocationSize),
-                             llvm::ConstantInt::get(i32, 0)});
-          mirrored.emplace_back(remote);
-          return cg.B.CreateIntToPtr(remote, ptr);
-        };
+        auto *mirrorSizes = cg.B.CreateAlloca(mirrorSizesType, nullptr, "remote_mirror_sizes");
         for (size_t index = 0; index < v.args.size(); ++index) {
           const auto &arg = v.args[index];
           ValPtr value;
+          auto *mirrorSize = llvm::ConstantInt::get(sizeTy, 0);
           if (arg.tpe().template is<Type::Struct>()) {
             auto *type = cg.resolveType(arg.tpe());
-            auto *local = cg.B.CreateAlloca(type, nullptr, "remote_closure");
-            cg.B.CreateStore(cg.mkTermVal(arg), local);
-            value = mirror(type, [&] { return cg.B.CreatePtrToInt(local, sizeTy); });
+            const auto allocationSize = cg.M.getDataLayout().getTypeAllocSize(type).getFixedValue();
+            if (allocationSize == 0) {
+              auto *local = cg.B.CreateAlloca(i8, nullptr, "remote_empty_closure");
+              cg.B.CreateStore(llvm::ConstantInt::get(i8, 0), local);
+              value = local;
+              mirrorSize = llvm::ConstantInt::get(sizeTy, 1);
+            } else {
+              auto *local = cg.B.CreateAlloca(type, nullptr, "remote_closure");
+              cg.B.CreateStore(cg.mkTermVal(arg), local);
+              value = local;
+              mirrorSize = llvm::ConstantInt::get(sizeTy, allocationSize);
+            }
           } else value = cg.mkTermVal(arg);
-          auto *slot = cg.B.CreateAlloca(value->getType(), nullptr, "remote_arg");
-          cg.B.CreateStore(value, slot);
           auto *offset = llvm::ConstantInt::get(i64, index);
-          cg.B.CreateStore(cg.B.CreatePointerCast(slot, ptr), cg.B.CreateGEP(argPointersType, argPointers, {zero, offset}));
+          if (mirrorSize->isZero()) {
+            auto *slot = cg.B.CreateAlloca(value->getType(), nullptr, "remote_arg");
+            cg.B.CreateStore(value, slot);
+            cg.B.CreateStore(cg.B.CreatePointerCast(slot, ptr), cg.B.CreateGEP(argPointersType, argPointers, {zero, offset}));
+          } else {
+            cg.B.CreateStore(cg.B.CreatePointerCast(value, ptr), cg.B.CreateGEP(argPointersType, argPointers, {zero, offset}));
+          }
           cg.B.CreateStore(llvm::ConstantInt::get(i8, runtimeType(arg.tpe())), cg.B.CreateGEP(argTypesType, argTypes, {zero, offset}));
+          cg.B.CreateStore(mirrorSize, cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, offset}));
         }
         std::string kernelName = "_kernel";
         if (const auto fn = v.kernel.tpe().get<Type::FnRef>()) {
@@ -143,14 +148,12 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         }
         auto *module = cg.B.CreateGlobalString(kernelName, "remote_module", 0, &cg.M);
         auto *kernel = cg.B.CreateGlobalString(kernelName, "remote_kernel", 0, &cg.M);
-        cg.B.CreateCall(external("polyrt_remote_launch", unit,
-                                 {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr}),
+        cg.B.CreateCall(external("polyrt_remote_launch_with_cleanup", unit,
+                                 {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr}),
                         {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX),
                          asSize(v.blockY), asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count),
-                         cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero})});
-        for (auto *remote : mirrored) {
-          cg.B.CreateCall(external("polyrt_remote_free", unit, {ptr, sizeTy}), {cg.mkTermVal(v.context), remote});
-        }
+                         cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero}),
+                         cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, zero})});
         return noop();
       },
       [&](const Spec::RemoteAlloc &v) -> ValPtr {

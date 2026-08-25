@@ -5,7 +5,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <exception>
+#include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -283,11 +286,57 @@ POLYREGION_EXPORT extern "C" void polyrt_context_release(void *context) { requir
 POLYREGION_EXPORT extern "C" size_t polyrt_device_max_threads_per_block(void *context) {
   return requireContext(context, __func__).device->maxThreadsPerBlock();
 }
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_max_threads_per_block_u64(void *context) {
+  return requireContext(context, __func__).device->maxThreadsPerBlock();
+}
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_subgroup_size(void *context) {
+  auto &execution = requireContext(context, __func__);
+  auto &device = *execution.device;
+  switch (device.moduleFormat()) {
+    case polyregion::runtime::ModuleFormat::Source: {
+      if (execution.platform && execution.platform->kind() == PlatformKind::HostThreaded) return device.subgroupSize();
+      return 32;
+    }
+    case polyregion::runtime::ModuleFormat::SPIRV_Kernel:
+    case polyregion::runtime::ModuleFormat::SPIRV_GLCompute: return 32;
+    default: return device.subgroupSize();
+  }
+}
+template <typename F> uint64_t requireDeviceCapability(void *context, const char *name, F query) {
+  const auto value = query(*requireContext(context, name).device);
+  if (value == 0) throw std::runtime_error(fmt::format("{} is unavailable for the active device", name));
+  return value;
+}
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_local_memory_bytes(void *context) {
+  return requireDeviceCapability(context, __func__, [](auto &device) { return device.localMemoryBytes(); });
+}
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_global_memory_bytes(void *context) {
+  return requireDeviceCapability(context, __func__, [](auto &device) { return device.globalMemoryBytes(); });
+}
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_compute_units(void *context) {
+  return requireDeviceCapability(context, __func__, [](auto &device) { return device.computeUnits(); });
+}
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_cuda_architecture_major(void *context) {
+  return requireContext(context, __func__).device->cudaArchitectureMajor();
+}
+POLYREGION_EXPORT extern "C" uint64_t polyrt_device_cuda_architecture_minor(void *context) {
+  return requireContext(context, __func__).device->cudaArchitectureMinor();
+}
 POLYREGION_EXPORT extern "C" polyregion::polyrt::DeviceKind polyrt_device_kind(void *context) {
   return requireContext(context, __func__).device->physicalDevice().scheme == PhysicalDevice::Scheme::Host
              ? polyregion::polyrt::DeviceKind::CPU
              : polyregion::polyrt::DeviceKind::GPU;
 }
+POLYREGION_EXPORT extern "C" void *polyrt_host_malloc(const uint64_t bytes) {
+  if (bytes > std::numeric_limits<size_t>::max()) POLYREGION_FATAL("PolyRT", "%s", "Host allocation size exceeds size_t");
+  return std::malloc(static_cast<size_t>(bytes));
+}
+POLYREGION_EXPORT extern "C" void *polyrt_host_new(const uint64_t bytes) {
+  if (bytes > std::numeric_limits<size_t>::max()) throw std::bad_alloc();
+  if (auto *pointer = std::malloc(static_cast<size_t>(bytes))) return pointer;
+  throw std::bad_alloc();
+}
+POLYREGION_EXPORT extern "C" void polyrt_host_free(void *pointer) { std::free(pointer); }
 
 POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) {
   if (bytes == 0) return 0;
@@ -307,6 +356,49 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_memcpy(void *context, const uint
     case 1: queue.enqueueDeviceToHostAsync(src, 0, reinterpret_cast<void *>(dst), bytes, {}); break;
     default: queue.enqueueDeviceToDeviceAsync(src, 0, dst, 0, bytes, {}); break;
   }
+  queue.enqueueWaitBlocking();
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_device_usm_host_acquire(void *context, void *remote, const uint64_t bytes, const int32_t mode) {
+  if (bytes == 0) return nullptr;
+  if (bytes > std::numeric_limits<size_t>::max()) POLYREGION_FATAL("PolyRT", "%s", "Host accessor size exceeds size_t");
+  const auto size = static_cast<size_t>(bytes);
+  auto *local = std::malloc(size);
+  if (!local) POLYREGION_FATAL("PolyRT", "Cannot allocate %zu-byte host accessor staging buffer", size);
+  try {
+    if ((mode & 1) != 0) polyrt_remote_memcpy(context, reinterpret_cast<uintptr_t>(local), reinterpret_cast<uintptr_t>(remote), size, 1);
+  } catch (...) {
+    std::free(local);
+    throw;
+  }
+  return local;
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_device_usm_host_release(void *context, void *remote, void *local, const uint64_t bytes,
+                                                                 const int32_t mode) {
+  if (!local) return;
+  if (bytes > std::numeric_limits<size_t>::max()) {
+    std::free(local);
+    POLYREGION_FATAL("PolyRT", "%s", "Host accessor size exceeds size_t");
+  }
+  const auto size = static_cast<size_t>(bytes);
+  try {
+    if ((mode & 2) != 0 && bytes != 0)
+      polyrt_remote_memcpy(context, reinterpret_cast<uintptr_t>(remote), reinterpret_cast<uintptr_t>(local), size, 0);
+  } catch (...) {
+    std::free(local);
+    throw;
+  }
+  std::free(local);
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_device_memset(void *context, void *dst, const int32_t value, const uint64_t count) {
+  if (count == 0) return;
+  if (count > std::numeric_limits<size_t>::max()) POLYREGION_FATAL("PolyRT", "%s", "Device memset size exceeds size_t");
+  const auto size = static_cast<size_t>(count);
+  const std::vector<char> hostBuffer(size, static_cast<char>(value));
+  auto &queue = *requireContext(context, __func__).queue;
+  queue.enqueueHostToDeviceAsync(hostBuffer.data(), reinterpret_cast<uintptr_t>(dst), 0, size, {});
   queue.enqueueWaitBlocking();
 }
 
@@ -351,6 +443,47 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char
       Policy{Dim3{gridX, gridY, gridZ}, blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
       {});
   value.queue->enqueueWaitBlocking();
+}
+
+POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_cleanup(void *context, const char *moduleName, const char *kernelName,
+                                                                    const size_t gridX, const size_t gridY, const size_t gridZ,
+                                                                    const size_t blockX, const size_t blockY, const size_t blockZ,
+                                                                    const size_t localMemBytes, const size_t argCount,
+                                                                    const uint8_t *argTypes, void *const *argPtrs,
+                                                                    const size_t *mirrorSizes) {
+  std::vector<uintptr_t> mirrors(argCount, 0);
+  std::vector<void *> launchArgPtrs(argCount, nullptr);
+  std::vector<uintptr_t> allocations;
+  allocations.reserve(argCount);
+  const auto release = [&]() noexcept {
+    std::exception_ptr failure;
+    for (const auto allocation : allocations) {
+      try {
+        polyrt_remote_free(context, allocation);
+      } catch (...) {
+        if (!failure) failure = std::current_exception();
+      }
+    }
+    allocations.clear();
+    return failure;
+  };
+  try {
+    for (size_t i = 0; i < argCount; ++i) {
+      launchArgPtrs[i] = argPtrs[i];
+      if (mirrorSizes[i] == 0) continue;
+      mirrors[i] = polyrt_remote_malloc(context, mirrorSizes[i]);
+      allocations.emplace_back(mirrors[i]);
+      polyrt_remote_memcpy(context, mirrors[i], reinterpret_cast<uintptr_t>(argPtrs[i]), mirrorSizes[i], 0);
+      launchArgPtrs[i] = &mirrors[i];
+    }
+    polyrt_remote_launch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
+                         launchArgPtrs.data());
+  } catch (...) {
+    const auto failure = std::current_exception();
+    (void)release();
+    std::rethrow_exception(failure);
+  }
+  if (const auto failure = release()) std::rethrow_exception(failure);
 }
 
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {

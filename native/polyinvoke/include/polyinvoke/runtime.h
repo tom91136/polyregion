@@ -473,6 +473,12 @@ struct POLYREGION_EXPORT Device {
   [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) = 0;
 
   [[nodiscard]] virtual POLYREGION_EXPORT size_t maxThreadsPerBlock() { return 1024; }
+  [[nodiscard]] virtual POLYREGION_EXPORT size_t subgroupSize() { return 1; }
+  [[nodiscard]] virtual POLYREGION_EXPORT size_t localMemoryBytes() { return 0; }
+  [[nodiscard]] virtual POLYREGION_EXPORT size_t globalMemoryBytes() { return 0; }
+  [[nodiscard]] virtual POLYREGION_EXPORT size_t computeUnits() { return 0; }
+  [[nodiscard]] virtual POLYREGION_EXPORT uint32_t cudaArchitectureMajor() { return 0; }
+  [[nodiscard]] virtual POLYREGION_EXPORT uint32_t cudaArchitectureMinor() { return 0; }
 };
 
 class POLYREGION_EXPORT Platform {

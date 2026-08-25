@@ -6,6 +6,7 @@
 #include "polyfront/options_backend.hpp"
 #include "polyfront/package_program.hpp"
 #include "polyfront/polyc_client.hpp"
+#include "polyfront/program_fragment.hpp"
 #include "polyfront/resolved_sym_program_compilation.hpp"
 
 #include "polyast_codec.h"
@@ -33,6 +34,119 @@ polyast::Function variant(polyast::FunctionDecl decl, const polyast::Sym &public
 }
 
 } // namespace
+
+TEST_CASE("program fragments merge host orchestration with device entries") {
+  using namespace polyast;
+  const auto i32 = Type::IntS32().widen();
+  const auto hostDecl = FunctionDecl(Sym({"dispatch"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto kernelDecl = FunctionDecl(Sym({"kernel"}), {}, {}, {Arg(Named("out", Type::Ptr(i32, TypeSpace::Global())), {})}, {}, {},
+                                       Type::Unit0(), FunctionAffinity::Offload());
+  const auto hostKernel = Function(kernelDecl, {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, FunctionVisibility::Internal(),
+                                   FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const auto deviceKernel = hostKernel.withBody(
+      {Stmt::Var(Named("device", i32), Expr::Alias(Term::IntS32Const(7)), false), Stmt::Return(Expr::Alias(Term::Unit0Const()))});
+  const auto host =
+      polyfront::packageProgram({Function(hostDecl, {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, FunctionVisibility::Exported(),
+                                          FunctionFpMode::Relaxed(), CallConvention::RegularCall()),
+                                 hostKernel},
+                                {});
+  const auto device = polyfront::packageProgram({deviceKernel}, {});
+  const auto merged = polyfront::package::mergeProgramFragments(host, device);
+  REQUIRE(merged);
+  REQUIRE_FALSE(merged.value->entry);
+  REQUIRE(merged.value->functions.size() == 2);
+  const auto kernel = merged.value->functions ^ aspartame::collect_first([&](const auto &function) -> std::optional<Function> {
+                        return function.decl.name == kernelDecl.name ? std::optional{function} : std::nullopt;
+                      });
+  REQUIRE(kernel);
+  CHECK(kernel->convention.is<CallConvention::OffloadEntry>());
+  CHECK(kernel->collect_all<Term::IntS32Const>() == std::vector{Term::IntS32Const(7)});
+}
+
+TEST_CASE("program fragment merging keeps same-named host helpers distinct from device entries") {
+  using namespace polyast;
+  const auto decl = FunctionDecl(Sym({"helper"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto host =
+      polyfront::packageProgram({Function(decl, {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, FunctionVisibility::Internal(),
+                                          FunctionFpMode::Relaxed(), CallConvention::RegularCall())},
+                                {});
+  const auto device =
+      polyfront::packageProgram({Function(decl.withAffinity(FunctionAffinity::Offload()), {Stmt::Return(Expr::Alias(Term::Unit0Const()))},
+                                          FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry())},
+                                {});
+  const auto merged = polyfront::package::mergeProgramFragments(host, device);
+  REQUIRE(merged);
+  CHECK(merged.value->functions.size() == 2);
+  CHECK(merged.value->functions ^ aspartame::exists([](const auto &function) { return function.decl.name == Sym({"helper"}); }));
+  CHECK(merged.value->functions ^ aspartame::exists([](const auto &function) { return function.decl.name == Sym({"#device", "helper"}); }));
+}
+
+TEST_CASE("program fragment merging preserves overload signatures") {
+  using namespace polyast;
+  const auto name = Sym({"overloaded"});
+  const auto make = [&](const Type::Any &type, int32_t value) {
+    const auto decl = FunctionDecl(name, {}, {}, {Arg(Named("value", type), {})}, {}, {}, type, FunctionAffinity::Offload());
+    return Function(decl, {Stmt::Return(Expr::Alias(Term::IntS32Const(value)))}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
+                    CallConvention::RegularCall());
+  };
+  const auto device = polyfront::packageProgram({make(Type::IntS32(), 1), make(Type::Float32(), 2)}, {});
+  const auto merged = polyfront::package::mergeProgramFragments(polyfront::packageProgram({}, {}), device);
+  REQUIRE(merged);
+  REQUIRE(merged.value->functions.size() == 2);
+  CHECK(merged.value->functions[0].decl.args.front().named.tpe != merged.value->functions[1].decl.args.front().named.tpe);
+}
+
+TEST_CASE("program fragment struct renaming propagates through enclosing device types") {
+  using namespace polyast;
+  const auto a = Sym({"A"});
+  const auto b = Sym({"B"});
+  const auto hostA = StructDef(a, {}, {Named("value", Type::IntS32())}, {}, false);
+  const auto deviceA = StructDef(a, {}, {Named("value", Type::Float32())}, {}, false);
+  const auto bType = Type::Struct(b, {}).widen();
+  const auto nestedA = Type::Struct(a, {}).widen();
+  const auto hostB = StructDef(b, {}, {Named("nested", nestedA)}, {}, false);
+  const auto deviceB = StructDef(b, {}, {Named("nested", nestedA)}, {}, false);
+  const auto declaration =
+      FunctionDecl(Sym({"helper"}), {}, {}, {Arg(Named("value", bType), {})}, {}, {}, Type::Unit0(), FunctionAffinity::Offload());
+  const auto function = Function(declaration, {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, FunctionVisibility::Internal(),
+                                 FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto merged = polyfront::package::mergeProgramFragments(polyfront::packageProgram({function}, {hostA, hostB}),
+                                                                polyfront::packageProgram({function}, {deviceA, deviceB}));
+  REQUIRE(merged);
+  CHECK(merged.value->defs ^ aspartame::exists([](const auto &definition) { return definition.name == Sym({"#device", "A"}); }));
+  CHECK(merged.value->defs ^ aspartame::exists([](const auto &definition) { return definition.name == Sym({"#device", "B"}); }));
+}
+
+TEST_CASE("program fragment merging rejects mismatched offload entry ABIs") {
+  using namespace polyast;
+  const auto name = Sym({"kernel"});
+  const auto entry = [&](const Type::Any &type) {
+    const auto declaration =
+        FunctionDecl(name, {}, {}, {Arg(Named("value", type), {})}, {}, {}, Type::Unit0(), FunctionAffinity::Offload());
+    return Function(declaration, {Stmt::Return(Expr::Alias(Term::Unit0Const()))}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
+                    CallConvention::OffloadEntry());
+  };
+  const auto merged = polyfront::package::mergeProgramFragments(polyfront::packageProgram({entry(Type::IntS32())}, {}),
+                                                                polyfront::packageProgram({entry(Type::IntS64())}, {}));
+  CHECK_FALSE(merged);
+  CHECK(merged.errors ^ aspartame::exists([](const auto &error) { return error.find("offload entry ABI") != std::string::npos; }));
+}
+
+TEST_CASE("program fragment merging renames body-local entry types outside the entry ABI") {
+  using namespace polyast;
+  const auto name = Sym({"LocalState"});
+  const auto type = Type::Struct(name, {}).widen();
+  const auto declaration = FunctionDecl(Sym({"kernel"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload());
+  const auto entry = Function(
+      declaration, {Stmt::Var(Named("local", type), std::optional<Expr::Any>{}, true), Stmt::Return(Expr::Alias(Term::Unit0Const()))},
+      FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const auto hostDefinition = StructDef(name, {}, {Named("value", Type::IntS32())}, {}, false);
+  const auto deviceDefinition = StructDef(name, {}, {Named("value", Type::Float32())}, {}, false);
+  const auto merged = polyfront::package::mergeProgramFragments(polyfront::packageProgram({entry}, {hostDefinition}),
+                                                                polyfront::packageProgram({entry}, {deviceDefinition}));
+  REQUIRE(merged);
+  CHECK(merged.value->defs ^ aspartame::exists([](const auto &definition) { return definition.name == Sym({"#device", "LocalState"}); }));
+}
 
 TEST_CASE("resolved package Sym targets follow the consumer architecture") {
   using polyregion::compiletime::Target;
@@ -134,10 +248,9 @@ TEST_CASE("package-service wire envelopes reject a stale fingerprint") {
   const auto request = PackageLinkRequest(Interface(Sym({"foo"}), {}, {}), {}, {});
   auto bytes = packagelinkrequest_to_msgpack(request);
   auto hash = bytes.end();
-  for (auto it = bytes.begin(); it != bytes.end(); ++it) {
-    if (static_cast<size_t>(bytes.end() - it) < 32) break;
-    if (std::all_of(it, it + 32, [](uint8_t value) { return std::isxdigit(value) != 0; })) {
-      hash = it;
+  for (size_t i = 0; i + 32 <= bytes.size(); ++i) {
+    if (bytes | aspartame::slice(i, i + 32) | aspartame::forall([](uint8_t value) { return std::isxdigit(value) != 0; })) {
+      hash = bytes.begin() + static_cast<ptrdiff_t>(i);
       break;
     }
   }

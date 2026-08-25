@@ -33,8 +33,10 @@ struct Remapper {
   };
   struct RemapContext {
     std::shared_ptr<StructDef> parent = {};
+    const clang::FunctionDecl *function = {};
     const clang::CXXRecordDecl *entryCapture = {};
     Set<const clang::CXXRecordDecl *> globalCaptures{};
+    Set<const clang::ValueDecl *> capturesInScope{};
     TypeSpace::Any thisSpace = TypeSpace::Global();
     bool ctorChain = false;
     Opt<Named> constructInto{};
@@ -48,6 +50,12 @@ struct Remapper {
     Map<std::string, std::shared_ptr<StructLayout>> layouts{};
     Map<std::string, Vector<std::shared_ptr<StructDef>>> parents{};
     Map<std::string, BitFieldInfo> bitFields{};
+    Set<std::string> packageVariables{};
+    Map<std::string, Type::Var> packageVariableTypes{};
+    Set<std::string> callableVariables{};
+    Map<std::string, std::string> indirectOffloadEntries{};
+    Map<std::string, uint64_t> indirectLaunchBlockSizes{};
+    Vector<Named> syclLogicalGlobalSizes{};
     Map<const clang::ValueDecl *, Type::Any> valueTypes{};
     Map<std::string, Named> exceptionWhats{};
     Map<std::string, Named> exceptionCodes{};
@@ -96,6 +104,11 @@ struct Remapper {
       layouts = r.layouts;
       parents = r.parents;
       bitFields = r.bitFields;
+      packageVariables = r.packageVariables;
+      packageVariableTypes = r.packageVariableTypes;
+      callableVariables = r.callableVariables;
+      indirectOffloadEntries = r.indirectOffloadEntries;
+      indirectLaunchBlockSizes = r.indirectLaunchBlockSizes;
       globalCaptures = r.globalCaptures;
       return {result, r.stmts};
     }
@@ -124,6 +137,8 @@ struct Remapper {
 
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
+  [[nodiscard]] Named namedOfDecl(const clang::NamedDecl *decl, const Type::Any &tpe) const;
+  [[nodiscard]] Term::Select selectPath(RemapContext &r, const Vector<Named> &prefix, const Named &leaf) const;
   [[nodiscard]] Pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   [[nodiscard]] Type::Any handleType(clang::QualType qual, RemapContext &r) const;
   [[nodiscard]] Expr::Any conform(RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe);

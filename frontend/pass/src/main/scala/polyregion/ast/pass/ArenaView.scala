@@ -93,6 +93,26 @@ object ArenaView extends ProgramPass {
     case _                           => None
   }
 
+  private def staticPathKey(steps: List[p.PathStep]): Option[String] =
+    if (steps.exists(_.isInstanceOf[p.PathStep.IndexDyn])) None
+    else
+      Some(
+        steps
+          .map {
+            case p.PathStep.Field(name) => s"field:$name"
+            case p.PathStep.Deref       => "deref"
+            case p.PathStep.Index(idx)  => s"index:$idx"
+            case _: p.PathStep.IndexDyn => throw IllegalStateException("dynamic step in static arena path")
+          }
+          .mkString("/")
+      )
+
+  private def localReferenceKey(base: p.Term.Select, index: Option[p.Term]): Option[String] =
+    for {
+      path <- staticPathKey(base.steps)
+      idx  <- staticIndex(index)
+    } yield s"${base.root.symbol}:$path:$idx"
+
   private def arenaStructs(program: p.Program, members: Map[p.Sym, List[p.Named]]): Set[p.Sym] = {
     def refs(t: p.Type): Set[p.Sym] = t match {
       case p.Type.Struct(sym, args) => Set(sym) ++ args.flatMap(refs)
@@ -171,7 +191,9 @@ object ArenaView extends ProgramPass {
     def identityWriteSource(expr: p.Expr): Option[Either[Field, Boolean]] = expr match {
       case p.Expr.Alias(rhs)               => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
       case p.Expr.Cast(rhs, _: p.Type.Ptr) => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
-      case _                               => None
+      case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) =>
+        Some(Right(isLocal(base) && localReferenceKey(base, index).nonEmpty))
+      case _ => None
     }
     val writes = program.entry
       .collectAll[p.Stmt]
@@ -295,14 +317,6 @@ object ArenaView extends ProgramPass {
           n
         }
         .toSet
-      def staticPathKey(steps: List[p.PathStep]): String = steps
-        .map {
-          case p.PathStep.Field(name) => s"field:$name"
-          case p.PathStep.Deref       => "deref"
-          case p.PathStep.Index(idx)  => s"index:$idx"
-          case _: p.PathStep.IndexDyn => throw IllegalArgumentException("dynamic step in static arena path")
-        }
-        .mkString("/")
       val localPointerKeys = f.collectAll[p.Stmt].foldLeft(Map.empty[p.Named, String]) {
         case (known, p.Stmt.Var(n, Some(p.Expr.RefTo(base @ p.Term.Select(_, steps, _), idx, _, _, _)), _))
             if isPtr(n.tpe) && !reassignedPointers(n) && rootedLocally(base) && staticIndex(idx).nonEmpty && !steps
@@ -310,7 +324,7 @@ object ArenaView extends ProgramPass {
                 case _: p.PathStep.IndexDyn => true
                 case _                      => false
               } =>
-          known + (n -> s"${base.root.symbol}:${staticPathKey(steps)}:${staticIndex(idx).get}")
+          known + (n -> localReferenceKey(base, idx).get)
         case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
             if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known.contains(root) =>
           known + (n -> known(root))
@@ -320,9 +334,19 @@ object ArenaView extends ProgramPass {
           known + (n -> known.getOrElse(root, s"${root.symbol}:array"))
         case (known, _) => known
       }
-      val localPointerTokens = localPointerKeys.values.toList.distinct.sorted.zipWithIndex.map { case (key, i) =>
-        key -> (i.toLong + 1L)
+      val directLocalPointerKeys = f
+        .collectAll[p.Expr]
+        .collect {
+          case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) if rootedLocally(base) =>
+            localReferenceKey(base, index)
+        }
+        .flatten
+        .toSet
+      val tokenByKey = (localPointerKeys.values.toSet ++ directLocalPointerKeys).toList.sorted.zipWithIndex.map {
+        case (key, i) =>
+          key -> (i.toLong + 1L)
       }.toMap
+      val localPointerTokens = localPointerKeys.view.mapValues(tokenByKey).toMap
 
       // Inlined nullable base-pointer adjustments retain their source-level null guard after their actual argument
       // becomes either an immutable RefTo of stack storage or an immutable null binding. Keeping those guards
@@ -395,7 +419,8 @@ object ArenaView extends ProgramPass {
             members,
             unions,
             identityFields,
-            localPointerKeys.view.mapValues(localPointerTokens).toMap,
+            localPointerTokens,
+            tokenByKey,
             capN,
             capTpe,
             views,
@@ -429,6 +454,7 @@ object ArenaView extends ProgramPass {
       unions: Set[p.Sym],
       identityFields: Set[Field],
       localPointerTokens: Map[p.Named, Long],
+      localReferenceTokens: Map[String, Long],
       capN: p.Named,
       capTpe: p.Type.Struct,
       views: List[p.Named],
@@ -835,6 +861,11 @@ object ArenaView extends ProgramPass {
                 p.Expr.Alias(i64(localPointerTokens(root)))
               case p.Expr.Cast(source, _: p.Type.Ptr) if identityField =>
                 identityComparable(source).map(p.Expr.Alias.apply).getOrElse(rwExpr(e))
+              case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) if identityField =>
+                localReferenceKey(base, index)
+                  .flatMap(localReferenceTokens.get)
+                  .map(token => p.Expr.Alias(i64(token)))
+                  .getOrElse(rwExpr(e))
               case _ => rwExpr(e)
             }
             List(p.Stmt.Mut(p.Term.Select(n, steps.map(rwStep), lhsT), rhs))

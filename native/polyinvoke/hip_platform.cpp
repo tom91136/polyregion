@@ -122,6 +122,31 @@ PhysicalDevice HipDevice::physicalDevice() {
   return PhysicalDevice::pci(static_cast<uint32_t>(prop.pciDomainID), static_cast<uint8_t>(prop.pciBusID),
                              static_cast<uint8_t>(prop.pciDeviceID), 0);
 }
+size_t HipDevice::subgroupSize() {
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  return static_cast<size_t>(prop.warpSize);
+}
+size_t HipDevice::maxThreadsPerBlock() {
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  return static_cast<size_t>(prop.maxThreadsPerBlock);
+}
+size_t HipDevice::localMemoryBytes() {
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  return prop.sharedMemPerBlock;
+}
+size_t HipDevice::globalMemoryBytes() {
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  return prop.totalGlobalMem;
+}
+size_t HipDevice::computeUnits() {
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  return static_cast<size_t>(prop.multiProcessorCount);
+}
 bool HipDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;

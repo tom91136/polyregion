@@ -71,6 +71,28 @@ static Opt<MatchedCall> polyregionIntrinsic(const clang::CallExpr &call, const c
                      false};
 }
 
-Vector<CallPrism> polyregionPrisms() { return {polyregionIntrinsic}; }
+static Opt<MatchedCall> usmHostAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto name = decl.getQualifiedNameAsString();
+  const bool acquire = name == "polyrt_device_usm_host_acquire" && call.getNumArgs() == 3;
+  const bool release = name == "polyrt_device_usm_host_release" && call.getNumArgs() == 4;
+  if (!acquire && !release) return {};
+  const auto *expression = &call;
+  return MatchedCall{Lowering{[expression, acquire, name](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       const auto raw = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+                       const auto remote = r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), raw));
+                       if (acquire) {
+                         const auto bytes = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), Type::IntU64()));
+                         const auto mode = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntS32()));
+                         return Expr::ForeignCall(name, {packageContext(), remote, bytes, mode}, self.handleType(expression->getType(), r));
+                       }
+                       const auto local = r.newVar(self.conform(r, self.handleExpr(expression->getArg(1), r), raw));
+                       const auto bytes = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntU64()));
+                       const auto mode = r.newVar(self.conform(r, self.handleExpr(expression->getArg(3), r), Type::IntS32()));
+                       return Expr::ForeignCall(name, {packageContext(), remote, local, bytes, mode}, Type::Unit0());
+                     }},
+                     false};
+}
+
+Vector<CallPrism> polyregionPrisms() { return {polyregionIntrinsic, usmHostAccess}; }
 
 } // namespace polyregion::polystl::call_prism

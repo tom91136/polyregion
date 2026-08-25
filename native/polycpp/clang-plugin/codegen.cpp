@@ -1,5 +1,7 @@
 #include "codegen.h"
 
+#include <string_view>
+
 #include "clang/AST/Attr.h"
 #include "clang/AST/RecordLayout.h"
 
@@ -22,6 +24,37 @@ using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace aspartame;
 using polyregion::polyfront::emit;
+
+namespace {
+constexpr std::string_view ContextArgument = "#context";
+
+Type::Any eraseCallableBinders(const Type::Any &type, const Set<Type::Var> &bound = {}) {
+  return type.match_total([](const Type::Float16 &x) -> Type::Any { return x; }, [](const Type::Float32 &x) -> Type::Any { return x; },
+                          [](const Type::Float64 &x) -> Type::Any { return x; }, [](const Type::IntU8 &x) -> Type::Any { return x; },
+                          [](const Type::IntU16 &x) -> Type::Any { return x; }, [](const Type::IntU32 &x) -> Type::Any { return x; },
+                          [](const Type::IntU64 &x) -> Type::Any { return x; }, [](const Type::IntS8 &x) -> Type::Any { return x; },
+                          [](const Type::IntS16 &x) -> Type::Any { return x; }, [](const Type::IntS32 &x) -> Type::Any { return x; },
+                          [](const Type::IntS64 &x) -> Type::Any { return x; }, [](const Type::Nothing &x) -> Type::Any { return x; },
+                          [](const Type::Unit0 &x) -> Type::Any { return x; }, [](const Type::Bool1 &x) -> Type::Any { return x; },
+                          [&](const Type::Struct &x) -> Type::Any {
+                            return x.withArgs(x.args ^ map([&](const auto &arg) { return eraseCallableBinders(arg, bound); }));
+                          },
+                          [&](const Type::Ptr &x) -> Type::Any { return x.withComp(eraseCallableBinders(x.comp, bound)); },
+                          [&](const Type::Arr &x) -> Type::Any { return x.withComp(eraseCallableBinders(x.comp, bound)); },
+                          [&](const Type::Var &x) -> Type::Any { return bound ^ contains(x) ? Type::Nothing().widen() : x.widen(); },
+                          [&](const Type::Exec &x) -> Type::Any {
+                            const auto nested = bound | concat(x.tpeVars) | to<Set>();
+                            return Type::Exec({}, x.args ^ map([&](const auto &arg) { return eraseCallableBinders(arg, nested); }),
+                                              eraseCallableBinders(x.rtn, nested));
+                          },
+                          [](const Type::FnRef &x) -> Type::Any { return x; });
+}
+
+template <typename T> Vector<Type::Var> freeTypeVariables(const T &value) {
+  return value.template modify_all<Type::Exec>([](const auto &exec) { return *eraseCallableBinders(exec).template get<Type::Exec>(); })
+      .template collect_all<Type::Var>();
+}
+} // namespace
 
 polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                                clang::ASTContext &C,                //
@@ -205,28 +238,168 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                  mir.bitcode, mir.mirrorId, asserts};
 }
 
-void polystl::compilePackageProgram(const polyfront::Options &opts,            //
-                                    clang::ASTContext &C,                      //
-                                    clang::DiagnosticsEngine &diag,            //
-                                    const std::vector<PackageExport> &exports, //
+void polystl::compilePackageProgram(const polyfront::Options &opts,                                //
+                                    clang::ASTContext &C,                                          //
+                                    clang::DiagnosticsEngine &diag,                                //
+                                    const std::vector<PackageExport> &exports,                     //
+                                    const std::vector<const clang::FunctionDecl *> &deviceKernels, //
                                     const std::string &outPath) {
   Remapper remapper(C);
   remapper.emitPackageProgramMode = true;
   Remapper::RemapContext r;
   Map<Sym, Sym> exportNames;
+  Set<std::string> exported;
+
+  if ((C.getLangOpts().CUDA || C.getLangOpts().HIP) && C.getLangOpts().CUDAIsDevice) {
+    for (const auto *kernel : deviceKernels) {
+      auto fn = remapper.handleCall(kernel, r).second;
+      fn->decl.affinity = FunctionAffinity::Offload();
+      fn->convention = CallConvention::OffloadEntry();
+    }
+  }
 
   for (const auto &exportedFunction : exports) {
     const auto *decl = exportedFunction.decl;
     const auto &exportName = exportedFunction.name;
-    auto fn = remapper.handleCall(decl, r).second;
+    auto [name, fn] = remapper.handleCall(decl, r);
     exportNames.emplace(fn->decl.name, exportName);
+    exported.emplace(name);
     fn->visibility = FunctionVisibility::Exported();
-    fn->decl.name = exportName;
-    fn->implements = exportedFunction.implements;
-    fn->requiredCapabilities = exportedFunction.requiredCapabilities;
     if (opts.verbose)
       emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Remark, POLYREGION_DIAG_POLYSTL "Exporting package symbol: %0",
            fqcn(exportName));
+  }
+
+  const auto completeStructArgs = [&](const Type::Struct &structType) {
+    const auto definition = r.structs ^ get_maybe(fqcn(structType.name));
+    if (!definition || structType.args.size() >= (*definition)->tpeVars.size()) return structType;
+    auto args = structType.args;
+    for (size_t i = args.size(); i < (*definition)->tpeVars.size(); ++i)
+      args.emplace_back((*definition)->tpeVars[i]);
+    return structType.withArgs(args);
+  };
+  const auto convergenceLimit = std::max<size_t>(64, (r.structs.size() + r.functions.size() + 1) * 8);
+  size_t structIterations = 0;
+  for (bool changed = true; changed;) {
+    if (++structIterations > convergenceLimit) {
+      emit(diag, C.getTranslationUnitDecl()->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
+           POLYREGION_DIAG_POLYSTL "Package struct completion did not converge after %0 iterations",
+           static_cast<unsigned long long>(convergenceLimit));
+      return;
+    }
+    changed = false;
+    for (const auto &definition : r.structs ^ values()) {
+      auto next = definition->template modify_all<Type::Struct>(completeStructArgs);
+      next.tpeVars = next.tpeVars | concat(next.template collect_all<Type::Var>()) | distinct() | to_vector();
+      if (next == *definition) continue;
+      *definition = std::move(next);
+      changed = true;
+    }
+  }
+  size_t functionIterations = 0;
+  for (bool changed = true; changed;) {
+    if (++functionIterations > convergenceLimit) {
+      emit(diag, C.getTranslationUnitDecl()->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
+           POLYREGION_DIAG_POLYSTL "Package function completion did not converge after %0 iterations",
+           static_cast<unsigned long long>(convergenceLimit));
+      return;
+    }
+    changed = false;
+    const auto functionsByName = r.functions | values() | map([](const auto &fn) { return std::pair{fn->decl.name, fn}; }) | to<Map>();
+    for (const auto &fn : r.functions ^ values()) {
+      auto next = fn->template modify_all<Type::Struct>(completeStructArgs);
+      next = next.template modify_all<Expr::Invoke>([&](const Expr::Invoke &invoke) {
+        const auto callee =
+            invoke.callee.template get<Type::FnRef>() ^ flat_map([&](const auto &ref) { return functionsByName ^ get_maybe(ref.name); });
+        if (!callee || invoke.tpeArgs.size() >= (*callee)->decl.tpeVars.size()) return invoke;
+        Map<std::string, Type::Any> inferred;
+        std::function<void(const Type::Any &, const Type::Any &)> infer = [&](const auto &expected, const auto &actual) {
+          if (const auto variable = expected.template get<Type::Var>()) inferred.emplace(variable->name, actual);
+          else if (const auto pointer = expected.template get<Type::Ptr>()) {
+            if (const auto value = actual.template get<Type::Ptr>()) infer(pointer->comp, value->comp);
+          } else if (const auto array = expected.template get<Type::Arr>()) {
+            if (const auto value = actual.template get<Type::Arr>()) infer(array->comp, value->comp);
+          } else if (const auto structure = expected.template get<Type::Struct>()) {
+            if (const auto value = actual.template get<Type::Struct>(); value && value->name == structure->name)
+              for (size_t i = 0; i < std::min(structure->args.size(), value->args.size()); ++i)
+                infer(structure->args[i], value->args[i]);
+          }
+        };
+        if ((*callee)->decl.receiver && invoke.receiver) infer((*callee)->decl.receiver->named.tpe, invoke.receiver->tpe());
+        for (size_t i = 0; i < std::min((*callee)->decl.args.size(), invoke.args.size()); ++i)
+          infer((*callee)->decl.args[i].named.tpe, invoke.args[i].tpe());
+        infer((*callee)->decl.rtn, invoke.rtn);
+        auto args = invoke.tpeArgs;
+        for (size_t i = args.size(); i < (*callee)->decl.tpeVars.size(); ++i) {
+          const auto &variable = (*callee)->decl.tpeVars[i];
+          if (const auto value = inferred ^ get_maybe(variable.name)) args.emplace_back(*value);
+          else if (r.packageVariables ^ contains(variable.name)) args.emplace_back(variable);
+          else break;
+        }
+        return invoke.withTpeArgs(args);
+      });
+      next.decl.tpeVars =
+          next.decl.tpeVars | concat(freeTypeVariables(next.decl))
+          | concat(freeTypeVariables(next) | filter([&](const auto &variable) { return r.packageVariables ^ contains(variable.name); }))
+          | distinct() | to_vector();
+      if (next == *fn) continue;
+      *fn = std::move(next);
+      changed = true;
+    }
+  }
+
+  const auto callees = [](const Function &fn) {
+    return fn.collect_all<Expr::Invoke>() | collect([](const auto &invoke) { return invoke.callee.template get<Type::FnRef>(); })
+           | map([](const auto &ref) { return ref.name; }) | to_vector();
+  };
+  const auto keyByName = r.functions | map([](const auto &entry) { return std::pair{entry.second->decl.name, entry.first}; }) | to<Map>();
+  Set<std::string> host = exported;
+  Set<std::string> contextual;
+  for (const auto &[name, fn] : r.functions)
+    if (fn->template collect_all<Term::Select>() ^ exists([](const auto &selection) { return selection.root.symbol == ContextArgument; }))
+      contextual.emplace(name);
+  size_t closureIterations = 0;
+  for (bool changed = true; changed;) {
+    if (++closureIterations > convergenceLimit) {
+      emit(diag, C.getTranslationUnitDecl()->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
+           POLYREGION_DIAG_POLYSTL "Package call closure did not converge after %0 iterations",
+           static_cast<unsigned long long>(convergenceLimit));
+      return;
+    }
+    changed = false;
+    for (const auto &[name, fn] : r.functions) {
+      const auto invoked = callees(*fn) | collect([&](const auto &callee) { return keyByName ^ get_maybe(callee); }) | to_vector();
+      if (host ^ contains(name))
+        for (const auto &callee : invoked)
+          if (host.emplace(callee).second) changed = true;
+      if (!(contextual ^ contains(name)) && invoked ^ exists([&](const auto &callee) { return contextual ^ contains(callee); })) {
+        contextual.emplace(name);
+        changed = true;
+      }
+    }
+  }
+  const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+  const auto context = Term::Select(Named(std::string(ContextArgument), contextType), {}, contextType).widen();
+  for (const auto &[name, fn] : r.functions) {
+    if (host ^ contains(name)) fn->decl.affinity = FunctionAffinity::Host();
+    if (!(contextual ^ contains(name))) continue;
+    if (fn->decl.args.empty() || fn->decl.args.front().named.symbol != ContextArgument)
+      fn->decl.args.insert(fn->decl.args.begin(), Arg(Named(std::string(ContextArgument), contextType), {}));
+    *fn = fn->template modify_all<Expr::Invoke>([&](const Expr::Invoke &invoke) -> Expr::Invoke {
+      const auto callee =
+          invoke.callee.template get<Type::FnRef>() ^ flat_map([&](const auto &ref) { return keyByName ^ get_maybe(ref.name); });
+      if (!callee || !(contextual ^ contains(*callee))) return invoke;
+      if (!invoke.args.empty())
+        if (const auto selected = invoke.args.front().template get<Term::Select>(); selected && selected->root.symbol == ContextArgument)
+          return invoke;
+      return invoke.withArgs(invoke.args ^ prepend(context));
+    });
+  }
+  for (const auto &exportedFunction : exports) {
+    auto fn = remapper.handleCall(exportedFunction.decl, r).second;
+    fn->decl.name = exportedFunction.name;
+    fn->implements = exportedFunction.implements;
+    fn->requiredCapabilities = exportedFunction.requiredCapabilities;
   }
 
   const auto functions =
@@ -234,7 +407,7 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,            /
       | values()  //
       | map([&](const auto &x) {
           return x->template modify_all<Type::FnRef>([&](const auto &ref) {
-            return exportNames ^ get_maybe(ref.name) | map([&](const auto &name) { return ref.withName(name); }) | get_or_else(ref);
+            return exportNames ^ get_maybe(ref.name) ^ map([&](const auto &name) { return ref.withName(name); }) ^ get_or_else(ref);
           });
         }) //
       | to_vector();
@@ -252,18 +425,44 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,            /
          POLYREGION_DIAG_POLYSTL "Duplicate package function identity: %0", fqcn(*duplicateName));
     return;
   }
+  const auto unboundFunctionVariable =
+      functions | collect_first([](const auto &fn) -> Opt<std::pair<Sym, Type::Var>> {
+        const auto bound = fn.decl.tpeVars | to<Set>();
+        return freeTypeVariables(fn) | collect_first([&](const auto &variable) -> Opt<std::pair<Sym, Type::Var>> {
+                 return bound ^ contains(variable) ? Opt<std::pair<Sym, Type::Var>>{} : std::pair{fn.decl.name, variable};
+               });
+      });
+  if (unboundFunctionVariable) {
+    emit(diag, clang::DiagnosticsEngine::Level::Error, POLYREGION_DIAG_POLYSTL "Package function %0 contains unbound type variable %1",
+         fqcn(unboundFunctionVariable->first), canonicalName(unboundFunctionVariable->second.widen()));
+    return;
+  }
+  const auto unboundStructVariable =
+      r.structs | values() | collect_first([](const auto &definition) -> Opt<std::pair<Sym, Type::Var>> {
+        const auto bound = definition->tpeVars | to<Set>();
+        return freeTypeVariables(*definition) | collect_first([&](const auto &variable) -> Opt<std::pair<Sym, Type::Var>> {
+                 return bound ^ contains(variable) ? Opt<std::pair<Sym, Type::Var>>{} : std::pair{definition->name, variable};
+               });
+      });
+  if (unboundStructVariable) {
+    emit(diag, clang::DiagnosticsEngine::Level::Error, POLYREGION_DIAG_POLYSTL "Package struct %0 contains unbound type variable %1",
+         fqcn(unboundStructVariable->first), canonicalName(unboundStructVariable->second.widen()));
+    return;
+  }
   const auto program =
       polyfront::packageProgram(functions, r.structs | values() | map([](const auto &x) { return std::move(*x); }) | to_vector());
 
-  polyfront::writeProgramMsgpack(program, outPath) //
+  auto phasePath = outPath;
+  if (C.getLangOpts().CUDA || C.getLangOpts().HIP) phasePath += C.getLangOpts().CUDAIsDevice ? ".device" : ".host";
+  polyfront::writeProgramMsgpack(program, phasePath) //
       ^ foreach_total(
           [&](const std::error_code &ec) {
-            emit(diag, clang::DiagnosticsEngine::Level::Error, POLYREGION_DIAG_POLYSTL "Cannot open package program output %0: %1", outPath,
-                 ec.message());
+            emit(diag, clang::DiagnosticsEngine::Level::Error, POLYREGION_DIAG_POLYSTL "Cannot open package program output %0: %1",
+                 phasePath, ec.message());
           },
           [&](const size_t bytes) {
             emit(diag, clang::DiagnosticsEngine::Level::Remark,
-                 POLYREGION_DIAG_POLYSTL "Wrote PolyAST package program %0 (%1 symbols, %2 functions, %3 bytes)", outPath,
+                 POLYREGION_DIAG_POLYSTL "Wrote PolyAST package program %0 (%1 symbols, %2 functions, %3 bytes)", phasePath,
                  std::to_string(exports.size()), std::to_string(program.functions.size()), std::to_string(bytes));
           });
 }

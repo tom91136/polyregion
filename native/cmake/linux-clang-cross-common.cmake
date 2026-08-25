@@ -56,6 +56,9 @@ set(VCPKG_LIBRARY_LINKAGE static)
 set(VCPKG_BUILD_TYPE release)
 set(VCPKG_CMAKE_SYSTEM_NAME Linux)
 set(VCPKG_MAKE_BUILD_TRIPLET "--host=${POLYREGION_TARGET_TRIPLE}")
+# Pass the selected libc/sysroot into port builds and include its path in each
+# package ABI. Otherwise vcpkg may restore host-libc archives for this triplet.
+set(VCPKG_ENV_PASSTHROUGH CMAKE_SYSROOT)
 if (DEFINED ENV{CMAKE_SYSROOT})
     set(CMAKE_SYSROOT "$ENV{CMAKE_SYSROOT}")
 endif ()

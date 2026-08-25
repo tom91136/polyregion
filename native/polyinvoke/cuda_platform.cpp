@@ -137,6 +137,41 @@ PhysicalDevice CudaDevice::physicalDevice() {
   CHECKED(cuDeviceGetAttribute(&slot, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, device));
   return PhysicalDevice::pci(static_cast<uint32_t>(domain), static_cast<uint8_t>(bus), static_cast<uint8_t>(slot), 0);
 }
+size_t CudaDevice::subgroupSize() {
+  int size = 1;
+  CHECKED(cuDeviceGetAttribute(&size, CU_DEVICE_ATTRIBUTE_WARP_SIZE, device));
+  return static_cast<size_t>(size);
+}
+size_t CudaDevice::maxThreadsPerBlock() {
+  int size = 0;
+  CHECKED(cuDeviceGetAttribute(&size, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, device));
+  return static_cast<size_t>(size);
+}
+size_t CudaDevice::localMemoryBytes() {
+  int size = 0;
+  CHECKED(cuDeviceGetAttribute(&size, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, device));
+  return static_cast<size_t>(size);
+}
+size_t CudaDevice::globalMemoryBytes() {
+  size_t size = 0;
+  CHECKED(cuDeviceTotalMem(&size, device));
+  return size;
+}
+size_t CudaDevice::computeUnits() {
+  int count = 0;
+  CHECKED(cuDeviceGetAttribute(&count, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device));
+  return static_cast<size_t>(count);
+}
+uint32_t CudaDevice::cudaArchitectureMajor() {
+  int value = 0;
+  CHECKED(cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
+  return static_cast<uint32_t>(value);
+}
+uint32_t CudaDevice::cudaArchitectureMinor() {
+  int value = 0;
+  CHECKED(cuDeviceGetAttribute(&value, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
+  return static_cast<uint32_t>(value);
+}
 bool CudaDevice::sharedAddressSpace() {
   POLYINVOKE_TRACE();
   return false;

@@ -12,6 +12,7 @@ add_llvm_library(polycpp-clang-plugin
         call_prism_core.cpp
         call_prism_cuda.cpp
         call_prism_hip.cpp
+        call_prism_sycl.cpp
         call_prism_polyregion.cpp
         remapper.cpp
         clang_utils.cpp

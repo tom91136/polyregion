@@ -244,12 +244,17 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
         return shuffle('x', llvm::Intrinsic::nvvm_shfl_sync_bfly_i32, v.value, v.laneMask, v.width, v.mask, v.rtn);
       },
       [&](const Spec::GpuSubgroupBarrier &v) -> ValPtr {
-        (void)v;
         // Before Volta, a warp executes in lockstep and has no warp execution-barrier instruction.
         // Preserve subgroup memory ordering without strengthening this into a CTA execution barrier,
         // which could deadlock when only one warp reaches a subgroup-uniform barrier.
-        if (legacySubgroup) return cg.intr0(llvm::Intrinsic::nvvm_membar_cta);
-        return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}), activeMask());
+        if (legacySubgroup) {
+          const auto literal = v.mask.get<Term::IntU32Const>();
+          if (!literal || literal->value != -1) throw BackendException("Masked subgroup barriers require sm_70 or newer");
+          return cg.intr0(llvm::Intrinsic::nvvm_membar_cta);
+        }
+        auto *active = activeMask();
+        auto *mask = effectiveMask(v.mask, active);
+        return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}), mask);
       },
       [&](const Spec::GpuBallot &v) -> ValPtr {
         auto *active = activeMask();

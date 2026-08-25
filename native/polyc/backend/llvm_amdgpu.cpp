@@ -125,16 +125,18 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     inRange = B.CreateAnd(inRange, B.CreateICmpULT(srcLane, cg.intr0(llvm::Intrinsic::amdgcn_wavefrontsize)));
     auto *maskV = B.CreateIntCast(cg.mkTermVal(mask), i32Ty, false);
     auto *active = activeMask();
-    auto *requested = B.CreateIntCast(maskV, active->getType(), false);
     auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32Ty, 0xFFFFFFFFu));
-    auto *members = B.CreateSelect(isAll, active, B.CreateAnd(requested, active));
     const auto member = [&](ValPtr lane) {
-      const auto bits = members->getType()->getIntegerBitWidth();
+      const auto bits = active->getType()->getIntegerBitWidth();
       auto *bounded = B.CreateICmpULT(lane, llvm::ConstantInt::get(i32Ty, bits));
-      auto *bit = B.CreateIntCast(lane, members->getType(), false);
-      auto *set = B.CreateICmpNE(B.CreateAnd(B.CreateLShr(members, bit), llvm::ConstantInt::get(members->getType(), 1)),
-                                 llvm::ConstantInt::get(members->getType(), 0));
-      return B.CreateAnd(bounded, set);
+      auto *safeLane = B.CreateSelect(bounded, lane, llvm::ConstantInt::get(i32Ty, 0));
+      auto *physicalBit = B.CreateIntCast(safeLane, active->getType(), false);
+      auto *activeSet = B.CreateICmpNE(B.CreateAnd(B.CreateLShr(active, physicalBit), llvm::ConstantInt::get(active->getType(), 1)),
+                                       llvm::ConstantInt::get(active->getType(), 0));
+      auto *logicalBit = B.CreateAnd(lane, llvm::ConstantInt::get(i32Ty, 31));
+      auto *requestedSet =
+          B.CreateICmpNE(B.CreateAnd(B.CreateLShr(maskV, logicalBit), llvm::ConstantInt::get(i32Ty, 1)), llvm::ConstantInt::get(i32Ty, 0));
+      return B.CreateAnd(bounded, B.CreateAnd(activeSet, B.CreateOr(isAll, requestedSet)));
     };
     inRange = B.CreateAnd(inRange, B.CreateAnd(member(lid), member(srcLane)));
     auto *safeSrcLane = B.CreateSelect(inRange, srcLane, lid);
@@ -165,12 +167,16 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   auto ballot = [&](llvm::Value *pred) {
     return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i32Ty()}), pred);
   };
-  auto memberMask = [&](const Term::Any &mask, llvm::Type *ballotTy) -> llvm::Value * {
+  auto logicalWarpMask = [&](llvm::Value *wide) -> llvm::Value * {
+    auto *segment = cg.B.CreateAnd(laneId(), llvm::ConstantInt::get(cg.C.i32Ty(), ~31u));
+    auto *shift = cg.B.CreateIntCast(segment, wide->getType(), false);
+    return cg.B.CreateIntCast(cg.B.CreateLShr(wide, shift), cg.C.i32Ty(), false);
+  };
+  auto memberMask = [&](const Term::Any &mask) -> llvm::Value * {
     auto *requested = cg.B.CreateIntCast(cg.mkTermVal(mask), cg.C.i32Ty(), false);
-    auto *active = activeMask();
-    auto *literal = cg.B.CreateIntCast(requested, ballotTy, false);
+    auto *active = logicalWarpMask(activeMask());
     auto *isAll = cg.B.CreateICmpEQ(requested, llvm::ConstantInt::get(cg.C.i32Ty(), 0xFFFFFFFFu));
-    return cg.B.CreateSelect(isAll, active, cg.B.CreateAnd(literal, active));
+    return cg.B.CreateSelect(isAll, active, cg.B.CreateAnd(requested, active));
   };
 
   return expr.op.match_total(                                                           //
@@ -228,19 +234,23 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
       [&](const Spec::GpuShuffleUp &v) -> ValPtr { return shuffle('u', v.value, v.delta, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleIdx &v) -> ValPtr { return shuffle('i', v.value, v.srcLane, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleXor &v) -> ValPtr { return shuffle('x', v.value, v.laneMask, v.width, v.mask, v.rtn); },
-      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return cg.intr0(llvm::Intrinsic::amdgcn_wave_barrier); },
+      [&](const Spec::GpuSubgroupBarrier &v) -> ValPtr {
+        const auto literal = v.mask.get<Term::IntU32Const>();
+        if (!literal || literal->value != -1) throw BackendException("Masked subgroup barriers are unsupported for AMDGPU");
+        return cg.intr0(llvm::Intrinsic::amdgcn_wave_barrier);
+      },
       [&](const Spec::GpuBallot &v) -> ValPtr {
-        auto *votes = ballot(cg.mkTermVal(v.pred));
-        return cg.B.CreateIntCast(cg.B.CreateAnd(votes, memberMask(v.mask, votes->getType())), cg.C.i32Ty(), false);
+        auto *votes = logicalWarpMask(ballot(cg.mkTermVal(v.pred)));
+        return cg.B.CreateAnd(votes, memberMask(v.mask));
       },
       [&](const Spec::GpuVoteAny &v) -> ValPtr {
-        auto *votes = ballot(cg.mkTermVal(v.pred));
-        auto *mask = memberMask(v.mask, votes->getType());
+        auto *votes = logicalWarpMask(ballot(cg.mkTermVal(v.pred)));
+        auto *mask = memberMask(v.mask);
         return cg.B.CreateICmpNE(cg.B.CreateAnd(votes, mask), llvm::ConstantInt::get(mask->getType(), 0));
       },
       [&](const Spec::GpuVoteAll &v) -> ValPtr {
-        auto *votes = ballot(cg.mkTermVal(v.pred));
-        auto *mask = memberMask(v.mask, votes->getType());
+        auto *votes = logicalWarpMask(ballot(cg.mkTermVal(v.pred)));
+        auto *mask = memberMask(v.mask);
         return cg.B.CreateICmpEQ(cg.B.CreateAnd(votes, mask), mask);
       },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, amdgpuScope(v.scope)); },

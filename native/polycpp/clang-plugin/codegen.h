@@ -28,9 +28,10 @@ polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
                                       const clang::SourceLocation &loc,    //
                                       runtime::PlatformKind kind);
 
-void compilePackageProgram(const polyfront::Options &opts,            //
-                           clang::ASTContext &C,                      //
-                           clang::DiagnosticsEngine &diag,            //
-                           const std::vector<PackageExport> &exports, //
+void compilePackageProgram(const polyfront::Options &opts,                                //
+                           clang::ASTContext &C,                                          //
+                           clang::DiagnosticsEngine &diag,                                //
+                           const std::vector<PackageExport> &exports,                     //
+                           const std::vector<const clang::FunctionDecl *> &deviceKernels, //
                            const std::string &outPath);
 } // namespace polyregion::polystl

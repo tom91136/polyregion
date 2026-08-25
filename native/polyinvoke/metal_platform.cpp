@@ -127,6 +127,14 @@ bool MetalDevice::singleEntryPerModule() {
   POLYINVOKE_TRACE();
   return false;
 }
+size_t MetalDevice::maxThreadsPerBlock() { return device->maxThreadsPerThreadgroup().width; }
+size_t MetalDevice::localMemoryBytes() { return device->maxThreadgroupMemoryLength(); }
+size_t MetalDevice::globalMemoryBytes() { return device->recommendedMaxWorkingSetSize(); }
+size_t MetalDevice::computeUnits() {
+  // Metal does not expose a physical compute-unit count. A conservative unit
+  // keeps policy sizing valid without claiming unavailable topology.
+  return 1;
+}
 std::vector<Property> MetalDevice::properties() {
   POLYINVOKE_TRACE();
   return {{

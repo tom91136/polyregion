@@ -3,6 +3,7 @@
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
@@ -16,11 +17,15 @@ int clang_main(int Argc, char **Argv, const llvm::ToolContext &ToolContext);
 #include "fmt/core.h"
 
 #include "polyfront/options_frontend.hpp"
+#include "polyfront/package_program.hpp"
+#include "polyfront/program_fragment.hpp"
 #include "polyregion/conventions.h"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 
 #include "driver_polyc.h"
+#include "polyast_codec.h"
+#include "program_fragment_hip.hpp"
 
 using namespace aspartame;
 using namespace polyregion::polyfront;
@@ -32,6 +37,44 @@ using polyregion::conventions::reflect::PassMem;
 using polyregion::conventions::reflect::PassProtectRt;
 using polyregion::conventions::reflect::PassRecordAlloc;
 using polyregion::conventions::reflect::PassStack;
+
+namespace {
+
+int finishPackageCompilation(const int result, const std::string &path) {
+  if (path.empty() || result != 0) return result;
+  const auto hostPath = path + ".host";
+  const auto devicePath = path + ".device";
+  const auto read = [](const std::string &input) -> std::optional<polyregion::polyast::Program> {
+    const auto buffer = llvm::MemoryBuffer::getFile(input);
+    if (!buffer) return {};
+    const auto bytes = (*buffer)->getBuffer();
+    return polyregion::polyast::hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()),
+                                                            reinterpret_cast<const uint8_t *>(bytes.end()));
+  };
+  const auto host = read(hostPath);
+  const auto device = read(devicePath);
+  if (!host && !device) return result;
+
+  auto program = host ? *host : *device;
+  if (host && device) {
+    const auto merged = polyregion::polyfront::package::mergeProgramFragments(*host, *device);
+    if (!merged) {
+      fmt::print(stderr, "[PolyCpp] Unable to merge package compilation fragments:\n{}\n", merged.errors ^ mk_string("\n") ^ indent(2));
+      return EXIT_FAILURE;
+    }
+    program = polyregion::polystl::hip::reconcileLaunchConstants(std::move(*merged.value), *device);
+  }
+  const auto written = polyregion::polyfront::writeProgramMsgpack(program, path);
+  if (const auto error = std::get_if<std::error_code>(&written)) {
+    fmt::print(stderr, "[PolyCpp] Cannot write package program {}: {}\n", path, error->message());
+    return EXIT_FAILURE;
+  }
+  llvm::sys::fs::remove(hostPath);
+  llvm::sys::fs::remove(devicePath);
+  return result;
+}
+
+} // namespace
 
 int main(int argc, const char *argv[]) {
 #ifdef POLYREGION_FUSED_DRIVER
@@ -88,9 +131,14 @@ int main(int argc, const char *argv[]) {
                  const auto polyreflectPlugin = joinPath(polycppLibPath, fmt::format("polyreflect-plugin.{}", dynamicLibSuffix()));
                  const auto polycppClangPlugin = joinPath(polycppLibPath, fmt::format("polycpp-clang-plugin.{}", dynamicLibSuffix()));
                  append({"-isystem", polycppIncludePath});
-                 append({"-include", "polystl/polystl.h"});
+                 if (opts->emitLibrary.empty()) append({"-include", "polystl/polystl.h"});
 
                  const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
+                 if (!opts->emitLibrary.empty()) {
+                   llvm::sys::fs::remove(opts->emitLibrary);
+                   llvm::sys::fs::remove(opts->emitLibrary + ".host");
+                   llvm::sys::fs::remove(opts->emitLibrary + ".device");
+                 }
                  const bool noRewrite = std::getenv(polyregion::env::PolycppNoRewrite) != nullptr;
                  const auto mem = noRewrite ? StdParOptions::MemKind::Direct : opts->mem;
 #ifndef POLYREGION_FUSED_DRIVER
@@ -136,7 +184,8 @@ int main(int argc, const char *argv[]) {
                                              fmt::format("-{}={}+{}", FlagLate, PassInterpose, PassStack)}));
                      break;
                    case StdParOptions::MemKind::Reflect:
-                     append({"-include", "reflect-rt/rt.hpp"});
+                     append(
+                         {"-include", opts->emitLibrary.empty() ? "reflect-rt/rt.hpp" : joinPath(polycppIncludePath, "reflect-rt/rt.hpp")});
                      // XXX run ProtectRT per-TU; otherwise LLD's plugin would see the ODR error first.
                      append(passPluginFlags({fmt::format("-{}={}", FlagVerbose, debug ? "1" : "0"), //
                                              fmt::format("-{}={}", FlagLate, PassProtectRt)}));
@@ -234,10 +283,13 @@ int main(int argc, const char *argv[]) {
                if (!isCC1) remaining.insert(remaining.begin() + 1, "--driver-mode=g++");
                auto rawArgs = remaining ^ map([](const auto &arg) { return const_cast<char *>(arg.data()); });
                llvm::ToolContext toolContext{execPath.c_str(), nullptr, false};
-               return clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext);
+               return finishPackageCompilation(clang_main(static_cast<int>(rawArgs.size()), rawArgs.data(), toolContext),
+                                               opts ? opts->emitLibrary : std::string{});
 #else
                remaining[0] = "clang++";
-               return llvm::sys::ExecuteAndWait(clangPath, remaining ^ map([](const auto &x) -> llvm::StringRef { return x; }));
+               return finishPackageCompilation(
+                   llvm::sys::ExecuteAndWait(clangPath, remaining ^ map([](const auto &x) -> llvm::StringRef { return x; })),
+                   opts ? opts->emitLibrary : std::string{});
 #endif
              });
 }

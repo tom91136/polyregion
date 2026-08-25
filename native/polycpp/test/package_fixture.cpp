@@ -16,6 +16,7 @@
 
 #include "ast.h"
 #include "polyast_codec.h"
+#include "program_fragment_hip.hpp"
 
 using namespace aspartame;
 
@@ -23,6 +24,15 @@ int main(int argc, char **argv) {
   using namespace polyregion::polyast;
   using namespace polyregion::polyast::dsl;
   const bool writeInputs = argc == 3 && std::string(argv[1]) == "--write-package-inputs";
+  if (argc == 3 && std::string(argv[1]) == "--print-program") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 10;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    llvm::outs() << repr(program) << '\n';
+    return 0;
+  }
   if (argc == 3 && std::string(argv[1]) == "--remove-prefix") {
     llvm::SmallString<256> directory(argv[2]);
     llvm::sys::path::remove_filename(directory);
@@ -57,6 +67,262 @@ int main(int argc, char **argv) {
       return 9;
     }
     return 0;
+  }
+  if (argc == 5 && std::string(argv[1]) == "--assert-struct-prefix-count") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 11;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const std::string prefix = argv[3];
+    const auto actual = program.defs ^ count([&](const auto &definition) { return fqcn(definition.name) ^ starts_with(prefix); });
+    const auto expected = std::stoul(argv[4]);
+    if (actual != expected) {
+      llvm::errs() << "Expected " << expected << " structs beginning with `" << prefix << "`, found " << actual << '\n';
+      return 12;
+    }
+    return 0;
+  }
+  if (argc == 4 && std::string(argv[1]) == "--assert-offload-i32-constant") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 13;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto expected = std::stoi(argv[3]);
+    const auto found = program.functions ^ exists([&](const auto &function) {
+                         return function.convention.template is<CallConvention::OffloadEntry>()
+                                && function.template collect_all<Term::IntS32Const>()
+                                       ^ exists([&](const auto &constant) { return constant.value == expected; });
+                       });
+    return found ? 0 : 13;
+  }
+  if (argc == 4 && std::string(argv[1]) == "--assert-i32-constant") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 18;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto expected = std::stoi(argv[3]);
+    const auto found = program.collect_all<Term::IntS32Const>() ^ exists([&](const auto &constant) { return constant.value == expected; });
+    return found ? 0 : 18;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-source-idioms") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 19;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto function = program.functions ^ collect_first([](const auto &candidate) -> std::optional<Function> {
+                            if (candidate.decl.name == Sym({"source_idioms", "implementation", "apply"})) return candidate;
+                            return {};
+                          });
+    if (!function) return 19;
+    const auto hasMemcpy =
+        !function->template collect_all<Stmt::While>().empty() && !function->template collect_all<Stmt::Update>().empty();
+    const auto hasBitCastRef = function->template collect_all<Expr::RefTo>()
+                               ^ exists([](const auto &ref) { return !ref.idx && ref.space.template is<TypeSpace::Private>(); });
+    const auto hasBitCastCast = function->template collect_all<Expr::Cast>() ^ exists([](const auto &cast) {
+                                  const auto target = cast.as.template get<Type::Ptr>();
+                                  return target && target->comp.template is<Type::IntU64>()
+                                         && target->space.template is<TypeSpace::Private>() && cast.from.tpe().template is<Type::Ptr>();
+                                });
+    const auto hasBitCastLoad = function->template collect_all<Expr::Index>() ^ exists([](const auto &index) {
+                                  const auto source = index.lhs.tpe().template get<Type::Ptr>();
+                                  return index.comp.template is<Type::IntU64>() && source && source->comp.template is<Type::IntU64>()
+                                         && source->space.template is<TypeSpace::Private>();
+                                });
+    const auto hasBitCast = hasBitCastRef && hasBitCastCast && hasBitCastLoad;
+    const auto hasVisit =
+        function->template collect_all<Stmt::Cond>().size() >= 2 && function->template collect_all<Expr::Invoke>().size() >= 3;
+    const auto hasNext = function->template collect_all<Expr::RefTo>() ^ exists([](const auto &ref) {
+                           return ref.comp.template is<Type::IntS32>() && ref.idx && ref.idx->template is<Term::Select>();
+                         });
+    return hasMemcpy && hasBitCast && hasVisit && hasNext ? 0 : 19;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-allocation-control-scaffolding") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 20;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto calls = program.collect_all<Expr::ForeignCall>();
+    const auto allocations =
+        calls ^ count([](const auto &call) { return call.name == "polyrt_host_malloc" || call.name == "polyrt_host_new"; });
+    const auto releases = calls ^ count([](const auto &call) { return call.name == "polyrt_host_free"; });
+    return allocations >= 2 && releases >= 1 ? 0 : 20;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-sycl-source-prisms") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 16;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto allocations = program.collect_all<Spec::RemoteAlloc>().size();
+    const auto frees = program.collect_all<Spec::RemoteFree>().size();
+    const auto launches = program.collect_all<Spec::RemoteLaunch>().size();
+    const auto entries =
+        program.functions ^ count([](const auto &function) { return function.convention.template is<CallConvention::OffloadEntry>(); });
+    const auto reductions = program.collect_all<Spec::GpuGroupReduce>().size();
+    const auto inclusiveScans = program.collect_all<Spec::GpuGroupInclusiveScan>().size();
+    const auto exclusiveScans = program.collect_all<Spec::GpuGroupExclusiveScan>().size();
+    const auto copies = program.collect_all<Spec::RemoteMemcpy>();
+    const auto localToRemote = copies ^ count([](const auto &copy) { return copy.direction.template is<Direction::LocalToRemote>(); });
+    const auto remoteToLocal = copies ^ count([](const auto &copy) { return copy.direction.template is<Direction::RemoteToLocal>(); });
+    const auto remoteToRemote = copies ^ count([](const auto &copy) { return copy.direction.template is<Direction::RemoteToRemote>(); });
+    const auto barriers = program.collect_all<Spec::GpuBarrierLocal>().size();
+    const auto allBarriers = program.collect_all<Spec::GpuBarrierAll>().size();
+    const auto subgroupBarriers = program.collect_all<Spec::GpuSubgroupBarrier>().size();
+    const auto shuffleUps = program.collect_all<Spec::GpuShuffleUp>().size();
+    const auto shuffleIndices = program.collect_all<Spec::GpuShuffleIdx>().size();
+    const auto subgroupSizes = program.collect_all<Spec::GpuSubgroupSize>().size();
+    const auto globalIndices = program.collect_all<Spec::GpuGlobalIdx>().size();
+    const auto localIndices = program.collect_all<Spec::GpuLocalIdx>().size();
+    const auto bitwiseReductions =
+        program.collect_all<Spec::GpuGroupReduce>() ^ count([](const auto &op) { return op.op.template is<AtomicOp::Or>(); });
+    const auto bitwiseInclusiveScans =
+        program.collect_all<Spec::GpuGroupInclusiveScan>() ^ count([](const auto &op) { return op.op.template is<AtomicOp::Xor>(); });
+    const auto deviceInfoCalls = program.collect_all<Expr::ForeignCall>() ^ count([](const auto &call) {
+                                   return call.name == "polyrt_device_max_threads_per_block_u64"
+                                          || call.name == "polyrt_device_local_memory_bytes"
+                                          || call.name == "polyrt_device_global_memory_bytes" || call.name == "polyrt_device_compute_units";
+                                 });
+    const auto deviceLimitCaps = program.collect_all<Intr::Min>().size();
+    const bool valid = allocations == 4 && frees == 4 && launches == 2 && entries == 2 && reductions == 3 && inclusiveScans == 2
+                       && exclusiveScans == 1 && bitwiseReductions == 2 && bitwiseInclusiveScans == 1 && copies.size() == 8
+                       && localToRemote == 1 && remoteToLocal == 3 && remoteToRemote == 4 && barriers == 0 && allBarriers == 2
+                       && subgroupBarriers == 1 && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4 && globalIndices >= 5
+                       && localIndices >= 5 && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4 && deviceLimitCaps >= 1;
+    if (!valid)
+      llvm::errs() << "Unexpected SYCL prism counts: alloc=" << allocations << " free=" << frees << " launch=" << launches
+                   << " entries=" << entries << " reduce=" << reductions << " copies=" << copies.size() << " inclusive=" << inclusiveScans
+                   << " exclusive=" << exclusiveScans << " local-to-remote=" << localToRemote << " remote-to-local=" << remoteToLocal
+                   << " remote-to-remote=" << remoteToRemote << " local-barriers=" << barriers << " all-barriers=" << allBarriers
+                   << " subgroup-barriers=" << subgroupBarriers << " shuffle-up=" << shuffleUps << " shuffle-index=" << shuffleIndices
+                   << " subgroup-size=" << subgroupSizes << " global-index=" << globalIndices << " local-index=" << localIndices
+                   << " multiply=" << program.collect_all<Intr::Mul>().size() << '\n'
+                   << repr(program) << '\n';
+    return valid ? 0 : 16;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-cuda-hip-source-prisms") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 17;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto shuffleDowns = program.collect_all<Spec::GpuShuffleDown>();
+    const auto shuffleUps = program.collect_all<Spec::GpuShuffleUp>();
+    const auto shuffleIndices = program.collect_all<Spec::GpuShuffleIdx>();
+    const auto shuffleXors = program.collect_all<Spec::GpuShuffleXor>();
+    const auto logicalWidth = [](const auto &shuffle) {
+      const auto width = shuffle.width.template get<Term::IntU32Const>();
+      return width && width->value == 15;
+    };
+    const auto pointerUpdates =
+        program.collect_all<Stmt::Update>() ^ count([](const auto &update) { return update.value.tpe().template is<Type::Ptr>(); });
+    const auto preservedHostHelper = program.functions ^ exists([](const auto &function) {
+                                       return fqcn(function.decl.name).find("application::basic_ostream_count") != std::string::npos
+                                              && !function.template collect_all<Intr::Add>().empty();
+                                     });
+    const auto indexedAsmOutput =
+        program.collect_all<Stmt::Update>() ^ exists([](const auto &update) {
+          return update.lhs.root.symbol.find("extracted") != std::string::npos && update.value.tpe().template is<Type::IntU32>();
+        });
+    const auto cudaDeviceQueries = program.collect_all<Expr::ForeignCall>() ^ count([](const auto &call) {
+                                     return call.name == "polyrt_device_compute_units" || call.name == "polyrt_device_local_memory_bytes";
+                                   });
+    const auto valid = program.collect_all<Spec::RemoteAlloc>().size() == 2 && program.collect_all<Spec::RemoteFree>().size() == 2
+                       && shuffleDowns.size() == 1 && shuffleDowns ^ forall(logicalWidth) && shuffleUps.size() == 3
+                       && (shuffleUps ^ count(logicalWidth)) >= 2 && shuffleIndices.size() == 1 && (shuffleIndices ^ forall(logicalWidth))
+                       && shuffleXors.size() == 2 && program.collect_all<Spec::GpuBallot>().size() == 2
+                       && program.collect_all<Spec::GpuSubgroupBarrier>().size() == 1
+                       && program.collect_all<Spec::GpuFenceLocal>().size() == 1 && program.collect_all<Spec::GpuFenceGlobal>().size() == 1
+                       && program.collect_all<Spec::GpuFenceAll>().size() == 1 && program.collect_all<Spec::GpuVolatileLoad>().size() == 1
+                       && program.collect_all<Spec::GpuVolatileStore>().size() == 1 && program.collect_all<Spec::GpuAtomicRMW>().size() == 2
+                       && program.collect_all<Spec::GpuAtomicCAS>().size() == 2 && program.collect_all<Spec::GpuSubgroupSize>().empty()
+                       && !program.collect_all<Spec::GpuLaneIdx>().empty() && pointerUpdates >= 2 && preservedHostHelper && indexedAsmOutput
+                       && cudaDeviceQueries == 2;
+    if (!valid)
+      llvm::errs() << "Unexpected CUDA/HIP prism counts: alloc=" << program.collect_all<Spec::RemoteAlloc>().size()
+                   << " free=" << program.collect_all<Spec::RemoteFree>().size() << " shuffle-down=" << shuffleDowns.size()
+                   << " shuffle-up=" << shuffleUps.size() << " shuffle-index=" << shuffleIndices.size()
+                   << " shuffle-xor=" << shuffleXors.size() << " ballot=" << program.collect_all<Spec::GpuBallot>().size()
+                   << " subgroup-barrier=" << program.collect_all<Spec::GpuSubgroupBarrier>().size()
+                   << " local-fence=" << program.collect_all<Spec::GpuFenceLocal>().size()
+                   << " global-fence=" << program.collect_all<Spec::GpuFenceGlobal>().size()
+                   << " all-fence=" << program.collect_all<Spec::GpuFenceAll>().size()
+                   << " volatile-load=" << program.collect_all<Spec::GpuVolatileLoad>().size()
+                   << " volatile-store=" << program.collect_all<Spec::GpuVolatileStore>().size()
+                   << " atomic-rmw=" << program.collect_all<Spec::GpuAtomicRMW>().size()
+                   << " atomic-cas=" << program.collect_all<Spec::GpuAtomicCAS>().size()
+                   << " subgroup-size=" << program.collect_all<Spec::GpuSubgroupSize>().size()
+                   << " lane-index=" << program.collect_all<Spec::GpuLaneIdx>().size() << " pointer-updates=" << pointerUpdates
+                   << " host-helper=" << preservedHostHelper << " indexed-asm-output=" << indexedAsmOutput << '\n';
+    return valid ? 0 : 17;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-native-cuda-semantics") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 21;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto localArrays =
+        program.collect_all<Type::Arr>() ^ count([](const auto &array) { return array.space.template is<TypeSpace::Local>(); });
+    const auto privatePointers =
+        program.collect_all<Type::Ptr>() ^ count([](const auto &pointer) { return pointer.space.template is<TypeSpace::Private>(); });
+    const auto invokesDiscardedCall = program.collect_all<Expr::Invoke>() ^ exists([](const auto &invoke) {
+                                        const auto callee = invoke.callee.template get<Type::FnRef>();
+                                        return callee && fqcn(callee->name).find("invoke_and_store") != std::string::npos;
+                                      });
+    const auto mutablePointerReference =
+        program.functions ^ exists([](const auto &function) {
+          if (fqcn(function.decl.name).find("rebase") == std::string::npos || function.decl.args.size() != 1) return false;
+          const auto outer = function.decl.args.front().named.tpe.template get<Type::Ptr>();
+          return outer && outer->comp.template is<Type::Ptr>() && !function.template collect_all<Stmt::Mut>().empty();
+        });
+    const auto valid = program.collect_all<Spec::GpuLocalIdx>().size() >= 3 && program.collect_all<Spec::GpuGroupIdx>().size() >= 3
+                       && program.collect_all<Spec::GpuLocalSize>().size() >= 3 && program.collect_all<Spec::GpuGroupSize>().size() >= 3
+                       && program.collect_all<Spec::GpuAtomicCAS>().size() == 2 && program.collect_all<Spec::GpuAtomicRMW>().size() == 1
+                       && localArrays >= 2 && privatePointers >= 1 && invokesDiscardedCall && mutablePointerReference;
+    if (!valid) llvm::errs() << "Unexpected native CUDA semantics program:\n" << repr(program) << '\n';
+    return valid ? 0 : 21;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--write-marker-interface") {
+    const auto t = Type::Var("T").widen();
+    const auto publicDecl =
+        FunctionDecl(Sym({"bar", "apply"}), {Type::Var("T")}, {},
+                     {Arg(Named("x", t), {}), Arg(Named("op", Type::Exec({}, {t}, t).widen()), {})}, {}, {}, t, FunctionAffinity::Host());
+    std::error_code error;
+    llvm::raw_fd_ostream out(argv[2], error, llvm::sys::fs::OF_None);
+    if (error) return 14;
+    const auto bytes = interface_to_msgpack(Interface(Sym({"foo"}), {publicDecl}, {}));
+    out.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    out.close();
+    return out.has_error() ? 14 : 0;
+  }
+  if (argc == 2 && std::string(argv[1]) == "--check-hip-launch-reconciliation") {
+    const auto iteratorType = Type::Struct(Sym({"rocprim", "detail", "device_partition"}), {}).widen();
+    const auto declaration = [&](const char *name) {
+      return FunctionDecl(Sym({name}), {}, {}, {Arg(Named("iterator", iteratorType), {})}, {}, {}, Type::Unit0(),
+                          FunctionAffinity::Offload());
+    };
+    const auto host = Function(declaration("host"), {let("block_size") = Term::IntU32Const(128), ret()}, FunctionVisibility::Internal(),
+                               FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+    const auto kernel = Function(declaration("kernel"), {let("block_size") = Term::IntU32Const(256), ret()}, FunctionVisibility::Internal(),
+                                 FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+    const auto device = polyregion::polyfront::packageProgram({kernel}, {});
+    const auto reconciled =
+        polyregion::polystl::hip::reconcileLaunchConstants(polyregion::polyfront::packageProgram({host, kernel}, {}), device);
+    const auto values = reconciled.functions.front().collect_all<Term::IntU32Const>();
+    const auto unrelatedType = Type::Struct(Sym({"application", "iterator"}), {}).widen();
+    const auto unrelatedDecl = FunctionDecl(Sym({"unrelated"}), {}, {}, {Arg(Named("iterator", unrelatedType), {})}, {}, {}, Type::Unit0(),
+                                            FunctionAffinity::Host());
+    const auto unrelated = Function(unrelatedDecl, {let("block_size") = Term::IntU32Const(64), ret()}, FunctionVisibility::Internal(),
+                                    FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+    const auto untouched =
+        polyregion::polystl::hip::reconcileLaunchConstants(polyregion::polyfront::packageProgram({unrelated, kernel}, {}), device);
+    const auto unrelatedValues = untouched.functions.front().collect_all<Term::IntU32Const>();
+    return values.size() == 1 && values.front().value == 256 && unrelatedValues.size() == 1 && unrelatedValues.front().value == 64 ? 0 : 15;
   }
   if (argc != 2 && !writeInputs) return 2;
 

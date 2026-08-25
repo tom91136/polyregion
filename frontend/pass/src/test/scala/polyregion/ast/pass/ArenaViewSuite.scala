@@ -180,6 +180,65 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
   }
 
+  test("a direct reference to stack array storage uses the same identity token as a pointer local") {
+    val holderSym     = p.Sym("DirectPointerHolder")
+    val holderTpe     = p.Type.Struct(holderSym, Nil)
+    val pointerTpe    = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val pointerMember = named("pointer", pointerTpe)
+    val storage       = named("storage", p.Type.Arr(p.Type.IntS32, 2, p.Type.Space.Global))
+    val pointer       = named("pointer", pointerTpe)
+    val holder        = named("holder", holderTpe)
+    val same          = named("same", p.Type.Bool1)
+    val capArg        = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val direct = p.Expr.RefTo(
+      selectT(storage),
+      Some(p.Term.IntS64Const(1)),
+      p.Type.IntS32,
+      p.Type.Space.Global,
+      p.Region.Opaque
+    )
+    val program = PassTest.program(
+      entry(
+        args = List(capArg),
+        body = List(
+          p.Stmt.Var(storage, None, isMutable = true),
+          p.Stmt.Var(pointer, Some(direct), isMutable = false),
+          p.Stmt.Var(holder, None, isMutable = true),
+          p.Stmt.Mut(
+            p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe),
+            direct
+          ),
+          p.Stmt.Var(
+            same,
+            Some(
+              p.Expr.IntrOp(
+                p.Intr.LogicEq(
+                  p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe),
+                  selectT(pointer)
+                )
+              )
+            ),
+            isMutable = false
+          ),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(p.StructDef(capSym, Nil, Nil, Nil), p.StructDef(holderSym, Nil, List(pointerMember), Nil))
+    )
+
+    val result = ArenaView(program, NoopLog)
+    assertEquals(result.defs.find(_.name == holderSym).flatMap(_.members.headOption).map(_.tpe), Some(p.Type.IntS64))
+    val fieldMut = result.entry.collectAll[p.Stmt].collectFirst {
+      case m @ p.Stmt.Mut(p.Term.Select(_, List(p.PathStep.Field("pointer")), _), _) => m
+    }
+    assertEquals(fieldMut.map(_.name.tpe), Some(p.Type.IntS64))
+    assertEquals(fieldMut.map(_.expr.tpe), Some(p.Type.IntS64))
+    val comparison = result.entry.collectAll[p.Expr].collectFirst { case p.Expr.IntrOp(x: p.Intr.LogicEq) => x }
+    assertEquals(comparison.map(_.x.tpe), Some(p.Type.IntS64))
+    assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
+  }
+
   test("a nullable base adjustment from immutable local storage drops its null guard") {
     val baseSym                   = p.Sym("Base")
     val derivedSym                = p.Sym("Derived")

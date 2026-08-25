@@ -201,6 +201,32 @@ static std::string mangleOcl(const std::string &name, const std::string &suffix)
   return "_Z" + std::to_string(name.size()) + name + suffix;
 }
 
+static ValPtr emitGroupCollective(CodeGen &cg, const std::string &base, const AtomicOp::Any &op, const Term::Any &value) {
+  const std::string suffix = op.is<AtomicOp::Add>()   ? "add"
+                             : op.is<AtomicOp::Min>() ? "min"
+                             : op.is<AtomicOp::Max>() ? "max"
+                                                      : throw BackendException("SPIR-V group reduce/scan supports only add/min/max");
+  const auto valueType = value.tpe();
+  const std::string mangle = valueType.is<Type::Float32>()   ? "f"
+                             : valueType.is<Type::Float64>() ? "d"
+                             : valueType.is<Type::IntS32>()  ? "i"
+                             : valueType.is<Type::IntU32>()  ? "j"
+                             : valueType.is<Type::IntS64>()  ? "l"
+                             : valueType.is<Type::IntU64>()  ? "m"
+                                                             : throw BackendException("unsupported SPIR-V group collective element type");
+  auto *valueV = cg.mkTermVal(value);
+  return callSpirFunc(cg, mangleOcl(base + "_" + suffix, mangle), valueV->getType(), {valueV});
+}
+
+// OpenCL work_group_any/all take and return int, while the source predicate may be bool/i1.
+static ValPtr emitGroupPredicate(CodeGen &cg, const std::string &name, const Term::Any &value) {
+  auto *i32Ty = cg.C.i32Ty();
+  auto *valueV = cg.mkTermVal(value);
+  auto *predicateV = valueV->getType() == i32Ty ? valueV : cg.B.CreateIntCast(valueV, i32Ty, /*isSigned*/ false);
+  auto *call = callSpirFunc(cg, mangleOcl(name, "i"), i32Ty, {predicateV});
+  return call->getType() == valueV->getType() ? call : cg.B.CreateIntCast(call, valueV->getType(), /*isSigned*/ false);
+}
+
 // OpenCL Itanium mangle suffix for a scalar shuffle element from the polyast type; nullptr if not a scalar
 static const char *scalarShuffleMangle(const Type::Any &rtn) {
   return rtn.is<Type::Float32>()   ? "f"
@@ -320,15 +346,14 @@ static ValPtr emitClampedSubgroupShuffle(CodeGen &cg, const char kind, const Ter
   inRange = cg.B.CreateAnd(inRange, cg.B.CreateICmpULT(srcLane, subgroupSize));
 
   auto *maskV = cg.B.CreateIntCast(cg.mkTermVal(mask), i32, false);
-  // Match NVPTX's maskless convention: -1 means all currently active subgroup lanes, including lanes >=32
-  // on a wider subgroup; any other value is a literal 32-bit membership mask.
+  // Match NVPTX's maskless convention: -1 means all currently active subgroup lanes; other values are
+  // 32-bit masks relative to each aligned 32-lane segment on a wider subgroup.
   auto *isAll = cg.B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32, 0xFFFFFFFFu));
   const auto member = [&](ValPtr laneV) {
     auto *bit = cg.B.CreateAnd(laneV, llvm::ConstantInt::get(i32, 31));
     auto *set =
         cg.B.CreateICmpNE(cg.B.CreateAnd(cg.B.CreateLShr(maskV, bit), llvm::ConstantInt::get(i32, 1)), llvm::ConstantInt::get(i32, 0));
-    auto *literal = cg.B.CreateAnd(cg.B.CreateICmpULT(laneV, llvm::ConstantInt::get(i32, 32)), set);
-    return cg.B.CreateOr(isAll, literal);
+    return cg.B.CreateOr(isAll, set);
   };
   inRange = cg.B.CreateAnd(inRange, cg.B.CreateAnd(member(lane), member(srcLane)));
   // The collective still executes for every lane, so its operand itself must be valid; selecting the result
@@ -380,19 +405,23 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuShuffleXor &v) -> ValPtr {
         return emitClampedSubgroupShuffle(cg, 'x', v.value, v.laneMask, v.width, v.mask, v.rtn);
       },
-      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return subgroupBarrier(); },
+      [&](const Spec::GpuSubgroupBarrier &v) -> ValPtr {
+        const auto literal = v.mask.get<Term::IntU32Const>();
+        if (!literal || literal->value != -1) throw BackendException("Masked subgroup barriers are unsupported for SPIRV-OpenCL");
+        return subgroupBarrier();
+      },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, ""); },
-      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce unsupported for SPIRV-CL"); },
-      [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
-        throw BackendException("Spec::GpuGroupInclusiveScan unsupported for SPIRV-CL");
+      [&](const Spec::GpuGroupReduce &v) -> ValPtr {
+        if (v.value.tpe().is<Type::Bool1>() && v.op.is<AtomicOp::Or>()) return emitGroupPredicate(cg, "work_group_any", v.value);
+        if (v.value.tpe().is<Type::Bool1>() && v.op.is<AtomicOp::And>()) return emitGroupPredicate(cg, "work_group_all", v.value);
+        return emitGroupCollective(cg, "work_group_reduce", v.op, v.value);
       },
-      [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
-        throw BackendException("Spec::GpuGroupExclusiveScan unsupported for SPIRV-CL");
-      },
+      [&](const Spec::GpuGroupInclusiveScan &v) -> ValPtr { return emitGroupCollective(cg, "work_group_scan_inclusive", v.op, v.value); },
+      [&](const Spec::GpuGroupExclusiveScan &v) -> ValPtr { return emitGroupCollective(cg, "work_group_scan_exclusive", v.op, v.value); },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
       [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
@@ -488,12 +517,14 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, atomicScope(v.scope)); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, atomicScope(v.scope)); },
-      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce unsupported for SPIRV-Vulkan"); },
+      [&](const Spec::GpuGroupReduce &) -> ValPtr {
+        throw BackendException("Spec::GpuGroupReduce requires SubgroupLower for SPIRV-Vulkan");
+      },
       [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
-        throw BackendException("Spec::GpuGroupInclusiveScan unsupported for SPIRV-Vulkan");
+        throw BackendException("Spec::GpuGroupInclusiveScan requires SubgroupLower for SPIRV-Vulkan");
       },
       [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
-        throw BackendException("Spec::GpuGroupExclusiveScan unsupported for SPIRV-Vulkan");
+        throw BackendException("Spec::GpuGroupExclusiveScan requires SubgroupLower for SPIRV-Vulkan");
       },
       [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
       [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },

@@ -3,8 +3,8 @@
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -c -o {output}.o {input}
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recv 2
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sig 2
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recv3f5d017bdead486b#sig5982ee392f651bd2 1
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recve59dc2d9039f2bba#sig5982ee392f651bd2 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recvda50d5cbfe5e0def#sig5982ee392f651bd2 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recvf1e376177472fdfe#sig5982ee392f651bd2 1
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sig508ecc398f34b46f 1
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sigfc2acedb11924e56 1
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::single#sigfc2acedb11924e56 1

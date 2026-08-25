@@ -100,7 +100,7 @@ class POLYREGION_EXPORT VulkanDevice final : public Device {
   size_t deviceMaxAllocSize;
   uint32_t deviceMaxWorkGroupInvocations;
   bool lavapipe; // XXX Mesa llvmpipe vectorisation bug: we need to caps high-footprint work-groups
-  uint32_t subgroupSize;
+  uint32_t deviceSubgroupSize;
 
   //  std::shared_ptr<vk::raii::CommandPool> computeCmdPool;
   //  std::shared_ptr<vk::raii::CommandBuffer> computeCmdBuffer;
@@ -127,6 +127,10 @@ public:
   POLYREGION_EXPORT PagingMode pagingMode() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
   POLYREGION_EXPORT size_t maxThreadsPerBlock() override;
+  POLYREGION_EXPORT size_t subgroupSize() override;
+  POLYREGION_EXPORT size_t localMemoryBytes() override;
+  POLYREGION_EXPORT size_t globalMemoryBytes() override;
+  POLYREGION_EXPORT size_t computeUnits() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;

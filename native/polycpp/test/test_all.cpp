@@ -15,6 +15,14 @@ int main(int argc, const char **argv) {
   llvm::sys::path::remove_filename(siblingFixture);
   llvm::sys::path::append(siblingFixture, llvm::sys::path::filename(PackageFixture));
   const auto packageFixture = llvm::sys::fs::exists(siblingFixture) ? siblingFixture.str().str() : std::string(PackageFixture);
+  llvm::SmallString<256> siblingPolyc(argv[0]);
+  llvm::sys::fs::make_absolute(siblingPolyc);
+  llvm::sys::path::remove_filename(siblingPolyc);
+#ifdef _WIN32
+  llvm::sys::path::append(siblingPolyc, "..", "polyc", "polyc.exe");
+#else
+  llvm::sys::path::append(siblingPolyc, "..", "polyc", "polyc");
+#endif
   return runMain(
       argc, argv,
       DriverConfig{
@@ -28,7 +36,7 @@ int main(int argc, const char **argv) {
           .defaultsLabelVar = "opt",
           .defaultsVariants = {{"O0", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O0 -g3 -Wall -Wextra -pedantic -std=c++17"},
                                {"O3", POLYTEST_APPLE_TARGET_FLAG "-fno-crash-diagnostics -O3 -g3 -Wall -Wextra -pedantic -std=c++17"}},
-          .extraVars = {{"package_fixture", packageFixture}},
+          .extraVars = {{"package_fixture", packageFixture}, {"polypackage_emit", siblingPolyc.str().str()}},
           .stdpar = {"polycpp_stdpar",
 #ifdef _WIN32
                      "-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=static -v"

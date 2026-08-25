@@ -3,12 +3,16 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/AST/StmtCXX.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Sema/Lookup.h"
@@ -179,12 +183,54 @@ static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
                                                identity->first, identity->second});
       },
       callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("interfaceDecl"))).bind("interfaceCall"));
-  std::set<const clang::FunctionDecl *> seen;
-  Vector<InterfaceSite> unique;
-  unique.reserve(results.size());
-  for (const auto &site : results)
-    if (seen.emplace(site.callee->getCanonicalDecl()).second) unique.emplace_back(site);
-  return unique;
+  return results;
+}
+
+static Vector<const clang::FunctionDecl *> interfaceCallableIdentities(const InterfaceSite &site) {
+  Vector<const clang::FunctionDecl *> identities;
+  identities.reserve(site.call->getNumArgs());
+  for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
+    const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
+    const auto *record = argument->getType()->getAsCXXRecordDecl();
+    const clang::FunctionDecl *callable = nullptr;
+    if (record) {
+      if (record->isLambda()) callable = record->getLambdaCallOperator();
+      else {
+        const auto methods = record->methods() | filter([](const auto *method) {
+                               return method->getOverloadedOperator() == clang::OO_Call && method->doesThisDeclarationHaveABody();
+                             })
+                             | to_vector();
+        if (methods.size() == 1) callable = methods.front();
+      }
+    } else if (argument->getType()->isFunctionPointerType()) {
+      const clang::Expr *referenced = argument->IgnoreParenImpCasts();
+      if (const auto *address = llvm::dyn_cast<clang::UnaryOperator>(referenced); address && address->getOpcode() == clang::UO_AddrOf)
+        referenced = address->getSubExpr()->IgnoreParenImpCasts();
+      if (const auto *ref = llvm::dyn_cast<clang::DeclRefExpr>(referenced)) callable = llvm::dyn_cast<clang::FunctionDecl>(ref->getDecl());
+    }
+    identities.emplace_back(callable ? callable->getCanonicalDecl() : nullptr);
+  }
+  return identities;
+}
+
+static Opt<std::string> interfaceCallableShapeError(const InterfaceSite &site) {
+  for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
+    const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
+    const auto *record = argument->getType()->getAsCXXRecordDecl();
+    if (!record) continue;
+    if (record->isLambda()) {
+      if (record->capture_size() != 0) return std::string("capturing library callables are not supported");
+      continue;
+    }
+    bool callable = false;
+    for (const auto *method : record->methods())
+      if (method->getOverloadedOperator() == clang::OO_Call && method->doesThisDeclarationHaveABody()) {
+        callable = true;
+        break;
+      }
+    if (callable && !record->isEmpty()) return std::string("stateful library callables are not supported");
+  }
+  return {};
 }
 
 static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::ASTContext &C, const InterfaceSite &site) {
@@ -251,12 +297,24 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
            POLYREGION_DIAG_POLYSTL "capturing library callables are not supported");
       return;
     }
+    if (record && !record->isLambda() && !record->isEmpty()) {
+      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
+           POLYREGION_DIAG_POLYSTL "stateful library callables are not supported");
+      return;
+    }
     if (callable->isTemplated()) {
       emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
            POLYREGION_DIAG_POLYSTL "generic library callables require a concrete operator() specialization");
       return;
     }
     auto [name, function] = remapper.handleCall(callable, context);
+    if (record && (function->collect_all<Term::Select>() ^ exists([](const auto &selection) {
+                     return selection.root.symbol == conventions::ThisReceiver;
+                   }))) {
+      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
+           POLYREGION_DIAG_POLYSTL "library callable operator() depends on its receiver");
+      return;
+    }
     auto args = function->decl.args;
     if (!args.empty() && args.front().named.symbol == conventions::ThisReceiver) args.erase(args.begin());
     function->decl = function->decl.withArgs(args).withAffinity(FunctionAffinity::Host());
@@ -331,6 +389,7 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
   std::vector<clang::Stmt *> statements;
   if (resultDecl) statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(resultDecl), {}, {}));
   statements.emplace_back(mkCall(C, contextAcquire, {contextArg}));
+  const auto protectedBegin = statements.size();
   auto *remoteLoad = mkExternCFn(C, "polyrt_remote_load", C.BoolTy,
                                  {C.VoidPtrTy, constCharStarTy(C), C.IntTy, C.IntTy, C.getSizeType(), C.getPointerType(constCharStarTy(C)),
                                   C.getSizeType(), C.getPointerType(C.getConstType(C.UnsignedCharTy))});
@@ -380,6 +439,16 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
         mkCall(C, requireLoaded, {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)), mkLoad(C, loaded)}));
   }
   statements.emplace_back(mkCall(C, entry, entryArgs));
+  std::vector<clang::Stmt *> protectedStatements(statements.begin() + protectedBegin, statements.end());
+  statements.erase(statements.begin() + protectedBegin, statements.end());
+  auto *release = mkCall(C, contextRelease, {contextArg});
+  auto *rethrow = new (C) clang::CXXThrowExpr(nullptr, C.VoidTy, {}, false);
+  const std::vector<clang::Stmt *> handlerStatements{release, rethrow};
+  auto *handlerBody = clang::CompoundStmt::Create(C, handlerStatements, {}, {}, {});
+  auto *handler = new (C) clang::CXXCatchStmt({}, nullptr, handlerBody);
+  auto *tryBody = clang::CompoundStmt::Create(C, protectedStatements, {}, {}, {});
+  const std::vector<clang::Stmt *> handlers{handler};
+  statements.emplace_back(clang::CXXTryStmt::Create(C, {}, tryBody, handlers));
   statements.emplace_back(mkCall(C, contextRelease, {contextArg}));
   if (resultDecl) statements.emplace_back(clang::ReturnStmt::Create(C, {}, mkLoad(C, resultDecl), nullptr));
   site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
@@ -710,12 +779,69 @@ struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
   clang::ASTContext &context;
   clang::DiagnosticsEngine &diag;
   std::vector<PackageExport> exports;
+  std::vector<const clang::FunctionDecl *> deviceKernels;
+  std::unordered_map<const clang::FunctionDecl *, bool> unsupportedDeviceClosures;
   bool invalid = false;
 
   ExportCollector(clang::ASTContext &context, clang::DiagnosticsEngine &diag) : context(context), diag(diag) {}
 
+  bool shouldVisitTemplateInstantiations() const { return true; }
+
+  bool hasUnsupportedDeviceClosure(const clang::FunctionDecl *fd) {
+    if (const auto found = unsupportedDeviceClosures.find(fd); found != unsupportedDeviceClosures.end()) return found->second;
+    std::unordered_set<const clang::FunctionDecl *> visited;
+    std::function<bool(const clang::FunctionDecl *)> inspect;
+    struct ClosureVisitor final : clang::RecursiveASTVisitor<ClosureVisitor> {
+      std::function<bool(const clang::FunctionDecl *)> &inspect;
+      bool &unsupported;
+
+      ClosureVisitor(std::function<bool(const clang::FunctionDecl *)> &inspect, bool &unsupported)
+          : inspect(inspect), unsupported(unsupported) {}
+
+      bool VisitGCCAsmStmt(clang::GCCAsmStmt *stmt) {
+        const auto text = stmt->getAsmString();
+        unsupported |= text.find("b128") != std::string::npos || text.find("dwordx4") != std::string::npos;
+        return !unsupported;
+      }
+
+      bool VisitCallExpr(clang::CallExpr *expr) {
+        const auto *callee = expr->getDirectCallee();
+        const auto *definition = callee ? callee->getDefinition() : nullptr;
+        unsupported |= definition && inspect(definition);
+        return !unsupported;
+      }
+    };
+    inspect = [&](const clang::FunctionDecl *current) {
+      if (!visited.emplace(current).second) return false;
+      bool unsupported = false;
+      ClosureVisitor(inspect, unsupported).TraverseStmt(current->getBody());
+      return unsupported;
+    };
+    const auto unsupported = inspect(fd);
+    unsupportedDeviceClosures.emplace(fd, unsupported);
+    return unsupported;
+  }
+
+  bool isLiveDeviceKernel(const clang::FunctionDecl *fd) const {
+    if (fd->getQualifiedNameAsString() != "rocprim::detail::trampoline_kernel") return true;
+    const auto *body = llvm::dyn_cast<clang::CompoundStmt>(fd->getBody());
+    if (!body) return false;
+    for (const auto *stmt : body->body()) {
+      const auto *branch = llvm::dyn_cast<clang::IfStmt>(stmt);
+      bool enabled = false;
+      if (branch && branch->isConstexpr() && branch->getCond()->EvaluateAsBooleanCondition(enabled, context)) return enabled;
+    }
+    return false;
+  }
+
   bool VisitFunctionDecl(clang::FunctionDecl *fd) {
     if (fd->doesThisDeclarationHaveABody()) {
+      const bool isSpecialisation = fd->getTemplateSpecializationKind() != clang::TSK_Undeclared;
+      if ((context.getLangOpts().CUDA || context.getLangOpts().HIP) && context.getLangOpts().CUDAIsDevice
+          && fd->hasAttr<clang::CUDAGlobalAttr>() && !fd->getType()->isDependentType()
+          && (fd->getDescribedFunctionTemplate() == nullptr || isSpecialisation) && isLiveDeviceKernel(fd)) {
+        if (!hasUnsupportedDeviceClosure(fd)) deviceKernels.push_back(fd);
+      }
       const auto metadata = packageExportMetadata(fd, context, diag);
       invalid |= metadata.invalid;
       if (metadata.name) exports.push_back({fd, *metadata.name, metadata.implements, metadata.requiredCapabilities});
@@ -735,7 +861,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
       emit(D, clang::DiagnosticsEngine::Warning,
            POLYREGION_DIAG_POLYSTL "-fstdpar-emit-library set but no [[clang::annotate(\"%0\")]] functions found",
            polyfront::PackageExportAnnotation);
-    compilePackageProgram(opts, C, D, collector.exports, opts.emitLibraryPath);
+    compilePackageProgram(opts, C, D, collector.exports, collector.deviceKernels, opts.emitLibraryPath);
     return;
   }
   for (auto r : outlinePolyregionOffload(C))
@@ -789,7 +915,25 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                          || action == clang::frontend::EmitLLVMOnly || action == clang::frontend::EmitCodeGenOnly
                          || action == clang::frontend::EmitObj;
   if (!emitsCode) return;
+  std::map<const clang::FunctionDecl *, Vector<const clang::FunctionDecl *>> interfaceBindings;
   for (const auto &site : interfaceSites(C)) {
+    if (const auto error = interfaceCallableShapeError(site)) {
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", *error);
+      continue;
+    }
+    const auto callableIdentities = interfaceCallableIdentities(site);
+    const auto [binding, inserted] = interfaceBindings.emplace(site.callee->getCanonicalDecl(), callableIdentities);
+    if (!inserted) {
+      if (binding->second != callableIdentities)
+        emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
+             POLYREGION_DIAG_POLYSTL "one interface specialization cannot bind conflicting callable identities");
+      continue;
+    }
+    if (!C.getLangOpts().CXXExceptions) {
+      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
+           POLYREGION_DIAG_POLYSTL "package interface binding requires C++ exceptions for failure-safe context cleanup");
+      continue;
+    }
     const auto package = polyfront::package::loadPackage(site.packageName, opts.libraryPath.empty()
                                                                                ? polyfront::package::packageRoots()
                                                                                : polyfront::package::splitPackageRoots(opts.libraryPath));

@@ -48,6 +48,13 @@ public:
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
   POLYREGION_EXPORT void freeShared(void *ptr) override;
   POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
+  POLYREGION_EXPORT size_t maxThreadsPerBlock() override;
+  POLYREGION_EXPORT size_t subgroupSize() override;
+  POLYREGION_EXPORT size_t localMemoryBytes() override;
+  POLYREGION_EXPORT size_t globalMemoryBytes() override;
+  POLYREGION_EXPORT size_t computeUnits() override;
+  POLYREGION_EXPORT uint32_t cudaArchitectureMajor() override;
+  POLYREGION_EXPORT uint32_t cudaArchitectureMinor() override;
   ~CudaDevice() override;
 };
 
