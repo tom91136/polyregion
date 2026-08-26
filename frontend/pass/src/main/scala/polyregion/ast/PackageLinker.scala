@@ -9,23 +9,6 @@ private[polyregion] object PackageLinker {
 
   private def symbol(name: p.Sym): String = name.fqn.mkString(".")
 
-  private def shiftSize(size: p.Arg.SizeExpr, by: Int): p.Arg.SizeExpr = size match {
-    case p.Arg.SizeExpr.Param(index)  => p.Arg.SizeExpr.Param(index + by)
-    case value: p.Arg.SizeExpr.Const  => value
-    case p.Arg.SizeExpr.Add(lhs, rhs) => p.Arg.SizeExpr.Add(shiftSize(lhs, by), shiftSize(rhs, by))
-    case p.Arg.SizeExpr.Mul(lhs, rhs) => p.Arg.SizeExpr.Mul(shiftSize(lhs, by), shiftSize(rhs, by))
-    case p.Arg.SizeExpr.Min(lhs, rhs) => p.Arg.SizeExpr.Min(shiftSize(lhs, by), shiftSize(rhs, by))
-  }
-
-  private def shiftBoundary(boundary: Option[p.Arg.Boundary], by: Int): Option[p.Arg.Boundary] =
-    boundary.map { value =>
-      val extent = value.extent match {
-        case p.Arg.Extent.Elements(size) => p.Arg.Extent.Elements(shiftSize(size, by))
-        case p.Arg.Extent.Bytes(size)    => p.Arg.Extent.Bytes(shiftSize(size, by))
-      }
-      value.copy(extent = extent)
-    }
-
   private def composeImplementationDecl(
       harvested: p.FunctionDecl,
       publicDecl: p.FunctionDecl
@@ -39,7 +22,9 @@ private[polyregion] object PackageLinker {
     else {
       val args = harvested.args.zipWithIndex.map { case (argument, index) =>
         if (index >= systemArguments && index < systemArguments + publicDecl.args.size)
-          argument.copy(boundary = shiftBoundary(publicDecl.args(index - systemArguments).boundary, systemArguments))
+          argument.copy(boundary =
+            ProgramLinker.shiftBoundary(publicDecl.args(index - systemArguments).boundary, systemArguments)
+          )
         else argument
       }.toArray
       if (trailingResult) {
@@ -55,7 +40,7 @@ private[polyregion] object PackageLinker {
       val initiallyComposed = harvested.copy(args = args.toList)
       val usedNames         = initiallyComposed.collectAll[p.Type].collect { case p.Type.Var(name, _) => name }.toSet
       val composed          = initiallyComposed.copy(tpeVars = initiallyComposed.tpeVars.filter(v => usedNames(v.name)))
-      PackageSymResolver.bindImplementation(composed, publicDecl).map(_ => composed)
+      ProgramLinker.matchImplementation(composed, publicDecl).map(_ => composed)
     }
   }
 
@@ -115,7 +100,7 @@ private[polyregion] object PackageLinker {
     errors.result().distinct
   }
 
-  def validate(pkg: p.Package): List[String] = {
+  private def validate(pkg: p.Package): List[String] = {
     val errors = List.newBuilder[String]
     if (pkg.interface.name.fqn.exists(_.trim.isEmpty)) errors += "package identity contains an empty component"
     if (pkg.program.entry.nonEmpty) errors += "package program must be entryless"
@@ -137,15 +122,15 @@ private[polyregion] object PackageLinker {
       }
       val declarations = pkg.interface.declarations.filter(decl => implementation.implements.contains(decl.name))
       val compatible =
-        declarations.flatMap(decl => PackageSymResolver.bindImplementation(implementation.decl, decl).toOption)
+        declarations.flatMap(decl => ProgramLinker.matchImplementation(implementation.decl, decl).toOption)
       if (compatible.size != 1)
         errors += s"implementation `$name` matches ${compatible.size} public declarations"
-      compatible.headOption.foreach { binding =>
+      compatible.headOption.foreach { result =>
         val constraints = implementation.tpeVars.flatMap(v => v.exactSizeInBytes.map(v.name -> _))
         val names       = constraints.map(_._1)
         if (names.distinct.size != names.size)
           errors += s"implementation `$name` has duplicate type-size constraints"
-        val sizeable = binding.types.keySet -- binding.callables.keySet
+        val sizeable = result.types.keySet -- result.callables.keySet
         if (names.nonEmpty && names.toSet != sizeable)
           errors += s"implementation `$name` type-size constraints must cover all type variables"
       }
@@ -153,7 +138,7 @@ private[polyregion] object PackageLinker {
     pkg.interface.declarations.foreach { declaration =>
       val covered = pkg.program.functions.exists { implementation =>
         implementation.implements.contains(declaration.name) &&
-        PackageSymResolver.bindImplementation(implementation.decl, declaration).isRight
+        ProgramLinker.matchImplementation(implementation.decl, declaration).isRight
       }
       if (!covered) errors += s"public declaration `${symbol(declaration.name)}` has no compatible implementation"
     }
@@ -174,37 +159,8 @@ private[polyregion] object PackageLinker {
     val implementationNames = selected.flatMap(_.functions).filter(_.implements.nonEmpty).map(_.name).toSet
     val functionGroups      = selected.flatMap(_.functions).groupBy(_.name)
     val definitionGroups    = selected.flatMap(_.defs).groupBy(_.name)
-    val localFunctions = mutable.Set.from(functionGroups.collect {
-      case (name, values) if !values.forall(_ == values.head) => name
-    })
-    val localDefinitions = mutable.Set.from(definitionGroups.collect {
-      case (name, values) if !values.forall(_ == values.head) => name
-    })
-    var changed = true
-    while (changed) {
-      changed = false
-      definitionGroups.foreach { case (name, definitions) =>
-        if (definitions.size >= 2 && !localDefinitions(name)) {
-          val depends = definitions.exists(_.collectAll[p.Type].exists {
-            case p.Type.Struct(target, _) => localDefinitions(target)
-            case _                        => false
-          })
-          if (depends) changed = localDefinitions.add(name) || changed
-        }
-      }
-      functionGroups.foreach { case (name, functions) =>
-        if (functions.size >= 2 && !localFunctions(name) && !implementationNames(name)) {
-          val depends = functions.exists { function =>
-            function.collectAll[p.Type].exists {
-              case p.Type.FnRef(target)     => localFunctions(target)
-              case p.Type.Struct(target, _) => localDefinitions(target)
-              case _                        => false
-            }
-          }
-          if (depends) changed = localFunctions.add(name) || changed
-        }
-      }
-    }
+    val (localFunctions, localDefinitions) =
+      ProgramLinker.collisionClosure(functionGroups, definitionGroups, stableFunctions = implementationNames)
 
     val isolated = selected.zipWithIndex.map { case (fragment, index) =>
       val functionNames = fragment.functions.collect {

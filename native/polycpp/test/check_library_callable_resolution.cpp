@@ -1,4 +1,4 @@
-#pragma region case: remote-package
+#pragma region case: callable-resolution-package
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
@@ -8,7 +8,9 @@
 #include <cstdio>
 
 namespace foo {
-template <class T> [[clang::annotate("polyregion_interface:foo:bar.remote_increment")]] inline T remote_increment(T x) { __builtin_trap(); }
+template <class T, class Op> [[clang::annotate("polyregion_interface:foo:bar.apply")]] inline T apply(T x, Op op) { __builtin_trap(); }
 } // namespace foo
 
-int main() { std::printf("%d", foo::remote_increment(41)); }
+int main() {
+  std::printf("%d", foo::apply(40, [](int x) { return x + 2; }));
+}

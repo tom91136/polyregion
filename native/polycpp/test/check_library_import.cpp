@@ -1,11 +1,11 @@
-#pragma region case: missing-package
+#pragma region case: missing-package-import
 #pragma region offload-only
 #pragma region compile-fails: no package is available for library `foo`
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -c -o {output}.o {input}
 
 #include <cstdint>
 
-#if !defined(CHECK_SCALAR) && !defined(CHECK_POINTER)
+#if !defined(CHECK_SCALAR) && !defined(CHECK_POINTER) && !defined(CHECK_BATCHED)
 namespace foo {
 
 template <class T>
@@ -15,7 +15,25 @@ template <class T>
 
 } // namespace foo
 
-void consume(const int *in, int *out) { foo::increment(in, out, 4); }
+void importIncrement(const int *in, int *out) { foo::increment(in, out, 4); }
+#endif
+
+#pragma region case: batched-package-imports
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -DCHECK_BATCHED -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 42 43
+
+#ifdef CHECK_BATCHED
+  #include <cstdio>
+
+namespace foo {
+template <class T> [[clang::annotate("polyregion_interface:foo:bar.increment")]] inline T increment(T x) { __builtin_trap(); }
+template <class T> [[clang::annotate("polyregion_interface:foo:bar.increment")]] inline T incrementAgain(T x) { __builtin_trap(); }
+} // namespace foo
+
+int main() { std::printf("%d %d", foo::increment(41), foo::incrementAgain(42)); }
 #endif
 
 #pragma region case: pointer-package

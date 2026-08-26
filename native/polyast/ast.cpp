@@ -214,7 +214,6 @@ bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::St
 // ====================
 
 Type::Ptr dsl::Ptr(const Type::Any &t, const TypeSpace::Any &s) { return Type::Ptr(t, s); }
-Type::Ptr dsl::Ptr(const Type::Any &t, std::optional<int32_t>, const TypeSpace::Any &s) { return Type::Ptr(t, s); }
 
 std::vector<Stmt::Any> dsl::whileLoop(const std::vector<Stmt::Any> &prelude, const Term::Any &cond, const std::vector<Stmt::Any> &body) {
   std::vector<Stmt::Any> result = prelude;

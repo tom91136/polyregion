@@ -52,9 +52,8 @@ bool writeFile(const llvm::StringRef path, const std::vector<uint8_t> &bytes, st
   return false;
 }
 
-template <typename T, typename Decode>
-Checked<T> invoke(const std::vector<uint8_t> &request, const std::string &explicitExecutable, const std::vector<std::string> &operationArgs,
-                  Decode decode) {
+Checked<polyast::CompileBundle> invokeCompiler(const std::vector<uint8_t> &request, const std::string &explicitExecutable,
+                                               const std::vector<std::string> &compileArgs) {
   const auto executable = clientExecutable(explicitExecutable);
   if (executable.empty()) return {{}, {"cannot locate polyc package compiler"}};
 
@@ -78,10 +77,9 @@ Checked<T> invoke(const std::vector<uint8_t> &request, const std::string &explic
   std::string writeError;
   if (!writeFile(inputPath, request, writeError)) return {{}, {std::move(writeError)}};
 
-  if (operationArgs.empty()) return {{}, {"polyc package operation is empty"}};
-  std::vector<std::string> ownedArgs{"", "--polyc", "package", operationArgs.front()};
+  std::vector<std::string> ownedArgs{"", "--polyc", "package", "compile"};
   ownedArgs.emplace_back(inputPath.str());
-  ownedArgs.insert(ownedArgs.end(), operationArgs.begin() + 1, operationArgs.end());
+  ownedArgs.insert(ownedArgs.end(), compileArgs.begin(), compileArgs.end());
   ownedArgs.emplace_back("--out=" + outputPath.str().str());
   std::vector<llvm::StringRef> args;
   args.reserve(ownedArgs.size());
@@ -104,7 +102,7 @@ Checked<T> invoke(const std::vector<uint8_t> &request, const std::string &explic
   const auto *begin = reinterpret_cast<const uint8_t *>((*buffer)->getBufferStart());
   const auto *end = begin + (*buffer)->getBufferSize();
   try {
-    return {{decode(begin, end)}, {}};
+    return {{polyast::compilebundle_from_msgpack(begin, end)}, {}};
   } catch (const std::exception &error) {
     return {{}, {std::string("cannot decode polyc package result: ") + error.what()}};
   }
@@ -112,22 +110,20 @@ Checked<T> invoke(const std::vector<uint8_t> &request, const std::string &explic
 
 } // namespace
 
-Checked<polyast::PackageSymCompileResult>
-PolycClient::compileSym(const polyast::PackageSymRequest &request, const std::string &executable, const compiletime::Target hostTarget,
-                        const std::string &hostArch, const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
-                        const std::optional<int> stackDepth) {
+Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest &request, const std::string &executable,
+                                               const compiletime::Target hostTarget, const std::string &hostArch,
+                                               const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
+                                               const std::optional<int> stackDepth) {
   const auto host = compiletime::TargetSpec::findByCodegen(hostTarget);
-  if (!host) return {{}, {fmt::format("unknown package host target {}", static_cast<int>(hostTarget))}};
-  std::vector<std::string> args{"compile-sym", "--target=" + std::string(host->canonical), "--arch=" + hostArch};
+  if (!host) return {{}, {fmt::format("unknown program host target {}", static_cast<int>(hostTarget))}};
+  std::vector<std::string> args{"--target=" + std::string(host->canonical), "--arch=" + hostArch};
   for (const auto &[target, arch] : deviceTargets) {
     const auto device = compiletime::TargetSpec::findByCodegen(target);
-    if (!device) return {{}, {fmt::format("unknown package device target {}", static_cast<int>(target))}};
+    if (!device) return {{}, {fmt::format("unknown program device target {}", static_cast<int>(target))}};
     args.emplace_back("--device=" + std::string(device->canonical) + "@" + arch);
   }
   if (stackDepth) args.emplace_back("--stack-depth=" + std::to_string(*stackDepth));
-  return invoke<polyast::PackageSymCompileResult>(
-      polyast::packagesymrequest_to_msgpack(request), executable, args,
-      [](const uint8_t *begin, const uint8_t *end) { return polyast::packagesymcompileresult_from_msgpack(begin, end); });
+  return invokeCompiler(polyast::programlinkrequest_to_msgpack(request), executable, args);
 }
 
 } // namespace polyregion::polyfront::package

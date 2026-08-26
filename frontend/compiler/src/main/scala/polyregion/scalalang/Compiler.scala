@@ -95,175 +95,170 @@ object Compiler {
       renameMap: Map[q.Symbol, p.Sym] = Map.empty
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])] = Map.empty
-  ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = for {
-    log <- sink.subLog(s"Compile ${deps.size} dependent function(s)").success
-    _ = deps.foreach { (fn, ivks) =>
-      log.info(q.DefDef(fn, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
-    }
+  ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = {
+    val interfaceImports = List.newBuilder[InterfaceResolver.Import]
+    for {
+      log <- sink.subLog(s"Compile ${deps.size} dependent function(s)").success
+      _ = deps.foreach { (fn, ivks) =>
+        log.info(q.DefDef(fn, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
+      }
 
-    (_ /*input*/, fns, clsDeps, moduleSymDeps) <- (
-      deps,                   // seed
-      List.empty[p.Function], // acc
-      Set.empty[p.StructDef], // acc
-      Set.empty[q.Symbol]     // acc
-    ).iterateWhileM { (remaining, fnAcc, clsDepAcc, moduleSymDepAcc) =>
-      remaining.toList
-        .foldLeftM((fnAcc, Map.empty: q.FnWitnesses, clsDepAcc, moduleSymDepAcc)) {
-          case ((xs, depss, clsDepss, moduleSymDepss), (sym, ivks)) =>
-            for {
-              // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
-              _ <-
-                if (ivks.map(_.callee).size != 1)
-                  s"Cannot collapse multiple invocations (${ivks.map(_.repr)}), term compiler may have miscompiled".fail
-                else ().success
-              target: p.Expr.Invoke = ivks.head
+      (_ /*input*/, fns, clsDeps, moduleSymDeps) <- (
+        deps,                   // seed
+        List.empty[p.Function], // acc
+        Set.empty[p.StructDef], // acc
+        Set.empty[q.Symbol]     // acc
+      ).iterateWhileM { (remaining, fnAcc, clsDepAcc, moduleSymDepAcc) =>
+        remaining.toList
+          .foldLeftM((fnAcc, Map.empty: q.FnWitnesses, clsDepAcc, moduleSymDepAcc)) {
+            case ((xs, depss, clsDepss, moduleSymDepss), (sym, ivks)) =>
+              for {
+                // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
+                _ <-
+                  if (ivks.map(_.callee).size != 1)
+                    s"Cannot collapse multiple invocations (${ivks.map(_.repr)}), term compiler may have miscompiled".fail
+                  else ().success
+                target: p.Expr.Invoke = ivks.head
 
-              // First, see if it's already in the pile the existing compiled/resolved functions (happens to local definitions)
-              existingFns = existing.map(f => f.signature -> f).toMap
-              r <- matchingSignatures(existingFns.keys, target).toList match {
-                case _ :: Nil => // We have a perfect match from existing functions, no further actions needed
-                  (xs, depss, clsDepss, moduleSymDepss).success
-                case Nil => // Not there, we now look at actual dependencies
-                  val defDef = sym.tree.asInstanceOf[q.DefDef]
-                  // scala.Array's apply/update/length etc. have stub `throw new Error` bodies in the
-                  // stdlib (the JVM lowers their call sites specially). The term compiler can't
-                  // handle `throw`, but Intrinsify handles xs.apply/update/length on Ptr<T>
-                  // receivers directly at IR level. So just skip compiling these - they'll never
-                  // be called as functions.
-                  val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
-                  if (isScalaArrayMethod)
+                // First, see if it's already in the pile the existing compiled/resolved functions (happens to local definitions)
+                existingFns = existing.map(f => f.signature -> f).toMap
+                r <- matchingSignatures(existingFns.keys, target).toList match {
+                  case _ :: Nil => // We have a perfect match from existing functions, no further actions needed
                     (xs, depss, clsDepss, moduleSymDepss).success
-                  else {
-                    // For overrides synthesized by depsWithOverrides, the target ivk's receiver is the
-                    // base type (e.g. Buffer for an xs.apply call), not the override's owner (ListBuffer).
-                    // If a mirror exists for the override's owner, the target's name/receiver won't match
-                    // any fnLut key. As a fallback (only used when the primary signature match finds
-                    // nothing), also match by the sym's own name when sym differs from the target's name.
-                    val symFullName    = p.Sym(sym.fullName)
-                    val primaryMatches = matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList
-                    val symNameMatch =
-                      if (primaryMatches.nonEmpty || symFullName == target.calleeName) Nil
-                      else
-                        fnLut.keys
-                          .filter(s =>
-                            s.name == symFullName &&
-                              s.tpeVars.size == target.tpeArgs.size &&
-                              s.args.size == target.args.size
-                          )
-                          .map(fnLut(_))
-                          .toList
-                    (primaryMatches ::: symNameMatch).distinctBy(_._1.name) match {
-                      case Nil => // We found no replacement, log it and keep going.
-                        val actualDefDef = missingDefDefs.getOrElse(sym, defDef)
-
-                        interfaceIdentity(actualDefDef.symbol) match {
-                          case Some((packageName, declaration)) =>
-                            for {
-                              pkg <- InterfaceResolver
-                                .loadPackage(packageName)
-                                .leftMap(errors => CompilerException(errors.mkString("\n")))
-                              resolved <- InterfaceResolver
-                                .resolve(pkg, declaration, target, (existing ::: xs).map(_.decl))
-                                .leftMap(errors => CompilerException(errors.mkString("\n")))
-                            } yield (
-                              resolved._1 ::: xs,
-                              depss,
-                              resolved._2 ++ clsDepss,
-                              moduleSymDepss
+                  case Nil => // Not there, we now look at actual dependencies
+                    val defDef = sym.tree.asInstanceOf[q.DefDef]
+                    // scala.Array's apply/update/length etc. have stub `throw new Error` bodies in the
+                    // stdlib (the JVM lowers their call sites specially). The term compiler can't
+                    // handle `throw`, but Intrinsify handles xs.apply/update/length on Ptr<T>
+                    // receivers directly at IR level. So just skip compiling these - they'll never
+                    // be called as functions.
+                    val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
+                    if (isScalaArrayMethod)
+                      (xs, depss, clsDepss, moduleSymDepss).success
+                    else {
+                      // For overrides synthesized by depsWithOverrides, the target ivk's receiver is the
+                      // base type (e.g. Buffer for an xs.apply call), not the override's owner (ListBuffer).
+                      // If a mirror exists for the override's owner, the target's name/receiver won't match
+                      // any fnLut key. As a fallback (only used when the primary signature match finds
+                      // nothing), also match by the sym's own name when sym differs from the target's name.
+                      val symFullName    = p.Sym(sym.fullName)
+                      val primaryMatches = matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList
+                      val symNameMatch =
+                        if (primaryMatches.nonEmpty || symFullName == target.calleeName) Nil
+                        else
+                          fnLut.keys
+                            .filter(s =>
+                              s.name == symFullName &&
+                                s.tpeVars.size == target.tpeArgs.size &&
+                                s.args.size == target.args.size
                             )
-                          case None if actualDefDef.rhs.isEmpty =>
-                            log.info(
-                              s"No implementation: ${target.repr} (${actualDefDef.symbol.flags.show}); ${actualDefDef.symbol
-                                  .hashCode()}",
-                              fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
-                            )
+                            .map(fnLut(_))
+                            .toList
+                      (primaryMatches ::: symNameMatch).distinctBy(_._1.name) match {
+                        case Nil => // We found no replacement, log it and keep going.
+                          val actualDefDef = missingDefDefs.getOrElse(sym, defDef)
 
-                            // if (actualDefDef.symbol.flags.is(q.Flags.Abstract)) {
-
-                            // } else {
-                            (
-                              xs,
-                              depss,
-                              clsDepss,
-                              moduleSymDepss
-                            ).success
-                          // }
-
-                          case None =>
-                            // see if function is already there
-
-                            for {
-                              log <- log
-                                .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
-                                .success
-                              (fn0Raw, deps) <- compileFn(log, actualDefDef, Map.empty)
-                              // Apply rename for symbols that collide on fullName (e.g. multiple
-                              // `_$$anon` classes from given declarations) so each compiled override
-                              // gets a unique IR name.
-                              fn0 = renameMap.get(actualDefDef.symbol) match {
-                                case Some(unique) => fn0Raw.copy(decl = fn0Raw.decl.copy(name = unique))
-                                case None         => fn0Raw
-                              }
-                              (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
-                                StdLib.StructDefs
+                          interfaceIdentity(actualDefDef.symbol) match {
+                            case Some((packageName, declaration)) =>
+                              interfaceImports += InterfaceResolver.Import(packageName, declaration, target)
+                              (xs, depss, clsDepss, moduleSymDepss).success
+                            case None if actualDefDef.rhs.isEmpty =>
+                              log.info(
+                                s"No implementation: ${target.repr} (${actualDefDef.symbol.flags.show}); ${actualDefDef.symbol
+                                    .hashCode()}",
+                                fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
                               )
-                            } yield (
-                              fn1 :: xs ::: deps.resolvedFunctions,
-                              // Add this function's body-discovered deps to next iteration's queue.
-                              // Avoid duplicates: skip if already in `remaining` (this-iteration queue)
-                              // or `depss` (already-queued-for-next-iter). Importantly, do NOT filter
-                              // against `deps.functions` itself - that's the SOURCE of wit0, so
-                              // filtering against it would empty wit0 entirely and starve the loop.
-                              depss ++ wit0.filterNot(x => remaining.contains(x._1) || depss.contains(x._1)),
-                              clsDeps ++ clsDepss,
-                              moduleDeps ++ moduleSymDepss
-                            )
-                        }
-                      case (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
-                        for {
-                          log <- log.subLog(s"${target.repr}").success
-                          _ = log.info("Callsites", ivks.map(_.repr).toList*)
-                          _ = log.info("Replacing with impl:", fn.repr)
-                          _ = log.info("Additional structs:", clsDeps.map(_.repr).toList*)
 
-                          originalFnOwner = defDef.symbol.owner
+                              // if (actualDefDef.symbol.flags.is(q.Flags.Abstract)) {
 
-                          originalFnOwnerStructDef <- structDef0(originalFnOwner)
-                            .adaptError(e =>
-                              CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
-                            )
-                          // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
-                        } yield (
-                          fn.copy(decl = fn.decl.copy(name = target.calleeName)) :: xs,
-                          depss,
-                          clsDeps ++ clsDepss,
-                          moduleSymDepss
-                        )
-                      case xs => // We found multiple ambiguous replacements, signal error
-                        s"Ambiguous replacement for ${target.repr}, the following replacements all match the signature:\n${xs
-                            .map("\t" + _._1.repr)
-                            .mkString("\n")}".fail
+                              // } else {
+                              (
+                                xs,
+                                depss,
+                                clsDepss,
+                                moduleSymDepss
+                              ).success
+                            // }
+
+                            case None =>
+                              // see if function is already there
+
+                              for {
+                                log <- log
+                                  .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
+                                  .success
+                                (fn0Raw, deps) <- compileFn(log, actualDefDef, Map.empty)
+                                // Apply rename for symbols that collide on fullName (e.g. multiple
+                                // `_$$anon` classes from given declarations) so each compiled override
+                                // gets a unique IR name.
+                                fn0 = renameMap.get(actualDefDef.symbol) match {
+                                  case Some(unique) => fn0Raw.copy(decl = fn0Raw.decl.copy(name = unique))
+                                  case None         => fn0Raw
+                                }
+                                (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
+                                  StdLib.StructDefs
+                                )
+                              } yield (
+                                fn1 :: xs ::: deps.resolvedFunctions,
+                                // Add this function's body-discovered deps to next iteration's queue.
+                                // Avoid duplicates: skip if already in `remaining` (this-iteration queue)
+                                // or `depss` (already-queued-for-next-iter). Importantly, do NOT filter
+                                // against `deps.functions` itself - that's the SOURCE of wit0, so
+                                // filtering against it would empty wit0 entirely and starve the loop.
+                                depss ++ wit0.filterNot(x => remaining.contains(x._1) || depss.contains(x._1)),
+                                clsDeps ++ clsDepss,
+                                moduleDeps ++ moduleSymDepss
+                              )
+                          }
+                        case (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
+                          for {
+                            log <- log.subLog(s"${target.repr}").success
+                            _ = log.info("Callsites", ivks.map(_.repr).toList*)
+                            _ = log.info("Replacing with impl:", fn.repr)
+                            _ = log.info("Additional structs:", clsDeps.map(_.repr).toList*)
+
+                            originalFnOwner = defDef.symbol.owner
+
+                            originalFnOwnerStructDef <- structDef0(originalFnOwner)
+                              .adaptError(e =>
+                                CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
+                              )
+                            // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
+                          } yield (
+                            fn.copy(decl = fn.decl.copy(name = target.calleeName)) :: xs,
+                            depss,
+                            clsDeps ++ clsDepss,
+                            moduleSymDepss
+                          )
+                        case xs => // We found multiple ambiguous replacements, signal error
+                          s"Ambiguous replacement for ${target.repr}, the following replacements all match the signature:\n${xs
+                              .map("\t" + _._1.repr)
+                              .mkString("\n")}".fail
+                      }
                     }
-                  }
-                case xs =>
-                  s"Ambiguous overload for ${target.repr}, the following existing resolved function all match the signature:\n${xs
-                      .map("\t" + _._1.repr)
-                      .mkString("\n")}".fail
-              }
+                  case xs =>
+                    s"Ambiguous overload for ${target.repr}, the following existing resolved function all match the signature:\n${xs
+                        .map("\t" + _._1.repr)
+                        .mkString("\n")}".fail
+                }
 
-            } yield r
-        }
-        .map((xs, deps, clsDeps, moduleSymDeps) =>
-          (
-            deps,
-            xs,
-            clsDeps,
-            moduleSymDeps
+              } yield r
+          }
+          .map((xs, deps, clsDeps, moduleSymDeps) =>
+            (
+              deps,
+              xs,
+              clsDeps,
+              moduleSymDeps
+            )
           )
-        )
 
-    }(_._1.nonEmpty)
-  } yield (fns, clsDeps, moduleSymDeps)
+      }(_._1.nonEmpty)
+      imports <- InterfaceResolver
+        .importAll(interfaceImports.result(), (existing ::: fns).map(_.decl))
+        .leftMap(errors => CompilerException(errors.mkString("\n")))
+    } yield (imports._1 ::: fns, imports._2 ++ clsDeps, moduleSymDeps)
+  }
 
   def compileFn(using q: Quoted) //
   (

@@ -4,8 +4,7 @@
 #pragma region do: polycpp --polyc {output}.polyast --list-exports
 #pragma region requires@0: foo.implementation.redeclared
 
-#define POLYREGION_EXPORT_FN [[clang::annotate("polyregion_export")]]
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 
-POLYREGION_EXPORT_FN int redeclared(int x);
+POLYREGION_EXPORT_AS("foo.implementation.redeclared") int redeclared(int x);
 POLYREGION_EXPORT_AS("foo.implementation.redeclared") int redeclared(const int x) { return x; }

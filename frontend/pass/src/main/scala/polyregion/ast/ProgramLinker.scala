@@ -7,10 +7,91 @@ import polyregion.ast.pass.*
 
 import scala.collection.mutable
 
-private[polyregion] object PackageSymResolver {
+private[polyregion] object ProgramLinker {
 
-  final case class ResolvedImplementation(functions: List[p.Function], definitions: Set[p.StructDef])
-  private final case class ResolvedEntry(entry: p.Function, entryArgs: List[p.Package.EntryArgBinding])
+  final case class CallSignature(
+      name: p.Sym,
+      tpeArgs: List[p.Type],
+      receiver: Option[p.Type],
+      args: List[p.Type],
+      rtn: p.Type
+  )
+
+  final case class CallMatch(types: Map[String, p.Type], callables: Map[Int, p.Sym])
+
+  enum ImplementationResult {
+    case Direct
+    case TrailingOutput(index: Int)
+  }
+
+  final case class ImplementationMatch(
+      types: Map[String, p.Type],
+      callables: Map[String, Int],
+      result: ImplementationResult,
+      systemArguments: Int
+  )
+
+  final case class ImplementationResolution(
+      publicDeclaration: p.FunctionDecl,
+      call: CallMatch,
+      implementation: p.Function,
+      abi: ImplementationMatch
+  )
+
+  private def shiftSize(size: p.Arg.SizeExpr, by: Int): p.Arg.SizeExpr = size match {
+    case p.Arg.SizeExpr.Param(index)  => p.Arg.SizeExpr.Param(index + by)
+    case value: p.Arg.SizeExpr.Const  => value
+    case p.Arg.SizeExpr.Add(lhs, rhs) => p.Arg.SizeExpr.Add(shiftSize(lhs, by), shiftSize(rhs, by))
+    case p.Arg.SizeExpr.Mul(lhs, rhs) => p.Arg.SizeExpr.Mul(shiftSize(lhs, by), shiftSize(rhs, by))
+    case p.Arg.SizeExpr.Min(lhs, rhs) => p.Arg.SizeExpr.Min(shiftSize(lhs, by), shiftSize(rhs, by))
+  }
+
+  private[ast] def shiftBoundary(boundary: Option[p.Arg.Boundary], by: Int): Option[p.Arg.Boundary] =
+    boundary.map { value =>
+      val extent = value.extent match {
+        case p.Arg.Extent.Elements(size) => p.Arg.Extent.Elements(shiftSize(size, by))
+        case p.Arg.Extent.Bytes(size)    => p.Arg.Extent.Bytes(shiftSize(size, by))
+      }
+      value.copy(extent = extent)
+    }
+
+  private[ast] def collisionClosure(
+      functionGroups: Map[p.Sym, List[p.Function]],
+      definitionGroups: Map[p.Sym, List[p.StructDef]],
+      stableFunctions: Set[p.Sym] = Set.empty,
+      stableDefinitions: Set[p.Sym] = Set.empty
+  ): (mutable.Set[p.Sym], mutable.Set[p.Sym]) = {
+    val localFunctions = mutable.Set.from(functionGroups.collect {
+      case (name, values) if !values.forall(_ == values.head) => name
+    })
+    val localDefinitions = mutable.Set.from(definitionGroups.collect {
+      case (name, values) if !values.forall(_ == values.head) => name
+    })
+    var changed = true
+    while (changed) {
+      changed = false
+      definitionGroups.foreach { case (name, definitions) =>
+        if (definitions.size >= 2 && !localDefinitions(name) && !stableDefinitions(name)) {
+          val depends = definitions.exists(_.collectAll[p.Type].exists {
+            case p.Type.Struct(target, _) => localDefinitions(target)
+            case _                        => false
+          })
+          if (depends) changed = localDefinitions.add(name) || changed
+        }
+      }
+      functionGroups.foreach { case (name, functions) =>
+        if (functions.size >= 2 && !localFunctions(name) && !stableFunctions(name)) {
+          val depends = functions.exists(_.collectAll[p.Type].exists {
+            case p.Type.FnRef(target)     => localFunctions(target)
+            case p.Type.Struct(target, _) => localDefinitions(target)
+            case _                        => false
+          })
+          if (depends) changed = localFunctions.add(name) || changed
+        }
+      }
+    }
+    localFunctions -> localDefinitions
+  }
 
   private def containsType(tpe: p.Type, variables: Set[String]): Boolean = tpe match {
     case p.Type.Var(name, _)         => variables(name)
@@ -135,12 +216,12 @@ private[polyregion] object PackageSymResolver {
       } yield head :: tail
     }
 
-  def bindCall(
+  def matchCall(
       decl: p.FunctionDecl,
-      signature: p.InvokeSignature,
+      signature: ProgramLinker.CallSignature,
       callerDecls: List[p.FunctionDecl],
       matchResult: Boolean = true
-  ): Either[List[String], InterfaceBinding.BoundCall] = {
+  ): Either[List[String], CallMatch] = {
     val errors = List.newBuilder[String]
     errors ++= decl.validate
     signature.tpeArgs.zipWithIndex.foreach((tpe, index) =>
@@ -156,7 +237,7 @@ private[polyregion] object PackageSymResolver {
     val deferred      = List.newBuilder[(p.Type.Exec, p.Type.FnRef, String, Option[Int])]
     var callableBinds = Map.empty[Int, p.Sym]
 
-    def matchCall(expected: p.Type, actual: p.Type, path: String, callableIndex: Option[Int] = None): Unit =
+    def matchType(expected: p.Type, actual: p.Type, path: String, callableIndex: Option[Int] = None): Unit =
       (expected, actual) match {
         case (expected: p.Type.Exec, actual: p.Type.FnRef) =>
           deferred += ((expected, actual, path, callableIndex))
@@ -173,16 +254,16 @@ private[polyregion] object PackageSymResolver {
     if (decl.moduleCaptures.nonEmpty || decl.termCaptures.nonEmpty)
       errors += "public declarations with explicit captures cannot be called directly"
     (decl.receiver, signature.receiver) match {
-      case (Some(expected), Some(actual)) => matchCall(expected.named.tpe, actual, "receiver")
+      case (Some(expected), Some(actual)) => matchType(expected.named.tpe, actual, "receiver")
       case (None, None)                   => ()
       case _                              => errors += "receiver presence differs"
     }
     if (decl.args.size != signature.args.size)
       errors += s"argument count differs: expected ${decl.args.size}, got ${signature.args.size}"
     decl.args.zip(signature.args).zipWithIndex.foreach { case ((expected, actual), index) =>
-      matchCall(expected.named.tpe, actual, s"argument $index `${expected.named.symbol}`", Some(index))
+      matchType(expected.named.tpe, actual, s"argument $index `${expected.named.symbol}`", Some(index))
     }
-    if (matchResult) matchCall(decl.rtn, signature.rtn, "return")
+    if (matchResult) matchType(decl.rtn, signature.rtn, "return")
     val callableIndex = callerDecls.groupBy(_.name).view.mapValues(_.sortBy(_.signatureKey)).toMap
     deferred.result().foreach { case (expected, p.Type.FnRef(name), path, argumentIndex) =>
       val candidates = callableIndex.getOrElse(name, Nil)
@@ -238,30 +319,13 @@ private[polyregion] object PackageSymResolver {
     }
     val publicTypes = resolvedTypes.result()
     val distinct    = errors.result().distinct
-    if (distinct.isEmpty) Right(InterfaceBinding.BoundCall(publicTypes, callableBinds)) else Left(distinct)
+    if (distinct.isEmpty) Right(CallMatch(publicTypes, callableBinds)) else Left(distinct)
   }
 
-  private def shiftSize(size: p.Arg.SizeExpr, by: Int): p.Arg.SizeExpr = size match {
-    case p.Arg.SizeExpr.Param(index)  => p.Arg.SizeExpr.Param(index + by)
-    case value: p.Arg.SizeExpr.Const  => value
-    case p.Arg.SizeExpr.Add(lhs, rhs) => p.Arg.SizeExpr.Add(shiftSize(lhs, by), shiftSize(rhs, by))
-    case p.Arg.SizeExpr.Mul(lhs, rhs) => p.Arg.SizeExpr.Mul(shiftSize(lhs, by), shiftSize(rhs, by))
-    case p.Arg.SizeExpr.Min(lhs, rhs) => p.Arg.SizeExpr.Min(shiftSize(lhs, by), shiftSize(rhs, by))
-  }
-
-  private def contextualBoundary(boundary: Option[p.Arg.Boundary], by: Int): Option[p.Arg.Boundary] =
-    boundary.map { value =>
-      val extent = value.extent match {
-        case p.Arg.Extent.Elements(size) => p.Arg.Extent.Elements(shiftSize(size, by))
-        case p.Arg.Extent.Bytes(size)    => p.Arg.Extent.Bytes(shiftSize(size, by))
-      }
-      value.copy(extent = extent)
-    }
-
-  def bindImplementation(
+  def matchImplementation(
       implementation: p.FunctionDecl,
       publicDecl: p.FunctionDecl
-  ): Either[List[String], InterfaceBinding.BoundImplementation] = {
+  ): Either[List[String], ImplementationMatch] = {
     val errors  = List.newBuilder[String]
     val matcher = TypeMatcher(implementation.tpeVars.map(_.name).toSet)
     errors ++= publicDecl.validate.map(error => s"public declaration: $error")
@@ -297,7 +361,7 @@ private[polyregion] object PackageSymResolver {
     val (ordinary, result) =
       if (comparable.size == publicDecl.args.size) {
         matcher.unify(implementation.rtn, publicDecl.rtn, "return")
-        comparable -> InterfaceBinding.ReturnConvention.Direct
+        comparable -> ImplementationResult.Direct
       } else if (
         comparable.size == publicDecl.args.size + 1 &&
         implementation.rtn == p.Type.Unit0 &&
@@ -316,18 +380,18 @@ private[polyregion] object PackageSymResolver {
         )
         if (!resultArg.boundary.contains(expectedBoundary))
           errors += s"trailing result boundary differs: expected $expectedBoundary, got ${resultArg.boundary}"
-        comparable.init -> InterfaceBinding.ReturnConvention.TrailingOutput(resultIndex)
+        comparable.init -> ImplementationResult.TrailingOutput(resultIndex)
       } else {
         errors +=
           s"argument/result shape differs: public has ${publicDecl.args.size} arguments and returns ${publicDecl.rtn}; " +
             s"implementation has ${comparable.size} public arguments and returns ${implementation.rtn}"
-        comparable.take(publicDecl.args.size) -> InterfaceBinding.ReturnConvention.Direct
+        comparable.take(publicDecl.args.size) -> ImplementationResult.Direct
       }
     if (ordinary.size != publicDecl.args.size)
       errors += s"argument count differs: expected ${publicDecl.args.size}, got ${ordinary.size}"
     ordinary.zip(publicDecl.args).zipWithIndex.foreach { case ((implementationArg, publicArg), index) =>
       matcher.unify(implementationArg.named.tpe, publicArg.named.tpe, s"argument $index")
-      val expectedBoundary = contextualBoundary(publicArg.boundary, systemArguments)
+      val expectedBoundary = shiftBoundary(publicArg.boundary, systemArguments)
       if (implementationArg.boundary != expectedBoundary)
         errors += s"argument $index boundary differs: expected $expectedBoundary, got ${implementationArg.boundary}"
     }
@@ -348,28 +412,28 @@ private[polyregion] object PackageSymResolver {
       .toMap
     val distinct = errors.result().distinct
     if (distinct.isEmpty)
-      Right(InterfaceBinding.BoundImplementation(matcher.bindings, callables, result, systemArguments))
+      Right(ImplementationMatch(matcher.bindings, callables, result, systemArguments))
     else Left(distinct)
   }
 
   def resolve(
       pkg: p.Package,
-      signature: p.InvokeSignature,
+      signature: ProgramLinker.CallSignature,
       callerDecls: List[p.FunctionDecl],
       capabilities: Set[String],
       typeSizes: Map[p.Type, Int],
       matchResult: Boolean = true
-  ): Either[List[String], InterfaceBinding.ResolvedCall] = {
+  ): Either[List[String], ImplementationResolution] = {
     val decls = pkg.interface.declarations.filter(_.name == signature.name)
     if (decls.isEmpty)
       return Left(List(s"no public declaration `${signature.name.fqn.mkString(".")}`"))
-    val boundDecls    = decls.map(decl => decl -> bindCall(decl, signature, callerDecls, matchResult))
-    val matchingDecls = boundDecls.collect { case (decl, Right(binding)) => decl -> binding }
-    val (decl, signatureBinding) = matchingDecls match {
+    val declarationMatches = decls.map(decl => decl -> matchCall(decl, signature, callerDecls, matchResult))
+    val matchingDecls      = declarationMatches.collect { case (decl, Right(result)) => decl -> result }
+    val (decl, callMatch) = matchingDecls match {
       case List(result) => result
       case Nil =>
         return Left(
-          "no matching public declaration" :: boundDecls.flatMap { case (candidate, result) =>
+          "no matching public declaration" :: declarationMatches.flatMap { case (candidate, result) =>
             result.left.toOption.toList.flatten.map(error => s"`${candidate.toString}`: $error")
           }
         )
@@ -386,7 +450,7 @@ private[polyregion] object PackageSymResolver {
     if (implementations.isEmpty)
       return Left(List(s"no implementations for `${decl.name.fqn.mkString(".")}`"))
 
-    val compatible = List.newBuilder[(p.Function, InterfaceBinding.BoundImplementation)]
+    val compatible = List.newBuilder[(p.Function, ImplementationMatch)]
     val rejected   = List.newBuilder[String]
     implementations.foreach { implementation =>
       val label  = implementation.name.fqn.mkString(".")
@@ -394,12 +458,12 @@ private[polyregion] object PackageSymResolver {
       implementation.requiredCapabilities.distinct.sorted.filterNot(capabilities).foreach { capability =>
         errors += s"requires capability `$capability`"
       }
-      val implementationBinding = bindImplementation(implementation.decl, decl)
-      implementationBinding.left.foreach(_.foreach(errors += _))
-      implementationBinding.foreach { binding =>
+      val implementationMatch = matchImplementation(implementation.decl, decl)
+      implementationMatch.left.foreach(_.foreach(errors += _))
+      implementationMatch.foreach { result =>
         val constraints = implementation.tpeVars.flatMap(variable => variable.exactSizeInBytes.map(variable -> _))
         val constrained = constraints.map(_._1.name)
-        val sizeable    = binding.types.keySet -- binding.callables.keySet
+        val sizeable    = result.types.keySet -- result.callables.keySet
         if (constrained.distinct.size != constrained.size)
           errors += "type-size constraints must be distinct"
         if (constrained.nonEmpty && constrained.toSet != sizeable)
@@ -407,10 +471,10 @@ private[polyregion] object PackageSymResolver {
         constraints.sortBy(_._1.name).foreach { case (variable, requiredSize) =>
           if (requiredSize <= 0)
             errors += s"type-size constraint for `${variable.name}` must be positive"
-          binding.types.get(variable.name) match {
+          result.types.get(variable.name) match {
             case None => errors += s"type-size constraint references unbound variable `${variable.name}`"
             case Some(bound) =>
-              substituteType(bound, signatureBinding.types) match {
+              substituteType(bound, callMatch.types) match {
                 case Left(reason) => errors += s"cannot resolve `${variable.name}`: $reason"
                 case Right(tpe) =>
                   typeSizes.get(tpe) match {
@@ -424,18 +488,18 @@ private[polyregion] object PackageSymResolver {
         }
       }
       val distinct = errors.result().distinct
-      implementationBinding match {
-        case Right(binding) if distinct.isEmpty => compatible += implementation -> binding
-        case _                                  => distinct.foreach(error => rejected += s"`$label`: $error")
+      implementationMatch match {
+        case Right(result) if distinct.isEmpty => compatible += implementation -> result
+        case _                                 => distinct.foreach(error => rejected += s"`$label`: $error")
       }
     }
 
     val matches     = compatible.result()
     val specialised = matches.filter(_._1.tpeVars.exists(_.exactSizeInBytes.nonEmpty))
-    val selected    = if (specialised.nonEmpty) specialised else matches
-    selected match {
-      case List((implementation, binding)) =>
-        Right(InterfaceBinding.ResolvedCall(decl, signatureBinding, implementation, binding))
+    val candidates  = if (specialised.nonEmpty) specialised else matches
+    candidates match {
+      case List((implementation, abi)) =>
+        Right(ImplementationResolution(decl, callMatch, implementation, abi))
       case Nil => Left(s"no compatible implementation for `${decl.name.fqn.mkString(".")}`" :: rejected.result())
       case values =>
         Left(
@@ -460,53 +524,18 @@ private[polyregion] object PackageSymResolver {
       case _ => tpe
     }
 
-  private def functionClosure(program: p.Program, root: p.Function): Either[List[String], List[p.Function]] = {
-    @annotation.tailrec
-    def loop(
-        frontier: List[p.Function],
-        reached: Set[p.Sym],
-        out: List[p.Function]
-    ): Either[List[String], List[p.Function]] = frontier match {
-      case Nil                                        => Right(out.reverse)
-      case function :: rest if reached(function.name) => loop(rest, reached, out)
-      case function :: rest =>
-        val names        = function.collectAll[p.Type].collect { case ref: p.Type.FnRef => ref.name }.distinct
-        val dependencies = names.map(name => name -> program.functions.filter(_.name == name))
-        val ambiguous = dependencies.collect {
-          case (name, matches) if matches.size != 1 =>
-            s"function `${name.repr}` has ${matches.size} package definitions"
-        }
-        if (ambiguous.nonEmpty) Left(ambiguous)
-        else loop(dependencies.flatMap(_._2) ::: rest, reached + function.name, function :: out)
-    }
-    loop(List(root), Set.empty, Nil)
-  }
-
-  private def structClosure(program: p.Program, functions: List[p.Function]): Set[p.StructDef] = {
-    @annotation.tailrec
-    def loop(frontier: List[p.Sym], reached: Set[p.Sym], out: Set[p.StructDef]): Set[p.StructDef] = frontier match {
-      case Nil                           => out
-      case name :: rest if reached(name) => loop(rest, reached, out)
-      case name :: rest =>
-        val definitions = program.defs.filter(_.name == name)
-        val next        = definitions.flatMap(_.collectAll[p.Type].collect { case p.Type.Struct(struct, _) => struct })
-        loop(next ::: rest, reached + name, out ++ definitions)
-    }
-    val roots = functions.flatMap(_.collectAll[p.Type].collect { case p.Type.Struct(name, _) => name })
-    loop(roots, Set.empty, Set.empty)
-  }
-
   private def implementationClosure(
       pkg: p.Package,
-      resolution: InterfaceBinding.ResolvedCall,
-      callerFns: List[p.Function]
+      resolution: ImplementationResolution,
+      callerFns: List[p.Function],
+      omitCallableArguments: Boolean = true
   ): Either[List[String], List[p.Function]] = {
     val errors = List.newBuilder[String]
-    val callableVariables = resolution.implementationBinding.callables.flatMap { case (name, index) =>
-      resolution.signature.callables.get(index).map(name -> _)
+    val callableVariables = resolution.abi.callables.flatMap { case (name, index) =>
+      resolution.call.callables.get(index).map(name -> _)
     }
-    val implementationVariables = resolution.implementationBinding.types.map { case (name, tpe) =>
-      val bound = callableVariables.get(name).fold(substitute(tpe, resolution.signature.types))(p.Type.FnRef(_))
+    val implementationVariables = resolution.abi.types.map { case (name, tpe) =>
+      val bound = callableVariables.get(name).fold(substitute(tpe, resolution.call.types))(p.Type.FnRef(_))
       name -> bound
     }
     val candidates = pkg.program.functions ::: callerFns
@@ -517,10 +546,10 @@ private[polyregion] object PackageSymResolver {
     }
     val selectedCount = pkg.program.functions.count(_.decl == resolution.implementation.decl)
     if (selectedCount != 1)
-      errors += (if (selectedCount == 0) "selected implementation is absent"
-                 else "selected implementation is ambiguous")
+      errors += (if (selectedCount == 0) "resolved implementation is absent"
+                 else "resolved implementation is ambiguous")
     callableVariables.values.foreach { name =>
-      if (!byName.contains(name)) errors += s"bound callable `${name.repr}` is absent"
+      if (!byName.contains(name)) errors += s"resolved callable `${name.repr}` is absent"
     }
     val roots = callableVariables.values.toList :+ resolution.implementation.name
     @annotation.tailrec
@@ -533,15 +562,15 @@ private[polyregion] object PackageSymResolver {
             errors += s"function `${name.repr}` is absent"
             loop(rest, reached + name, out)
           case Some(original) =>
-            val selected = original.decl == resolution.implementation.decl
+            val isSelectedImplementation = original.decl == resolution.implementation.decl
             val withoutCallables =
-              if (!selected) original
+              if (!isSelectedImplementation || !omitCallableArguments) original
               else {
                 val removed = original.args.zipWithIndex.collect {
                   case (argument, index)
-                      if index >= resolution.implementationBinding.systemArguments &&
-                        resolution.signature.callables.contains(
-                          index - resolution.implementationBinding.systemArguments
+                      if index >= resolution.abi.systemArguments &&
+                        resolution.call.callables.contains(
+                          index - resolution.abi.systemArguments
                         ) =>
                     argument.named.symbol
                 }.toSet
@@ -557,31 +586,32 @@ private[polyregion] object PackageSymResolver {
                 original.copy(
                   decl = original.decl.copy(args = original.args.zipWithIndex.collect {
                     case (argument, index)
-                        if index < resolution.implementationBinding.systemArguments ||
-                          !resolution.signature.callables
-                            .contains(index - resolution.implementationBinding.systemArguments) =>
+                        if index < resolution.abi.systemArguments ||
+                          !resolution.call.callables
+                            .contains(index - resolution.abi.systemArguments) =>
                       argument
                   }),
                   implements = None,
                   requiredCapabilities = Nil
                 )
               }
-            val bindings =
-              if (selected) implementationVariables else implementationVariables -- withoutCallables.tpeVars.map(_.name)
-            val function     = withoutCallables.modifyAll[p.Type](substitute(_, bindings))
+            val substitutions =
+              if (isSelectedImplementation) implementationVariables
+              else implementationVariables -- withoutCallables.tpeVars.map(_.name)
+            val function     = withoutCallables.modifyAll[p.Type](substitute(_, substitutions))
             val dependencies = function.collectAll[p.Type].collect { case p.Type.FnRef(target) => target }
             loop(dependencies ::: rest, reached + name, function :: out)
         }
     }
     val closed = loop(roots, Set.empty, Nil)
     callableVariables.values.foreach { name =>
-      if (!closed.exists(_.name == name)) errors += s"bound callable `${name.repr}` is unreachable"
+      if (!closed.exists(_.name == name)) errors += s"resolved callable `${name.repr}` is unreachable"
     }
     val distinct = errors.result().distinct
     Either.cond(distinct.isEmpty, closed, distinct)
   }
 
-  private def boundStructClosure(
+  private def resolvedStructClosure(
       pkg: p.Package,
       functions: List[p.Function],
       callerDefs: List[p.StructDef]
@@ -597,17 +627,17 @@ private[polyregion] object PackageSymResolver {
           case None =>
             errors += s"struct definition `${applied.name.repr}` is absent"
             loop(rest, reached)
-          case Some(selected) =>
-            if (matches.exists(_ != selected))
+          case Some(definition) =>
+            if (matches.exists(_ != definition))
               errors += s"struct definition `${applied.name.repr}` conflicts between package and caller"
-            if (selected.tpeVars.size != applied.args.size)
+            if (definition.tpeVars.size != applied.args.size)
               errors +=
-                s"struct `${applied.name.repr}` type-argument count differs: expected ${selected.tpeVars.size}, got ${applied.args.size}"
+                s"struct `${applied.name.repr}` type-argument count differs: expected ${definition.tpeVars.size}, got ${applied.args.size}"
             if (reached(applied.name)) loop(rest, reached)
             else {
-              selected.validate.foreach(error => errors += s"struct definition `${applied.name.repr}`: $error")
-              out += selected
-              val nested = selected.collectAll[p.Type].collect { case value: p.Type.Struct => value }
+              definition.validate.foreach(error => errors += s"struct definition `${applied.name.repr}`: $error")
+              out += definition
+              val nested = definition.collectAll[p.Type].collect { case value: p.Type.Struct => value }
               loop(nested ::: rest, reached + applied.name)
             }
         }
@@ -620,28 +650,20 @@ private[polyregion] object PackageSymResolver {
 
   private def materializeEntry(
       name: String,
-      resolution: InterfaceBinding.ResolvedCall,
-      typeSizes: Map[p.Type, Int],
-      returnConvention: p.Package.ReturnConvention
-  ): Either[List[String], ResolvedEntry] = {
-    val errors          = List.newBuilder[String]
-    val publicDecl      = resolution.publicDeclaration
-    val implementation  = resolution.implementation.decl
-    val concreteTypes   = publicDecl.args.map(arg => substitute(arg.named.tpe, resolution.signature.types))
-    val entryArgs       = mutable.ListBuffer.empty[p.Arg]
-    val argumentSources = mutable.ListBuffer[p.Package.EntryArgBinding](p.Package.EntryArgBinding.Context)
-    val body            = mutable.ListBuffer.empty[p.Stmt]
-    val downloads       = mutable.ListBuffer.empty[p.Stmt]
-    val frees           = mutable.ListBuffer.empty[p.Stmt]
-    val invokeArgs      = mutable.ListBuffer.empty[p.Term]
-    val sourceArgs      = mutable.Map.empty[Int, p.Named]
-    val scalarValues    = mutable.Map.empty[Int, p.Named]
-
-    val outParamIndex = returnConvention match {
-      case p.Package.ReturnConvention.Return          => None
-      case p.Package.ReturnConvention.OutParam(index) => Some(index)
-    }
-    def sourceIndex(index: Int): Int = outParamIndex.fold(index)(out => if (index < out) index else index + 1)
+      resolution: ImplementationResolution,
+      typeSizes: Map[p.Type, Int]
+  ): Either[List[String], p.Function] = {
+    val errors         = List.newBuilder[String]
+    val publicDecl     = resolution.publicDeclaration
+    val implementation = resolution.implementation.decl
+    val concreteTypes  = publicDecl.args.map(arg => substitute(arg.named.tpe, resolution.call.types))
+    val entryArgs      = mutable.ListBuffer.empty[p.Arg]
+    val body           = mutable.ListBuffer.empty[p.Stmt]
+    val downloads      = mutable.ListBuffer.empty[p.Stmt]
+    val frees          = mutable.ListBuffer.empty[p.Stmt]
+    val invokeArgs     = mutable.ListBuffer.empty[p.Term]
+    val sourceArgs     = mutable.Map.empty[Int, p.Named]
+    val scalarValues   = mutable.Map.empty[Int, p.Named]
 
     def select(named: p.Named): p.Term.Select           = p.Term.Select(named, Nil, named.tpe)
     def spec(op: p.Spec): p.Expr                        = p.Expr.SpecOp(op)
@@ -652,9 +674,9 @@ private[polyregion] object PackageSymResolver {
     val contextType = p.Spec.ContextType
     val context     = p.Named("#context", contextType)
     entryArgs += p.Arg(context)
-    if (resolution.implementationBinding.systemArguments != 0) invokeArgs += select(context)
+    if (resolution.abi.systemArguments != 0) invokeArgs += select(context)
     publicDecl.args.indices.foreach { index =>
-      if (!resolution.signature.callables.contains(index)) {
+      if (!resolution.call.callables.contains(index)) {
         val concrete = concreteTypes(index)
         val abiType = concrete match {
           case _: p.Type.Ptr => concrete
@@ -663,14 +685,10 @@ private[polyregion] object PackageSymResolver {
         val named = p.Named(s"a$index", abiType)
         sourceArgs(index) = named
         entryArgs += p.Arg(named)
-        argumentSources += (concrete match {
-          case _: p.Type.Ptr => p.Package.EntryArgBinding.CallValue(sourceIndex(index))
-          case _             => p.Package.EntryArgBinding.CallAddress(sourceIndex(index))
-        })
       }
     }
     publicDecl.args.indices.foreach { index =>
-      if (!resolution.signature.callables.contains(index) && !concreteTypes(index).isInstanceOf[p.Type.Ptr]) {
+      if (!resolution.call.callables.contains(index) && !concreteTypes(index).isInstanceOf[p.Type.Ptr]) {
         val concrete = concreteTypes(index)
         val named    = p.Named(s"v$index", concrete)
         immutable(named, p.Expr.Index(select(sourceArgs(index)), p.Term.IntS32Const(0), concrete))
@@ -711,7 +729,7 @@ private[polyregion] object PackageSymResolver {
     }
 
     publicDecl.args.indices.foreach { index =>
-      if (!resolution.signature.callables.contains(index)) {
+      if (!resolution.call.callables.contains(index)) {
         concreteTypes(index) match {
           case pointer: p.Type.Ptr =>
             publicDecl.args(index).boundary match {
@@ -783,49 +801,43 @@ private[polyregion] object PackageSymResolver {
     }
 
     val tpeArgs = implementation.tpeVars.flatMap { variable =>
-      resolution.implementationBinding.types.get(variable.name) match {
+      resolution.abi.types.get(variable.name) match {
         case None =>
           errors += s"implementation type variable `${variable.name}` is not bound"
           Nil
         case Some(bound) =>
-          val publicType = substitute(bound, resolution.signature.types)
+          val publicType = substitute(bound, resolution.call.types)
           publicType match {
             case _: p.Type.Exec =>
               val callable = for {
-                index  <- resolution.implementationBinding.callables.get(variable.name)
-                symbol <- resolution.signature.callables.get(index)
+                index  <- resolution.abi.callables.get(variable.name)
+                symbol <- resolution.call.callables.get(index)
               } yield symbol
               callable match {
                 case Some(symbol) => List(p.Type.FnRef(symbol))
                 case None =>
-                  errors += s"callable type variable `${variable.name}` has no bound function"
+                  errors += s"callable type variable `${variable.name}` has no resolved function"
                   Nil
               }
             case value => List(value)
           }
       }
     }
-    val concreteResult = substitute(publicDecl.rtn, resolution.signature.types)
+    val concreteResult = substitute(publicDecl.rtn, resolution.call.types)
     val returnsValue   = concreteResult != p.Type.Unit0
     val result         = Option.when(returnsValue)(p.Named("result", p.Type.Ptr(concreteResult, p.Type.Space.Global)))
-    result.foreach { named =>
-      entryArgs += p.Arg(named)
-      argumentSources += (returnConvention match {
-        case p.Package.ReturnConvention.Return          => p.Package.EntryArgBinding.ResultAddress
-        case p.Package.ReturnConvention.OutParam(index) => p.Package.EntryArgBinding.CallValue(index)
-      })
+    result.foreach(named => entryArgs += p.Arg(named))
+    resolution.abi.result match {
+      case ImplementationResult.TrailingOutput(_) => result.foreach(named => invokeArgs += select(named))
+      case ImplementationResult.Direct            => ()
     }
-    resolution.implementationBinding.result match {
-      case InterfaceBinding.ReturnConvention.TrailingOutput(_) => result.foreach(named => invokeArgs += select(named))
-      case InterfaceBinding.ReturnConvention.Direct            => ()
-    }
-    val invokeResult = resolution.implementationBinding.result match {
-      case InterfaceBinding.ReturnConvention.TrailingOutput(_) => p.Type.Unit0
-      case InterfaceBinding.ReturnConvention.Direct            => concreteResult
+    val invokeResult = resolution.abi.result match {
+      case ImplementationResult.TrailingOutput(_) => p.Type.Unit0
+      case ImplementationResult.Direct            => concreteResult
     }
     val invoke = p.Expr.Invoke(p.Type.FnRef(implementation.name), tpeArgs, None, invokeArgs.toList, invokeResult)
-    (returnsValue, resolution.implementationBinding.result) match {
-      case (true, InterfaceBinding.ReturnConvention.Direct) =>
+    (returnsValue, resolution.abi.result) match {
+      case (true, ImplementationResult.Direct) =>
         val callResult = p.Named("callResult", concreteResult)
         immutable(callResult, invoke)
         body += p.Stmt.Update(select(result.get), p.Term.IntS32Const(0), select(callResult))
@@ -853,10 +865,177 @@ private[polyregion] object PackageSymResolver {
       p.Function.FpMode.Relaxed,
       p.CallConvention.RegularCall
     )
-    Either.cond(distinct.isEmpty, ResolvedEntry(entry, argumentSources.toList), distinct)
+    Either.cond(distinct.isEmpty, entry, distinct)
   }
 
-  def resolveSym(request: p.Package.SymRequest): Either[List[String], p.Package.SymResolvedProgram] = {
+  private def linkRoot(
+      pkg: p.Package,
+      root: p.Function,
+      callerFns: List[p.Function],
+      callerDefs: List[p.StructDef],
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int]
+  ): Either[List[String], p.Program] = {
+    val target = root.implements.toRight(List(s"consumer root `${root.name.repr}` has no public declaration"))
+    target.flatMap { declaration =>
+      val signature = ProgramLinker.CallSignature(
+        declaration,
+        root.tpeVars,
+        root.receiver.map(_.named.tpe),
+        root.args.map(_.named.tpe),
+        root.rtn
+      )
+      for {
+        resolution <- resolve(
+          pkg,
+          signature,
+          callerFns.map(_.decl),
+          capabilities,
+          typeSizes,
+          matchResult = root.rtn != p.Type.Nothing
+        )
+        closure     <- implementationClosure(pkg, resolution, callerFns)
+        definitions <- resolvedStructClosure(pkg, closure, callerDefs)
+        entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
+      } yield {
+        val initial     = p.Program(Some(entry), closure, definitions)
+        val specialised = Specialisation(initial, PluginEntry.defaultLog)
+        val monomorphic = MonoStruct(specialised, PluginEntry.defaultLog)._2
+        DeadStructElimination(
+          DeadFunctionElimination(
+            KernelCaptureFlatten(OffloadEntryInline(monomorphic, PluginEntry.defaultLog), PluginEntry.defaultLog),
+            PluginEntry.defaultLog
+          ),
+          PluginEntry.defaultLog
+        )
+      }
+    }
+  }
+
+  private def importRoot(
+      pkg: p.Package,
+      root: p.Function,
+      signature: CallSignature,
+      callerFns: List[p.Function],
+      callerDefs: List[p.StructDef],
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int]
+  ): Either[List[String], p.Program] = {
+    val target = root.implements.toRight(List(s"consumer root `${root.name.repr}` has no public declaration"))
+    target.flatMap { declaration =>
+      for {
+        _ <- Either.cond(
+          signature.name == declaration,
+          (),
+          List(
+            s"logical call signature `${signature.name.repr}` differs from consumer declaration `${declaration.repr}`"
+          )
+        )
+        resolution <- resolve(pkg, signature, callerFns.map(_.decl), capabilities, typeSizes)
+        _ <- Either.cond(
+          resolution.abi.result == ImplementationResult.Direct,
+          (),
+          List("logical imports do not support trailing-output implementations")
+        )
+        closure     <- implementationClosure(pkg, resolution, callerFns, omitCallableArguments = false)
+        definitions <- resolvedStructClosure(pkg, closure, callerDefs)
+      } yield {
+        val implementationName = resolution.implementation.name
+        val renamed = closure
+          .map(
+            _.modifyAll[p.Type] {
+              case p.Type.FnRef(name) if name == implementationName => p.Type.FnRef(root.name)
+              case tpe                                              => tpe
+            }
+          )
+          .map { function =>
+            if (function.name != implementationName) function
+            else
+              function.copy(decl = function.decl.copy(name = root.name, tpeVars = Nil, receiver = root.receiver))
+          }
+        p.Program(None, renamed, definitions)
+      }
+    }
+  }
+
+  private def mergeLinkedPrograms(programs: List[p.Program]): Either[List[String], p.Program] = {
+    if (programs.isEmpty) return Left(List("consumer program has no package roots"))
+    val errors           = List.newBuilder[String]
+    val entryNames       = programs.flatMap(_.entry.map(_.name)).toSet
+    val functionGroups   = programs.flatMap(program => program.entry.toList ++ program.functions).groupBy(_.name)
+    val definitionGroups = programs.flatMap(_.defs).groupBy(_.name)
+    val entryStructs = programs
+      .flatMap(_.entry.toList.flatMap(_.decl.collectAll[p.Type].collect { case x: p.Type.Struct => x.name }))
+      .toSet
+    val (localFunctions, localDefinitions) =
+      collisionClosure(functionGroups, definitionGroups, entryNames, entryStructs)
+
+    entryNames.intersect(localFunctions.toSet).foreach(name => errors += s"consumer entry `${name.repr}` conflicts")
+    entryStructs
+      .intersect(localDefinitions.toSet)
+      .foreach(name => errors += s"consumer ABI struct `${name.repr}` conflicts")
+    localFunctions --= entryNames
+    localDefinitions --= entryStructs
+
+    def localName(index: Int, name: p.Sym): p.Sym = p.Sym("#consumer" :: index.toString :: name.fqn)
+    val isolated = programs.zipWithIndex.map { case (program, index) =>
+      val allFunctions = program.entry.toList ++ program.functions
+      val functionNames = allFunctions.collect {
+        case function if localFunctions(function.name) => function.name -> localName(index, function.name)
+      }.toMap
+      val definitionNames = program.defs.collect {
+        case definition if localDefinitions(definition.name) => definition.name -> localName(index, definition.name)
+      }.toMap
+      val rewriteType: p.Type => p.Type = {
+        case value @ p.Type.FnRef(name)        => functionNames.get(name).fold(value)(p.Type.FnRef(_))
+        case value @ p.Type.Struct(name, args) => definitionNames.get(name).fold(value)(p.Type.Struct(_, args))
+        case value                             => value
+      }
+      val functions = allFunctions.map { function =>
+        val rewritten = function.modifyAll[p.Type](rewriteType)
+        functionNames
+          .get(rewritten.name)
+          .fold(rewritten)(name => rewritten.copy(decl = rewritten.decl.copy(name = name)))
+      }
+      val definitions = program.defs.map { definition =>
+        val rewritten = definition.modifyAll[p.Type](rewriteType)
+        definitionNames.get(rewritten.name).fold(rewritten)(name => rewritten.copy(name = name))
+      }
+      p.Program(None, functions, definitions)
+    }
+
+    val functions = isolated.flatMap(_.functions).groupBy(_.name).toList.sortBy(_._1.fqn.mkString(".")).flatMap {
+      case (name, values) if values.forall(_ == values.head) => List(values.head)
+      case (name, _) =>
+        errors += s"linked consumer program contains conflicting function `${name.repr}`"
+        Nil
+    }
+    val definitions = isolated.flatMap(_.defs).groupBy(_.name).toList.sortBy(_._1.fqn.mkString(".")).flatMap {
+      case (_, values) if values.forall(_ == values.head) => List(values.head)
+      case (name, _) =>
+        errors += s"linked consumer program contains conflicting struct `${name.repr}`"
+        Nil
+    }
+    val distinct     = errors.result().distinct
+    val primaryEntry = programs.flatMap(_.entry.map(_.name)).headOption.flatMap(name => functions.find(_.name == name))
+    val linked = primaryEntry match {
+      case Some(entry) => p.Program(Some(entry), functions.filterNot(_.name == entry.name), definitions)
+      case None        => p.Program(None, functions, definitions)
+    }
+    Either.cond(distinct.isEmpty, linked, distinct)
+  }
+
+  private def linkRequest(
+      request: p.Program.LinkRequest,
+      resolveRoot: (
+          p.Package,
+          p.Function,
+          List[p.Function],
+          List[p.StructDef],
+          Set[String],
+          Map[p.Type, Int]
+      ) => Either[List[String], p.Program]
+  ): Either[List[String], p.Program] = {
     val groupedTypeSizes = request.typeSizes.groupBy(_.tpe)
     val layoutErrors = groupedTypeSizes.toList
       .flatMap { case (tpe, values) =>
@@ -866,108 +1045,41 @@ private[polyregion] object PackageSymResolver {
       }
       .flatten
       .distinct
+    val roots = request.consumer.functions.filter(function =>
+      function.visibility == p.Function.Visibility.Exported && function.implements.nonEmpty
+    ) ++ request.consumer.entry.toList.filter(_.implements.nonEmpty)
+    val rootNames = roots.map(_.name).toSet
+    val callerFns = request.consumer.functions.filterNot(function => rootNames(function.name))
+    val packagesByDeclaration =
+      request.packages.flatMap(pkg => pkg.interface.declarations.map(_.name -> pkg)).groupBy(_._1)
     val typeSizes = groupedTypeSizes.view.mapValues(_.head.sizeInBytes).toMap
-    val returnConventionErrors = request.returnConvention match {
-      case p.Package.ReturnConvention.Return => Nil
-      case p.Package.ReturnConvention.OutParam(index) =>
-        Option.when(index < 0 || index > request.signature.args.size)(
-          s"result output parameter index $index is outside source argument range 0..${request.signature.args.size}"
-        ) ::
-          Option.when(request.signature.rtn != p.Type.Nothing)(
-            s"result output parameter requires an erased ${p.Type.Nothing.repr} signature return, got ${request.signature.rtn.repr}"
-          ) :: Nil
+    val linked = roots.map { root =>
+      val target = root.implements.get
+      packagesByDeclaration.getOrElse(target, Nil).map(_._2).distinct match {
+        case List(pkg) =>
+          resolveRoot(pkg, root, callerFns, request.consumer.defs, request.capabilities.toSet, typeSizes)
+        case Nil => Left(List(s"no package declares `${target.repr}` for consumer root `${root.name.repr}`"))
+        case matches =>
+          Left(List(s"${matches.size} packages declare `${target.repr}` for consumer root `${root.name.repr}`"))
+      }
     }
-    for {
-      _ <- Either.cond(returnConventionErrors.flatten.isEmpty, (), returnConventionErrors.flatten)
-      _ <- Either.cond(layoutErrors.isEmpty, (), layoutErrors)
-      resolution <- resolve(
-        request.pkg,
-        request.signature,
-        request.callerDecls,
-        request.capabilities.toSet,
-        typeSizes,
-        matchResult = request.returnConvention == p.Package.ReturnConvention.Return
-      )
-      closure     <- implementationClosure(request.pkg, resolution, request.callerFns)
-      definitions <- boundStructClosure(request.pkg, closure, request.callerDefs)
-      entry       <- materializeEntry(request.entryName, resolution, typeSizes, request.returnConvention)
-    } yield {
-      val initial     = p.Program(Some(entry.entry), closure, definitions)
-      val specialised = Specialisation(initial, PluginEntry.defaultLog)
-      val monomorphic = MonoStruct(specialised, PluginEntry.defaultLog)._2
-      val prepared = DeadStructElimination(
-        DeadFunctionElimination(
-          KernelCaptureFlatten(OffloadEntryInline(monomorphic, PluginEntry.defaultLog), PluginEntry.defaultLog),
-          PluginEntry.defaultLog
-        ),
-        PluginEntry.defaultLog
-      )
-      p.Package.SymResolvedProgram(prepared, entry.entryArgs)
-    }
+    val errors = layoutErrors ::: linked.flatMap(_.left.toOption.toList.flatten)
+    if (errors.nonEmpty) Left(errors.distinct)
+    else mergeLinkedPrograms(linked.flatMap(_.toOption))
   }
 
-  def resolveImplementation(
-      pkg: p.Package,
-      declaration: String,
-      target: p.Expr.Invoke,
-      callerDecls: List[p.FunctionDecl] = Nil,
-      capabilities: Set[String] = Set.empty,
-      typeSizes: Map[p.Type, Int] = Map.empty
-  ): Either[List[String], ResolvedImplementation] = {
-    val signature = p.InvokeSignature(
-      p.Sym(declaration),
-      target.tpeArgs,
-      None,
-      target.args.map(_.tpe),
-      target.rtn
+  def link(request: p.Program.LinkRequest): Either[List[String], p.Program] = linkRequest(request, linkRoot)
+
+  def importProgram(
+      request: p.Program.LinkRequest,
+      signatures: Map[p.Sym, CallSignature]
+  ): Either[List[String], p.Program] =
+    linkRequest(
+      request,
+      (pkg, root, callerFns, callerDefs, capabilities, typeSizes) =>
+        signatures
+          .get(root.name)
+          .toRight(List(s"consumer root `${root.name.repr}` has no logical call signature"))
+          .flatMap(signature => importRoot(pkg, root, signature, callerFns, callerDefs, capabilities, typeSizes))
     )
-    for {
-      resolution <- resolve(pkg, signature, callerDecls, capabilities, typeSizes)
-      selected = resolution.implementation
-      _ <- Either.cond(target.tpeArgs.isEmpty, (), List("generic Scala interface calls are not yet supported"))
-      _ <- Either.cond(
-        resolution.implementationBinding.result == InterfaceBinding.ReturnConvention.Direct,
-        (),
-        List("Scala interface resolution does not support trailing-output implementations")
-      )
-      callableBindings <- resolution.implementationBinding.callables.toList
-        .traverse { case (name, index) =>
-          resolution.signature.callables
-            .get(index)
-            .toRight(List(s"callable binding `$name` has no signature argument at index $index"))
-            .map(name -> _)
-        }
-        .map(_.toMap)
-      bindings = resolution.implementationBinding.types.view
-        .mapValues(substitute(_, resolution.signature.types))
-        .toMap ++ callableBindings.view.mapValues(p.Type.FnRef(_))
-      closed <- functionClosure(pkg.program, selected)
-      functions = closed
-        .map(_.modifyAll[p.Type](substitute(_, bindings)))
-        .map(_.modifyAll[p.Expr] {
-          case invoke: p.Expr.Invoke =>
-            invoke.callee match {
-              case p.Type.Var(name, _) =>
-                callableBindings.get(name).fold(invoke)(symbol => invoke.copy(callee = p.Type.FnRef(symbol)))
-              case _ => invoke
-            }
-          case expression => expression
-        })
-      renamed = functions.map(_.modifyAll[p.Type] {
-        case p.Type.FnRef(name) if name == selected.name => p.Type.FnRef(target.calleeName)
-        case tpe                                         => tpe
-      })
-      resolved = renamed.map { function =>
-        if (function.name != selected.name) function
-        else
-          function.copy(decl =
-            function.decl.copy(
-              name = target.calleeName,
-              tpeVars = Nil,
-              receiver = target.receiver.map(value => p.Arg(p.Named("this", value.tpe), None))
-            )
-          )
-      }
-    } yield ResolvedImplementation(resolved, structClosure(pkg.program, resolved))
-  }
 }

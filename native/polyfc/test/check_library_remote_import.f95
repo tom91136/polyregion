@@ -1,4 +1,4 @@
-!CHECK case: remote-package
+!CHECK case: remote-package-import
 !CHECK offload-only
 !CHECK do: {package_fixture} {output}.packages
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}

@@ -12,12 +12,9 @@
 
 namespace polyregion::polyfront::package {
 
-class PolycClient {
-public:
-  [[nodiscard]] static Checked<polyast::PackageSymCompileResult>
-  compileSym(const polyast::PackageSymRequest &request, const std::string &executable, compiletime::Target hostTarget,
-             const std::string &hostArch, const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
-             std::optional<int> stackDepth = {});
-};
+[[nodiscard]] Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest &request, const std::string &executable,
+                                                             compiletime::Target hostTarget, const std::string &hostArch,
+                                                             const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
+                                                             std::optional<int> stackDepth = {});
 
 } // namespace polyregion::polyfront::package

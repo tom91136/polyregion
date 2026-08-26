@@ -1,4 +1,4 @@
-#pragma region case: syntax-only-package
+#pragma region case: syntax-only-package-import
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -fsyntax-only -o {output}.syntax {input}

@@ -1,10 +1,9 @@
 package polyregion.ast.pass
 
 import polyregion.ast.{
-  InterfaceBinding,
   MsgPack,
-  PackageSymResolver,
   PolyAST as p,
+  ProgramLinker,
   modifyDecl,
   remapArgs,
   signature,
@@ -17,18 +16,18 @@ import polyregion.ast.Traversal.*
 class InterfaceDeclarationSuite extends munit.FunSuite {
 
   extension (decl: p.FunctionDecl) {
-    private def bind(signature: p.InvokeSignature, callerDecls: List[p.FunctionDecl]) =
-      PackageSymResolver.bindCall(decl, signature, callerDecls)
-    private def conformsTo(publicDecl: p.FunctionDecl) = PackageSymResolver.bindImplementation(decl, publicDecl)
+    private def matches(signature: ProgramLinker.CallSignature, callerDecls: List[p.FunctionDecl]) =
+      ProgramLinker.matchCall(decl, signature, callerDecls)
+    private def conformsTo(publicDecl: p.FunctionDecl) = ProgramLinker.matchImplementation(decl, publicDecl)
   }
 
   extension (pkg: p.Package) {
     private def resolve(
-        signature: p.InvokeSignature,
+        signature: ProgramLinker.CallSignature,
         callerDecls: List[p.FunctionDecl],
         capabilities: Set[String],
         typeSizes: Map[p.Type, Int]
-    ) = PackageSymResolver.resolve(pkg, signature, callerDecls, capabilities, typeSizes)
+    ) = ProgramLinker.resolve(pkg, signature, callerDecls, capabilities, typeSizes)
   }
 
   private def transformDecl = {
@@ -93,7 +92,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.CallConvention.RegularCall
     )
     val renamed = fn.modifyDecl(_.copy(name = p.Sym(List("foo", "renamed"))))
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -285,7 +284,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Float32,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -294,12 +293,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      decl.bind(call, List(lambda)),
-      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map(3 -> lambda.name)))
+      decl.matches(call, List(lambda)),
+      Right(ProgramLinker.CallMatch(Map("T" -> p.Type.Float32), Map(3 -> lambda.name)))
     )
   }
 
-  test("call binding selects a callable overload by structure") {
+  test("call matching selects a callable overload by structure") {
     val decl   = transformDecl
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
     val name   = p.Sym(List("caller", "overloaded"))
@@ -314,7 +313,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Function.Affinity.Host
     )
     val f32 = callable(p.Type.Float32)
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -322,16 +321,16 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Unit0
     )
 
-    assert(decl.bind(call, List(callable(p.Type.IntS32), f32)).isRight)
+    assert(decl.matches(call, List(callable(p.Type.IntS32), f32)).isRight)
     assert(
       decl
-        .bind(call, List(f32, f32))
+        .matches(call, List(f32, f32))
         .left
         .exists(_.exists(_.contains("2 matching declarations")))
     )
   }
 
-  test("callback overload selection incorporates later argument inference") {
+  test("callback overload resolution incorporates later argument inference") {
     val t    = p.Type.Var("T")
     val name = p.Sym(List("caller", "overloaded"))
     val decl = p.FunctionDecl(
@@ -357,7 +356,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       tpe,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       Nil,
       None,
@@ -366,8 +365,8 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      decl.bind(call, List(callable(p.Type.IntS32), callable(p.Type.Float32))),
-      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map(0 -> name)))
+      decl.matches(call, List(callable(p.Type.IntS32), callable(p.Type.Float32))),
+      Right(ProgramLinker.CallMatch(Map("T" -> p.Type.Float32), Map(0 -> name)))
     )
   }
 
@@ -398,7 +397,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       tpe,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       Nil,
       None,
@@ -406,7 +405,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Unit0
     )
 
-    val bound = decl.bind(
+    val result = decl.matches(
       call,
       List(
         callable(first, p.Type.IntS32),
@@ -414,7 +413,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
         callable(last, p.Type.Float32)
       )
     )
-    assert(bound.left.exists(_.exists(_.contains("has 2 matching declarations for callable `caller.first`"))), bound)
+    assert(result.left.exists(_.exists(_.contains("has 2 matching declarations for callable `caller.first`"))), result)
   }
 
   test("explicit public types make callable overload checks independent") {
@@ -444,7 +443,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       tpe,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -453,7 +452,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      decl.bind(
+      decl.matches(
         call,
         List(
           callable(first, p.Type.IntS32),
@@ -461,13 +460,13 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
           callable(last, p.Type.Float32)
         )
       ),
-      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map(0 -> first, 1 -> last)))
+      Right(ProgramLinker.CallMatch(Map("T" -> p.Type.Float32), Map(0 -> first, 1 -> last)))
     )
   }
 
   test("direct calls reject declarations with explicit captures") {
     val decl = transformDecl.copy(moduleCaptures = List(p.Arg(p.Named("state", p.Type.IntS32))))
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -482,7 +481,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
 
     assert(
       decl
-        .bind(call, Nil)
+        .matches(call, Nil)
         .left
         .exists(_.contains("public declarations with explicit captures cannot be called directly"))
     )
@@ -496,7 +495,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     assert(missingBoundary.validateInterfaceDeclaration.exists(_.contains("has no boundary")))
   }
 
-  test("binding rejects a conflicting element type and callable signature") {
+  test("matching rejects a conflicting element type and callable signature") {
     val decl   = transformDecl
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
     val i32Ptr = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
@@ -510,7 +509,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Bool1,
       p.Function.Affinity.Host
     )
-    val wrongElement = p.InvokeSignature(
+    val wrongElement = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -519,11 +518,11 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
     val wrongCallable = wrongElement.copy(args = List(f32Ptr, f32Ptr, p.Type.IntS32, p.Type.FnRef(wrongLambda.name)))
 
-    assert(decl.bind(wrongElement, List(wrongLambda)).isLeft)
-    assert(decl.bind(wrongCallable, List(wrongLambda)).isLeft)
+    assert(decl.matches(wrongElement, List(wrongLambda)).isLeft)
+    assert(decl.matches(wrongCallable, List(wrongLambda)).isLeft)
   }
 
-  test("binding respects callable type-variable scope and alpha-renaming") {
+  test("matching respects callable type-variable scope and alpha-renaming") {
     val decl = transformDecl.copy(args =
       transformDecl.args.updated(
         3,
@@ -531,7 +530,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       )
     )
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Float32),
       None,
@@ -545,15 +544,15 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      decl.bind(call, Nil),
-      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32), Map.empty))
+      decl.matches(call, Nil),
+      Right(ProgramLinker.CallMatch(Map("T" -> p.Type.Float32), Map.empty))
     )
   }
 
-  test("binding rejects declaration type variables that cannot be inferred") {
+  test("matching rejects declaration type variables that cannot be inferred") {
     val decl   = transformDecl.copy(tpeVars = List(p.Type.Var("T"), p.Type.Var("Unused")))
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       Nil,
       None,
@@ -568,13 +567,13 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
 
     assert(
       decl
-        .bind(call, Nil)
+        .matches(call, Nil)
         .left
         .exists(_.contains("declaration type variable `Unused` is not bound by the signature"))
     )
   }
 
-  test("binding resolves consistent chained type substitutions") {
+  test("matching resolves consistent chained type substitutions") {
     val decl = p.FunctionDecl(
       p.Sym("foo.chain"),
       List(p.Type.Var("T"), p.Type.Var("U")),
@@ -585,7 +584,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       decl.name,
       List(p.Type.Var("U"), p.Type.Float32),
       None,
@@ -594,12 +593,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
 
     assertEquals(
-      decl.bind(call, Nil),
-      Right(InterfaceBinding.BoundCall(Map("T" -> p.Type.Float32, "U" -> p.Type.Float32), Map.empty))
+      decl.matches(call, Nil),
+      Right(ProgramLinker.CallMatch(Map("T" -> p.Type.Float32, "U" -> p.Type.Float32), Map.empty))
     )
   }
 
-  test("binding resolves a callable returned by reference") {
+  test("matching resolves a callable returned by reference") {
     val callable = p.FunctionDecl(
       p.Sym("caller.callback"),
       Nil,
@@ -620,12 +619,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Exec(Nil, List(p.Type.Float32), p.Type.Float32),
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(decl.name, Nil, None, Nil, p.Type.FnRef(callable.name))
+    val call = ProgramLinker.CallSignature(decl.name, Nil, None, Nil, p.Type.FnRef(callable.name))
 
-    assertEquals(decl.bind(call, List(callable)), Right(InterfaceBinding.BoundCall(Map.empty, Map.empty)))
+    assertEquals(decl.matches(call, List(callable)), Right(ProgramLinker.CallMatch(Map.empty, Map.empty)))
   }
 
-  test("binding rejects duplicate binders in an actual callable type") {
+  test("matching rejects duplicate binders in an actual callable type") {
     val expected = p.Type.Exec(
       List(p.Type.Var("A"), p.Type.Var("B")),
       List(p.Type.Var("A"), p.Type.Var("B")),
@@ -646,9 +645,9 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Unit0,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(decl.name, Nil, None, List(malformed), p.Type.Unit0)
+    val call = ProgramLinker.CallSignature(decl.name, Nil, None, List(malformed), p.Type.Unit0)
 
-    assert(decl.bind(call, Nil).isLeft)
+    assert(decl.matches(call, Nil).isLeft)
   }
 
   test("validation rejects malformed callable type-variable binders") {
@@ -716,10 +715,10 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     assertEquals(
       impl.conformsTo(public),
       Right(
-        InterfaceBinding.BoundImplementation(
+        ProgramLinker.ImplementationMatch(
           Map("Element" -> p.Type.Var("T")),
           Map.empty,
-          InterfaceBinding.ReturnConvention.Direct,
+          ProgramLinker.ImplementationResult.Direct,
           0
         )
       )
@@ -858,10 +857,10 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     assertEquals(
       implementation.conformsTo(public),
       Right(
-        InterfaceBinding.BoundImplementation(
+        ProgramLinker.ImplementationMatch(
           Map("Element" -> p.Type.Var("T")),
           Map.empty,
-          InterfaceBinding.ReturnConvention.TrailingOutput(2),
+          ProgramLinker.ImplementationResult.TrailingOutput(2),
           0
         )
       )
@@ -922,7 +921,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       p.Type.Float32,
       p.Function.Affinity.Host
     )
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       public.name,
       List(p.Type.Float32),
       None,
@@ -1058,7 +1057,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
         Some(name)
       )
     val pkg  = p.Package(p.Interface(p.Sym("foo"), List(f64, f32)), p.Program(None, List(variant), Nil))
-    val call = p.InvokeSignature(name, Nil, None, List(p.Type.Float32), p.Type.Float32)
+    val call = ProgramLinker.CallSignature(name, Nil, None, List(p.Type.Float32), p.Type.Float32)
 
     assertEquals(
       pkg.resolve(call, Nil, Set.empty, Map.empty).map(_.publicDeclaration),
@@ -1082,7 +1081,7 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     val public   = transformDecl
     val variable = p.Type.Var("T")
     val ptr      = p.Type.Ptr(variable, p.Type.Space.Global)
-    val call = p.InvokeSignature(
+    val call = ProgramLinker.CallSignature(
       public.name,
       List(variable),
       None,

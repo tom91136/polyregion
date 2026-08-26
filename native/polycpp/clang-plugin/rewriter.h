@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -11,17 +10,8 @@
 
 namespace polyregion::polystl {
 
-using ResolvedSymBitcode = std::vector<std::vector<int8_t>>;
-
-class OffloadRewriteConsumer : public clang::ASTConsumer {
-  clang::CompilerInstance &CI;
-  polyregion::polyfront::Options opts;
-  std::shared_ptr<ResolvedSymBitcode> resolvedSymBitcode;
-
-public:
-  OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyregion::polyfront::Options &opts,
-                         std::shared_ptr<ResolvedSymBitcode> resolvedSymBitcode);
-  void HandleTranslationUnit(clang::ASTContext &C) override;
-};
+[[nodiscard]] std::unique_ptr<clang::ASTConsumer> makeOffloadRewriteConsumer(clang::CompilerInstance &CI,
+                                                                             const polyregion::polyfront::Options &opts,
+                                                                             std::shared_ptr<std::vector<int8_t>> packageProgramBitcode);
 
 } // namespace polyregion::polystl

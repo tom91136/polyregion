@@ -1,6 +1,7 @@
 package polyregion.scalalang
 
-import polyregion.ast.{MsgPack, PackageSymResolver, PolyAST as p, given}
+import cats.syntax.all.*
+import polyregion.ast.{MsgPack, PolyAST as p, ProgramLinker, calleeName, canonicalName, given}
 import polyregion.scalalang.generated.PolyASTWireSchema
 
 import java.nio.file.{Files, Path, Paths}
@@ -8,6 +9,8 @@ import java.util.Locale
 import scala.util.control.NonFatal
 
 private[scalalang] object InterfaceResolver {
+
+  final case class Import(packageName: String, declaration: String, target: p.Expr.Invoke)
 
   private def configured(name: String, property: String): Option[String] =
     Option(System.getenv(name)).orElse(Option(System.getProperty(property))).map(_.trim).filter(_.nonEmpty)
@@ -84,17 +87,74 @@ private[scalalang] object InterfaceResolver {
       case _                        => Nil
     })
 
-  def resolve(
-      pkg: p.Package,
-      declaration: String,
-      target: p.Expr.Invoke,
-      callerDecls: List[p.FunctionDecl] = Nil,
+  private def root(declaration: String, target: p.Expr.Invoke): p.Function =
+    p.Function(
+      p.FunctionDecl(
+        target.calleeName,
+        Nil,
+        target.receiver.map(value => p.Arg(p.Named("this", value.tpe), None)),
+        target.args.zipWithIndex.map((value, index) => p.Arg(p.Named(s"arg$index", value.tpe), None)),
+        Nil,
+        Nil,
+        target.rtn,
+        p.Function.Affinity.Host
+      ),
+      Nil,
+      p.Function.Visibility.Exported,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.RegularCall,
+      Some(p.Sym(declaration))
+    )
+
+  def importPackages(
+      packages: List[p.Package],
+      imports: List[Import],
+      callerDecls: List[p.FunctionDecl],
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int]
+  ): Either[List[String], (List[p.Function], Set[p.StructDef])] = {
+    val layouts =
+      imports.flatMap(value => (value.target.args.map(_.tpe) :+ value.target.rtn).flatMap(layoutsOf)).toMap ++ typeSizes
+    val roots = imports.map(value => root(value.declaration, value.target))
+    val signatures = imports.map { value =>
+      value.target.calleeName -> ProgramLinker.CallSignature(
+        p.Sym(value.declaration),
+        value.target.tpeArgs,
+        value.target.receiver.map(_.tpe),
+        value.target.args.map(_.tpe),
+        value.target.rtn
+      )
+    }.toMap
+    val callers = callerDecls.map(decl =>
+      p.Function(decl, Nil, p.Function.Visibility.Internal, p.Function.FpMode.Relaxed, p.CallConvention.RegularCall)
+    )
+    val request = p.Program.LinkRequest(
+      packages,
+      p.Program(None, roots ::: callers, Nil),
+      capabilities.toList.sorted,
+      layouts.toList.filter(_._2 > 0).sortBy(_._1.canonicalName).map((tpe, size) => p.Program.TypeSize(tpe, size))
+    )
+    val callerNames = callerDecls.map(_.name).toSet
+    ProgramLinker
+      .importProgram(request, signatures)
+      .map(program => program.functions.filterNot(fn => callerNames(fn.name)) -> program.defs.toSet)
+  }
+
+  def importAll(
+      imports: List[Import],
+      callerDecls: List[p.FunctionDecl],
       capabilities: Set[String] = configuredCapabilities,
       typeSizes: Map[p.Type, Int] = Map.empty
-  ): Either[List[String], (List[p.Function], Set[p.StructDef])] = {
-    val layouts = (target.args.map(_.tpe) :+ target.rtn).flatMap(layoutsOf).toMap ++ typeSizes
-    PackageSymResolver
-      .resolveImplementation(pkg, declaration, target, callerDecls, capabilities, layouts)
-      .map(resolved => resolved.functions -> resolved.definitions)
-  }
+  ): Either[List[String], (List[p.Function], Set[p.StructDef])] =
+    if (imports.isEmpty) Right(Nil -> Set.empty)
+    else
+      imports.map(_.packageName).distinct.sorted.traverse(loadPackage).flatMap { packages =>
+        importPackages(
+          packages,
+          imports,
+          callerDecls,
+          capabilities,
+          typeSizes
+        )
+      }
 }

@@ -24,6 +24,7 @@
 #include "compiler.h"
 #include "fire.hpp"
 #include "generated/polypass_symbols.h"
+#include "package_compiler.hpp"
 #include "polyast_codec.h"
 
 using namespace polyregion;
@@ -63,7 +64,7 @@ int packageLinkMain(int argc, const char *argv[]) {
     });
     if (!programs) return 3;
     const auto interface = polyast::interface_from_msgpack(*interfaceBytes);
-    const auto linked = compiler::linkPackage(
+    const auto linked = compiler::package::link(
         polyast::PackageLinkRequest(interface, *programs, std::vector<std::string>(capabilities.begin(), capabilities.end())));
     if (!linked) {
       llvm::errs() << (linked.errors | mk_string("\n")) << '\n';
@@ -81,9 +82,9 @@ int packageLinkMain(int argc, const char *argv[]) {
   }
 }
 
-int packageCompileSymMain(int argc, const char *argv[]) {
+int packageCompileMain(int argc, const char *argv[]) {
   if (argc < 4) {
-    llvm::errs() << "usage: polyc package compile-sym <request.msgpack> --out=<result.msgpack> --target=<host-target> "
+    llvm::errs() << "usage: polyc package compile <request.msgpack> --out=<result.msgpack> --target=<host-target> "
                     "--arch=<host-arch> [--device=<target>@<arch>]... [--stack-depth=<n>]\n";
     return 2;
   }
@@ -122,25 +123,25 @@ int packageCompileSymMain(int argc, const char *argv[]) {
       }
       devices.emplace_back(target->codegen, raw->substr(separator + 1));
     } else {
-      llvm::errs() << "unknown package compile-sym argument: " << arg << '\n';
+      llvm::errs() << "unknown program compile argument: " << arg << '\n';
       return 2;
     }
   }
   const auto hostTarget = compiletime::TargetSpec::findByName(hostTargetName);
   if (output.empty() || !hostTarget) {
-    llvm::errs() << "package compile-sym requires a valid --out and --target\n";
+    llvm::errs() << "program compile requires a valid --out and --target\n";
     return 2;
   }
   try {
     const auto requestBytes = readBytes(argv[3]);
     if (!requestBytes) return 3;
-    const auto request = polyast::packagesymrequest_from_msgpack(*requestBytes);
-    const auto compiled = compiler::compilePackageSym(request, hostTarget->codegen, hostArch, devices, stackDepth);
+    const auto request = polyast::programlinkrequest_from_msgpack(*requestBytes);
+    const auto compiled = compiler::package::compile(request, hostTarget->codegen, hostArch, devices, stackDepth);
     if (!compiled) {
       llvm::errs() << (compiled.errors | mk_string("\n")) << '\n';
       return 4;
     }
-    const auto bytes = polyast::packagesymcompileresult_to_msgpack(*compiled.value);
+    const auto bytes = polyast::compilebundle_to_msgpack(*compiled.value);
     std::ofstream stream(output, std::ios::binary | std::ios::trunc);
     stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     stream.close();
@@ -158,8 +159,8 @@ int packageCompileSymMain(int argc, const char *argv[]) {
 std::optional<int> packageMain(int argc, const char *argv[]) {
   if (argc < 2 || std::string_view(argv[1]) != "package") return {};
   if (argc >= 3 && std::string_view(argv[2]) == "link") return packageLinkMain(argc, argv);
-  if (argc >= 3 && std::string_view(argv[2]) == "compile-sym") return packageCompileSymMain(argc, argv);
-  llvm::errs() << "usage: polyc package <link|compile-sym> ...\n";
+  if (argc >= 3 && std::string_view(argv[2]) == "compile") return packageCompileMain(argc, argv);
+  llvm::errs() << "usage: polyc package <link|compile> ...\n";
   return 2;
 }
 

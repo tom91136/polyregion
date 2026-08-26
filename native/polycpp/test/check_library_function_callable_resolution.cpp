@@ -1,4 +1,4 @@
-#pragma region case: callable-package
+#pragma region case: function-callable-resolution-package
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
@@ -9,8 +9,7 @@
 
 namespace foo {
 template <class T, class Op> [[clang::annotate("polyregion_interface:foo:bar.apply")]] inline T apply(T x, Op op) { __builtin_trap(); }
+int plusTwo(int x) { return x + 2; }
 } // namespace foo
 
-int main() {
-  std::printf("%d", foo::apply(40, [](int x) { return x + 2; }));
-}
+int main() { std::printf("%d", foo::apply(40, &foo::plusTwo)); }

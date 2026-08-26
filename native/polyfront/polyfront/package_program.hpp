@@ -12,8 +12,6 @@
 
 namespace polyregion::polyfront {
 
-inline constexpr auto PackageExportAnnotation = "polyregion_export";
-
 inline polyast::Program packageProgram(std::vector<polyast::Function> functions, std::vector<polyast::StructDef> defs) {
   return polyast::Program({}, std::move(functions), std::move(defs), polyast::PassPhase::Initial(), {});
 }

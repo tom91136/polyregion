@@ -174,7 +174,6 @@ private[polyregion] object CodeGen {
       :: deriveStruct[Handler]()
       :: deriveStruct[Stmt]()
       :: deriveStruct[Signature]()
-      :: deriveStruct[InvokeSignature]()
       :: Nil
 
   private def astProgramStructs: List[StructNode] =
@@ -213,24 +212,25 @@ private[polyregion] object CodeGen {
   // of the persistent Package schema. Keep their fingerprint independent so
   // adding a service operation cannot invalidate stored Program/Package data.
   private def packageWireStructs: List[StructNode] =
-    deriveStruct[Package.TypeSize]()
+    deriveStruct[Program.TypeSize]()
+      :: deriveStruct[Program.LinkRequest]()
       :: deriveStruct[Package.LinkRequest]()
-      :: deriveStruct[Package.SymRequest]()
-      :: deriveStruct[Package.ReturnConvention]()
-      :: deriveStruct[Package.EntryArgBinding]()
-      :: deriveStruct[Package.SymResolvedProgram]()
-      :: deriveStruct[Package.SymCompiledObject]()
-      :: deriveStruct[Package.SymCompileResult]()
+      :: Nil
+
+  private def compileWireStructs: List[StructNode] =
+    deriveStruct[Compile.Module]()
+      :: deriveStruct[Compile.Bundle]()
       :: Nil
 
   private def generateAstBindings() = {
 
     println("Generating C++ mirror for PolyAST...")
 
-    val programStructs = astCoreStructs ::: astProgramStructs
-    val packageStructs = programStructs ::: astPackageStructs
-    val wireStructs    = packageWireStructs
-    val structs        = packageStructs ::: wireStructs
+    val programStructs     = astCoreStructs ::: astProgramStructs
+    val packageStructs     = programStructs ::: astPackageStructs
+    val wireStructs        = packageWireStructs
+    val compileWireStructs = CodeGen.compileWireStructs
+    val structs            = packageStructs ::: wireStructs ::: compileWireStructs
 
     val (reprProtos, reprImpls): (String, String) = compiletime.generateReprSource[PolyAST.type]
 
@@ -254,29 +254,29 @@ private[polyregion] object CodeGen {
           "package-service Package",
           "package-service wire"
         ),
+        Root.versioned[Program](
+          "program_service_result",
+          Schema.PackageWire,
+          "package-service Program",
+          "package-service wire"
+        ),
         Root.versioned[Package.LinkRequest](
           "packagelinkrequest",
           Schema.PackageWire,
           "PackageLinkRequest",
           "package-service wire"
         ),
-        Root.versioned[Package.SymRequest](
-          "packagesymrequest",
+        Root.versioned[Program.LinkRequest](
+          "programlinkrequest",
           Schema.PackageWire,
-          "PackageSymRequest",
+          "ProgramLinkRequest",
           "package-service wire"
         ),
-        Root.versioned[Package.SymResolvedProgram](
-          "resolvedsymprogram",
-          Schema.PackageWire,
-          "PackageSymResolvedProgram",
-          "package-service wire"
-        ),
-        Root.versioned[Package.SymCompileResult](
-          "packagesymcompileresult",
-          Schema.PackageWire,
-          "PackageSymCompileResult",
-          "package-service wire"
+        Root.versioned[Compile.Bundle](
+          "compilebundle",
+          Schema.CompileWire,
+          "CompileBundle",
+          "native compile wire"
         ),
         Root.raw[List[StructDef]]("structdefs"),
         Root.versioned[List[StructDef]](
@@ -358,6 +358,7 @@ private[polyregion] object CodeGen {
     val programHash     = md5(adtFingerprint(programStructs))
     val packageHash     = md5(adtFingerprint(packageStructs))
     val packageWireHash = md5(packageHash + "\n" + adtFingerprint(wireStructs))
+    val compileWireHash = md5(adtFingerprint(compileWireStructs))
 
     val jsonCodecHeader = CppCodecGen.emitHeader(namespace, jsonCodecSources, msgpackRoots)
     val jsonCodecImpl = CppCodecGen.emitImpl(
@@ -367,6 +368,7 @@ private[polyregion] object CodeGen {
       programHash,
       packageHash,
       packageWireHash,
+      compileWireHash,
       jsonCodecSources,
       msgpackCodecSources,
       msgpackRoots
@@ -489,7 +491,7 @@ private[polyregion] object CodeGen {
       "../native/common/generated/polyregion/polypackage.h",
       "../native/common/generated/polyregion/polypackage_symbols.h",
       "../native/polyc/generated/polypackage-exports.txt",
-      CAbiCodeGen.polyPackageHeader,
+      CAbiCodeGen.polyPackageHeader, // expands the PolyPackageAbi version and operation surface here
       CAbiCodeGen.polyPackageSymbolsHeader,
       CAbiCodeGen.polyPackageExportsList
     )

@@ -23,11 +23,12 @@ int main(int argc, char **argv) {
   if (argc != expectedIndex + 1) return 2;
   using namespace polyregion::polyast;
   const auto name = Sym({"probe"});
-  const auto request =
-      PackageSymRequest(Package(Interface(name, {}, {}), polyregion::polyfront::packageProgram({}, {})),
-                        InvokeSignature(name, {}, {}, {}, Type::Unit0()), {}, {}, {}, {}, {}, "__probe", PackageReturnConvention::Return());
+  const auto rootDecl = FunctionDecl(Sym({"__probe"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
+  const auto root = Function(rootDecl, {}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall(), name);
+  const auto request = ProgramLinkRequest({Package(Interface(name, {}, {}), polyregion::polyfront::packageProgram({}, {}))},
+                                          polyregion::polyfront::packageProgram({root}, {}));
   const auto result =
-      polyregion::polyfront::package::PolycClient::compileSym(request, {}, polyregion::compiletime::Target::Object_LLVM_HOST, "native", {});
+      polyregion::polyfront::package::compileProgram(request, {}, polyregion::compiletime::Target::Object_LLVM_HOST, "native", {});
   if (result) return 3;
   const std::string expected = argv[expectedIndex];
   for (const auto &error : result.errors)

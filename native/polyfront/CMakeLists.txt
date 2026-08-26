@@ -26,14 +26,8 @@ target_link_libraries(polyfront-polyc-client
         PUBLIC PolyAST polycommon
         PRIVATE fmt::fmt LLVMSupport)
 target_include_directories(polyfront-polyc-client SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
+target_include_directories(polyfront-polyc-client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(polyfront-polyc-client PRIVATE POLYC_DEV_EXECUTABLE="$<TARGET_FILE:polyc-bin>")
-target_sources(polyfront-polyc-client
-        PUBLIC FILE_SET HEADERS
-        TYPE HEADERS
-        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
-        FILES
-        polyfront/resolved_sym_program_compilation.hpp
-        polyfront/polyc_client.hpp)
 polyregion_apply_common_options(polyfront-polyc-client)
 polyregion_strip_asan_on_darwin(polyfront-polyc-client) # embedded in the dlopen'd frontend plugins
 

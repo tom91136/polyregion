@@ -62,29 +62,33 @@ TEST_CASE("reject a plugin built against the previous PolyPass ABI") {
 TEST_CASE("load and invoke a package-only plugin") {
   JsPassRunner r;
   REQUIRE(r.loadModule(R"JS(
-    exports.polypackage_abi_version = function() { return 1; };
+    exports.polypackage_abi_version = function() { return 2; };
     exports.polypackage_link_package = function(bytes) {
       const out = new Uint8Array(bytes.length + 1);
       out[0] = 42;
       out.set(bytes, 1);
       return out;
     };
-    exports.polypackage_resolve_sym = function(bytes) { return bytes; };
+    exports.polypackage_link_program = function(bytes) { return bytes; };
   )JS")
               .empty());
   CHECK(r.passNames().empty());
-  REQUIRE(r.packageAbiVersion() == 1);
+  REQUIRE(r.packageAbiVersion() == 2);
 
   std::string error;
   const auto output = r.runPackage(polyregion::polypackage::abi::LinkPackage, {1, 2, 3}, error);
   CHECK(error.empty());
   CHECK(output == std::vector<uint8_t>{42, 1, 2, 3});
+
+  const auto program = r.runPackage(polyregion::polypackage::abi::LinkProgram, {4, 5, 6}, error);
+  CHECK(error.empty());
+  CHECK(program == std::vector<uint8_t>{4, 5, 6});
 }
 
 TEST_CASE("reject an incomplete package capability") {
   JsPassRunner r;
   const auto error = r.loadModule(R"JS(
-    exports.polypackage_abi_version = function() { return 1; };
+    exports.polypackage_abi_version = function() { return 2; };
     exports.polypackage_link_package = function(bytes) { return bytes; };
   )JS");
   REQUIRE((error ^ contains_slice("incomplete package capability")));

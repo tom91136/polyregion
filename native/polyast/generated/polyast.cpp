@@ -4061,38 +4061,6 @@ POLYREGION_EXPORT bool Signature::operator==(const Signature &rhs) const {
          && (rtn == rhs.rtn);
 }
 
-InvokeSignature::InvokeSignature(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Type::Any> receiver, std::vector<Type::Any> args,
-                                 Type::Any rtn) noexcept
-    : name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
-size_t InvokeSignature::hash_code() const {
-  size_t seed = 0;
-  seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(tpeArgs)>()(tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(receiver)>()(receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(args)>()(args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-InvokeSignature InvokeSignature::withName(const Sym &v_) const { return InvokeSignature(v_, tpeArgs, receiver, args, rtn); }
-InvokeSignature InvokeSignature::withTpeArgs(const std::vector<Type::Any> &v_) const {
-  return InvokeSignature(name, v_, receiver, args, rtn);
-}
-InvokeSignature InvokeSignature::withReceiver(const std::optional<Type::Any> &v_) const {
-  return InvokeSignature(name, tpeArgs, v_, args, rtn);
-}
-InvokeSignature InvokeSignature::withArgs(const std::vector<Type::Any> &v_) const {
-  return InvokeSignature(name, tpeArgs, receiver, v_, rtn);
-}
-InvokeSignature InvokeSignature::withRtn(const Type::Any &v_) const { return InvokeSignature(name, tpeArgs, receiver, args, v_); }
-POLYREGION_EXPORT bool InvokeSignature::operator!=(const InvokeSignature &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool InvokeSignature::operator==(const InvokeSignature &rhs) const {
-  return (name == rhs.name)
-         && std::equal(tpeArgs.begin(), tpeArgs.end(), rhs.tpeArgs.begin(), rhs.tpeArgs.end(), [](auto &&l, auto &&r) { return l == r; })
-         && ((!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver))
-         && std::equal(args.begin(), args.end(), rhs.args.begin(), rhs.args.end(), [](auto &&l, auto &&r) { return l == r; })
-         && (rtn == rhs.rtn);
-}
-
 FunctionVisibility::Base::Base() = default;
 uint32_t FunctionVisibility::Any::id() const { return _v->id(); }
 size_t FunctionVisibility::Any::hash_code() const { return _v->hash_code(); }
@@ -4888,18 +4856,47 @@ Package Package::withProgram(const Program &v_) const { return Package(interface
 POLYREGION_EXPORT bool Package::operator!=(const Package &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Package::operator==(const Package &rhs) const { return (interface == rhs.interface) && (program == rhs.program); }
 
-PackageTypeSize::PackageTypeSize(Type::Any tpe, int32_t sizeInBytes) noexcept : tpe(std::move(tpe)), sizeInBytes(sizeInBytes) {}
-size_t PackageTypeSize::hash_code() const {
+ProgramTypeSize::ProgramTypeSize(Type::Any tpe, int32_t sizeInBytes) noexcept : tpe(std::move(tpe)), sizeInBytes(sizeInBytes) {}
+size_t ProgramTypeSize::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(tpe)>()(tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(sizeInBytes)>()(sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-PackageTypeSize PackageTypeSize::withTpe(const Type::Any &v_) const { return PackageTypeSize(v_, sizeInBytes); }
-PackageTypeSize PackageTypeSize::withSizeInBytes(const int32_t &v_) const { return PackageTypeSize(tpe, v_); }
-POLYREGION_EXPORT bool PackageTypeSize::operator!=(const PackageTypeSize &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool PackageTypeSize::operator==(const PackageTypeSize &rhs) const {
+ProgramTypeSize ProgramTypeSize::withTpe(const Type::Any &v_) const { return ProgramTypeSize(v_, sizeInBytes); }
+ProgramTypeSize ProgramTypeSize::withSizeInBytes(const int32_t &v_) const { return ProgramTypeSize(tpe, v_); }
+POLYREGION_EXPORT bool ProgramTypeSize::operator!=(const ProgramTypeSize &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool ProgramTypeSize::operator==(const ProgramTypeSize &rhs) const {
   return (tpe == rhs.tpe) && (sizeInBytes == rhs.sizeInBytes);
+}
+
+ProgramLinkRequest::ProgramLinkRequest(std::vector<Package> packages, Program consumer, std::vector<std::string> capabilities,
+                                       std::vector<ProgramTypeSize> typeSizes) noexcept
+    : packages(std::move(packages)), consumer(std::move(consumer)), capabilities(std::move(capabilities)), typeSizes(std::move(typeSizes)) {
+}
+size_t ProgramLinkRequest::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(packages)>()(packages) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(consumer)>()(consumer) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(typeSizes)>()(typeSizes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+ProgramLinkRequest ProgramLinkRequest::withPackages(const std::vector<Package> &v_) const {
+  return ProgramLinkRequest(v_, consumer, capabilities, typeSizes);
+}
+ProgramLinkRequest ProgramLinkRequest::withConsumer(const Program &v_) const {
+  return ProgramLinkRequest(packages, v_, capabilities, typeSizes);
+}
+ProgramLinkRequest ProgramLinkRequest::withCapabilities(const std::vector<std::string> &v_) const {
+  return ProgramLinkRequest(packages, consumer, v_, typeSizes);
+}
+ProgramLinkRequest ProgramLinkRequest::withTypeSizes(const std::vector<ProgramTypeSize> &v_) const {
+  return ProgramLinkRequest(packages, consumer, capabilities, v_);
+}
+POLYREGION_EXPORT bool ProgramLinkRequest::operator!=(const ProgramLinkRequest &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool ProgramLinkRequest::operator==(const ProgramLinkRequest &rhs) const {
+  return (packages == rhs.packages) && (consumer == rhs.consumer) && (capabilities == rhs.capabilities) && (typeSizes == rhs.typeSizes);
 }
 
 PackageLinkRequest::PackageLinkRequest(Interface interface, std::vector<Program> programFragments,
@@ -4926,282 +4923,46 @@ POLYREGION_EXPORT bool PackageLinkRequest::operator==(const PackageLinkRequest &
   return (interface == rhs.interface) && (programFragments == rhs.programFragments) && (capabilities == rhs.capabilities);
 }
 
-PackageSymRequest::PackageSymRequest(Package pkg, InvokeSignature signature, std::vector<FunctionDecl> callerDecls,
-                                     std::vector<Function> callerFns, std::vector<StructDef> callerDefs,
-                                     std::vector<std::string> capabilities, std::vector<PackageTypeSize> typeSizes, std::string entryName,
-                                     PackageReturnConvention::Any returnConvention) noexcept
-    : pkg(std::move(pkg)), signature(std::move(signature)), callerDecls(std::move(callerDecls)), callerFns(std::move(callerFns)),
-      callerDefs(std::move(callerDefs)), capabilities(std::move(capabilities)), typeSizes(std::move(typeSizes)),
-      entryName(std::move(entryName)), returnConvention(std::move(returnConvention)) {}
-size_t PackageSymRequest::hash_code() const {
-  size_t seed = 0;
-  seed ^= std::hash<decltype(pkg)>()(pkg) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(signature)>()(signature) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(callerDecls)>()(callerDecls) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(callerFns)>()(callerFns) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(callerDefs)>()(callerDefs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(typeSizes)>()(typeSizes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(entryName)>()(entryName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(returnConvention)>()(returnConvention) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-PackageSymRequest PackageSymRequest::withPkg(const Package &v_) const {
-  return PackageSymRequest(v_, signature, callerDecls, callerFns, callerDefs, capabilities, typeSizes, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withSignature(const InvokeSignature &v_) const {
-  return PackageSymRequest(pkg, v_, callerDecls, callerFns, callerDefs, capabilities, typeSizes, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withCallerDecls(const std::vector<FunctionDecl> &v_) const {
-  return PackageSymRequest(pkg, signature, v_, callerFns, callerDefs, capabilities, typeSizes, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withCallerFns(const std::vector<Function> &v_) const {
-  return PackageSymRequest(pkg, signature, callerDecls, v_, callerDefs, capabilities, typeSizes, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withCallerDefs(const std::vector<StructDef> &v_) const {
-  return PackageSymRequest(pkg, signature, callerDecls, callerFns, v_, capabilities, typeSizes, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withCapabilities(const std::vector<std::string> &v_) const {
-  return PackageSymRequest(pkg, signature, callerDecls, callerFns, callerDefs, v_, typeSizes, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withTypeSizes(const std::vector<PackageTypeSize> &v_) const {
-  return PackageSymRequest(pkg, signature, callerDecls, callerFns, callerDefs, capabilities, v_, entryName, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withEntryName(const std::string &v_) const {
-  return PackageSymRequest(pkg, signature, callerDecls, callerFns, callerDefs, capabilities, typeSizes, v_, returnConvention);
-}
-PackageSymRequest PackageSymRequest::withReturnConvention(const PackageReturnConvention::Any &v_) const {
-  return PackageSymRequest(pkg, signature, callerDecls, callerFns, callerDefs, capabilities, typeSizes, entryName, v_);
-}
-POLYREGION_EXPORT bool PackageSymRequest::operator!=(const PackageSymRequest &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool PackageSymRequest::operator==(const PackageSymRequest &rhs) const {
-  return (pkg == rhs.pkg) && (signature == rhs.signature) && (callerDecls == rhs.callerDecls) && (callerFns == rhs.callerFns)
-         && (callerDefs == rhs.callerDefs) && (capabilities == rhs.capabilities) && (typeSizes == rhs.typeSizes)
-         && (entryName == rhs.entryName) && (returnConvention == rhs.returnConvention);
-}
-
-PackageReturnConvention::Base::Base() = default;
-uint32_t PackageReturnConvention::Any::id() const { return _v->id(); }
-size_t PackageReturnConvention::Any::hash_code() const { return _v->hash_code(); }
-bool PackageReturnConvention::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
-bool PackageReturnConvention::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
-bool PackageReturnConvention::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
-
-PackageReturnConvention::Return::Return() noexcept : PackageReturnConvention::Base() {}
-uint32_t PackageReturnConvention::Return::id() const { return variant_id; };
-size_t PackageReturnConvention::Return::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
-POLYREGION_EXPORT bool PackageReturnConvention::Return::operator==(const PackageReturnConvention::Return &rhs) const { return true; }
-POLYREGION_EXPORT bool PackageReturnConvention::Return::operator==(const Base &rhs_) const {
-  if (rhs_.id() != variant_id) return false;
-  return true;
-}
-POLYREGION_EXPORT bool PackageReturnConvention::Return::operator<(const PackageReturnConvention::Return &rhs) const { return false; }
-POLYREGION_EXPORT bool PackageReturnConvention::Return::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
-PackageReturnConvention::Return::operator PackageReturnConvention::Any() const {
-  return std::static_pointer_cast<Base>(std::make_shared<Return>(*this));
-}
-PackageReturnConvention::Any PackageReturnConvention::Return::widen() const { return Any(*this); };
-
-PackageReturnConvention::OutParam::OutParam(int32_t index) noexcept : PackageReturnConvention::Base(), index(index) {}
-uint32_t PackageReturnConvention::OutParam::id() const { return variant_id; };
-size_t PackageReturnConvention::OutParam::hash_code() const {
-  size_t seed = variant_id;
-  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-PackageReturnConvention::OutParam PackageReturnConvention::OutParam::withIndex(const int32_t &v_) const {
-  return PackageReturnConvention::OutParam(v_);
-}
-POLYREGION_EXPORT bool PackageReturnConvention::OutParam::operator==(const PackageReturnConvention::OutParam &rhs) const {
-  return (this->index == rhs.index);
-}
-POLYREGION_EXPORT bool PackageReturnConvention::OutParam::operator==(const Base &rhs_) const {
-  if (rhs_.id() != variant_id) return false;
-  return this->operator==(static_cast<const PackageReturnConvention::OutParam &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
-}
-POLYREGION_EXPORT bool PackageReturnConvention::OutParam::operator<(const PackageReturnConvention::OutParam &rhs) const { return false; }
-POLYREGION_EXPORT bool PackageReturnConvention::OutParam::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
-PackageReturnConvention::OutParam::operator PackageReturnConvention::Any() const {
-  return std::static_pointer_cast<Base>(std::make_shared<OutParam>(*this));
-}
-PackageReturnConvention::Any PackageReturnConvention::OutParam::widen() const { return Any(*this); };
-
-PackageEntryArgBinding::Base::Base() = default;
-uint32_t PackageEntryArgBinding::Any::id() const { return _v->id(); }
-size_t PackageEntryArgBinding::Any::hash_code() const { return _v->hash_code(); }
-bool PackageEntryArgBinding::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v); }
-bool PackageEntryArgBinding::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v); }
-bool PackageEntryArgBinding::Any::operator<(const Any &rhs) const { return _v->operator<(*rhs._v); };
-
-PackageEntryArgBinding::Context::Context() noexcept : PackageEntryArgBinding::Base() {}
-uint32_t PackageEntryArgBinding::Context::id() const { return variant_id; };
-size_t PackageEntryArgBinding::Context::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::Context::operator==(const PackageEntryArgBinding::Context &rhs) const { return true; }
-POLYREGION_EXPORT bool PackageEntryArgBinding::Context::operator==(const Base &rhs_) const {
-  if (rhs_.id() != variant_id) return false;
-  return true;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::Context::operator<(const PackageEntryArgBinding::Context &rhs) const { return false; }
-POLYREGION_EXPORT bool PackageEntryArgBinding::Context::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
-PackageEntryArgBinding::Context::operator PackageEntryArgBinding::Any() const {
-  return std::static_pointer_cast<Base>(std::make_shared<Context>(*this));
-}
-PackageEntryArgBinding::Any PackageEntryArgBinding::Context::widen() const { return Any(*this); };
-
-PackageEntryArgBinding::CallValue::CallValue(int32_t index) noexcept : PackageEntryArgBinding::Base(), index(index) {}
-uint32_t PackageEntryArgBinding::CallValue::id() const { return variant_id; };
-size_t PackageEntryArgBinding::CallValue::hash_code() const {
-  size_t seed = variant_id;
-  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-PackageEntryArgBinding::CallValue PackageEntryArgBinding::CallValue::withIndex(const int32_t &v_) const {
-  return PackageEntryArgBinding::CallValue(v_);
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallValue::operator==(const PackageEntryArgBinding::CallValue &rhs) const {
-  return (this->index == rhs.index);
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallValue::operator==(const Base &rhs_) const {
-  if (rhs_.id() != variant_id) return false;
-  return this->operator==(static_cast<const PackageEntryArgBinding::CallValue &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallValue::operator<(const PackageEntryArgBinding::CallValue &rhs) const { return false; }
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallValue::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
-PackageEntryArgBinding::CallValue::operator PackageEntryArgBinding::Any() const {
-  return std::static_pointer_cast<Base>(std::make_shared<CallValue>(*this));
-}
-PackageEntryArgBinding::Any PackageEntryArgBinding::CallValue::widen() const { return Any(*this); };
-
-PackageEntryArgBinding::CallAddress::CallAddress(int32_t index) noexcept : PackageEntryArgBinding::Base(), index(index) {}
-uint32_t PackageEntryArgBinding::CallAddress::id() const { return variant_id; };
-size_t PackageEntryArgBinding::CallAddress::hash_code() const {
-  size_t seed = variant_id;
-  seed ^= std::hash<decltype(index)>()(index) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-PackageEntryArgBinding::CallAddress PackageEntryArgBinding::CallAddress::withIndex(const int32_t &v_) const {
-  return PackageEntryArgBinding::CallAddress(v_);
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallAddress::operator==(const PackageEntryArgBinding::CallAddress &rhs) const {
-  return (this->index == rhs.index);
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallAddress::operator==(const Base &rhs_) const {
-  if (rhs_.id() != variant_id) return false;
-  return this->operator==(static_cast<const PackageEntryArgBinding::CallAddress &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallAddress::operator<(const PackageEntryArgBinding::CallAddress &rhs) const {
-  return false;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::CallAddress::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
-PackageEntryArgBinding::CallAddress::operator PackageEntryArgBinding::Any() const {
-  return std::static_pointer_cast<Base>(std::make_shared<CallAddress>(*this));
-}
-PackageEntryArgBinding::Any PackageEntryArgBinding::CallAddress::widen() const { return Any(*this); };
-
-PackageEntryArgBinding::ResultAddress::ResultAddress() noexcept : PackageEntryArgBinding::Base() {}
-uint32_t PackageEntryArgBinding::ResultAddress::id() const { return variant_id; };
-size_t PackageEntryArgBinding::ResultAddress::hash_code() const {
-  size_t seed = variant_id;
-  return seed;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::ResultAddress::operator==(const PackageEntryArgBinding::ResultAddress &rhs) const {
-  return true;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::ResultAddress::operator==(const Base &rhs_) const {
-  if (rhs_.id() != variant_id) return false;
-  return true;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::ResultAddress::operator<(const PackageEntryArgBinding::ResultAddress &rhs) const {
-  return false;
-}
-POLYREGION_EXPORT bool PackageEntryArgBinding::ResultAddress::operator<(const Base &rhs_) const { return variant_id < rhs_.id(); }
-PackageEntryArgBinding::ResultAddress::operator PackageEntryArgBinding::Any() const {
-  return std::static_pointer_cast<Base>(std::make_shared<ResultAddress>(*this));
-}
-PackageEntryArgBinding::Any PackageEntryArgBinding::ResultAddress::widen() const { return Any(*this); };
-
-PackageSymResolvedProgram::PackageSymResolvedProgram(Program program, std::vector<PackageEntryArgBinding::Any> entryArgs) noexcept
-    : program(std::move(program)), entryArgs(std::move(entryArgs)) {}
-size_t PackageSymResolvedProgram::hash_code() const {
-  size_t seed = 0;
-  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(entryArgs)>()(entryArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-PackageSymResolvedProgram PackageSymResolvedProgram::withProgram(const Program &v_) const {
-  return PackageSymResolvedProgram(v_, entryArgs);
-}
-PackageSymResolvedProgram PackageSymResolvedProgram::withEntryArgs(const std::vector<PackageEntryArgBinding::Any> &v_) const {
-  return PackageSymResolvedProgram(program, v_);
-}
-POLYREGION_EXPORT bool PackageSymResolvedProgram::operator!=(const PackageSymResolvedProgram &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool PackageSymResolvedProgram::operator==(const PackageSymResolvedProgram &rhs) const {
-  return (program == rhs.program)
-         && std::equal(entryArgs.begin(), entryArgs.end(), rhs.entryArgs.begin(), rhs.entryArgs.end(),
-                       [](auto &&l, auto &&r) { return l == r; });
-}
-
-PackageSymCompiledObject::PackageSymCompiledObject(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features,
-                                                   std::vector<int8_t> moduleImage) noexcept
-    : moduleName(std::move(moduleName)), format(format), kind(kind), features(std::move(features)), moduleImage(std::move(moduleImage)) {}
-size_t PackageSymCompiledObject::hash_code() const {
+CompileModule::CompileModule(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features,
+                             std::vector<int8_t> image) noexcept
+    : moduleName(std::move(moduleName)), format(format), kind(kind), features(std::move(features)), image(std::move(image)) {}
+size_t CompileModule::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(moduleName)>()(moduleName) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(format)>()(format) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(kind)>()(kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(features)>()(features) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(moduleImage)>()(moduleImage) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(image)>()(image) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-PackageSymCompiledObject PackageSymCompiledObject::withModuleName(const std::string &v_) const {
-  return PackageSymCompiledObject(v_, format, kind, features, moduleImage);
+CompileModule CompileModule::withModuleName(const std::string &v_) const { return CompileModule(v_, format, kind, features, image); }
+CompileModule CompileModule::withFormat(const int32_t &v_) const { return CompileModule(moduleName, v_, kind, features, image); }
+CompileModule CompileModule::withKind(const int32_t &v_) const { return CompileModule(moduleName, format, v_, features, image); }
+CompileModule CompileModule::withFeatures(const std::vector<std::string> &v_) const {
+  return CompileModule(moduleName, format, kind, v_, image);
 }
-PackageSymCompiledObject PackageSymCompiledObject::withFormat(const int32_t &v_) const {
-  return PackageSymCompiledObject(moduleName, v_, kind, features, moduleImage);
+CompileModule CompileModule::withImage(const std::vector<int8_t> &v_) const {
+  return CompileModule(moduleName, format, kind, features, v_);
 }
-PackageSymCompiledObject PackageSymCompiledObject::withKind(const int32_t &v_) const {
-  return PackageSymCompiledObject(moduleName, format, v_, features, moduleImage);
-}
-PackageSymCompiledObject PackageSymCompiledObject::withFeatures(const std::vector<std::string> &v_) const {
-  return PackageSymCompiledObject(moduleName, format, kind, v_, moduleImage);
-}
-PackageSymCompiledObject PackageSymCompiledObject::withModuleImage(const std::vector<int8_t> &v_) const {
-  return PackageSymCompiledObject(moduleName, format, kind, features, v_);
-}
-POLYREGION_EXPORT bool PackageSymCompiledObject::operator!=(const PackageSymCompiledObject &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool PackageSymCompiledObject::operator==(const PackageSymCompiledObject &rhs) const {
+POLYREGION_EXPORT bool CompileModule::operator!=(const CompileModule &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool CompileModule::operator==(const CompileModule &rhs) const {
   return (moduleName == rhs.moduleName) && (format == rhs.format) && (kind == rhs.kind) && (features == rhs.features)
-         && (moduleImage == rhs.moduleImage);
+         && (image == rhs.image);
 }
 
-PackageSymCompileResult::PackageSymCompileResult(PackageSymResolvedProgram resolved, std::vector<int8_t> hostObject,
-                                                 std::vector<PackageSymCompiledObject> remoteObjects) noexcept
-    : resolved(std::move(resolved)), hostObject(std::move(hostObject)), remoteObjects(std::move(remoteObjects)) {}
-size_t PackageSymCompileResult::hash_code() const {
+CompileBundle::CompileBundle(std::vector<int8_t> hostObject, std::vector<CompileModule> remoteModules) noexcept
+    : hostObject(std::move(hostObject)), remoteModules(std::move(remoteModules)) {}
+size_t CompileBundle::hash_code() const {
   size_t seed = 0;
-  seed ^= std::hash<decltype(resolved)>()(resolved) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(hostObject)>()(hostObject) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(remoteObjects)>()(remoteObjects) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(remoteModules)>()(remoteModules) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-PackageSymCompileResult PackageSymCompileResult::withResolved(const PackageSymResolvedProgram &v_) const {
-  return PackageSymCompileResult(v_, hostObject, remoteObjects);
-}
-PackageSymCompileResult PackageSymCompileResult::withHostObject(const std::vector<int8_t> &v_) const {
-  return PackageSymCompileResult(resolved, v_, remoteObjects);
-}
-PackageSymCompileResult PackageSymCompileResult::withRemoteObjects(const std::vector<PackageSymCompiledObject> &v_) const {
-  return PackageSymCompileResult(resolved, hostObject, v_);
-}
-POLYREGION_EXPORT bool PackageSymCompileResult::operator!=(const PackageSymCompileResult &rhs) const { return !(*this == rhs); }
-POLYREGION_EXPORT bool PackageSymCompileResult::operator==(const PackageSymCompileResult &rhs) const {
-  return (resolved == rhs.resolved) && (hostObject == rhs.hostObject) && (remoteObjects == rhs.remoteObjects);
+CompileBundle CompileBundle::withHostObject(const std::vector<int8_t> &v_) const { return CompileBundle(v_, remoteModules); }
+CompileBundle CompileBundle::withRemoteModules(const std::vector<CompileModule> &v_) const { return CompileBundle(hostObject, v_); }
+POLYREGION_EXPORT bool CompileBundle::operator!=(const CompileBundle &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool CompileBundle::operator==(const CompileBundle &rhs) const {
+  return (hostObject == rhs.hostObject) && (remoteModules == rhs.remoteModules);
 }
 
 } // namespace polyregion::polyast
@@ -5852,9 +5613,6 @@ std::size_t std::hash<polyregion::polyast::Stmt::Rethrow>::operator()(const poly
 std::size_t std::hash<polyregion::polyast::Signature>::operator()(const polyregion::polyast::Signature &x) const noexcept {
   return x.hash_code();
 }
-std::size_t std::hash<polyregion::polyast::InvokeSignature>::operator()(const polyregion::polyast::InvokeSignature &x) const noexcept {
-  return x.hash_code();
-}
 std::size_t
 std::hash<polyregion::polyast::FunctionVisibility::Any>::operator()(const polyregion::polyast::FunctionVisibility::Any &x) const noexcept {
   return x.hash_code();
@@ -6010,57 +5768,20 @@ std::size_t std::hash<polyregion::polyast::Interface>::operator()(const polyregi
 std::size_t std::hash<polyregion::polyast::Package>::operator()(const polyregion::polyast::Package &x) const noexcept {
   return x.hash_code();
 }
-std::size_t std::hash<polyregion::polyast::PackageTypeSize>::operator()(const polyregion::polyast::PackageTypeSize &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::ProgramTypeSize>::operator()(const polyregion::polyast::ProgramTypeSize &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t
+std::hash<polyregion::polyast::ProgramLinkRequest>::operator()(const polyregion::polyast::ProgramLinkRequest &x) const noexcept {
   return x.hash_code();
 }
 std::size_t
 std::hash<polyregion::polyast::PackageLinkRequest>::operator()(const polyregion::polyast::PackageLinkRequest &x) const noexcept {
   return x.hash_code();
 }
-std::size_t std::hash<polyregion::polyast::PackageSymRequest>::operator()(const polyregion::polyast::PackageSymRequest &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::CompileModule>::operator()(const polyregion::polyast::CompileModule &x) const noexcept {
   return x.hash_code();
 }
-std::size_t std::hash<polyregion::polyast::PackageReturnConvention::Any>::operator()(
-    const polyregion::polyast::PackageReturnConvention::Any &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageReturnConvention::Return>::operator()(
-    const polyregion::polyast::PackageReturnConvention::Return &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageReturnConvention::OutParam>::operator()(
-    const polyregion::polyast::PackageReturnConvention::OutParam &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageEntryArgBinding::Any>::operator()(
-    const polyregion::polyast::PackageEntryArgBinding::Any &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageEntryArgBinding::Context>::operator()(
-    const polyregion::polyast::PackageEntryArgBinding::Context &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageEntryArgBinding::CallValue>::operator()(
-    const polyregion::polyast::PackageEntryArgBinding::CallValue &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageEntryArgBinding::CallAddress>::operator()(
-    const polyregion::polyast::PackageEntryArgBinding::CallAddress &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageEntryArgBinding::ResultAddress>::operator()(
-    const polyregion::polyast::PackageEntryArgBinding::ResultAddress &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageSymResolvedProgram>::operator()(
-    const polyregion::polyast::PackageSymResolvedProgram &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t std::hash<polyregion::polyast::PackageSymCompiledObject>::operator()(
-    const polyregion::polyast::PackageSymCompiledObject &x) const noexcept {
-  return x.hash_code();
-}
-std::size_t
-std::hash<polyregion::polyast::PackageSymCompileResult>::operator()(const polyregion::polyast::PackageSymCompileResult &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::CompileBundle>::operator()(const polyregion::polyast::CompileBundle &x) const noexcept {
   return x.hash_code();
 }

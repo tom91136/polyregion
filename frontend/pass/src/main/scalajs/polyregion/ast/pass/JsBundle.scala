@@ -1,6 +1,6 @@
 package polyregion.ast.pass
 
-import polyregion.ast.{MsgPack, PackageLinker, PackageSymResolver}
+import polyregion.ast.{MsgPack, PackageLinker, ProgramLinker}
 import polyregion.ast.PolyAST.{PolyPackageAbi, PolyPassAbi}
 import polyregion.ast.PolyAST as p
 import polyregion.ast.generated.PolyPackageWireSchema
@@ -61,11 +61,9 @@ object JsBundle {
   def linkPackage(bytes: Uint8Array): Uint8Array =
     packageOperation[p.Package.LinkRequest, p.Package]("link package", bytes)(PackageLinker.link)
 
-  @JSExportTopLevel(PolyPackageAbi.ResolveSym.Name)
-  def resolvePackageSym(bytes: Uint8Array): Uint8Array =
-    packageOperation[p.Package.SymRequest, p.Package.SymResolvedProgram]("resolve Sym", bytes)(
-      PackageSymResolver.resolveSym
-    )
+  @JSExportTopLevel(PolyPackageAbi.LinkProgram.Name)
+  def linkProgram(bytes: Uint8Array): Uint8Array =
+    packageOperation[p.Program.LinkRequest, p.Program]("link program", bytes)(ProgramLinker.link)
 
   private object JsBytes {
     def toArray(bytes: Uint8Array): Array[Byte] = {

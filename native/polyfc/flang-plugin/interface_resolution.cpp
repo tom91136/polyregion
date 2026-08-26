@@ -1,5 +1,6 @@
 #include "interface_resolution.h"
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <string>
@@ -17,7 +18,9 @@
 #include "fmt/format.h"
 
 #include "polyfront/package.hpp"
-#include "polyfront/resolved_sym_program_compilation.hpp"
+#include "polyfront/package_program.hpp"
+#include "polyfront/polyc_client.hpp"
+#include "polyregion/program_import.hpp"
 
 #include "mlir_utils.h"
 #include "remapper.h"
@@ -117,6 +120,18 @@ Checked<std::string> writeBitcode(const std::vector<int8_t> &bytes) {
   return result;
 }
 
+struct PreparedInterface {
+  func::FuncOp function;
+  polyast::Package pkg;
+  std::vector<polyast::Type::Any> argumentTypes;
+  std::vector<polyast::ProgramTypeSize> typeSizes;
+  bool erasedResult;
+  size_t logicalArgumentCount;
+  polyast::Type::Any returnType;
+  std::string entryName;
+  polyast::Function root;
+};
+
 } // namespace
 
 void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::DiagnosticsEngine &diag, ModuleOp &module,
@@ -143,16 +158,23 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   });
 
   DataLayout layout(module);
+  std::map<std::string, polyast::Package> packagesByName;
+  std::vector<PreparedInterface> prepared;
   for (auto &[function, identity] : sites) {
-    const auto pkg = loadPackage(identity.packageName, opts.libraryPath.empty() ? packageRoots() : splitPackageRoots(opts.libraryPath));
-    if (!pkg) {
-      emitErrors(diag, function.getLoc(), pkg.errors);
-      continue;
+    auto package = packagesByName.find(identity.packageName);
+    if (package == packagesByName.end()) {
+      const auto loaded =
+          loadPackage(identity.packageName, opts.libraryPath.empty() ? packageRoots() : splitPackageRoots(opts.libraryPath));
+      if (!loaded) {
+        emitErrors(diag, function.getLoc(), loaded.errors);
+        continue;
+      }
+      package = packagesByName.emplace(identity.packageName, *loaded.value).first;
     }
 
     Remapper remapper(module, layout, function, {});
     const auto declarationName = Sym(identity.declaration ^ split('.'));
-    const auto erasedResults = pkg.value->interface.declarations | filter([&](const auto &decl) {
+    const auto erasedResults = package->second.interface.declarations | filter([&](const auto &decl) {
                                  return function.getNumResults() == 0 && decl.name == declarationName && decl.rtn != polyast::Type::Unit0()
                                         && decl.args.size() + 1 == function.getNumArguments();
                                })
@@ -164,10 +186,9 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     const bool erasedResult = erasedResults.size() == 1;
     const auto logicalArgumentCount = function.getNumArguments() - (erasedResult ? 1 : 0);
     const std::vector<mlir::Type> allSourceTypes(function.getArgumentTypes().begin(), function.getArgumentTypes().end());
-    const auto sourceArgumentTypes = allSourceTypes ^ map([&](const auto type) { return remapper.handleType(type); });
     const std::vector<mlir::Type> sourceTypes(allSourceTypes.begin(), allSourceTypes.begin() + logicalArgumentCount);
-    const std::vector<polyast::Type::Any> argumentTypes(sourceArgumentTypes.begin(), sourceArgumentTypes.begin() + logicalArgumentCount);
-    std::vector<PackageTypeSize> typeSizes;
+    const auto argumentTypes = sourceTypes ^ map([&](const auto type) { return remapper.handleType(type); });
+    std::vector<ProgramTypeSize> typeSizes;
     for (size_t i = 0; i < sourceTypes.size(); ++i) {
       const auto type = sourceTypes[i];
       const auto &mapped = argumentTypes[i];
@@ -182,28 +203,45 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     if (function.getNumResults() != 0)
       typeSizes.emplace_back(returnType, static_cast<int32_t>(layout.getTypeSize(function.getResultTypes().front())));
 
-    const auto signature = InvokeSignature(declarationName, {}, {}, argumentTypes, returnType);
-    const auto entryName = fmt::format("__polyregion_package_sym_{}", function.getSymName());
-    const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-    const auto returnConvention = erasedResult ? PackageReturnConvention::OutParam(static_cast<int32_t>(logicalArgumentCount)).widen()
-                                               : PackageReturnConvention::Return().widen();
-    const auto request = PackageSymRequest(*pkg.value, signature, {}, {}, {}, capabilities, typeSizes, entryName, returnConvention);
-    const auto compiled = resolveAndCompileSym(opts, request, compiletime::Target::Object_LLVM_HOST, "native");
-    if (!compiled) {
-      emitErrors(diag, function.getLoc(), compiled.errors);
-      continue;
-    }
-    const auto &resolution = compiled.value->resolved;
-    if (const auto errors = validateResolvedSymProgram(request, resolution, sourceArgumentTypes, returnType); !errors.empty()) {
-      emitErrors(diag, function.getLoc(), errors);
-      continue;
-    }
-    const auto bitcode = writeBitcode(compiled.value->hostObject);
-    if (!bitcode) {
-      emitErrors(diag, function.getLoc(), bitcode.errors);
-      continue;
-    }
-    bitcodeFiles.emplace_back(*bitcode.value);
+    const auto entryName = fmt::format("__polyregion_package_program_{}", function.getSymName());
+    const auto root = program::importRoot(entryName, declarationName, argumentTypes, returnType);
+    prepared.emplace_back(PreparedInterface{function, package->second, argumentTypes, std::move(typeSizes), erasedResult,
+                                            logicalArgumentCount, returnType, entryName, root});
+  }
+
+  if (prepared.empty()) return;
+  std::vector<Package> packages;
+  std::vector<Function> roots;
+  std::vector<ProgramTypeSize> typeSizes;
+  for (const auto &item : prepared) {
+    if (std::find(packages.begin(), packages.end(), item.pkg) == packages.end()) packages.emplace_back(item.pkg);
+    roots.emplace_back(item.root);
+    for (const auto &size : item.typeSizes)
+      if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
+  }
+  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+  const auto request =
+      ProgramLinkRequest(std::move(packages), polyfront::packageProgram(std::move(roots), {}), capabilities, std::move(typeSizes));
+  const auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
+                                                           opts.targets, opts.stackDepth);
+  if (!compiled) {
+    emitErrors(diag, prepared.front().function.getLoc(), compiled.errors);
+    return;
+  }
+  const auto bitcode = writeBitcode(compiled.value->hostObject);
+  if (!bitcode) {
+    emitErrors(diag, prepared.front().function.getLoc(), bitcode.errors);
+    return;
+  }
+  bitcodeFiles.emplace_back(*bitcode.value);
+
+  for (auto &item : prepared) {
+    auto function = item.function;
+    const auto &argumentTypes = item.argumentTypes;
+    const auto erasedResult = item.erasedResult;
+    const auto logicalArgumentCount = item.logicalArgumentCount;
+    const auto &returnType = item.returnType;
+    const auto &entryName = item.entryName;
 
     auto &block = function.getBody().front();
     for (auto &operation : block)
@@ -213,41 +251,40 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     std::vector<Value> entryArgs;
     std::vector<mlir::Type> entryTypes;
     const auto contextType = fir::ReferenceType::get(builder.getI8Type());
-    Value context;
+    auto contextFn = module.lookupSymbol<func::FuncOp>("polyrt_context_current");
+    if (!contextFn) {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(module.getBody());
+      contextFn = func::FuncOp::create(builder, function.getLoc(), "polyrt_context_current",
+                                       FunctionType::get(module.getContext(), {}, {contextType}));
+      contextFn.setPrivate();
+    }
+    const auto context = fir::CallOp::create(builder, function.getLoc(), contextFn, ValueRange{}).getResult(0);
+    entryArgs.emplace_back(context);
+    entryTypes.emplace_back(contextType);
     Value resultSlot;
-    for (const auto &param : resolution.entryArgs) {
-      if (param.is<PackageEntryArgBinding::Context>()) {
-        auto contextFn = module.lookupSymbol<func::FuncOp>("polyrt_context_current");
-        if (!contextFn) {
-          OpBuilder::InsertionGuard guard(builder);
-          builder.setInsertionPointToStart(module.getBody());
-          contextFn = func::FuncOp::create(builder, function.getLoc(), "polyrt_context_current",
-                                           FunctionType::get(module.getContext(), {}, {contextType}));
-          contextFn.setPrivate();
-        }
-        context = fir::CallOp::create(builder, function.getLoc(), contextFn, ValueRange{}).getResult(0);
-        entryArgs.emplace_back(context);
-        entryTypes.emplace_back(contextType);
-      } else if (const auto source = param.get<PackageEntryArgBinding::CallValue>()) {
-        const auto argument = block.getArgument(source->index);
+    for (size_t index = 0; index < argumentTypes.size(); ++index) {
+      if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::OmittedCallable) continue;
+      const auto argument = block.getArgument(index);
+      if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::DirectPointer) {
         entryArgs.emplace_back(argument);
         entryTypes.emplace_back(argument.getType());
-      } else if (const auto source = param.get<PackageEntryArgBinding::CallAddress>()) {
-        const auto argument = block.getArgument(source->index);
+      } else {
         auto slot = fir::AllocaOp::create(builder, function.getLoc(), argument.getType()).getResult();
         fir::StoreOp::create(builder, function.getLoc(), argument, slot);
         entryArgs.emplace_back(slot);
         entryTypes.emplace_back(slot.getType());
-      } else if (param.is<PackageEntryArgBinding::ResultAddress>()) {
-        const auto type = function.getResultTypes().front();
-        resultSlot = fir::AllocaOp::create(builder, function.getLoc(), type).getResult();
-        entryArgs.emplace_back(resultSlot);
-        entryTypes.emplace_back(resultSlot.getType());
       }
     }
-    if (!context) {
-      emitErrors(diag, function.getLoc(), {"resolved package Sym entry has no context parameter"});
-      continue;
+    if (erasedResult) {
+      resultSlot = block.getArgument(logicalArgumentCount);
+      entryArgs.emplace_back(resultSlot);
+      entryTypes.emplace_back(resultSlot.getType());
+    } else if (!returnType.is<polyast::Type::Unit0>()) {
+      const auto type = function.getResultTypes().front();
+      resultSlot = fir::AllocaOp::create(builder, function.getLoc(), type).getResult();
+      entryArgs.emplace_back(resultSlot);
+      entryTypes.emplace_back(resultSlot.getType());
     }
     const auto contextOperation = [&](llvm::StringRef name) {
       auto operation = module.lookupSymbol<func::FuncOp>(name);
@@ -269,7 +306,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       entry.setPrivate();
     }
     fir::CallOp::create(builder, function.getLoc(), contextAcquire, ValueRange{context});
-    if (!compiled.value->remoteObjects.empty()) {
+    if (!compiled.value->remoteModules.empty()) {
       const auto pointerType = LLVM::LLVMPointerType::get(module.getContext());
       const auto sizeType = builder.getI64Type();
       auto remoteLoad = module.lookupSymbol<func::FuncOp>("polyrt_remote_load");
@@ -284,9 +321,10 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
         remoteLoad.setPrivate();
       }
       std::map<std::string, Value> loadedModules;
-      for (const auto &[moduleName, object] : compiled.value->remoteObjects) {
+      for (const auto &object : compiled.value->remoteModules) {
+        const auto &moduleName = object.moduleName;
         const auto moduleNameValue = polyfc::strConst(builder, module, moduleName, true);
-        const auto imageValue = polyfc::strConst(builder, module, object.moduleImage, false);
+        const auto imageValue = polyfc::strConst(builder, module, std::string(object.image.begin(), object.image.end()), false);
         Value featureData = polyfc::nullConst(builder);
         if (!object.features.empty()) {
           featureData =
@@ -305,7 +343,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
                                             polyfc::intConst(builder, builder.getI32Type(), static_cast<int32_t>(object.kind)),
                                             polyfc::intConst(builder, builder.getI32Type(), static_cast<int32_t>(object.format)),
                                             polyfc::intConst(builder, sizeType, object.features.size()), featureData,
-                                            polyfc::intConst(builder, sizeType, object.moduleImage.size()), imageValue})
+                                            polyfc::intConst(builder, sizeType, object.image.size()), imageValue})
                 .getResult(0);
         const auto found = loadedModules.find(moduleName);
         if (found == loadedModules.end()) loadedModules.emplace(moduleName, loaded);
@@ -326,7 +364,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
     }
     fir::CallOp::create(builder, function.getLoc(), entry, entryArgs);
     fir::CallOp::create(builder, function.getLoc(), contextRelease, ValueRange{context});
-    if (resultSlot) {
+    if (resultSlot && !erasedResult) {
       const auto value = fir::LoadOp::create(builder, function.getLoc(), resultSlot).getResult();
       func::ReturnOp::create(builder, function.getLoc(), value);
     } else func::ReturnOp::create(builder, function.getLoc());

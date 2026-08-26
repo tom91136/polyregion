@@ -79,10 +79,6 @@ const static auto Unit = Tpe::Unit0();
 const static auto Nothing = Tpe::Nothing();
 
 Tpe::Ptr Ptr(const Tpe::Any &t, const TypeSpace::Any &s = TypeSpace::Global());
-// Backwards-compat shim: legacy DSL passed `Ptr(t, {}, space)` where {} was an optional length.
-// The new schema splits Arr (with length) from Ptr (no length); the middle arg is ignored here so
-// existing call sites keep building.
-Tpe::Ptr Ptr(const Tpe::Any &t, std::optional<int32_t>, const TypeSpace::Any &s);
 Tpe::Arr Arr(const Tpe::Any &t, int32_t length, const TypeSpace::Any &s = TypeSpace::Global());
 Tpe::Struct Struct(std::string name, Vector<Type::Any> args);
 

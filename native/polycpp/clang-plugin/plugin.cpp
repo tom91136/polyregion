@@ -63,13 +63,13 @@ public:
   }
 };
 
-bool linkResolvedSymModule(llvm::Module &module, std::unique_ptr<llvm::Module> resolved, clang::DiagnosticsEngine &clangDiagnostics) {
+bool linkProgramModule(llvm::Module &module, std::unique_ptr<llvm::Module> linked, clang::DiagnosticsEngine &clangDiagnostics) {
   auto &context = module.getContext();
   auto previous = context.getDiagnosticHandler();
-  const auto identifier = resolved->getModuleIdentifier();
+  const auto identifier = linked->getModuleIdentifier();
   std::vector<CapturedLinkDiagnostic> diagnostics;
   context.setDiagnosticHandler(std::make_unique<LinkDiagnosticHandler>(previous.get(), diagnostics));
-  const bool failed = llvm::Linker(module).linkInModule(std::move(resolved));
+  const bool failed = llvm::Linker(module).linkInModule(std::move(linked));
   context.setDiagnosticHandler(std::move(previous));
   for (const auto &diagnostic : diagnostics) {
     unsigned id;
@@ -84,33 +84,33 @@ bool linkResolvedSymModule(llvm::Module &module, std::unique_ptr<llvm::Module> r
   return failed;
 }
 
-class LinkResolvedSymBitcodePass final : public llvm::PassInfoMixin<LinkResolvedSymBitcodePass> {
-  std::shared_ptr<polystl::ResolvedSymBitcode> bitcode;
+class LinkProgramBitcodePass final : public llvm::PassInfoMixin<LinkProgramBitcodePass> {
+  std::shared_ptr<std::vector<int8_t>> bitcode;
   clang::DiagnosticsEngine &diagnostics;
 
 public:
-  LinkResolvedSymBitcodePass(std::shared_ptr<polystl::ResolvedSymBitcode> bitcode, clang::DiagnosticsEngine &diagnostics)
+  LinkProgramBitcodePass(std::shared_ptr<std::vector<int8_t>> bitcode, clang::DiagnosticsEngine &diagnostics)
       : bitcode(std::move(bitcode)), diagnostics(diagnostics) {}
 
   llvm::PreservedAnalyses run(llvm::Module &module, llvm::ModuleAnalysisManager &) {
-    for (const auto &bytes : *bitcode) {
-      const auto data = llvm::StringRef(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-      auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, "polyregion-resolved-package-sym"), module.getContext());
+    if (!bitcode->empty()) {
+      const auto data = llvm::StringRef(reinterpret_cast<const char *>(bitcode->data()), bitcode->size());
+      auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, "polyregion-linked-program"), module.getContext());
       if (!parsed) {
         module.getContext().emitError(llvm::toString(parsed.takeError()));
         return llvm::PreservedAnalyses::none();
       }
-      auto resolved = std::move(*parsed);
-      const llvm::Triple sourceTriple(resolved->getTargetTriple()), targetTriple(module.getTargetTriple());
+      auto linked = std::move(*parsed);
+      const llvm::Triple sourceTriple(linked->getTargetTriple()), targetTriple(module.getTargetTriple());
       if (!polyfront::objectTargetsCompatible(sourceTriple, targetTriple)
-          || !polyfront::objectLayoutsCompatible(*resolved, module.getDataLayout())) {
-        module.getContext().emitError("resolved package Sym target is incompatible with the translation unit");
+          || !polyfront::objectLayoutsCompatible(*linked, module.getDataLayout())) {
+        module.getContext().emitError("linked package program target is incompatible with the translation unit");
         return llvm::PreservedAnalyses::none();
       }
-      resolved->setTargetTriple(module.getTargetTriple());
-      resolved->setDataLayout(module.getDataLayout());
-      if (linkResolvedSymModule(module, std::move(resolved), diagnostics)) {
-        module.getContext().emitError("cannot link resolved package Sym");
+      linked->setTargetTriple(module.getTargetTriple());
+      linked->setDataLayout(module.getDataLayout());
+      if (linkProgramModule(module, std::move(linked), diagnostics)) {
+        module.getContext().emitError("cannot link package program");
         return llvm::PreservedAnalyses::none();
       }
     }
@@ -124,11 +124,11 @@ class PolyCppFrontendAction final : public clang::PluginASTAction {
 
 protected:
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef InFile) override {
-    auto resolvedSymBitcode = std::make_shared<polystl::ResolvedSymBitcode>();
+    auto packageProgramBitcode = std::make_shared<std::vector<int8_t>>();
     auto &diagnostics = CI.getDiagnostics();
-    CI.getCodeGenOpts().PassBuilderCallbacks.push_back([resolvedSymBitcode, &diagnostics](llvm::PassBuilder &PB) {
-      PB.registerPipelineStartEPCallback([resolvedSymBitcode, &diagnostics](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
-        MPM.addPass(LinkResolvedSymBitcodePass(resolvedSymBitcode, diagnostics));
+    CI.getCodeGenOpts().PassBuilderCallbacks.push_back([packageProgramBitcode, &diagnostics](llvm::PassBuilder &PB) {
+      PB.registerPipelineStartEPCallback([packageProgramBitcode, &diagnostics](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
+        MPM.addPass(LinkProgramBitcodePass(packageProgramBitcode, diagnostics));
       });
     });
 #ifdef POLYREGION_FUSED_DRIVER
@@ -137,7 +137,7 @@ protected:
     CI.getCodeGenOpts().PassBuilderCallbacks.push_back([info](llvm::PassBuilder &PB) { info.RegisterPassBuilderCallbacks(PB); });
 #endif
     if (std::getenv(polyregion::env::PolycppNoRewrite)) return std::make_unique<clang::ASTConsumer>();
-    return std::make_unique<polystl::OffloadRewriteConsumer>(CI, opts, std::move(resolvedSymBitcode));
+    return polystl::makeOffloadRewriteConsumer(CI, opts, std::move(packageProgramBitcode));
   }
 
   bool ParseArgs(const clang::CompilerInstance &CI, const std::vector<std::string> &args) override {

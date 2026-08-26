@@ -63,7 +63,6 @@
 
 #include "test_utils.h"
 
-#define POLYREGION_EXPORT_FN [[clang::annotate("polyregion_export")]]
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 #define POLYREGION_IMPLEMENTS(name) [[clang::annotate("polyregion_implements:" name)]]
 #define POLYREGION_REQUIRES(name) [[clang::annotate("polyregion_requires:" name)]]
@@ -93,23 +92,23 @@ static int unrelated(const int x) { return x + 1; }
 #if CHECK_KIND == 0
 POLYREGION_EXPORT_AS("foo.implementation.exportedA")
 POLYREGION_IMPLEMENTS("foo.exportedA") POLYREGION_REQUIRES("gpu") int exportedA(const int x) { return x <= 0 ? 0 : exportedA(x - 1) + 1; }
-POLYREGION_EXPORT_FN int exportedB(const int x) { return helper(x) + 2; }
+POLYREGION_EXPORT_AS("exportedB") int exportedB(const int x) { return helper(x) + 2; }
 #elif CHECK_KIND == 1
-POLYREGION_EXPORT_FN int relaxed(Diamond *d) { return d == nullptr ? 0 : 1; }
+POLYREGION_EXPORT_AS("relaxed") int relaxed(Diamond *d) { return d == nullptr ? 0 : 1; }
 #elif CHECK_KIND == 2
-POLYREGION_EXPORT_FN int relaxed(int *sink) { return Effect{sink}.sink[0]; }
+POLYREGION_EXPORT_AS("relaxed") int relaxed(int *sink) { return Effect{sink}.sink[0]; }
 #elif CHECK_KIND == 3
-POLYREGION_EXPORT_FN int relaxed(const int x) {
+POLYREGION_EXPORT_AS("relaxed") int relaxed(const int x) {
   if (x < 0) throw 1;
   return x;
 }
 #elif CHECK_KIND == 4
-POLYREGION_EXPORT_FN int relaxed(int *sink) {
+POLYREGION_EXPORT_AS("relaxed") int relaxed(int *sink) {
   Effect e[2]{{sink}, {sink}};
   return sink[0];
 }
 #elif CHECK_KIND == 5
-POLYREGION_EXPORT_FN int relaxed(const int x) {
+POLYREGION_EXPORT_AS("relaxed") int relaxed(const int x) {
   try {
     return x;
   } catch (...) {

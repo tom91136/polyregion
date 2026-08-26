@@ -12,7 +12,7 @@ private[polyregion] case class CppMsgPackCodecGen(
 private[polyregion] object CppMsgPackCodecGen {
 
   enum Schema {
-    case Program, Package, PackageWire
+    case Program, Package, PackageWire, CompileWire
   }
 
   enum Envelope {
@@ -213,6 +213,7 @@ private[polyregion] object CppMsgPackCodecGen {
     case Schema.Program     => "ProgramHash"
     case Schema.Package     => "PackageHash"
     case Schema.PackageWire => "PackageWireHash"
+    case Schema.CompileWire => "CompileWireHash"
   }
 
   def rootImpl(root: Root): List[String] = {

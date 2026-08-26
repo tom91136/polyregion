@@ -1,5 +1,6 @@
 #include "rewriter.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -27,8 +28,9 @@
 #include "polyfront/diag.hpp"
 #include "polyfront/package.hpp"
 #include "polyfront/package_program.hpp"
-#include "polyfront/resolved_sym_program_compilation.hpp"
+#include "polyfront/polyc_client.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/program_import.hpp"
 
 #include "ast.h"
 #include "ast_visitors.h"
@@ -56,9 +58,7 @@ struct PackageExportMetadata {
   bool invalid;
 };
 
-static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *decl, const clang::ASTContext &context,
-                                                   clang::DiagnosticsEngine &diag) {
-  bool legacy = false;
+static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *decl, clang::DiagnosticsEngine &diag) {
   bool invalid = false;
   Vector<Sym> explicitNames;
   Vector<Sym> implements;
@@ -67,10 +67,6 @@ static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *de
     const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
     if (!annotation) continue;
     const auto value = annotation->getAnnotation();
-    if (value == polyfront::PackageExportAnnotation) {
-      legacy = true;
-      continue;
-    }
     const auto parseSym = [&](const llvm::StringLiteral prefix, Vector<Sym> &out, const std::string_view kind) {
       if (!value.starts_with(prefix)) return false;
       const auto parts = value.drop_front(prefix.size()).str() ^ split('.');
@@ -110,12 +106,7 @@ static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *de
   const auto capabilities = requiredCapabilities | distinct() | to_vector();
   if (invalid) return {{}, {}, {}, true};
   if (!names.empty()) return {names.front(), implementation, capabilities, false};
-  if (!legacy) return {{}, implementation, capabilities, false};
-
-  std::string qualified;
-  llvm::raw_string_ostream out(qualified);
-  decl->getNameForDiagnostic(out, context.getPrintingPolicy(), /*Qualified*/ true);
-  return {Sym({qualified}), implementation, capabilities, false};
+  return {{}, implementation, capabilities, false};
 }
 
 template <typename F> class InlineMatchCallback final : public clang::ast_matchers::MatchFinder::MatchCallback {
@@ -245,20 +236,24 @@ static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::
   return md5.final().digest().str().str();
 }
 
-static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C, const InterfaceSite &site,
-                              const polyast::Package &pkg, ResolvedSymBitcode &resolvedSymBitcode) {
-  using namespace polyfront::package;
+struct PreparedInterfaceCall {
+  InterfaceSite site;
+  polyast::Package pkg;
+  std::vector<Type::Any> argumentTypes;
+  std::vector<ProgramTypeSize> typeSizes;
+  std::vector<Function> consumerFunctions;
+  std::vector<StructDef> consumerDefinitions;
+  std::string suffix;
+  std::string entryName;
+};
+
+static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::CompilerInstance &CI, clang::ASTContext &C,
+                                                                 const InterfaceSite &site, const polyast::Package &pkg) {
   auto &D = CI.getDiagnostics();
-  const auto emitErrors = [&](const auto &errors) {
-    for (const auto &error : errors)
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
-  };
   Remapper remapper(C);
   Remapper::RemapContext context;
   std::vector<Type::Any> argumentTypes;
-  std::vector<FunctionDecl> callableDecls;
-  std::set<const clang::FunctionDecl *> callableSources;
-  std::vector<PackageTypeSize> typeSizes;
+  std::vector<ProgramTypeSize> typeSizes;
   for (const auto *parameter : site.callee->parameters()) {
     const auto type = remapper.handleType(parameter->getType(), context);
     argumentTypes.emplace_back(type);
@@ -281,7 +276,7 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
         if (methods.size() > 1) {
           emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
                POLYREGION_DIAG_POLYSTL "library callable has an ambiguous operator()");
-          return;
+          return {};
         }
         callable = methods | head_maybe() | get_or_else(static_cast<clang::CXXMethodDecl *>(nullptr));
       }
@@ -295,93 +290,80 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
     if (record && record->isLambda() && record->capture_size() != 0) {
       emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
            POLYREGION_DIAG_POLYSTL "capturing library callables are not supported");
-      return;
+      return {};
     }
     if (record && !record->isLambda() && !record->isEmpty()) {
       emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
            POLYREGION_DIAG_POLYSTL "stateful library callables are not supported");
-      return;
+      return {};
     }
     if (callable->isTemplated()) {
       emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
            POLYREGION_DIAG_POLYSTL "generic library callables require a concrete operator() specialization");
-      return;
+      return {};
     }
     auto [name, function] = remapper.handleCall(callable, context);
-    if (record && (function->collect_all<Term::Select>() ^ exists([](const auto &selection) {
-                     return selection.root.symbol == conventions::ThisReceiver;
+    if (record && (function->collect_all<Term::Select>() ^ exists([](const auto &select) {
+                     return select.root.symbol == conventions::ThisReceiver;
                    }))) {
       emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
            POLYREGION_DIAG_POLYSTL "library callable operator() depends on its receiver");
-      return;
+      return {};
     }
     auto args = function->decl.args;
     if (!args.empty() && args.front().named.symbol == conventions::ThisReceiver) args.erase(args.begin());
     function->decl = function->decl.withArgs(args).withAffinity(FunctionAffinity::Host());
     argumentTypes[i] = Type::FnRef(function->decl.name);
-    if (callableSources.emplace(callable->getCanonicalDecl()).second) callableDecls.emplace_back(function->decl);
   }
   const auto returnType = remapper.handleType(site.callee->getReturnType(), context);
   if (!site.callee->getReturnType()->isVoidType())
     typeSizes.emplace_back(returnType, static_cast<int32_t>(C.getTypeSize(site.callee->getReturnType()) / 8));
-  const auto signature = InvokeSignature(Sym(site.declaration ^ split('.')), {}, {}, argumentTypes, returnType);
+  const auto publicName = Sym(site.declaration ^ split('.'));
   const auto suffix = interfaceKey(CI, C, site);
-  const auto entryName = "__polyregion_package_sym_" + suffix;
-  const auto callerFns = context.functions | values() | map([](const auto &function) { return *function; }) | to_vector();
+  const auto entryName = "__polyregion_package_program_" + suffix;
+  auto callerFns = context.functions | values() | map([](const auto &function) { return *function; }) | to_vector();
   const auto callerDefs = context.structs | values() | map([](const auto &definition) { return *definition; }) | to_vector();
-  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-  const auto request = PackageSymRequest(pkg, signature, callableDecls, callerFns, callerDefs, capabilities, typeSizes, entryName,
-                                         PackageReturnConvention::Return());
-  const auto entryTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
-  if (!entryTarget) {
-    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
-         POLYREGION_DIAG_POLYSTL "resolved package Sym does not support target architecture: %0", CI.getTarget().getTriple().getArchName());
-    return;
-  }
-  const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
-  const auto compiled = resolveAndCompileSym(opts, request, *entryTarget, polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU));
-  if (!compiled) {
-    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", compiled.errors ^ mk_string("; "));
-    return;
-  }
-  const auto &resolution = compiled.value->resolved;
-  if (const auto errors = validateResolvedSymProgram(request, resolution, argumentTypes, returnType); !errors.empty()) {
-    emitErrors(errors);
-    return;
-  }
-  resolvedSymBitcode.emplace_back(std::move(compiled.value->hostObject));
+  callerFns.emplace_back(program::importRoot(entryName, publicName, argumentTypes, returnType));
+  return PreparedInterfaceCall{site,   pkg,      std::move(argumentTypes), std::move(typeSizes), std::move(callerFns), callerDefs,
+                               suffix, entryName};
+}
 
+struct InterfaceModuleResource {
+  clang::VarDecl *image;
+  clang::VarDecl *features;
+};
+
+static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTContext &C, const PreparedInterfaceCall &prepared,
+                                     const polyast::CompileBundle &compiled, const std::vector<InterfaceModuleResource> &resources) {
+  const auto &site = prepared.site;
+  const auto &argumentTypes = prepared.argumentTypes;
+  const auto &suffix = prepared.suffix;
+  const auto &entryName = prepared.entryName;
   auto &S = CI.getSema();
   std::vector<clang::QualType> entryTypes;
   std::vector<clang::Expr *> entryArgs;
-  clang::Expr *contextArg = nullptr;
+  auto *contextFn = mkExternCFn(C, "polyrt_context_current", C.VoidPtrTy, {});
+  auto *contextArg = mkCall(C, contextFn, {});
+  entryTypes.emplace_back(C.VoidPtrTy);
+  entryArgs.emplace_back(contextArg);
   clang::VarDecl *resultDecl = nullptr;
-  for (const auto &param : resolution.entryArgs) {
-    if (param.is<PackageEntryArgBinding::Context>()) {
-      auto *contextFn = mkExternCFn(C, "polyrt_context_current", C.VoidPtrTy, {});
-      contextArg = mkCall(C, contextFn, {});
-      entryTypes.emplace_back(C.VoidPtrTy);
-      entryArgs.emplace_back(contextArg);
-    } else if (const auto source = param.get<PackageEntryArgBinding::CallValue>()) {
-      auto *parameter = site.callee->getParamDecl(source->index);
+  for (size_t index = 0; index < argumentTypes.size(); ++index) {
+    if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::OmittedCallable) continue;
+    auto *parameter = site.callee->getParamDecl(index);
+    if (program::importArgumentMode(argumentTypes[index]) == program::ImportArgumentMode::DirectPointer) {
       entryTypes.emplace_back(parameter->getType());
       entryArgs.emplace_back(mkLoad(C, parameter));
-    } else if (const auto source = param.get<PackageEntryArgBinding::CallAddress>()) {
-      auto *parameter = site.callee->getParamDecl(source->index);
+    } else {
       entryTypes.emplace_back(C.getPointerType(parameter->getType()));
       entryArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, parameter)).get());
-    } else if (param.is<PackageEntryArgBinding::ResultAddress>()) {
-      const auto type = site.callee->getReturnType();
-      resultDecl = clang::VarDecl::Create(C, site.callee, {}, {}, &C.Idents.get("__polyregion_interface_result"), type,
-                                          C.getTrivialTypeSourceInfo(type), clang::SC_None);
-      entryTypes.emplace_back(C.getPointerType(type));
-      entryArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, resultDecl)).get());
     }
   }
-  if (!contextArg) {
-    emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
-         POLYREGION_DIAG_POLYSTL "resolved package Sym entry has no context parameter");
-    return;
+  if (!site.callee->getReturnType()->isVoidType()) {
+    const auto type = site.callee->getReturnType();
+    resultDecl = clang::VarDecl::Create(C, site.callee, {}, {}, &C.Idents.get("__polyregion_interface_result"), type,
+                                        C.getTrivialTypeSourceInfo(type), clang::SC_None);
+    entryTypes.emplace_back(C.getPointerType(type));
+    entryArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, resultDecl)).get());
   }
   auto *entry = mkExternCFn(C, entryName, C.VoidTy, entryTypes);
   auto *contextAcquire = mkExternCFn(C, "polyrt_context_acquire", C.VoidTy, {C.VoidPtrTy});
@@ -394,8 +376,9 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
                                  {C.VoidPtrTy, constCharStarTy(C), C.IntTy, C.IntTy, C.getSizeType(), C.getPointerType(constCharStarTy(C)),
                                   C.getSizeType(), C.getPointerType(C.getConstType(C.UnsignedCharTy))});
   std::map<std::string, clang::VarDecl *> loadedModules;
-  for (size_t index = 0; index < compiled.value->remoteObjects.size(); ++index) {
-    const auto &[moduleName, object] = compiled.value->remoteObjects[index];
+  for (size_t index = 0; index < compiled.remoteModules.size(); ++index) {
+    const auto &object = compiled.remoteModules[index];
+    const auto &moduleName = object.moduleName;
     auto [loadedEntry, inserted] = loadedModules.try_emplace(moduleName, nullptr);
     if (inserted) {
       auto *loaded = clang::VarDecl::Create(
@@ -405,29 +388,17 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
       loadedEntry->second = loaded;
       statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(loaded), {}, {}));
     }
-    auto *image = mkStaticVarDecl(C, site.callee, "__polyregion_package_image_" + suffix + "_" + std::to_string(index),
-                                  mkConstArrTy(C, C.UnsignedCharTy, object.moduleImage.size()),
-                                  object.moduleImage | map([&](const auto byte) -> clang::Expr * {
-                                    return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
-                                                                           mkIntLit(C, C.IntTy, static_cast<unsigned char>(byte)), nullptr,
-                                                                           clang::VK_PRValue, {});
-                                  }) | to_vector());
-    statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(image), {}, {}));
+    auto *image = resources[index].image;
     clang::Expr *featureData = mkNullPtrLit(C, constCharStarTy(C));
     if (!object.features.empty()) {
-      auto *features = mkStaticVarDecl(C, site.callee, "__polyregion_package_features_" + suffix + "_" + std::to_string(index),
-                                       mkConstArrTy(C, constCharStarTy(C), object.features.size()),
-                                       object.features | map([&](const auto &feature) -> clang::Expr * {
-                                         return mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, feature));
-                                       }) | to_vector());
-      statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(features), {}, {}));
+      auto *features = resources[index].features;
       featureData = mkArrayToPtrDecay(C, C.getPointerType(constCharStarTy(C)), mkDeclRef(C, features));
     }
     auto *load =
         mkCall(C, remoteLoad,
                {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)),
                 mkIntLit(C, C.IntTy, static_cast<int>(object.kind)), mkIntLit(C, C.IntTy, static_cast<int>(object.format)),
-                mkIntLit(C, C.getSizeType(), object.features.size()), featureData, mkIntLit(C, C.getSizeType(), object.moduleImage.size()),
+                mkIntLit(C, C.getSizeType(), object.features.size()), featureData, mkIntLit(C, C.getSizeType(), object.image.size()),
                 mkArrayToPtrDecay(C, C.getPointerType(C.getConstType(C.UnsignedCharTy)), mkDeclRef(C, image))});
     auto *loaded = loadedEntry->second;
     auto *anyLoaded = S.CreateBuiltinBinOp({}, clang::BO_LOr, load, mkLoad(C, loaded)).get();
@@ -452,6 +423,75 @@ static void bindInterfaceCall(const polyfront::Options &opts, clang::CompilerIns
   statements.emplace_back(mkCall(C, contextRelease, {contextArg}));
   if (resultDecl) statements.emplace_back(clang::ReturnStmt::Create(C, {}, mkLoad(C, resultDecl), nullptr));
   site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
+}
+
+static void compileInterfaceCalls(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C,
+                                  const std::vector<PreparedInterfaceCall> &prepared, std::vector<int8_t> &packageProgramBitcode) {
+  if (prepared.empty()) return;
+  auto &D = CI.getDiagnostics();
+  const auto entryTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
+  if (!entryTarget) {
+    emit(D, prepared.front().site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
+         POLYREGION_DIAG_POLYSTL "linked package program does not support target architecture: %0",
+         CI.getTarget().getTriple().getArchName());
+    return;
+  }
+  std::vector<Package> packages;
+  std::vector<Function> functions;
+  std::vector<StructDef> definitions;
+  std::vector<ProgramTypeSize> typeSizes;
+  const auto appendDistinct = []<typename T>(std::vector<T> &target, const std::vector<T> &values) {
+    for (const auto &value : values)
+      if (std::find(target.begin(), target.end(), value) == target.end()) target.emplace_back(value);
+  };
+  for (const auto &item : prepared) {
+    if (std::find(packages.begin(), packages.end(), item.pkg) == packages.end()) packages.emplace_back(item.pkg);
+    appendDistinct(functions, item.consumerFunctions);
+    appendDistinct(definitions, item.consumerDefinitions);
+    appendDistinct(typeSizes, item.typeSizes);
+  }
+  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+  const auto request = ProgramLinkRequest(std::move(packages), polyfront::packageProgram(std::move(functions), std::move(definitions)),
+                                          capabilities, std::move(typeSizes));
+  const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
+  auto compiled =
+      polyfront::package::compileProgram(request, opts.executable, *entryTarget,
+                                         polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets, opts.stackDepth);
+  if (!compiled) {
+    emit(D, prepared.front().site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
+         compiled.errors ^ mk_string("; "));
+    return;
+  }
+  packageProgramBitcode = compiled.value->hostObject;
+  std::vector<InterfaceModuleResource> resources;
+  resources.reserve(compiled.value->remoteModules.size());
+  auto *translationUnit = C.getTranslationUnitDecl();
+  const auto &batchSuffix = prepared.front().suffix;
+  for (size_t index = 0; index < compiled.value->remoteModules.size(); ++index) {
+    const auto &object = compiled.value->remoteModules[index];
+    auto *image = mkStaticVarDecl(C, translationUnit, "__polyregion_package_image_" + batchSuffix + "_" + std::to_string(index),
+                                  mkConstArrTy(C, C.UnsignedCharTy, object.image.size()),
+                                  object.image | map([&](const auto byte) -> clang::Expr * {
+                                    return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
+                                                                           mkIntLit(C, C.IntTy, static_cast<unsigned char>(byte)), nullptr,
+                                                                           clang::VK_PRValue, {});
+                                  }) | to_vector());
+    translationUnit->addDecl(image);
+    CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(image));
+    clang::VarDecl *features = nullptr;
+    if (!object.features.empty()) {
+      features = mkStaticVarDecl(C, translationUnit, "__polyregion_package_features_" + batchSuffix + "_" + std::to_string(index),
+                                 mkConstArrTy(C, constCharStarTy(C), object.features.size()),
+                                 object.features | map([&](const auto &feature) -> clang::Expr * {
+                                   return mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, feature));
+                                 }) | to_vector());
+      translationUnit->addDecl(features);
+      CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(features));
+    }
+    resources.emplace_back(InterfaceModuleResource{image, features});
+  }
+  for (const auto &item : prepared)
+    materializeInterfaceCall(CI, C, item, *compiled.value, resources);
 }
 
 static Vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
@@ -770,9 +810,22 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   c.calleeDecl->setBody(clang::CompoundStmt::Create(C, newStmts, {}, {}, {}));
 }
 
+namespace polyregion::polystl {
+class OffloadRewriteConsumer final : public clang::ASTConsumer {
+  clang::CompilerInstance &CI;
+  polyfront::Options opts;
+  std::shared_ptr<std::vector<int8_t>> packageProgramBitcode;
+
+public:
+  OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
+                         std::shared_ptr<std::vector<int8_t>> packageProgramBitcode);
+  void HandleTranslationUnit(clang::ASTContext &C) override;
+};
+} // namespace polyregion::polystl
+
 OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
-                                               std::shared_ptr<ResolvedSymBitcode> resolvedSymBitcode)
-    : clang::ASTConsumer(), CI(CI), opts(opts), resolvedSymBitcode(std::move(resolvedSymBitcode)) {}
+                                               std::shared_ptr<std::vector<int8_t>> packageProgramBitcode)
+    : clang::ASTConsumer(), CI(CI), opts(opts), packageProgramBitcode(std::move(packageProgramBitcode)) {}
 
 namespace {
 struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
@@ -842,7 +895,7 @@ struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
           && (fd->getDescribedFunctionTemplate() == nullptr || isSpecialisation) && isLiveDeviceKernel(fd)) {
         if (!hasUnsupportedDeviceClosure(fd)) deviceKernels.push_back(fd);
       }
-      const auto metadata = packageExportMetadata(fd, context, diag);
+      const auto metadata = packageExportMetadata(fd, diag);
       invalid |= metadata.invalid;
       if (metadata.name) exports.push_back({fd, *metadata.name, metadata.implements, metadata.requiredCapabilities});
     }
@@ -859,8 +912,8 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     if (collector.invalid) return;
     if (collector.exports.empty())
       emit(D, clang::DiagnosticsEngine::Warning,
-           POLYREGION_DIAG_POLYSTL "-fstdpar-emit-library set but no [[clang::annotate(\"%0\")]] functions found",
-           polyfront::PackageExportAnnotation);
+           POLYREGION_DIAG_POLYSTL
+           "-fstdpar-emit-library set but no [[clang::annotate(\"polyregion_export:<identity>\")]] functions found");
     compilePackageProgram(opts, C, D, collector.exports, collector.deviceKernels, opts.emitLibraryPath);
     return;
   }
@@ -915,31 +968,46 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                          || action == clang::frontend::EmitLLVMOnly || action == clang::frontend::EmitCodeGenOnly
                          || action == clang::frontend::EmitObj;
   if (!emitsCode) return;
-  std::map<const clang::FunctionDecl *, Vector<const clang::FunctionDecl *>> interfaceBindings;
+  std::map<const clang::FunctionDecl *, Vector<const clang::FunctionDecl *>> interfaceCallables;
+  std::map<std::string, polyast::Package> interfacePackages;
+  std::vector<PreparedInterfaceCall> preparedInterfaces;
   for (const auto &site : interfaceSites(C)) {
     if (const auto error = interfaceCallableShapeError(site)) {
       emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", *error);
       continue;
     }
     const auto callableIdentities = interfaceCallableIdentities(site);
-    const auto [binding, inserted] = interfaceBindings.emplace(site.callee->getCanonicalDecl(), callableIdentities);
+    const auto [existing, inserted] = interfaceCallables.emplace(site.callee->getCanonicalDecl(), callableIdentities);
     if (!inserted) {
-      if (binding->second != callableIdentities)
+      if (existing->second != callableIdentities)
         emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
-             POLYREGION_DIAG_POLYSTL "one interface specialization cannot bind conflicting callable identities");
+             POLYREGION_DIAG_POLYSTL "one interface specialization cannot use conflicting callable identities");
       continue;
     }
     if (!C.getLangOpts().CXXExceptions) {
       emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
-           POLYREGION_DIAG_POLYSTL "package interface binding requires C++ exceptions for failure-safe context cleanup");
+           POLYREGION_DIAG_POLYSTL "package interface compilation requires C++ exceptions for failure-safe context cleanup");
       continue;
     }
-    const auto package = polyfront::package::loadPackage(site.packageName, opts.libraryPath.empty()
-                                                                               ? polyfront::package::packageRoots()
-                                                                               : polyfront::package::splitPackageRoots(opts.libraryPath));
-    if (!package) {
-      for (const auto &error : package.errors)
-        emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
-    } else bindInterfaceCall(opts, CI, C, site, *package.value, *resolvedSymBitcode);
+    auto found = interfacePackages.find(site.packageName);
+    if (found == interfacePackages.end()) {
+      const auto package = polyfront::package::loadPackage(site.packageName, opts.libraryPath.empty()
+                                                                                 ? polyfront::package::packageRoots()
+                                                                                 : polyfront::package::splitPackageRoots(opts.libraryPath));
+      if (!package) {
+        for (const auto &error : package.errors)
+          emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);
+        continue;
+      }
+      found = interfacePackages.emplace(site.packageName, *package.value).first;
+    }
+    if (auto prepared = prepareInterfaceCall(CI, C, site, found->second)) preparedInterfaces.emplace_back(std::move(*prepared));
   }
+  compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcode);
+}
+
+std::unique_ptr<clang::ASTConsumer>
+polyregion::polystl::makeOffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
+                                                std::shared_ptr<std::vector<int8_t>> packageProgramBitcode) {
+  return std::make_unique<OffloadRewriteConsumer>(CI, opts, std::move(packageProgramBitcode));
 }

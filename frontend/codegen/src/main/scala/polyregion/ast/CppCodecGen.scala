@@ -47,6 +47,7 @@ private[polyregion] object CppCodecGen {
       programHash: String,
       packageHash: String,
       packageWireHash: String,
+      compileWireHash: String,
       json: List[CppNlohmannJsonCodecGen],
       msgpack: List[CppMsgPackCodecGen],
       roots: List[CppMsgPackCodecGen.Root]
@@ -65,6 +66,7 @@ private[polyregion] object CppCodecGen {
         |constexpr auto ProgramHash = "$programHash";
         |constexpr auto PackageHash = "$packageHash";
         |constexpr auto PackageWireHash = "$packageWireHash";
+        |constexpr auto CompileWireHash = "$compileWireHash";
         |using msgpack::decodeMaybeInterned;
         |using msgpack::encodeInterned;
         |using msgpack::MsgpackReader;

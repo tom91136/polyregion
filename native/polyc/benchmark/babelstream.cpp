@@ -151,18 +151,18 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
                      })
                   : //
                  mkCpuStreamFn(
-                     "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, {}, Local))(), "array_size"_(UInt)()}, empty,
+                     "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, Local))(), "array_size"_(UInt)()}, empty,
                      [&](const auto &local_i, const auto &i) -> Stmts {
                        Stmts body;
                        body.push_back(let("global_size") = call(GpuGlobalSize(0_(UInt))));
-                       body.push_back("wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type));
+                       body.push_back("wg_sum"_(Ptr(type, Local))[local_i] = 0_(type));
                        body ^= concat(whileLoop({var("cont") = call(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
                                                 {let("ai") = "a"_(Ptr(type))[i],                           // ai = a[i]
                                                  let("bi") = "b"_(Ptr(type))[i],                           // bi = b[i]
-                                                 let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],  // sumid = sum[local_i]
+                                                 let("sumid") = "wg_sum"_(Ptr(type, Local))[local_i],      // sumid = sum[local_i]
                                                  let("r0") = call(Mul("ai"_(type), "bi"_(type), type)),    // r0 = ai * bi
                                                  let("r1") = call(Add("r0"_(type), "sumid"_(type), type)), // r1 = r0 + sumid
-                                                 "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),   // a[i] = bi
+                                                 "wg_sum"_(Ptr(type, Local))[local_i] = "r1"_(type),       // a[i] = bi
                                                  ("i"_(UInt) = call(Add("i"_(UInt), "global_size"_(UInt), UInt)))})); // i += global_size
                        body.push_back(var("offset") = call(GpuLocalSize(0_(UInt))));
                        body.push_back("offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt))); // offset /= 2
@@ -173,10 +173,10 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
                                Cond("__cond_lt"_(Bool), //
                                     {
                                         let("new_offset") = call(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // local_i + offset
-                                        let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
-                                        let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)],
+                                        let("wg_sum_old") = "wg_sum"_(Ptr(type, Local))[local_i],
+                                        let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, Local))["new_offset"_(UInt)],
                                         "wg_sum_at_offset"_(type) = call(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
-                                        "wg_sum"_(Ptr(type, {}, Local))[local_i] = "wg_sum_at_offset"_(type),
+                                        "wg_sum"_(Ptr(type, Local))[local_i] = "wg_sum_at_offset"_(type),
                                     },
                                     {}),
                                "offset"_(UInt) = call(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
@@ -185,7 +185,7 @@ StreamFunctions mkStreamFunctions(std::string suffix, Type::Any type, bool gpu =
                        body.push_back(let("__cond_eq") = call(LogicEq("local_i"_(UInt), 0_(UInt))));
                        body.push_back(Cond("__cond_eq"_(Bool), //
                                            {
-                                               let("wg_sum_old_1") = "wg_sum"_(Ptr(type, {}, Local))[local_i],
+                                               let("wg_sum_old_1") = "wg_sum"_(Ptr(type, Local))[local_i],
                                                "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
                                            },
                                            {}));

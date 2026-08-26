@@ -20,6 +20,20 @@ object LookalikeApi {
 
 class InterfaceResolverSuite extends munit.FunSuite {
 
+  private def importOne(
+      pkg: p.Package,
+      declaration: String,
+      target: p.Expr.Invoke,
+      callerDecls: List[p.FunctionDecl] = Nil
+  ) =
+    InterfaceResolver.importPackages(
+      List(pkg),
+      List(InterfaceResolver.Import(pkg.interface.name.fqcn, declaration, target)),
+      callerDecls,
+      InterfaceResolver.configuredCapabilities,
+      Map.empty
+    )
+
   override def afterEach(context: AfterEach): Unit = {
     System.clearProperty("polyregion.library.capabilities")
     System.clearProperty("polyregion.library.path")
@@ -46,7 +60,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
   }
 
-  test("resolve, link and execute a scalar interface call") {
+  test("import and execute multiple scalar interface calls in one link") {
     val i32                = p.Type.IntS32
     val publicName         = p.Sym("bar.increment")
     val implementationName = p.Sym("bar.implementation.increment")
@@ -73,7 +87,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Interface(p.Sym("foo"), List(publicDecl)),
       p.Program(None, List(implementation.copy(implements = Some(publicName))), Nil)
     )
-    val targetName = p.Sym("foo.bindings.increment")
+    val targetName = p.Sym("foo.resolved.increment")
     val target: p.Expr.Invoke = p.Expr.Invoke(
       p.Type.FnRef(targetName),
       Nil,
@@ -81,9 +95,24 @@ class InterfaceResolverSuite extends munit.FunSuite {
       List(p.Term.IntS32Const(41)),
       i32
     )
+    val secondName = p.Sym("foo.resolved.incrementAgain")
+    val second = target.copy(
+      callee = p.Type.FnRef(secondName),
+      args = List(p.Term.IntS32Const(42))
+    )
 
-    val (functions, defs) =
-      InterfaceResolver.resolve(pkg, "bar.increment", target).fold(errors => fail(errors.mkString("\n")), identity)
+    val (functions, defs) = InterfaceResolver
+      .importPackages(
+        List(pkg),
+        List(
+          InterfaceResolver.Import("foo", "bar.increment", target),
+          InterfaceResolver.Import("foo", "bar.increment", second)
+        ),
+        Nil,
+        Set.empty,
+        Map.empty
+      )
+      .fold(errors => fail(errors.mkString("\n")), identity)
     val resolved = functions.find(_.name == targetName).getOrElse(fail("missing resolved function"))
     val program = p.Program(
       Some(resolved.copy(convention = p.CallConvention.OffloadEntry)),
@@ -93,7 +122,9 @@ class InterfaceResolverSuite extends munit.FunSuite {
       Nil
     )
 
-    assertEquals(Interpreter.Vm(program).call(targetName, List(i32 -> V.I(41))), V.I(42))
+    val vm = Interpreter.Vm(program)
+    assertEquals(vm.call(targetName, List(i32 -> V.I(41))), V.I(42))
+    assertEquals(vm.call(secondName, List(i32 -> V.I(42))), V.I(43))
   }
 
   test("link an inferred callable interface argument") {
@@ -145,15 +176,14 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
     val callable = p.Term.Select(p.Named("op", p.Type.FnRef(callableName)), Nil, p.Type.FnRef(callableName))
     val target: p.Expr.Invoke = p.Expr.Invoke(
-      p.Type.FnRef(p.Sym("foo.bindings.apply")),
+      p.Type.FnRef(p.Sym("foo.resolved.apply")),
       Nil,
       None,
       List(p.Term.IntS32Const(41), callable),
       i32
     )
 
-    val (functions, _) = InterfaceResolver
-      .resolve(pkg, "bar.apply", target, List(callableDecl))
+    val (functions, _) = importOne(pkg, "bar.apply", target, List(callableDecl))
       .fold(errors => fail(errors.mkString("\n")), identity)
     val resolved = functions.find(_.name == target.calleeName).getOrElse(fail("missing resolved function"))
 
@@ -195,14 +225,14 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
     val pointer = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
     val target: p.Expr.Invoke = p.Expr.Invoke(
-      p.Type.FnRef(p.Sym("foo.bindings.copy")),
+      p.Type.FnRef(p.Sym("foo.resolved.copy")),
       Nil,
       None,
       List(p.Term.Select(p.Named("in", pointer), Nil, pointer)),
       p.Type.Unit0
     )
 
-    val resolved = InterfaceResolver.resolve(pkg, "bar.copy", target)
+    val resolved = importOne(pkg, "bar.copy", target)
     assert(resolved.isRight, resolved.left.toOption.fold("")(_.mkString("\n")))
   }
 
@@ -241,14 +271,14 @@ class InterfaceResolverSuite extends munit.FunSuite {
         p.Program(None, List(implementation.copy(implements = Some(publicName))), Nil)
       )
       val target: p.Expr.Invoke = p.Expr.Invoke(
-        p.Type.FnRef(p.Sym(s"foo.bindings.$name")),
+        p.Type.FnRef(p.Sym(s"foo.resolved.$name")),
         Nil,
         None,
         List(p.Term.Select(p.Named("value", targetArg), Nil, targetArg)),
         p.Type.Unit0
       )
 
-      val resolved = InterfaceResolver.resolve(pkg, publicName.fqcn, target)
+      val resolved = importOne(pkg, publicName.fqcn, target)
       assert(resolved.isRight, resolved.left.toOption.fold("")(_.mkString("\n")))
     }
 
@@ -263,7 +293,7 @@ class InterfaceResolverSuite extends munit.FunSuite {
     )
   }
 
-  test("reject explicit generic interface calls until call sites can be specialized") {
+  test("link explicit generic interface calls through inferred concrete arguments") {
     val i32 = p.Type.IntS32
     val tpe = p.Type.Var("T")
     val publicDecl = p.FunctionDecl(
@@ -288,16 +318,18 @@ class InterfaceResolverSuite extends munit.FunSuite {
       p.Program(None, List(implementation.copy(implements = Some(publicDecl.name))), Nil)
     )
     val target: p.Expr.Invoke = p.Expr.Invoke(
-      p.Type.FnRef(p.Sym("foo.bindings.identity")),
+      p.Type.FnRef(p.Sym("foo.resolved.identity")),
       List(i32),
       None,
       List(p.Term.IntS32Const(41)),
       i32
     )
 
+    val resolved = importOne(pkg, "bar.identity", target)
+    assert(resolved.isRight, resolved.left.toOption.fold("")(_.mkString("\n")))
     assertEquals(
-      InterfaceResolver.resolve(pkg, "bar.identity", target).left.toOption,
-      Some(List("generic Scala interface calls are not yet supported"))
+      resolved.toOption.toList.flatMap(_._1).find(_.name == target.calleeName).map(_.args.map(_.named.tpe)),
+      Some(List(i32))
     )
   }
 }

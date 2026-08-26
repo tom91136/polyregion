@@ -20,6 +20,7 @@
 #include "polyregion/llvm_utils.hpp"
 #include "polyregion/polypackage.h"
 #include "polyregion/polypackage_symbols.h"
+#include "polyregion/program_import.hpp"
 
 #include "ast.h"
 #include "backend/c_source.h"
@@ -27,6 +28,7 @@
 #include "backend/llvmc.h"
 #include "dso_runner.h"
 #include "js_runner.h"
+#include "package_compiler.hpp"
 #include "polyast_codec.h"
 #include "polypass_locate.h"
 
@@ -207,7 +209,7 @@ std::mutex &packageMutex() {
 }
 
 template <typename T, typename Decode>
-compiler::PackageResult<T> invokePackage(const std::vector<uint8_t> &request, const std::string_view operation, Decode decode) {
+compiler::package::Result<T> invokePackage(const std::vector<uint8_t> &request, const std::string_view operation, Decode decode) {
   auto &registry = sharedPlugins();
   if (registry.packageProviders.size() != 1)
     return {{}, {fmt::format("expected one package-service plugin, found {}", registry.packageProviders.size())}};
@@ -236,16 +238,16 @@ std::string bareName(const std::string &step) {
 
 } // namespace
 
-compiler::PackageResult<polyast::Package> compiler::linkPackage(const polyast::PackageLinkRequest &request) {
+compiler::package::Result<polyast::Package> compiler::package::link(const polyast::PackageLinkRequest &request) {
   return invokePackage<polyast::Package>(
       polyast::packagelinkrequest_to_msgpack(request), polypackage::abi::LinkPackage,
       [](const uint8_t *begin, const uint8_t *end) { return polyast::package_service_result_from_msgpack(begin, end); });
 }
 
-compiler::PackageResult<polyast::PackageSymResolvedProgram> compiler::resolvePackageSym(const polyast::PackageSymRequest &request) {
-  return invokePackage<polyast::PackageSymResolvedProgram>(
-      polyast::packagesymrequest_to_msgpack(request), polypackage::abi::ResolveSym,
-      [](const uint8_t *begin, const uint8_t *end) { return polyast::resolvedsymprogram_from_msgpack(begin, end); });
+static compiler::package::Result<polyast::Program> linkProgram(const polyast::ProgramLinkRequest &request) {
+  return invokePackage<polyast::Program>(
+      polyast::programlinkrequest_to_msgpack(request), polypackage::abi::LinkProgram,
+      [](const uint8_t *begin, const uint8_t *end) { return polyast::program_service_result_from_msgpack(begin, end); });
 }
 
 namespace {
@@ -269,23 +271,68 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::op
   }
 }
 
+std::vector<std::string> validateImportedEntries(const polyast::ProgramLinkRequest &request, const polyast::Program &program) {
+  std::vector<std::string> errors;
+  const auto linked = program.entry | to_vector() | concat(program.functions) | to_vector();
+  const auto roots = request.consumer.entry | to_vector() | concat(request.consumer.functions) | filter([](const auto &function) {
+                       return function.visibility.template is<polyast::FunctionVisibility::Exported>() && function.implements.has_value();
+                     })
+                     | to_vector();
+  for (const auto &root : roots) {
+    const auto matches = linked | filter([&](const auto &function) { return function.decl.name == root.decl.name; }) | to_vector();
+    if (matches.size() != 1) {
+      errors.emplace_back(fmt::format("linked consumer entry `{}` has {} definitions", polyast::fqcn(root.decl.name), matches.size()));
+      continue;
+    }
+    std::vector<polyast::Type::Any> expectedArgs{polyast::Type::Ptr(polyast::Type::IntU8(), polyast::TypeSpace::Global())};
+    for (const auto &argument : root.decl.args) {
+      switch (program::importArgumentMode(argument.named.tpe)) {
+        case program::ImportArgumentMode::OmittedCallable: break;
+        case program::ImportArgumentMode::DirectPointer: expectedArgs.emplace_back(argument.named.tpe); break;
+        case program::ImportArgumentMode::AddressOfValue:
+          expectedArgs.emplace_back(polyast::Type::Ptr(argument.named.tpe, polyast::TypeSpace::Global()));
+          break;
+      }
+    }
+    const auto hasResult = !root.decl.rtn.is<polyast::Type::Unit0>();
+    if (hasResult) expectedArgs.emplace_back(polyast::Type::Ptr(root.decl.rtn, polyast::TypeSpace::Global()));
+    const auto &actual = matches.front().decl;
+    const auto actualArgs = actual.args | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+    const auto argumentTypesMatch = [&] {
+      if (actualArgs.size() != expectedArgs.size()) return false;
+      const auto valueArguments = expectedArgs.size() - (hasResult ? 1 : 0);
+      for (size_t index = 0; index < valueArguments; ++index)
+        if (actualArgs[index] != expectedArgs[index]) return false;
+      if (!hasResult) return true;
+      if (!root.decl.rtn.is<polyast::Type::Nothing>()) return actualArgs.back() == expectedArgs.back();
+      const auto resolved = actualArgs.back().get<polyast::Type::Ptr>();
+      return resolved && resolved->space == polyast::TypeSpace::Global() && !resolved->comp.is<polyast::Type::Nothing>();
+    }();
+    if (actual.tpeVars.size() || actual.receiver || actual.moduleCaptures.size() || actual.termCaptures.size()
+        || actual.rtn != polyast::Type::Unit0() || actual.affinity != polyast::FunctionAffinity::Host() || !argumentTypesMatch)
+      errors.emplace_back(fmt::format("linked consumer entry `{}` has an invalid physical ABI", polyast::fqcn(root.decl.name)));
+  }
+  return errors;
+}
+
 } // namespace
 
-compiler::PackageResult<polyast::PackageSymCompileResult>
-compiler::compilePackageSym(const polyast::PackageSymRequest &request, const compiletime::Target hostTarget, const std::string &hostArch,
-                            const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
-                            const std::optional<int> stackDepth) {
-  auto resolved = resolvePackageSym(request);
-  if (!resolved) return {{}, std::move(resolved.errors)};
+compiler::package::Result<polyast::CompileBundle>
+compiler::package::compile(const polyast::ProgramLinkRequest &request, const compiletime::Target hostTarget, const std::string &hostArch,
+                           const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
+                           const std::optional<int> stackDepth) {
+  auto linked = linkProgram(request);
+  if (!linked) return {{}, std::move(linked.errors)};
+  if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};
   initialise();
-  auto program = resolved.value->program;
+  auto program = std::move(*linked.value);
   for (auto &function : program.functions)
     if (function.convention.is<polyast::CallConvention::OffloadEntry>()) function.visibility = polyast::FunctionVisibility::Exported();
 
   const auto host = compile(program, Options{hostTarget, hostArch, "FullOpt(level=0)", true}, compiletime::OptLevel::O3);
-  if (!host.binary) return {{}, {"resolved Sym program compilation failed: " + host.messages}};
+  if (!host.binary) return {{}, {"linked consumer program compilation failed: " + host.messages}};
 
-  std::vector<polyast::PackageSymCompiledObject> remoteObjects;
+  std::vector<polyast::CompileModule> remoteModules;
   for (const auto &entry : program.functions) {
     if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
     auto moduleName = polyast::fqcn(entry.decl.name);
@@ -305,14 +352,14 @@ compiler::compilePackageSym(const polyast::PackageSymRequest &request, const com
     for (const auto &[target, arch] : deviceTargets) {
       const auto pipeline = packageEntryPipeline(target, stackDepth);
       const auto device = compile(entryProgram, Options{target, arch, pipeline}, compiletime::OptLevel::O3);
-      if (!device.binary) return {{}, {"package entry compilation failed for " + moduleName + ": " + device.messages}};
+      if (!device.binary) return {{}, {"linked consumer entry compilation failed for " + moduleName + ": " + device.messages}};
       const auto format = runtime::moduleFormatOf(target);
       if (!format) continue;
-      remoteObjects.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
+      remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
                                  device.features, *device.binary);
     }
   }
-  return {{polyast::PackageSymCompileResult(std::move(*resolved.value), std::move(*host.binary), std::move(remoteObjects))}, {}};
+  return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules))}, {}};
 }
 
 static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view rawSpec) {

@@ -413,14 +413,6 @@ object PolyAST {
       rtn: Type
   ) derives MsgPack.Codec
 
-  case class InvokeSignature(
-      name: Sym,
-      tpeArgs: List[Type],
-      receiver: Option[Type],
-      args: List[Type],
-      rtn: Type
-  ) derives MsgPack.Codec
-
   object Arg {
     enum Access derives MsgPack.Codec { case Read, Write, ReadWrite }
 
@@ -503,54 +495,23 @@ object PolyAST {
     def meta(key: String): Option[String] = metadata.find(_.key == key).map(_.value)
   }
 
-  case class Package(interface: Interface, program: Program) derives MsgPack.Codec
-  object Package {
+  object Program {
     case class TypeSize(tpe: Type, sizeInBytes: Int) derives MsgPack.Codec
 
+    case class LinkRequest(
+        packages: List[Package],
+        consumer: Program,
+        capabilities: List[String] = Nil,
+        typeSizes: List[TypeSize] = Nil
+    ) derives MsgPack.Codec
+  }
+
+  case class Package(interface: Interface, program: Program) derives MsgPack.Codec
+  object Package {
     case class LinkRequest(
         interface: Interface,
         programFragments: List[Program],
         capabilities: List[String] = Nil
-    ) derives MsgPack.Codec
-
-    case class SymRequest(
-        pkg: Package,
-        signature: InvokeSignature,
-        callerDecls: List[FunctionDecl],
-        callerFns: List[Function],
-        callerDefs: List[StructDef],
-        capabilities: List[String],
-        typeSizes: List[TypeSize],
-        entryName: String,
-        returnConvention: ReturnConvention = ReturnConvention.Return
-    ) derives MsgPack.Codec
-
-    enum ReturnConvention derives MsgPack.Codec {
-      case Return
-      case OutParam(index: Int)
-    }
-
-    enum EntryArgBinding derives MsgPack.Codec {
-      case Context
-      case CallValue(index: Int)
-      case CallAddress(index: Int)
-      case ResultAddress
-    }
-
-    case class SymResolvedProgram(program: Program, entryArgs: List[EntryArgBinding]) derives MsgPack.Codec
-
-    case class SymCompiledObject(
-        moduleName: String,
-        format: Int,
-        kind: Int,
-        features: List[String],
-        moduleImage: ArraySeq[Byte]
-    ) derives MsgPack.Codec
-
-    case class SymCompileResult(
-        resolved: SymResolvedProgram,
-        hostObject: ArraySeq[Byte],
-        remoteObjects: List[SymCompiledObject]
     ) derives MsgPack.Codec
   }
 
@@ -565,6 +526,19 @@ object PolyAST {
   ) derives MsgPack.Codec
 
   object Compile {
+    case class Module(
+        moduleName: String,
+        format: Int,
+        kind: Int,
+        features: List[String],
+        image: ArraySeq[Byte]
+    ) derives MsgPack.Codec
+
+    case class Bundle(
+        hostObject: ArraySeq[Byte],
+        remoteModules: List[Module]
+    ) derives MsgPack.Codec
+
     case class Event(
         epochMillis: Long,
         elapsedNanos: Long,
@@ -652,7 +626,7 @@ object PolyAST {
 
   object PolyPackageAbi {
 
-    inline val Version = 1
+    inline val Version = 2
     inline val Prefix  = "polypackage_"
 
     object Status {
@@ -675,9 +649,9 @@ object PolyAST {
       transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
     }
 
-    object ResolveSym {
+    object LinkProgram {
       def apply(request: Array[Byte]): Array[Byte] = docs(
-        "Resolve a versioned PackageSymRequest into a versioned PackageSymResolvedProgram."
+        "Link a versioned ProgramLinkRequest into a Program encoded with the package-service wire schema."
       )
       transparent inline def Name: String = AbiMacros.cName[this.type](Prefix)
     }

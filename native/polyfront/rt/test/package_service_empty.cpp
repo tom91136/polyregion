@@ -12,7 +12,7 @@ polypackage_status_t polypackage_link_package(const uint8_t *, size_t, uint8_t *
   return POLYPACKAGE_OK;
 }
 
-polypackage_status_t polypackage_resolve_sym(const uint8_t *, size_t, uint8_t **out, size_t *outSize) {
+polypackage_status_t polypackage_link_program(const uint8_t *, size_t, uint8_t **out, size_t *outSize) {
   *out = nullptr;
   *outSize = 0;
   return POLYPACKAGE_OK;

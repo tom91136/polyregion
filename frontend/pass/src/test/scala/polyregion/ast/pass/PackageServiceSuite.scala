@@ -1,6 +1,6 @@
 package polyregion.ast.pass
 
-import polyregion.ast.{InterfaceBinding, MsgPack, PackageLinker, PackageSymResolver, PolyAST as p, given}
+import polyregion.ast.{MsgPack, PackageLinker, PolyAST as p, ProgramLinker, given}
 import polyregion.ast.Traversal.*
 import polyregion.ast.generated.PolyPackageWireSchema
 
@@ -64,7 +64,7 @@ class PackageServiceSuite extends munit.FunSuite {
       Some(p.Arg.Boundary(p.Arg.Access.ReadWrite, p.Arg.Extent.Elements(p.Arg.SizeExpr.Param(2))))
     )
     assertEquals(
-      PackageSymResolver.bindImplementation(implementation.decl, public).map(_.systemArguments),
+      ProgramLinker.matchImplementation(implementation.decl, public).map(_.systemArguments),
       Right(1)
     )
   }
@@ -130,7 +130,7 @@ class PackageServiceSuite extends munit.FunSuite {
     )
   }
 
-  test("Sym resolution preserves context and a direct result") {
+  test("program linking materializes a canonical consumer entry without an ABI recipe") {
     val name = p.Sym("library.increment")
     val public = p.FunctionDecl(
       name,
@@ -146,43 +146,33 @@ class PackageServiceSuite extends munit.FunSuite {
       name = p.Sym("implementation.increment"),
       args = p.Arg(p.Named("#context", p.Spec.ContextType)) :: public.args
     )
-    val value = implementationDecl.args(1).named
     val implementation = function(
       implementationDecl,
-      List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(value, Nil, value.tpe)))),
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(implementationDecl.args(1).named, Nil, p.Type.IntS32)))),
       Some(name),
       visibility = p.Function.Visibility.Exported
     )
-    val pkg = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
-    val resolved = PackageSymResolver.resolveSym(
-      p.Package.SymRequest(
-        pkg,
-        p.InvokeSignature(name, Nil, None, List(p.Type.IntS32), p.Type.IntS32),
-        Nil,
-        Nil,
-        Nil,
-        Nil,
-        List(p.Package.TypeSize(p.Type.IntS32, 4)),
-        "#entry"
+    val root = function(
+      public.copy(name = p.Sym("consumer.increment")),
+      body = Nil,
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val linked = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))),
+        p.Program(None, List(root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
       )
     )
-    assert(resolved.isRight, resolved)
-    val resolvedProgram = resolved.toOption.get
-    assertEquals(
-      resolvedProgram.entryArgs,
-      List(
-        p.Package.EntryArgBinding.Context,
-        p.Package.EntryArgBinding.CallAddress(0),
-        p.Package.EntryArgBinding.ResultAddress
-      )
-    )
-    val entry = resolvedProgram.program.entry.get
+    assert(linked.isRight, linked)
+    val program = linked.toOption.get
+    val entry   = (program.entry.toList ::: program.functions).find(_.name == root.name).get
     assertEquals(entry.args.map(_.named.symbol), List("#context", "a0", "result"))
-    val invoke = entry.collectAll[p.Expr].collectFirst { case value: p.Expr.Invoke => value }.get
-    assertEquals(invoke.args.head, p.Term.Select(entry.args.head.named, Nil, p.Spec.ContextType))
+    assertEquals(entry.rtn, p.Type.Unit0)
   }
 
-  test("Sym resolution maps an erased result to its source call argument") {
+  test("program linking uses the canonical result-address ABI for an erased frontend result") {
     val name = p.Sym("library.increment")
     val public = p.FunctionDecl(
       name,
@@ -202,72 +192,65 @@ class PackageServiceSuite extends munit.FunSuite {
       implements = Some(name),
       visibility = p.Function.Visibility.Exported
     )
-    val resolved = PackageSymResolver.resolveSym(
-      p.Package.SymRequest(
-        p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil)),
-        p.InvokeSignature(name, Nil, None, List(p.Type.IntS32), p.Type.Nothing),
-        Nil,
-        Nil,
-        Nil,
-        Nil,
-        List(p.Package.TypeSize(p.Type.IntS32, 4)),
-        "#entry",
-        p.Package.ReturnConvention.OutParam(1)
+    val root = function(
+      public.copy(name = p.Sym("consumer.increment"), rtn = p.Type.Nothing),
+      body = Nil,
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val linked = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))),
+        p.Program(None, List(root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
       )
     )
-    assert(resolved.isRight, resolved)
-    assertEquals(
-      resolved.toOption.get.entryArgs,
-      List(
-        p.Package.EntryArgBinding.Context,
-        p.Package.EntryArgBinding.CallAddress(0),
-        p.Package.EntryArgBinding.CallValue(1)
-      )
-    )
-
-    val leadingOutParam = PackageSymResolver.resolveSym(
-      p.Package.SymRequest(
-        p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil)),
-        p.InvokeSignature(name, Nil, None, List(p.Type.IntS32), p.Type.Nothing),
-        Nil,
-        Nil,
-        Nil,
-        Nil,
-        List(p.Package.TypeSize(p.Type.IntS32, 4)),
-        "#entry-leading",
-        p.Package.ReturnConvention.OutParam(0)
-      )
-    )
-    assertEquals(
-      leadingOutParam.map(_.entryArgs),
-      Right(
-        List(
-          p.Package.EntryArgBinding.Context,
-          p.Package.EntryArgBinding.CallAddress(1),
-          p.Package.EntryArgBinding.CallValue(0)
-        )
-      )
-    )
-
-    List(-1, 2).foreach { index =>
-      val invalid = PackageSymResolver.resolveSym(
-        p.Package.SymRequest(
-          p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil)),
-          p.InvokeSignature(name, Nil, None, List(p.Type.IntS32), p.Type.Nothing),
-          Nil,
-          Nil,
-          Nil,
-          Nil,
-          List(p.Package.TypeSize(p.Type.IntS32, 4)),
-          "#entry-invalid",
-          p.Package.ReturnConvention.OutParam(index)
-        )
-      )
-      assert(invalid.left.exists(_.exists(_.contains("outside source argument range"))), invalid)
-    }
+    assert(linked.isRight, linked)
+    val program = linked.toOption.get
+    val entry   = (program.entry.toList ::: program.functions).find(_.name == root.name).get
+    assertEquals(entry.args.map(_.named.symbol), List("#context", "a0", "result"))
   }
 
-  test("Sym resolution rejects invalid or conflicting type layouts") {
+  test("program linking batches roots across packages") {
+    def packageAndRoot(prefix: String): (p.Package, p.Function) = {
+      val publicName = p.Sym(s"$prefix.increment")
+      val public = p.FunctionDecl(
+        publicName,
+        Nil,
+        None,
+        List(p.Arg(p.Named("value", p.Type.IntS32))),
+        Nil,
+        Nil,
+        p.Type.IntS32,
+        p.Function.Affinity.Host
+      )
+      val implementation = function(
+        public.copy(name = p.Sym(s"implementation.$prefix.increment")),
+        implements = Some(publicName),
+        visibility = p.Function.Visibility.Exported
+      )
+      val root = function(
+        public.copy(name = p.Sym(s"consumer.$prefix.increment")),
+        implements = Some(publicName),
+        visibility = p.Function.Visibility.Exported
+      )
+      p.Package(p.Interface(p.Sym(prefix), List(public)), p.Program(None, List(implementation), Nil)) -> root
+    }
+    val (firstPackage, firstRoot)   = packageAndRoot("first")
+    val (secondPackage, secondRoot) = packageAndRoot("second")
+    val linked = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(firstPackage, secondPackage),
+        p.Program(None, List(firstRoot, secondRoot), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
+      )
+    )
+    assert(linked.isRight, linked)
+    val entries = linked.toOption.get.entry.toList ::: linked.toOption.get.functions
+    assertEquals(entries.count(function => function.name == firstRoot.name || function.name == secondRoot.name), 2)
+  }
+
+  test("program linking rejects invalid or conflicting type layouts") {
     val name = p.Sym("library.noop")
     val declaration = p.FunctionDecl(
       name,
@@ -285,32 +268,29 @@ class PackageServiceSuite extends munit.FunSuite {
       visibility = p.Function.Visibility.Exported
     )
     val pkg = p.Package(p.Interface(p.Sym("library"), List(declaration)), p.Program(None, List(implementation), Nil))
-    def request(layouts: List[p.Package.TypeSize]) = p.Package.SymRequest(
-      pkg,
-      p.InvokeSignature(name, Nil, None, Nil, p.Type.Unit0),
-      Nil,
-      Nil,
-      Nil,
-      Nil,
-      layouts,
-      "#entry"
+    val root = function(
+      declaration.copy(name = p.Sym("consumer.noop")),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
     )
+    def request(layouts: List[p.Program.TypeSize]) =
+      p.Program.LinkRequest(List(pkg), p.Program(None, List(root), Nil), typeSizes = layouts)
 
     assert(
-      PackageSymResolver
-        .resolveSym(request(List(p.Package.TypeSize(p.Type.IntS32, 4), p.Package.TypeSize(p.Type.IntS32, 8))))
+      ProgramLinker
+        .link(request(List(p.Program.TypeSize(p.Type.IntS32, 4), p.Program.TypeSize(p.Type.IntS32, 8))))
         .left
         .exists(_.exists(_.contains("conflicts")))
     )
     assert(
-      PackageSymResolver
-        .resolveSym(request(List(p.Package.TypeSize(p.Type.IntS32, 0))))
+      ProgramLinker
+        .link(request(List(p.Program.TypeSize(p.Type.IntS32, 0))))
         .left
         .exists(_.exists(_.contains("must be positive")))
     )
   }
 
-  test("package linking and Sym resolution preserve a trailing-output result") {
+  test("package and program linking preserve a trailing-output result") {
     val name = p.Sym("library.increment")
     val public = p.FunctionDecl(
       name,
@@ -342,35 +322,27 @@ class PackageServiceSuite extends munit.FunSuite {
       Some(p.Arg.Boundary(p.Arg.Access.Write, p.Arg.Extent.Elements(p.Arg.SizeExpr.Const(1))))
     )
 
-    val resolved = PackageSymResolver.resolveSym(
-      p.Package.SymRequest(
-        linked.toOption.get,
-        p.InvokeSignature(name, Nil, None, List(p.Type.IntS32), p.Type.IntS32),
-        Nil,
-        Nil,
-        Nil,
-        Nil,
-        List(p.Package.TypeSize(p.Type.IntS32, 4)),
-        "#entry"
+    val root = function(
+      public.copy(name = p.Sym("consumer.increment")),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val resolved = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(linked.toOption.get),
+        p.Program(None, List(root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
       )
     )
     assert(resolved.isRight, resolved)
-    val resolvedProgram = resolved.toOption.get
-    assertEquals(
-      resolvedProgram.entryArgs,
-      List(
-        p.Package.EntryArgBinding.Context,
-        p.Package.EntryArgBinding.CallAddress(0),
-        p.Package.EntryArgBinding.ResultAddress
-      )
-    )
-    val entry  = resolvedProgram.program.entry.get
-    val invoke = entry.collectAll[p.Expr].collectFirst { case value: p.Expr.Invoke => value }.get
+    val program = resolved.toOption.get
+    val entry   = (program.entry.toList ::: program.functions).find(_.name == root.name).get
+    val invoke  = entry.collectAll[p.Expr].collectFirst { case value: p.Expr.Invoke => value }.get
     assertEquals(invoke.rtn, p.Type.Unit0)
     assertEquals(invoke.args.last, p.Term.Select(entry.args.last.named, Nil, resultType))
   }
 
-  test("Sym resolution closes and substitutes a source callable") {
+  test("program linking closes and substitutes a source callable") {
     val name              = p.Sym("library.apply")
     val callable          = p.Sym("caller.increment")
     val element: p.Type   = p.Type.Var("Element")
@@ -427,32 +399,32 @@ class PackageServiceSuite extends munit.FunSuite {
       List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(callableDecl.args.head.named, Nil, p.Type.IntS32))))
     )
     val pkg = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
-    val resolved = PackageSymResolver.resolveSym(
-      p.Package.SymRequest(
-        pkg,
-        p.InvokeSignature(name, Nil, None, List(p.Type.IntS32, p.Type.FnRef(callable)), p.Type.IntS32),
-        List(callableDecl),
-        List(callableFunction),
-        Nil,
-        Nil,
-        List(p.Package.TypeSize(p.Type.IntS32, 4)),
-        "#entry"
+    val root = function(
+      public.copy(
+        name = p.Sym("consumer.apply"),
+        args = List(p.Arg(p.Named("value", p.Type.IntS32)), p.Arg(p.Named("operation", p.Type.FnRef(callable))))
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val resolved = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(pkg),
+        p.Program(None, List(callableFunction, root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
       )
     )
     assert(resolved.isRight, resolved)
     val resolvedProgram = resolved.toOption.get
-    assertEquals(
-      resolvedProgram.entryArgs,
-      List(
-        p.Package.EntryArgBinding.Context,
-        p.Package.EntryArgBinding.CallAddress(0),
-        p.Package.EntryArgBinding.ResultAddress
-      )
-    )
-    assert(resolvedProgram.program.functions.exists(_.name == callable))
-    val selected = resolvedProgram.program.functions.find(_.name != callable).get
-    assertEquals(selected.args.map(_.named.symbol), List("value"))
-    assert(selected.collectAll[p.Type].contains(p.Type.FnRef(callable)))
+    val functions       = resolvedProgram.entry.toList ::: resolvedProgram.functions
+    val entry           = functions.find(_.name == root.name).get
+    assertEquals(entry.args.map(_.named.symbol), List("#context", "a0", "result"))
+    assert(functions.exists(_.name == callable))
+    val resolvedImplementation = functions
+      .find(function => function.name != callable && function.collectAll[p.Type].contains(p.Type.FnRef(callable)))
+      .get
+    assertEquals(resolvedImplementation.args.map(_.named.symbol), List("value"))
+    assert(resolvedImplementation.collectAll[p.Type].contains(p.Type.FnRef(callable)))
   }
 
   test("callable return types participate in public type inference") {
@@ -479,12 +451,12 @@ class PackageServiceSuite extends munit.FunSuite {
       p.Type.IntS32,
       p.Function.Affinity.Host
     )
-    val bound = PackageSymResolver.bindCall(
+    val matched = ProgramLinker.matchCall(
       public,
-      p.InvokeSignature(name, Nil, None, List(p.Type.FnRef(callable)), p.Type.IntS32),
+      ProgramLinker.CallSignature(name, Nil, None, List(p.Type.FnRef(callable)), p.Type.IntS32),
       List(callableDecl)
     )
-    assertEquals(bound.map(_.types), Right(Map("Element" -> p.Type.IntS32)))
+    assertEquals(matched.map(_.types), Right(Map("Element" -> p.Type.IntS32)))
   }
 
   test("package-service envelopes have an independent explicit fingerprint") {

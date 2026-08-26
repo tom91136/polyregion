@@ -1,4 +1,4 @@
-#pragma region case: multi-tu-binding-package
+#pragma region case: multi-tu-package-import
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -DTU_A -c -o {output}.a.o {input}

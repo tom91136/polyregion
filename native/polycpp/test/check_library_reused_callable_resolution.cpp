@@ -1,11 +1,11 @@
-#pragma region case: stateful-callable-package-diagnostic
+#pragma region case: stateful-callable-resolution-diagnostic
 #pragma region offload-only
 #pragma region compile-fails: stateful library callables are not supported
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DSTATEFUL_CALLABLE -fstdpar-library-path={output}.packages -c -o {output}.o {input}
 
 #pragma region case: conflicting-callable-package-diagnostic
 #pragma region offload-only
-#pragma region compile-fails: one interface specialization cannot bind conflicting callable identities
+#pragma region compile-fails: one interface specialization cannot use conflicting callable identities
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCONFLICTING_CALLABLES -fstdpar-library-path={output}.packages -c -o {output}.o {input}
 
 #pragma region case: reused-callable-package

@@ -303,7 +303,7 @@ object Pickler {
           val arrPtr    = $pointerOfBuffer(arrBuffer)
           if (sys.env.contains(Env.PolyregionDebug))
             println(
-              s"[bind]: write array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
+              s"[marshal]: write array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
             )
           var i = 0
           while (i < $expr.length_) {
@@ -348,7 +348,7 @@ object Pickler {
       val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
       val ptr    = $pointerOfBuffer(buffer)
       if (sys.env.contains(Env.PolyregionDebug))
-        println(s"[bind]: object  ${$root}(prism=${$rootAfterPrism}) => $buffer(0x${ptr.toHexString})")
+        println(s"[marshal]: object  ${$root}(prism=${$rootAfterPrism}) => $buffer(0x${ptr.toHexString})")
       ${
         Varargs(mapping.members.map { m =>
           val memberOffset = Expr(m.offsetInBytes.toInt)
@@ -459,7 +459,7 @@ object Pickler {
           }
           if (sys.env.contains(Env.PolyregionDebug))
             println(
-              s"[bind]: read array  [${arrayLen} * ${${ Expr(comp.repr) }}]  ${$seq} => $arrBuffer(0x${arrPtr.toHexString})"
+              s"[marshal]: read array  [${arrayLen} * ${${ Expr(comp.repr) }}]  ${$seq} => $arrBuffer(0x${arrPtr.toHexString})"
             )
         }
     }
@@ -473,7 +473,7 @@ object Pickler {
     ) = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
       if (sys.env.contains(Env.PolyregionDebug))
-        println(s"[bind]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
+        println(s"[marshal]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
 
       def toByteArray(buffer: ByteBuffer): Array[Byte] = {
         val array = new Array[Byte](buffer.remaining())
@@ -543,7 +543,7 @@ object Pickler {
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
       if (sys.env.contains(Env.PolyregionDebug))
         println(
-          s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }} <- $buffer(0x${$ptr.toHexString})"
+          s"[marshal]: mk object ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }} <- $buffer(0x${$ptr.toHexString})"
         )
       ${
 

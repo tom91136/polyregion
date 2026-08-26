@@ -1,4 +1,4 @@
-#pragma region case: two-callable-package
+#pragma region case: two-callable-resolution-package
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}

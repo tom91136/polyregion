@@ -1,6 +1,6 @@
 package polyregion.ast.pass
 
-import polyregion.ast.{MsgPack, PackageLinker, PackageSymResolver}
+import polyregion.ast.{MsgPack, PackageLinker, ProgramLinker}
 import polyregion.ast.PolyAST.{PolyPackageAbi, PolyPassAbi}
 import polyregion.ast.PolyAST as p
 import polyregion.ast.generated.PolyPackageWireSchema
@@ -204,15 +204,15 @@ object NativeBundle {
       PackageLinker.link
     )
 
-  @exported(PolyPackageAbi.ResolveSym.Name)
-  def resolvePackageSym(
+  @exported(PolyPackageAbi.LinkProgram.Name)
+  def linkProgram(
       inPtr: Ptr[Byte],
       inLen: CSize,
       outPtr: Ptr[Ptr[Byte]],
       outLen: Ptr[CSize]
   ): CInt =
-    packageOperation[p.Package.SymRequest, p.Package.SymResolvedProgram]("resolve Sym", inPtr, inLen, outPtr, outLen)(
-      PackageSymResolver.resolveSym
+    packageOperation[p.Program.LinkRequest, p.Program]("link program", inPtr, inLen, outPtr, outLen)(
+      ProgramLinker.link
     )
 
   @exported(PolyPackageAbi.LastError.Name)
