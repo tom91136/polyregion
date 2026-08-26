@@ -338,17 +338,17 @@ POLYREGION_EXPORT extern "C" void *polyrt_host_new(const uint64_t bytes) {
 }
 POLYREGION_EXPORT extern "C" void polyrt_host_free(void *pointer) { std::free(pointer); }
 
-POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) {
+POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) noexcept(false) {
   if (bytes == 0) return 0;
   return requireContext(context, __func__).device->mallocDevice(bytes, Access::RW);
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_free(void *context, const uintptr_t ptr) {
+POLYREGION_EXPORT extern "C" void polyrt_remote_free(void *context, const uintptr_t ptr) noexcept(false) {
   if (ptr != 0) requireContext(context, __func__).device->freeDevice(ptr);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_memcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
-                                                       const int32_t direction) {
+                                                       const int32_t direction) noexcept(false) {
   if (bytes == 0 || src == 0 || dst == 0) return;
   auto &queue = *requireContext(context, __func__).queue;
   switch (direction) {
@@ -431,7 +431,7 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, co
 POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName, const size_t gridX,
                                                        const size_t gridY, const size_t gridZ, const size_t blockX, const size_t blockY,
                                                        const size_t blockZ, const size_t localMemBytes, const size_t argCount,
-                                                       const uint8_t *argTypes, void *const *argPtrs) {
+                                                       const uint8_t *argTypes, void *const *argPtrs) noexcept(false) {
   auto &value = requireContext(context, __func__);
   ArgBuffer buffer{};
   if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
@@ -450,7 +450,7 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_cleanup(void *contex
                                                                     const size_t blockX, const size_t blockY, const size_t blockZ,
                                                                     const size_t localMemBytes, const size_t argCount,
                                                                     const uint8_t *argTypes, void *const *argPtrs,
-                                                                    const size_t *mirrorSizes) {
+                                                                    const size_t *mirrorSizes) noexcept(false) {
   std::vector<uintptr_t> mirrors(argCount, 0);
   std::vector<void *> launchArgPtrs(argCount, nullptr);
   std::vector<uintptr_t> allocations;

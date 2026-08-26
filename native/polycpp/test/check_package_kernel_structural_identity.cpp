@@ -42,7 +42,7 @@ struct HostOnlyDeclarationNoise {
 };
 #endif
 
-POLYREGION_EXPORT_AS("kernel_identity.implementation.apply") void apply(int narrow, long wide) {
+POLYREGION_EXPORT_AS("kernel_identity.implementation.apply") void apply(int narrow, long long wide) {
   LAUNCH_CAPTURE(narrow);
   LAUNCH_CAPTURE(wide);
   overloaded<<<dim3(1), dim3(1)>>>(static_cast<int *>(nullptr));

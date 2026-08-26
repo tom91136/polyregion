@@ -11,6 +11,9 @@ struct dim3 {
 };
 extern "C" int cudaLaunchKernel(const void *, dim3, dim3, void **, unsigned long, void *);
 extern "C" int __cudaPushCallConfiguration(dim3, dim3, unsigned long = 0, void * = nullptr);
+extern "C" int cudaConfigureCall(dim3, dim3, unsigned long = 0, void * = nullptr);
+extern "C" int cudaSetupArgument(const void *, unsigned long, unsigned long);
+extern "C" int cudaLaunch(const void *);
 
 template <typename T> __attribute__((global)) void phase_kernel(T *out) {
 #ifdef __CUDA_ARCH__
