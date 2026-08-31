@@ -67,29 +67,60 @@ private[polyregion] object ProgramLinker {
     val localDefinitions = mutable.Set.from(definitionGroups.collect {
       case (name, values) if !values.forall(_ == values.head) => name
     })
-    var changed = true
-    while (changed) {
-      changed = false
-      definitionGroups.foreach { case (name, definitions) =>
-        if (definitions.size >= 2 && !localDefinitions(name) && !stableDefinitions(name)) {
-          val depends = definitions.exists(_.collectAll[p.Type].exists {
-            case p.Type.Struct(target, _) => localDefinitions(target)
-            case _                        => false
-          })
-          if (depends) changed = localDefinitions.add(name) || changed
-        }
-      }
-      functionGroups.foreach { case (name, functions) =>
-        if (functions.size >= 2 && !localFunctions(name) && !stableFunctions(name)) {
-          val depends = functions.exists(_.collectAll[p.Type].exists {
-            case p.Type.FnRef(target)     => localFunctions(target)
-            case p.Type.Struct(target, _) => localDefinitions(target)
-            case _                        => false
-          })
-          if (depends) changed = localFunctions.add(name) || changed
-        }
-      }
+
+    val definitionCandidates = definitionGroups.collect {
+      case (name, definitions) if definitions.size >= 2 && !stableDefinitions(name) => name -> definitions
     }
+    val functionCandidates = functionGroups.collect {
+      case (name, functions) if functions.size >= 2 && !stableFunctions(name) => name -> functions
+    }
+    val definitionsDependingOn         = mutable.Map.empty[p.Sym, mutable.Set[p.Sym]]
+    val functionsDependingOnDefinition = mutable.Map.empty[p.Sym, mutable.Set[p.Sym]]
+    val functionsDependingOnFunction   = mutable.Map.empty[p.Sym, mutable.Set[p.Sym]]
+    def dependent(index: mutable.Map[p.Sym, mutable.Set[p.Sym]], target: p.Sym, owner: p.Sym): Unit =
+      index.getOrElseUpdate(target, mutable.Set.empty) += owner
+
+    definitionCandidates.foreach { case (name, definitions) =>
+      definitions.foreach(_.visitAll[p.Type] {
+        case p.Type.Struct(target, _) => dependent(definitionsDependingOn, target, name)
+        case _                        => ()
+      })
+    }
+    functionCandidates.foreach { case (name, functions) =>
+      functions.foreach(_.visitAll[p.Type] {
+        case p.Type.FnRef(target)     => dependent(functionsDependingOnFunction, target, name)
+        case p.Type.Struct(target, _) => dependent(functionsDependingOnDefinition, target, name)
+        case _                        => ()
+      })
+    }
+
+    enum Collision {
+      case Function(name: p.Sym)
+      case Definition(name: p.Sym)
+    }
+    val pending = mutable.Queue.empty[Collision]
+    pending ++= localFunctions.iterator.map(Collision.Function(_))
+    pending ++= localDefinitions.iterator.map(Collision.Definition(_))
+    while (pending.nonEmpty)
+      pending.dequeue() match {
+        case Collision.Function(name) =>
+          functionsDependingOnFunction
+            .get(name)
+            .foreach(_.foreach { dependentName =>
+              if (localFunctions.add(dependentName)) pending.enqueue(Collision.Function(dependentName))
+            })
+        case Collision.Definition(name) =>
+          definitionsDependingOn
+            .get(name)
+            .foreach(_.foreach { dependentName =>
+              if (localDefinitions.add(dependentName)) pending.enqueue(Collision.Definition(dependentName))
+            })
+          functionsDependingOnDefinition
+            .get(name)
+            .foreach(_.foreach { dependentName =>
+              if (localFunctions.add(dependentName)) pending.enqueue(Collision.Function(dependentName))
+            })
+      }
     localFunctions -> localDefinitions
   }
 
@@ -599,7 +630,7 @@ private[polyregion] object ProgramLinker {
               if (isSelectedImplementation) implementationVariables
               else implementationVariables -- withoutCallables.tpeVars.map(_.name)
             val function     = withoutCallables.modifyAll[p.Type](substitute(_, substitutions))
-            val dependencies = function.collectAll[p.Type].collect { case p.Type.FnRef(target) => target }
+            val dependencies = function.collectWhere[p.Type] { case p.Type.FnRef(target) => target }
             loop(dependencies ::: rest, reached + name, function :: out)
         }
     }
@@ -616,17 +647,18 @@ private[polyregion] object ProgramLinker {
       functions: List[p.Function],
       callerDefs: List[p.StructDef]
   ): Either[List[String], List[p.StructDef]] = {
-    val errors = List.newBuilder[String]
-    val out    = List.newBuilder[p.StructDef]
+    val errors            = List.newBuilder[String]
+    val out               = List.newBuilder[p.StructDef]
+    val definitionsByName = (pkg.program.defs ::: callerDefs).groupBy(_.name)
     @annotation.tailrec
     def loop(frontier: List[p.Type.Struct], reached: Set[p.Sym]): Unit = frontier match {
       case Nil => ()
       case applied :: rest =>
-        val matches = (pkg.program.defs ::: callerDefs).filter(_.name == applied.name)
+        val matches = definitionsByName.getOrElse(applied.name, Nil)
         matches.headOption match {
           case None =>
             errors += s"struct definition `${applied.name.repr}` is absent"
-            loop(rest, reached)
+            loop(rest, reached + applied.name)
           case Some(definition) =>
             if (matches.exists(_ != definition))
               errors += s"struct definition `${applied.name.repr}` conflicts between package and caller"
@@ -637,12 +669,12 @@ private[polyregion] object ProgramLinker {
             else {
               definition.validate.foreach(error => errors += s"struct definition `${applied.name.repr}`: $error")
               out += definition
-              val nested = definition.collectAll[p.Type].collect { case value: p.Type.Struct => value }
+              val nested = definition.collectWhere[p.Type] { case value: p.Type.Struct => value }
               loop(nested ::: rest, reached + applied.name)
             }
         }
     }
-    val roots = functions.flatMap(_.collectAll[p.Type].collect { case value: p.Type.Struct => value })
+    val roots = functions.collectWhere[p.Type] { case value: p.Type.Struct => value }
     loop(roots, Set.empty)
     val distinct = errors.result().distinct
     Either.cond(distinct.isEmpty, out.result(), distinct)
@@ -965,7 +997,8 @@ private[polyregion] object ProgramLinker {
     val functionGroups   = programs.flatMap(program => program.entry.toList ++ program.functions).groupBy(_.name)
     val definitionGroups = programs.flatMap(_.defs).groupBy(_.name)
     val entryStructs = programs
-      .flatMap(_.entry.toList.flatMap(_.decl.collectAll[p.Type].collect { case x: p.Type.Struct => x.name }))
+      .flatMap(_.entry.map(_.decl))
+      .collectWhere[p.Type] { case value: p.Type.Struct => value.name }
       .toSet
     val (localFunctions, localDefinitions) =
       collisionClosure(functionGroups, definitionGroups, entryNames, entryStructs)

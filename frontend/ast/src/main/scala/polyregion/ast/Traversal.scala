@@ -1,6 +1,5 @@
 package polyregion.ast
 
-import scala.annotation.targetName
 import scala.deriving.Mirror
 import scala.compiletime.{erasedValue, summonInline}
 import scala.util.NotGiven
@@ -8,8 +7,21 @@ import scala.quoted.*
 
 trait Traversal[A, B] {
   extension (a: A) {
-    def collectAll: List[B]
-    def collectWhere[C](f: PartialFunction[B, C]): List[C]
+    def visitAll(f: B => Unit): Unit
+    def collectAll: List[B] = {
+      val out = List.newBuilder[B]
+      visitAll(out += _)
+      out.result()
+    }
+    def collectWhere[C](f: PartialFunction[B, C]): List[C] = {
+      val out     = List.newBuilder[C]
+      val collect = f.runWith(out += _)
+      visitAll { value =>
+        collect(value)
+        ()
+      }
+      out.result()
+    }
     def collectFirst_[C](f: PartialFunction[B, C]): Option[C]
     def modifyAll(f: B => B): A
     def modifyCollect[C](f: B => (B, C)): (A, List[C])
@@ -46,56 +58,6 @@ object Traversal {
     Apply(mk, as).asExprOf[A]
   }
 
-  private inline def collectAllFields[T <: Tuple, B](prod: Product, idx: Int): List[B] =
-    inline erasedValue[T] match {
-      case _: EmptyTuple => Nil
-      case _: (t *: ts) =>
-        val tr: Traversal[t, B] = summonInline[Traversal[t, B]]
-        tr.collectAll(prod.productElement(idx).asInstanceOf[t]) :::
-          collectAllFields[ts, B](prod, idx + 1)
-    }
-  private inline def collectWhereFields[T <: Tuple, B, C](prod: Product, idx: Int, f: PartialFunction[B, C]): List[C] =
-    inline erasedValue[T] match {
-      case _: EmptyTuple => Nil
-      case _: (t *: ts) =>
-        val tr: Traversal[t, B] = summonInline[Traversal[t, B]]
-        tr.collectWhere(prod.productElement(idx).asInstanceOf[t])(f) :::
-          collectWhereFields[ts, B, C](prod, idx + 1, f)
-    }
-  private inline def collectFirstFields[T <: Tuple, B, C](
-      prod: Product,
-      idx: Int,
-      f: PartialFunction[B, C]
-  ): Option[C] =
-    inline erasedValue[T] match {
-      case _: EmptyTuple => None
-      case _: (t *: ts) =>
-        val tr: Traversal[t, B] = summonInline[Traversal[t, B]]
-        tr.collectFirst_(prod.productElement(idx).asInstanceOf[t])(f)
-          .orElse(collectFirstFields[ts, B, C](prod, idx + 1, f))
-    }
-  private inline def modifyAllFields[T <: Tuple, B](prod: Product, idx: Int, f: B => B): Tuple =
-    inline erasedValue[T] match {
-      case _: EmptyTuple => EmptyTuple
-      case _: (t *: ts) =>
-        val tr: Traversal[t, B] = summonInline[Traversal[t, B]]
-        val nx                  = tr.modifyAll(prod.productElement(idx).asInstanceOf[t])(f)
-        nx *: modifyAllFields[ts, B](prod, idx + 1, f)
-    }
-  private inline def modifyCollectFields[T <: Tuple, B, C](
-      prod: Product,
-      idx: Int,
-      f: B => (B, C)
-  ): (Tuple, List[C]) =
-    inline erasedValue[T] match {
-      case _: EmptyTuple => (EmptyTuple, Nil)
-      case _: (t *: ts) =>
-        val tr: Traversal[t, B] = summonInline[Traversal[t, B]]
-        val (nx, cx)            = tr.modifyCollect(prod.productElement(idx).asInstanceOf[t])(f)
-        val (rest, cs)          = modifyCollectFields[ts, B, C](prod, idx + 1, f)
-        (nx *: rest, cx ::: cs)
-    }
-
   private inline def isB[A, B]: Boolean = inline erasedValue[A] match {
     case _: B => true
     case _    => false
@@ -109,10 +71,7 @@ object Traversal {
   private def singleton[A, B](aSubB: Boolean): Traversal[A, B] =
     new Traversal[A, B] {
       extension (a: A) {
-        def collectAll: List[B] =
-          if (aSubB) a.asInstanceOf[B] :: Nil else Nil
-        def collectWhere[C](f: PartialFunction[B, C]): List[C] =
-          if (aSubB) f.lift(a.asInstanceOf[B]).toList else Nil
+        def visitAll(f: B => Unit): Unit = if (aSubB) f(a.asInstanceOf[B])
         def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
           if (aSubB) f.lift(a.asInstanceOf[B]) else None
         def modifyAll(f: B => B): A =
@@ -137,29 +96,15 @@ object Traversal {
   ): Traversal[A, B] = new Traversal[A, B] {
     private lazy val tss = tssThunk
     extension (a: A) {
-      def collectAll: List[B] = {
+      def visitAll(f: B => Unit): Unit = {
+        if (aSubB) f(a.asInstanceOf[B])
         val prod = a.asInstanceOf[Product]
         val arr  = tss
-        val n    = arr.length
-        val out  = scala.collection.mutable.ListBuffer.empty[B]
         var i    = 0
-        while (i < n) {
-          out ++= arr(i).asInstanceOf[Traversal[Any, B]].collectAll(prod.productElement(i))
+        while (i < arr.length) {
+          arr(i).asInstanceOf[Traversal[Any, B]].visitAll(prod.productElement(i))(f)
           i += 1
         }
-        if (aSubB) a.asInstanceOf[B] :: out.toList else out.toList
-      }
-      def collectWhere[C](f: PartialFunction[B, C]): List[C] = {
-        val prod = a.asInstanceOf[Product]
-        val arr  = tss
-        val n    = arr.length
-        val out  = scala.collection.mutable.ListBuffer.empty[C]
-        var i    = 0
-        while (i < n) {
-          out ++= arr(i).asInstanceOf[Traversal[Any, B]].collectWhere(prod.productElement(i))(f)
-          i += 1
-        }
-        if (aSubB) f.lift(a.asInstanceOf[B]).toList ::: out.toList else out.toList
       }
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = {
         val prod = a.asInstanceOf[Product]
@@ -225,10 +170,8 @@ object Traversal {
   ): Traversal[A, B] = new Traversal[A, B] {
     private lazy val tss = tssThunk
     extension (a: A) {
-      def collectAll: List[B] =
-        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectAll(a)
-      def collectWhere[C](f: PartialFunction[B, C]): List[C] =
-        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectWhere(a)(f)
+      def visitAll(f: B => Unit): Unit =
+        tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].visitAll(a)(f)
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         tss(s.ordinal(a)).asInstanceOf[Traversal[A, B]].collectFirst_(a)(f)
       def modifyAll(f: B => B): A = {
@@ -261,8 +204,7 @@ object Traversal {
 
   private val nullTraversal: Traversal[Any, Any] = new Traversal[Any, Any] {
     extension (a: Any) {
-      def collectAll: List[Any]                                        = Nil
-      def collectWhere[C](f: PartialFunction[Any, C]): List[C]         = Nil
+      def visitAll(f: Any => Unit): Unit                               = ()
       def collectFirst_[C](f: PartialFunction[Any, C]): Option[C]      = None
       def modifyAll(f: Any => Any): Any                                = a
       def modifyAllInternal(f: Any => Any): Any                        = a
@@ -278,8 +220,7 @@ object Traversal {
 
   given [A, B](using t: Traversal[A, B]): Traversal[List[A], B] = new Traversal[List[A], B] {
     extension (xs: List[A]) {
-      def collectAll: List[B]                                = xs.flatMap(t.collectAll(_))
-      def collectWhere[C](f: PartialFunction[B, C]): List[C] = xs.flatMap(t.collectWhere(_)(f))
+      def visitAll(f: B => Unit): Unit = xs.foreach(t.visitAll(_)(f))
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         xs.view.map(t.collectFirst_(_)(f)).collectFirst { case Some(x) => x }
       def modifyAll(f: B => B): List[A]         = xs.map(t.modifyAll(_)(f))
@@ -302,8 +243,7 @@ object Traversal {
 
   given [A, B](using t: Traversal[A, B]): Traversal[Vector[A], B] = new Traversal[Vector[A], B] {
     extension (xs: Vector[A]) {
-      def collectAll: List[B]                                = xs.flatMap(t.collectAll(_)).toList
-      def collectWhere[C](f: PartialFunction[B, C]): List[C] = xs.flatMap(t.collectWhere(_)(f)).toList
+      def visitAll(f: B => Unit): Unit = xs.foreach(t.visitAll(_)(f))
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
         xs.view.map(t.collectFirst_(_)(f)).collectFirst { case Some(x) => x }
       def modifyAll(f: B => B): Vector[A]         = xs.map(t.modifyAll(_)(f))
@@ -324,8 +264,7 @@ object Traversal {
 
   given [A, B](using t: Traversal[A, B]): Traversal[Option[A], B] = new Traversal[Option[A], B] {
     extension (o: Option[A]) {
-      def collectAll: List[B]                                   = o.fold(Nil)(t.collectAll(_))
-      def collectWhere[C](f: PartialFunction[B, C]): List[C]    = o.fold(Nil)(t.collectWhere(_)(f))
+      def visitAll(f: B => Unit): Unit                          = o.foreach(t.visitAll(_)(f))
       def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = o.fold(None)(t.collectFirst_(_)(f))
       def modifyAll(f: B => B): Option[A]                       = o.map(t.modifyAll(_)(f))
       def modifyAllInternal(f: B => B): Option[A]               = o.map(t.modifyAll(_)(f))
@@ -339,7 +278,8 @@ object Traversal {
 
   extension [A](a: A) {
 
-    def collectAll[B](using t: Traversal[A, B]): List[B] = t.collectAll(a)
+    inline def visitAll[B](using t: Traversal[A, B])(f: B => Unit): Unit = t.visitAll(a)(f)
+    def collectAll[B](using t: Traversal[A, B]): List[B]                 = t.collectAll(a)
     def collectWhere[B](using t: Traversal[A, B]): [C] => PartialFunction[B, C] => List[C] = [C] =>
       (f: PartialFunction[B, C]) => t.collectWhere(a)(f)
     def collectFirst_[B](using t: Traversal[A, B]): [C] => PartialFunction[B, C] => Option[C] = [C] =>

@@ -22,11 +22,10 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
       program.defs.flatMap(definition => definition.validate.map(error => s"struct `${definition.name.repr}`: $error"))
     if (definitionErrors.nonEmpty) throw IllegalArgumentException(definitionErrors.mkString("; "))
 
-    val rootStructs: List[p.Type.Struct] =
-      ((program.entry.toList ::: program.functions).flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s }) ++
-        program.defs
-          .filter(_.tpeVars.isEmpty)
-          .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s })).distinct
+    val rootStructs = (
+      (program.entry.toList ::: program.functions).collectWhere[p.Type] { case struct: p.Type.Struct => struct } ++
+        program.defs.filter(_.tpeVars.isEmpty).collectWhere[p.Type] { case struct: p.Type.Struct => struct }
+    ).distinct
 
     val sdefByName = program.defs.map(d => d.name -> d).toMap
 
@@ -71,13 +70,13 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
     @annotation.tailrec
     def closeStructs(
-        pending: List[Pending],
+        pending: scala.collection.immutable.Queue[Pending],
         seen: Set[p.Type.Struct] = Set.empty,
         result: List[p.Type.Struct] = Nil
-    ): List[p.Type.Struct] = pending match {
-      case Nil                                        => result
-      case Pending(struct, _) :: tail if seen(struct) => closeStructs(tail, seen, result)
-      case Pending(struct, ancestry) :: tail =>
+    ): List[p.Type.Struct] = pending.dequeueOption match {
+      case None                                             => result.reverse
+      case Some((Pending(struct, _), tail)) if seen(struct) => closeStructs(tail, seen, result)
+      case Some((Pending(struct, ancestry), tail)) =>
         val history = ancestry.getOrElse(struct.name, Nil)
         history.takeRight(2) match {
           case previousPrevious :: previous :: Nil
@@ -90,20 +89,25 @@ object MonoStruct extends BoundaryPass[Map[p.Sym, p.Sym]] {
           case _ => ()
         }
         val nestedAncestry = ancestry.updated(struct.name, history :+ struct)
-        val dependencies = instantiate(struct).toList.flatMap(
-          _.collectWhere[p.Type] { case dependency: p.Type.Struct => dependency }
+        val dependencies   = instantiate(struct).collectWhere[p.Type] { case dependency: p.Type.Struct => dependency }
+        closeStructs(
+          tail.enqueueAll(dependencies.map(Pending(_, nestedAncestry))),
+          seen + struct,
+          struct :: result
         )
-        closeStructs(tail ::: dependencies.map(Pending(_, nestedAncestry)), seen + struct, result :+ struct)
     }
 
-    val structUses = closeStructs(rootStructs.map(Pending(_, Map.empty)))
+    val structUses = closeStructs(scala.collection.immutable.Queue.from(rootStructs.map(Pending(_, Map.empty))))
 
-    log.info("uses", structUses.map(_.repr)*)
-    log.info("defs", program.defs.map(_.repr)*)
+    if (log.enabled) {
+      log.info("uses", structUses.map(_.repr)*)
+      log.info("defs", program.defs.map(_.repr)*)
+    }
     val monoStructDefs   = structUses.flatMap(struct => instantiate(struct).map(struct -> _))
     val replacementTable = monoStructDefs.toMap
 
-    log.info("rename table", replacementTable.map((k, v) => s"${k.repr} => ${v.repr}").toSeq*)
+    if (log.enabled)
+      log.info("rename table", replacementTable.map((k, v) => s"${k.repr} => ${v.repr}").toSeq*)
 
     val replacementsByName: Map[p.Sym, List[(p.Type.Struct, p.StructDef)]] = replacementTable.toList.groupBy(_._1.name)
 

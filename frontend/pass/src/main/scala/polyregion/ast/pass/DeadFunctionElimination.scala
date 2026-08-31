@@ -18,22 +18,27 @@ import scala.annotation.tailrec
 object DeadFunctionElimination extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {
+    def functionReferences(function: p.Function): Set[p.Sym] =
+      function.collectWhere[p.Type] { case p.Type.FnRef(name) => name }.toSet
+
     val seeds: Set[p.Sym] =
       program.functions.filter(_.visibility == p.Function.Visibility.Exported).map(_.name).toSet ++
-        program.entry.collectWhere[p.Type] { case f: p.Type.FnRef => f.name }
+        program.entry.toSet.flatMap(functionReferences)
 
     val byName = program.functions.groupBy(_.name)
 
     @tailrec def reach(frontier: Set[p.Sym], live: Set[p.Sym]): Set[p.Sym] = {
       val next = frontier.flatMap { s =>
-        byName.getOrElse(s, Nil).flatMap(_.collectWhere[p.Type] { case f: p.Type.FnRef => f.name })
+        byName.getOrElse(s, Nil).flatMap(functionReferences)
       } -- live
       if (next.isEmpty) live else reach(next, live ++ next)
     }
 
     val live = reach(seeds, seeds)
-    log.info("kept", live.toSeq.map(_.repr).sorted*)
-    log.info("dropped", program.functions.map(_.name).filterNot(live.contains).map(_.repr).sorted*)
+    if (log.enabled) {
+      log.info("kept", live.toSeq.map(_.repr).sorted*)
+      log.info("dropped", program.functions.map(_.name).filterNot(live.contains).map(_.repr).sorted*)
+    }
     program.copy(functions = program.functions.filter(f => live.contains(f.name)))
   }
 
