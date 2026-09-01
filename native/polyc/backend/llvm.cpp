@@ -728,6 +728,9 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             },
             [&](const Intr::BZSR &v) -> ValPtr {
               return binaryExpr(expr, v.x, v.y, v.tpe, [&](const auto &l, const auto &r) { return B.CreateLShr(l, r); });
+            },
+            [&](const Intr::PopCount &v) -> ValPtr {
+              return unaryExpr(expr, v.x, v.rtn, [&](const auto &x) { return B.CreateUnaryIntrinsic(llvm::Intrinsic::ctpop, x); });
             },                                                                                                     //
             [&](const Intr::LogicAnd &v) -> ValPtr { return B.CreateLogicalAnd(mkTermVal(v.x), mkTermVal(v.y)); }, //
             [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkTermVal(v.x), mkTermVal(v.y)); },   //

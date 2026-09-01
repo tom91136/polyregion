@@ -119,6 +119,73 @@ TEST_CASE("entry-less libraries compile their exported closure", "[backend][libr
   CHECK_THAT(std::string(source.binary->begin(), source.binary->end()), Catch::Matchers::ContainsSubstring("exported"));
 }
 
+TEST_CASE("population count uses native backends with portable C source fallbacks", "[backend][intrinsic]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named value("value", Type::IntU32());
+  const Function entry = mkFn("population_count", {Arg(value, {})}, Type::IntU32(),
+                              {ret(Expr::IntrOp(Intr::PopCount(selectNamed(value), Type::IntU32())).widen())},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed());
+  const Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  {
+    const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+    const auto compiled = polyregion::compiler::compile(program, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    CHECK(llvmIrOf(compiled) ^ contains_slice("llvm.ctpop.i32"));
+  }
+
+  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
+           {Target::Object_LLVM_NVPTX64, "sm_35"},
+           {Target::Object_LLVM_AMDGCN, "gfx906"},
+           {Target::Object_LLVM_SPIRV64_Kernel, ""},
+           {Target::Object_LLVM_SPIRV_GLCompute, ""},
+       }) {
+    INFO(static_cast<int>(target));
+    REQUIRE(polyregion::compiler::compile(program, {target, arch}, OptLevel::O0).binary);
+  }
+
+  const auto source = [&](const Program &input, const Target target) {
+    const auto compiled = polyregion::compiler::compile(input, {target, ""}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    return std::string(compiled.binary->begin(), compiled.binary->end());
+  };
+
+  const auto c11 = source(program, Target::Source_C_C11);
+  CHECK(c11 ^ contains_slice("_polyregion_popcount_u32"));
+  CHECK_FALSE(c11 ^ contains_slice("_polyregion_popcount_u64"));
+  CHECK(c11 ^ contains_slice("#define POLY_POPCOUNT32(x) _polyregion_popcount_u32(x)"));
+
+  const auto opencl = source(program, Target::Source_C_OpenCL1_1);
+  CHECK(opencl ^ contains_slice("__OPENCL_C_VERSION__ >= 120"));
+  CHECK(opencl ^ contains_slice("#define POLY_POPCOUNT32(x) popcount(x)"));
+  CHECK(opencl ^ contains_slice("#define POLY_POPCOUNT32(x) _polyregion_popcount_u32(x)"));
+  CHECK_FALSE(opencl ^ contains_slice("POLY_POPCOUNT64"));
+
+  const auto metal = source(program, Target::Source_C_Metal1_0);
+  CHECK(metal ^ contains_slice("metal::popcount("));
+  CHECK_FALSE(metal ^ contains_slice("_polyregion_popcount_u32"));
+
+  const Named wideValue("value", Type::IntU64());
+  const Function wideEntry = mkFn("population_count", {Arg(wideValue, {})}, Type::IntU64(),
+                                  {ret(Expr::IntrOp(Intr::PopCount(selectNamed(wideValue), Type::IntU64())).widen())},
+                                  FunctionVisibility::Exported(), FunctionFpMode::Relaxed());
+  const Program wideProgram(wideEntry, {}, {}, PassPhase::Initial(), {});
+  {
+    const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+    const auto compiled = polyregion::compiler::compile(wideProgram, {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
+    REQUIRE(compiled.binary);
+    CHECK(llvmIrOf(compiled) ^ contains_slice("llvm.ctpop.i64"));
+  }
+  const auto wideC11 = source(wideProgram, Target::Source_C_C11);
+  CHECK(wideC11 ^ contains_slice("_polyregion_popcount_u64"));
+  CHECK_FALSE(wideC11 ^ contains_slice("_polyregion_popcount_u32"));
+  const auto wideOpencl = source(wideProgram, Target::Source_C_OpenCL1_1);
+  CHECK(wideOpencl ^ contains_slice("#define POLY_POPCOUNT64(x) popcount(x)"));
+  CHECK(wideOpencl ^ contains_slice("#define POLY_POPCOUNT64(x) _polyregion_popcount_u64(x)"));
+}
+
 TEST_CASE("SPIR-V normalises narrowed integer operands", "[backend][spirv]") {
   const std::vector<uint32_t> words{
       spv::MagicNumber,

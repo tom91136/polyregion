@@ -6544,10 +6544,50 @@ struct POLYREGION_EXPORT BZSR : Intr::Base {
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
+struct POLYREGION_EXPORT PopCount : Intr::Base {
+  Term::Any x;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 17;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Intr::PopCount withX(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Intr::PopCount withRtn(const Type::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PopCount>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    x.collect_where<T, U>(results_, f);
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PopCount modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PopCount>) {
+      return f(*this);
+    }
+    return Intr::PopCount(x.modify_all<T>(f), rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Intr::PopCount &) const;
+  PopCount(Term::Any x, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
 struct POLYREGION_EXPORT LogicAnd : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 17;
+  constexpr static uint32_t variant_id = 18;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicAnd withX(const Term::Any &v_) const;
@@ -6587,7 +6627,7 @@ struct POLYREGION_EXPORT LogicAnd : Intr::Base {
 struct POLYREGION_EXPORT LogicOr : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 18;
+  constexpr static uint32_t variant_id = 19;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicOr withX(const Term::Any &v_) const;
@@ -6627,7 +6667,7 @@ struct POLYREGION_EXPORT LogicOr : Intr::Base {
 struct POLYREGION_EXPORT LogicEq : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 19;
+  constexpr static uint32_t variant_id = 20;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicEq withX(const Term::Any &v_) const;
@@ -6667,7 +6707,7 @@ struct POLYREGION_EXPORT LogicEq : Intr::Base {
 struct POLYREGION_EXPORT LogicNeq : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 20;
+  constexpr static uint32_t variant_id = 21;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicNeq withX(const Term::Any &v_) const;
@@ -6707,7 +6747,7 @@ struct POLYREGION_EXPORT LogicNeq : Intr::Base {
 struct POLYREGION_EXPORT LogicLte : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 21;
+  constexpr static uint32_t variant_id = 22;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicLte withX(const Term::Any &v_) const;
@@ -6747,7 +6787,7 @@ struct POLYREGION_EXPORT LogicLte : Intr::Base {
 struct POLYREGION_EXPORT LogicGte : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 22;
+  constexpr static uint32_t variant_id = 23;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicGte withX(const Term::Any &v_) const;
@@ -6787,7 +6827,7 @@ struct POLYREGION_EXPORT LogicGte : Intr::Base {
 struct POLYREGION_EXPORT LogicLt : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 23;
+  constexpr static uint32_t variant_id = 24;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicLt withX(const Term::Any &v_) const;
@@ -6827,7 +6867,7 @@ struct POLYREGION_EXPORT LogicLt : Intr::Base {
 struct POLYREGION_EXPORT LogicGt : Intr::Base {
   Term::Any x;
   Term::Any y;
-  constexpr static uint32_t variant_id = 24;
+  constexpr static uint32_t variant_id = 25;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Intr::LogicGt withX(const Term::Any &v_) const;
@@ -11704,8 +11744,8 @@ POLYREGION_EXPORT polyregion::polyast::Spec::Any polyregion::polyast::Spec::Any:
   return *result_;
 }
 namespace polyregion::polyast::Intr {
-using All = alternatives<BNot, LogicNot, Pos, Neg, Add, Sub, Mul, Div, Rem, Min, Max, BAnd, BOr, BXor, BSL, BSR, BZSR, LogicAnd, LogicOr,
-                         LogicEq, LogicNeq, LogicLte, LogicGte, LogicLt, LogicGt>;
+using All = alternatives<BNot, LogicNot, Pos, Neg, Add, Sub, Mul, Div, Rem, Min, Max, BAnd, BOr, BXor, BSL, BSR, BZSR, PopCount, LogicAnd,
+                         LogicOr, LogicEq, LogicNeq, LogicLte, LogicGte, LogicLt, LogicGt>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Intr::Any::is() const {
   static_assert((polyregion::polyast::Intr::All::contains<T>), "type not part of the variant");
@@ -13149,6 +13189,9 @@ template <> struct hash<polyregion::polyast::Intr::BSR> {
 };
 template <> struct hash<polyregion::polyast::Intr::BZSR> {
   std::size_t operator()(const polyregion::polyast::Intr::BZSR &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Intr::PopCount> {
+  std::size_t operator()(const polyregion::polyast::Intr::PopCount &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Intr::LogicAnd> {
   std::size_t operator()(const polyregion::polyast::Intr::LogicAnd &) const noexcept;

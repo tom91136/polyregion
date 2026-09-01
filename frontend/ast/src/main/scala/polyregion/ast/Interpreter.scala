@@ -492,7 +492,11 @@ object Interpreter {
             r
           )
         )
-      case p.Intr.BZSR(a, b, r)  => V.I(narrow(asI(evalT(a, fr)) >>> asI(evalT(b, fr)), r))
+      case p.Intr.BZSR(a, b, r) => V.I(narrow(asI(evalT(a, fr)) >>> asI(evalT(b, fr)), r))
+      case p.Intr.PopCount(a, r) =>
+        val bits  = sizeOf(r).toInt * 8
+        val value = asI(evalT(a, fr))
+        V.I(java.lang.Long.bitCount(if (bits >= 64) value else value & ((1L << bits) - 1)).toLong)
       case p.Intr.BNot(a, r)     => V.I(narrow(~asI(evalT(a, fr)), r))
       case p.Intr.Pos(a, _)      => evalT(a, fr)
       case p.Intr.Neg(a, r)      => if (isFloat(r)) V.D(-asD(evalT(a, fr))) else V.I(narrow(-asI(evalT(a, fr)), r))

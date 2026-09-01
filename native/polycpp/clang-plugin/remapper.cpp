@@ -269,6 +269,7 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
 }
 
 Expr::Any Remapper::zeroInitialise(RemapContext &r, const Type::Any &tpe) {
+  if (const auto pointer = tpe.get<Type::Ptr>()) return Expr::Alias(Term::NullPtrConst(pointer->comp, pointer->space, Region::Opaque()));
   if (const auto structTpe = tpe.get<Type::Struct>()) {
     const auto allocated = r.newVar(tpe);
     defaultInitialiseStruct(r, *structTpe, allocated);
@@ -1012,6 +1013,16 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     }
     r.push(Stmt::Return(Expr::IntrOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
   };
+  auto emitPopcount = [&](auto &r) {
+    if (args.size() != 1) {
+      r.push(Stmt::Return(Expr::Alias(Term::Poison(rtnType))));
+      return;
+    }
+    const auto type = args[0].named.tpe;
+    const auto input = select(r, {}, args[0].named);
+    const auto count = r.newVar(Expr::IntrOp(Intr::PopCount(input, type)));
+    r.push(Stmt::Return(Expr::Cast(count, rtnType)));
+  };
 
   // stub before lowering the body so a recursive call resolves here, not into endless plugin recursion
   auto declarationArgs = args;
@@ -1239,6 +1250,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
             // XXX always false outside constant evaluation;, seen in _GLIBCXX_ASSERTIONS bounds-check branches
             r.push(Stmt::Return(Expr::Alias(Term::Bool1Const(false))));
             break;
+          case clang::Builtin::BI__builtin_popcount:
+          case clang::Builtin::BI__popcnt: emitPopcount(r); break;
           default:
             if (isTrapBuiltin(decl->getBuiltinID())) {
               r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
@@ -2510,6 +2523,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::ArrayInitLoopExpr *expr) -> Expr::Any { return handleExpr(expr->getCommonExpr()->getSourceExpr(), r); },
       [&](const clang::UnaryExprOrTypeTraitExpr *expr) -> Expr::Any {
+        if (expr->getKind() == clang::UETT_SizeOf) {
+          const auto argumentType = expr->isArgumentType() ? expr->getArgumentType() : expr->getArgumentExpr()->getType();
+          return Expr::SizeOf(handleType(argumentType, r));
+        }
         const auto tpe = handleType(expr->getType(), r);
         if (clang::Expr::EvalResult eval; expr->EvaluateAsInt(eval, context))
           return integralConstOfType(tpe, eval.Val.getInt().getZExtValue());
@@ -2893,6 +2910,18 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto refDeclName = declName(decl);
 
         if (const auto ec = llvm::dyn_cast<clang::EnumConstantDecl>(decl)) {
+          const clang::Expr *initializer = ec->getInitExpr();
+          while (initializer) {
+            initializer = initializer->IgnoreParenImpCasts();
+            if (const auto constant = llvm::dyn_cast<clang::ConstantExpr>(initializer)) {
+              initializer = constant->getSubExpr();
+              continue;
+            }
+            if (const auto size = llvm::dyn_cast<clang::UnaryExprOrTypeTraitExpr>(initializer);
+                size && size->getKind() == clang::UETT_SizeOf)
+              return conform(r, handleExpr(size, r), actual);
+            break;
+          }
           return integralConstOfType(actual, static_cast<uint64_t>(ec->getInitVal().getExtValue()));
         }
 
@@ -2913,7 +2942,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         // Inline namespace-scope constexpr / const-init refs; otherwise we'd Select an unbound
         // name and polyc would reject it. Locals stay on the normal stack-lookup path.
-        if (auto var = llvm::dyn_cast<clang::VarDecl>(decl); var && !var->isLocalVarDecl()) {
+        if (auto var = llvm::dyn_cast<clang::VarDecl>(decl); var && !var->isLocalVarDeclOrParm()) {
           const bool isConstantInit = var->isConstexpr() || var->getType().isConstQualified();
           if (isConstantInit) {
             const auto tpe = handleType(var->getType(), r);
@@ -2934,6 +2963,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 if (const auto local = materialiseConstantStruct(r, *structure, eval.Val, diagnosticName(var, context)))
                   return Expr::Alias(select(r, {}, *local));
             }
+            // Stateless namespace-scope policy/tag objects (for example thrust::device) may be
+            // declared `static const` without an initializer. They have no runtime state to load,
+            // so represent the value directly instead of selecting an unbound global name.
+            if (const auto structure = tpe.get<Type::Struct>()) return Expr::Alias(Term::Poison(*structure));
           }
         }
 
@@ -3108,6 +3141,22 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           }
         }
 
+        // Preserve C++ short-circuiting. Evaluating both operands eagerly turns a guarded access such as
+        // `index < size && values[index]` into an unconditional out-of-bounds read and also runs RHS side effects
+        // that the source program suppresses.
+        if (const auto opcode = expr->getOpcode(); opcode == clang::BO_LAnd || opcode == clang::BO_LOr) {
+          const bool conjunction = opcode == clang::BO_LAnd;
+          const auto result = select(r, {}, r.newVar(handleType(expr->getType(), r)));
+          const auto condition = r.newVar(conform(r, handleExpr(expr->getLHS(), r), Type::Bool1()));
+          auto rhsArm = r.scoped(
+              [&](auto &nested) { nested.push(Stmt::Mut(result, conform(nested, handleExpr(expr->getRHS(), nested), result.tpe))); });
+          auto shortArm = r.scoped([&](auto &nested) {
+            nested.push(Stmt::Mut(result, conform(nested, Expr::Alias(Term::Bool1Const(!conjunction)), result.tpe)));
+          });
+          r.push(conjunction ? Stmt::Cond(condition, rhsArm, shortArm) : Stmt::Cond(condition, shortArm, rhsArm));
+          return Expr::Alias(result);
+        }
+
         auto lhs = r.newVar(handleExpr(expr->getLHS(), r));
         auto rhs = r.newVar(handleExpr(expr->getRHS(), r));
         auto tpe_ = handleType(expr->getType(), r);
@@ -3192,8 +3241,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_And: return Expr::IntrOp(Intr::BAnd(dl(), dr(), tpe_));
           case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(dl(), dr(), tpe_));
           case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl(), dr(), tpe_));
-          case clang::BO_LAnd: return Expr::IntrOp(Intr::LogicAnd(dl(), dr()));
-          case clang::BO_LOr: return Expr::IntrOp(Intr::LogicOr(dl(), dr()));
+          case clang::BO_LAnd:
+          case clang::BO_LOr: raise("unreachable short-circuit lowering");
           case clang::BO_Assign: return Expr::Alias(assign(lhs, rhs)); // Builtin direct assignment
           case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(cl(), cr(), compTpe)));
           case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(cl(), cr(), compTpe)));
@@ -4087,7 +4136,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             const auto directConstructRecord = directConstruct ? directConstruct->getType()->getAsCXXRecordDecl() : nullptr;
             const auto directlyConstructible =
                 directConstruct && !derivesStdException(directConstructRecord) && !stdRecordNamed(directConstructRecord, "error_code");
-            if (initList && !name.tpe.is<Type::Struct>()) {
+            if (initList && var->getType()->isArrayType() && !name.tpe.is<Type::Struct>()) {
               auto initExpr = createInit(var->getType(), name.tpe);
               r.push(Stmt::Var(name, initExpr, /*isMutable*/ true));
               if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {

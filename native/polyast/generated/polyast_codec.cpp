@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "3bdce7277e63a72712d17ccb257b17a1";
-constexpr auto ProgramHash = "c8096d11d64ef5a586ae39283a4cb3e8";
-constexpr auto PackageHash = "bfda6a3bbf2892a19240b8821549e1e2";
-constexpr auto PackageWireHash = "bfc77f458e7245fb71f2802c8b97439d";
+constexpr auto AdtHash = "8af0b52951e8eaa1c3ef5235508e3170";
+constexpr auto ProgramHash = "9ed09edfb092999d42d81a77e801a4d0";
+constexpr auto PackageHash = "6b48c7364f320d41387092483194a595";
+constexpr auto PackageWireHash = "d17615421943c184d0b81bf0b8b3fded";
 constexpr auto CompileWireHash = "e6b6255e589708b2bd5b064b6b4fe04a";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -1764,6 +1764,18 @@ json Intr::bzsr_to_json(const Intr::BZSR &x_) {
   return json::array({x, y, rtn});
 }
 
+Intr::PopCount Intr::popcount_from_json(const json &j_) {
+  auto x = Term::any_from_json(j_.at(0));
+  auto rtn = Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Intr::popcount_to_json(const Intr::PopCount &x_) {
+  auto x = Term::any_to_json(x_.x);
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
 Intr::LogicAnd Intr::logicand_from_json(const json &j_) {
   auto x = Term::any_from_json(j_.at(0));
   auto y = Term::any_from_json(j_.at(1));
@@ -1881,14 +1893,15 @@ Intr::Any Intr::any_from_json(const json &j_) {
     case 14: return Intr::bsl_from_json(t_);
     case 15: return Intr::bsr_from_json(t_);
     case 16: return Intr::bzsr_from_json(t_);
-    case 17: return Intr::logicand_from_json(t_);
-    case 18: return Intr::logicor_from_json(t_);
-    case 19: return Intr::logiceq_from_json(t_);
-    case 20: return Intr::logicneq_from_json(t_);
-    case 21: return Intr::logiclte_from_json(t_);
-    case 22: return Intr::logicgte_from_json(t_);
-    case 23: return Intr::logiclt_from_json(t_);
-    case 24: return Intr::logicgt_from_json(t_);
+    case 17: return Intr::popcount_from_json(t_);
+    case 18: return Intr::logicand_from_json(t_);
+    case 19: return Intr::logicor_from_json(t_);
+    case 20: return Intr::logiceq_from_json(t_);
+    case 21: return Intr::logicneq_from_json(t_);
+    case 22: return Intr::logiclte_from_json(t_);
+    case 23: return Intr::logicgte_from_json(t_);
+    case 24: return Intr::logiclt_from_json(t_);
+    case 25: return Intr::logicgt_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1911,14 +1924,15 @@ json Intr::any_to_json(const Intr::Any &x_) {
                         [](const Intr::BSL &y_) -> json { return {14, Intr::bsl_to_json(y_)}; },
                         [](const Intr::BSR &y_) -> json { return {15, Intr::bsr_to_json(y_)}; },
                         [](const Intr::BZSR &y_) -> json { return {16, Intr::bzsr_to_json(y_)}; },
-                        [](const Intr::LogicAnd &y_) -> json { return {17, Intr::logicand_to_json(y_)}; },
-                        [](const Intr::LogicOr &y_) -> json { return {18, Intr::logicor_to_json(y_)}; },
-                        [](const Intr::LogicEq &y_) -> json { return {19, Intr::logiceq_to_json(y_)}; },
-                        [](const Intr::LogicNeq &y_) -> json { return {20, Intr::logicneq_to_json(y_)}; },
-                        [](const Intr::LogicLte &y_) -> json { return {21, Intr::logiclte_to_json(y_)}; },
-                        [](const Intr::LogicGte &y_) -> json { return {22, Intr::logicgte_to_json(y_)}; },
-                        [](const Intr::LogicLt &y_) -> json { return {23, Intr::logiclt_to_json(y_)}; },
-                        [](const Intr::LogicGt &y_) -> json { return {24, Intr::logicgt_to_json(y_)}; });
+                        [](const Intr::PopCount &y_) -> json { return {17, Intr::popcount_to_json(y_)}; },
+                        [](const Intr::LogicAnd &y_) -> json { return {18, Intr::logicand_to_json(y_)}; },
+                        [](const Intr::LogicOr &y_) -> json { return {19, Intr::logicor_to_json(y_)}; },
+                        [](const Intr::LogicEq &y_) -> json { return {20, Intr::logiceq_to_json(y_)}; },
+                        [](const Intr::LogicNeq &y_) -> json { return {21, Intr::logicneq_to_json(y_)}; },
+                        [](const Intr::LogicLte &y_) -> json { return {22, Intr::logiclte_to_json(y_)}; },
+                        [](const Intr::LogicGte &y_) -> json { return {23, Intr::logicgte_to_json(y_)}; },
+                        [](const Intr::LogicLt &y_) -> json { return {24, Intr::logiclt_to_json(y_)}; },
+                        [](const Intr::LogicGt &y_) -> json { return {25, Intr::logicgt_to_json(y_)}; });
 }
 
 Math::Abs Math::abs_from_json(const json &j_) {
@@ -4102,6 +4116,10 @@ Intr::BZSR bzsr_fields_from_msgpack(MsgpackReader &, size_t);
 void bzsr_fields_to_msgpack(MsgpackWriter &, const Intr::BZSR &);
 Intr::BZSR bzsr_from_msgpack(MsgpackReader &);
 void bzsr_to_msgpack(MsgpackWriter &, const Intr::BZSR &);
+Intr::PopCount popcount_fields_from_msgpack(MsgpackReader &, size_t);
+void popcount_fields_to_msgpack(MsgpackWriter &, const Intr::PopCount &);
+Intr::PopCount popcount_from_msgpack(MsgpackReader &);
+void popcount_to_msgpack(MsgpackWriter &, const Intr::PopCount &);
 Intr::LogicAnd logicand_fields_from_msgpack(MsgpackReader &, size_t);
 void logicand_fields_to_msgpack(MsgpackWriter &, const Intr::LogicAnd &);
 Intr::LogicAnd logicand_from_msgpack(MsgpackReader &);
@@ -8217,6 +8235,28 @@ void Intr::bzsr_to_msgpack(MsgpackWriter &w_, const Intr::BZSR &x_) {
   Intr::bzsr_fields_to_msgpack(w_, x_);
 }
 
+Intr::PopCount Intr::popcount_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Intr::PopCount with 2 field(s)");
+  auto x = Term::any_from_msgpack(r_);
+  auto rtn = Type::any_from_msgpack(r_);
+  return {x, rtn};
+}
+
+void Intr::popcount_fields_to_msgpack(MsgpackWriter &w_, const Intr::PopCount &x_) {
+  Term::any_to_msgpack(w_, x_.x);
+  Type::any_to_msgpack(w_, x_.rtn);
+}
+
+Intr::PopCount Intr::popcount_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Intr::popcount_fields_from_msgpack(r_, n_);
+}
+
+void Intr::popcount_to_msgpack(MsgpackWriter &w_, const Intr::PopCount &x_) {
+  w_.writeArrayHeader(2);
+  Intr::popcount_fields_to_msgpack(w_, x_);
+}
+
 Intr::LogicAnd Intr::logicand_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Intr::LogicAnd with 2 field(s)");
   auto x = Term::any_from_msgpack(r_);
@@ -8416,14 +8456,15 @@ Intr::Any Intr::any_from_msgpack(MsgpackReader &r_) {
       case 14: return Intr::bsl_fields_from_msgpack(r_, n_ - 1);
       case 15: return Intr::bsr_fields_from_msgpack(r_, n_ - 1);
       case 16: return Intr::bzsr_fields_from_msgpack(r_, n_ - 1);
-      case 17: return Intr::logicand_fields_from_msgpack(r_, n_ - 1);
-      case 18: return Intr::logicor_fields_from_msgpack(r_, n_ - 1);
-      case 19: return Intr::logiceq_fields_from_msgpack(r_, n_ - 1);
-      case 20: return Intr::logicneq_fields_from_msgpack(r_, n_ - 1);
-      case 21: return Intr::logiclte_fields_from_msgpack(r_, n_ - 1);
-      case 22: return Intr::logicgte_fields_from_msgpack(r_, n_ - 1);
-      case 23: return Intr::logiclt_fields_from_msgpack(r_, n_ - 1);
-      case 24: return Intr::logicgt_fields_from_msgpack(r_, n_ - 1);
+      case 17: return Intr::popcount_fields_from_msgpack(r_, n_ - 1);
+      case 18: return Intr::logicand_fields_from_msgpack(r_, n_ - 1);
+      case 19: return Intr::logicor_fields_from_msgpack(r_, n_ - 1);
+      case 20: return Intr::logiceq_fields_from_msgpack(r_, n_ - 1);
+      case 21: return Intr::logicneq_fields_from_msgpack(r_, n_ - 1);
+      case 22: return Intr::logiclte_fields_from_msgpack(r_, n_ - 1);
+      case 23: return Intr::logicgte_fields_from_msgpack(r_, n_ - 1);
+      case 24: return Intr::logiclt_fields_from_msgpack(r_, n_ - 1);
+      case 25: return Intr::logicgt_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -8454,6 +8495,7 @@ Intr::Any Intr::any_from_msgpack(MsgpackReader &r_) {
       case 22: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 23: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 24: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 25: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -8546,44 +8588,49 @@ void Intr::any_to_msgpack(MsgpackWriter &w_, const Intr::Any &x_) {
         w_.writeInt32(16);
         Intr::bzsr_fields_to_msgpack(w_, y_);
       },
-      [&](const Intr::LogicAnd &y_) -> void {
+      [&](const Intr::PopCount &y_) -> void {
         w_.writeArrayHeader(3);
         w_.writeInt32(17);
+        Intr::popcount_fields_to_msgpack(w_, y_);
+      },
+      [&](const Intr::LogicAnd &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(18);
         Intr::logicand_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicOr &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(18);
+        w_.writeInt32(19);
         Intr::logicor_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicEq &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(19);
+        w_.writeInt32(20);
         Intr::logiceq_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicNeq &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(20);
+        w_.writeInt32(21);
         Intr::logicneq_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicLte &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(21);
+        w_.writeInt32(22);
         Intr::logiclte_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicGte &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(22);
+        w_.writeInt32(23);
         Intr::logicgte_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicLt &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(23);
+        w_.writeInt32(24);
         Intr::logiclt_fields_to_msgpack(w_, y_);
       },
       [&](const Intr::LogicGt &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(24);
+        w_.writeInt32(25);
         Intr::logicgt_fields_to_msgpack(w_, y_);
       });
 }

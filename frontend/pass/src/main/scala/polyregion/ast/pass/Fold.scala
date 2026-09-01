@@ -137,6 +137,20 @@ object Fold {
     case p.Intr.BSL(x, y, t)  => foldBits(x, y, t)(_ << _)
     case p.Intr.BSR(x, y, t)  => foldBits(x, y, t)((a, b) => if (t.isSigned) a >> b else a >>> b)
     case p.Intr.BZSR(x, y, t) => foldBits(x, y, t)(_ >>> _)
+    case p.Intr.PopCount(x, t) =>
+      val bits = t match {
+        case p.Type.IntU8 | p.Type.IntS8   => Some(8)
+        case p.Type.IntU16 | p.Type.IntS16 => Some(16)
+        case p.Type.IntU32 | p.Type.IntS32 => Some(32)
+        case p.Type.IntU64 | p.Type.IntS64 => Some(64)
+        case _                             => None
+      }
+      for {
+        width <- bits
+        value <- asLong(x)
+        masked = if (width >= 64) value else value & ((1L << width) - 1)
+        result <- intTerm(t, java.lang.Long.bitCount(masked).toLong)
+      } yield result
 
     case p.Intr.LogicAnd(x, y) =>
       (asBool(x), asBool(y)) match { case (Some(a), Some(b)) => Some(p.Term.Bool1Const(a && b)); case _ => None }

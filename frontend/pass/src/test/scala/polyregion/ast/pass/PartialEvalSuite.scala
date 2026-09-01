@@ -494,6 +494,30 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(foldedU64(op), interpU64(op))
   }
 
+  test("PopCount folds using the operand width and matches the Interpreter") {
+    for (
+      (term, tpe, expected) <- List(
+        (p.Term.IntS8Const(-1), p.Type.IntS8, 8L),
+        (p.Term.IntU32Const(0xf0f00000), p.Type.IntU32, 8L),
+        (p.Term.IntS64Const(-1L), p.Type.IntS64, 64L)
+      )
+    ) {
+      val op     = p.Intr.PopCount(term, tpe)
+      val folded = Fold.tryFoldIntr(op).flatMap(Fold.asLong)
+      val value  = named("value", tpe)
+      val prog = program(
+        entry(body = List(p.Stmt.Var(value, Some(p.Expr.IntrOp(op))), p.Stmt.Return(p.Expr.Alias(selectT(value)))))
+          .modifyDecl(_.copy(rtn = tpe))
+      )
+      val interpreted = Interpreter.Vm(prog).call(p.Conventions.EntryName, Nil) match {
+        case Interpreter.V.I(x) => x
+        case other              => fail(s"interpreter returned non-int: $other")
+      }
+      assertEquals(folded, Some(expected), tpe.toString)
+      assertEquals(interpreted, expected, tpe.toString)
+    }
+  }
+
   private def foldedU64Bool(op: p.Expr): Boolean = {
     val v = named("v", p.Type.Bool1)
     returnedTerm(pe(List(p.Stmt.Var(v, Some(op)), p.Stmt.Return(p.Expr.Alias(selectT(v)))), p.Type.Bool1)) match {

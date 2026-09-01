@@ -2901,6 +2901,30 @@ POLYREGION_EXPORT bool Intr::BZSR::operator==(const Base &rhs_) const {
 Intr::BZSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BZSR>(*this)); }
 Intr::Any Intr::BZSR::widen() const { return Any(*this); };
 
+Intr::PopCount::PopCount(Term::Any x, Type::Any rtn) noexcept
+    : Intr::Base({Overload({Type::IntU8()}, Type::IntU8()), Overload({Type::IntU16()}, Type::IntU16()),
+                  Overload({Type::IntU32()}, Type::IntU32()), Overload({Type::IntU64()}, Type::IntU64()),
+                  Overload({Type::IntS8()}, Type::IntS8()), Overload({Type::IntS16()}, Type::IntS16()),
+                  Overload({Type::IntS32()}, Type::IntS32()), Overload({Type::IntS64()}, Type::IntS64())},
+                 {x}, rtn),
+      x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Intr::PopCount::id() const { return variant_id; };
+size_t Intr::PopCount::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Intr::PopCount Intr::PopCount::withX(const Term::Any &v_) const { return Intr::PopCount(v_, rtn); }
+Intr::PopCount Intr::PopCount::withRtn(const Type::Any &v_) const { return Intr::PopCount(x, v_); }
+POLYREGION_EXPORT bool Intr::PopCount::operator==(const Intr::PopCount &rhs) const { return (this->x == rhs.x) && (this->rtn == rhs.rtn); }
+POLYREGION_EXPORT bool Intr::PopCount::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Intr::PopCount &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Intr::PopCount::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<PopCount>(*this)); }
+Intr::Any Intr::PopCount::widen() const { return Any(*this); };
+
 Intr::LogicAnd::LogicAnd(Term::Any x, Term::Any y) noexcept
     : Intr::Base({Overload({Type::Bool1(), Type::Bool1()}, Type::Bool1())}, {x, y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicAnd::id() const { return variant_id; };
@@ -5458,6 +5482,9 @@ std::size_t std::hash<polyregion::polyast::Intr::BSR>::operator()(const polyregi
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Intr::BZSR>::operator()(const polyregion::polyast::Intr::BZSR &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Intr::PopCount>::operator()(const polyregion::polyast::Intr::PopCount &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Intr::LogicAnd>::operator()(const polyregion::polyast::Intr::LogicAnd &x) const noexcept {

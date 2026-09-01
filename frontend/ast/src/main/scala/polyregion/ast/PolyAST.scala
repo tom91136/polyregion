@@ -353,6 +353,7 @@ object PolyAST {
     case BSL(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BSR(x: Term, y: Term, rtn: Type)  extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
     case BZSR(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformIntegral, List(x, y), rtn)
+    case PopCount(x: Term, rtn: Type)      extends Intr(Intr.UnaryUniformIntegral, List(x), rtn)
     case LogicAnd(x: Term, y: Term)        extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
     case LogicOr(x: Term, y: Term)         extends Intr(Intr.BinaryUniformBool, List(x, y), Type.Bool1)
     case LogicEq(x: Term, y: Term)         extends Intr(Intr.BinaryUniformLogic, List(x, y), Type.Bool1)
@@ -1105,6 +1106,7 @@ object PolyAST {
           case Intr.BSL(x, y, tpe)  => s"(${x.repr} '<< ${y.repr})"
           case Intr.BSR(x, y, tpe)  => s"(${x.repr} '>> ${y.repr})"
           case Intr.BZSR(x, y, tpe) => s"(${x.repr} '>>> ${y.repr})"
+          case Intr.PopCount(x, _)  => s"'popcount(${x.repr})"
 
           case Intr.LogicAnd(x, y) => s"(${x.repr} '&& ${y.repr})"
           case Intr.LogicOr(x, y)  => s"(${x.repr} '|| ${y.repr})"

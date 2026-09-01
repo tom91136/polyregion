@@ -399,6 +399,8 @@ namespace Intr {
 [[nodiscard]] POLYREGION_EXPORT json bsr_to_json(const Intr::BSR &);
 [[nodiscard]] POLYREGION_EXPORT Intr::BZSR bzsr_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bzsr_to_json(const Intr::BZSR &);
+[[nodiscard]] POLYREGION_EXPORT Intr::PopCount popcount_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json popcount_to_json(const Intr::PopCount &);
 [[nodiscard]] POLYREGION_EXPORT Intr::LogicAnd logicand_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json logicand_to_json(const Intr::LogicAnd &);
 [[nodiscard]] POLYREGION_EXPORT Intr::LogicOr logicor_from_json(const json &);

@@ -1438,6 +1438,20 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                 [&](const Intr::BSL &v) { return fmt::format("({} << {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BSR &v) { return fmt::format("({} >> {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::BZSR &v) { return fmt::format("({} >> {})", mkTerm(v.x), mkTerm(v.y)); },
+                                [&](const Intr::PopCount &v) {
+                                  if (dialect == Dialect::MSL1_0) return fmt::format("metal::popcount({})", mkTerm(v.x));
+                                  const auto unsignedType = [&]() -> Type::Any {
+                                    if (v.rtn.template is<Type::IntU8>() || v.rtn.template is<Type::IntS8>()) return Type::IntU8();
+                                    if (v.rtn.template is<Type::IntU16>() || v.rtn.template is<Type::IntS16>()) return Type::IntU16();
+                                    if (v.rtn.template is<Type::IntU32>() || v.rtn.template is<Type::IntS32>()) return Type::IntU32();
+                                    if (v.rtn.template is<Type::IntU64>() || v.rtn.template is<Type::IntS64>()) return Type::IntU64();
+                                    throw BackendException("popcount requires an integral operand");
+                                  }();
+                                  const bool wide = unsignedType.template is<Type::IntU64>();
+                                  const auto helperType = wide ? Type::IntU64().widen() : Type::IntU32().widen();
+                                  return fmt::format("(({}) POLY_POPCOUNT{}(({}) (({}) {})))", mkTpe(v.rtn), wide ? "64" : "32",
+                                                     mkTpe(helperType), mkTpe(unsignedType), mkTerm(v.x));
+                                },
                                 [&](const Intr::LogicAnd &v) { return fmt::format("({} && {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::LogicOr &v) { return fmt::format("({} || {})", mkTerm(v.x), mkTerm(v.y)); },
                                 [&](const Intr::LogicEq &v) { return fmt::format("({} == {})", mkTerm(v.x), mkTerm(v.y)); },
@@ -2007,6 +2021,47 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                                        | to_vector()
                                  : std::vector<std::string>{};
 
+  std::vector<std::string> popCountHelpers;
+  if (dialect != Dialect::MSL1_0) {
+    // C11 has no standard population count and OpenCL added its builtin in 1.2. Emit the same
+    // width-specific SWAR fallback for both, then let newer OpenCL compilers select popcount.
+    const auto popCounts = allFns ^ flat_map([](const auto &fn) { return fn.template collect_all<Intr::PopCount>(); });
+    const auto wide = [](const Intr::PopCount &op) { return op.rtn.template is<Type::IntU64>() || op.rtn.template is<Type::IntS64>(); };
+    const bool needs32 = popCounts ^ exists([&](const auto &op) { return !wide(op); });
+    const bool needs64 = popCounts ^ exists(wide);
+    const auto u32 = mkTpe(Type::IntU32()), u64 = mkTpe(Type::IntU64());
+    if (needs32)
+      popCountHelpers.emplace_back(fmt::format("static {} _polyregion_popcount_u32({} x) {{\n"
+                                               "  x -= (x >> 1) & (({}) 0x55555555);\n"
+                                               "  x = (x & (({}) 0x33333333)) + ((x >> 2) & (({}) 0x33333333));\n"
+                                               "  x = (x + (x >> 4)) & (({}) 0x0f0f0f0f);\n"
+                                               "  return (x * (({}) 0x01010101)) >> 24;\n"
+                                               "}}",
+                                               u32, u32, u32, u32, u32, u32, u32));
+    if (needs64)
+      popCountHelpers.emplace_back(fmt::format("static {} _polyregion_popcount_u64({} x) {{\n"
+                                               "  x -= (x >> 1) & (({}) 0x5555555555555555);\n"
+                                               "  x = (x & (({}) 0x3333333333333333)) + ((x >> 2) & (({}) 0x3333333333333333));\n"
+                                               "  x = (x + (x >> 4)) & (({}) 0x0f0f0f0f0f0f0f0f);\n"
+                                               "  return (x * (({}) 0x0101010101010101)) >> 56;\n"
+                                               "}}",
+                                               u64, u64, u64, u64, u64, u64, u64));
+    if (needs32 || needs64) {
+      std::string native, fallback;
+      if (needs32) {
+        native += "#define POLY_POPCOUNT32(x) popcount(x)\n";
+        fallback += "#define POLY_POPCOUNT32(x) _polyregion_popcount_u32(x)\n";
+      }
+      if (needs64) {
+        native += "#define POLY_POPCOUNT64(x) popcount(x)\n";
+        fallback += "#define POLY_POPCOUNT64(x) _polyregion_popcount_u64(x)\n";
+      }
+      popCountHelpers.emplace_back(dialect == Dialect::OpenCL1_1 ? "#if defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ >= 120\n"
+                                                                       + native + "#else\n" + fallback + "#endif"
+                                                                 : fallback);
+    }
+  }
+
   const auto protos = allFns ^ mk_string("\n", [&](const auto &fn) { return fmt::format("{};", mkFnProto(fn)); });
   auto code = includes                                                       //
               | concat(typedefs)                                             //
@@ -2014,6 +2069,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
               | concat(stringDecls)                                          //
               | concat(volatileHelpers)                                      //
               | concat(atomicHelpers)                                        //
+              | concat(popCountHelpers)                                      //
               | append(protos)                                               //
               | append(std::string("\n"))                                    //
               | concat(allFns ^ map([&](const auto &f) { return mkFn(f); })) //

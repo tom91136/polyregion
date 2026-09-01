@@ -474,6 +474,9 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Intr::BZSR>()) {
           return fmt::format("({} '>>> {})", repr(_z->x), repr(_z->y));
         }
+        if (auto _z = _x->op.get<Intr::PopCount>()) {
+          return fmt::format("'popcount({})", repr(_z->x));
+        }
         if (auto _z = _x->op.get<Intr::LogicAnd>()) {
           return fmt::format("({} '&& {})", repr(_z->x), repr(_z->y));
         }
