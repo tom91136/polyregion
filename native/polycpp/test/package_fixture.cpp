@@ -284,7 +284,13 @@ int main(int argc, char **argv) {
         program.functions ^ exists([](const auto &function) {
           if (fqcn(function.decl.name).find("rebase") == std::string::npos || function.decl.args.size() != 1) return false;
           const auto outer = function.decl.args.front().named.tpe.template get<Type::Ptr>();
-          return outer && outer->comp.template is<Type::Ptr>() && !function.template collect_all<Stmt::Mut>().empty();
+          if (!outer || !outer->comp.template is<Type::Ptr>()) return false;
+          const auto pointerSlotUpdate =
+              function.template collect_all<Stmt::Update>() ^ exists([](const auto &update) {
+                const auto slot = update.lhs.tpe.template get<Type::Ptr>();
+                return slot && slot->comp.template is<Type::Ptr>() && update.value.tpe().template is<Type::Ptr>();
+              });
+          return pointerSlotUpdate || !function.template collect_all<Stmt::Mut>().empty();
         });
     const auto valid = program.collect_all<Spec::GpuLocalIdx>().size() >= 3 && program.collect_all<Spec::GpuGroupIdx>().size() >= 3
                        && program.collect_all<Spec::GpuLocalSize>().size() >= 3 && program.collect_all<Spec::GpuGroupSize>().size() >= 3

@@ -2219,7 +2219,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     } else if (rhsArrTpe && lhs.tpe() == rhsArrTpe->comp) {
       auto idxR = r.newVar(integralConstOfType(Type::IntS64(), 0));
       r.push(Stmt::Mut(lhsSel, Expr::Index(rhs, idxR, lhs.tpe())));
-    } else if (const auto rhsArr = rhs.tpe().get<Type::Arr>(); lhsArrTpe && lhsArrTpe->comp == rhsArr->comp) {
+    } else if (const auto rhsArr = rhs.tpe().get<Type::Arr>(); rhsArr && lhsArrTpe && lhsArrTpe->comp == rhsArr->comp) {
       // An array assigned to a pointer decays to its first element.
       const auto zero = r.newVar(integralConstOfType(Type::IntS64(), 0));
       r.push(Stmt::Mut(lhsSel, Expr::RefTo(termToSel(rhs), zero, rhsArr->comp, lhsArrTpe->space, Region::Opaque())));
@@ -2956,7 +2956,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (conditionalWhat) {
             const auto what = findExceptionMetadata(source, r_.exceptionWhats);
             if (!what)
-              raise(fmt::format("Unsupported conditional standard exception without message metadata: {}", pretty_string(source, context)));
+              // A by-value conditional of exception objects cannot carry the source exception's
+              // metadata across the copy. Keep the established diagnostic for the resulting
+              // temporary instead of aborting while trying to synthesize incomplete metadata.
+              raise(fmt::format("Unsupported temporary of type {}",
+                                expr->getType().getNonReferenceType().getUnqualifiedType().getAsString()));
             copyExceptionMessageInto(r_, r_.newVar(exceptionMessagePointer(*what)), *conditionalWhat);
             if (derivesStdExceptionNamed(sourceRecord(source), "system_error") || r_.incompleteExceptionWhats.contains(what->symbol))
               r_.incompleteExceptionWhats.insert(conditionalWhat->symbol);

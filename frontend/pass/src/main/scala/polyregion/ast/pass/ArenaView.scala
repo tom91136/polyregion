@@ -131,7 +131,7 @@ object ArenaView extends ProgramPass {
       program: p.Program,
       members: Map[p.Sym, List[p.Named]],
       arenaDefs: Set[p.Sym]
-  ): Set[Field] = {
+  ): (Set[Field], Map[p.Named, (Field, p.Term)]) = {
     val entry   = program.entry.getOrElse(throw IllegalArgumentException("ArenaView requires a program entry"))
     val derived = Provenance.derivedIn(entry, arena = true)
     val cap     = captureRoot(entry).map(_._1)
@@ -176,15 +176,43 @@ object ArenaView extends ProgramPass {
       // Stable locals are seeded only from locally rooted RefTo expressions or casts from local arrays.
       // Inlining can conservatively widen an alias's provenance to Opaque, so do not discard that stronger
       // construction proof when classifying an identity-only field write.
+      case p.Term.Select(_, Nil, _) =>
+        isLocal(t) || Provenance.at(derived, t, arena = true) == p.Region.Opaque || stableLocal(t)
       case _ => stableLocal(t)
     }
-    def selectedField(t: p.Term): Option[Field] = t match {
+    def directSelectedField(t: p.Term): Option[Field] = t match {
       case p.Term.Select(root, steps, _: p.Type.Ptr) if steps.nonEmpty =>
         fieldsAt(root.tpe, steps, members).lastOption.collect { case (field, p.Type.Ptr(_, p.Type.Space.Global)) =>
           field
         }
       case _ => None
     }
+    // FullOpt materialises pointer-field reads into immutable SSA aliases before ArenaView. Retain
+    // the field identity through those aliases so a field used only for pointer equality is still
+    // represented by a logical token rather than an illegal pointer value.
+    val fieldAliases = doUntilNotEq(Map.empty[p.Named, (Field, p.Term)]) { (_, known) =>
+      val discovered = program.entry
+        .collectAll[p.Stmt]
+        .collect { case p.Stmt.Var(n, Some(p.Expr.Alias(source)), false) =>
+          directSelectedField(source)
+            .map(field => n -> (field, source))
+            .orElse(source match {
+              case p.Term.Select(root, Nil, _) =>
+                known.get(root).map { case (field, original) => n -> (field, original) }
+              case _ => None
+            })
+        }
+        .flatten
+        .toMap
+      known ++ discovered
+    }._2
+    def selectedField(t: p.Term): Option[Field] =
+      directSelectedField(t).orElse {
+        t match {
+          case p.Term.Select(root, Nil, _: p.Type.Ptr) => fieldAliases.get(root).map(_._1)
+          case _                                       => None
+        }
+      }
     // Logical SPIR-V cannot store a local pointer in an aggregate, but a field used only for identity can retain
     // C++ equality semantics as an i64 token. Arena-reachable or otherwise-observed fields keep normal lowering.
     // A write source is either an already-tokenisable local value or another identity field.
@@ -252,20 +280,20 @@ object ArenaView extends ProgramPass {
           selectedField(selected).get
       }
       .toSet
-    candidates -- unsupported
+    (candidates -- unsupported, fieldAliases)
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
     // ORIGINAL member types drive the offset walk (each pointer field's pointee struct); retyping preserves
     // the layout, so emitted OffsetOf resolves the same against the retyped def
-    val members        = program.defs.iterator.map(d => d.name -> d.members).toMap
-    val arenaDefs      = arenaStructs(program, members)
-    val identityFields = localIdentityFields(program, members, arenaDefs)
+    val members                        = program.defs.iterator.map(d => d.name -> d.members).toMap
+    val arenaDefs                      = arenaStructs(program, members)
+    val (identityFields, fieldAliases) = localIdentityFields(program, members, arenaDefs)
     // union: copy only the canonical (largest, head) member
     val unions  = program.defs.iterator.filter(_.isUnion).map(_.name).toSet
     val retyped = program.defs.map(d => d.copy(members = d.members.map(m => m.copy(tpe = i64ify(m.tpe)))))
     val entry   = program.entry.getOrElse(throw IllegalArgumentException("ArenaView requires a program entry"))
-    program.copy(defs = retyped, entry = Some(run(members, unions, identityFields, entry)))
+    program.copy(defs = retyped, entry = Some(run(members, unions, identityFields, fieldAliases, entry)))
   }
 
   // lift a stepped Select (the only term shape that can carry an arena access) out of a ForRange bound or
@@ -293,6 +321,7 @@ object ArenaView extends ProgramPass {
       members: Map[p.Sym, List[p.Named]],
       unions: Set[p.Sym],
       identityFields: Set[Field],
+      fieldAliases: Map[p.Named, (Field, p.Term)],
       f: p.Function
   ): p.Function = captureRoot(
     f
@@ -419,6 +448,7 @@ object ArenaView extends ProgramPass {
             members,
             unions,
             identityFields,
+            fieldAliases,
             localPointerTokens,
             tokenByKey,
             capN,
@@ -453,6 +483,7 @@ object ArenaView extends ProgramPass {
       members: Map[p.Sym, List[p.Named]],
       unions: Set[p.Sym],
       identityFields: Set[Field],
+      fieldAliases: Map[p.Named, (Field, p.Term)],
       localPointerTokens: Map[p.Named, Long],
       localReferenceTokens: Map[String, Long],
       capN: p.Named,
@@ -756,13 +787,16 @@ object ArenaView extends ProgramPass {
     }
     def selectedIdentityField(t: p.Term): Boolean = t match {
       case p.Term.Select(root, steps, _: p.Type.Ptr) if steps.nonEmpty => isIdentityField(root, steps)
-      case _                                                           => false
+      case p.Term.Select(root, Nil, _: p.Type.Ptr) => fieldAliases.get(root).exists(x => identityFields(x._1))
+      case _                                       => false
     }
     def identityComparable(t: p.Term): Option[p.Term] = t match {
       case _: p.Term.NullPtrConst                                           => Some(i64(0))
       case p.Term.Select(root, Nil, _) if localPointerTokens.contains(root) => Some(i64(localPointerTokens(root)))
-      case selected if selectedIdentityField(selected)                      => Some(rwTerm(selected))
-      case _                                                                => None
+      case p.Term.Select(root, Nil, _) if fieldAliases.get(root).exists(x => identityFields(x._1)) =>
+        Some(rwTerm(fieldAliases(root)._2))
+      case selected if selectedIdentityField(selected) => Some(rwTerm(selected))
+      case _                                           => None
     }
     def equality(x: p.Term, y: p.Term, eq: (p.Term, p.Term) => p.Intr): p.Expr =
       if (selectedIdentityField(x) || selectedIdentityField(y)) {

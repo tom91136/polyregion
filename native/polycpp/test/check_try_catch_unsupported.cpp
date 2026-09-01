@@ -5,8 +5,9 @@
 
 #pragma region case: record-lvalue-conditional
 #pragma region offload-only
-#pragma region compile-fails: Unsupported record lvalue conditional
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=1 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 7
 
 #pragma region case: qualified-pointer-exception
 #pragma region offload-only

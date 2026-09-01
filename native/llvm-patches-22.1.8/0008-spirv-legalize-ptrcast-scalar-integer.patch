@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000008 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Tue, 01 Sep 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] legalize boolean stack-slot ptrcasts
+
+SPIRVLegalizePointerCast already handles aggregate and vector type mismatches,
+but the stack-slot representation used for i1 values leaves a ptrcast between
+the i1 value and its i8 backing slot. Translate the access as an integer
+extension/truncation while preserving the pointer's deduced type. Without
+this, logical SPIR-V translation aborts on stores through the cast; loads hit
+the corresponding unimplemented path next.
+---
+ llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+--- a/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVLegalizePointerCast.cpp
+@@ -225,4 +225,11 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+     else if (SAT && DVT && SAT->getElementType() == DVT->getElementType())
+       Output = loadVectorFromArray(B, DVT, OriginalOperand);
++    else if ((FromTy->isIntegerTy(1) && ToTy->isIntegerTy(8)) ||
++             (FromTy->isIntegerTy(8) && ToTy->isIntegerTy(1))) {
++      LoadInst *NewLoad = B.CreateLoad(FromTy, OriginalOperand);
++      NewLoad->setAlignment(LI->getAlign());
++      buildAssignType(B, FromTy, NewLoad);
++      Output = B.CreateZExtOrTrunc(NewLoad, ToTy);
++      buildAssignType(B, ToTy, Output);
++    } else
+-    else
+       llvm_unreachable("Unimplemented implicit down-cast from load.");
+@@ -374,4 +381,10 @@ class SPIRVLegalizePointerCast : public FunctionPass {
+     else if (D_AT && !S_VT && isTypeFirstElementAggregate(FromTy, D_AT))
+       storeToFirstValueAggregate(B, Src, Dst, D_AT, Alignment);
++    else if ((FromTy->isIntegerTy(1) && ToTy->isIntegerTy(8)) ||
++             (FromTy->isIntegerTy(8) && ToTy->isIntegerTy(1))) {
++      Value *Converted = B.CreateZExtOrTrunc(Src, ToTy);
++      buildAssignType(B, ToTy, Converted);
++      StoreInst *SI = B.CreateStore(Converted, Dst);
++      SI->setAlignment(Alignment);
++    } else
+-    else
+       llvm_unreachable("Unsupported ptrcast use in store. Please fix.");
+
+--
+2.43.0
