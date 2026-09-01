@@ -243,8 +243,14 @@ struct CLAddressSpaceTracePass {
         },
         [&](const Expr::RefTo &x) -> SpacedExpr {
           auto stLhs = mapTerm_(x.lhs);
-          const auto space = x.space.template is<TypeSpace::Private>() ? x.space : stLhs.space;
-          return {Expr::RefTo(stLhs.actual, x.idx ^ map(mapTerm0_), x.comp, space, Region::Opaque()), space};
+          // `&p` addresses the private binding slot which contains `p`; it does not address the
+          // global/local resource to which the value of `p` points. Keep both pointer layers
+          // distinct. Indexed address-taking (`&p[i]`) still inherits the pointee space.
+          const auto select = stLhs.actual.template get<Term::Select>();
+          const auto pointerSlot = !x.idx && select && select->steps.empty() && stLhs.actual.tpe().template is<Type::Ptr>();
+          const auto space = pointerSlot ? TypeSpace::Private().widen() : x.space.template is<TypeSpace::Private>() ? x.space : stLhs.space;
+          const auto comp = pointerSlot ? stLhs.actual.tpe() : x.comp;
+          return {Expr::RefTo(stLhs.actual, x.idx ^ map(mapTerm0_), comp, space, Region::Opaque()), space};
         },
         [&](const Expr::Alloc &x) -> SpacedExpr { return {Expr::Alloc(x.comp, mapTerm0_(x.size), x.space, Region::Opaque())}; },
         [&](const Expr::ForeignCall &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },

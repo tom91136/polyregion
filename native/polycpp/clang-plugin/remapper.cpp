@@ -802,16 +802,15 @@ Expr::Any Remapper::conform(RemapContext &r, const Expr::Any &expr, const Type::
   auto exprIndex = expr.get<Expr::Index>();
   std::optional<Term::Select> rhsSelectTermOpt = exprAlias ? exprAlias->ref.template get<Term::Select>() : std::optional<Term::Select>{};
   auto rhsSelectTerm = rhsSelectTermOpt ? &*rhsSelectTermOpt : nullptr;
-  if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && rhsSelectTerm) {
-    // Handle decay
-    //   int rhs = /* */;
-    //   int &lhs = rhs;
-    return Expr::RefTo(*rhsSelectTerm, {}, rhsTpe, tgtPtrTpe->space, Region::Opaque());
-  } else if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && exprIndex) {
-    // Handle decay
-    //   auto rhs = xs[0];
-    //   int &lhs = rhs;
-    return Expr::RefTo(exprIndex->lhs, exprIndex->idx, exprIndex->comp, tgtPtrTpe->space, Region::Opaque());
+  if (tgtPtrTpe && tgtPtrTpe->comp == rhsTpe) {
+    // Bind an lvalue reference to its existing slot, or materialise a prvalue into a temporary
+    // slot first. The latter matters for pointer prvalues bound to T*&&: an opaque Ptr<T> ->
+    // Ptr<Ptr<T>> cast would reinterpret the pointee as the pointer slot.
+    if (rhsSelectTerm) return Expr::RefTo(*rhsSelectTerm, {}, rhsTpe, tgtPtrTpe->space, Region::Opaque());
+    if (exprIndex) return Expr::RefTo(exprIndex->lhs, exprIndex->idx, exprIndex->comp, tgtPtrTpe->space, Region::Opaque());
+    const auto bound = Stmt::Var(r.newName(rhsTpe), expr, /*isMutable*/ false);
+    r.push(bound);
+    return Expr::RefTo(select(r, {}, bound.name), {}, rhsTpe, tgtPtrTpe->space, Region::Opaque());
   } else if (!rhsPtrTpe && tgtPtrTpe) {
     // array-to-pointer decay: `T arr[N]; T *p = arr` yields `&arr[0]` (`T*`), not `&arr` (`T(*)[N]`)
     // std::string `_Myptr` needs this (`char* = _Bx._Buf` where `_Buf` is `char[16]`); index element 0
@@ -2191,23 +2190,55 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     return r.newVar(extractBitField(storageSel, info));
   };
 
-  auto assign = [&r, termToSel](const Term::Any &lhs, const Term::Any &rhs) -> Term::Any {
+  auto assign = [&r, termToSel](const Term::Any &lhs, const Term::Any &rhs, const bool pointerRebind = false) -> Term::Any {
     const auto lhsArrTpe = lhs.tpe().get<Type::Ptr>();
     const auto rhsArrTpe = rhs.tpe().get<Type::Ptr>();
     auto lhsSel = termToSel(lhs);
     if (lhsArrTpe && rhsArrTpe && *lhsArrTpe == *rhsArrTpe) {
-      // two same-typed Ptr operands of a builtin `=` are a pointer rebind, not a store-through
-      r.push(Stmt::Mut(lhsSel, Expr::Alias(rhs)));
+      if (pointerRebind) {
+        // A C++ pointer-valued lhs rebinds. Lowered class/array lvalues also use Ptr, but assign through them.
+        r.push(Stmt::Mut(lhsSel, Expr::Alias(rhs)));
+      } else {
+        const auto zero = r.newVar(integralConstOfType(Type::IntS64(), 0));
+        r.push(Stmt::Update(lhsSel, zero, r.newVar(Expr::Index(rhs, zero, lhsArrTpe->comp))));
+      }
     } else if (lhsArrTpe && lhsArrTpe->comp == rhs.tpe()) {
       auto idxLhs = r.newVar(integralConstOfType(Type::IntS64(), 0));
       r.push(Stmt::Update(lhsSel, idxLhs, rhs));
     } else if (rhsArrTpe && lhs.tpe() == rhsArrTpe->comp) {
       auto idxR = r.newVar(integralConstOfType(Type::IntS64(), 0));
       r.push(Stmt::Mut(lhsSel, Expr::Index(rhs, idxR, lhs.tpe())));
+    } else if (const auto rhsArr = rhs.tpe().get<Type::Arr>(); lhsArrTpe && lhsArrTpe->comp == rhsArr->comp) {
+      // An array assigned to a pointer decays to its first element.
+      const auto zero = r.newVar(integralConstOfType(Type::IntS64(), 0));
+      r.push(Stmt::Mut(lhsSel, Expr::RefTo(termToSel(rhs), zero, rhsArr->comp, lhsArrTpe->space, Region::Opaque())));
     } else {
       r.push(Stmt::Mut(lhsSel, Expr::Alias(rhs)));
     }
     return lhs;
+  };
+
+  // A direct pointer lvalue is represented by Ptr<T>, while a mutable pointer reference (T*&)
+  // is represented by the address of its slot, Ptr<Ptr<T>>. Both have a pointer-valued C++
+  // result, so recognise the latter from the extra representation layer before rebasing it.
+  auto pointerLValue = [&r, &deref](const Term::Any &lhs, const Type::Any &resultTpe) -> std::optional<std::pair<Term::Any, bool>> {
+    const auto lhsPtr = lhs.tpe().get<Type::Ptr>();
+    if (!lhsPtr || !resultTpe.is<Type::Ptr>()) return {};
+    const bool indirect = sameTypeShape(lhsPtr->comp, resultTpe);
+    if (!indirect && !sameTypeShape(lhs.tpe(), resultTpe)) return {};
+    return std::pair<Term::Any, bool>{indirect ? r.newVar(deref(lhs)) : lhs, indirect};
+  };
+
+  auto rebasePointer = [&r, &assign, &pointerLValue, termToSel](const Term::Any &lhs, const Term::Any &offset,
+                                                                const Type::Any &resultTpe) -> std::optional<Term::Any> {
+    const auto resolved = pointerLValue(lhs, resultTpe);
+    if (!resolved) return {};
+    const auto &[current, indirect] = *resolved;
+    const auto pointer = current.tpe().get<Type::Ptr>();
+    if (!pointer) return {};
+    auto rebased = r.newVar(Expr::RefTo(termToSel(current), offset, pointer->comp, pointer->space, Region::Opaque()));
+    assign(lhs, rebased, /*pointerRebind*/ !indirect);
+    return rebased;
   };
 
   auto initArray = [&](const Term::Select &slots, const Type::Arr &tpe, const clang::InitListExpr *expr) {
@@ -2563,6 +2594,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             return Expr::Alias(r.newVar(sourceExpr));
           case clang::CK_LValueToRValue:
             if (targetTpe == sourceExpr.tpe()) {
+              // A pointer-valued Select still denotes the storage of the pointer field/local. Preserve the
+              // source lvalue-to-rvalue conversion by materialising the selected pointer value before a later
+              // subscript. Otherwise `accessor.data[i]` indexes `&accessor.data` (T**) rather than `data` (T*).
+              if (targetTpe.is<Type::Ptr>() && sourceExpr.template get<Expr::Alias>()
+                  && sourceExpr.template get<Expr::Alias>()->ref.template is<Term::Select>()) {
+                const auto value = r.newName(targetTpe);
+                r.push(Stmt::Var(value, sourceExpr, /*isMutable*/ false));
+                return Expr::Alias(select(r, {}, value));
+              }
               return sourceExpr;
             } else if ((sourceExpr.tpe().is<Type::FnRef>() || sourceExpr.tpe().is<Type::Var>())
                        && (targetTpe.is<Type::Nothing>() || (targetTpe.get<Type::Ptr>() ^ exists([](const auto &pointer) {
@@ -2841,9 +2881,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::AbstractConditionalOperator *expr) -> Expr::Any { // covers a?b:c and a?:c
         const auto record = expr->getType().getNonReferenceType()->getAsCXXRecordDecl();
-        if (record && expr->isGLValue()) raise("Unsupported record lvalue conditional");
         const auto valueTpe = handleType(expr->getType(), r);
-        const auto lhs = select(r, {}, r.newVar(valueTpe));
+        // A conditional whose arms are glvalues is itself a glvalue. Preserve the selected
+        // storage address so a returned reference cannot point at this function's dead stack slot.
+        const auto resultTpe = expr->isGLValue() ? handleType(context.getPointerType(expr->getType()), r) : valueTpe;
+        const auto lhs = select(r, {}, r.newVar(resultTpe));
         const auto conditionalWhat = derivesStdException(record)
                                          ? Opt<Named>{copyExceptionMessage(r, Term::StringConst(expr->getType().getAsString()))}
                                          : Opt<Named>{};
@@ -2856,10 +2898,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           r.push(Stmt::Var(*conditionalCode, Expr::Alias(Term::IntS32Const(0)), /*isMutable*/ true));
           r.exceptionCodes.emplace(exceptionMetadataKey(expr), *conditionalCode);
         }
-        // XXX a scalar lvalue conditional yields ref arms (`T*`) but the result slot is value `T` (e.g.
-        // std::max's `cond ? b : a`) so deref the arms
-        const auto k = lhs.tpe.kind();
-        const bool scalarResult = k.is<TypeKind::Integral>() || k.is<TypeKind::Fractional>();
         auto arm = [&](RemapContext &r_, const clang::Expr *source) -> Expr::Any {
           const auto e = handleExpr(source, r_);
           if (conditionalWhat) {
@@ -2876,9 +2914,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               raise(fmt::format("Unsupported conditional standard exception without code metadata: {}", pretty_string(source, context)));
             r_.push(Stmt::Mut(select(r_, {}, *conditionalCode), Expr::Alias(select(r_, {}, *code))));
           }
-          const auto ap = e.tpe().get<Type::Ptr>();
-          if (scalarResult && ap && ap->comp == lhs.tpe) return conform(r_, e, lhs.tpe);
-          return e;
+          return conform(r_, e, lhs.tpe);
         };
         auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
         r.push(Stmt::Cond(condTerm, //
@@ -2970,21 +3006,26 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           }
         }
 
-        if (expr->isImplicitCXXThis() || (expr->refersToEnclosingVariableOrCapture() && !(r.capturesInScope ^ contains(decl)))) {
+        const auto fieldName = decl->getDeclName().isEmpty() ? refDeclName : decl->getDeclName().getAsString();
+        const auto capturedField =
+            r.parent ? Vector<std::string>{fieldName, packCaptureName(decl), refDeclName} ^ collect_first([&](const auto &candidate) {
+                         return r.parent->members ^ find([&](const auto &member) { return member.symbol == candidate; });
+                       })
+                     : Opt<Named>{};
+        const auto *declaredFunction = llvm::dyn_cast<clang::FunctionDecl>(decl->getDeclContext());
+        const bool declaredInCurrentFunction =
+            declaredFunction && r.function && declaredFunction->getCanonicalDecl() == r.function->getCanonicalDecl();
+        const bool capturedFromOuterFunction = capturedField && !declaredInCurrentFunction;
+        if (expr->isImplicitCXXThis() || (expr->refersToEnclosingVariableOrCapture() && !(r.capturesInScope ^ contains(decl)))
+            || capturedFromOuterFunction) {
           if (!r.parent) {
             raise("Missing parent for expr: " + pretty_string(expr, context));
           }
           // Lambda capture / this-member access: the parent struct's fields use unsuffixed source
           // names (FieldDecl), but the outer VarDecl's declName may carry the shadow-disambiguation
           // ID suffix. Strip it so the field lookup matches the struct definition.
-          const auto fieldName = decl->getDeclName().isEmpty() //
-                                     ? refDeclName
-                                     : decl->getDeclName().getAsString();
-          const auto field = Vector<std::string>{fieldName, packCaptureName(decl), refDeclName} ^ collect_first([&](const auto &candidate) {
-                               return r.parent->members ^ find([&](const auto &member) { return member.symbol == candidate; });
-                             });
-          if (field) {
-            return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, *field));
+          if (capturedField) {
+            return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, *capturedField));
           } else {
             const auto declName = Named(fieldName, handleType(decl->getType(), r));
             return Expr::Alias(select(r, {Named(This, Type::Ptr(Type::Struct(r.parent->name, {}), r.thisSpace))}, declName));
@@ -3028,6 +3069,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           } else if (arrTpe->comp == exprTpe) {
             // Ptr[C] => C
             return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace, Region::Opaque());
+          } else if (arrTpe->comp.get<Type::Ptr>() && exprTpe.get<Type::Ptr>()) {
+            // Array-of-pointers indexing returns the stored pointer value. Keep the container's
+            // address space on the lvalue even when its pointee type differs after a cast.
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace, Region::Opaque());
           } else {
             raise("Cannot index nested ptr expressions with mismatching expected components");
           }
@@ -3045,14 +3090,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (expr->getOpcode() == clang::UO_AddrOf) {
           if (expr->getSubExpr()->getType()->isFunctionType()) return lhsExpr;
           if (lhsExpr.is<Expr::RefTo>()) return lhsExpr;
-          // A reference capture is represented by a pointer-valued field. If that pointer's
-          // component is the source lvalue type, it is already the result of `&capture`;
-          // taking the address of the representation would incorrectly produce T**. A genuine
-          // pointer-valued local still has the source pointer type itself and falls through so
-          // `&localPointer` addresses its slot.
+          // A C++ reference result is represented by a pointer, whether it came from a capture,
+          // an overloaded subscript, or another reference-returning call. If that pointer's
+          // component is the source lvalue type, it is already the result of taking the lvalue's
+          // address; addressing the representation would incorrectly produce T**. A genuine
+          // pointer-valued local has the source pointer type itself and falls through so
+          // `&localPointer` still addresses its slot.
           const auto sourceTpe = handleType(expr->getSubExpr()->getType(), r);
-          if (const auto alias = lhsExpr.get<Expr::Alias>())
-            if (const auto pointer = alias->ref.tpe().get<Type::Ptr>(); pointer && pointer->comp == sourceTpe) return lhsExpr;
+          if (const auto pointer = lhsExpr.tpe().get<Type::Ptr>(); pointer && pointer->comp == sourceTpe) return lhsExpr;
           const auto lhs = r.newVar(lhsExpr);
           const auto selected = lhs.get<Term::Select>();
           if (!selected) raise("Cannot take the address of " + repr(lhs));
@@ -3063,16 +3108,18 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         // pointer inc/dec rebases the pointer; the scalar path below would step the pointee instead
         auto ptrStep = [&](const int64_t delta, const bool snapshot) -> std::optional<Term::Any> {
-          const auto ptrTpe = lhs.tpe().get<Type::Ptr>();
-          if (!ptrTpe || !exprTpe.is<Type::Ptr>()) return {};
-          Term::Any stepped = lhs;
+          const auto resolved = pointerLValue(lhs, exprTpe);
+          if (!resolved) return {};
+          const auto &[current, indirect] = *resolved;
+          Term::Any stepped = current;
           if (snapshot) {
             const auto oldName = r.newName(exprTpe);
-            r.push(Stmt::Var(oldName, Expr::Alias(lhs), /*isMutable*/ false));
+            r.push(Stmt::Var(oldName, Expr::Alias(current), /*isMutable*/ false));
             stepped = select(r, {}, oldName).widen();
           }
-          assign(lhs, r.newVar(Expr::RefTo(termToSel(lhs), Term::IntS64Const(delta), ptrTpe->comp, ptrTpe->space, Region::Opaque())));
-          return stepped;
+          const auto rebased = rebasePointer(lhs, Term::IntS64Const(delta), exprTpe);
+          if (!rebased) return {};
+          return snapshot ? stepped : *rebased;
         };
 
         switch (expr->getOpcode()) {
@@ -3115,8 +3162,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::UO_Deref: {
             auto idx = r.newVar(integralConstOfType(Type::IntU64(), 0));
             const auto ptrTpe = lhs.tpe().get<Type::Ptr>();
-            if (!ptrTpe) raise("Cannot dereference non-pointer type: " + repr(lhs.tpe()));
-            return Expr::RefTo(termToSel(lhs), idx, exprTpe, ptrTpe->space, Region::Opaque());
+            if (ptrTpe) return Expr::RefTo(termToSel(lhs), idx, exprTpe, ptrTpe->space, Region::Opaque());
+            // Array-to-pointer decay is intentionally storage-preserving in PolyAST, so `*array`
+            // still has an Arr operand here. Dereference it as the equivalent `array[0]` lvalue.
+            const auto arrTpe = lhs.tpe().get<Type::Arr>();
+            if (arrTpe && arrTpe->comp == exprTpe) return Expr::RefTo(termToSel(lhs), idx, exprTpe, arrTpe->space, Region::Opaque());
+            raise(fmt::format("Cannot dereference non-pointer type {} at {}: {}", repr(lhs.tpe()),
+                              expr->getExprLoc().printToString(context.getSourceManager()), pretty_string(expr, context)));
           }
           case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, exprTpe));
           case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, exprTpe));
@@ -3197,14 +3249,18 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         switch (expr->getOpcode()) {
           case clang::BO_Add: // Handle Ptr arithmetics for +
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(), rtnPtr = tpe_.get<Type::Ptr>(); lhsPtr && rtnPtr) {
-              return Expr::RefTo(termToSel(lhs), rhs, rtnPtr->comp, TypeSpace::Global(), Region::Opaque());
+              return Expr::RefTo(termToSel(lhs), rhs, rtnPtr->comp, lhsPtr->space, Region::Opaque());
+            } else if (const auto lhsArr = lhs.tpe().get<Type::Arr>(); lhsArr && tpe_.is<Type::Ptr>()) {
+              // Array arithmetic performs the same decay with the requested element offset (`buffer + offset`).
+              const auto rtnPtr = *tpe_.get<Type::Ptr>();
+              return Expr::RefTo(termToSel(lhs), rhs, lhsArr->comp, rtnPtr.space, Region::Opaque());
             } else {
               return Expr::IntrOp(Intr::Add(dl(), dr(), tpe_));
             }
           case clang::BO_Sub: // Handle Ptr arithmetics for -
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(), rtnPtr = tpe_.get<Type::Ptr>(); lhsPtr && rtnPtr) {
               auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
-              return Expr::RefTo(termToSel(lhs), negativeIdx, rtnPtr->comp, TypeSpace::Global(), Region::Opaque());
+              return Expr::RefTo(termToSel(lhs), negativeIdx, rtnPtr->comp, lhsPtr->space, Region::Opaque());
             } else if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && rhs.tpe().is<Type::Ptr>()) {
               const auto i64 = Type::IntS64();
               auto lhsInt = r.newVar(Expr::Cast(lhs, i64));
@@ -3243,29 +3299,25 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl(), dr(), tpe_));
           case clang::BO_LAnd:
           case clang::BO_LOr: raise("unreachable short-circuit lowering");
-          case clang::BO_Assign: return Expr::Alias(assign(lhs, rhs)); // Builtin direct assignment
+          case clang::BO_Assign:
+            return Expr::Alias(assign(lhs, rhs, expr->getLHS()->getType()->isPointerType())); // Builtin direct assignment
           case clang::BO_MulAssign: return Expr::Alias(opAssign(Intr::Mul(cl(), cr(), compTpe)));
           case clang::BO_DivAssign: return Expr::Alias(opAssign(Intr::Div(cl(), cr(), compTpe)));
           case clang::BO_RemAssign: return Expr::Alias(opAssign(Intr::Rem(cl(), cr(), compTpe)));
           case clang::BO_AddAssign:
             // Pointer +=/-= must rebase the pointer itself; the scalar opAssign path would
             // write through it.
-            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
-              auto newPtr = r.newVar(Expr::RefTo(termToSel(lhs), rhs, lhsPtr->comp, lhsPtr->space, Region::Opaque()));
-              r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(newPtr)));
-              return Expr::Alias(lhs);
+            if (const auto rebased = rebasePointer(lhs, rhs, tpe_)) {
+              return Expr::Alias(*rebased);
             } else {
               return Expr::Alias(opAssign(Intr::Add(cl(), cr(), compTpe)));
             }
           case clang::BO_SubAssign:
-            if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
+            if (tpe_.is<Type::Ptr>()) {
               auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
-              auto newPtr = r.newVar(Expr::RefTo(termToSel(lhs), negativeIdx, lhsPtr->comp, lhsPtr->space, Region::Opaque()));
-              r.push(Stmt::Mut(termToSel(lhs), Expr::Alias(newPtr)));
-              return Expr::Alias(lhs);
-            } else {
-              return Expr::Alias(opAssign(Intr::Sub(cl(), cr(), compTpe)));
+              if (const auto rebased = rebasePointer(lhs, negativeIdx, tpe_)) return Expr::Alias(*rebased);
             }
+            return Expr::Alias(opAssign(Intr::Sub(cl(), cr(), compTpe)));
           case clang::BO_ShlAssign: return Expr::Alias(opAssign(Intr::BSL(dl(), dr(), tpe_)));
           case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(dl(), dr(), tpe_)));
           case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(dl(), dr(), tpe_)));
@@ -3296,14 +3348,19 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               if (!var || capture.getCaptureKind() != clang::LCK_ByRef) return handleExpr(init, r);
               const auto initExpr = handleExpr(init, r);
               if (var->getType()->isReferenceType()) return Expr::Alias(r.newVar(initExpr));
-              const auto ptr = field->tpe.get<Type::Ptr>();
-              if (!ptr) raise("By-reference capture field resulted in a non-pointer type: " + repr(field->tpe));
-              // A by-reference capture needs an addressable slot even when inlining later turns the captured
-              // parameter into a constant. newVar deliberately returns constants unchanged, which would otherwise
-              // produce invalid source such as `&(20)` on Metal.
-              const auto binding = Stmt::Var(r.newName(initExpr.tpe()), initExpr, /*isMutable*/ false);
+              const auto pointer = field->tpe.get<Type::Ptr>();
+              if (!pointer) raise("By-reference capture field resulted in a non-pointer type: " + repr(field->tpe));
+              // A by-reference capture stores the address of the captured variable, including when that variable
+              // is itself a pointer. Preserve an existing lvalue slot; only materialise a temporary when inlining
+              // has reduced the initialiser to a prvalue.
+              if (const auto alias = initExpr.get<Expr::Alias>())
+                if (const auto selected = alias->ref.get<Term::Select>())
+                  return Expr::RefTo(*selected, {}, pointer->comp, pointer->space, Region::Opaque());
+              if (const auto indexed = initExpr.get<Expr::Index>())
+                return Expr::RefTo(indexed->lhs, indexed->idx, indexed->comp, pointer->space, Region::Opaque());
+              const auto binding = Stmt::Var(r.newName(pointer->comp), conform(r, initExpr, pointer->comp), /*isMutable*/ false);
               r.push(binding);
-              return Expr::RefTo(select(r, {}, binding.name), {}, ptr->comp, ptr->space, Region::Opaque());
+              return Expr::RefTo(select(r, {}, binding.name), {}, pointer->comp, pointer->space, Region::Opaque());
             }();
             r.push(Stmt::Mut(member, conform(r, value, field->tpe)));
           }

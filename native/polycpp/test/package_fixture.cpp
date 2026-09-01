@@ -138,7 +138,13 @@ int main(int argc, char **argv) {
     const auto hasNext = function->template collect_all<Expr::RefTo>() ^ exists([](const auto &ref) {
                            return ref.comp.template is<Type::IntS32>() && ref.idx && ref.idx->template is<Term::Select>();
                          });
-    return hasMemcpy && hasBitCast && hasVisit && hasNext ? 0 : 19;
+    const auto selectReference = program.functions ^ collect_first([](const auto &candidate) -> std::optional<Function> {
+                                   if (fqcn(candidate.decl.name).find("selectReference") != std::string::npos) return candidate;
+                                   return {};
+                                 });
+    const auto preservesConditionalReference = selectReference && selectReference->template collect_all<Expr::RefTo>().empty()
+                                               && selectReference->decl.rtn.template is<Type::Ptr>();
+    return hasMemcpy && hasBitCast && hasVisit && hasNext && preservesConditionalReference ? 0 : 19;
   }
   if (argc == 3 && std::string(argv[1]) == "--assert-allocation-control-scaffolding") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);

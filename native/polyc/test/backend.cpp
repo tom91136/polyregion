@@ -2624,6 +2624,38 @@ TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]
   CHECK_FALSE(llvmIrOf(c) ^ contains_slice("load ptr"));
 }
 
+TEST_CASE("OpenCL address-of preserves a pointer variable's private slot", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto pointee = Type::Ptr(Type::IntS32(), TypeSpace::Local());
+  const Named base("p", pointee);
+  // Deliberately retain stale spaces on both layers, as generic C++ remapping can do before
+  // address-space tracing. The pointee follows `p`; the address of `p` itself is private.
+  const Named ref("pp", Type::Ptr(Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen(), TypeSpace::Global()));
+  const Function entry = mkFn("kernel", {}, Type::Unit0(),
+                              {
+                                  Var(base, std::optional<Expr::Any>{}, true).widen(),
+                                  Var(ref,
+                                      Expr::RefTo(selectNamed(base).widen(), {}, Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen(),
+                                                  TypeSpace::Global(), Region::Opaque())
+                                          .widen(),
+                                      false)
+                                      .widen(),
+                                  ret(),
+                              },
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(c.binary->begin(), c.binary->end());
+  CHECK(source ^ contains_slice("local int* private *"));
+  CHECK_FALSE(source ^ contains_slice("global int* local *"));
+}
+
 TEST_CASE("a constant loop condition lowers to an unconditional branch", "[backend]") {
   polyregion::compiler::initialise();
   const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));

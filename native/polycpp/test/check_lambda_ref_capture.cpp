@@ -1,7 +1,7 @@
 #pragma region case: ref-captured-pointer-and-reference
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
 #pragma region do: {output}
-#pragma region requires: 126
+#pragma region requires: 168
 
 #include <cstdio>
 
@@ -20,11 +20,15 @@ int main() {
     auto bumpReference = [&reference]() { reference += 2; };
     bumpReference();
 
+    int scalarValue = 40;
+    auto bumpScalar = [&scalarValue]() { scalarValue += 2; };
+    bumpScalar();
+
     int *capturedPointer = &capturedValue;
     auto bumpCapturedPointer = [&capturedPointer]() { *capturedPointer += 2; };
     bumpCapturedPointer();
 
-    return pointerValue + referenceValue + capturedValue;
+    return pointerValue + referenceValue + scalarValue + capturedValue;
   });
   std::printf("%d", result);
   return 0;

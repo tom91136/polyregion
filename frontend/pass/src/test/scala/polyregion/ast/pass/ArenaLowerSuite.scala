@@ -496,6 +496,56 @@ class ArenaLowerSuite extends munit.FunSuite {
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef, closureDef))), Nil)
   }
 
+  test("taking the address of an arena-relative pointer preserves its local binding slot") {
+    val capSym  = sym("Cap")
+    val ptrTpe  = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val refTpe  = p.Type.Ptr(ptrTpe, p.Type.Space.Global)
+    val capTpe  = p.Type.Struct(capSym, Nil)
+    val cap     = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val pointer = named("pointer", ptrTpe)
+    val ref     = named("ref", refTpe)
+    val capDef  = p.StructDef(capSym, Nil, List(named("data", ptrTpe)), Nil)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(
+          pointer,
+          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
+          isMutable = true
+        ),
+        p.Stmt.Var(
+          ref,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(pointer, Nil, ptrTpe),
+              None,
+              ptrTpe,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+    assertEquals(
+      out.body.collectFirst { case p.Stmt.Var(`ref`, Some(expr), _) => expr },
+      Some(
+        p.Expr.RefTo(
+          p.Term.Select(pointer, Nil, ptrTpe),
+          None,
+          ptrTpe,
+          p.Type.Space.Global,
+          p.Region.Rooted(pointer)
+        )
+      )
+    )
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef))), Nil)
+  }
+
   test("encoded arena pointer arithmetic remains an arena offset") {
     val capSym    = sym("Cap")
     val holderSym = sym("Holder")

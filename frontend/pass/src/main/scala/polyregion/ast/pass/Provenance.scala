@@ -152,7 +152,11 @@ object Provenance {
         case _ => None
       }
       def regionOf(n: p.Named, e: p.Expr): Option[p.Region] = e match {
-        case p.Expr.Alias(_: p.Term.NullPtrConst)                    => None
+        case p.Expr.Alias(_: p.Term.NullPtrConst) => None
+        // `&p` points at the binding slot of `p`, not at the allocation represented by the
+        // pointer value stored in that slot. Keep the extra indirection rooted at the local.
+        case p.Expr.RefTo(p.Term.Select(root, Nil, t), None, comp, _, _) if isPtr(t) && comp == t =>
+          Some(p.Region.Rooted(root))
         case p.Expr.RefTo(p.Term.Select(root, steps, t), _, _, _, _) => Some(of(root, steps, t))
         case p.Expr.Index(p.Term.Select(_, _, _), _, p.Type.Ptr(_, p.Type.Space.Global | p.Type.Space.Constant)) =>
           Some(p.Region.Opaque)

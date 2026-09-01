@@ -402,6 +402,11 @@ object ArenaLower extends ProgramPass {
         if (isPtr(b.tpe) && offsetVal(b))
           p.Expr.Index(sel(arenaBase(rwTerm(b), p.Type.Ptr(comp, pointeeSpace(b.tpe)))), rwTerm(i), comp)
         else p.Expr.Index(rwTerm(b), rwTerm(i), comp)
+      // `&p` addresses the local slot which holds an arena-relative pointer value. It is not
+      // arithmetic on that value, so preserve the RefTo for the backend instead of converting
+      // `p` itself into an arena offset address.
+      case p.Expr.RefTo(t @ p.Term.Select(root, Nil, tpe), None, comp, sp, _) if isPtr(tpe) && comp == tpe =>
+        p.Expr.RefTo(rwTerm(t), None, comp, sp, p.Region.Rooted(root))
       // address-of through an arena offset pointer (`&p[i]`) remains an offset token. emitting a real
       // address here would make the next arena deref add the arena base twice.
       case p.Expr.RefTo(t, idx, comp, p.Type.Space.Global, _) if isPtr(t.tpe) && offsetVal(t) =>

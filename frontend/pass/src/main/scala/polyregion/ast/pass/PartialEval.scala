@@ -83,8 +83,17 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     reduced
   }
 
-  private def mutatedNames(f: p.Function): Set[p.Named] =
-    f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
+  private def mutatedNames(f: p.Function): Set[p.Named] = {
+    val stmts = f.collectAll[p.Stmt]
+    val direct = stmts.collect {
+      case p.Stmt.Mut(p.Term.Select(name, _, _), _)       => name
+      case p.Stmt.Update(p.Term.Select(name, _, _), _, _) => name
+    }.toSet
+    val refToRoots = stmts.collect {
+      case p.Stmt.Var(name, Some(p.Expr.RefTo(that: p.Term.Select, None, _, _, _)), false) => name -> that.root
+    }.toMap
+    direct ++ direct.flatMap(refToRoots.get)
+  }
 
   // an immutable struct-to-struct reinterpret aliases the source storage; the substitution is a whole-function
   // property, so it is scanned once rather than threaded as a binding
@@ -173,7 +182,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
               st.bindVal(name, sel)
             // a write through the pointer leaves its slot stable, so only a bare re-aim invalidates the bind
             case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _)
-                if !reassigned.contains(name) && !reassigned.contains(sel.root) =>
+                if !reassigned.contains(name) && (!Provenance.isPtr(sel.root.tpe) || !reassigned.contains(sel.root)) =>
               log.info(s"addr-bind ${name.repr} = &${sel.repr}")
               st.bindAddr(name, sel)
             case _ => st
@@ -532,8 +541,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   private def resolveFieldAliases(f: p.Function, reassigned: Set[String]): (p.Function, Int) = {
     val aliases = f.collectAll[p.Stmt].foldLeft(Map.empty[String, (p.Named, List[p.PathStep])]) { (m, s) =>
       s match {
-        case p.Stmt.Var(n, Some(p.Expr.RefTo(p.Term.Select(b, path, selTpe), idx, _, _, _)), false)
-            if isIdentityRef(idx, selTpe) && !reassigned(b.symbol) =>
+        case p.Stmt.Var(n, Some(p.Expr.RefTo(p.Term.Select(b, path, selTpe), idx, comp, _, _)), false)
+            if isIdentityRef(idx, selTpe) &&
+              (!reassigned(b.symbol) || (path.isEmpty && idx.isEmpty && Provenance.isPtr(selTpe) && comp == selTpe)) =>
           val (root, base) = m.getOrElse(b.symbol, (b, Nil))
           m + (n.symbol -> (root, base ++ path))
         case _ => m

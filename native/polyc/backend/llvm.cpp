@@ -137,6 +137,11 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
   } else throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select");
 }
 
+static bool isPointerSlotReference(const Expr::RefTo &x) {
+  const auto lhs = x.lhs.template get<Term::Select>();
+  return lhs && !x.idx && lhs->steps.empty() && lhs->tpe.template is<Type::Ptr>() && x.comp == lhs->tpe;
+}
+
 static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::string &key) {
   auto &B = gen.B;
   auto &C = gen.C;
@@ -162,7 +167,7 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
       // indirection) is the address of its slot, not a decay `&p[0]`. lowering it as base+offset loads the
       // pointer value and GEPs off that - null for an unwritten local - so a later `*dest = x` through the
       // stored address faults
-      if (!x.idx && x.comp == lhs->tpe) return gen.mkSelectPtr(*lhs);
+      if (isPointerSlotReference(x)) return gen.mkSelectPtr(*lhs);
       return stepPtr(*arrTpe, x.lhs);
     } else if (auto arrTpe = lhs->tpe.template get<Type::Arr>(); arrTpe) {
       auto offset = x.idx ? gen.i64SExt(gen.mkTermVal(*x.idx)) : llvm::ConstantInt::get(C.i64Ty(), 0, true);
@@ -196,6 +201,10 @@ static ValPtr physicalRefToPtr(CodeGen &gen, const Expr::RefTo &x, const std::st
 ValPtr physicalRefToVal(CodeGen &gen, const Expr::RefTo &x, const std::string &key) {
   const auto ptr = physicalRefToPtr(gen, x, key);
   if (!ptr->getType()->isPointerTy()) return ptr;
+  // The slot of a pointer-valued local has the target's physical alloca space, regardless of
+  // stale pointee-space metadata on RefTo. Casting it to the pointee's space turns `T*&` into an
+  // address in global/workgroup storage and makes rebinding write to the wrong object.
+  if (isPointerSlotReference(x)) return ptr;
   const auto want = gen.B.getPtrTy(gen.C.addressSpace(x.space));
   return ptr->getType() == want ? ptr : gen.B.CreateAddrSpaceCast(ptr, want);
 }
@@ -448,8 +457,10 @@ struct LogicalPointerModel final : VulkanLowering {
     return physicalIndexVal(gen, index, key);
   }
   ValPtr refToVal(CodeGen &gen, const Expr::RefTo &refTo, const std::string &key) override {
-    if (auto lhs = refTo.lhs.template get<Term::Select>())
-      if (auto v = mkRefTo(*lhs, refTo.idx)) return *v;
+    // `&p` denotes the physical slot of the pointer-valued local, not element zero of `p`.
+    if (!isPointerSlotReference(refTo))
+      if (auto lhs = refTo.lhs.template get<Term::Select>())
+        if (auto v = mkRefTo(*lhs, refTo.idx)) return *v;
     return physicalRefToVal(gen, refTo, key);
   }
   void storeUpdate(CodeGen &gen, const Term::Select &lhs, const Term::Any &idx, const Term::Any &value) override {

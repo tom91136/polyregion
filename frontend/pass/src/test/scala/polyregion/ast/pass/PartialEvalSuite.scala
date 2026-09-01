@@ -352,8 +352,7 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(returnedTerm(out), Some(deref))
   }
 
-  test("address of a later-mutated root is not address-folded (p keeps its own slot)") {
-    // a is mutated after its address is taken; folding *p to a anyway would erase the last RefTo to a
+  test("address of a later-mutated root still folds to the pointee slot") {
     val a     = named("a", p.Type.IntS32)
     val pp    = named("p", ptrI32)
     val deref = p.Term.Select(pp, List(p.PathStep.Deref), p.Type.IntS32)
@@ -366,8 +365,9 @@ class PartialEvalSuite extends munit.FunSuite {
       rtn = p.Type.IntS32,
       args = List(arg("a", p.Type.IntS32))
     )
-    // a is mutated after its address is taken -> excluded -> the deref stays a deref of p
-    assertEquals(returnedTerm(out), Some(deref))
+    // Reassigning a changes the value in its slot, not the location denoted by p.
+    assertEquals(returnedTerm(out), Some(selectT(a)))
+    assert(!out.exists { case p.Stmt.Var(n, _, _) => n == pp; case _ => false }, out.map(_.repr).mkString("\n"))
   }
 
   // --- canonicaliseAddresses mode: whole-value (&lvalue) field-alias canonicalisation ---
@@ -412,6 +412,25 @@ class PartialEvalSuite extends munit.FunSuite {
     )
   }
 
+  test("an Update through a pointer-to-local invalidates the pointee value") {
+    val x = named("x", p.Type.IntS32)
+    val v = named("v", ptrI32)
+    val out = pe(
+      List(
+        p.Stmt.Var(x, Some(p.Expr.Alias(p.Term.IntS32Const(0)))),
+        p.Stmt.Var(v, Some(addrOf(selectT(x)))),
+        p.Stmt.Update(selectT(v), p.Term.IntS32Const(0), p.Term.IntS32Const(5)),
+        p.Stmt.Return(p.Expr.Alias(selectT(x)))
+      ),
+      p.Type.IntS32
+    )
+    assertEquals(returnedTerm(out), Some(selectT(x)))
+    assert(
+      out.exists { case p.Stmt.Mut(p.Term.Select(`x`, Nil, _), _) => true; case _ => false },
+      out.map(_.repr).mkString("\n")
+    )
+  }
+
   test("canonicalise mode is a no-op on PE fold output: deref-then-field (*v).f") {
     val s = named("s", p.Type.Struct(sym("S"), Nil))
     val v = named("v", p.Type.Ptr(p.Type.Struct(sym("S"), Nil), p.Type.Space.Global))
@@ -450,6 +469,34 @@ class PartialEvalSuite extends munit.FunSuite {
     )
     val out = PartialEval(canonicaliseAddresses = true)(prog, NoopLog)
     assertEquals(out.entry.body, List(p.Stmt.Return(p.Expr.Alias(selectT(x)))))
+  }
+
+  test("canonicaliseAddresses mode preserves a mutable pointer slot behind T*&") {
+    val pointer = named("pointer", ptrI32)
+    val ref     = named("ref", p.Type.Ptr(ptrI32, p.Type.Space.Global))
+    val next    = named("next", ptrI32)
+    val prog = program(
+      entry(
+        args = List(p.Arg(pointer), p.Arg(next)),
+        body = List(
+          p.Stmt.Var(
+            ref,
+            Some(p.Expr.RefTo(selectT(pointer), None, ptrI32, p.Type.Space.Global, p.Region.Opaque)),
+            isMutable = false
+          ),
+          p.Stmt.Update(selectT(ref), p.Term.IntS64Const(0), selectT(next)),
+          p.Stmt.Return(p.Expr.Alias(selectT(pointer)))
+        )
+      ).modifyDecl(_.copy(rtn = ptrI32))
+    )
+
+    val out = PartialEval(canonicaliseAddresses = true)(prog, NoopLog).entry.body
+    assert(!out.exists { case p.Stmt.Var(`ref`, _, _) => true; case _ => false }, out.map(_.repr).mkString("\n"))
+    assert(out.exists {
+      case p.Stmt.Mut(p.Term.Select(`pointer`, Nil, _), p.Expr.Alias(p.Term.Select(`next`, Nil, _))) => true
+      case _                                                                                         => false
+    })
+    assertEquals(returnedTerm(out), Some(selectT(pointer)))
   }
 
   // --- Fold matches the Interpreter on unsigned Div/Rem/BSR (previously divergent) ---

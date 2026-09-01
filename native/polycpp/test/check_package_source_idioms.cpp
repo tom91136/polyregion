@@ -20,10 +20,12 @@ struct Pair {
 struct EmptyA {};
 struct EmptyB {};
 
+static const std::uint32_t &selectReference(const std::uint32_t &left, const std::uint32_t &right) { return left < right ? right : left; }
+
 POLYREGION_EXPORT_AS("source_idioms.implementation.apply")
 std::uint64_t apply(Pair *destination, const Pair *source, int *values, std::variant<EmptyA, EmptyB> choice) {
   __builtin_memcpy(destination, source, sizeof(Pair));
   const auto bits = __builtin_bit_cast(std::uint64_t, *source);
   const auto selected = std::visit([](auto) { return 1; }, choice);
-  return bits + std::uint64_t(*thrust::next(values, selected));
+  return bits + std::uint64_t(*thrust::next(values, selected)) + selectReference(destination->left, source->right);
 }
