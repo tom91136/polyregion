@@ -307,13 +307,13 @@ download_url() {
   local url="$1"
   local jar="$2"
 
-  mkdir -p "${jar%/*}" && {
+  mkdir -p "${jar%/*}" && rm -f "$jar" && {
     if command -v curl >/dev/null 2>&1; then
-      curl --fail --silent --location "$url" --output "$jar"
+      curl --fail --silent --show-error --location --retry 4 --retry-delay 2 --retry-all-errors --output "$jar" "$url"
     elif command -v wget >/dev/null 2>&1; then
-      wget -q -O "$jar" "$url"
+      wget -q --tries=5 --waitretry=2 -O "$jar" "$url"
     fi
-  } && [[ -r "$jar" ]]
+  } && [[ -s "$jar" ]]
 }
 
 acquire_sbt_jar() {
@@ -352,7 +352,10 @@ verify_sbt_jar() {
   echoerr "  From  ${md5url}"
   echoerr "    To  ${md5}"
 
-  download_url "${md5url}" "${md5}" >/dev/null 2>&1
+  if ! download_url "${md5url}" "${md5}" >/dev/null 2>&1; then
+    echoerr "Could not download the sbt launcher checksum"
+    return 1
+  fi
 
   if command -v md5sum >/dev/null 2>&1; then
     if echo "$(cat "${md5}")  ${jar}" | md5sum -c -; then
