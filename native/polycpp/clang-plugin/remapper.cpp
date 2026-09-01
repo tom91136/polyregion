@@ -1933,6 +1933,17 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
   return nullptr;
 }
 
+[[nodiscard]] static const clang::MaterializeTemporaryExpr *lifetimeExtendedTemporary(const clang::VarDecl *var) {
+  const clang::Stmt *current = var ? var->getInit() : nullptr;
+  while (current) {
+    if (const auto materialised = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(current);
+        materialised && materialised->getExtendingDecl() == var)
+      return materialised;
+    current = transparentExceptionExpr(current);
+  }
+  return nullptr;
+}
+
 [[nodiscard]] static bool identityExceptionWrapper(const clang::CallExpr *call) {
   const auto callee = call ? call->getDirectCallee() : nullptr;
   if (!callee || call->getNumArgs() != 1) return false;
@@ -2284,13 +2295,55 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             );
       },
       [&](const clang::MaterializeTemporaryExpr *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
-      [&](const clang::ExprWithCleanups *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
-      // dropping the binding drops the destructor call, so only pass through when destruction is a no-op
+      [&](const clang::ExprWithCleanups *expr) -> Expr::Any {
+        r.cleanups.emplace_back();
+        const auto value = handleExpr(expr->getSubExpr(), r);
+        if (r.cleanups.back().empty()) {
+          r.cleanups.pop_back();
+          return value;
+        }
+        // Preserve the full-expression result before destroying its temporaries.
+        // This matters for calls such as make_owner().get(), whose primitive
+        // result outlives the owner but whose owner destructor must still run.
+        const auto bound = Stmt::Var(r.newName(value.tpe()), value, /*isMutable*/ false);
+        r.push(bound);
+        unwindCleanups(r, r.cleanups.size() - 1);
+        r.cleanups.pop_back();
+        return Expr::Alias(select(r, {}, bound.name).widen());
+      },
+      // A local with the same complete-object type owns the materialized value and its registered cleanup;
+      // otherwise dropping the binding would drop the temporary's destructor call.
       [&](const clang::CXXBindTemporaryExpr *expr) -> Expr::Any {
-        if (!destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl()))
-          raise(fmt::format("Unsupported temporary of type {} at {} (dropping it would drop its destructor's effects)",
-                            expr->getType().getAsString(), expr->getBeginLoc().printToString(context.getSourceManager())));
-        return handleExpr(expr->getSubExpr(), r);
+        const bool transferredToLocal = r.boundTemporaryType
+                                        && context.hasSameType(expr->getType().getCanonicalType().getNonReferenceType(),
+                                                               r.boundTemporaryType->getCanonicalType().getNonReferenceType());
+        const bool effectful = !destroysWithoutEffect(expr->getType()->getAsCXXRecordDecl());
+        if (transferredToLocal || !effectful) return handleExpr(expr->getSubExpr(), r);
+        if (r.cleanups.empty())
+          raise(fmt::format("Unsupported temporary of type {} at {} (no full-expression cleanup scope)", expr->getType().getAsString(),
+                            expr->getBeginLoc().printToString(context.getSourceManager())));
+
+        const auto tpe = handleType(expr->getType(), r);
+        const auto temporary = r.newName(tpe);
+        const clang::Expr *initialiser = expr->getSubExpr();
+        while (const auto *next = transparentExceptionExpr(initialiser))
+          initialiser = next;
+        const auto directConstruct = llvm::dyn_cast<clang::CXXConstructExpr>(initialiser);
+        const auto previousBoundTemporaryType = r.boundTemporaryType;
+        r.boundTemporaryType = expr->getType();
+        if (directConstruct && tpe.is<Type::Struct>()) {
+          r.push(Stmt::Var(temporary, std::optional<Expr::Any>{}, /*isMutable*/ true));
+          const auto previousConstructInto = r.constructInto;
+          r.constructInto = temporary;
+          (void)r.newVar(handleExpr(expr->getSubExpr(), r));
+          r.constructInto = previousConstructInto;
+        } else {
+          const auto value = conform(r, handleExpr(expr->getSubExpr(), r), tpe);
+          r.push(Stmt::Var(temporary, value, /*isMutable*/ true));
+        }
+        r.boundTemporaryType = previousBoundTemporaryType;
+        r.cleanups.back().emplace_back(Cleanup{expr->getType(), temporary});
+        return Expr::Alias(select(r, {}, temporary).widen());
       },
       [&](const clang::CXXNewExpr *expr) -> Expr::Any {
         if (expr->getNumPlacementArgs() == 1 && !expr->isArray() && expr->getPlacementArg(0)->getType()->isPointerType()) {
@@ -4140,28 +4193,10 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ true));
               continue;
             }
-            Opt<Expr::Any> pointerInit;
-            if (var->hasInit() && name.tpe.is<Type::Ptr>() && !llvm::isa<clang::InitListExpr>(var->getInit())) {
-              auto raw = handleExpr(var->getInit(), r);
-              auto target = name.tpe;
-              if (const auto refTo = raw.get<Expr::RefTo>(); refTo && storageSpace(refTo->lhs).is<TypeSpace::Private>()) {
-                raw = refTo->withSpace(TypeSpace::Private());
-              } else if (const auto alias = raw.get<Expr::Alias>()) {
-                if (const auto targetPtr = target.get<Type::Ptr>()) {
-                  if (const auto selection = alias->ref.get<Term::Select>(); selection && targetPtr->comp == raw.tpe())
-                    target = Type::Ptr(targetPtr->comp, storageSpace(*selection));
-                }
-              }
-              if (raw.tpe().is<Type::Ptr>() && sameTypeShape(raw.tpe(), target)) target = raw.tpe();
-              const auto lowered = conform(r, raw, target);
-              if (lowered.tpe().is<Type::Ptr>() && sameTypeShape(lowered.tpe(), name.tpe)) name = Named(name.symbol, lowered.tpe());
-              pointerInit = lowered;
-            }
-            r.valueTypes.insert_or_assign(var, name.tpe);
+            const auto lifetimeExtended = lifetimeExtendedTemporary(var);
             Opt<Cleanup> cleanup;
-
             if (const auto rd = var->getType()->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
-                rd && !isStdExceptionRecord(rd) && !destroysWithoutEffect(rd)) {
+                rd && !isStdExceptionRecord(rd) && !destroysWithoutEffect(rd) && (!var->getType()->isReferenceType() || lifetimeExtended)) {
               const auto reject = [&](const std::string &why) {
                 raise(fmt::format("Unsupported local {} of type {} at {} ({}, so its destructor's effects would be lost)", declName(var),
                                   var->getType().getAsString(), var->getLocation().printToString(context.getSourceManager()), why));
@@ -4183,7 +4218,27 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               }
               cleanup = Cleanup{var->getType(), name};
             }
-
+            Opt<Expr::Any> pointerInit;
+            if (var->hasInit() && name.tpe.is<Type::Ptr>() && !llvm::isa<clang::InitListExpr>(var->getInit())) {
+              const auto previousBoundTemporaryType = r.boundTemporaryType;
+              if (lifetimeExtended) r.boundTemporaryType = var->getType();
+              auto raw = handleExpr(var->getInit(), r);
+              r.boundTemporaryType = previousBoundTemporaryType;
+              auto target = name.tpe;
+              if (const auto refTo = raw.get<Expr::RefTo>(); refTo && storageSpace(refTo->lhs).is<TypeSpace::Private>()) {
+                raw = refTo->withSpace(TypeSpace::Private());
+              } else if (const auto alias = raw.get<Expr::Alias>()) {
+                if (const auto targetPtr = target.get<Type::Ptr>()) {
+                  if (const auto selection = alias->ref.get<Term::Select>(); selection && targetPtr->comp == raw.tpe())
+                    target = Type::Ptr(targetPtr->comp, storageSpace(*selection));
+                }
+              }
+              if (raw.tpe().is<Type::Ptr>() && sameTypeShape(raw.tpe(), target)) target = raw.tpe();
+              const auto lowered = conform(r, raw, target);
+              if (lowered.tpe().is<Type::Ptr>() && sameTypeShape(lowered.tpe(), name.tpe)) name = Named(name.symbol, lowered.tpe());
+              pointerInit = lowered;
+            }
+            r.valueTypes.insert_or_assign(var, name.tpe);
             auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit());
             const clang::Expr *directInit = var->getInit();
             while (directInit)
@@ -4219,11 +4274,18 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             } else if ((directlyConstructible || initList) && name.tpe.is<Type::Struct>()) {
               r.push(Stmt::Var(name, std::optional<Expr::Any>{}, /*isMutable*/ !var->getType().isConstQualified()));
               r.constructInto = name;
+              const auto previousBoundTemporaryType = r.boundTemporaryType;
+              if (cleanup) r.boundTemporaryType = var->getType();
               (void)r.newVar(handleExpr(var->getInit(), r));
+              r.boundTemporaryType = previousBoundTemporaryType;
               r.constructInto.reset();
             } else if (var->hasInit()) {
               const bool isMutable = !var->getType().isConstQualified();
-              r.push(Stmt::Var(name, pointerInit ? *pointerInit : conform(r, handleExpr(var->getInit(), r), name.tpe), isMutable));
+              const auto previousBoundTemporaryType = r.boundTemporaryType;
+              if (cleanup) r.boundTemporaryType = var->getType();
+              const auto initialiser = pointerInit ? *pointerInit : conform(r, handleExpr(var->getInit(), r), name.tpe);
+              r.boundTemporaryType = previousBoundTemporaryType;
+              r.push(Stmt::Var(name, initialiser, isMutable));
             } else if (auto arrInit = createInit(var->getType(), name.tpe); arrInit) {
               const bool isMutable = !var->getType().isConstQualified();
               r.push(Stmt::Var(name, *arrInit, isMutable));
@@ -4347,7 +4409,10 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::WhileStmt *stmt) { whileLoop(stmt->getCond(), nullptr, stmt->getBody(), nullptr); },
       [&](const clang::ReturnStmt *stmt) {
         const auto rv = stmt->getRetValue();
+        const auto previousBoundTemporaryType = r.boundTemporaryType;
+        if (rv && rv->getType().getNonReferenceType()->getAsCXXRecordDecl()) r.boundTemporaryType = rv->getType();
         const auto value = rv ? conform(r, handleExpr(rv, r), r.rtnType) : Expr::Any(Expr::Alias(Term::Unit0Const()));
+        r.boundTemporaryType = previousBoundTemporaryType;
         // the result is read before any local dies; skipping the temp when nothing is destroyed also keeps
         // `_v<N>` numbering unchanged for every region without cleanups
         const auto tpe = value.tpe();

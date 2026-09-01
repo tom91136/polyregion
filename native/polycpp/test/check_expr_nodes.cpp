@@ -54,14 +54,19 @@
 #pragma region requires: 7
 
 #pragma region case: bind-temporary-dtor-effects
-#pragma region offload-only
-#pragma region compile-fails: Unsupported temporary of type Guard
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=11 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 1
 
 #pragma region case: bind-temporary-member-dtor-effects
-#pragma region offload-only
-#pragma region compile-fails: Unsupported temporary of type Outer
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=12 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 1
+
+#pragma region case: bind-temporary-local-owner
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=13 -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 1
 
 #include <cstdio>
 
@@ -149,6 +154,15 @@ int main() {
 #elif CHECK_KIND == 12
   int *sink = new int(0);
   const int r = __polyregion_offload_f1__([=]() { return Outer(sink).v; });
+#elif CHECK_KIND == 13
+  int *sink = new int(0);
+  const int r = __polyregion_offload_f1__([=]() {
+    {
+      Guard guard = Guard(sink);
+      (void)guard;
+    }
+    return *sink;
+  });
 #endif
   std::printf("%d", r);
   return 0;

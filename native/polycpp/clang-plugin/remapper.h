@@ -68,6 +68,7 @@ struct Remapper {
     size_t tryFrame{};
     bool inCatch = false;
     bool cleanupsSuspended = false;
+    Opt<clang::QualType> boundTemporaryType{};
 
     template <typename T>
     [[nodiscard]] Pair<T, Vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
@@ -93,6 +94,7 @@ struct Remapper {
         r.tryFrame = 0;
         r.inCatch = false;
         r.cleanupsSuspended = false;
+        r.boundTemporaryType.reset();
       }
       auto result = f(r);
       if (persistFunctionState) {
