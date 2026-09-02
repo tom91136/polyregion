@@ -48,8 +48,28 @@ using namespace aspartame;
 namespace {
 
 constexpr static llvm::StringLiteral packageExportPrefix = "polyregion_export:";
+constexpr static llvm::StringLiteral packageExportTemplatePrefix = "polyregion_export_template:";
 constexpr static llvm::StringLiteral packageImplementsPrefix = "polyregion_implements:";
 constexpr static llvm::StringLiteral packageRequiresPrefix = "polyregion_requires:";
+constexpr static llvm::StringLiteral typeVariablePrefix = "polyregion_type_variable:";
+
+static std::optional<unsigned> packageTypeWidth(const clang::TemplateArgument &argument) {
+  if (argument.getKind() != clang::TemplateArgument::Type) return {};
+  const auto *record = argument.getAsType()->getAs<clang::RecordType>();
+  if (!record) return {};
+  for (const auto *attr : record->getDecl()->attrs()) {
+    const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+    if (!annotation) continue;
+    const auto value = annotation->getAnnotation();
+    if (!value.starts_with(typeVariablePrefix)) continue;
+    constexpr llvm::StringLiteral marker = ":size=";
+    const auto offset = value.find(marker);
+    unsigned width = 0;
+    if (offset == llvm::StringRef::npos || value.drop_front(offset + marker.size()).getAsInteger(10, width) || width == 0) return {};
+    return width;
+  }
+  return {};
+}
 
 struct PackageExportMetadata {
   std::optional<Sym> name;
@@ -61,6 +81,7 @@ struct PackageExportMetadata {
 static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *decl, clang::DiagnosticsEngine &diag) {
   bool invalid = false;
   Vector<Sym> explicitNames;
+  Vector<Sym> templateNames;
   Vector<Sym> implements;
   Vector<std::string> requiredCapabilities;
   for (const auto *attr : decl->attrs()) {
@@ -78,6 +99,7 @@ static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *de
       return true;
     };
     if (parseSym(packageExportPrefix, explicitNames, "export")) continue;
+    if (parseSym(packageExportTemplatePrefix, templateNames, "export template")) continue;
     if (parseSym(packageImplementsPrefix, implements, "implementation")) continue;
     if (!value.starts_with(packageRequiresPrefix)) continue;
     const auto capability = value.drop_front(packageRequiresPrefix.size());
@@ -89,11 +111,18 @@ static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *de
   }
 
   const auto names = explicitNames | distinct() | to_vector();
+  const auto templates = templateNames | distinct() | to_vector();
   const auto implementationNames = implements | distinct() | to_vector();
   if (names.size() > 1) {
     emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
          POLYREGION_DIAG_POLYSTL "Conflicting package export identities: %0",
          names | map([](const auto &name) { return fqcn(name); }) | mk_string(", "));
+    invalid = true;
+  }
+  if (templates.size() > 1 || (!names.empty() && !templates.empty())) {
+    emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
+         POLYREGION_DIAG_POLYSTL "Conflicting package export identities on template: %0",
+         templates | map([](const auto &name) { return fqcn(name); }) | mk_string(", "));
     invalid = true;
   }
   if (implementationNames.size() > 1) {
@@ -106,6 +135,24 @@ static PackageExportMetadata packageExportMetadata(const clang::FunctionDecl *de
   const auto capabilities = requiredCapabilities | distinct() | to_vector();
   if (invalid) return {{}, {}, {}, true};
   if (!names.empty()) return {names.front(), implementation, capabilities, false};
+  if (!templates.empty()) {
+    const auto *arguments = decl->getTemplateSpecializationArgs();
+    if (!arguments) return {{}, implementation, capabilities, false};
+    auto name = templates.front();
+    bool foundWidth = false;
+    for (const auto &argument : arguments->asArray())
+      if (const auto width = packageTypeWidth(argument)) {
+        name.fqn.back() += "_w" + std::to_string(*width);
+        foundWidth = true;
+      }
+    if (!foundWidth) {
+      emit(diag, decl->getBeginLoc(), clang::DiagnosticsEngine::Level::Error,
+           POLYREGION_DIAG_POLYSTL "Package export template specialization has no sized type-variable argument: %0",
+           decl->getQualifiedNameAsString());
+      return {{}, {}, {}, true};
+    }
+    return {name, implementation, capabilities, false};
+  }
   return {{}, implementation, capabilities, false};
 }
 
