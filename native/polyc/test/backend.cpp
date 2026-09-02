@@ -532,6 +532,34 @@ TEST_CASE("C source preserves hoisted workgroup array initialisation", "[backend
   CHECK(sourceText ^ contains_slice("_v1[_ac0] = _v0[_ac0]"));
 }
 
+TEST_CASE("OpenCL immutable array aliases keep selected storage", "[backend][opencl]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto values = Named("values", Type::Arr(Type::IntS64(), 4, TypeSpace::Global()));
+  const StructDef capDef(Sym({"Cap"}), {}, {values}, {}, false);
+  const Type::Struct capTpe(Sym({"Cap"}), {});
+  const Named capture("#capture", Type::Ptr(capTpe, TypeSpace::Global()));
+  const Named view("view", values.tpe);
+  const Named readBack("readBack", Type::IntS64());
+  const Function entry =
+      mkFn("kernel", {Arg(capture, {})}, Type::Unit0(),
+           {Var(view, Expr::Alias(Select({capture}, values).widen()).widen(), false).widen(),
+            Var(readBack, Expr::Index(Select({}, view).widen(), Term::IntS32Const(0).widen(), Type::IntS64()).widen(), false).widen(),
+            Update(Select({capture}, values), Term::IntS32Const(0).widen(), selectNamed(readBack).widen()).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const ScopedEnv verbose(polyregion::env::PolycVerboseNames, std::string("1"));
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {capDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  INFO(source);
+  CHECK(source ^ contains_slice("global long* _v1 = (*_v0).values;"));
+  CHECK_FALSE(source ^ contains_slice("long _v1[4]"));
+}
+
 TEST_CASE("C source accounts for workgroup struct storage", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -2139,6 +2167,69 @@ TEST_CASE("by-value array initialisation copies contents on by-pointer targets",
   CHECK(c.messages == "");
 
   CHECK(llvmIrOf(c) ^ contains_slice("llvm.memcpy"));
+}
+
+TEST_CASE("immutable SPIR-V array aliases keep the selected storage", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const auto values = Named("values", Type::Arr(Type::IntS64(), 4, TypeSpace::Global()));
+  const StructDef capDef(Sym({"Cap"}), {}, {values}, {}, false);
+  const Type::Struct capTpe(Sym({"Cap"}), {});
+  const Named capture("#capture", Type::Ptr(capTpe, TypeSpace::Global()));
+  const Named view("view", values.tpe);
+  const Named readBack("readBack", Type::IntS64());
+
+  std::vector<Stmt::Any> body{
+      Var(view, Expr::Alias(Select({capture}, values).widen()).widen(), false).widen(),
+      Var(readBack, Expr::Index(Select({}, view).widen(), Term::IntS32Const(0).widen(), Type::IntS64()).widen(), false).widen(),
+      Update(Select({capture}, values), Term::IntS32Const(0).widen(), selectNamed(readBack).widen()).widen(),
+      ret(),
+  };
+  const Function entry =
+      mkFn("kernel", {Arg(capture, {})}, Type::Unit0(), body, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {}, {capDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV64_Kernel, ""};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const auto &ir = llvmIrOf(c);
+  INFO(ir);
+  CHECK_FALSE(ir ^ contains_slice("llvm.memcpy"));
+  CHECK_FALSE(ir ^ contains_slice("view_stack_ptr"));
+}
+
+TEST_CASE("ArenaView preserves immutable SPIR-V array aliases", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const auto values = Named("values", Type::Arr(Type::IntS64(), 4, TypeSpace::Global()));
+  const StructDef capDef(Sym({"Cap"}), {}, {values}, {}, false);
+  const Type::Struct capTpe(Sym({"Cap"}), {});
+  const Named capture("#capture", Type::Ptr(capTpe, TypeSpace::Global()));
+  const Named view("view", values.tpe);
+  const Named readBack("readBack", Type::IntS64());
+  const Function entry =
+      mkFn("kernel", {Arg(capture, {})}, Type::Unit0(),
+           {Var(view, Expr::Alias(Select({capture}, values).widen()).widen(), false).widen(),
+            Var(readBack, Expr::Index(Select({}, view).widen(), Term::IntS32Const(0).widen(), Type::IntS64()).widen(), false).widen(),
+            Update(Select({capture}, values), Term::IntS32Const(0).widen(), selectNamed(readBack).widen()).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Program p(entry, {}, {capDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_SPIRV64_Kernel, ""};
+  opts.pipelineSpec = "FullOpt;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
+  const auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const auto &ir = llvmIrOf(c);
+  INFO(ir);
+  CHECK_FALSE(ir ^ contains_slice("llvm.memcpy"));
+  CHECK_FALSE(ir ^ contains_slice("view_stack_ptr"));
 }
 
 TEST_CASE("SPIR-V dynamic workgroup views do not initialise shared storage", "[backend][spirv]") {

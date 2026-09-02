@@ -42,6 +42,7 @@ private:
   std::string mkTpe(const Type::Any &tpe);
   std::string mkArrayDecl(const Type::Any &element, const TypeSpace::Any &space, const std::string &name, const std::string &extent);
   std::string mkDecl(const Type::Any &tpe, const std::string &name);
+  std::optional<std::string> mkArrayAliasDecl(const Type::Any &tpe, const Term::Any &source, const std::string &name);
   std::string mkTerm(const Term::Any &term);
   std::string mkExpr(const Expr::Any &expr);
   std::string mkStmt(const Stmt::Any &stmt);

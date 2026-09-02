@@ -1040,6 +1040,22 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
               if (ptrModel->defineLocalString(*this, x.name.symbol, sc->value, pc->comp)) return BlockKind::Normal;
         }
 
+        // An immutable array alias is a view of the selected storage, not a new value.  Keeping the
+        // selected pointer directly avoids a per-work-item alloca/memcpy; for large arrays that can
+        // exhaust the OpenCL worker stack (and it is also unnecessary since the binding cannot rebind).
+        // Physical LLVM targets keep arrays behind a pointer slot, so this representation is specific
+        // to SPIR-V kernels where an array local is already represented by its storage pointer.
+        if (C.isSpirvKernel() && !x.isMutable && x.name.tpe.template is<Type::Arr>() && x.expr)
+          if (const auto alias = x.expr->template get<Expr::Alias>())
+            if (const auto select = alias->ref.template get<Term::Select>();
+                select && !select->steps.empty() && select->root.tpe.template is<Type::Ptr>()) {
+              auto rhs = mkExprVal(*x.expr, x.name.symbol + "_array_alias");
+              if (rhs->getType()->isPointerTy()) {
+                stackVarPtrs.insert_or_assign(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, rhs});
+                return BlockKind::Normal;
+              }
+            }
+
         if (x.name.tpe.is<Type::Unit0>()) {
           // Unit0 declaration, discard declaration but keep RHS effect.
           if (x.expr) auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");

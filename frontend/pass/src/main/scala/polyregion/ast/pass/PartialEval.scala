@@ -83,17 +83,10 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     reduced
   }
 
-  private def mutatedNames(f: p.Function): Set[p.Named] = {
-    val stmts = f.collectAll[p.Stmt]
-    val direct = stmts.collect {
-      case p.Stmt.Mut(p.Term.Select(name, _, _), _)       => name
-      case p.Stmt.Update(p.Term.Select(name, _, _), _, _) => name
-    }.toSet
-    val refToRoots = stmts.collect {
-      case p.Stmt.Var(name, Some(p.Expr.RefTo(that: p.Term.Select, None, _, _, _)), false) => name -> that.root
-    }.toMap
-    direct ++ direct.flatMap(refToRoots.get)
-  }
+  // An Update writes through a pointer/array lvalue; it does not re-aim the binding itself.
+  // Only a bare Mut of the binding invalidates value/copy propagation for that name.
+  private def mutatedNames(f: p.Function): Set[p.Named] =
+    f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
 
   // an immutable struct-to-struct reinterpret aliases the source storage; the substitution is a whole-function
   // property, so it is scanned once rather than threaded as a binding

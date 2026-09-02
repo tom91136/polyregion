@@ -431,6 +431,26 @@ class PartialEvalSuite extends munit.FunSuite {
     )
   }
 
+  test("a write-through Update does not block immutable pointer alias propagation") {
+    val pointer = named("pointer", ptrI32)
+    val alias   = named("alias", ptrI32)
+    val out = pe(
+      List(
+        p.Stmt.Var(alias, Some(p.Expr.Alias(selectT(pointer)))),
+        // Updating the pointee changes memory, not the pointer value stored in `pointer`.
+        p.Stmt.Update(selectT(pointer), p.Term.IntS32Const(1), p.Term.IntS32Const(5)),
+        p.Stmt.Return(p.Expr.Alias(selectT(alias)))
+      ),
+      rtn = ptrI32,
+      args = List(arg("pointer", ptrI32))
+    )
+    assert(
+      !out.exists { case p.Stmt.Var(n, _, _) if n == alias => true; case _ => false },
+      out.map(_.repr).mkString("\n")
+    )
+    assertEquals(returnedTerm(out), Some(selectT(pointer)))
+  }
+
   test("canonicalise mode is a no-op on PE fold output: deref-then-field (*v).f") {
     val s = named("s", p.Type.Struct(sym("S"), Nil))
     val v = named("v", p.Type.Ptr(p.Type.Struct(sym("S"), Nil), p.Type.Space.Global))

@@ -296,6 +296,10 @@ object ArenaLower extends ProgramPass {
           case Some((_, Reference(_))) => false
           case None =>
             offsetRoots(root.symbol) ||
+            // A pointer loaded from an arena-backed field and kept in a local aggregate is a
+            // real arena address, but pointer fields reached through it still hold arena offsets.
+            // Treat the field load as encoded so the next dereference is rebased exactly once.
+            (steps.nonEmpty && canBeArenaOffset(t.tpe) && state.root(root.symbol) == Base) ||
             (steps.nonEmpty && canBeArenaOffset(t.tpe) && arenaBases(root.symbol)) ||
             (steps.nonEmpty && canBeArenaOffset(t.tpe) && state.isArenaRooted(t))
         }
@@ -454,10 +458,18 @@ object ArenaLower extends ProgramPass {
       case p.Stmt.Var(n, None, m)    => p.Stmt.Var(offsetNamed(n), None, m)
       case p.Stmt.Mut(t @ p.Term.Select(root, steps, targetTpe), e)
           if steps.nonEmpty && localAggregateLValue(t) && isPtr(targetTpe) && offsetExpr(e) =>
-        val token = bind("ot", rwExpr(e))
+        // rwExpr may already materialise an encoded field load while walking a pointer chain.
+        // Only call arenaBase for an expression that is still an offset token; otherwise this
+        // local aggregate would receive a pointer rebased twice.
+        val lowered = rwExpr(e)
+        val value =
+          if (offsetExpr(lowered)) {
+            val token = bind("ot", lowered)
+            p.Expr.Alias(sel(arenaBase(token, e.tpe)))
+          } else lowered
         p.Stmt.Mut(
           rwTerm(t).asInstanceOf[p.Term.Select],
-          p.Expr.Alias(sel(arenaBase(token, e.tpe)))
+          value
         )
       case p.Stmt.Mut(t, e) => p.Stmt.Mut(rwTerm(t).asInstanceOf[p.Term.Select], rwExpr(e))
       case p.Stmt.Update(lhs, i, v) =>

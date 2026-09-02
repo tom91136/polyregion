@@ -428,6 +428,45 @@ class ArenaLowerSuite extends munit.FunSuite {
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef, holderDef, nodeDef))), Nil)
   }
 
+  test("arena pointer loaded into a local aggregate is rebased before a field mutation") {
+    val capSym       = sym("Cap")
+    val nodeSym      = sym("Node")
+    val iteratorSym  = sym("Iterator")
+    val nodeTpe      = p.Type.Struct(nodeSym, Nil)
+    val nodePtr      = p.Type.Ptr(nodeTpe, p.Type.Space.Global)
+    val capTpe       = p.Type.Struct(capSym, Nil)
+    val iteratorTpe  = p.Type.Struct(iteratorSym, Nil)
+    val cap          = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val iterator     = named("iterator", iteratorTpe)
+    val next         = named("next", nodePtr)
+    val capDef       = p.StructDef(capSym, Nil, List(named("head", nodePtr)), Nil)
+    val nodeDef      = p.StructDef(nodeSym, Nil, List(named("next", nodePtr)), Nil)
+    val iteratorDef  = p.StructDef(iteratorSym, Nil, List(named("node", nodePtr)), Nil)
+    val iteratorNode = p.Term.Select(iterator, List(p.PathStep.Field("node")), nodePtr).asInstanceOf[p.Term.Select]
+    val nextField    = p.Term.Select(next, List(p.PathStep.Field("next")), nodePtr)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(iterator, None, isMutable = true),
+        p.Stmt.Mut(iteratorNode, p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("head")), nodePtr))),
+        p.Stmt.Var(next, Some(p.Expr.Alias(iteratorNode)), isMutable = false),
+        p.Stmt.Mut(iteratorNode, p.Expr.Alias(nextField)),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef, nodeDef, iteratorDef)), NoopLog).entry
+
+    assert(
+      out.body.exists {
+        case p.Stmt.Mut(`iteratorNode`, p.Expr.Alias(p.Term.Select(root, Nil, _))) => root.symbol.startsWith("#ab")
+        case _                                                                     => false
+      },
+      out.repr
+    )
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef, nodeDef, iteratorDef))), Nil)
+  }
+
   test("arena offset loaded through a private pointer slot is rebased") {
     val capSym      = sym("Cap")
     val closureSym  = sym("Closure")

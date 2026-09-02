@@ -479,7 +479,10 @@ struct CLAddressSpaceTracePass {
       return key;
     };
 
-    const auto designated = [&](const std::string &fn, const Term::Select &select) -> std::optional<std::string> {
+    std::vector<std::tuple<std::string, std::string, int>> colours;
+
+    std::function<std::optional<std::string>(const std::string &, const Term::Select &)> designated;
+    designated = [&](const std::string &fn, const Term::Select &select) -> std::optional<std::string> {
       if (select.steps.empty()) {
         if (const auto structure = carries(select.root.tpe)) return registerVariable(fn, select.root.symbol, *structure);
         return std::nullopt;
@@ -490,21 +493,43 @@ struct CLAddressSpaceTracePass {
       if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
       const auto structure = owner.template get<Type::Struct>();
       if (!structure) return std::nullopt;
-      if (const auto tpe = fieldType(owner, field->name))
+      if (const auto tpe = fieldType(owner, field->name)) {
         if (const auto carried = carries(*tpe)) return registerMember(structure->name, field->name, *carried);
+        // An aggregate initialized from a pointer field (e.g. `PointerHolder copied{a.ptr}`)
+        // inherits the address-space-specialised representation of the source aggregate. The
+        // field itself carries a scalar pointer, so `carries` cannot identify that relationship.
+        if (tpe->template is<Type::Ptr>() && (conflicted ^ contains(structure->name))) {
+          if (select.steps.size() == 1) return registerVariable(fn, select.root.symbol, structure->name);
+          auto ownerSteps = select.steps;
+          ownerSteps.pop_back();
+          const Term::Select ownerSelect(select.root, ownerSteps, walkPath(select.root.tpe, ownerSteps, ownerSteps.size()).type);
+          return designated(fn, ownerSelect);
+        }
+      }
       return std::nullopt;
     };
-    const auto expressionSpace = [&](const Expr::Any &expr) {
+    const auto expressionSpace = [&](const std::string &fn, const Expr::Any &expr) {
       if (const auto alias = expr.template get<Expr::Alias>())
-        if (const auto select = alias->ref.template get<Term::Select>())
+        if (const auto select = alias->ref.template get<Term::Select>()) {
+          // A pointer field read carries the source aggregate's specialised field colour. The
+          // declared field type is still the unspecialised (usually global) pointer until the
+          // conflict split is applied, so consulting only walkPath here loses the private colour
+          // and makes a copied aggregate use the wrong address space.
+          if (!select->steps.empty())
+            if (const auto field = select->steps.back().template get<PathStep::Field>())
+              if (const auto source = designated(fn, *select)) {
+                const auto component = slots.find(*source);
+                for (const auto &[slot, member, code] : colours)
+                  if (slots.find(slot) == component && member == field->name) return code;
+              }
           return spaceCode(walkPath(select->root.tpe, select->steps, select->steps.size()).space);
+        }
       if (const auto ref = expr.template get<Expr::RefTo>()) return spaceCode(ref->space);
       if (const auto ptr = expr.tpe().template get<Type::Ptr>()) return spaceCode(ptr->space);
       return 3;
     };
 
     bool valid = true;
-    std::vector<std::tuple<std::string, std::string, int>> colours;
     struct NestedCopy {
       std::string function;
       Sym owner;
@@ -517,8 +542,21 @@ struct CLAddressSpaceTracePass {
     std::vector<AggregateCopy> aggregateCopies;
     for (const auto &function : functions) {
       const auto fn = functionKey(function);
+      Map<std::string, Term::Select> pointerAliases;
+      const auto resolvePointerAlias = [&](Term::Select select) {
+        Set<std::string> seen;
+        while (select.steps.empty()) {
+          if (!seen.insert(select.root.symbol).second) break;
+          const auto source = pointerAliases.find(select.root.symbol);
+          if (source == pointerAliases.end()) break;
+          select = source->second;
+        }
+        return select;
+      };
       eachStmt(function.body, [&](const Stmt::Any &stmt) {
         if (const auto var = stmt.template get<Stmt::Var>()) {
+          if (var->expr)
+            if (const auto source = aliasSelect(*var->expr)) pointerAliases.insert_or_assign(var->name.symbol, *source);
           if (const auto structure = carries(var->name.tpe)) {
             const auto dst = registerVariable(fn, var->name.symbol, *structure);
             if (var->expr && !isPoisonInit(*var->expr)) {
@@ -565,7 +603,17 @@ struct CLAddressSpaceTracePass {
             slot = designated(fn, ownerSelect);
           }
           if (!slot) throw backend::BackendException("cannot specialise indirect conflicting pointer field");
-          colours.emplace_back(*slot, field->name, expressionSpace(mut->expr));
+          if (const auto source = aliasSelect(mut->expr))
+            if (const auto sourceSlot = designated(fn, resolvePointerAlias(*source))) {
+              if (slotStruct[*slot] == slotStruct[*sourceSlot]) {
+                // Copying a pointer field between aggregates of the same type preserves the
+                // source aggregate's specialised representation (the source slot already carries
+                // the field colour discovered earlier in this function).
+                slots.unite(*slot, *sourceSlot);
+                return;
+              }
+            }
+          colours.emplace_back(*slot, field->name, expressionSpace(fn, mut->expr));
         } else if (structure && tpe) {
           if (const auto carried = carries(*tpe)) {
             const auto source = aliasSelect(mut->expr);
@@ -782,7 +830,6 @@ struct CLAddressSpaceTracePass {
                   + static_cast<int>(has(stores.local, structure, field)) + static_cast<int>(has(stores.priv, structure, field))
               >= 2)
             conflicted.insert(structure);
-
     ConflictSplit split;
     if (!conflicted.empty()) {
       const auto structDefs = p.defs | map([](const auto &def) { return std::pair{def.name, def}; }) | to<Map>();
@@ -1110,6 +1157,42 @@ std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &na
     return fmt::format("{}{} (*{}){}", q, mkTpe(base), name, dims);
   }
   return fmt::format("{} {}", mkTpe(tpe), name);
+}
+
+std::optional<std::string> backend::CSource::mkArrayAliasDecl(const Type::Any &tpe, const Term::Any &source, const std::string &name) {
+  // An immutable array alias only needs the source address.  Materialising every element of a
+  // large field array in a private temporary is both unnecessary and, on PoCL, enough to exhaust
+  // the worker stack.  Keep mutable aliases as value copies below because rebinding their storage
+  // would change the language-level copy semantics.
+  if (dialect != Dialect::OpenCL1_1) return std::nullopt;
+  const auto array = tpe.template get<Type::Arr>();
+  const auto select = source.template get<Term::Select>();
+  // Keep ordinary local-array initialisation by value.  The optimisation is for a field reached
+  // through a pointer (the derived-type capture shape emitted by polyfc), where the selected
+  // storage is the intended immutable view and is already addressable without a copy.
+  if (!array || !select || select->steps.empty() || !select->root.tpe.template is<Type::Ptr>()) return std::nullopt;
+
+  Type::Any current = select->root.tpe;
+  TypeSpace::Any space =
+      current.template get<Type::Ptr>() ^ map([](const auto &p) { return p.space; }) ^ get_or_else(TypeSpace::Private().widen());
+  for (const auto &step : select->steps)
+    step.match_total(
+        [&](const PathStep::Field &field) {
+          if (const auto pointer = current.template get<Type::Ptr>()) space = pointer->space, current = pointer->comp;
+          current = resolveFieldType(current, field.name);
+        },
+        [&](const PathStep::Deref &) {
+          if (const auto pointer = current.template get<Type::Ptr>()) space = pointer->space, current = pointer->comp;
+        },
+        [&](const PathStep::Index &) {
+          if (const auto pointer = current.template get<Type::Ptr>()) space = pointer->space, current = pointer->comp;
+          else if (const auto nested = current.template get<Type::Arr>()) current = nested->comp;
+        },
+        [&](const PathStep::IndexDyn &) {
+          if (const auto pointer = current.template get<Type::Ptr>()) space = pointer->space, current = pointer->comp;
+          else if (const auto nested = current.template get<Type::Arr>()) current = nested->comp;
+        });
+  return fmt::format("{} = {}", mkDecl(Type::Ptr(array->comp, space).widen(), name), mkTerm(*select));
 }
 
 std::string backend::CSource::mkTerm(const Term::Any &term) {
@@ -1683,6 +1766,9 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
             return mkValueCopy(localName(x.name.symbol), mkExpr(*x.expr), x.name.tpe, 0);
           throw BackendException("workgroup array initializer is not representable");
         }
+        if (x.expr)
+          if (const auto alias = x.expr->template get<Expr::Alias>(); alias && !x.isMutable)
+            if (const auto decl = mkArrayAliasDecl(x.name.tpe, alias->ref, localName(x.name.symbol))) return *decl + ";";
         if (x.expr && isPoisonInit(*x.expr) && (x.name.tpe.is<Type::Struct>() || x.name.tpe.is<Type::Arr>())) {
           return fmt::format("{};", mkDecl(x.name.tpe, localName(x.name.symbol)));
         }

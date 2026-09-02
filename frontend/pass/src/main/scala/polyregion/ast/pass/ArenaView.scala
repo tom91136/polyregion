@@ -456,7 +456,13 @@ object ArenaView extends ProgramPass {
             views,
             derived,
             arenaRegion,
-            isArena
+            isArena,
+            f.collectAll[p.Stmt]
+              .collect {
+                case p.Stmt.Mut(p.Term.Select(root, _, _), _)       => root
+                case p.Stmt.Update(p.Term.Select(root, _, _), _, _) => root
+              }
+              .toSet
           )
         )
       // neutralise view binding slots to an i8 view so the slot stays aligned, so we can avoid dragging unused types in
@@ -491,7 +497,8 @@ object ArenaView extends ProgramPass {
       views: List[p.Named],
       derived: Map[p.Named, p.Region],
       arenaRegion: p.Region => Boolean,
-      isArena: p.Named => Boolean
+      isArena: p.Named => Boolean,
+      mutatedRoots: Set[p.Named]
   )(leaf: p.Stmt): List[p.Stmt] = {
     val pre = ListBuffer.empty[p.Stmt]
 
@@ -610,6 +617,40 @@ object ArenaView extends ProgramPass {
     def bindTerm(hint: String, t: p.Term): p.Term.Select = {
       val n = fresh(hint, t.tpe); pre += p.Stmt.Var(n, Some(p.Expr.Alias(t)), isMutable = false); sel(n)
     }
+
+    // Physical SPIR-V still uses ArenaView's typed scalar descriptors, but an immutable array
+    // binding does not need a private aggregate copy.  Keep a pointer to the selected first
+    // element and expose it through a dereferenced pointer-to-array binding.  The LLVM backend
+    // can then bind the array name directly to that storage.  Restrict this to scalar arrays and
+    // untouched bindings: aggregate elements need the ordinary field-wise materialisation, and a
+    // write through a by-value binding must not unexpectedly alias the arena object.
+    def arrayAlias(n: p.Named, e: p.Expr, isMutable: Boolean): Option[p.Stmt] =
+      if (isMutable) None
+      else
+        (n.tpe, e) match {
+          case (arr @ p.Type.Arr(component, length, _), p.Expr.Alias(source: p.Term.Select))
+              if length > 0 && !isAgg(component) && source.steps.nonEmpty && lvalueOffset(
+                source.root,
+                source.steps
+              ).nonEmpty =>
+            if (mutatedRoots(n)) None
+            else {
+              val off              = lvalueOffset(source.root, source.steps).get
+              val (view, _, shift) = viewFor(component)
+              val elemPtrTpe       = p.Type.Ptr(component, Global)
+              val elemPtr          = fresh("av", elemPtrTpe)
+              val ptrTpe           = p.Type.Ptr(arr, Global)
+              val ptr              = fresh("av", ptrTpe)
+              val index            = indexOf(off, shift)
+              val ref              = p.Expr.RefTo(sel(view), Some(index), component, Global, p.Region.Rooted(view))
+              pre += p.Stmt.Var(elemPtr, Some(ref), isMutable = false)
+              pre += p.Stmt.Var(ptr, Some(p.Expr.Cast(sel(elemPtr), ptrTpe)), isMutable = false)
+              Some(
+                p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(ptr, List(p.PathStep.Deref), arr))), isMutable = false)
+              )
+            }
+          case _ => None
+        }
 
     // arena byte-offset walk from a base offset + pointee type; a Field/Index on a loaded pointer field
     // auto-derefs it (the `ptr->field` idiom carries no explicit Deref), an explicit Deref does its own load
@@ -875,8 +916,12 @@ object ArenaView extends ProgramPass {
       } else (n, rwExpr(e))
 
     val out = leaf match {
-      case p.Stmt.Var(n, Some(e), m) => val (nn, ne) = rwInit(n, e); List(p.Stmt.Var(nn, Some(ne), m))
-      case p.Stmt.Var(n, None, m)    => List(p.Stmt.Var(if (isArena(n) && isPtr(n.tpe)) i64Var(n) else n, None, m))
+      case p.Stmt.Var(n, Some(e), m) =>
+        arrayAlias(n, e, m).toList match {
+          case Nil     => val (nn, ne) = rwInit(n, e); List(p.Stmt.Var(nn, Some(ne), m))
+          case aliases => aliases
+        }
+      case p.Stmt.Var(n, None, m) => List(p.Stmt.Var(if (isArena(n) && isPtr(n.tpe)) i64Var(n) else n, None, m))
       case p.Stmt.Mut(p.Term.Select(n, Nil, t), e) =>
         if (isArena(n) && isPtr(n.tpe)) List(p.Stmt.Mut(p.Term.Select(i64Var(n), Nil, I64), rwExpr(e)))
         else List(p.Stmt.Mut(p.Term.Select(n, Nil, t), rwExpr(e)))
