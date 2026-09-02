@@ -100,6 +100,11 @@ static std::optional<uint64_t> scalarBytes(const Type::Any &t) {
   return std::nullopt;
 }
 
+static bool needsMslRefTemporary(const Expr::RefTo &ref) {
+  return ref.space.template is<TypeSpace::Private>() && scalarBytes(ref.comp).has_value() && !ref.lhs.template is<Term::Select>()
+         && !ref.lhs.template is<Term::StringConst>() && !ref.lhs.tpe().template is<Type::Ptr>() && !ref.lhs.tpe().template is<Type::Arr>();
+}
+
 struct ArrayExtent {
   Type::Any element;
   uint64_t count;
@@ -1760,6 +1765,12 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::FnRef>()) return ""s;
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
+        if (dialect == Dialect::MSL1_0 && x.expr)
+          if (const auto ref = x.expr->template get<Expr::RefTo>(); ref && needsMslRefTemporary(*ref)) {
+            const auto temp = denseName(localNameCounter++);
+            return fmt::format("thread {} {} = {}; {} = &{};", mkTpe(ref->comp), temp, mkTerm(ref->lhs),
+                               mkDecl(x.name.tpe, localName(x.name.symbol)), temp);
+          }
         if (isLocalArr(x.name.tpe)) {
           if (!x.expr || isPoisonInit(*x.expr)) return ""s;
           if (memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
@@ -1783,6 +1794,11 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         if (x.name.tpe.template is<Type::FnRef>()) return ""s;
         if (isPoisonInit(x.expr) && (x.name.tpe.template is<Type::Struct>() || x.name.tpe.template is<Type::Arr>())) return ""s;
         if (x.name.tpe.template is<Type::Unit0>()) return fmt::format("{};", mkExpr(x.expr));
+        if (dialect == Dialect::MSL1_0)
+          if (const auto ref = x.expr.template get<Expr::RefTo>(); ref && needsMslRefTemporary(*ref)) {
+            const auto temp = denseName(localNameCounter++);
+            return fmt::format("thread {} {} = {}; {} = &{};", mkTpe(ref->comp), temp, mkTerm(ref->lhs), mkTerm(x.name), temp);
+          }
         if (memberwise(x.name.tpe, x.expr.template is<Expr::Alias>())) return mkValueCopy(mkTerm(x.name), mkExpr(x.expr), x.name.tpe, 0);
         return fmt::format("{} = {};", mkTerm(x.name), mkExpr(x.expr));
       },

@@ -2891,6 +2891,57 @@ TEST_CASE("OpenCL source takes the address of a constant through a compound lite
   CHECK_FALSE(source ^ contains_slice("&(1 /*uint*/)"));
 }
 
+TEST_CASE("Metal source materialises the address of a scalar constant", "[backend][metal]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named ref("p", Type::Ptr(Type::IntU32(), TypeSpace::Private()));
+  Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {
+          Var(ref, Expr::RefTo(Term::IntU32Const(1).widen(), {}, Type::IntU32(), TypeSpace::Private(), Region::Opaque()).widen(), false)
+              .widen(),
+          Mut(selectNamed(ref),
+              Expr::RefTo(Term::IntU32Const(3).widen(), {}, Type::IntU32(), TypeSpace::Private(), Region::Opaque()).widen())
+              .widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source ^ contains_slice("thread uint32_t _v1 = 1;"));
+  CHECK(source ^ contains_slice("thread uint32_t* _v0 = &_v1;"));
+  CHECK_FALSE(source ^ contains_slice("&(1 /*uint32_t*/)"));
+}
+
+TEST_CASE("Metal source materialises scalar references assigned through captures", "[backend][metal]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym boxSym({"Box"});
+  const Type::Struct box(boxSym, {});
+  const Named pointer("pointer", Type::Ptr(Type::IntU32(), TypeSpace::Private()));
+  const StructDef boxDef(boxSym, {}, {pointer}, {}, false);
+  const Named capture("#capture", Type::Ptr(box, TypeSpace::Global()));
+  const Function entry =
+      mkFn("kernel", {Arg(capture, {})}, Type::Unit0(),
+           {Mut(selectField(selectNamed(capture), pointer),
+                Expr::RefTo(Term::IntU32Const(3).widen(), {}, Type::IntU32(), TypeSpace::Private(), Region::Opaque()).widen())
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source ^ contains_slice("thread uint32_t _v1 = 3;"));
+  CHECK_FALSE(source ^ contains_slice("&(3 /*uint32_t*/)"));
+}
+
 TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its address", "[backend]") {
   polyregion::compiler::initialise();
   const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
