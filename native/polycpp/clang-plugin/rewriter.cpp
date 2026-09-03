@@ -380,6 +380,24 @@ struct InterfaceModuleResource {
   clang::VarDecl *features;
 };
 
+static clang::VarDecl *mkStaticByteArray(clang::ASTContext &C, clang::DeclContext *context, const std::string &name,
+                                         const llvm::StringRef bytes) {
+  const auto type = mkConstArrTy(C, C.getConstType(C.UnsignedCharTy), bytes.size() + 1);
+  auto *literal = clang::StringLiteral::Create(C, bytes, clang::StringLiteralKind::Ordinary, false, type, {{}});
+  auto *declaration = clang::VarDecl::Create(C, context, {}, {}, &C.Idents.get(name), type, nullptr, clang::SC_Static);
+  declaration->setInit(literal);
+  declaration->setInitStyle(clang::VarDecl::InitializationStyle::CInit);
+  return declaration;
+}
+
+template <typename T, typename Allocator>
+  requires(sizeof(T) == 1)
+static clang::VarDecl *mkStaticByteArray(clang::ASTContext &C, clang::DeclContext *context, const std::string &name,
+                                         const std::vector<T, Allocator> &bytes) {
+  return mkStaticByteArray(C, context, name,
+                           llvm::StringRef(bytes.empty() ? "" : reinterpret_cast<const char *>(bytes.data()), bytes.size()));
+}
+
 static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTContext &C, const PreparedInterfaceCall &prepared,
                                      const polyast::CompileBundle &compiled, const std::vector<InterfaceModuleResource> &resources) {
   const auto &site = prepared.site;
@@ -516,13 +534,8 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
   const auto &batchSuffix = prepared.front().suffix;
   for (size_t index = 0; index < compiled.value->remoteModules.size(); ++index) {
     const auto &object = compiled.value->remoteModules[index];
-    auto *image = mkStaticVarDecl(C, translationUnit, "__polyregion_package_image_" + batchSuffix + "_" + std::to_string(index),
-                                  mkConstArrTy(C, C.UnsignedCharTy, object.image.size()),
-                                  object.image | map([&](const auto byte) -> clang::Expr * {
-                                    return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
-                                                                           mkIntLit(C, C.IntTy, static_cast<unsigned char>(byte)), nullptr,
-                                                                           clang::VK_PRValue, {});
-                                  }) | to_vector());
+    auto *image =
+        mkStaticByteArray(C, translationUnit, "__polyregion_package_image_" + batchSuffix + "_" + std::to_string(index), object.image);
     translationUnit->addDecl(image);
     CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(image));
     clang::VarDecl *features = nullptr;
@@ -610,18 +623,12 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   const auto AggregateMemberTy = typeOfFieldWithName(*TypeLayoutTy, "members") ^ map([](const auto &t) { return t->getPointeeType(); });
   const auto TypeLayoutMembersField = fieldWithName(*TypeLayoutTy, "members");
 
-  auto kernelImageDecls =
-      bundle.objects     //
-      | zip_with_index() //
-      | map([&](const auto &ko, const auto &idx) {
-          return mkStaticVarDecl(
-              C, c.calleeDecl, fmt::format("__ko_image_data_{}", idx), mkConstArrTy(C, C.UnsignedCharTy, ko.moduleImage.size()),
-              ko.moduleImage ^ map([&](const auto &x) -> clang::Expr * {
-                return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
-                                                       mkIntLit(C, C.IntTy, static_cast<unsigned char>(x)), nullptr, clang::VK_PRValue, {});
-              }));
-        }) //
-      | to_vector();
+  auto kernelImageDecls = bundle.objects     //
+                          | zip_with_index() //
+                          | map([&](const auto &ko, const auto &idx) {
+                              return mkStaticByteArray(C, c.calleeDecl, fmt::format("__ko_image_data_{}", idx), ko.moduleImage);
+                            }) //
+                          | to_vector();
 
   auto kernelFeatureDecls =
       bundle.objects     //
@@ -637,13 +644,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
 
   Opt<clang::VarDecl *> kernelProgramDecl;
   if (!bundle.program.empty()) {
-    kernelProgramDecl = mkStaticVarDecl(C, c.calleeDecl, "__ko_program_data", //
-                                        mkConstArrTy(C, C.UnsignedCharTy, bundle.program.size()),
-                                        bundle.program ^ map([&](const auto &x) -> clang::Expr * {
-                                          return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
-                                                                                 mkIntLit(C, C.IntTy, static_cast<unsigned char>(x)),
-                                                                                 nullptr, clang::VK_PRValue, {});
-                                        }));
+    kernelProgramDecl = mkStaticByteArray(C, c.calleeDecl, "__ko_program_data", bundle.program);
   }
 
   auto kernelObjectArrayDecl = mkStaticVarDecl(
