@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
     const auto hasVisit =
         function->template collect_all<Stmt::Cond>().size() >= 2 && function->template collect_all<Expr::Invoke>().size() >= 3;
     const auto hasVariantException = program.functions ^ exists([](const auto &candidate) {
-                                       return fqcn(candidate.decl.name).find("__throw_bad_variant_access") != std::string::npos;
+                                       return fqcn(candidate.decl.name).find("variant_access") != std::string::npos;
                                      });
     const auto hasNext = function->template collect_all<Expr::RefTo>() ^ exists([](const auto &ref) {
                            return ref.comp.template is<Type::IntS32>() && ref.idx && ref.idx->template is<Term::Select>();

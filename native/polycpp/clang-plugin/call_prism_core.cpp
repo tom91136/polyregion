@@ -345,7 +345,9 @@ static Opt<MatchedCall> compilerBuiltin(const clang::CallExpr &call, const clang
 }
 
 static Opt<MatchedCall> badVariantAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
-  if (decl.getQualifiedNameAsString() != "std::__throw_bad_variant_access" || !decl.isNoReturn() || !call.getType()->isVoidType())
+  const auto name = decl.getQualifiedNameAsString();
+  if ((name != "std::__throw_bad_variant_access" && name != "std::_Throw_bad_variant_access") || !decl.isNoReturn()
+      || !call.getType()->isVoidType())
     return {};
   const auto *expression = &call;
   return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {

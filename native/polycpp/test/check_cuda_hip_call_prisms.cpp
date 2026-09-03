@@ -58,6 +58,8 @@
 #pragma region compile-fails: Signed PTX bit-field extraction is not supported
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SIGNED_BFE -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
 
+#include <cstdint>
+
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 
 namespace cub {
@@ -151,7 +153,7 @@ struct triple_chevron {
 };
 } // namespace thrust::cuda_cub::launcher
 
-void launch_kernel(int *output, long value) { *output = static_cast<int>(value); }
+void launch_kernel(int *output, std::int64_t value) { *output = static_cast<int>(value); }
 
 int cudaMalloc(void **pointer, unsigned long) {
   *pointer = nullptr;
