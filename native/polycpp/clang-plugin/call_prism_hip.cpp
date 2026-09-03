@@ -18,6 +18,7 @@ constexpr std::string_view devicePartition = "device_partition";
 constexpr std::string_view warpShuffleDown = "rocprim::warp_shuffle_down";
 constexpr std::string_view warpShuffleUp = "rocprim::warp_shuffle_up";
 constexpr std::string_view hostTargetArchitecture = "rocprim::detail::host_target_arch";
+constexpr std::string_view deviceArchitecture = "rocprim::detail::get_device_arch";
 
 [[nodiscard]] bool warpSizeAttribute(const clang::Expr &expression) {
   const auto *reference = llvm::dyn_cast<clang::DeclRefExpr>(expression.IgnoreParenImpCasts());
@@ -141,7 +142,8 @@ static Opt<MatchedCall> hipBuiltin(const clang::CallExpr &call, const clang::Fun
         if (stream || device) {
           (void)lowerArguments(*expression, self, r);
           if (stream && !expression->getArg(0)->isNullPointerConstant(self.context, clang::Expr::NPC_ValueDependentIsNotNull))
-            raise("Non-default HIP streams are not supported in package code");
+            raise(fmt::format("Non-default HIP streams are not supported in package code at {}",
+                              expression->getArg(0)->getExprLoc().printToString(self.context.getSourceManager())));
           (void)r.newVar(Expr::SpecOp(Spec::RemoteSync(packageContext())));
           return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
         }
@@ -178,10 +180,11 @@ static Opt<MatchedCall> hipBallot(const clang::CallExpr &call, const clang::Func
   const auto name = decl.getQualifiedNameAsString();
   if ((name != "__builtin_amdgcn_ballot_w32" && name != "__builtin_amdgcn_ballot_w64") || call.getNumArgs() != 1) return {};
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, name](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-                       if (name == "__builtin_amdgcn_ballot_w64") raise("64-bit AMD ballots are not representable in PolyAST");
+  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        const auto predicate = r.newVar(self.handleExpr(expression->getArg(0), r));
                        const auto ballot = Expr::SpecOp(Spec::GpuBallot(Term::IntU32Const(0xffffffffu), predicate));
+                       // PolyAST defines a portable 32-lane logical subgroup. A w64 source alternative may still be
+                       // instantiated in host code for a wave32 target; widen the logical mask to its declared type.
                        return self.conform(r, ballot, self.handleType(expression->getType(), r));
                      }},
                      false};
@@ -191,34 +194,50 @@ static Opt<MatchedCall> hipRuntime(const clang::CallExpr &call, const clang::Fun
   return remoteRuntimePrism(call, decl, "hip");
 }
 
+static Opt<MatchedCall> hipErrorState(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto name = decl.getQualifiedNameAsString();
+  if (call.getNumArgs() != 0 || (name != "hipPeekAtLastError" && name != "hipGetLastError")) return {};
+  const auto *expression = &call;
+  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       (void)lowerArguments(*expression, self, r);
+                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                     }},
+                     false};
+}
+
 static Opt<MatchedCall> hipHostQuery(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto name = decl.getQualifiedNameAsString();
-  const bool architecture = name == hostTargetArchitecture && call.getNumArgs() >= 2;
+  const bool architecture = (name == hostTargetArchitecture || name == deviceArchitecture) && call.getNumArgs() >= 2;
+  const bool deviceOrdinal = name == "hipGetDevice" && call.getNumArgs() == 1;
   const bool attribute = name == "hipDeviceGetAttribute" && call.getNumArgs() == 3;
   const bool warpSize = attribute && warpSizeAttribute(*call.getArg(1));
-  if (!architecture && !attribute) return {};
+  if (!architecture && !deviceOrdinal && !attribute) return {};
   const auto *expression = &call;
-  return MatchedCall{
-      Lowering{[expression, architecture, warpSize](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-        const auto arguments = lowerArguments(*expression, self, r);
-        if (!architecture && !warpSize) raise("Unsupported HIP device attribute query");
-        const auto output = arguments[architecture ? 1 : 0];
-        const auto pointer = output.tpe().get<Type::Ptr>();
-        if (!pointer) raise("HIP host query output is not a pointer");
-        const auto base = output.get<Term::Select>();
-        if (!base) raise("HIP host query output did not lower to a selectable pointer");
-        const auto stored =
-            architecture ? r.newVar(self.integralConstOfType(pointer->comp, 0xFFFFFFFFULL))
-                         : r.newVar(self.conform(r, Expr::ForeignCall("polyrt_device_subgroup_size", {packageContext()}, Type::IntU64()),
-                                                 pointer->comp));
-        r.push(Stmt::Update(*base, Term::IntU64Const(0), stored));
-        return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
-      }},
-      false};
+  return MatchedCall{Lowering{[expression, architecture, deviceOrdinal, warpSize](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       const auto arguments = lowerArguments(*expression, self, r);
+                       if (!architecture && !deviceOrdinal && !warpSize) raise("Unsupported HIP device attribute query");
+                       const auto output = arguments[architecture ? 1 : 0];
+                       const auto selection = output.get<Term::Select>();
+                       if (!selection) raise("HIP host query output did not lower to a selectable value");
+                       if (const auto pointer = output.tpe().get<Type::Ptr>()) {
+                         const auto stored =
+                             architecture    ? r.newVar(self.integralConstOfType(pointer->comp, 0xFFFFFFFFULL))
+                             : deviceOrdinal ? r.newVar(self.integralConstOfType(pointer->comp, 0))
+                                             : r.newVar(self.conform(
+                                                   r, Expr::ForeignCall("polyrt_device_subgroup_size", {packageContext()}, Type::IntU64()),
+                                                   pointer->comp));
+                         r.push(Stmt::Update(*selection, Term::IntU64Const(0), stored));
+                       } else {
+                         if (!architecture) raise("HIP host query output is not a pointer");
+                         r.push(Stmt::Mut(*selection, self.integralConstOfType(output.tpe(), 0xFFFFFFFFULL)));
+                       }
+                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                     }},
+                     false};
 }
 
 Vector<CallPrism> hipPrisms() {
-  return {hipSleepScanState, hipShuffle, hipBuiltin, hipOcklIndex, hipBallot, hipRuntime, hipHostQuery, hipIgnoredHelper};
+  return {hipSleepScanState, hipShuffle, hipBuiltin, hipOcklIndex, hipBallot, hipRuntime, hipErrorState, hipHostQuery, hipIgnoredHelper};
 }
 
 } // namespace polyregion::polystl::call_prism

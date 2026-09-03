@@ -135,6 +135,9 @@ int main(int argc, char **argv) {
     const auto hasBitCast = hasBitCastRef && hasBitCastCast && hasBitCastLoad;
     const auto hasVisit =
         function->template collect_all<Stmt::Cond>().size() >= 2 && function->template collect_all<Expr::Invoke>().size() >= 3;
+    const auto hasVariantException = program.functions ^ exists([](const auto &candidate) {
+                                       return fqcn(candidate.decl.name).find("__throw_bad_variant_access") != std::string::npos;
+                                     });
     const auto hasNext = function->template collect_all<Expr::RefTo>() ^ exists([](const auto &ref) {
                            return ref.comp.template is<Type::IntS32>() && ref.idx && ref.idx->template is<Term::Select>();
                          });
@@ -144,7 +147,7 @@ int main(int argc, char **argv) {
                                  });
     const auto preservesConditionalReference = selectReference && selectReference->template collect_all<Expr::RefTo>().empty()
                                                && selectReference->decl.rtn.template is<Type::Ptr>();
-    return hasMemcpy && hasBitCast && hasVisit && hasNext && preservesConditionalReference ? 0 : 19;
+    return hasMemcpy && hasBitCast && hasVisit && !hasVariantException && hasNext && preservesConditionalReference ? 0 : 19;
   }
   if (argc == 3 && std::string(argv[1]) == "--assert-allocation-control-scaffolding") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
@@ -184,8 +187,12 @@ int main(int argc, char **argv) {
     const auto subgroupSizes = program.collect_all<Spec::GpuSubgroupSize>().size();
     const auto globalIndices = program.collect_all<Spec::GpuGlobalIdx>().size();
     const auto localIndices = program.collect_all<Spec::GpuLocalIdx>().size();
-    const auto bitwiseReductions =
-        program.collect_all<Spec::GpuGroupReduce>() ^ count([](const auto &op) { return op.op.template is<AtomicOp::Or>(); });
+    const auto bitwiseReductions = program.collect_all<Spec::GpuGroupReduce>() ^ count([](const auto &op) {
+                                     return op.op.template is<AtomicOp::Or>() && !op.value.tpe().template is<Type::Bool1>();
+                                   });
+    const auto logicalReductions = program.collect_all<Spec::GpuGroupReduce>() ^ count([](const auto &op) {
+                                     return op.op.template is<AtomicOp::Or>() && op.value.tpe().template is<Type::Bool1>();
+                                   });
     const auto bitwiseInclusiveScans =
         program.collect_all<Spec::GpuGroupInclusiveScan>() ^ count([](const auto &op) { return op.op.template is<AtomicOp::Xor>(); });
     const auto deviceInfoCalls = program.collect_all<Expr::ForeignCall>() ^ count([](const auto &call) {
@@ -194,16 +201,18 @@ int main(int argc, char **argv) {
                                           || call.name == "polyrt_device_global_memory_bytes" || call.name == "polyrt_device_compute_units";
                                  });
     const auto deviceLimitCaps = program.collect_all<Intr::Min>().size();
-    const bool valid = allocations == 4 && frees == 4 && launches == 2 && entries == 2 && reductions == 3 && inclusiveScans == 2
-                       && exclusiveScans == 1 && bitwiseReductions == 2 && bitwiseInclusiveScans == 1 && copies.size() == 8
-                       && localToRemote == 1 && remoteToLocal == 3 && remoteToRemote == 4 && barriers == 0 && allBarriers == 2
-                       && subgroupBarriers == 1 && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4 && globalIndices >= 5
-                       && localIndices >= 5 && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4 && deviceLimitCaps >= 1;
+    const bool valid = allocations == 6 && frees == 5 && launches == 2 && entries == 2 && reductions == 3 && inclusiveScans == 2
+                       && exclusiveScans == 1 && bitwiseReductions == 1 && logicalReductions == 1 && bitwiseInclusiveScans == 1
+                       && copies.size() == 9 && localToRemote == 1 && remoteToLocal == 3 && remoteToRemote == 5 && barriers == 0
+                       && allBarriers == 2 && subgroupBarriers == 1 && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4
+                       && globalIndices >= 5 && localIndices >= 5 && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4
+                       && deviceLimitCaps >= 1;
     if (!valid)
       llvm::errs() << "Unexpected SYCL prism counts: alloc=" << allocations << " free=" << frees << " launch=" << launches
                    << " entries=" << entries << " reduce=" << reductions << " copies=" << copies.size() << " inclusive=" << inclusiveScans
                    << " exclusive=" << exclusiveScans << " local-to-remote=" << localToRemote << " remote-to-local=" << remoteToLocal
-                   << " remote-to-remote=" << remoteToRemote << " local-barriers=" << barriers << " all-barriers=" << allBarriers
+                   << " remote-to-remote=" << remoteToRemote << " bitwise-reduce=" << bitwiseReductions
+                   << " logical-reduce=" << logicalReductions << " local-barriers=" << barriers << " all-barriers=" << allBarriers
                    << " subgroup-barriers=" << subgroupBarriers << " shuffle-up=" << shuffleUps << " shuffle-index=" << shuffleIndices
                    << " subgroup-size=" << subgroupSizes << " global-index=" << globalIndices << " local-index=" << localIndices
                    << " multiply=" << program.collect_all<Intr::Mul>().size() << '\n'
@@ -237,17 +246,43 @@ int main(int argc, char **argv) {
     const auto cudaDeviceQueries = program.collect_all<Expr::ForeignCall>() ^ count([](const auto &call) {
                                      return call.name == "polyrt_device_compute_units" || call.name == "polyrt_device_local_memory_bytes";
                                    });
+    const auto launches = program.collect_all<Spec::RemoteLaunch>().size();
+    const auto conformedLaunchArguments = program.collect_all<Spec::RemoteLaunch>() ^ exists([](const auto &launch) {
+                                            return launch.args.size() == 2 && launch.args[1].tpe().template is<Type::IntS64>();
+                                          });
+    const auto pointerInitialisedValues = program.collect_all<Stmt::Var>() ^ count([](const auto &variable) {
+                                            if (!variable.expr) return false;
+                                            const auto pointer = variable.expr->tpe().template get<Type::Ptr>();
+                                            return pointer && pointer->comp == variable.name.tpe;
+                                          });
+    const auto hasRawErrorStateHelper =
+        program.functions ^ exists([](const auto &function) {
+          const auto name = fqcn(function.decl.name);
+          return name.find("cudaPeekAtLastError") != std::string::npos || name.find("cudaGetLastError") != std::string::npos
+                 || name.find("hipPeekAtLastError") != std::string::npos || name.find("hipGetLastError") != std::string::npos;
+        });
+    const auto hasRawDeviceOrdinalHelper =
+        program.functions ^ exists([](const auto &function) {
+          const auto name = fqcn(function.decl.name);
+          return name == "cudaGetDevice" || name.ends_with("::cudaGetDevice") || name == "hipGetDevice" || name.ends_with("::hipGetDevice");
+        });
+    const auto hasRawHipArchitectureHelper = program.functions ^ exists([](const auto &function) {
+                                               const auto name = fqcn(function.decl.name);
+                                               return name.find("rocprim::detail::host_target_arch") != std::string::npos
+                                                      || name.find("rocprim::detail::get_device_arch") != std::string::npos;
+                                             });
     const auto valid = program.collect_all<Spec::RemoteAlloc>().size() == 2 && program.collect_all<Spec::RemoteFree>().size() == 2
-                       && shuffleDowns.size() == 1 && shuffleDowns ^ forall(logicalWidth) && shuffleUps.size() == 3
+                       && shuffleDowns.size() == 1 && shuffleDowns ^ forall(logicalWidth) && shuffleUps.size() == 4
                        && (shuffleUps ^ count(logicalWidth)) >= 2 && shuffleIndices.size() == 1 && (shuffleIndices ^ forall(logicalWidth))
-                       && shuffleXors.size() == 2 && program.collect_all<Spec::GpuBallot>().size() == 2
+                       && shuffleXors.size() == 2 && program.collect_all<Spec::GpuBallot>().size() == 3
                        && program.collect_all<Spec::GpuSubgroupBarrier>().size() == 1
                        && program.collect_all<Spec::GpuFenceLocal>().size() == 1 && program.collect_all<Spec::GpuFenceGlobal>().size() == 1
                        && program.collect_all<Spec::GpuFenceAll>().size() == 1 && program.collect_all<Spec::GpuVolatileLoad>().size() == 1
                        && program.collect_all<Spec::GpuVolatileStore>().size() == 1 && program.collect_all<Spec::GpuAtomicRMW>().size() == 2
                        && program.collect_all<Spec::GpuAtomicCAS>().size() == 2 && program.collect_all<Spec::GpuSubgroupSize>().empty()
                        && !program.collect_all<Spec::GpuLaneIdx>().empty() && pointerUpdates >= 2 && preservedHostHelper && indexedAsmOutput
-                       && cudaDeviceQueries == 2;
+                       && cudaDeviceQueries == 2 && launches == 1 && conformedLaunchArguments && pointerInitialisedValues == 0
+                       && !hasRawErrorStateHelper && !hasRawDeviceOrdinalHelper && !hasRawHipArchitectureHelper;
     if (!valid)
       llvm::errs() << "Unexpected CUDA/HIP prism counts: alloc=" << program.collect_all<Spec::RemoteAlloc>().size()
                    << " free=" << program.collect_all<Spec::RemoteFree>().size() << " shuffle-down=" << shuffleDowns.size()
@@ -263,7 +298,11 @@ int main(int argc, char **argv) {
                    << " atomic-cas=" << program.collect_all<Spec::GpuAtomicCAS>().size()
                    << " subgroup-size=" << program.collect_all<Spec::GpuSubgroupSize>().size()
                    << " lane-index=" << program.collect_all<Spec::GpuLaneIdx>().size() << " pointer-updates=" << pointerUpdates
-                   << " host-helper=" << preservedHostHelper << " indexed-asm-output=" << indexedAsmOutput << '\n';
+                   << " pointer-initialised-values=" << pointerInitialisedValues << " host-helper=" << preservedHostHelper
+                   << " indexed-asm-output=" << indexedAsmOutput << " launches=" << launches
+                   << " conformed-launch-arguments=" << conformedLaunchArguments
+                   << " raw-device-ordinal-helper=" << hasRawDeviceOrdinalHelper
+                   << " raw-hip-architecture-helper=" << hasRawHipArchitectureHelper << '\n';
     return valid ? 0 : 17;
   }
   if (argc == 3 && std::string(argv[1]) == "--assert-native-cuda-semantics") {

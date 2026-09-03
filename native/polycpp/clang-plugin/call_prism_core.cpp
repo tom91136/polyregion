@@ -161,18 +161,21 @@ static Opt<MatchedCall> byteMemcpy(const clang::CallExpr &call, const clang::Fun
 static Opt<MatchedCall> hostAllocation(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (decl.hasBody()) return {};
   const auto name = decl.getQualifiedNameAsString();
-  const bool throwingNew = name == "operator new" || name == "::operator new";
+  const bool throwingNew = name == "operator new" || name == "::operator new" || name == "__builtin_operator_new";
   const bool allocationName = name == "malloc" || name == "::malloc" || throwingNew;
-  const bool releaseName = name == "free" || name == "::free" || name == "operator delete" || name == "::operator delete";
-  if ((allocationName || releaseName) && call.getNumArgs() != 1)
+  const bool releaseName =
+      name == "free" || name == "::free" || name == "operator delete" || name == "::operator delete" || name == "__builtin_operator_delete";
+  const bool sizedDelete = name == "__builtin_operator_delete" && call.getNumArgs() == 2;
+  if ((allocationName || releaseName) && call.getNumArgs() != 1 && !sizedDelete)
     raise("Aligned, sized, and nothrow host allocation overloads are not supported in package programs");
   const bool allocate = allocationName && call.getNumArgs() == 1;
-  const bool release = releaseName && call.getNumArgs() == 1;
+  const bool release = releaseName && (call.getNumArgs() == 1 || sizedDelete);
   if (!allocate && !release) return {};
   const auto *expression = &call;
   return MatchedCall{Lowering{[expression, allocate, throwingNew](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        if (!self.emitPackageProgramMode) raise("Host allocation is only supported while emitting a package");
-                       if (expression->getNumArgs() != 1) raise("Aligned, sized, and nothrow host allocation calls are not supported");
+                       if (expression->getNumArgs() != 1 && !(!allocate && expression->getNumArgs() == 2))
+                         raise("Aligned and nothrow host allocation calls are not supported");
                        const auto result = self.handleType(expression->getType(), r);
                        const auto argument = r.newVar(self.handleExpr(expression->getArg(0), r));
                        if (allocate) {
@@ -341,6 +344,19 @@ static Opt<MatchedCall> compilerBuiltin(const clang::CallExpr &call, const clang
                      false};
 }
 
+static Opt<MatchedCall> badVariantAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  if (decl.getQualifiedNameAsString() != "std::__throw_bad_variant_access" || !decl.isNoReturn() || !call.getType()->isVoidType())
+    return {};
+  const auto *expression = &call;
+  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       (void)lowerArguments(*expression, self, r);
+                       (void)r.newVar(
+                           Expr::SpecOp(Spec::Assert(Term::IntU32Const(1330795077), Term::StringConst("std::bad_variant_access"))));
+                       return Expr::Alias(Term::Unit0Const());
+                     }},
+                     false};
+}
+
 static Opt<MatchedCall> singleThreaded(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   if (call.getNumArgs() != 0 || decl.getQualifiedNameAsString() != "__gnu_cxx::__is_single_threaded") return {};
   const auto resultType = call.getType();
@@ -360,8 +376,8 @@ static Opt<MatchedCall> hostOnlyNoReturnSink(const clang::CallExpr &call, const 
 }
 
 Vector<CallPrism> corePrisms() {
-  return {addressOf,      errorCategory, makeErrorCode, minMaxInitList,  byteMemcpy,
-          hostAllocation, thrustNext,    standardVisit, compilerBuiltin, singleThreaded};
+  return {addressOf,  errorCategory, makeErrorCode,   minMaxInitList,   byteMemcpy,    hostAllocation,
+          thrustNext, standardVisit, compilerBuiltin, badVariantAccess, singleThreaded};
 }
 
 Vector<CallPrism> coreFallbackPrisms() { return {hostOnlyNoReturnSink}; }

@@ -73,7 +73,8 @@ Opt<MatchedCall> remoteRuntimePrism(const clang::CallExpr &call, const clang::Fu
         if ((asyncCopy || asyncFill)
             && !expression->getArg(expression->getNumArgs() - 1)
                     ->isNullPointerConstant(self.context, clang::Expr::NPC_ValueDependentIsNotNull))
-          raise("Non-default CUDA/HIP streams are not supported in package code");
+          raise(fmt::format("Non-default CUDA/HIP streams are not supported in package code at {}",
+                            expression->getArg(expression->getNumArgs() - 1)->getExprLoc().printToString(self.context.getSourceManager())));
         if (allocate) {
           const auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[1]), Type::IntU64()));
           const auto allocation = r.newVar(Expr::SpecOp(Spec::RemoteAlloc(packageContext(), bytes)));

@@ -3,6 +3,11 @@
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
 #pragma region do: {package_fixture} --assert-cuda-hip-source-prisms {output}.polyast
 
+#pragma region case: cuda-hip-non-default-stream-diagnostic
+#pragma region offload-only
+#pragma region compile-fails: Non-default CUDA/HIP streams are not supported in package code
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_NON_DEFAULT_STREAM -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
+
 #pragma region case: hip-mbcnt-mask-diagnostic
 #pragma region offload-only
 #pragma region compile-fails: HIP mbcnt currently requires a constant all-lanes mask
@@ -35,7 +40,7 @@
 
 #pragma region case: cub-warpscan-operation-diagnostic
 #pragma region offload-only
-#pragma region compile-fails: CUB WarpScan currently supports only the standard additive operation
+#pragma region compile-fails: CUB WarpScan currently supports only the standard additive operation or a package callable
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_CUB_WARPSCAN_OPERATION -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
 
 #pragma region case: cuda-occupancy-diagnostic
@@ -57,6 +62,10 @@
 
 namespace cub {
 enum CacheModifier { LOAD_DEFAULT, STORE_DEFAULT };
+struct Pair {
+  int key;
+  int value;
+};
 template <CacheModifier, class T> T ThreadLoad(T *pointer) { return *pointer; }
 template <CacheModifier, class T> void ThreadStore(T *pointer, T value) { *pointer = value; }
 template <unsigned Width> int ShuffleDown(int value, unsigned delta, unsigned lastLane, unsigned mask) {
@@ -65,6 +74,7 @@ template <unsigned Width> int ShuffleDown(int value, unsigned delta, unsigned la
 template <unsigned Width> int ShuffleUp(int value, unsigned delta, unsigned firstLane, unsigned mask) {
   return value + int(Width + delta + firstLane + mask);
 }
+template <unsigned Width> Pair ShuffleUp(Pair value, unsigned, unsigned, unsigned) { return value; }
 template <unsigned Width> int ShuffleIndex(int value, unsigned sourceLane, unsigned mask) { return value + int(Width + sourceLane + mask); }
 int WARP_BALLOT(int predicate, unsigned mask) { return predicate + int(mask); }
 void WARP_SYNC(unsigned) {}
@@ -84,10 +94,22 @@ struct WarpScanShfl {
   int InclusiveScanStep(int input, cub::Sum, int firstLane, int offset) const { return input + firstLane + offset; }
 };
 int basic_ostream_count(int value) { return value + 17; }
+int shuffle_pair(const cub::Pair &value) { return cub::ShuffleUp<16>(value, 1, 0, ~0u).value; }
 } // namespace application
 
 namespace rocprim {
 int warp_shuffle_up(int value, unsigned delta, unsigned width) { return value + int(delta + width); }
+namespace detail {
+enum class target_arch : unsigned { invalid = 0 };
+int host_target_arch(void *, target_arch &architecture) {
+  architecture = target_arch::invalid;
+  return 0;
+}
+int get_device_arch(int, target_arch &architecture) {
+  architecture = target_arch::invalid;
+  return 0;
+}
+} // namespace detail
 } // namespace rocprim
 
 namespace thrust::cuda_cub {
@@ -100,12 +122,36 @@ template <class T> device_iterator<T> uninitialized_copy_n(execution_policy, T *
     *destination.m_iterator++ = *source++;
   return destination;
 }
+template <class T> device_iterator<T> uninitialized_copy(execution_policy policy, T *first, T *last, device_iterator<T> destination) {
+  return uninitialized_copy_n(policy, first, last - first, destination);
+}
 template <class T> T *uninitialized_copy_n(execution_policy, T *source, long count, T *destination) {
   while (count-- > 0)
     *destination++ = *source++;
   return destination;
 }
 } // namespace thrust::cuda_cub
+
+struct dim3 {
+  unsigned x;
+  unsigned y;
+  unsigned z;
+};
+
+namespace thrust::cuda_cub::launcher {
+struct triple_chevron {
+  dim3 grid;
+  dim3 block;
+  unsigned long shared_mem;
+  void *stream;
+  template <class K, class... Args> int doit(K kernel, Args... args) const {
+    kernel(args...);
+    return 0;
+  }
+};
+} // namespace thrust::cuda_cub::launcher
+
+void launch_kernel(int *output, long value) { *output = static_cast<int>(value); }
 
 int cudaMalloc(void **pointer, unsigned long) {
   *pointer = nullptr;
@@ -117,6 +163,24 @@ int hipMalloc(void **pointer, unsigned long) {
   return 1;
 }
 int hipFree(void *) { return 1; }
+int cudaMemcpyAsync(void *, const void *, unsigned long, int, void *) { return 0; }
+int hipMemcpyWithStream(void *, const void *, unsigned long, int, void *) { return 0; }
+int cudaMemsetAsync(void *, int, unsigned long, void *) { return 0; }
+int hipMemsetAsync(void *, int, unsigned long, void *) { return 0; }
+int cudaStreamSynchronize(void *) { return 0; }
+int hipStreamSynchronize(void *) { return 0; }
+int cudaPeekAtLastError() { return 1; }
+int cudaGetLastError() { return 1; }
+int hipPeekAtLastError() { return 1; }
+int hipGetLastError() { return 1; }
+int cudaGetDevice(int *device) {
+  *device = 7;
+  return 1;
+}
+int hipGetDevice(int *device) {
+  *device = 7;
+  return 1;
+}
 enum cudaDeviceAttr {
   cudaDevAttrWarpSize,
   cudaDevAttrMultiProcessorCount,
@@ -146,6 +210,7 @@ int __nv_clz(unsigned) { return 0; }
 int __nv_popc(unsigned) { return 0; }
 int __nv_popcll(unsigned long long) { return 0; }
 unsigned __builtin_amdgcn_ballot_w32(bool predicate) { return predicate; }
+unsigned long long __builtin_amdgcn_ballot_w64(bool predicate) { return predicate; }
 unsigned __builtin_amdgcn_mbcnt_lo(unsigned mask, unsigned base) { return mask + base; }
 int __shfl_xor_sync(unsigned, int value, unsigned laneMask, int width) { return value + int(laneMask) + width; }
 int __nvvm_shfl_sync_bfly_i32(unsigned, int value, unsigned laneMask, int control) { return value + int(laneMask) + control; }
@@ -156,10 +221,27 @@ void __threadfence_system() {}
 POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   int *cuda = nullptr;
   int *hip = nullptr;
+  void *stream = &value;
   cudaMalloc(reinterpret_cast<void **>(&cuda), 16);
   hipMalloc(reinterpret_cast<void **>(&hip), 16);
+  cudaMemcpyAsync(cuda, &value, sizeof(value), 1, nullptr);
+  hipMemcpyWithStream(hip, &value, sizeof(value), 1, nullptr);
+  cudaMemsetAsync(cuda, 0, sizeof(value), nullptr);
+  hipMemsetAsync(hip, 0, sizeof(value), nullptr);
+  cudaStreamSynchronize(nullptr);
+  hipStreamSynchronize(nullptr);
+  const int errorState = cudaPeekAtLastError() + cudaGetLastError() + hipPeekAtLastError() + hipGetLastError();
+  int cudaDevice = -1;
+  int hipDevice = -1;
+  const int deviceQueryState = cudaGetDevice(&cudaDevice) + hipGetDevice(&hipDevice);
+  rocprim::detail::target_arch architecture{};
+  const int hostArchitectureState = rocprim::detail::host_target_arch(stream, architecture);
+  const int deviceArchitectureState = rocprim::detail::get_device_arch(hipDevice, architecture);
+  thrust::cuda_cub::launcher::triple_chevron{{1, 1, 1}, {32, 1, 1}, 0, nullptr}.doit(&launch_kernel, cuda, value);
   const auto relocated =
       thrust::cuda_cub::uninitialized_copy_n(thrust::cuda_cub::execution_policy{}, cuda, 1, thrust::cuda_cub::device_iterator<int>{hip});
+  const auto relocatedRange = thrust::cuda_cub::uninitialized_copy(thrust::cuda_cub::execution_policy{}, cuda, cuda + 1,
+                                                                   thrust::cuda_cub::device_iterator<int>{hip});
   const int shuffled = cub::ShuffleDown<16>(value, 1, 14, ~0u) + cub::ShuffleUp<16>(value, 1, 1, ~0u) + cub::ShuffleIndex<16>(value, 3, ~0u)
                        + rocprim::warp_shuffle_up(value, 1, 16) + __shfl_xor_sync(~0u, value, 1, 16)
                        + __nvvm_shfl_sync_bfly_i32(~0u, value, 1, (16 << 8) | 15);
@@ -172,7 +254,7 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   const int atomic = atomicAdd(&state, 2) + atomicCAS(&state, value + 3, value);
   const int bits = int(__nv_brev(unsigned(value))) + __nv_clz(unsigned(value)) + __nv_popc(unsigned(value))
                    + __nv_popcll(static_cast<unsigned long long>(unsigned(value))) + __builtin_ctz(unsigned(value) | 1u);
-  const int hipBallot = int(__builtin_amdgcn_ballot_w32(value != 0));
+  const int hipBallot = int(__builtin_amdgcn_ballot_w32(value != 0) + __builtin_amdgcn_ballot_w64(value != 0));
   unsigned extracted[1] = {0};
   unsigned laneMask = 0;
   asm("bfe.u32 %0, %1, %2, %3;" : "=r"(extracted[0]) : "r"(unsigned(value)), "r"(1u), "r"(3u));
@@ -203,7 +285,18 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   hipFree(hip);
   return shuffled + voted + atomic + bits + hipBallot + hipLoaded + int(extracted[0] + laneMask) + scanned + unrelatedScanned + cudaWarpSize
          + hipWarpSize + cudaComputeUnits + cudaLocalMemory + cudaMaxGridX + cudaComputeMajor + cudaComputeMinor
-         + application::basic_ostream_count(value) + int(relocated.m_iterator != nullptr);
+         + application::basic_ostream_count(value) + int(relocated.m_iterator != nullptr) + int(relocatedRange.m_iterator != nullptr)
+         + errorState + cudaDevice + hipDevice + deviceQueryState + hostArchitectureState + deviceArchitectureState;
+}
+
+#ifdef CHECK_NON_DEFAULT_STREAM
+POLYREGION_EXPORT_AS("foo.implementation.reject_stream") int reject_stream(int *destination, const int *source, int value) {
+  return cudaMemcpyAsync(destination, source, sizeof(value), 1, &value);
+}
+#endif
+
+POLYREGION_EXPORT_AS("foo.implementation.shuffle_pair") int shuffle_pair(const cub::Pair &value) {
+  return application::shuffle_pair(value);
 }
 
 #ifdef CHECK_HIP_MBCNT_MASK

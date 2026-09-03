@@ -62,11 +62,29 @@ constexpr std::string_view LegacySycl = "cl::sycl::";
 
 [[nodiscard]] bool usmFree(const std::string_view name) { return syclNameIs(name, "sycl::free"); }
 
+[[nodiscard]] bool smartPointerRecord(const std::string_view name) {
+  return name.starts_with("std::shared_ptr") || name.starts_with("std::__shared_ptr") || name.starts_with("std::unique_ptr");
+}
+
 [[nodiscard]] bool deviceUsmKind(const clang::Expr &expression) {
-  const auto *reference = llvm::dyn_cast<clang::DeclRefExpr>(expression.IgnoreParenImpCasts());
+  const clang::Expr *current = expression.IgnoreParenImpCasts();
+  while (true) {
+    if (const auto *substitution = llvm::dyn_cast<clang::SubstNonTypeTemplateParmExpr>(current))
+      current = substitution->getReplacement()->IgnoreParenImpCasts();
+    else if (const auto *constant = llvm::dyn_cast<clang::ConstantExpr>(current)) current = constant->getSubExpr()->IgnoreParenImpCasts();
+    else if (const auto *cast = llvm::dyn_cast<clang::CastExpr>(current)) current = cast->getSubExpr()->IgnoreParenImpCasts();
+    else break;
+  }
+  const auto *reference = llvm::dyn_cast<clang::DeclRefExpr>(current);
   const auto *constant = reference ? llvm::dyn_cast<clang::EnumConstantDecl>(reference->getDecl()) : nullptr;
-  if (!constant || constant->getName() != "device") return false;
-  return syclNameIs(constant->getQualifiedNameAsString(), "sycl::usm::alloc::device");
+  if (constant && constant->getName() == "device") return syclNameIs(constant->getQualifiedNameAsString(), "sycl::usm::alloc::device");
+  const auto *integer = llvm::dyn_cast<clang::IntegerLiteral>(current);
+  const auto *enumType = expression.getType()->getAs<clang::EnumType>();
+  const auto *enumeration = enumType ? enumType->getDecl() : nullptr;
+  if (!integer || !enumeration || !syclNameIs(enumeration->getQualifiedNameAsString(), "sycl::usm::alloc")) return false;
+  for (const auto *enumerator : enumeration->enumerators())
+    if (enumerator->getName() == "device" && enumerator->getInitVal().getZExtValue() == integer->getValue().getZExtValue()) return true;
+  return false;
 }
 
 [[nodiscard]] size_t semanticArgumentCount(const clang::CallExpr &call) {
@@ -122,6 +140,20 @@ void requireEffectFreeGroupArgument(const clang::Expr &expression, clang::ASTCon
 
 enum class PointerProvenance { Unknown, Local, Remote };
 
+[[nodiscard]] bool packageExport(const clang::FunctionDecl &function) {
+  const auto annotated = [](const clang::FunctionDecl &candidate) {
+    for (const auto *attribute : candidate.attrs())
+      if (const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attribute)) {
+        const auto value = annotation->getAnnotation();
+        if (value.starts_with("polyregion_export:") || value.starts_with("polyregion_export_template:")) return true;
+      }
+    return false;
+  };
+  if (annotated(function)) return true;
+  const auto *primary = function.getPrimaryTemplate();
+  return primary && annotated(*primary->getTemplatedDecl());
+}
+
 [[nodiscard]] const clang::VarDecl *directVariable(const clang::Expr *expression) {
   const auto *reference = llvm::dyn_cast<clang::DeclRefExpr>(expression->IgnoreParenCasts());
   return reference ? llvm::dyn_cast<clang::VarDecl>(reference->getDecl()) : nullptr;
@@ -163,7 +195,7 @@ enum class PointerProvenance { Unknown, Local, Remote };
   return false;
 }
 
-[[nodiscard]] PointerProvenance pointerProvenance(const clang::Expr *expression, Set<const clang::VarDecl *> seen = {}) {
+[[nodiscard]] PointerProvenance pointerProvenance(const clang::Expr *expression, Set<const clang::Decl *> seen = {}) {
   const clang::Expr *current = expression;
   while (true) {
     current = current->IgnoreParenCasts();
@@ -177,16 +209,25 @@ enum class PointerProvenance { Unknown, Local, Remote };
       const auto arguments = semanticArgumentCount(*call);
       if (usmAllocate(name) || (genericUsmAllocate(name) && arguments > 0 && deviceUsmKind(*call->getArg(arguments - 1))))
         return PointerProvenance::Remote;
+      // Iterator-returning device-policy algorithms alias their input range. Package-export pointer parameters are
+      // remote allocations, so preserve that provenance across the algorithm call for subsequent queue transfers.
+      if ((name == "oneapi::dpl::min_element" || name == "oneapi::dpl::max_element") && arguments > 1)
+        return pointerProvenance(call->getArg(1), std::move(seen));
       if (const auto *memberCall = llvm::dyn_cast<clang::CXXMemberCallExpr>(call))
         if (const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(callee);
-            method && method->getName() == "get" && method->getParent()->getQualifiedNameAsString().starts_with("std::shared_ptr")) {
-          const auto *member = llvm::dyn_cast<clang::MemberExpr>(memberCall->getImplicitObjectArgument()->IgnoreParenImpCasts());
+            method && method->getName() == "get" && smartPointerRecord(method->getParent()->getQualifiedNameAsString())) {
+          const auto *member = llvm::dyn_cast<clang::MemberExpr>(memberCall->getImplicitObjectArgument()->IgnoreParenCasts());
           const auto *field = member ? llvm::dyn_cast<clang::FieldDecl>(member->getMemberDecl()) : nullptr;
           const auto owner = field ? field->getParent()->getQualifiedNameAsString() : std::string{};
-          if (field && field->getName() == "__scratch_buf" && owner.starts_with("oneapi::dpl::")
-              && owner.find("__result_and_scratch_storage") != std::string::npos)
-            return PointerProvenance::Remote;
+          const bool resultStorage = (field && (field->getName() == "__scratch_buf" || field->getName() == "__result_buf")
+                                      && owner.find("__result_and_scratch_storage") != std::string::npos);
+          const bool deviceStorage = field && field->getName() == "__usm_buf" && owner.find("__device_storage") != std::string::npos;
+          if (owner.starts_with("oneapi::dpl::") && (resultStorage || deviceStorage)) return PointerProvenance::Remote;
         }
+      if (callee->hasBody() && seen.emplace(callee).second)
+        if (const auto *body = llvm::dyn_cast<clang::CompoundStmt>(callee->getBody()); body && body->size() == 1)
+          if (const auto *result = llvm::dyn_cast<clang::ReturnStmt>(*body->body_begin()); result && result->getRetValue())
+            return pointerProvenance(result->getRetValue(), std::move(seen));
     }
   if (const auto *unary = llvm::dyn_cast<clang::UnaryOperator>(current); unary && unary->getOpcode() == clang::UO_AddrOf) {
     const clang::Expr *pointee = unary->getSubExpr()->IgnoreParenImpCasts();
@@ -229,6 +270,14 @@ enum class PointerProvenance { Unknown, Local, Remote };
   if (const auto *variable = directVariable(current)) {
     if (seen.emplace(variable).second) {
       const auto *function = llvm::dyn_cast<clang::FunctionDecl>(variable->getDeclContext());
+      if (llvm::isa<clang::ParmVarDecl>(variable) && variable->getType()->isPointerType() && function && packageExport(*function))
+        return PointerProvenance::Remote;
+      if (const auto *parameter = llvm::dyn_cast<clang::ParmVarDecl>(variable);
+          parameter && function && function->getName() == "__copy_n" && parameter->getName() == "__dst")
+        if (const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(function);
+            method && method->getParent()->getQualifiedNameAsString().starts_with("oneapi::dpl::")
+            && method->getParent()->getQualifiedNameAsString().find("__device_storage") != std::string::npos)
+          return PointerProvenance::Local;
       if (function && function->hasBody() && mayReassign(*function->getBody(), *variable)) return PointerProvenance::Unknown;
       if (const auto *initializer = variable->getInit()) return pointerProvenance(initializer, std::move(seen));
       if (variable->getType()->isArrayType()) return PointerProvenance::Local;
@@ -263,12 +312,18 @@ enum class PointerProvenance { Unknown, Local, Remote };
 
 static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto name = decl.getQualifiedNameAsString();
+  // oneDPL wraps device USM allocation only to add a throwing null check.  Package calls cannot
+  // propagate a C++ exception across their C ABI, so lower that wrapper at the same semantic
+  // boundary as the underlying SYCL allocation and let the runtime own allocation failure.
+  const bool oneDplDeviceAllocate = name.starts_with("oneapi::dpl::") && name.ends_with("::__sycl_usm_alloc") && call.getNumArgs() == 2
+                                    && call.getType()->isPointerType();
   if (usmAlignedAllocate(name)) raise("SYCL aligned device allocation is not supported");
   if (unsupportedUsmAllocate(name)) raise("SYCL host and shared USM allocation is not supported");
-  if ((!usmAllocate(name) && !genericUsmAllocate(name) && !usmFree(name)) || call.getNumArgs() < 1) return {};
-  const auto allocate = usmAllocate(name) || genericUsmAllocate(name);
+  if ((!usmAllocate(name) && !genericUsmAllocate(name) && !usmFree(name) && !oneDplDeviceAllocate) || call.getNumArgs() < 1) return {};
+  const auto allocate = usmAllocate(name) || genericUsmAllocate(name) || oneDplDeviceAllocate;
   const auto generic = genericUsmAllocate(name);
   const size_t semanticArguments = semanticArgumentCount(call);
+  if (oneDplDeviceAllocate && semanticArguments != 2) raise("Unsupported oneDPL device allocation wrapper");
   if (allocate && !generic && semanticArguments != 2 && semanticArguments != 3) raise("Unsupported SYCL device allocation overload");
   if (generic && semanticArguments != 3 && semanticArguments != 4) raise("Unsupported generic SYCL allocation overload");
   if (!allocate && semanticArguments != 2) raise("Unsupported SYCL free overload");
@@ -282,29 +337,30 @@ static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::Functi
   const auto untypedGeneric = generic && call.getType()->isPointerType() && call.getType()->getPointeeType()->isVoidType();
   if (generic && untypedGeneric != (semanticArguments == 4)) raise("Unsupported generic SYCL allocation overload");
   const auto *expression = &call;
-  return MatchedCall{
-      Lowering{[expression, allocate, generic, untypedGeneric, semanticArguments](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-        Vector<Term::Any> arguments;
-        arguments.reserve(semanticArguments);
-        for (size_t i = 0; i < semanticArguments; ++i)
-          arguments.emplace_back(r.newVar(self.handleExpr(expression->getArg(i), r)));
-        if (!allocate) {
-          const auto rawPointer = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
-          const auto pointer = r.newVar(self.conform(r, Expr::Alias(arguments[0]), rawPointer));
-          return Expr::SpecOp(Spec::RemoteFree(packageContext(), pointer));
-        }
-        const auto u64 = Type::IntU64();
-        auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[0]), u64));
-        const auto result = expression->getType().getCanonicalType();
-        const auto pointee = result->isPointerType() ? result->getPointeeType() : clang::QualType{};
-        if ((!generic || !untypedGeneric) && !pointee.isNull() && !pointee->isVoidType()) {
-          const auto width = self.context.getTypeSizeInChars(pointee).getQuantity();
-          bytes = r.newVar(Expr::IntrOp(Intr::Mul(bytes, Term::IntU64Const(width), u64)));
-        }
-        const auto allocation = r.newVar(Expr::SpecOp(Spec::RemoteAlloc(packageContext(), bytes)));
-        return Expr::Cast(allocation, self.handleType(expression->getType(), r));
-      }},
-      false};
+  return MatchedCall{Lowering{[expression, allocate, generic, untypedGeneric, oneDplDeviceAllocate,
+                               semanticArguments](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       Vector<Term::Any> arguments;
+                       arguments.reserve(semanticArguments);
+                       for (size_t i = 0; i < semanticArguments; ++i)
+                         arguments.emplace_back(r.newVar(self.handleExpr(expression->getArg(i), r)));
+                       if (!allocate) {
+                         const auto rawPointer = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+                         const auto pointer = r.newVar(self.conform(r, Expr::Alias(arguments[0]), rawPointer));
+                         return Expr::SpecOp(Spec::RemoteFree(packageContext(), pointer));
+                       }
+                       const auto u64 = Type::IntU64();
+                       const auto countArgument = oneDplDeviceAllocate ? 1u : 0u;
+                       auto bytes = r.newVar(self.conform(r, Expr::Alias(arguments[countArgument]), u64));
+                       const auto result = expression->getType().getCanonicalType();
+                       const auto pointee = result->isPointerType() ? result->getPointeeType() : clang::QualType{};
+                       if ((!generic || !untypedGeneric) && !pointee.isNull() && !pointee->isVoidType()) {
+                         const auto width = self.context.getTypeSizeInChars(pointee).getQuantity();
+                         bytes = r.newVar(Expr::IntrOp(Intr::Mul(bytes, Term::IntU64Const(width), u64)));
+                       }
+                       const auto allocation = r.newVar(Expr::SpecOp(Spec::RemoteAlloc(packageContext(), bytes)));
+                       return Expr::Cast(allocation, self.handleType(expression->getType(), r));
+                     }},
+                     false};
 }
 
 static Opt<MatchedCall> syclCollective(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -356,15 +412,23 @@ static Opt<MatchedCall> syclVote(const clang::CallExpr &call, const clang::Funct
   const auto *expression = &call;
   return MatchedCall{Lowering{[expression, all, none, group](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        requireEffectFreeGroupArgument(*expression->getArg(0), self.context);
-                       if (group != GroupKind::Workgroup) raise("SYCL group vote requires a work-group");
                        if (expression->getNumArgs() == 3) raise("SYCL predicate group-vote overload is not supported");
                        auto predicate = r.newVar(self.handleExpr(expression->getArg(1), r));
                        if (const auto pointer = predicate.tpe().get<Type::Ptr>())
                          predicate = r.newVar(Expr::Index(predicate, Term::IntU64Const(0), pointer->comp));
+                       if (group == GroupKind::Subgroup) {
+                         const auto mask = Term::IntU32Const(0xFFFFFFFFu);
+                         const auto voted = r.newVar(Expr::SpecOp(all ? Spec::Any(Spec::GpuVoteAll(mask, predicate))
+                                                                      : Spec::Any(Spec::GpuVoteAny(mask, predicate))));
+                         if (!none) return Expr::Alias(voted);
+                         return Expr::IntrOp(Intr::LogicEq(voted, Term::Bool1Const(false)));
+                       }
+                       if (group != GroupKind::Workgroup) raise("SYCL group vote requires a supported group kind");
+                       predicate = r.newVar(self.conform(r, Expr::Alias(predicate), Type::Bool1()));
                        const auto operation = all ? AtomicOp::Any(AtomicOp::And()) : AtomicOp::Any(AtomicOp::Or());
                        const auto reduced = r.newVar(Expr::SpecOp(Spec::GpuGroupReduce(operation, predicate, predicate.tpe())));
-                       const auto zero = r.newVar(Remapper::integralConstOfType(predicate.tpe(), 0));
-                       return Expr::IntrOp(none ? Intr::Any(Intr::LogicEq(reduced, zero)) : Intr::Any(Intr::LogicNeq(reduced, zero)));
+                       if (!none) return Expr::Alias(reduced);
+                       return Expr::IntrOp(Intr::LogicEq(reduced, Term::Bool1Const(false)));
                      }},
                      false};
 }
@@ -429,17 +493,23 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
                      || name == "get_local_id" || name == "get_local_linear_id" || name == "get_group" || name == "get_group_id"
                      || name == "get_group_linear_id" || name == "get_range" || name == "get_global_range" || name == "get_local_range"
                      || name == "get_local_linear_range" || name == "get_max_local_range";
-  const bool supported = (item || ndItem || subGroup || group) && ((index && scalarResult) || (ndItem && name == "barrier"));
-  if ((item || ndItem || subGroup || group) && index && !scalarResult)
-    raise("Structured SYCL id, range, and group accessors are not supported");
+  const bool structuredGroup = ndItem && !scalarResult && (name == "get_group" || name == "get_sub_group");
+  const bool supported =
+      (item || ndItem || subGroup || group) && ((index && scalarResult) || structuredGroup || (ndItem && name == "barrier"));
+  if ((item || ndItem || subGroup || group) && index && !scalarResult && !structuredGroup)
+    raise("Structured SYCL id and range accessors are not supported");
   if (!supported) return {};
   const auto *expression = member;
   const auto memberName = name.str();
   const auto ownerName = owner.str();
   const auto dimensions = dimensionsOf(*method->getParent());
   return MatchedCall{
-      Lowering{[expression, memberName, ownerName, dimensions](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      Lowering{[expression, memberName, ownerName, dimensions, structuredGroup](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         const auto result = self.handleType(expression->getType(), r);
+        if (structuredGroup) {
+          (void)r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
+          return Expr::Alias(Term::Poison(result));
+        }
         const auto dim = [&]() -> Term::Any {
           return expression->getNumArgs() == 1 ? r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), Type::IntU32()))
                                                : Term::Any(Term::IntU32Const(0));
@@ -449,8 +519,17 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
             return self.conform(r, Expr::SpecOp(Spec::GpuLaneIdx()), result);
           if (memberName == "get_local_linear_range" || memberName == "get_max_local_range")
             return self.conform(r, Expr::SpecOp(Spec::GpuSubgroupSize()), result);
-          if (memberName == "get_group_linear_id" || memberName == "get_group_id")
-            raise("SYCL sub-group group identity requires work-group linearization");
+          if (memberName == "get_group_linear_id" || memberName == "get_group_id") {
+            auto local = r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(0))));
+            for (unsigned i = 1; i < 3; ++i) {
+              const auto size = r.newVar(Expr::SpecOp(Spec::GpuLocalSize(Term::IntU32Const(i))));
+              const auto index = r.newVar(Expr::SpecOp(Spec::GpuLocalIdx(Term::IntU32Const(i))));
+              local =
+                  r.newVar(Expr::IntrOp(Intr::Add(r.newVar(Expr::IntrOp(Intr::Mul(local, size, Type::IntU32()))), index, Type::IntU32())));
+            }
+            const auto subgroupSize = r.newVar(Expr::SpecOp(Spec::GpuSubgroupSize()));
+            return self.conform(r, Expr::IntrOp(Intr::Div(local, subgroupSize, Type::IntU32())), result);
+          }
         }
         if (memberName == "barrier" && ownerName == "nd_item") {
           if (expression->getNumArgs() == 0 || llvm::isa<clang::CXXDefaultArgExpr>(expression->getArg(0)))
@@ -460,6 +539,9 @@ static Opt<MatchedCall> syclItemAccess(const clang::CallExpr &call, const clang:
           const auto *constant = reference ? llvm::dyn_cast<clang::EnumConstantDecl>(reference->getDecl()) : nullptr;
           if (constant && constant->getName().contains("global_and_local")) return Expr::SpecOp(Spec::GpuBarrierAll());
           if (constant && constant->getName().contains("local_space")) return Expr::SpecOp(Spec::GpuBarrierLocal());
+          const auto *enumType = expression->getArg(0)->getType()->getAs<clang::EnumType>();
+          if (enumType && enumType->getDecl()->getQualifiedNameAsString().ends_with("access::fence_space"))
+            return Expr::SpecOp(Spec::GpuBarrierAll());
           raise("Unsupported SYCL nd_item barrier fence space");
         }
         const auto linear = [&](const auto &indexAt, const auto &sizeAt) -> Expr::Any {
@@ -547,6 +629,16 @@ static Opt<MatchedCall> syclDevice(const clang::CallExpr &call, const clang::Fun
   const bool kind = owner == "device" && (name == "is_cpu" || name == "is_gpu");
   const bool info = name == "get_info" && owner == "device";
   if (!kind && !info) return {};
+  if (info) {
+    const auto *arguments = decl.getTemplateSpecializationArgs();
+    const auto *descriptor = arguments && arguments->size() >= 1 && (*arguments)[0].getKind() == clang::TemplateArgument::Type
+                                 ? (*arguments)[0].getAsType()->getAsCXXRecordDecl()
+                                 : nullptr;
+    const auto parameter = descriptor ? normaliseSyclName(descriptor->getQualifiedNameAsString()) : Opt<std::string>{};
+    // The Spectra SYCL shim deliberately returns an empty subgroup capability list so oneDPL selects its portable
+    // multipass implementations. Preserve that authored body instead of claiming this aggregate-valued query here.
+    if (parameter && *parameter == "sycl::info::device::sub_group_sizes") return {};
+  }
   const auto *expression = &call;
   return MatchedCall{
       Lowering{[expression, kind, name = name.str()](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
@@ -574,7 +666,7 @@ static Opt<MatchedCall> syclDevice(const clang::CallExpr &call, const clang::Fun
           return self.conform(r, Expr::ForeignCall("polyrt_device_global_memory_bytes", {packageContext()}, Type::IntU64()), result);
         if (parameter && *parameter == "sycl::info::device::max_compute_units")
           return self.conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), result);
-        raise("Unsupported SYCL device info query");
+        raise("Unsupported SYCL device info query: " + parameter.value_or("<unknown>"));
       }},
       false};
 }

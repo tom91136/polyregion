@@ -37,6 +37,9 @@ POLYREGION_EXPORT_AS("allocation_control_scaffolding.implementation.release") vo
   delete control;
 }
 
+POLYREGION_EXPORT_AS("allocation_control_scaffolding.implementation.release_sized")
+void release_sized(void *control, unsigned long bytes) { __builtin_operator_delete(control, bytes); }
+
 POLYREGION_EXPORT_AS("allocation_control_scaffolding.implementation.deleter") void deleter(const std::shared_ptr<Payload> &pointer) {
   (void)std::get_deleter<PayloadDeleter>(pointer);
 }

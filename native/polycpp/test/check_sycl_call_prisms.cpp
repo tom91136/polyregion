@@ -28,6 +28,10 @@
 #pragma region compile-fails: Only generic SYCL device allocation is supported
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_GENERIC_HOST_ALLOCATION -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
 
+#pragma region case: sycl-memcpy-device-iterator
+#pragma region offload-only
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_MEMCPY_DEVICE_ITERATOR -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
+
 #pragma region case: sycl-exclusive-bitwise-scan
 #pragma region offload-only
 #pragma region compile-fails: SYCL exclusive group scans currently support only addition
@@ -36,10 +40,11 @@
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 
 namespace std {
-template <typename T> struct shared_ptr {
+template <typename T> struct __shared_ptr {
   T *pointer;
   T *get() const { return pointer; }
 };
+template <typename T> struct shared_ptr : __shared_ptr<T> {};
 } // namespace std
 
 namespace oneapi::dpl::__par_backend_hetero {
@@ -57,6 +62,7 @@ struct max_work_group_size {};
 struct local_mem_size {};
 struct global_mem_size {};
 struct max_compute_units {};
+struct sub_group_sizes {};
 } // namespace info::device
 struct device {
   template <typename Parameter> unsigned long get_info() const { return 0; }
@@ -64,6 +70,9 @@ struct device {
 struct context {};
 namespace usm {
 enum class alloc { device, host, shared };
+}
+namespace access {
+enum class fence_space { local_space, global_space, global_and_local };
 }
 struct device_record {
   struct nested_record {
@@ -92,7 +101,9 @@ template <unsigned Dimensions> struct nd_item {
   unsigned get_global_linear_id() const { return 99; }
   unsigned get_local_linear_id() const { return 99; }
   unsigned get_group_linear_id() const { return 99; }
-  void barrier() const {}
+  group<Dimensions> get_group() const { return {}; }
+  sub_group get_sub_group() const { return {}; }
+  void barrier(access::fence_space = access::fence_space::global_and_local) const {}
 };
 
 template <unsigned Dimensions> struct item {
@@ -153,6 +164,29 @@ void free(void *, int, code_location = {}) {}
 
 }} // namespace sycl::_V1
 
+namespace oneapi::dpl::__par_backend_hetero::__internal {
+template <typename T, sycl::usm::alloc Kind> T *__sycl_usm_alloc(const sycl::queue &, unsigned long) { return nullptr; }
+} // namespace oneapi::dpl::__par_backend_hetero::__internal
+
+template <sycl::usm::alloc Kind> int *allocateGeneric(sycl::queue &queue) { return sycl::malloc<int>(4, queue, Kind); }
+
+#ifdef CHECK_MEMCPY_DEVICE_ITERATOR
+namespace oneapi::dpl {
+template <class Policy, class T, class Op> const T *min_element(Policy, const T *first, const T *, Op) {
+  const T *result = first;
+  return result;
+}
+} // namespace oneapi::dpl
+
+POLYREGION_EXPORT_AS("foo.implementation.device_iterator") int copyDeviceIterator(const int *input, int count) {
+  sycl::queue queue;
+  int result = 0;
+  const auto *selected = oneapi::dpl::min_element(0, input, input + count, sycl::plus{});
+  queue.memcpy(&result, selected, sizeof(result)).wait();
+  return result;
+}
+#endif
+
 namespace application {
 struct group {
   unsigned get_global_id(unsigned) const { return 7; }
@@ -166,11 +200,16 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   sycl::device_record *record = sycl::malloc_device<sycl::device_record>(1, 0);
   void *genericBytes = sycl::malloc(sizeof(int), sycl::device{}, sycl::context{}, sycl::usm::alloc::device);
   int *genericElements = sycl::malloc<int>(4, queue, sycl::usm::alloc::device);
+  int *genericTemplateElements = allocateGeneric<sycl::usm::alloc::device>(queue);
+  int *oneDplElements = oneapi::dpl::__par_backend_hetero::__internal::__sycl_usm_alloc<int, sycl::usm::alloc::device>(queue, 4);
   oneapi::dpl::__par_backend_hetero::__result_and_scratch_storage<int> storage{{genericElements}};
   const sycl::nd_item<2> item;
-  item.barrier();
-  sycl::group_barrier(sycl::group<2>{});
-  sycl::group_barrier(sycl::sub_group{});
+  const auto fenceSpace = sycl::access::fence_space::local_space;
+  item.barrier(fenceSpace);
+  const auto workgroupFromItem = item.get_group();
+  const auto subgroupFromItem = item.get_sub_group();
+  sycl::group_barrier(workgroupFromItem);
+  sycl::group_barrier(subgroupFromItem);
   int local = value;
   queue.memcpy(allocation, &local, sizeof(local)).wait();
   queue.memcpy(&local, allocation, sizeof(local)).wait();
@@ -181,11 +220,14 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   auto &remoteReferenceAlias = remoteReference;
   queue.memcpy(&local, &remoteReferenceAlias, sizeof(local)).wait();
   queue.memcpy(allocation, genericElements, sizeof(local)).wait();
+  queue.memcpy(allocation, genericTemplateElements, sizeof(local)).wait();
+  (void)oneDplElements;
   queue.memcpy(allocation, storage.__scratch_buf.get() + 1, sizeof(local)).wait();
   sycl::free(allocation, 0);
   sycl::free(record, 0);
   sycl::free(genericBytes, 0);
   sycl::free(genericElements, 0);
+  sycl::free(genericTemplateElements, 0);
   queue
       .submit([&](sycl::handler &handler) {
         const sycl::range<2> extent(4, 2);
@@ -208,7 +250,8 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   const sycl::device selected;
   const auto deviceInfo =
       selected.get_info<sycl::info::device::max_work_group_size>() + selected.get_info<sycl::info::device::local_mem_size>()
-      + selected.get_info<sycl::info::device::global_mem_size>() + selected.get_info<sycl::info::device::max_compute_units>();
+      + selected.get_info<sycl::info::device::global_mem_size>() + selected.get_info<sycl::info::device::max_compute_units>()
+      + selected.get_info<sycl::info::device::sub_group_sizes>();
   return collectives + unrelatedCollective + shuffles + application::reduce_over_group(unrelated, value, {})
          + int(unrelated.get_global_id(0)) + int(item.get_global_id(1)) + int(item.get_local_id(1)) + int(item.get_global_linear_id())
          + int(deviceInfo) + int(item.get_local_linear_id()) + int(item.get_group_linear_id());

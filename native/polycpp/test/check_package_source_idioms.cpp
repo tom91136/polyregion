@@ -27,5 +27,6 @@ std::uint64_t apply(Pair *destination, const Pair *source, int *values, std::var
   __builtin_memcpy(destination, source, sizeof(Pair));
   const auto bits = __builtin_bit_cast(std::uint64_t, *source);
   const auto selected = std::visit([](auto) { return 1; }, choice);
+  if (bits == UINT64_MAX) std::__throw_bad_variant_access(0);
   return bits + std::uint64_t(*thrust::next(values, selected)) + selectReference(destination->left, source->right);
 }

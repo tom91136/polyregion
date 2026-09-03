@@ -31,7 +31,8 @@ constexpr std::string_view cubPtxVersionUncached = "cub::PtxVersionUncached";
 constexpr std::string_view cubMaxSmOccupancy = "cub::MaxSmOccupancy";
 constexpr std::string_view cubThreadLoad = "cub::ThreadLoad";
 constexpr std::string_view cubThreadStore = "cub::ThreadStore";
-constexpr std::string_view thrustUninitializedCopy = "thrust::cuda_cub::uninitialized_copy_n";
+constexpr std::string_view thrustUninitializedCopy = "thrust::cuda_cub::uninitialized_copy";
+constexpr std::string_view thrustUninitializedCopyN = "thrust::cuda_cub::uninitialized_copy_n";
 
 [[nodiscard]] bool shuffleDown(const std::string_view name) { return name == cubShuffleDownLegacy || name == cubShuffleDown; }
 [[nodiscard]] bool shuffleUp(const std::string_view name) { return name == cubShuffleUpLegacy || name == cubShuffleUp; }
@@ -58,6 +59,9 @@ constexpr std::string_view thrustUninitializedCopy = "thrust::cuda_cub::uninitia
 
 Expr::Any boundedShuffle(Remapper &self, Remapper::RemapContext &r, const bool down, Term::Any value, Term::Any delta, Term::Any boundary,
                          Term::Any width, Term::Any mask, const Type::Any &result) {
+  // CUB accepts the shuffled value by value, but Clang may present a class-valued lvalue as T&.  A call prism
+  // bypasses ordinary parameter conformance, so perform the load here before both the shuffle and fallback path.
+  value = r.newVar(self.conform(r, Expr::Alias(value), result));
   delta = r.newVar(self.conform(r, Expr::Alias(delta), Type::IntU32()));
   boundary = r.newVar(self.conform(r, Expr::Alias(boundary), Type::IntU32()));
   width = r.newVar(self.conform(r, Expr::Alias(width), Type::IntU32()));
@@ -75,7 +79,9 @@ Expr::Any boundedShuffle(Remapper &self, Remapper::RemapContext &r, const bool d
   return Expr::Alias(Term::Select(output, {}, result));
 }
 
-[[nodiscard]] bool isPtxVersionQuery(const std::string_view name) { return name == cubPtxVersion || name == cubPtxVersionUncached; }
+[[nodiscard]] bool isPtxVersionQuery(const std::string_view name) {
+  return name == cubPtxVersion || name == cubPtxVersionUncached || name.ends_with("::PtxVersion") || name.ends_with("::PtxVersionUncached");
+}
 
 [[nodiscard]] bool isOccupancyQuery(const std::string_view name) {
   return name == cubMaxSmOccupancy || name == "cudaOccupancyMaxActiveBlocksPerMultiprocessor";
@@ -147,20 +153,19 @@ static Opt<MatchedCall> cubThreadAccess(const clang::CallExpr &call, const clang
                        Opt<size_t> pointerIndex;
                        Opt<size_t> valueIndex;
                        for (size_t i = 0; i < arguments.size(); ++i)
-                         if (const auto pointer = arguments[i].tpe().get<Type::Ptr>();
-                             pointer && !pointerIndex && (load ? pointer->comp == result : true))
-                           pointerIndex = i;
+                         if (arguments[i].tpe().is<Type::Ptr>() && !pointerIndex) pointerIndex = i;
                        if (pointerIndex && !load) {
-                         const auto pointee = arguments[*pointerIndex].tpe().get<Type::Ptr>()->comp;
                          for (size_t i = 0; i < arguments.size(); ++i)
-                           if (i != *pointerIndex && arguments[i].tpe() == pointee) {
+                           if (i != *pointerIndex) {
                              valueIndex = i;
                              break;
                            }
                        }
                        if (!pointerIndex || (!load && !valueIndex)) raise("CUB thread access has no compatible pointer/value arguments");
-                       if (load) return Expr::SpecOp(Spec::GpuVolatileLoad(arguments[*pointerIndex], result));
-                       return Expr::SpecOp(Spec::GpuVolatileStore(arguments[*pointerIndex], arguments[*valueIndex]));
+                       const auto pointee = arguments[*pointerIndex].tpe().get<Type::Ptr>()->comp;
+                       if (load) return self.conform(r, Expr::SpecOp(Spec::GpuVolatileLoad(arguments[*pointerIndex], pointee)), result);
+                       const auto value = r.newVar(self.conform(r, Expr::Alias(arguments[*valueIndex]), pointee));
+                       return Expr::SpecOp(Spec::GpuVolatileStore(arguments[*pointerIndex], value));
                      }},
                      false};
 }
@@ -229,21 +234,34 @@ static Opt<MatchedCall> cudaBitOperation(const clang::CallExpr &call, const clan
       false};
 }
 
+static bool thrustBitwiseRelocatable(clang::QualType tpe, const clang::ASTContext &context) {
+  if (tpe.isTriviallyCopyableType(context)) return true;
+  const auto *specialization = llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(tpe->getAsCXXRecordDecl());
+  if (!specialization) return false;
+  const auto name = specialization->getSpecializedTemplate()->getQualifiedNameAsString();
+  if (name != "thrust::tuple" && name != "thrust::pair") return false;
+  return specialization->getTemplateArgs().asArray() | forall([&](const auto &argument) {
+           return argument.getKind() == clang::TemplateArgument::Type && thrustBitwiseRelocatable(argument.getAsType(), context);
+         });
+}
+
 static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
-  if (decl.getQualifiedNameAsString() != thrustUninitializedCopy || call.getNumArgs() != 4 || !call.getArg(1)->getType()->isPointerType())
-    return {};
+  const auto name = decl.getQualifiedNameAsString();
+  const bool counted = name == thrustUninitializedCopyN;
+  if ((!counted && name != thrustUninitializedCopy) || call.getNumArgs() != 4 || !call.getArg(1)->getType()->isPointerType()) return {};
+  const auto operation = counted ? "thrust::uninitialized_copy_n" : "thrust::uninitialized_copy";
   const auto *policy = call.getArg(0)->getType().getCanonicalType()->getAsCXXRecordDecl();
   if (!policy || !policy->getQualifiedNameAsString().starts_with("thrust::cuda_cub::"))
-    raise("thrust::uninitialized_copy_n requires a CUDA device execution policy");
-  if (call.getArg(3)->getType()->isPointerType()) raise("thrust::uninitialized_copy_n raw destinations have ambiguous memory provenance");
-  if (!call.getArg(1)->getType()->getPointeeType().isTriviallyCopyableType(decl.getASTContext()))
-    raise("thrust::uninitialized_copy_n requires a trivially-copyable value type");
+    raise(std::string(operation) + " requires a CUDA device execution policy");
+  if (call.getArg(3)->getType()->isPointerType()) raise(std::string(operation) + " raw destinations have ambiguous memory provenance");
+  if (!thrustBitwiseRelocatable(call.getArg(1)->getType()->getPointeeType(), decl.getASTContext()))
+    raise(fmt::format("{} requires a trivially-copyable value type, found {}", operation,
+                      call.getArg(1)->getType()->getPointeeType().getAsString()));
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      Lowering{[expression, counted](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
         (void)r.newVar(self.handleExpr(expression->getArg(0), r));
         const auto *sourceExpression = expression->getArg(1);
-        const auto *countExpression = expression->getArg(2);
         const auto *destinationExpression = expression->getArg(3);
         const auto elementBytes =
             static_cast<uint64_t>(self.context.getTypeSizeInChars(sourceExpression->getType()->getPointeeType()).getQuantity());
@@ -269,8 +287,11 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
             const auto definition = r.findStruct(fqcn(structure.name), "Thrust relocation output");
             if (const auto member = definition->members ^ find([](const auto &candidate) {
                                       return candidate.symbol == "m_iterator" || candidate.symbol.ends_with("::m_iterator");
-                                    }))
-              return Vector<Named>{*member};
+                                    })) {
+              if (member->tpe.get<Type::Ptr>()) return Vector<Named>{*member};
+              if (const auto nested = member->tpe.get<Type::Struct>())
+                if (const auto path = findIterator(*nested)) return Vector<Named>{*member} ^ concat(*path);
+            }
             for (const auto &member : definition->members)
               if (const auto nested = member.tpe.get<Type::Struct>())
                 if (const auto path = findIterator(*nested)) return Vector<Named>{member} ^ concat(*path);
@@ -282,10 +303,21 @@ static Opt<MatchedCall> thrustRelocate(const clang::CallExpr &call, const clang:
           auto prefix = Vector<Named>{holder} | concat(*path | take(path->size() - 1)) | to_vector();
           destinationIterator = self.selectPath(r, prefix, path->back());
           if (destinationIterator->tpe != pointerType)
-            raise("Thrust relocation requires identical source and destination iterator pointer types");
+            raise(fmt::format("Thrust relocation requires identical source and destination iterator pointer types: {} and {}",
+                              repr(pointerType), repr(destinationIterator->tpe)));
           return r.newVar(Expr::Alias(*destinationIterator));
         }();
-        const auto count = r.newVar(self.conform(r, self.handleExpr(countExpression, r), Type::IntS64()));
+        const auto count = [&]() {
+          if (counted) return r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), Type::IntS64()));
+          const auto endType = self.handleType(expression->getArg(2)->getType(), r);
+          if (endType != pointerType) raise("Thrust relocation requires identical range iterator types");
+          const auto end = r.newVar(self.conform(r, self.handleExpr(expression->getArg(2), r), pointerType));
+          const auto beginAddress = r.newVar(Expr::Cast(source, Type::IntS64()));
+          const auto endAddress = r.newVar(Expr::Cast(end, Type::IntS64()));
+          const auto byteCount = r.newVar(Expr::IntrOp(Intr::Sub(endAddress, beginAddress, Type::IntS64())));
+          return r.newVar(
+              Expr::IntrOp(Intr::Div(byteCount, r.newVar(Remapper::integralConstOfType(Type::IntS64(), elementBytes)), Type::IntS64())));
+        }();
         const auto safeCount =
             r.newVar(Expr::IntrOp(Intr::Max(count, r.newVar(Remapper::integralConstOfType(Type::IntS64(), 0)), Type::IntS64())));
         const auto bytes = r.newVar(
@@ -305,7 +337,12 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
   const auto *member = llvm::dyn_cast<clang::CXXMemberCallExpr>(&call);
   const auto *owner = llvm::dyn_cast<clang::CXXRecordDecl>(decl.getDeclContext());
   const auto ownerName = owner ? owner->getQualifiedNameAsString() : std::string{};
-  const auto *operationRecord = call.getNumArgs() > 1 ? call.getArg(1)->getType().getCanonicalType()->getAsCXXRecordDecl() : nullptr;
+  auto operationType = call.getNumArgs() > 1 ? call.getArg(1)->getType().getCanonicalType() : clang::QualType{};
+  if (!operationType.isNull()) {
+    if (operationType->isReferenceType()) operationType = operationType->getPointeeType().getCanonicalType();
+    if (operationType->isPointerType()) operationType = operationType->getPointeeType().getCanonicalType();
+  }
+  const auto *operationRecord = operationType.isNull() ? nullptr : operationType->getAsCXXRecordDecl();
   const auto *operationSpecialisation = llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(operationRecord);
   const auto operationName = operationSpecialisation ? operationSpecialisation->getSpecializedTemplate()->getQualifiedNameAsString()
                              : operationRecord       ? operationRecord->getQualifiedNameAsString()
@@ -317,49 +354,114 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
   if (!member || !owner || !ownerName.starts_with("cub::") || owner->getName() != "WarpScanShfl" || decl.getName() != "InclusiveScanStep"
       || (call.getNumArgs() != 4 && call.getNumArgs() != 5))
     return {};
-  if (!additive) raise("CUB WarpScan currently supports only the standard additive operation");
+  const auto *operationCall = [&]() -> const clang::CXXMethodDecl * {
+    if (!operationRecord) return nullptr;
+    const auto resultType = call.getType().getCanonicalType().getUnqualifiedType();
+    const auto exact = [&](const clang::FunctionDecl *candidate) {
+      return candidate && candidate->getNumParams() == 2 && !candidate->getReturnType()->isDependentType()
+             && decl.getASTContext().hasSameType(candidate->getReturnType().getCanonicalType().getUnqualifiedType(), resultType);
+    };
+    const clang::CXXMethodDecl *fallback = nullptr;
+    for (const auto *method : operationRecord->methods()) {
+      if (method->getOverloadedOperator() != clang::OO_Call) continue;
+      if (const auto *functionTemplate = method->getDescribedFunctionTemplate()) {
+        for (const auto *specialisation : functionTemplate->specializations()) {
+          const auto *candidate = llvm::dyn_cast<clang::CXXMethodDecl>(specialisation);
+          if (exact(candidate)) return candidate;
+          if (!fallback && candidate && candidate->getNumParams() == 2) fallback = candidate;
+        }
+      } else {
+        if (exact(method)) return method;
+        if (!fallback && method->getNumParams() == 2) fallback = method;
+      }
+    }
+    // Function-template call operators are owned by their FunctionTemplateDecl and
+    // are therefore not necessarily exposed by CXXRecordDecl::methods().
+    for (const auto *memberDecl : operationRecord->decls()) {
+      const auto *functionTemplate = llvm::dyn_cast<clang::FunctionTemplateDecl>(memberDecl);
+      const auto *method = functionTemplate ? llvm::dyn_cast<clang::CXXMethodDecl>(functionTemplate->getTemplatedDecl()) : nullptr;
+      if (!method || method->getOverloadedOperator() != clang::OO_Call) continue;
+      for (const auto *specialisation : functionTemplate->specializations()) {
+        const auto *candidate = llvm::dyn_cast<clang::CXXMethodDecl>(specialisation);
+        if (exact(candidate)) return candidate;
+        if (!fallback && candidate && candidate->getNumParams() == 2) fallback = candidate;
+      }
+    }
+    return fallback;
+  }();
   const auto logicalWidth = warpScanWidth(decl);
   if (!logicalWidth) raise("CUB WarpScan has no valid logical-warp width");
   const auto *expression = member;
-  return MatchedCall{Lowering{[expression, logicalWidth](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
-                       const auto result = self.handleType(expression->getType(), r);
-                       if (!(result.kind().is<TypeKind::Integral>() || result.kind().is<TypeKind::Fractional>()))
-                         raise("CUB WarpScan scalar result is not numeric");
-                       const auto receiver = r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
-                       const auto input = r.newVar(self.handleExpr(expression->getArg(0), r));
-                       (void)r.newVar(self.handleExpr(expression->getArg(1), r));
-                       const auto firstLane = r.newVar(self.handleExpr(expression->getArg(2), r));
-                       const auto offset = r.newVar(self.handleExpr(expression->getArg(3), r));
-                       for (unsigned i = 4; i < expression->getNumArgs(); ++i)
-                         (void)r.newVar(self.handleExpr(expression->getArg(i), r));
-                       const auto selected = receiver.get<Term::Select>();
-                       if (!selected) raise("CUB WarpScan receiver is not selectable");
-                       const auto field = [&](const std::string_view name) -> Term::Any {
-                         const auto structure = selected->tpe.get<Type::Struct>();
-                         if (!structure) raise("CUB WarpScan receiver is not a struct");
-                         const auto definition = r.findStruct(fqcn(structure->name), "CUB WarpScan field");
-                         const auto member = definition->members ^ find([&](const auto &candidate) {
-                                               return candidate.symbol == name || candidate.symbol.ends_with(fmt::format("::{}", name));
-                                             });
-                         if (!member) raise(fmt::format("CUB WarpScan receiver has no {} field", name));
-                         auto steps = selected->steps;
-                         steps.emplace_back(PathStep::Field(member->symbol));
-                         return Term::Select(selected->root, std::move(steps), member->tpe);
-                       };
-                       const auto mask = field("member_mask");
-                       const auto lane = field("lane_id");
-                       const auto shuffled =
-                           r.newVar(Expr::SpecOp(Spec::GpuShuffleUp(input, offset, Term::IntU32Const(*logicalWidth - 1), mask, result)));
-                       const auto sum = r.newVar(Expr::IntrOp(Intr::Add(shuffled, input, result)));
-                       const auto bound = r.newVar(Expr::IntrOp(Intr::Add(firstLane, offset, Type::IntS32())));
-                       const auto laneSigned = r.newVar(Expr::Cast(lane, Type::IntS32()));
-                       const auto below = r.newVar(Expr::IntrOp(Intr::LogicLt(laneSigned, bound)));
-                       const auto output = r.newName(result);
-                       r.push(Stmt::Var(output, Expr::Alias(input), true));
-                       r.push(Stmt::Cond(below, {}, {Stmt::Mut(Term::Select(output, {}, result), Expr::Alias(sum))}));
-                       return Expr::Alias(Term::Select(output, {}, result));
-                     }},
-                     false};
+  return MatchedCall{
+      Lowering{[expression, logicalWidth, additive, operationCall, operationName](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+        const auto result = self.handleType(expression->getType(), r);
+        if (additive && !(result.kind().is<TypeKind::Integral>() || result.kind().is<TypeKind::Fractional>()))
+          raise("CUB additive WarpScan result is not numeric");
+        const auto receiver = r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
+        const auto input = r.newVar(self.conform(r, self.handleExpr(expression->getArg(0), r), result));
+        const auto operation = r.newVar(self.handleExpr(expression->getArg(1), r));
+        const auto firstLane = r.newVar(self.handleExpr(expression->getArg(2), r));
+        const auto offset = r.newVar(self.handleExpr(expression->getArg(3), r));
+        for (unsigned i = 4; i < expression->getNumArgs(); ++i)
+          (void)r.newVar(self.handleExpr(expression->getArg(i), r));
+        const auto selected = receiver.get<Term::Select>();
+        if (!selected) raise("CUB WarpScan receiver is not selectable");
+        const auto field = [&](const std::string_view name) -> Term::Any {
+          auto steps = selected->steps;
+          auto structure = selected->tpe.get<Type::Struct>();
+          if (!structure)
+            if (const auto pointer = selected->tpe.get<Type::Ptr>()) {
+              structure = pointer->comp.get<Type::Struct>();
+              if (structure) steps.emplace_back(PathStep::Deref());
+            }
+          if (!structure) raise("CUB WarpScan receiver is not a struct");
+          const auto definition = r.findStruct(fqcn(structure->name), "CUB WarpScan field");
+          const auto member = definition->members ^ find([&](const auto &candidate) {
+                                return candidate.symbol == name || candidate.symbol.ends_with(fmt::format("::{}", name));
+                              });
+          if (!member) raise(fmt::format("CUB WarpScan receiver has no {} field", name));
+          steps.emplace_back(PathStep::Field(member->symbol));
+          return Term::Select(selected->root, std::move(steps), member->tpe);
+        };
+        const auto mask = field("member_mask");
+        const auto lane = field("lane_id");
+        const auto shuffled = r.newVar(Expr::SpecOp(Spec::GpuShuffleUp(input, offset, Term::IntU32Const(*logicalWidth - 1), mask, result)));
+        const auto combined = [&]() -> Term::Any {
+          if (additive) return r.newVar(Expr::IntrOp(Intr::Add(shuffled, input, result)));
+          auto callable = operation;
+          if (const auto pointer = callable.tpe().get<Type::Ptr>();
+              pointer && (pointer->comp.is<Type::Var>() || pointer->comp.is<Type::FnRef>())) {
+            const auto selected = callable.get<Term::Select>();
+            if (!selected) raise("CUB WarpScan package callable pointer is not selectable");
+            auto steps = selected->steps;
+            steps.emplace_back(PathStep::Deref());
+            callable = Term::Select(selected->root, std::move(steps), pointer->comp).widen();
+          }
+          if (callable.tpe().is<Type::Var>() || callable.tpe().is<Type::FnRef>())
+            return r.newVar(Expr::Invoke(callable.tpe(), {}, {}, {shuffled, input}, result));
+          if (operationCall) {
+            const auto [name, function] = self.handleCall(operationCall, r);
+            if (function->decl.args.size() != 3)
+              raise(fmt::format("CUB WarpScan operation expected three lowered arguments, found {}", function->decl.args.size()));
+            const auto receiver = r.newVar(self.conform(r, Expr::Alias(callable), function->decl.args[0].named.tpe));
+            const auto lhs = r.newVar(self.conform(r, Expr::Alias(shuffled), function->decl.args[1].named.tpe));
+            const auto rhs = r.newVar(self.conform(r, Expr::Alias(input), function->decl.args[2].named.tpe));
+            return r.newVar(
+                Expr::Invoke(Type::FnRef(Sym({name})), functionTypeArguments(function->decl), {}, {receiver, lhs, rhs}, result));
+          }
+          raise(fmt::format(
+              "CUB WarpScan currently supports only the standard additive operation or a package callable, found {} (AST record `{}`)",
+              repr(callable.tpe()), operationName));
+        }();
+        const auto bound = r.newVar(Expr::IntrOp(Intr::Add(firstLane, offset, Type::IntS32())));
+        const auto laneSigned = r.newVar(Expr::Cast(lane, Type::IntS32()));
+        const auto below = r.newVar(Expr::IntrOp(Intr::LogicLt(laneSigned, bound)));
+        const auto output = r.newName(result);
+        r.push(Stmt::Var(output, Expr::Alias(input), true));
+        r.push(Stmt::Cond(below, {}, {Stmt::Mut(Term::Select(output, {}, result), Expr::Alias(combined))}));
+        return Expr::Alias(Term::Select(output, {}, result));
+      }},
+      false};
 }
 
 static Opt<MatchedCall> cudaWarp(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
@@ -451,6 +553,108 @@ static Opt<MatchedCall> cudaSynchronise(const clang::CallExpr &call, const clang
                      false};
 }
 
+static Opt<MatchedCall> cudaErrorState(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto name = decl.getQualifiedNameAsString();
+  if (call.getNumArgs() != 0 || (name != "cudaPeekAtLastError" && name != "cudaGetLastError")) return {};
+  const auto *expression = &call;
+  return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       (void)lowerArguments(*expression, self, r);
+                       return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+                     }},
+                     false};
+}
+
+static Opt<MatchedCall> thrustTripleChevronLaunch(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto *method = llvm::dyn_cast<clang::CXXMethodDecl>(&decl);
+  const auto *member = llvm::dyn_cast<clang::CXXMemberCallExpr>(&call);
+  if (!method || !member || method->getName() != "doit" || call.getNumArgs() < 1) return {};
+  const auto owner = method->getParent()->getQualifiedNameAsString();
+  if (!owner.ends_with("thrust::cuda_cub::launcher::triple_chevron") && owner != "thrust::cuda_cub::launcher::triple_chevron") return {};
+  const auto *expression = member;
+  return MatchedCall{
+      Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+        const auto receiver = r.newVar(self.handleExpr(expression->getImplicitObjectArgument(), r));
+        const auto selected = receiver.get<Term::Select>();
+        if (!selected) raise("Thrust triple-chevron launcher receiver is not selectable");
+        const auto field = [&](const std::string_view name) -> Term::Any {
+          auto steps = selected->steps;
+          auto structure = selected->tpe.get<Type::Struct>();
+          if (!structure)
+            if (const auto pointer = selected->tpe.get<Type::Ptr>()) {
+              structure = pointer->comp.get<Type::Struct>();
+              if (structure) steps.emplace_back(PathStep::Deref());
+            }
+          if (!structure) raise("Thrust triple-chevron launcher receiver is not a struct");
+          const auto definition = r.findStruct(fqcn(structure->name), "Thrust triple-chevron launcher field");
+          const auto member = definition->members ^ find([&](const auto &candidate) {
+                                return candidate.symbol == name || candidate.symbol.ends_with(fmt::format("::{}", name));
+                              });
+          if (!member) raise(fmt::format("Thrust triple-chevron launcher has no {} field", name));
+          steps.emplace_back(PathStep::Field(member->symbol));
+          return Term::Select(selected->root, std::move(steps), member->tpe);
+        };
+        const auto dimension = [&](const Term::Any &value, const std::string_view axis) -> Term::Any {
+          const auto selectedDimension = termToSelect(value, r);
+          auto structure = selectedDimension.tpe.get<Type::Struct>();
+          if (!structure) raise("Thrust triple-chevron launch dimension is not a struct");
+          const auto definition = r.findStruct(fqcn(structure->name), "Thrust triple-chevron launch dimension");
+          const auto member = definition->members ^ find([&](const auto &candidate) {
+                                return candidate.symbol == axis || candidate.symbol.ends_with(fmt::format("::{}", axis));
+                              });
+          if (!member) raise(fmt::format("Thrust triple-chevron launch dimension has no {} field", axis));
+          auto steps = selectedDimension.steps;
+          steps.emplace_back(PathStep::Field(member->symbol));
+          return Term::Select(selectedDimension.root, std::move(steps), member->tpe);
+        };
+        const auto grid = field("grid");
+        const auto block = field("block");
+        const auto shared = r.newVar(self.conform(r, Expr::Alias(field("shared_mem")), Type::IntU32()));
+        const auto *kernelExpression = expression->getArg(0)->IgnoreParenImpCasts();
+        if (const auto *address = llvm::dyn_cast<clang::UnaryOperator>(kernelExpression);
+            address && address->getOpcode() == clang::UO_AddrOf)
+          kernelExpression = address->getSubExpr()->IgnoreParenImpCasts();
+        Opt<Vector<Type::Any>> kernelArgumentTypes;
+        Term::Any kernel = [&]() -> Term::Any {
+          const auto *reference = llvm::dyn_cast<clang::DeclRefExpr>(kernelExpression);
+          const auto *functionDecl = reference ? llvm::dyn_cast<clang::FunctionDecl>(reference->getDecl()) : nullptr;
+          if (!functionDecl) return r.newVar(self.handleExpr(expression->getArg(0), r));
+          auto [name, function] = self.handleCall(functionDecl, r);
+          function->decl.affinity = FunctionAffinity::Offload();
+          function->convention = CallConvention::OffloadEntry();
+          kernelArgumentTypes = function->decl.args | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+          return Term::Poison(Type::FnRef(function->decl.name));
+        }();
+        if (const auto pointer = kernel.tpe().get<Type::Ptr>(); pointer && pointer->comp.is<Type::FnRef>()) {
+          const auto root = termToSelect(kernel, r);
+          auto steps = root.steps;
+          steps.emplace_back(PathStep::Deref());
+          kernel = Term::Select(root.root, std::move(steps), pointer->comp).widen();
+        }
+        if (!kernelArgumentTypes)
+          if (const auto reference = kernel.tpe().get<Type::FnRef>())
+            if (const auto function = r.functions ^ get_maybe(fqcn(reference->name)))
+              kernelArgumentTypes = (*function)->decl.args | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+        if (!kernel.tpe().is<Type::FnRef>() && !kernel.tpe().is<Type::Ptr>())
+          raise("Thrust triple-chevron launch kernel is not a function reference");
+        if (kernelArgumentTypes && kernelArgumentTypes->size() != expression->getNumArgs() - 1)
+          raise(fmt::format("Thrust triple-chevron launch has {} arguments but its kernel declares {}", expression->getNumArgs() - 1,
+                            kernelArgumentTypes->size()));
+        Vector<Term::Any> launchArguments;
+        launchArguments.reserve(expression->getNumArgs() - 1);
+        for (unsigned i = 1; i < expression->getNumArgs(); ++i) {
+          auto lowered = self.handleExpr(expression->getArg(i), r);
+          if (kernelArgumentTypes) lowered = self.conform(r, std::move(lowered), (*kernelArgumentTypes)[i - 1]);
+          auto argument = r.newVar(std::move(lowered));
+          launchArguments.emplace_back(argument);
+        }
+        (void)r.newVar(
+            Expr::SpecOp(Spec::RemoteLaunch(packageContext(), kernel, {}, dimension(grid, "x"), dimension(grid, "y"), dimension(grid, "z"),
+                                            dimension(block, "x"), dimension(block, "y"), dimension(block, "z"), shared, launchArguments)));
+        return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
+      }},
+      false};
+}
+
 static Opt<MatchedCall> cudaRuntime(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   return remoteRuntimePrism(call, decl, "cuda");
 }
@@ -459,53 +663,61 @@ static Opt<MatchedCall> cudaHostQuery(const clang::CallExpr &call, const clang::
   const auto name = decl.getQualifiedNameAsString();
   const bool ptxVersion = isPtxVersionQuery(name);
   const bool occupancy = isOccupancyQuery(name);
+  const bool deviceOrdinal = name == "cudaGetDevice" && call.getNumArgs() == 1;
   const bool deviceAttribute = name == "cudaDeviceGetAttribute" && call.getNumArgs() == 3;
   const auto attribute = deviceAttribute ? deviceAttributeName(*call.getArg(1)) : Opt<std::string>{};
-  if ((!ptxVersion && !occupancy && !deviceAttribute) || call.getNumArgs() < 1) return {};
+  if ((!ptxVersion && !occupancy && !deviceOrdinal && !deviceAttribute) || call.getNumArgs() < 1) return {};
   const auto *expression = &call;
   return MatchedCall{
-      Lowering{[expression, ptxVersion, occupancy, deviceAttribute, attribute](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+      Lowering{[expression, ptxVersion, occupancy, deviceOrdinal, deviceAttribute, attribute](Remapper &self,
+                                                                                              Remapper::RemapContext &r) -> Expr::Any {
         const auto arguments = lowerArguments(*expression, self, r);
         const auto pointer = arguments.front().tpe().get<Type::Ptr>();
-        if (pointer) {
-          Expr::Any queried = Expr::Alias(Term::Poison(pointer->comp));
+        const auto outputType = pointer      ? Opt<Type::Any>{pointer->comp}
+                                : ptxVersion ? Opt<Type::Any>{arguments.front().tpe()}
+                                             : std::nullopt;
+        if (outputType) {
+          Expr::Any queried = Expr::Alias(Term::Poison(*outputType));
           if (ptxVersion) {
             const auto major = r.newVar(Expr::ForeignCall("polyrt_device_cuda_architecture_major", {packageContext()}, Type::IntU64()));
             const auto minor = r.newVar(Expr::ForeignCall("polyrt_device_cuda_architecture_minor", {packageContext()}, Type::IntU64()));
             const auto hundreds = r.newVar(Expr::IntrOp(Intr::Mul(major, Term::IntU64Const(100), Type::IntU64())));
             const auto tens = r.newVar(Expr::IntrOp(Intr::Mul(minor, Term::IntU64Const(10), Type::IntU64())));
-            queried = self.conform(r, Expr::IntrOp(Intr::Add(hundreds, tens, Type::IntU64())), pointer->comp);
+            queried = self.conform(r, Expr::IntrOp(Intr::Add(hundreds, tens, Type::IntU64())), *outputType);
           } else if (occupancy) {
-            if (expression->getDirectCallee()->getQualifiedNameAsString() == "cudaOccupancyMaxActiveBlocksPerMultiprocessor")
+            if (expression->getDirectCallee()->getQualifiedNameAsString() == "cudaOccupancyMaxActiveBlocksPerMultiprocessor") {
               raise("cudaOccupancyMaxActiveBlocksPerMultiprocessor requires a target-specific occupancy query");
+            }
             // One resident block is the conservative target-independent lower bound for a launchable kernel.
-            queried = self.integralConstOfType(pointer->comp, 1);
+            queried = self.integralConstOfType(*outputType, 1);
+          } else if (deviceOrdinal) {
+            queried = self.integralConstOfType(*outputType, 0);
           }
           if (deviceAttribute) {
             if (!attribute) raise("CUDA device attribute is not a named constant");
-            if (*attribute == "cudaDevAttrWarpSize") queried = self.integralConstOfType(pointer->comp, 32);
+            if (*attribute == "cudaDevAttrWarpSize") queried = self.integralConstOfType(*outputType, 32);
             else if (*attribute == "cudaDevAttrMultiProcessorCount")
-              queried =
-                  self.conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), pointer->comp);
+              queried = self.conform(r, Expr::ForeignCall("polyrt_device_compute_units", {packageContext()}, Type::IntU64()), *outputType);
             else if (*attribute == "cudaDevAttrMaxSharedMemoryPerBlock" || *attribute == "cudaDevAttrMaxSharedMemoryPerBlockOptin")
               queried =
-                  self.conform(r, Expr::ForeignCall("polyrt_device_local_memory_bytes", {packageContext()}, Type::IntU64()), pointer->comp);
+                  self.conform(r, Expr::ForeignCall("polyrt_device_local_memory_bytes", {packageContext()}, Type::IntU64()), *outputType);
             else if (*attribute == "cudaDevAttrMaxThreadsPerBlock")
               queried = self.conform(r, Expr::ForeignCall("polyrt_device_max_threads_per_block_u64", {packageContext()}, Type::IntU64()),
-                                     pointer->comp);
-            else if (*attribute == "cudaDevAttrMaxGridDimX") queried = self.integralConstOfType(pointer->comp, 0x7fffffff);
+                                     *outputType);
+            else if (*attribute == "cudaDevAttrMaxGridDimX") queried = self.integralConstOfType(*outputType, 0x7fffffff);
             else if (*attribute == "cudaDevAttrComputeCapabilityMajor")
               queried = self.conform(r, Expr::ForeignCall("polyrt_device_cuda_architecture_major", {packageContext()}, Type::IntU64()),
-                                     pointer->comp);
+                                     *outputType);
             else if (*attribute == "cudaDevAttrComputeCapabilityMinor")
               queried = self.conform(r, Expr::ForeignCall("polyrt_device_cuda_architecture_minor", {packageContext()}, Type::IntU64()),
-                                     pointer->comp);
+                                     *outputType);
             else raise("Unsupported CUDA device attribute query: " + *attribute);
           }
           const auto stored = r.newVar(queried);
           const auto base = arguments.front().get<Term::Select>();
           if (!base) raise("CUDA host query output did not lower to a selectable pointer");
-          r.push(Stmt::Update(*base, Term::IntU64Const(0), stored));
+          if (pointer) r.push(Stmt::Update(*base, Term::IntU64Const(0), stored));
+          else r.push(Stmt::Mut(*base, Expr::Alias(stored)));
         }
         return self.integralConstOfType(self.handleType(expression->getType(), r), 0);
       }},
@@ -528,8 +740,9 @@ static Opt<MatchedCall> cudaIgnoredHelper(const clang::CallExpr &call, const cla
 }
 
 Vector<CallPrism> cudaPrisms() {
-  return {cubLegacyShuffle, cubThreadAccess, cudaAtomic,  cudaBitOperation, thrustRelocate, cubWarpScan,
-          cudaWarp,         cudaBarrier,     cudaRuntime, cudaSynchronise,  cudaHostQuery,  cudaIgnoredHelper};
+  return {cubLegacyShuffle, cubThreadAccess,  cudaAtomic,  cudaBitOperation, thrustRelocate, cubWarpScan,
+          cudaWarp,         cudaBarrier,      cudaRuntime, cudaSynchronise,  cudaErrorState, thrustTripleChevronLaunch,
+          cudaHostQuery,    cudaIgnoredHelper};
 }
 
 } // namespace polyregion::polystl::call_prism
