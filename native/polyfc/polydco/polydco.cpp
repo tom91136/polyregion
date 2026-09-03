@@ -1,6 +1,8 @@
 #include "polydco.h"
 
 #include <cinttypes>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <span>
 #include <thread>

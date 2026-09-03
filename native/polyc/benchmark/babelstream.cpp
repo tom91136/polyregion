@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <thread>
 
 #include "aspartame/all.hpp"

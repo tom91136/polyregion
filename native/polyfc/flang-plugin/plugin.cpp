@@ -5,6 +5,8 @@
 #include "flang/Evaluate/expression.h"
 // clang-format on
 
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <vector>
 

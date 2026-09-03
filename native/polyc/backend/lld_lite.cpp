@@ -1,5 +1,6 @@
 #include "lld_lite.h"
 
+#include <cstdio>
 #include <deque>
 #include <fstream>
 

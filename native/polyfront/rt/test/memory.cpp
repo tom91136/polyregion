@@ -1,4 +1,5 @@
 #include <array>
+#include <cstdio>
 #include <fstream>
 #include <numeric>
 
