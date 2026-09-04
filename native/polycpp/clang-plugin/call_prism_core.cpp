@@ -346,9 +346,9 @@ static Opt<MatchedCall> compilerBuiltin(const clang::CallExpr &call, const clang
 
 static Opt<MatchedCall> badVariantAccess(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   const auto name = decl.getQualifiedNameAsString();
-  if ((name != "std::__throw_bad_variant_access" && name != "std::_Throw_bad_variant_access") || !decl.isNoReturn()
-      || !call.getType()->isVoidType())
-    return {};
+  // Older libstdc++ headers omit [[noreturn]] on the private overloads even
+  // though both implementations unconditionally throw or abort.
+  if ((name != "std::__throw_bad_variant_access" && name != "std::_Throw_bad_variant_access") || !call.getType()->isVoidType()) return {};
   const auto *expression = &call;
   return MatchedCall{Lowering{[expression](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        (void)lowerArguments(*expression, self, r);
