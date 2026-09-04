@@ -296,6 +296,84 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
       changed = true;
     }
   }
+  const auto functionsByName = r.functions | values() | group_by([](const auto &fn) { return fn->decl.name; });
+  const auto scalarType = [](const Type::Any &type) {
+    return type.is<Type::Float16>() || type.is<Type::Float32>() || type.is<Type::Float64>() || type.is<Type::IntU8>()
+           || type.is<Type::IntU16>() || type.is<Type::IntU32>() || type.is<Type::IntU64>() || type.is<Type::IntS8>()
+           || type.is<Type::IntS16>() || type.is<Type::IntS32>() || type.is<Type::IntS64>() || type.is<Type::Bool1>();
+  };
+  const auto normalizeRemoteType = [](const Type::Any &expected, const Type::Any &actual) -> Type::Any {
+    if (const auto expectedStruct = expected.get<Type::Struct>())
+      if (const auto actualPointer = actual.get<Type::Ptr>())
+        if (const auto actualStruct = actualPointer->comp.get<Type::Struct>();
+            actualStruct && expectedStruct->name == actualStruct->name && expectedStruct->args.size() == actualStruct->args.size())
+          return actualStruct->widen();
+    if (const auto expectedPointer = expected.get<Type::Ptr>())
+      if (const auto expectedStruct = expectedPointer->comp.get<Type::Struct>())
+        if (const auto actualStruct = actual.get<Type::Struct>();
+            actualStruct && expectedStruct->name == actualStruct->name && expectedStruct->args.size() == actualStruct->args.size())
+          return Type::Ptr(actualStruct->widen(), expectedPointer->space).widen();
+    return actual;
+  };
+  const auto inferTypes = [&](const Vector<Type::Any> &expected, const Vector<Type::Any> &actual, const bool remote,
+                              const bool allowScalarConversion) -> Opt<Map<std::string, Type::Any>> {
+    if (expected.size() != actual.size()) return {};
+    Map<std::string, Type::Any> inferred;
+    std::function<bool(const Type::Any &, const Type::Any &)> infer = [&](const auto &pattern, const auto &rawValue) {
+      const auto value = remote ? normalizeRemoteType(pattern, rawValue) : rawValue;
+      if (const auto variable = pattern.template get<Type::Var>()) {
+        if (const auto existing = inferred ^ get_maybe(variable->name)) return *existing == value;
+        inferred.emplace(variable->name, value);
+        return true;
+      }
+      if (const auto pointer = pattern.template get<Type::Ptr>()) {
+        if (pointer->comp.template is<Type::Nothing>() && value.template is<Type::FnRef>()) return true;
+        const auto actualPointer = value.template get<Type::Ptr>();
+        return actualPointer && pointer->space == actualPointer->space && infer(pointer->comp, actualPointer->comp);
+      }
+      if (const auto array = pattern.template get<Type::Arr>()) {
+        const auto actualArray = value.template get<Type::Arr>();
+        return actualArray && array->length == actualArray->length && array->space == actualArray->space
+               && infer(array->comp, actualArray->comp);
+      }
+      if (const auto structure = pattern.template get<Type::Struct>()) {
+        const auto actualStructure = value.template get<Type::Struct>();
+        if (!actualStructure || actualStructure->name != structure->name || actualStructure->args.size() != structure->args.size())
+          return false;
+        for (size_t i = 0; i < structure->args.size(); ++i)
+          if (!infer(structure->args[i], actualStructure->args[i])) return false;
+        return true;
+      }
+      return pattern == value || (remote && allowScalarConversion && scalarType(pattern) && scalarType(value));
+    };
+    for (size_t i = 0; i < expected.size(); ++i)
+      if (!infer(expected[i], actual[i])) return {};
+    return inferred;
+  };
+  const auto suppliedTypesAgree = [](const FunctionDecl &decl, const Vector<Type::Any> &supplied,
+                                     const Map<std::string, Type::Any> &inferred) {
+    for (size_t i = 0; i < supplied.size(); ++i)
+      if (const auto value = inferred ^ get_maybe(decl.tpeVars[i].name); value && *value != supplied[i]) return false;
+    return true;
+  };
+  const auto completeTypeArgs = [&](const FunctionDecl &decl, const Vector<Type::Any> &supplied,
+                                    const Map<std::string, Type::Any> &inferred) {
+    auto args = supplied;
+    for (size_t i = args.size(); i < decl.tpeVars.size(); ++i) {
+      const auto &variable = decl.tpeVars[i];
+      if (const auto value = inferred ^ get_maybe(variable.name)) args.emplace_back(*value);
+      else if (r.packageVariables ^ contains(variable.name)) args.emplace_back(variable);
+      else break;
+    }
+    return args;
+  };
+  const auto remoteParameters = [](const FunctionDecl &decl) {
+    return decl.moduleCaptures | concat(decl.termCaptures) | concat(decl.args) | filter([](const auto &argument) {
+             return !argument.named.tpe.template is<Type::Unit0>() && !argument.named.tpe.template is<Type::Nothing>();
+           })
+           | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+  };
+
   size_t functionIterations = 0;
   for (bool changed = true; changed;) {
     if (++functionIterations > convergenceLimit) {
@@ -305,38 +383,55 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
       return;
     }
     changed = false;
-    const auto functionsByName = r.functions | values() | map([](const auto &fn) { return std::pair{fn->decl.name, fn}; }) | to<Map>();
     for (const auto &fn : r.functions ^ values()) {
       auto next = fn->template modify_all<Type::Struct>(completeStructArgs);
       next = next.template modify_all<Expr::Invoke>([&](const Expr::Invoke &invoke) {
-        const auto callee =
+        const auto overloads =
             invoke.callee.template get<Type::FnRef>() ^ flat_map([&](const auto &ref) { return functionsByName ^ get_maybe(ref.name); });
-        if (!callee || invoke.tpeArgs.size() >= (*callee)->decl.tpeVars.size()) return invoke;
-        Map<std::string, Type::Any> inferred;
-        std::function<void(const Type::Any &, const Type::Any &)> infer = [&](const auto &expected, const auto &actual) {
-          if (const auto variable = expected.template get<Type::Var>()) inferred.emplace(variable->name, actual);
-          else if (const auto pointer = expected.template get<Type::Ptr>()) {
-            if (const auto value = actual.template get<Type::Ptr>()) infer(pointer->comp, value->comp);
-          } else if (const auto array = expected.template get<Type::Arr>()) {
-            if (const auto value = actual.template get<Type::Arr>()) infer(array->comp, value->comp);
-          } else if (const auto structure = expected.template get<Type::Struct>()) {
-            if (const auto value = actual.template get<Type::Struct>(); value && value->name == structure->name)
-              for (size_t i = 0; i < std::min(structure->args.size(), value->args.size()); ++i)
-                infer(structure->args[i], value->args[i]);
-          }
-        };
-        if ((*callee)->decl.receiver && invoke.receiver) infer((*callee)->decl.receiver->named.tpe, invoke.receiver->tpe());
-        for (size_t i = 0; i < std::min((*callee)->decl.args.size(), invoke.args.size()); ++i)
-          infer((*callee)->decl.args[i].named.tpe, invoke.args[i].tpe());
-        infer((*callee)->decl.rtn, invoke.rtn);
-        auto args = invoke.tpeArgs;
-        for (size_t i = args.size(); i < (*callee)->decl.tpeVars.size(); ++i) {
-          const auto &variable = (*callee)->decl.tpeVars[i];
-          if (const auto value = inferred ^ get_maybe(variable.name)) args.emplace_back(*value);
-          else if (r.packageVariables ^ contains(variable.name)) args.emplace_back(variable);
-          else break;
+        if (!overloads) return invoke;
+        auto actual = invoke.args | map([](const auto &argument) { return argument.tpe(); }) | to_vector();
+        if (invoke.receiver) {
+          actual.insert(actual.begin(), invoke.receiver->tpe());
         }
-        return invoke.withTpeArgs(args);
+        actual.emplace_back(invoke.rtn);
+        std::shared_ptr<Function> callee;
+        Map<std::string, Type::Any> inferred;
+        size_t matches = 0;
+        for (const auto &candidate : *overloads) {
+          if (invoke.tpeArgs.size() >= candidate->decl.tpeVars.size()) continue;
+          auto expected = candidate->decl.args | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+          if (candidate->decl.receiver) expected.insert(expected.begin(), candidate->decl.receiver->named.tpe);
+          expected.emplace_back(candidate->decl.rtn);
+          const auto types = inferTypes(expected, actual, false, false);
+          if (!types || !suppliedTypesAgree(candidate->decl, invoke.tpeArgs, *types)) continue;
+          callee = candidate;
+          inferred = *types;
+          ++matches;
+        }
+        return matches == 1 ? invoke.withTpeArgs(completeTypeArgs(callee->decl, invoke.tpeArgs, inferred)) : invoke;
+      });
+      next = next.template modify_all<Spec::RemoteLaunch>([&](const Spec::RemoteLaunch &launch) {
+        const auto overloads = launch.kernel.tpe().template get<Type::FnRef>()
+                               ^ flat_map([&](const auto &ref) { return functionsByName ^ get_maybe(ref.name); });
+        if (!overloads) return launch;
+        const auto actual = launch.args | map([](const auto &argument) { return argument.tpe(); }) | to_vector();
+        std::shared_ptr<Function> callee;
+        Map<std::string, Type::Any> inferred;
+        const auto findMatches = [&](const bool allowScalarConversion) {
+          size_t matches = 0;
+          for (const auto &candidate : *overloads) {
+            if (launch.tpeArgs.size() >= candidate->decl.tpeVars.size()) continue;
+            const auto types = inferTypes(remoteParameters(candidate->decl), actual, true, allowScalarConversion);
+            if (!types || !suppliedTypesAgree(candidate->decl, launch.tpeArgs, *types)) continue;
+            callee = candidate;
+            inferred = *types;
+            ++matches;
+          }
+          return matches;
+        };
+        auto matches = findMatches(false);
+        if (matches == 0) matches = findMatches(true);
+        return matches == 1 ? launch.withTpeArgs(completeTypeArgs(callee->decl, launch.tpeArgs, inferred)) : launch;
       });
       next.decl.tpeVars =
           next.decl.tpeVars | concat(freeTypeVariables(next.decl))
@@ -356,8 +451,12 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
   Set<std::string> host = exported;
   Set<std::string> contextual;
   for (const auto &[name, fn] : r.functions)
-    if (fn->template collect_all<Term::Select>() ^ exists([](const auto &selection) { return selection.root.symbol == ContextArgument; }))
+    if (!fn->convention.template is<CallConvention::OffloadEntry>()
+        && fn->template collect_all<Term::Select>()
+               ^ exists([](const auto &selection) { return selection.root.symbol == ContextArgument; })) {
       contextual.emplace(name);
+      host.emplace(name);
+    }
   size_t closureIterations = 0;
   for (bool changed = true; changed;) {
     if (++closureIterations > convergenceLimit) {
@@ -372,8 +471,10 @@ void polystl::compilePackageProgram(const polyfront::Options &opts,             
       if (host ^ contains(name))
         for (const auto &callee : invoked)
           if (host.emplace(callee).second) changed = true;
-      if (!(contextual ^ contains(name)) && invoked ^ exists([&](const auto &callee) { return contextual ^ contains(callee); })) {
+      if (!fn->convention.template is<CallConvention::OffloadEntry>() && !(contextual ^ contains(name))
+          && invoked ^ exists([&](const auto &callee) { return contextual ^ contains(callee); })) {
         contextual.emplace(name);
+        host.emplace(name);
         changed = true;
       }
     }

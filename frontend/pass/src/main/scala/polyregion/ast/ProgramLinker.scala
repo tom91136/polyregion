@@ -597,34 +597,39 @@ private[polyregion] object ProgramLinker {
             val withoutCallables =
               if (!isSelectedImplementation || !omitCallableArguments) original
               else {
-                val removed = original.args.zipWithIndex.collect {
+                val replacements = original.args.zipWithIndex.flatMap {
                   case (argument, index)
                       if index >= resolution.abi.systemArguments &&
                         resolution.call.callables.contains(
                           index - resolution.abi.systemArguments
                         ) =>
-                    argument.named.symbol
-                }.toSet
+                    resolution.call.callables
+                      .get(index - resolution.abi.systemArguments)
+                      .map(argument.named.symbol -> p.Type.FnRef(_))
+                  case _ => None
+                }.toMap
+                original.visitAll[p.Term] {
+                  case select @ p.Term.Select(root, steps, _) if replacements.contains(root.symbol) && steps.nonEmpty =>
+                    errors += s"callable placeholder `${select.root.symbol}` is projected as a runtime value"
+                  case _ => ()
+                }
                 original
-                  .collectAll[p.Term]
-                  .collect { case select: p.Term.Select => select }
-                  .filter { select =>
-                    removed(select.root.symbol)
+                  .modifyAll[p.Term] {
+                    case p.Term.Select(root, Nil, _) if replacements.contains(root.symbol) =>
+                      p.Term.Poison(replacements(root.symbol))
+                    case term => term
                   }
-                  .foreach(select =>
-                    errors += s"callable placeholder `${select.root.symbol}` is used as a runtime value"
+                  .copy(
+                    decl = original.decl.copy(args = original.args.zipWithIndex.collect {
+                      case (argument, index)
+                          if index < resolution.abi.systemArguments ||
+                            !resolution.call.callables
+                              .contains(index - resolution.abi.systemArguments) =>
+                        argument
+                    }),
+                    implements = None,
+                    requiredCapabilities = Nil
                   )
-                original.copy(
-                  decl = original.decl.copy(args = original.args.zipWithIndex.collect {
-                    case (argument, index)
-                        if index < resolution.abi.systemArguments ||
-                          !resolution.call.callables
-                            .contains(index - resolution.abi.systemArguments) =>
-                      argument
-                  }),
-                  implements = None,
-                  requiredCapabilities = Nil
-                )
               }
             val substitutions =
               if (isSelectedImplementation) implementationVariables
@@ -634,6 +639,8 @@ private[polyregion] object ProgramLinker {
             loop(dependencies ::: rest, reached + name, function :: out)
         }
     }
+    // Substitution exposes concrete consumer callables as FnRefs, so the ordinary dependency walk closes over
+    // precisely the required caller functions without retaining unrelated consumer code.
     val closed = loop(roots, Set.empty, Nil)
     callableVariables.values.foreach { name =>
       if (!closed.exists(_.name == name)) errors += s"resolved callable `${name.repr}` is unreachable"
@@ -929,18 +936,7 @@ private[polyregion] object ProgramLinker {
         closure     <- implementationClosure(pkg, resolution, callerFns)
         definitions <- resolvedStructClosure(pkg, closure, callerDefs)
         entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
-      } yield {
-        val initial     = p.Program(Some(entry), closure, definitions)
-        val specialised = Specialisation(initial, PluginEntry.defaultLog)
-        val monomorphic = MonoStruct(specialised, PluginEntry.defaultLog)._2
-        DeadStructElimination(
-          DeadFunctionElimination(
-            KernelCaptureFlatten(OffloadEntryInline(monomorphic, PluginEntry.defaultLog), PluginEntry.defaultLog),
-            PluginEntry.defaultLog
-          ),
-          PluginEntry.defaultLog
-        )
-      }
+      } yield p.Program(Some(entry), closure, definitions)
     }
   }
 
@@ -988,6 +984,117 @@ private[polyregion] object ProgramLinker {
         p.Program(None, renamed, definitions)
       }
     }
+  }
+
+  private def missingRemoteLaunchTargets(program: p.Program): List[p.Sym] = {
+    val functions     = program.entry.toList ::: program.functions
+    val functionNames = functions.map(_.name).toSet
+    functions
+      .collectWhereOption[p.Expr] {
+        case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) =>
+          launch.kernel.tpe match {
+            case p.Type.FnRef(name) => Some(name)
+            case _                  => None
+          }
+        case _ => None
+      }
+      .distinct
+      .filterNot(functionNames)
+  }
+
+  private def validateRemoteLaunchTargets(program: p.Program): Either[List[String], p.Program] = {
+    val functions = program.entry.toList ::: program.functions
+    val dynamic = functions.flatMap { function =>
+      function.collectWhere[p.Expr] {
+        case p.Expr.SpecOp(launch: p.Spec.RemoteLaunch) if !launch.kernel.tpe.isInstanceOf[p.Type.FnRef] =>
+          val origin = launch.kernel match {
+            case p.Term.Select(root, Nil, _) =>
+              function
+                .collectFirst_[p.Stmt] {
+                  case p.Stmt.Var(name, Some(value), _) if name == root =>
+                    s"; `${root.repr}` is initialised by `${value.repr}`"
+                }
+                .getOrElse("")
+            case _ => ""
+          }
+          s"remote launch in `${function.name.fqcn}` has unresolved target `${launch.kernel.repr}` of type `${launch.kernel.tpe.repr}`$origin"
+      }
+    }
+    val missing = missingRemoteLaunchTargets(program)
+    val errors  = dynamic ::: missing.map(name => s"remote launch target `${name.fqcn}` has no prepared definition")
+    Either.cond(errors.isEmpty, program, errors)
+  }
+
+  private def propagateHostAffinity(program: p.Program): p.Program = {
+    val all    = program.entry.toList ::: program.functions
+    val byName = all.groupBy(_.name)
+    @annotation.tailrec
+    def loop(frontier: List[p.Sym], reached: Set[p.Sym]): Set[p.Sym] = frontier match {
+      case Nil                           => reached
+      case name :: rest if reached(name) => loop(rest, reached)
+      case name :: rest =>
+        val dependencies = byName
+          .getOrElse(name, Nil)
+          .filter(_.convention == p.CallConvention.RegularCall)
+          .flatMap(
+            _.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(target), _, _, _, _) => target }
+          )
+        loop(dependencies ::: rest, reached + name)
+    }
+    val host =
+      loop(all.collect { case function if function.affinity == p.Function.Affinity.Host => function.name }, Set.empty)
+    def promote(function: p.Function): p.Function =
+      if (host(function.name) && function.convention == p.CallConvention.RegularCall)
+        function.copy(decl = function.decl.copy(affinity = p.Function.Affinity.Host))
+      else function
+    program.copy(entry = program.entry.map(promote), functions = program.functions.map(promote))
+  }
+
+  private def prepareLinkedProgram(program: p.Program): Either[List[String], p.Program] = {
+    val specialised = Specialisation(program, PluginEntry.defaultLog)
+    val monomorphic = MonoStruct(specialised, PluginEntry.defaultLog)._2
+    val candidates  = program.functions.groupBy(_.name)
+
+    def closeRemoteTargets(current: p.Program, restored: Set[p.Sym]): Either[List[String], p.Program] = {
+      val missing = missingRemoteLaunchTargets(current)
+      if (missing.isEmpty) Right(current)
+      else {
+        val errors    = List.newBuilder[String]
+        val additions = List.newBuilder[p.Function]
+        missing.foreach { name =>
+          if (restored(name))
+            errors += s"remote launch target `${name.fqcn}` could not be prepared from its source definition"
+          else
+            candidates.getOrElse(name, Nil).distinct match {
+              case function :: Nil => additions += function
+              case Nil             => errors += s"remote launch target `${name.fqcn}` has no source definition"
+              case conflicts =>
+                errors += s"remote launch target `${name.fqcn}` has ${conflicts.size} source definitions"
+            }
+        }
+        val distinctErrors = errors.result().distinct
+        if (distinctErrors.nonEmpty) Left(distinctErrors)
+        else {
+          val restoredFunctions = additions.result()
+          val withTemplates = current.copy(
+            functions = current.functions ::: restoredFunctions,
+            defs = (program.defs ::: current.defs).distinctBy(_.name)
+          )
+          val next = MonoStruct(Specialisation(withTemplates, PluginEntry.defaultLog), PluginEntry.defaultLog)._2
+          closeRemoteTargets(next, restored ++ restoredFunctions.map(_.name))
+        }
+      }
+    }
+
+    val closed = closeRemoteTargets(monomorphic, Set.empty)
+    closed
+      .map { program =>
+        val flattened = KernelCaptureFlatten(program, PluginEntry.defaultLog)
+        val functions = DeadFunctionElimination(flattened, PluginEntry.defaultLog)
+        val structs   = DeadStructElimination(functions, PluginEntry.defaultLog)
+        propagateHostAffinity(structs)
+      }
+      .flatMap(validateRemoteLaunchTargets)
   }
 
   private def mergeLinkedPrograms(programs: List[p.Program]): Either[List[String], p.Program] = {
@@ -1058,7 +1165,7 @@ private[polyregion] object ProgramLinker {
     Either.cond(distinct.isEmpty, linked, distinct)
   }
 
-  private def linkRequest(
+  private def resolveRequest(
       request: p.Program.LinkRequest,
       resolveRoot: (
           p.Package,
@@ -1068,7 +1175,7 @@ private[polyregion] object ProgramLinker {
           Set[String],
           Map[p.Type, Int]
       ) => Either[List[String], p.Program]
-  ): Either[List[String], p.Program] = {
+  ): Either[List[String], List[p.Program]] = {
     val groupedTypeSizes = request.typeSizes.groupBy(_.tpe)
     val layoutErrors = groupedTypeSizes.toList
       .flatMap { case (tpe, values) =>
@@ -1098,21 +1205,27 @@ private[polyregion] object ProgramLinker {
     }
     val errors = layoutErrors ::: linked.flatMap(_.left.toOption.toList.flatten)
     if (errors.nonEmpty) Left(errors.distinct)
-    else mergeLinkedPrograms(linked.flatMap(_.toOption))
+    else Right(linked.flatMap(_.toOption))
   }
 
-  def link(request: p.Program.LinkRequest): Either[List[String], p.Program] = linkRequest(request, linkRoot)
+  def link(request: p.Program.LinkRequest): Either[List[String], p.Program] =
+    resolveRequest(request, linkRoot)
+      // Package roots are independent imports. Prepare each selected closure before merging so specialisation and
+      // offload-entry handling never retain unrelated widths in the same expanding AST. This is also the natural
+      // unit for a future bounded-parallel implementation.
+      .flatMap(_.traverse(prepareLinkedProgram))
+      .flatMap(mergeLinkedPrograms)
 
   def importProgram(
       request: p.Program.LinkRequest,
       signatures: Map[p.Sym, CallSignature]
   ): Either[List[String], p.Program] =
-    linkRequest(
+    resolveRequest(
       request,
       (pkg, root, callerFns, callerDefs, capabilities, typeSizes) =>
         signatures
           .get(root.name)
           .toRight(List(s"consumer root `${root.name.repr}` has no logical call signature"))
           .flatMap(signature => importRoot(pkg, root, signature, callerFns, callerDefs, capabilities, typeSizes))
-    )
+    ).flatMap(mergeLinkedPrograms)
 }

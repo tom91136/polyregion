@@ -36,6 +36,28 @@ class FnInlineSuite extends munit.FunSuite {
     assert(invokesLeft.isEmpty, s"expected no Invoke remaining in entry, got: ${invokesLeft.map(_.repr)}")
   }
 
+  test("alpha-renamed locals do not embed callee identities") {
+    val local = named("value", p.Type.IntS32)
+    val helper = fn(
+      s"vendor.template.${"component" * 128}",
+      rtn = p.Type.IntS32,
+      body = List(
+        p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.IntS32Const(7)))),
+        p.Stmt.Return(select(local))
+      )
+    )
+    val invoke = p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, Nil, p.Type.IntS32)
+
+    val out = FnInline(program(entry(body = List(p.Stmt.Return(invoke))), List(helper)), NoopLog)
+
+    val inlineLocals = out.entry.collectWhere[p.Stmt] {
+      case p.Stmt.Var(name, _, _) if name.symbol.startsWith("_inline_") => name.symbol
+    }
+    assert(inlineLocals.nonEmpty)
+    assert(inlineLocals.forall(_.length < 64))
+    assert(inlineLocals.forall(!_.contains("vendor.template")))
+  }
+
   test("generic member calls take inline type arguments from pointer receivers") {
     val boxName   = sym("Box")
     val boxT      = p.Type.Struct(boxName, List(p.Type.Var("T")))
@@ -93,6 +115,104 @@ class FnInlineSuite extends munit.FunSuite {
 
     assertEquals(out.entry.collectWhere[p.Expr] { case x: p.Expr.Invoke => x }, Nil)
     assertEquals(out.entry.collectWhere[p.Term] { case x: p.Term.Float32Const => x.value }, List(3.5f))
+  }
+
+  test("null arguments adopt a specialised pointer address space") {
+    val localPointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+    val pointer      = arg("pointer", localPointer)
+    val localNull    = p.Term.NullPtrConst(p.Type.IntS32, p.Type.Space.Local, p.Region.Opaque)
+    val helper = fn(
+      "local.null",
+      args = List(pointer),
+      rtn = localPointer,
+      body = List(
+        p.Stmt.Mut(selectT(pointer.named), p.Expr.Alias(localNull)),
+        p.Stmt.Return(p.Expr.Alias(selectT(pointer.named)))
+      )
+    )
+    val genericNull = p.Term.NullPtrConst(p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque)
+    val invoke      = p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, List(genericNull), localPointer)
+    val result      = named("result", localPointer)
+    val in = program(
+      entry(body = List(p.Stmt.Var(result, Some(invoke)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))),
+      List(helper)
+    )
+
+    val out = FnInline(in, NoopLog)
+
+    assertEquals(
+      out.entry.collectWhere[p.Term] { case x: p.Term.NullPtrConst => x.space }.distinct,
+      List(p.Type.Space.Local)
+    )
+  }
+
+  test("erased function pointer parameters inline to their concrete callable") {
+    val kernel    = fn("erased.kernel")
+    val erased    = p.Type.Ptr(p.Type.Nothing, p.Type.Space.Global)
+    val kernelArg = arg("kernel", erased)
+    val one       = p.Term.IntU32Const(1)
+    val context   = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
+    val remoteLaunch = p.Spec.RemoteLaunch(
+      context = context,
+      kernel = selectT(kernelArg.named),
+      tpeArgs = Nil,
+      gridX = one,
+      gridY = one,
+      gridZ = one,
+      blockX = one,
+      blockY = one,
+      blockZ = one,
+      shmem = p.Term.IntU32Const(0),
+      args = Nil
+    )
+    val launcher = fn(
+      "erased.launcher",
+      args = List(kernelArg),
+      body = List(
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(remoteLaunch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val invoke = p.Expr.Invoke(
+      p.Type.FnRef(launcher.name),
+      Nil,
+      None,
+      List(p.Term.Poison(p.Type.FnRef(kernel.name))),
+      p.Type.Unit0
+    )
+
+    val out = FnInline(program(entry(body = List(p.Stmt.Return(invoke))), List(launcher, kernel)), NoopLog)
+
+    val launches = out.entry.collectAll[p.Expr].collect { case p.Expr.SpecOp(x: p.Spec.RemoteLaunch) => x }
+    assertEquals(launches.map(_.kernel.tpe), List(p.Type.FnRef(kernel.name)))
+  }
+
+  test("an exact callable overload outranks an erased callable parameter") {
+    val name     = sym("callable.overload")
+    val callback = fn("callable.target")
+    val erased = fn(
+      name.fqcn,
+      args = List(arg("callback", p.Type.Ptr(p.Type.Nothing, p.Type.Space.Global))),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(1))))
+    )
+    val exact = fn(
+      name.fqcn,
+      args = List(arg("callback", p.Type.FnRef(callback.name))),
+      rtn = p.Type.IntS32,
+      body = List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(2))))
+    )
+    val invoke = p.Expr.Invoke(
+      p.Type.FnRef(name),
+      Nil,
+      None,
+      List(p.Term.Poison(p.Type.FnRef(callback.name))),
+      p.Type.IntS32
+    )
+
+    val out = FnInline(program(entry(body = List(p.Stmt.Return(invoke))), List(erased, exact, callback)), NoopLog)
+
+    assertEquals(out.entry.collectWhere[p.Term] { case value: p.Term.IntS32Const => value.value }, List(2))
   }
 
   test("recursive helpers fail promptly with a deterministic diagnostic") {
@@ -527,6 +647,60 @@ class FnInlineSuite extends munit.FunSuite {
     assertEquals(run(FnInline(in, NoopLog)), 7L)
   }
 
+  test("inlining preserves fall-through after a partial return nested in a constant branch") {
+    val i32   = p.Type.IntS32
+    val index = arg("index", i32)
+    val zero  = named("zero", p.Type.Bool1)
+    val helper = fn(
+      "helper",
+      args = List(index),
+      rtn = i32,
+      body = List(
+        p.Stmt.Cond(
+          p.Term.Bool1Const(true),
+          List(
+            p.Stmt.Var(
+              zero,
+              Some(p.Expr.IntrOp(p.Intr.LogicEq(selectT(index.named), p.Term.IntS32Const(0))))
+            ),
+            p.Stmt.Cond(selectT(zero), List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(1)))), Nil)
+          ),
+          Nil
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(2)))
+      )
+    )
+    val out  = arg("out", p.Type.Ptr(i32, p.Type.Space.Global))
+    val call = (index: Int) => p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, List(p.Term.IntS32Const(index)), i32)
+    val first  = named("first", i32)
+    val second = named("second", i32)
+    val in = program(
+      entry(
+        args = List(out),
+        body = List(
+          p.Stmt.Var(first, Some(call(0))),
+          p.Stmt.Var(second, Some(call(1))),
+          p.Stmt.Update(selectT(out.named), p.Term.IntS32Const(0), selectT(first)),
+          p.Stmt.Update(selectT(out.named), p.Term.IntS32Const(1), selectT(second)),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      List(helper)
+    )
+
+    def run(prog: p.Program): List[Long] = {
+      val vm   = Interpreter.Vm(prog)
+      val cell = vm.allocOf(i32, 2)
+      vm.call(p.Conventions.EntryName, List(out.named.tpe -> V.I(cell)))
+      List(0L, 4L).map(offset =>
+        vm.load(cell + offset, i32) match { case V.I(value) => value; case _ => Long.MinValue }
+      )
+    }
+
+    assertEquals(run(in), List(1L, 2L))
+    assertEquals(run(FnInline(in, NoopLog)), List(1L, 2L))
+  }
+
   test("inlining alpha-renames locals inside raise cleanup") {
     val local = named("cleanup", p.Type.IntS32)
     val helper = fn(
@@ -564,5 +738,28 @@ class FnInlineSuite extends munit.FunSuite {
     assertEquals(mutated, locals)
     assert(locals.forall(_.symbol != local.symbol))
     assertEquals(Verify(out, NoopLog, verifyFunction = true).flatMap(_._2), Nil)
+  }
+
+  test("alpha-renaming keeps refined occurrences of one source symbol together") {
+    val erased   = p.Type.Ptr(p.Type.Nothing, p.Type.Space.Private)
+    val refined  = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private)
+    val declared = p.Named("value", erased)
+    val used     = p.Named("value", refined)
+    val helper = fn(
+      "refined.symbol",
+      rtn = refined,
+      body = List(
+        p.Stmt.Var(declared, Some(p.Expr.Alias(p.Term.Poison(erased))), isMutable = false),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Select(used, Nil, refined)))
+      )
+    )
+    val invoke = p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, Nil, refined)
+
+    val out      = FnInline(program(entry(body = List(p.Stmt.Return(invoke))), List(helper)), NoopLog)
+    val variable = out.entry.collectWhere[p.Stmt] { case p.Stmt.Var(name, _, _) => name }.head
+    val selected = out.entry.collectWhere[p.Term] { case value: p.Term.Select => value }.head
+
+    assertEquals(selected.root.symbol, variable.symbol)
+    assertEquals(selected.root.tpe, refined)
   }
 }

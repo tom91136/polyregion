@@ -1220,24 +1220,72 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                   }
                   handleStmt(decl->getBody(), r);
                   r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
-                } else raise("receiver is not a struct type!");
-              } else raise("receiver is not a instance ptr type!");
+                } else if (const auto variable = instancePtr->comp.template get<Type::Var>();
+                           variable && (r.callableVariables ^ contains(variable->name))) {
+                  // Callable variables erase their marker record. Their implicit constructors still
+                  // surface while lowering instantiated vendor templates, so preserve the only
+                  // observable operation: copy/move construction copies the function identity.
+                  if (!ctor->isTrivial())
+                    raise(fmt::format("non-trivial type-variable constructor `{}` is unsupported", decl->getQualifiedNameAsString()));
+                  if (ctor->isCopyConstructor() || ctor->isMoveConstructor()) {
+                    if (args.size() != 1)
+                      raise(fmt::format("type-variable constructor `{}` expected one argument, got {}", decl->getQualifiedNameAsString(),
+                                        args.size()));
+                    const auto lhs = Term::Select(receiver->named, {PathStep::Deref().widen()}, instancePtr->comp);
+                    const auto rhs = [&]() -> Term::Any {
+                      if (const auto sourcePtr = args[0].named.tpe.template get<Type::Ptr>();
+                          sourcePtr && sourcePtr->comp == instancePtr->comp)
+                        return Term::Select(args[0].named, {PathStep::Deref().widen()}, instancePtr->comp).widen();
+                      return select(r, {}, args[0].named).widen();
+                    }();
+                    r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
+                  } else if (!ctor->isDefaultConstructor()) {
+                    raise(fmt::format("unsupported type-variable constructor `{}`", decl->getQualifiedNameAsString()));
+                  }
+                  r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+                } else
+                  raise(fmt::format("constructor `{}` receiver is not a struct type: {}", decl->getQualifiedNameAsString(),
+                                    repr(instancePtr->comp)));
+              } else
+                raise(fmt::format("constructor `{}` receiver is not an instance pointer type: {}", decl->getQualifiedNameAsString(),
+                                  repr(receiver->named.tpe)));
             } else {
-              if (auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl);
-                  method && method->isDefaulted() && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator()) && //
-                  parent && args.size() == 1) {
-                auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
-                // Defaulted assignment has an empty body for empty structs (only the placeholder byte) and for
-                // unions (Clang elides the member-wise copy), so copy the canonical storage member explicitly.
-                if (r.emptyStruct(*parent)) {
-                  auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
-                  auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
-                  r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
-                } else if (parent->isUnion && !parent->members.empty()) {
-                  copyUnionStorage(r, Named(This, thisPtr), args[0].named, parent->members.front());
+              const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl);
+              const bool defaultedAssignment = method && method->isDefaulted() && method->isTrivial()
+                                               && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator())
+                                               && args.size() == 1;
+              const auto receiverPtr = receiver ? receiver->named.tpe.get<Type::Ptr>() : Opt<Type::Ptr>{};
+              const auto receiverVariable = receiverPtr ? receiverPtr->comp.get<Type::Var>() : Opt<Type::Var>{};
+              const bool callableVariableAssignment = method && receiverVariable && (r.callableVariables ^ contains(receiverVariable->name))
+                                                      && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator());
+              if (callableVariableAssignment && !defaultedAssignment)
+                raise(fmt::format("non-trivial callable-variable assignment `{}` is unsupported", decl->getQualifiedNameAsString()));
+              const bool callableAssignment =
+                  defaultedAssignment && receiverVariable && (r.callableVariables ^ contains(receiverVariable->name));
+              if (callableAssignment) {
+                const auto lhs = Term::Select(receiver->named, {PathStep::Deref().widen()}, receiverPtr->comp);
+                const auto rhs = [&]() -> Term::Any {
+                  if (const auto sourcePtr = args[0].named.tpe.get<Type::Ptr>(); sourcePtr && sourcePtr->comp == receiverPtr->comp)
+                    return Term::Select(args[0].named, {PathStep::Deref().widen()}, receiverPtr->comp).widen();
+                  return select(r, {}, args[0].named).widen();
+                }();
+                r.push(Stmt::Mut(lhs, Expr::Alias(rhs)));
+                r.push(Stmt::Return(Expr::Alias(select(r, {}, receiver->named))));
+              } else {
+                if (defaultedAssignment && parent) {
+                  auto thisPtr = ptrTo(Type::Struct(parent->name, {}));
+                  // Defaulted assignment has an empty body for empty structs (only the placeholder byte) and for
+                  // unions (Clang elides the member-wise copy), so copy the canonical storage member explicitly.
+                  if (r.emptyStruct(*parent)) {
+                    auto thisRef = select(r, {Named(This, thisPtr)}, EmptyStructMarker);
+                    auto rhsRef = select(r, {args[0].named}, EmptyStructMarker);
+                    r.push(Stmt::Mut(thisRef, Expr::Alias(rhsRef)));
+                  } else if (parent->isUnion && !parent->members.empty()) {
+                    copyUnionStorage(r, Named(This, thisPtr), args[0].named, parent->members.front());
+                  }
                 }
+                handleStmt(decl->getBody(), r);
               }
-              handleStmt(decl->getBody(), r);
             }
             break;
           case clang::Builtin::BI__builtin_expect:
@@ -3073,6 +3121,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const bool declaredInCurrentFunction =
             declaredFunction && r.function && declaredFunction->getCanonicalDecl() == r.function->getCanonicalDecl();
         const bool capturedFromOuterFunction = capturedField && !declaredInCurrentFunction;
+        if (const auto binding = r.captureValueBindings ^ get_maybe(decl)) return Expr::Alias(select(r, {}, *binding));
         if (expr->isImplicitCXXThis() || (expr->refersToEnclosingVariableOrCapture() && !(r.capturesInScope ^ contains(decl)))
             || capturedFromOuterFunction) {
           if (!r.parent) {
@@ -3556,6 +3605,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         }
 
         if (const auto variable = ctorTpe.template get<Type::Var>()) {
+          const auto *constructor = expr->getConstructor();
+          if ((r.callableVariables ^ contains(variable->name)) && (constructor->isCopyConstructor() || constructor->isMoveConstructor())
+              && !constructor->isTrivial())
+            raise(fmt::format("non-trivial callable-variable constructor `{}` is unsupported", constructor->getQualifiedNameAsString()));
           if (expr->getNumArgs() == 1) {
             const clang::Expr *argument = expr->getArg(0)->IgnoreImplicit();
             while (const auto construct = llvm::dyn_cast<clang::CXXConstructExpr>(argument)) {
@@ -3738,14 +3791,20 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto calleeFn = expr->getCalleeDecl() ? expr->getCalleeDecl()->getAsFunction() : nullptr;
         if (const auto receiverType =
                 handleType(expr->getArg(0)->IgnoreImpCasts()->getType().getNonReferenceType(), r).template get<Type::Var>()) {
-          if (!(r.callableVariables ^ contains(receiverType->name))) {
-            if (expr->getOperator() == clang::OO_Equal && expr->getNumArgs() == 2) {
-              const auto lhs = r.newVar(handleExpr(expr->getArg(0), r));
-              const auto rhs = r.newVar(conform(r, handleExpr(expr->getArg(1), r), receiverType->widen()));
-              return Expr::Alias(assign(lhs, rhs));
+          if (expr->getOperator() == clang::OO_Equal && expr->getNumArgs() == 2) {
+            if (r.callableVariables ^ contains(receiverType->name)) {
+              const auto *method = llvm::dyn_cast_or_null<clang::CXXMethodDecl>(calleeFn);
+              if (!method || !method->isDefaulted() || !method->isTrivial()
+                  || (!method->isCopyAssignmentOperator() && !method->isMoveAssignmentOperator()))
+                raise(fmt::format("non-trivial callable-variable assignment `{}` is unsupported",
+                                  calleeFn ? calleeFn->getQualifiedNameAsString() : "<unresolved>"));
             }
-            raise(fmt::format("Unexpected operator on package element variable: {}", pretty_string(expr, context)));
+            const auto lhs = r.newVar(handleExpr(expr->getArg(0), r));
+            const auto rhs = r.newVar(conform(r, handleExpr(expr->getArg(1), r), receiverType->widen()));
+            return Expr::Alias(assign(lhs, rhs));
           }
+          if (!(r.callableVariables ^ contains(receiverType->name)))
+            raise(fmt::format("Unexpected operator on package element variable: {}", pretty_string(expr, context)));
           Vector<Term::Any> arguments;
           arguments.reserve(expr->getNumArgs() - 1);
           for (size_t i = 1; i < expr->getNumArgs(); ++i)
@@ -4239,7 +4298,11 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               }
               if (raw.tpe().is<Type::Ptr>() && sameTypeShape(raw.tpe(), target)) target = raw.tpe();
               const auto lowered = conform(r, raw, target);
-              if (lowered.tpe().is<Type::Ptr>() && sameTypeShape(lowered.tpe(), name.tpe)) name = Named(name.symbol, lowered.tpe());
+              const auto erasedFunctionPointer =
+                  target.get<Type::Ptr>() | exists([](const auto &pointer) { return pointer.comp.template is<Type::Nothing>(); });
+              if ((lowered.tpe().is<Type::Ptr>() && sameTypeShape(lowered.tpe(), name.tpe))
+                  || (erasedFunctionPointer && lowered.tpe().is<Type::FnRef>()))
+                name = Named(name.symbol, lowered.tpe());
               pointerInit = lowered;
             }
             r.valueTypes.insert_or_assign(var, name.tpe);

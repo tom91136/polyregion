@@ -37,6 +37,7 @@ struct Remapper {
     const clang::CXXRecordDecl *entryCapture = {};
     Set<const clang::CXXRecordDecl *> globalCaptures{};
     Set<const clang::ValueDecl *> capturesInScope{};
+    Map<const clang::ValueDecl *, Named> captureValueBindings{};
     TypeSpace::Any thisSpace = TypeSpace::Global();
     bool ctorChain = false;
     Opt<Named> constructInto{};

@@ -710,8 +710,11 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
               raise("SYCL queue::submit command-group lambdas cannot capture *this by value");
             if (capture.capturesVariable()) {
               const auto *variable = capture.getCapturedVar();
-              if (capture.getCaptureKind() != clang::LCK_ByRef || (variable && variable->isInitCapture()))
-                raise("SYCL queue::submit currently requires ordinary by-reference captures");
+              if (variable && variable->isInitCapture()) raise("SYCL queue::submit command-group lambda init-captures are unsupported");
+              if (capture.getCaptureKind() == clang::LCK_ByCopy && !lambda->getCallOperator()->isConst())
+                raise("SYCL queue::submit mutable command-group lambdas cannot capture variables by value");
+              if (capture.getCaptureKind() != clang::LCK_ByRef && capture.getCaptureKind() != clang::LCK_ByCopy)
+                raise("Unsupported SYCL queue::submit command-group lambda capture");
             }
           }
           for (const auto *parameter : lambda->getCallOperator()->parameters()) {
@@ -726,10 +729,21 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
             }
           }
           const auto previousCaptures = r.capturesInScope;
-          for (const auto &capture : lambda->getLambdaClass()->captures())
-            if (const auto *variable = capture.getCapturedVar()) r.capturesInScope.emplace(variable);
+          const auto previousCaptureValueBindings = r.captureValueBindings;
+          for (auto &&[capture, init] : lambda->captures() | zip(lambda->capture_inits())) {
+            const auto *variable = capture.getCapturedVar();
+            if (!variable) continue;
+            if (capture.getCaptureKind() == clang::LCK_ByRef) r.capturesInScope.emplace(variable);
+            else if (capture.getCaptureKind() == clang::LCK_ByCopy) {
+              const auto value = self.handleExpr(init, r);
+              const auto binding = r.newName(value.tpe());
+              r.push(Stmt::Var(binding, value, /*isMutable*/ false));
+              r.captureValueBindings.insert_or_assign(variable, binding);
+            }
+          }
           self.handleStmt(lambda->getCallOperator()->getBody(), r);
           r.capturesInScope = previousCaptures;
+          r.captureValueBindings = previousCaptureValueBindings;
           return Expr::Alias(Term::Poison(self.handleType(expression->getType(), r)));
         }
         if (wait) return Expr::SpecOp(Spec::RemoteSync(packageContext()));
@@ -777,13 +791,16 @@ static Opt<MatchedCall> syclQueue(const clang::CallExpr &call, const clang::Func
         }
         const auto *previousEntryCapture = r.entryCapture;
         const auto previousCaptures = r.capturesInScope;
+        const auto previousCaptureValueBindings = r.captureValueBindings;
         r.entryCapture = lambda->getLambdaClass()->getCanonicalDecl();
         r.capturesInScope.clear();
+        r.captureValueBindings.clear();
         auto [kernelName, kernel] = self.handleCall(operatorDecl, r);
         const auto logicalGlobalSizes = r.syclLogicalGlobalSizes;
         r.syclLogicalGlobalSizes = previousLogicalGlobalSizes;
         r.entryCapture = previousEntryCapture;
         r.capturesInScope = previousCaptures;
+        r.captureValueBindings = previousCaptureValueBindings;
         kernel->decl.affinity = FunctionAffinity::Offload();
         kernel->convention = CallConvention::OffloadEntry();
         const auto functionsByName = r.functions | values() | map([](const auto &fn) { return std::pair{fn->decl.name, fn}; }) | to<Map>();

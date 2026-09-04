@@ -24,6 +24,129 @@ class PackageServiceSuite extends munit.FunSuite {
     capabilities
   )
 
+  test("program linking retains transitively specialised remote-launch targets") {
+    val publicName = p.Sym("library.launch")
+    val publicDecl = p.FunctionDecl(
+      publicName,
+      Nil,
+      None,
+      Nil,
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val implementationName  = p.Sym("implementation.launch")
+    val firstKernelName     = p.Sym("kernel.first")
+    val secondKernelName    = p.Sym("kernel.second")
+    val element: p.Type.Var = p.Type.Var("T")
+    val context             = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
+    val one                 = p.Term.IntU32Const(1)
+    def launch(name: p.Sym, tpeArgs: List[p.Type]) = p.Expr.SpecOp(
+      p.Spec.RemoteLaunch(
+        context,
+        p.Term.Poison(p.Type.FnRef(name)),
+        tpeArgs,
+        one,
+        one,
+        one,
+        one,
+        one,
+        one,
+        p.Term.IntU32Const(0),
+        Nil
+      )
+    )
+    def launcher(decl: p.FunctionDecl, target: p.Sym, tpeArgs: List[p.Type]) = function(
+      decl,
+      List(
+        p.Stmt.Var(p.Named("launch", p.Type.Unit0), Some(launch(target, tpeArgs)), isMutable = false),
+        unitReturn.head
+      )
+    )
+    val implementation =
+      launcher(publicDecl.copy(name = implementationName), firstKernelName, List(p.Type.IntS32)).copy(
+        visibility = p.Function.Visibility.Exported,
+        implements = Some(publicName)
+      )
+    val firstKernel = launcher(
+      publicDecl.copy(name = firstKernelName, tpeVars = List(element), affinity = p.Function.Affinity.Offload),
+      secondKernelName,
+      List(element)
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    val secondKernel = function(
+      publicDecl.copy(name = secondKernelName, tpeVars = List(element), affinity = p.Function.Affinity.Offload)
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    val pkg = p.Package(
+      p.Interface(p.Sym("library"), List(publicDecl)),
+      p.Program(None, List(implementation, firstKernel, secondKernel), Nil)
+    )
+    val root = function(
+      publicDecl.copy(name = p.Sym("consumer.launch")),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+
+    val linked = ProgramLinker.link(p.Program.LinkRequest(List(pkg), p.Program(None, List(root), Nil)))
+
+    assert(linked.isRight, linked)
+    val program   = linked.toOption.get
+    val functions = program.entry.toList ::: program.functions
+    val targets = functions
+      .flatMap(_.collectAll[p.Expr].collect { case p.Expr.SpecOp(value: p.Spec.RemoteLaunch) => value.kernel.tpe })
+      .collect { case p.Type.FnRef(name) => name }
+    val expectedTargets = Set(
+      Specialisation.monomorphicName(firstKernelName, List(p.Type.IntS32)),
+      Specialisation.monomorphicName(secondKernelName, List(p.Type.IntS32))
+    )
+    assertEquals(targets.toSet, expectedTargets)
+    targets.foreach(target => assertEquals(functions.count(_.name == target), 1))
+  }
+
+  test("host affinity follows calls rather than stored function handles") {
+    val publicName = p.Sym("library.handle")
+    val publicDecl = p.FunctionDecl(
+      publicName,
+      Nil,
+      None,
+      Nil,
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val deviceName = p.Sym("kernel.handle")
+    val implementation = function(
+      publicDecl.copy(name = p.Sym("implementation.handle")),
+      List(
+        p.Stmt.Var(
+          p.Named("handle", p.Type.FnRef(deviceName)),
+          Some(p.Expr.Alias(p.Term.Poison(p.Type.FnRef(deviceName)))),
+          isMutable = false
+        ),
+        unitReturn.head
+      ),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val device = function(publicDecl.copy(name = deviceName, affinity = p.Function.Affinity.Offload))
+      .copy(convention = p.CallConvention.OffloadEntry)
+    val pkg =
+      p.Package(p.Interface(p.Sym("library"), List(publicDecl)), p.Program(None, List(implementation, device), Nil))
+    val root = function(
+      publicDecl.copy(name = p.Sym("consumer.handle")),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+
+    val linked = ProgramLinker.link(p.Program.LinkRequest(List(pkg), p.Program(None, List(root), Nil)))
+
+    assert(linked.isRight, linked)
+    val retained =
+      linked.toOption.get.functions.find(_.name == deviceName).getOrElse(fail("missing stored device handle"))
+    assertEquals(retained.affinity, p.Function.Affinity.Offload)
+  }
+
   test("linking composes a context-aware implementation ABI") {
     val name    = p.Sym("library.copy")
     val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
@@ -398,6 +521,19 @@ class PackageServiceSuite extends munit.FunSuite {
       callableDecl,
       List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(callableDecl.args.head.named, Nil, p.Type.IntS32))))
     )
+    val unrelatedType = p.Type.Struct(p.Sym("caller.Unrelated"), Nil)
+    val unrelated = function(
+      p.FunctionDecl(
+        p.Sym("caller.unrelated"),
+        Nil,
+        None,
+        List(p.Arg(p.Named("value", unrelatedType))),
+        Nil,
+        Nil,
+        p.Type.Unit0,
+        p.Function.Affinity.Host
+      )
+    )
     val pkg = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
     val root = function(
       public.copy(
@@ -410,7 +546,9 @@ class PackageServiceSuite extends munit.FunSuite {
     val resolved = ProgramLinker.link(
       p.Program.LinkRequest(
         List(pkg),
-        p.Program(None, List(callableFunction, root), Nil),
+        // The unrelated function deliberately has no matching struct definition. It must not leak into the
+        // selected callable closure or make an otherwise valid import fail.
+        p.Program(None, List(unrelated, callableFunction, root), Nil),
         typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
       )
     )

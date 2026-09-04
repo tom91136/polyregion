@@ -1,6 +1,5 @@
 package polyregion.ast.pass
 
-import cats.syntax.all.*
 import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
@@ -118,12 +117,14 @@ object FnInline extends ProgramPass {
     }
 
   private def renameAll(f: p.Function, ctr: java.util.concurrent.atomic.AtomicLong): p.Function = {
-    val id = ctr.incrementAndGet()
+    val id      = ctr.incrementAndGet()
+    val renamed = scala.collection.mutable.HashMap.empty[String, String]
     def semantic(n: p.Named) =
       n.symbol == p.Conventions.ExceptionValue || n.symbol == p.Conventions.ExceptionWhat ||
         n.symbol == p.Conventions.ExceptionCode
     def rename(n: p.Named) =
-      if (semantic(n)) n else p.Named(s"_inline_${id}_${f.mangledName}_${n.symbol}", n.tpe)
+      if (semantic(n)) n
+      else n.copy(symbol = renamed.getOrElseUpdate(n.symbol, s"_inline_${id}_${renamed.size}"))
     val captureNames = f.moduleCaptures.map(_.named).toSet
     val body = f.body
       .modifyAll[p.Term] {
@@ -161,16 +162,17 @@ object FnInline extends ProgramPass {
 
     val table = f.tpeVars.map(_.name).zip(concreteTpeArgs).toMap
 
-    val renamed = renameAll(
-      f
-        .modifyAll[p.Type](protectExecBinders)
-        .modifyAll[p.Type](_.mapLeaf {
-          case p.Type.Var(name, _) if table.contains(name) => table(name)
-          case x                                           => x
-        })
-        .modifyAll[p.Type](unprotectExecBinders),
-      ctr
-    )
+    val typed =
+      if (table.isEmpty) f
+      else
+        f
+          .modifyAll[p.Type](protectExecBinders)
+          .modifyAll[p.Type](_.mapLeaf {
+            case p.Type.Var(name, _) if table.contains(name) => table(name)
+            case x                                           => x
+          })
+          .modifyAll[p.Type](unprotectExecBinders)
+    val renamed = renameAll(typed, ctr)
 
     // ivk.args is the flattened (moduleCaptures ::: termCaptures ::: args) per Compiler.patchIvk.
     val targetNames =
@@ -179,7 +181,18 @@ object FnInline extends ProgramPass {
         renamed.termCaptures.map(_.named) ++
         renamed.args.map(_.named)
     val replacements = ivk.receiver.toList ++ ivk.args
-    val parameters   = targetNames.zip(replacements)
+    val parameters = targetNames.zip(replacements).map { case (name, value) =>
+      val conformed = (name.tpe, value) match {
+        // A null pointer is valid in every address space. Calls can acquire a
+        // more precise formal space during package specialisation, so carry
+        // that space into the inlined binding instead of retaining the generic
+        // null type from the original call site.
+        case (p.Type.Ptr(comp, space), p.Term.NullPtrConst(_, _, region)) =>
+          p.Term.NullPtrConst(comp, space, region)
+        case _ => value
+      }
+      name -> conformed
+    }
     val mutableParameters = renamed
       .collectWhere[p.Stmt] { case p.Stmt.Mut(p.Term.Select(root, _, _), _) =>
         root
@@ -311,13 +324,9 @@ object FnInline extends ProgramPass {
     case Nil                     => Nil
     case (r: p.Stmt.Return) :: _ => List(r)
     case p.Stmt.Cond(c @ p.Term.Bool1Const(true), t, _) :: rest =>
-      val chosen = sinkAfterReturn(t)
-      val head   = p.Stmt.Cond(c, chosen, Nil)
-      if (alwaysReturns(chosen)) List(head) else head :: sinkAfterReturn(rest)
+      List(p.Stmt.Cond(c, sinkAfterReturn(t ::: rest), Nil))
     case p.Stmt.Cond(c @ p.Term.Bool1Const(false), _, f) :: rest =>
-      val chosen = sinkAfterReturn(f)
-      val head   = p.Stmt.Cond(c, Nil, chosen)
-      if (alwaysReturns(chosen)) List(head) else head :: sinkAfterReturn(rest)
+      List(p.Stmt.Cond(c, Nil, sinkAfterReturn(f ::: rest)))
     case p.Stmt.Cond(c, t, f) :: rest =>
       val t2 = sinkAfterReturn(t)
       val f2 = sinkAfterReturn(f)
@@ -355,22 +364,43 @@ object FnInline extends ProgramPass {
   }
 
   private def resolveOverload(ivk: p.Expr.Invoke, overloads: OverloadLut): p.Function = {
+    def argumentMatches(expected: p.Type, actual: p.Term, allowErasedCallable: Boolean): Boolean = actual match {
+      case p.Term.NullPtrConst(comp, _, _) =>
+        expected match {
+          case p.Type.Ptr(expectedComp, _) => sameType(expectedComp, comp)
+          case _                           => false
+        }
+      case _ =>
+        sameType(expected, actual.tpe) ||
+        (allowErasedCallable && expected.isInstanceOf[p.Type.Ptr] && (expected match {
+          case p.Type.Ptr(p.Type.Nothing, _) => actual.tpe.isInstanceOf[p.Type.FnRef]
+          case _                             => false
+        }))
+    }
     val candidates = overloads.getOrElse((ivk.calleeName, ivk.args.size), Nil)
-    candidates.filter { f =>
+    def matching(allowErasedCallable: Boolean) = candidates.filter { f =>
       val varToTpeLut = f.tpeVars.map(_.name).zip(appliedTypeArgs(ivk, f.tpeVars.size)).toMap
-      val sig = f.signature
-        .modifyAll[p.Type](protectExecBinders)
-        .modifyAll[p.Type](_.mapLeaf {
-          case v @ p.Type.Var(n, _) => varToTpeLut.getOrElse(n, v)
-          case x                    => x
-        })
-        .modifyAll[p.Type](unprotectExecBinders)
+      val sig =
+        if (varToTpeLut.isEmpty) f.signature
+        else
+          f.signature
+            .modifyAll[p.Type](protectExecBinders)
+            .modifyAll[p.Type](_.mapLeaf {
+              case v @ p.Type.Var(n, _) => varToTpeLut.getOrElse(n, v)
+              case x                    => x
+            })
+            .modifyAll[p.Type](unprotectExecBinders)
       val flatSigParams = sig.moduleCaptures ++ sig.termCaptures ++ sig.args
       sig.receiver.size == ivk.receiver.size &&
-      sig.receiver.zip(ivk.receiver.map(_.tpe)).forall(sameType) &&
-      flatSigParams.zip(ivk.args.map(_.tpe)).forall(sameType) &&
+      sig.receiver.zip(ivk.receiver).forall((expected, actual) => argumentMatches(expected, actual, false)) &&
+      flatSigParams
+        .zip(ivk.args)
+        .forall((expected, actual) => argumentMatches(expected, actual, allowErasedCallable)) &&
       sameType(sig.rtn, ivk.rtn)
-    } match {
+    }
+    val exact   = matching(allowErasedCallable = false)
+    val matched = if (exact.nonEmpty) exact else matching(allowErasedCallable = true)
+    matched match {
       case f :: Nil => f
       case Nil =>
         throw IllegalStateException(
@@ -399,11 +429,27 @@ object FnInline extends ProgramPass {
           )
         val nestedActive                     = calleeKey :: active
         val (resultExpr, inlineStmts, caps)  = inlineOne(ivk, callee, ctr)
-        val (rewrittenStmts, nestedCaps)     = inlineStmts.foldMap(s => inlineStmt(s, overloads, ctr, nestedActive))
+        val (rewrittenStmts, nestedCaps)     = inlineBlock(inlineStmts, overloads, ctr, nestedActive)
         val (finalExpr, tailStmts, tailCaps) = inlineExpr(resultExpr, overloads, ctr, nestedActive)
         (finalExpr, rewrittenStmts ::: tailStmts, caps ++ nestedCaps ++ tailCaps)
       case _ => (expr, Nil, Nil)
     }
+
+  private def inlineBlock(
+      statements: List[p.Stmt],
+      overloads: OverloadLut,
+      ctr: java.util.concurrent.atomic.AtomicLong,
+      active: List[String]
+  ): (List[p.Stmt], List[p.Arg]) = {
+    val rewritten = List.newBuilder[p.Stmt]
+    val captures  = List.newBuilder[p.Arg]
+    statements.foreach { statement =>
+      val (nextStatements, nextCaptures) = inlineStmt(statement, overloads, ctr, active)
+      rewritten ++= nextStatements
+      captures ++= nextCaptures
+    }
+    (rewritten.result(), captures.result())
+  }
 
   private def inlineStmt(
       stmt: p.Stmt,
@@ -423,25 +469,28 @@ object FnInline extends ProgramPass {
       val (newE, prepend, caps) = inlineExpr(e, overloads, ctr, active)
       (prepend :+ p.Stmt.Return(newE), caps)
     case p.Stmt.While(cond, body) =>
-      val (newBody, caps) = body.foldMap(s => inlineStmt(s, overloads, ctr, active))
+      val (newBody, caps) = inlineBlock(body, overloads, ctr, active)
       (List(p.Stmt.While(cond, newBody)), caps)
     case p.Stmt.Cond(cond, t, e) =>
-      val (newT, capsT) = t.foldMap(s => inlineStmt(s, overloads, ctr, active))
-      val (newE, capsE) = e.foldMap(s => inlineStmt(s, overloads, ctr, active))
+      val (newT, capsT) = inlineBlock(t, overloads, ctr, active)
+      val (newE, capsE) = inlineBlock(e, overloads, ctr, active)
       (List(p.Stmt.Cond(cond, newT, newE)), capsT ++ capsE)
     case p.Stmt.ForRange(i, lb, ub, step, body) =>
-      val (newBody, caps) = body.foldMap(s => inlineStmt(s, overloads, ctr, active))
+      val (newBody, caps) = inlineBlock(body, overloads, ctr, active)
       (List(p.Stmt.ForRange(i, lb, ub, step, newBody)), caps)
     case p.Stmt.Try(body, handlers, fin) =>
-      val (newBody, capsB) = body.foldMap(s => inlineStmt(s, overloads, ctr, active))
-      val (newHandlers, capsH) = handlers.foldMap { h =>
-        val (hBody, hCaps) = h.body.foldMap(s => inlineStmt(s, overloads, ctr, active))
-        (List(h.copy(body = hBody)), hCaps)
+      val (newBody, capsB) = inlineBlock(body, overloads, ctr, active)
+      val newHandlers      = List.newBuilder[p.Handler]
+      val handlerCaptures  = List.newBuilder[p.Arg]
+      handlers.foreach { handler =>
+        val (handlerBody, captures) = inlineBlock(handler.body, overloads, ctr, active)
+        newHandlers += handler.copy(body = handlerBody)
+        handlerCaptures ++= captures
       }
-      val (newFin, capsF) = fin.foldMap(s => inlineStmt(s, overloads, ctr, active))
-      (List(p.Stmt.Try(newBody, newHandlers, newFin)), capsB ++ capsH ++ capsF)
+      val (newFin, capsF) = inlineBlock(fin, overloads, ctr, active)
+      (List(p.Stmt.Try(newBody, newHandlers.result(), newFin)), capsB ++ handlerCaptures.result() ++ capsF)
     case p.Stmt.Raise(value, exceptionKind, cleanup) =>
-      val (newCleanup, caps) = cleanup.foldMap(s => inlineStmt(s, overloads, ctr, active))
+      val (newCleanup, caps) = inlineBlock(cleanup, overloads, ctr, active)
       (List(p.Stmt.Raise(value, exceptionKind, newCleanup)), caps)
     case p.Stmt.Annotated(inner, pos, c) =>
       val (rewritten, caps) = inlineStmt(inner, overloads, ctr, active)
@@ -456,7 +505,7 @@ object FnInline extends ProgramPass {
     val overloads = program.functions.distinct.groupBy(f => (f.name, flatParams(f).size))
     val source    = program.entry.getOrElse(throw IllegalArgumentException("FnInline requires a program entry"))
     val (n, f) = doUntilNotEq(source, limit = 10) { (i, f) =>
-      val (stmts, moduleCaptures) = f.body.foldMap(s => inlineStmt(s, overloads, ctr, Nil))
+      val (stmts, moduleCaptures) = inlineBlock(f.body, overloads, ctr, Nil)
       f.copy(
         decl = f.decl.copy(moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct),
         body = stmts

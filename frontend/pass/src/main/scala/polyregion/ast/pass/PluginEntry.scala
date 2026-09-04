@@ -42,6 +42,7 @@ object PluginEntry {
   val clock: PassClock = PassClock.system
 
   object NoopLog extends Log {
+    override def enabled: Boolean                     = false
     def info(message: String, details: String*): Unit = ()
     def subLog(name: String): Log                     = this
   }

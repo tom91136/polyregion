@@ -13,6 +13,7 @@ import polyregion.ast.Traversal.*
 //   kernel(cap){ copy = cap.view }      ->  copy = cap.view; copy.data = #ptr  (then use copy)
 // edge cases:
 //   scalar-only capture                ->  unchanged
+//   a trampoline's single by-value aggregate argument -> treated as its capture
 //   module/term captures               ->  retain their flattened call/launch order ahead of ordinary args
 //   overloaded remote kernel           ->  selected by substituted effective parameter types
 //   nested pointer graph / union / slot mutation / unsupported escape  ->  rejected
@@ -114,26 +115,65 @@ object KernelCaptureFlatten extends ProgramPass {
         .filterNot(arg => arg.named.tpe == p.Type.Unit0 || arg.named.tpe == p.Type.Nothing)
     }
 
+    def launchTypeMatches(expected: p.Type, actual: p.Type): Boolean = (expected, actual) match {
+      case (p.Type.Ptr(expectedStruct: p.Type.Struct, _), actualStruct: p.Type.Struct) =>
+        expectedStruct == actualStruct
+      case (expectedStruct: p.Type.Struct, p.Type.Ptr(actualStruct: p.Type.Struct, _)) =>
+        expectedStruct == actualStruct
+      case _ => expected == actual
+    }
+
+    def launchTypeCompatible(expected: p.Type, actual: p.Type): Boolean =
+      launchTypeMatches(expected, actual) ||
+        (expected.kind == p.Type.Kind.Integral && actual.kind == p.Type.Kind.Integral)
+
     def launchTarget(launch: p.Spec.RemoteLaunch): Option[p.Function] = launch.kernel.tpe match {
       case p.Type.FnRef(name) =>
-        val matches = byName.getOrElse(name, Nil).filter { candidate =>
+        val candidates = byName.getOrElse(name, Nil)
+        def matching(typesMatch: (p.Type, p.Type) => Boolean) = candidates.filter { candidate =>
           val parameters = launchParameters(candidate, launch.tpeArgs)
           candidate.affinity == p.Function.Affinity.Offload &&
           candidate.receiver.isEmpty &&
           candidate.rtn == p.Type.Unit0 &&
           candidate.tpeVars.size == launch.tpeArgs.size &&
-          parameters.map(_.named.tpe) == launch.args.map(_.tpe)
+          parameters.size == launch.args.size &&
+          parameters.zip(launch.args).forall { case (parameter, argument) =>
+            typesMatch(parameter.named.tpe, argument.tpe)
+          }
         }
+        val exact   = matching(launchTypeMatches)
+        val matches = if exact.nonEmpty then exact else matching(launchTypeCompatible)
         matches match {
           case kernel :: Nil => Some(kernel)
-          case Nil           => None
+          case Nil if candidates.exists(_.affinity == p.Function.Affinity.Offload) =>
+            val actual = launch.args.map(_.tpe.repr).mkString("(", ", ", ")")
+            val expected = candidates
+              .filter(_.affinity == p.Function.Affinity.Offload)
+              .map { candidate =>
+                val parameters =
+                  launchParameters(candidate, launch.tpeArgs).map(_.named.tpe.repr).mkString("(", ", ", ")")
+                s"${candidate.name.repr}${candidate.tpeVars.map(_.name).mkString("[", ", ", "]")}$parameters"
+              }
+              .mkString(", ")
+            throw RuntimeException(
+              s"KernelCaptureFlatten: remote launch of ${name.repr}$actual does not match offload target(s): $expected"
+            )
+          case Nil => None
           case _ =>
             throw RuntimeException(s"KernelCaptureFlatten: launch of ${name.repr} matches multiple function bodies")
         }
       case _ => None
     }
 
-    def buildPlan(kernel: p.Function): Option[Plan] = captureRoot(kernel) match {
+    def kernelCaptureRoot(kernel: p.Function): Option[(p.Named, p.Type.Struct)] =
+      captureRoot(kernel).orElse {
+        val aggregates = kernel.args.collect { case p.Arg(named @ p.Named(_, struct: p.Type.Struct, _), _, _) =>
+          named -> struct
+        }
+        Option.when(kernel.convention == p.CallConvention.OffloadEntry && aggregates.size == 1)(aggregates.head)
+      }
+
+    def buildPlan(kernel: p.Function): Option[Plan] = kernelCaptureRoot(kernel) match {
       case None => None
       case Some((capture, captureStruct)) =>
         val leaves = leavesOf(kernel, captureStruct)
@@ -147,9 +187,13 @@ object KernelCaptureFlatten extends ProgramPass {
           )
           escaped
             .find(_.steps.isEmpty)
-            .foreach(_ =>
-              fail(kernel, "the entire capture pointer escapes before a pointer leaf; capture identity is unsupported")
-            )
+            .foreach { _ =>
+              if (!capture.tpe.isInstanceOf[p.Type.Struct])
+                fail(
+                  kernel,
+                  "the entire capture pointer escapes before a pointer leaf; capture identity is unsupported"
+                )
+            }
           val minimalEscapes = escaped.sortBy(_.steps.length).foldLeft(List.empty[p.Term.Select]) { (roots, select) =>
             if (roots.exists(root => select.steps.startsWith(root.steps))) roots else roots :+ select
           }
@@ -199,9 +243,12 @@ object KernelCaptureFlatten extends ProgramPass {
 
     val directlyCalled = calls.flatMap(_.calleeSym).toSet.flatMap { name =>
       byName.getOrElse(name, Nil) match {
-        case kernel :: Nil if kernel.affinity == p.Function.Affinity.Offload => List(kernel)
-        case Nil                                                             => Nil
-        case _ :: Nil                                                        => Nil
+        case kernel :: Nil
+            if kernel.affinity == p.Function.Affinity.Offload &&
+              kernel.convention == p.CallConvention.OffloadEntry =>
+          List(kernel)
+        case Nil      => Nil
+        case _ :: Nil => Nil
         case _ =>
           throw RuntimeException(s"KernelCaptureFlatten: called kernel ${name.repr} has multiple function bodies")
       }

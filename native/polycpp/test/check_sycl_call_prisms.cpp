@@ -13,6 +13,11 @@
 #pragma region compile-fails: SYCL queue::submit command-group lambdas cannot capture *this by value
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_COMMAND_GROUP_STAR_THIS -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
 
+#pragma region case: sycl-command-group-mutable-by-copy
+#pragma region offload-only
+#pragma region compile-fails: SYCL queue::submit mutable command-group lambdas cannot capture variables by value
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_COMMAND_GROUP_MUTABLE_BY_COPY -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
+
 #pragma region case: sycl-memcpy-mutable-alias
 #pragma region offload-only
 #pragma region compile-fails: Cannot infer the direction of SYCL queue::memcpy
@@ -229,7 +234,7 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   sycl::free(genericElements, 0);
   sycl::free(genericTemplateElements, 0);
   queue
-      .submit([&](sycl::handler &handler) {
+      .submit([&, value](sycl::handler &handler) {
         const sycl::range<2> extent(4, 2);
         handler.parallel_for(extent, [=](auto thread) {
           allocation[thread.get_linear_id()] = value + int(thread.get_id(1) + thread.get_range(0) + thread[0]);
@@ -273,6 +278,13 @@ POLYREGION_EXPORT_AS("foo.implementation.apply_nd") void apply_nd(int *allocatio
 POLYREGION_EXPORT_AS("foo.implementation.reject_return") void reject_return() {
   sycl::queue queue;
   queue.submit([](sycl::handler &) { return; }).wait();
+}
+#endif
+
+#ifdef CHECK_COMMAND_GROUP_MUTABLE_BY_COPY
+POLYREGION_EXPORT_AS("foo.implementation.reject_mutable_by_copy") void reject_mutable_by_copy(int value) {
+  sycl::queue queue;
+  queue.submit([value](sycl::handler &) mutable { ++value; }).wait();
 }
 #endif
 

@@ -6,6 +6,7 @@ import polyregion.ast.Traversal.*
 object PassTest {
 
   object NoopLog extends Log {
+    override def enabled: Boolean                     = false
     def info(message: String, details: String*): Unit = ()
     def subLog(name: String): Log                     = this
   }

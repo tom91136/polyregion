@@ -137,6 +137,59 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     )
   }
 
+  test("extracts pointer leaves from a trampoline's by-value aggregate argument") {
+    val capSym = sym("TrampolineCapture")
+    val capTpe = p.Type.Struct(capSym, Nil)
+    val capDef = p.StructDef(capSym, Nil, List(named("data", i32p), named("count", p.Type.IntS32)), Nil)
+    val capArg = named("kernel", capTpe)
+    val data   = p.Term.Select(capArg, List(p.PathStep.Field("data")), i32p)
+    val capPtr = p.Type.Ptr(capTpe, global)
+    val local  = named("local", capPtr)
+    val kernel = fn(
+      "trampolineKernel",
+      body = List(
+        p.Stmt.Var(local, Some(p.Expr.RefTo(selectT(capArg), None, capTpe, global, p.Region.Opaque))),
+        p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      ),
+      convention = p.CallConvention.OffloadEntry
+    ).modifyDecl(_.copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload))
+    val capture = named("capture", capTpe)
+    val fired   = named("fired", p.Type.Unit0)
+    val caller = entry(
+      body = List(
+        p.Stmt.Var(capture, None, isMutable = true),
+        p.Stmt.Var(
+          fired,
+          Some(p.Expr.Invoke(p.Type.FnRef(kernel.name), Nil, None, List(selectT(capture)), p.Type.Unit0)),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      ),
+      moduleCaptures = Nil,
+      termCaptures = Nil
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
+
+    val out       = KernelCaptureFlatten(program(caller, List(kernel), List(capDef)), NoopLog)
+    val outKernel = out.functions.head
+    val outCall   = out.entry.collectWhere[p.Expr] { case call: p.Expr.Invoke => call }.head
+
+    assertEquals(outKernel.args.map(_.named.tpe), List[p.Type](capTpe, i32p))
+    assertEquals(
+      outCall.args,
+      List[p.Term](selectT(capture), p.Term.Select(capture, List(p.PathStep.Field("data")), i32p))
+    )
+    assert(outKernel.body.exists {
+      case p.Stmt.Var(
+            `local`,
+            Some(p.Expr.RefTo(p.Term.Select(root, Nil, `capTpe`), None, `capTpe`, _, _)),
+            _
+          ) if root.symbol.startsWith("#capture_copy_") =>
+        true
+      case _ => false
+    })
+  }
+
   test("extracts pointer leaves from a specialised remote launch") {
     val capSym = sym("RemoteCapture")
     val capTpe = p.Type.Struct(capSym, Nil)
@@ -199,6 +252,67 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     )
   }
 
+  test("extracts pointer leaves when a remote capture is transported by value") {
+    val innerSym = sym("RemoteInner")
+    val capSym   = sym("RemoteValueCapture")
+    val innerTpe = p.Type.Struct(innerSym, Nil)
+    val capTpe   = p.Type.Struct(capSym, Nil)
+    val capPtr   = p.Type.Ptr(capTpe, global)
+    val innerDef = p.StructDef(innerSym, Nil, List(named("data", i32p)), Nil)
+    val capDef   = p.StructDef(capSym, Nil, List(named("inner", innerTpe)), Nil)
+    val capArg   = named(p.Conventions.CaptureArg, capPtr)
+    val data = p.Term.Select(
+      capArg,
+      List(p.PathStep.Field("inner"), p.PathStep.Field("data")),
+      i32p
+    )
+    val kernel = fn(
+      "remoteValueKernel",
+      body = List(
+        p.Stmt.Var(named("x"), Some(p.Expr.Index(data, p.Term.IntS32Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      ),
+      convention = p.CallConvention.OffloadEntry
+    ).modifyDecl(_.copy(args = List(p.Arg(capArg)), affinity = p.Function.Affinity.Offload))
+    val capture = named("capture", capTpe)
+    val context = p.Term.NullPtrConst(p.Type.IntU8, global, p.Region.Opaque)
+    val one     = p.Term.IntU32Const(1)
+    val launch = p.Spec.RemoteLaunch(
+      context,
+      p.Term.Poison(p.Type.FnRef(kernel.name)),
+      Nil,
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      List(selectT(capture))
+    )
+    val caller = entry(
+      body = List(
+        p.Stmt.Var(capture, None, isMutable = true),
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
+
+    val out       = KernelCaptureFlatten(program(caller, List(kernel), List(innerDef, capDef)), NoopLog)
+    val outKernel = out.functions.head
+    val outLaunch = out.entry.collectWhere[p.Expr] { case p.Expr.SpecOp(x: p.Spec.RemoteLaunch) => x }.head
+
+    assertEquals(outKernel.args.map(_.named.tpe), List[p.Type](capPtr, i32p))
+    assertEquals(
+      outLaunch.args,
+      List[p.Term](
+        selectT(capture),
+        p.Term.Select(capture, List(p.PathStep.Field("inner"), p.PathStep.Field("data")), i32p)
+      )
+    )
+    assertEquals(Verify(out, NoopLog, verifyFunction = true).flatMap(_._2), Nil)
+  }
+
   test("resolves a remote kernel overload before flattening its capture") {
     val capSym = sym("OverloadedCapture")
     val capTpe = p.Type.Struct(capSym, Nil)
@@ -246,6 +360,35 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       out.entry.collectWhere[p.Expr] { case p.Expr.SpecOp(x: p.Spec.RemoteLaunch) => x }.head.args,
       List[p.Term](selectT(capture), p.Term.Select(capture, List(p.PathStep.Field("data")), i32p))
     )
+  }
+
+  test("accepts an integral launch conversion when resolving a remote kernel") {
+    val kernel = fn("convertedLaunchKernel", args = List(arg("count", p.Type.IntS64)))
+      .modifyDecl(_.copy(affinity = p.Function.Affinity.Offload))
+    val context = p.Term.NullPtrConst(p.Type.IntU8, global, p.Region.Opaque)
+    val one     = p.Term.IntU32Const(1)
+    val launch = p.Spec.RemoteLaunch(
+      context,
+      p.Term.Poison(p.Type.FnRef(kernel.name)),
+      Nil,
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      List(p.Term.IntS32Const(7))
+    )
+    val caller = entry(
+      body = List(
+        p.Stmt.Var(named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))
+    val in = program(caller, List(kernel))
+
+    assertEquals(KernelCaptureFlatten(in, NoopLog), in)
   }
 
   test("rewrites updates through an extracted pointer leaf") {
@@ -493,6 +636,26 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
       KernelCaptureFlatten(program(host(mutateKernel, capture), List(mutateKernel), List(capDef)), NoopLog)
     }
     assert(mutationEx.getMessage.contains("mutation"))
+  }
+
+  test("does not treat an ordinary offload helper as a kernel entry") {
+    val capSym              = sym("HelperCapture")
+    val capTpe              = p.Type.Struct(capSym, Nil)
+    val capPtr              = p.Type.Ptr(capTpe, global)
+    val capDef              = p.StructDef(capSym, Nil, List(named("data", i32p)), Nil)
+    val self                = named(p.Conventions.ThisReceiver, capPtr)
+    val data: p.Term.Select = p.Term.Select(self, List(p.PathStep.Field("data")), i32p)
+    val helper = fn(
+      "helper",
+      body = List(
+        p.Stmt.Mut(data, p.Expr.Alias(p.Term.NullPtrConst(p.Type.IntS32, global, p.Region.Opaque))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
+    val capture = named("capture", capPtr)
+    val in      = program(host(helper, capture), List(helper), List(capDef))
+
+    assertEquals(KernelCaptureFlatten(in, NoopLog), in)
   }
 
   test("rejects unsupported capture pointer shapes") {

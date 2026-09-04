@@ -384,7 +384,11 @@ object Verify {
                     candidate.tpeVars.size == launch.tpeArgs.size &&
                     parameters.size == launch.args.size &&
                     parameters.zip(launch.args).forall { case (expected, actual) =>
-                      expected == actual.tpe
+                      (expected, actual.tpe) match {
+                        case (p.Type.Ptr(expectedStruct: p.Type.Struct, _), actualStruct: p.Type.Struct) =>
+                          expectedStruct == actualStruct
+                        case _ => expected == actual.tpe
+                      }
                     }
                   }
                   if (matching) Nil
