@@ -49,6 +49,10 @@ object PassRegistry {
     PassDef.singleton(ArenaLower),
     PassDef.singleton(ArenaView),
     PassDef.singleton(RegionRespace),
+    PassDef.configured(SourcePointerLegalise()),
+    PassDef.configured(SourceStorageLegalise()),
+    PassDef.singleton(SourceSelectionLegalise),
+    PassDef.configured(SourceNameNormalise()),
     PassDef.configured(Mirror()),
     PassDef.singleton(StructuredExit)
   )

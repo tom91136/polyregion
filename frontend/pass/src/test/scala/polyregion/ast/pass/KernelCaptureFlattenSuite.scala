@@ -13,7 +13,6 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     val fired = named("fired", p.Type.Unit0)
     entry(
       body = List(
-        p.Stmt.Var(capture, None, isMutable = true),
         p.Stmt.Var(
           fired,
           Some(
@@ -24,6 +23,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
         ),
         p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
       ),
+      args = List(p.Arg(capture)),
       moduleCaptures = Nil,
       termCaptures = Nil
     ).modifyDecl(_.copy(affinity = p.Function.Affinity.Host))

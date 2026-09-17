@@ -82,6 +82,18 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(StructuredExit(in, NoopLog), in)
   }
 
+  test("non-escaping structured exits are lowered in helper functions") {
+    val helper = fn(
+      "helper",
+      body = List(p.Stmt.Try(List(ret), Nil, List(p.Stmt.Var(named("cleanup", p.Type.Unit0), None))), ret)
+    )
+    val in  = program(entry(body = List(ret)), functions = List(helper))
+    val out = StructuredExit(in, NoopLog)
+    assertEquals(out.functions.size, 1)
+    assertEquals(out.functions.head.collectWhere[p.Stmt] { case _: p.Stmt.Try => () }, Nil)
+    assertEquals(out.functions.head.args, helper.args)
+  }
+
   test("an asserting entry gains a leading error-buffer arg and a drain return") {
     val out = lower(Nil, List(assertStmt(), ret))
     assertEquals(out.entry.args.headOption.map(_.named.tpe), Some(errT)) // the leading Ptr<i8> the dispatch binds
@@ -558,6 +570,88 @@ class StructuredExitSuite extends munit.FunSuite {
       Nil
     )
     assertEquals(runOut(outer), 7L -> (0, ""))
+  }
+
+  test("a projected pointer handler does not materialise an unused binder") {
+    val baseSym                   = sym("Base")
+    val derivedSym                = sym("Derived")
+    val baseTpe: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedTpe: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val basePtr                   = p.Type.Ptr(baseTpe, p.Type.Space.Private)
+    val derivedPtr                = p.Type.Ptr(derivedTpe, p.Type.Space.Private)
+    val value                     = named("value", derivedTpe)
+    val thrown                    = named("thrown", derivedPtr)
+    val caught                    = named("caught", basePtr)
+    val code                      = named("code", i32)
+    val baseDef                   = p.StructDef(baseSym, Nil, List(named("code", i32)), Nil)
+    val derivedDef = p.StructDef(
+      derivedSym,
+      Nil,
+      List(named(s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}", baseTpe)),
+      List(baseTpe)
+    )
+    val exceptionKind = p.ExceptionKind(derivedPtr, "Derived *")
+    val in = program(
+      entry(
+        body = List(
+          p.Stmt.Var(value, None, isMutable = true),
+          p.Stmt.Var(
+            thrown,
+            Some(
+              p.Expr.RefTo(
+                selectT(value),
+                None,
+                derivedTpe,
+                p.Type.Space.Private,
+                p.Region.Rooted(value)
+              )
+            )
+          ),
+          p.Stmt.Try(
+            List(p.Stmt.Raise(selectT(thrown), exceptionKind, Nil)),
+            List(
+              p.Handler(
+                Some(p.ExceptionKind(basePtr, "Base *")),
+                Some(caught),
+                List(
+                  p.Stmt.Var(
+                    code,
+                    Some(p.Expr.Alias(p.Term.Select(caught, List(p.PathStep.Field("code")), i32)))
+                  )
+                )
+              )
+            ),
+            Nil
+          ),
+          ret
+        )
+      ),
+      defs = List(baseDef, derivedDef)
+    )
+
+    val out = StructuredExit(in, NoopLog)
+
+    assertEquals(out.entry.collectWhere[p.Stmt] { case p.Stmt.Var(`caught`, _, _) => () }, Nil)
+    assert(
+      out.entry.collectAll[p.Stmt].exists {
+        case p.Stmt.Var(
+              `code`,
+              Some(
+                p.Expr.Alias(
+                  p.Term.Select(
+                    root,
+                    p.PathStep.Deref :: p.PathStep.Field(base) :: p.PathStep.Field("code") :: Nil,
+                    `i32`
+                  )
+                )
+              ),
+              _
+            ) =>
+          root != caught && base == s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}"
+        case _ => false
+      },
+      out.repr
+    )
   }
 
   test("a handled raise in finally cannot overwrite the pending exception message") {

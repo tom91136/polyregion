@@ -25,7 +25,7 @@ inline std::string deviceOpt(std::optional<int> stackDepth) { return "DeadFuncti
 inline std::string deviceArena(std::optional<int> stackDepth = {}) {
   return fullOpt(stackDepth) + ";SubgroupLower;StructuredExit;ArenaLower;VerifyAnchors(strict=true)";
 }
-// VerifyAnchors(strict) after ArenaView asserts every opaque-origin access resolved to an arena view
+// VerifyAnchors(strict) after ArenaView asserts every pointer representation was solved into an arena view
 // (logical SPIR-V cannot deref a raw pointer) - a missed deref becomes a compile error, not a device fault.
 // PartialEval(canonicaliseAddresses=true) is the address-canonicalisation-only mode (no fold/DCE) that
 // root-anchors derived-pointer temps; it runs after StructuredExit so the temps that lowering injects are

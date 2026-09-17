@@ -428,6 +428,78 @@ class ArenaLowerSuite extends munit.FunSuite {
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef, holderDef, nodeDef))), Nil)
   }
 
+  test("pointer fields reached through a nested local alias are not rebased twice") {
+    val capSym      = sym("Cap")
+    val ownerSym    = sym("Owner")
+    val outerSym    = sym("Outer")
+    val ptrTpe      = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val capTpe      = p.Type.Struct(capSym, Nil)
+    val ownerTpe    = p.Type.Struct(ownerSym, Nil)
+    val outerTpe    = p.Type.Struct(outerSym, Nil)
+    val ownerPtrTpe = p.Type.Ptr(ownerTpe, p.Type.Space.Private)
+    val cap         = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val source      = named("source", ownerTpe)
+    val outer       = named("outer", outerTpe)
+    val nested      = named("nested", ownerPtrTpe)
+    val target      = named("target", ownerTpe)
+    val targetPtr   = named("targetPtr", ownerPtrTpe)
+    val capDef      = p.StructDef(capSym, Nil, List(named("data", ptrTpe)), Nil)
+    val ownerDef    = p.StructDef(ownerSym, Nil, List(named("data", ptrTpe)), Nil)
+    val outerDef    = p.StructDef(outerSym, Nil, List(named("owner", ownerTpe)), Nil)
+    val sourceSlot  = p.Term.Select(source, List(p.PathStep.Field("data")), ptrTpe).asInstanceOf[p.Term.Select]
+    val targetSlot  = p.Term.Select(targetPtr, List(p.PathStep.Field("data")), ptrTpe).asInstanceOf[p.Term.Select]
+    val nestedData  = p.Term.Select(nested, List(p.PathStep.Field("data")), ptrTpe)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(source, None, isMutable = true),
+        p.Stmt.Mut(sourceSlot, p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
+        p.Stmt.Var(outer, None, isMutable = true),
+        p.Stmt.Mut(
+          p.Term.Select(outer, List(p.PathStep.Field("owner")), ownerTpe).asInstanceOf[p.Term.Select],
+          p.Expr.Alias(p.Term.Select(source, Nil, ownerTpe))
+        ),
+        p.Stmt.Var(
+          nested,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(outer, List(p.PathStep.Field("owner")), ownerTpe),
+              None,
+              ownerTpe,
+              p.Type.Space.Private,
+              p.Region.Rooted(outer)
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Var(target, None, isMutable = true),
+        p.Stmt.Var(
+          targetPtr,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(target, Nil, ownerTpe),
+              None,
+              ownerTpe,
+              p.Type.Space.Private,
+              p.Region.Rooted(target)
+            )
+          ),
+          isMutable = false
+        ),
+        p.Stmt.Mut(targetSlot, p.Expr.Alias(nestedData)),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef, ownerDef, outerDef)), NoopLog).entry
+
+    assertEquals(
+      out.body.collectFirst { case p.Stmt.Mut(`targetSlot`, expr) => expr },
+      Some(p.Expr.Alias(nestedData))
+    )
+    assertEquals(Verify.validateRegions(program(out, defs = List(capDef, ownerDef, outerDef))), Nil)
+  }
+
   test("arena pointer loaded into a local aggregate is rebased before a field mutation") {
     val capSym       = sym("Cap")
     val nodeSym      = sym("Node")
@@ -854,7 +926,7 @@ class ArenaLowerSuite extends munit.FunSuite {
     })
   }
 
-  test("arena lowering rejects mixed real and offset pointer representations") {
+  test("arena lowering normalises mixed real and offset pointer joins") {
     val capSym  = sym("Cap")
     val capTpe  = p.Type.Struct(capSym, Nil)
     val capPtr  = p.Type.Ptr(capTpe, p.Type.Space.Global)
@@ -871,8 +943,128 @@ class ArenaLowerSuite extends munit.FunSuite {
       )
     )
 
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+    assert(out.body.exists {
+      case p.Stmt.Var(n, _, _) if n.symbol == pointer.symbol => true
+      case _                                                 => false
+    })
+    assert(out.body.exists {
+      case p.Stmt.Var(n, _, _) if n.symbol.startsWith("#ab") => true
+      case _                                                 => false
+    })
+  }
+
+  test("arena lowering treats separately bound capture pointers as real in mixed joins") {
+    val capSym    = sym("Cap")
+    val valueTpe  = p.Type.IntS64
+    val ptrTpe    = p.Type.Ptr(valueTpe, p.Type.Space.Global)
+    val capTpe    = p.Type.Struct(capSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val external  = named("#capture_ptr_0", ptrTpe)
+    val endpoint  = named("endpoint", ptrTpe)
+    val result    = named("result", valueTpe)
+    val nField    = named("n", valueTpe)
+    val capDef    = p.StructDef(capSym, Nil, List(nField), Nil)
+    val endpointT = p.Term.Select(endpoint, Nil, ptrTpe).asInstanceOf[p.Term.Select]
+    val e = entry(
+      args = List(p.Arg(cap), p.Arg(external)),
+      body = List(
+        p.Stmt.Var(endpoint, None, isMutable = true),
+        p.Stmt.Cond(
+          p.Term.Bool1Const(true),
+          List(
+            p.Stmt.Mut(
+              endpointT,
+              p.Expr.RefTo(
+                p.Term.Select(cap, List(p.PathStep.Field("n")), valueTpe),
+                None,
+                valueTpe,
+                p.Type.Space.Global,
+                p.Region.Rooted(cap)
+              )
+            )
+          ),
+          List(
+            p.Stmt.Mut(
+              endpointT,
+              p.Expr.RefTo(
+                p.Term.Select(external, Nil, ptrTpe),
+                Some(p.Term.IntS64Const(1)),
+                valueTpe,
+                p.Type.Space.Global,
+                p.Region.Opaque
+              )
+            )
+          )
+        ),
+        p.Stmt.Update(endpointT, p.Term.IntS64Const(0), p.Term.IntS64Const(41)),
+        p.Stmt.Var(
+          result,
+          Some(p.Expr.Index(p.Term.Select(endpoint, Nil, ptrTpe), p.Term.IntS64Const(0), valueTpe)),
+          isMutable = false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+    assert(out.collectAll[p.Stmt].exists {
+      case p.Stmt.Update(p.Term.Select(root, Nil, _), _, _) => root.symbol == endpoint.symbol
+      case _                                                => false
+    })
+    assert(out.collectAll[p.Expr].exists {
+      case p.Expr.Index(p.Term.Select(root, Nil, _), _, `valueTpe`) => root.symbol == endpoint.symbol
+      case _                                                        => false
+    })
+    assert(out.collectAll[p.Expr].exists {
+      case p.Expr.RefTo(p.Term.Select(root, Nil, _), Some(p.Term.IntS64Const(1)), `valueTpe`, _, _) =>
+        root.symbol == external.symbol
+      case _ => false
+    })
+  }
+
+  test("arena lowering joins a bound pointer's initial representation with later conversions") {
+    val capSym   = sym("Cap")
+    val capTpe   = p.Type.Struct(capSym, Nil)
+    val capPtr   = p.Type.Ptr(capTpe, p.Type.Space.Global)
+    val cap      = named(p.Conventions.CaptureArg, capPtr)
+    val external = named("external", capPtr)
+    val child    = p.Term.Select(cap, List(p.PathStep.Field("child")), capPtr)
+    val capDef   = p.StructDef(capSym, Nil, List(named("child", capPtr)), Nil)
+    val e = entry(
+      args = List(p.Arg(cap), p.Arg(external)),
+      body = List(
+        p.Stmt.Mut(p.Term.Select(external, Nil, capPtr), p.Expr.Alias(child)),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = ArenaLower(program(e, defs = List(capDef)), NoopLog).entry
+    assert(out.body.exists {
+      case p.Stmt.Mut(p.Term.Select(`external`, Nil, _), p.Expr.Alias(p.Term.Select(root, Nil, _))) =>
+        root.symbol.startsWith("#ab")
+      case _ => false
+    })
+  }
+
+  test("arena lowering still rejects mixed integer address representations") {
+    val capSym  = sym("Cap")
+    val capTpe  = p.Type.Struct(capSym, Nil)
+    val capPtr  = p.Type.Ptr(capTpe, p.Type.Space.Global)
+    val cap     = named(p.Conventions.CaptureArg, capPtr)
+    val address = named("address", p.Type.IntU64)
+    val capDef  = p.StructDef(capSym, Nil, Nil, Nil)
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(address, Some(p.Expr.Cast(p.Term.Select(cap, Nil, capPtr), p.Type.IntU64)), isMutable = true),
+        p.Stmt.Mut(p.Term.Select(address, Nil, p.Type.IntU64), p.Expr.Alias(p.Term.IntU64Const(0))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
     val ex = intercept[RuntimeException](ArenaLower(program(e, defs = List(capDef)), NoopLog))
-    assert(ex.getMessage.contains("arena representation changes"))
+    assert(ex.getMessage.contains("address encoding changes"))
   }
 
   test("capture-derived pointer fields retain offsets when stored through arena pointers") {

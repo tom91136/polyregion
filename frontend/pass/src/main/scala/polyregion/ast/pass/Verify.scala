@@ -6,7 +6,7 @@ import polyregion.ast.Traversal.*
 // well-formedness checks over a program
 // examples:
 //   p rooted, p[i]                      ->  ok
-//   q opaque, q[i] / q[i] = v / q.f     ->  "read/write/deref through opaque-origin pointer q"
+//   unresolved q, q[i] / q[i] = v / q.f ->  "unresolved-pointer-use: cannot determine ..."
 //   alloc Local of a runtime size       ->  "Alloc Local ... requires a constant size"
 //   PostMono fn still holds a Type.Var  ->  "PostMono: ... contains Type.Var"
 //   Global p rooted at a Local a        ->  "p declared Global but rooted at a declared Local"
@@ -78,25 +78,24 @@ object Verify {
 
   def validateRegions(program: p.Program): List[String] =
     (program.entry.toList ::: program.functions).flatMap { f =>
-      val derived = Provenance.derivedIn(f)
-      f.collectWhere[p.Expr] {
-        case p.Expr.Index(ptr, _, _) if Provenance.at(derived, ptr) == p.Region.Opaque =>
-          s"${f.name.repr}: read through opaque-origin pointer ${ptr.repr}"
-      } ::: f.collectWhere[p.Stmt] {
-        case p.Stmt.Update(lhs, _, _) if Provenance.at(derived, lhs) == p.Region.Opaque =>
-          s"${f.name.repr}: write through opaque-origin pointer ${lhs.repr}"
-      } ::: f.collectWhere[p.Term] {
-        case s @ p.Term.Select(root, steps, _)
-            if steps.nonEmpty && Provenance.isPtr(root.tpe) && Provenance.at(derived, s) == p.Region.Opaque =>
-          s"${f.name.repr}: deref through opaque-origin pointer ${s.repr}"
-      }
+      AddressRefinement.solve(program, f).diagnostics.map(diagnostic => s"${f.name.repr}: $diagnostic")
     }
 
   def validateRegionSpaces(program: p.Program): List[String] =
     (program.entry.toList ::: program.functions).flatMap { f =>
-      Provenance.spaceMismatches(f).map { (n, r, sn, sr) =>
-        s"${f.name.repr}: ${n.symbol} declared $sn but rooted at ${r.symbol} declared $sr"
-      }
+      val analysis = AddressRefinement.solve(program, f)
+      val declared = (
+        f.receiver.iterator.map(_.named) ++ f.args.iterator.map(_.named) ++
+          f.moduleCaptures.iterator.map(_.named) ++ f.termCaptures.iterator.map(_.named) ++
+          f.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(n, _, _) => n }
+      ).map(n => n.symbol -> n).toMap
+      declared.valuesIterator.flatMap { name =>
+        for {
+          declaredSpace <- AddressRefinement.spaceOf(name.tpe)
+          refinedSpace  <- analysis.refinedSpace(name)
+          if declaredSpace != refinedSpace
+        } yield s"${f.name.repr}: ${name.symbol} declared $declaredSpace but inferred $refinedSpace"
+      }.toList
     }
 
   def validateSingle(

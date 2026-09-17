@@ -42,32 +42,6 @@ class RegionRespaceSuite extends munit.FunSuite {
     assertEquals(ptrSpacesOf(out.entry, "s"), Set[p.Type.Space](p.Type.Space.Global))
   }
 
-  test("default provenance keeps first reassignment semantics for pointer arguments") {
-    val left  = named("left", ptr(p.Type.Space.Global))
-    val right = named("right", ptr(p.Type.Space.Global))
-    val e = entry(
-      args = List(p.Arg(left), p.Arg(right)),
-      body = List(
-        p.Stmt.Mut(selectT(left), p.Expr.Alias(selectT(right))),
-        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
-      )
-    )
-
-    val derived = Provenance.derivedIn(e)
-
-    assertEquals(derived.get(left), Some(p.Region.Rooted(right)))
-  }
-
-  test("address-spaced array roots join conservatively") {
-    val local  = named("local", p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Local))
-    val global = named("global", p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Global))
-
-    assertEquals(
-      Provenance.joinRegions(p.Region.Rooted(local), p.Region.Rooted(global)),
-      p.Region.Opaque
-    )
-  }
-
   test("a stale term type still resolves the declaration's local provenance by symbol") {
     val local = named("local", ptr(p.Type.Space.Local))
     val stale = named("local", ptr(p.Type.Space.Global))
@@ -230,6 +204,66 @@ class RegionRespaceSuite extends munit.FunSuite {
     assertEquals(ptrSpacesOf(out.entry, "result"), Set[p.Type.Space](p.Type.Space.Local))
   }
 
+  test("a respaced pointer carries its address space into a null initializer") {
+    val local    = named("local", ptr(p.Type.Space.Local))
+    val nullSlot = named("nullSlot", ptr(p.Type.Space.Global))
+    val e = entry(
+      body = List(
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(4), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Var(
+          nullSlot,
+          Some(p.Expr.Alias(p.Term.NullPtrConst(p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
+          isMutable = true
+        ),
+        p.Stmt.Mut(selectT(nullSlot), p.Expr.Alias(selectT(local))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = RegionRespace(program(e), NoopLog)
+
+    assertEquals(ptrSpacesOf(out.entry, "nullSlot"), Set[p.Type.Space](p.Type.Space.Local))
+    assertEquals(
+      out.entry.collectWhere[p.Term] { case x: p.Term.NullPtrConst => x.space }.distinct,
+      List(p.Type.Space.Local)
+    )
+  }
+
+  test("a null compared with a respaced pointer adopts the pointer address space") {
+    val local   = named("local", ptr(p.Type.Space.Local))
+    val slot    = named("slot", ptr(p.Type.Space.Global))
+    val nonNull = named("nonNull", p.Type.Bool1)
+    val e = entry(
+      body = List(
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(4), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Var(slot, Some(p.Expr.Alias(selectT(local)))),
+        p.Stmt.Var(
+          nonNull,
+          Some(
+            p.Expr.IntrOp(
+              p.Intr.LogicNeq(selectT(slot), p.Term.NullPtrConst(p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = RegionRespace(program(e), NoopLog)
+
+    assertEquals(ptrSpacesOf(out.entry, "slot"), Set[p.Type.Space](p.Type.Space.Local))
+    assertEquals(
+      out.entry.collectWhere[p.Term] { case x: p.Term.NullPtrConst => x.space }.distinct,
+      List(p.Type.Space.Local)
+    )
+  }
+
   test("pointer provenance preserves a selected field's address space") {
     val holderSym = sym("Holder")
     val localPtr  = ptr(p.Type.Space.Local)
@@ -304,6 +338,122 @@ class RegionRespaceSuite extends munit.FunSuite {
     val out = RegionRespace(program(e, defs = List(holderDef)), NoopLog)
 
     assertEquals(ptrSpacesOf(out.entry, "casted"), Set[p.Type.Space](p.Type.Space.Local))
+  }
+
+  test("a pointer cast honours a patched field reached through an aggregate pointer") {
+    val holderSym             = sym("Holder")
+    val storageSym            = sym("Storage")
+    val rawSym                = sym("Raw")
+    val globalPtr             = ptr(p.Type.Space.Global)
+    val holderTpe             = p.Type.Struct(holderSym, Nil)
+    val storageTpe            = p.Type.Struct(storageSym, Nil)
+    val rawTpe: p.Type.Struct = p.Type.Struct(rawSym, Nil)
+    val holderPtr             = p.Type.Ptr(holderTpe, p.Type.Space.Private)
+    val storageGlobalPtr      = p.Type.Ptr(storageTpe, p.Type.Space.Global)
+    val storageLocalPtr       = p.Type.Ptr(storageTpe, p.Type.Space.Local)
+    val holder                = named("holder", holderPtr)
+    val local                 = named("local", storageLocalPtr)
+    val casted                = named("casted", globalPtr)
+    val holderDef             = p.StructDef(holderSym, Nil, List(named("storage", storageGlobalPtr)), Nil)
+    val storageDef            = p.StructDef(storageSym, Nil, List(named("raw", rawTpe)), List(rawTpe))
+    val rawDef = p.StructDef(rawSym, Nil, List(named("data", p.Type.Arr(p.Type.IntS32, 8, p.Type.Space.Private))), Nil)
+    val storagePath = List(p.PathStep.Deref, p.PathStep.Field("storage"))
+    val dataPath    = storagePath ::: List(p.PathStep.Deref, p.PathStep.Field("raw"), p.PathStep.Field("data"))
+    val e = entry(
+      args = List(p.Arg(holder)),
+      body = List(
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(storageTpe, p.Term.IntS64Const(1), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Mut(p.Term.Select(holder, storagePath, storageGlobalPtr), p.Expr.Alias(selectT(local))),
+        p.Stmt.Cond(
+          p.Term.Bool1Const(true),
+          List(
+            p.Stmt.Var(
+              casted,
+              Some(
+                p.Expr.Cast(
+                  p.Term.Select(holder, dataPath, p.Type.Arr(p.Type.IntS32, 8, p.Type.Space.Private)),
+                  globalPtr
+                )
+              )
+            )
+          ),
+          Nil
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = RegionRespace(program(e, defs = List(holderDef, storageDef, rawDef)), NoopLog)
+
+    assertEquals(ptrSpacesOf(out.entry, "casted"), Set[p.Type.Space](p.Type.Space.Local))
+    val storageMutSpaces = out.entry.required
+      .collectAll[p.Stmt]
+      .collect {
+        case p.Stmt.Mut(p.Term.Select(_, steps, p.Type.Ptr(_, space)), _) if steps == storagePath => space
+      }
+      .toSet
+    assertEquals(storageMutSpaces, Set[p.Type.Space](p.Type.Space.Local))
+  }
+
+  test("a field written through an inlined constructor receiver is visible through its stack aggregate") {
+    val holderSym           = sym("Holder")
+    val localPtr            = ptr(p.Type.Space.Local)
+    val globalPtr           = ptr(p.Type.Space.Global)
+    val holderTpe           = p.Type.Struct(holderSym, Nil)
+    val holderPtr           = p.Type.Ptr(holderTpe, p.Type.Space.Global)
+    val holder              = named("holder", holderTpe)
+    val receiver            = named("receiver", holderPtr)
+    val ctorThis            = named("ctorThis", holderPtr)
+    val local               = named("local", localPtr)
+    val result              = named("result", globalPtr)
+    val holderDef           = p.StructDef(holderSym, Nil, List(named("data", globalPtr)), Nil)
+    val dataThroughReceiver = List(p.PathStep.Deref, p.PathStep.Field("data"))
+    val e = entry(
+      body = List(
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(8), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Var(
+          receiver,
+          Some(p.Expr.RefTo(selectT(holder), None, holderTpe, p.Type.Space.Global, p.Region.Opaque))
+        ),
+        p.Stmt.Var(ctorThis, Some(p.Expr.Alias(selectT(receiver)))),
+        p.Stmt.Mut(
+          p.Term.Select(ctorThis, dataThroughReceiver, globalPtr),
+          p.Expr.Alias(selectT(local))
+        ),
+        p.Stmt.Var(
+          result,
+          Some(p.Expr.Alias(p.Term.Select(holder, List(p.PathStep.Field("data")), globalPtr)))
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = RegionRespace(program(e, defs = List(holderDef)), NoopLog)
+
+    assertEquals(ptrSpacesOf(out.entry, "receiver"), Set[p.Type.Space](p.Type.Space.Private))
+    assertEquals(ptrSpacesOf(out.entry, "ctorThis"), Set[p.Type.Space](p.Type.Space.Private))
+    assertEquals(ptrSpacesOf(out.entry, "result"), Set[p.Type.Space](p.Type.Space.Local))
+    val resultSourceSpaces = out.entry.required
+      .collectAll[p.Stmt]
+      .collect {
+        case p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(_, _, p.Type.Ptr(_, space)))), _) if n.symbol == "result" =>
+          space
+      }
+      .toSet
+    assertEquals(resultSourceSpaces, Set[p.Type.Space](p.Type.Space.Local))
+    val writtenSpaces = out.entry.required
+      .collectAll[p.Stmt]
+      .collect {
+        case p.Stmt.Mut(p.Term.Select(_, steps, p.Type.Ptr(_, space)), _) if steps == dataThroughReceiver => space
+      }
+      .toSet
+    assertEquals(writtenSpaces, Set[p.Type.Space](p.Type.Space.Local))
   }
 
   test("copying a nested aggregate preserves its pointer-field provenance") {
@@ -562,12 +712,8 @@ class RegionRespaceSuite extends munit.FunSuite {
     }
 
     List(false, true).foreach { reverse =>
-      val input   = build(reverse)
-      val derived = Provenance.derivedIn(input, trackSlots = true)
-      val result  = input.body.collectFirst { case p.Stmt.Var(n, _, _) if n.symbol == "result" => n }.get
-      assertEquals(Provenance.at(derived, selectT(result)), p.Region.Opaque)
-
-      val out = RegionRespace(program(input, defs = List(holderDef)), NoopLog)
+      val input = build(reverse)
+      val out   = RegionRespace(program(input, defs = List(holderDef)), NoopLog)
       assertEquals(ptrSpacesOf(out.entry, "result"), Set[p.Type.Space](p.Type.Space.Global))
     }
   }

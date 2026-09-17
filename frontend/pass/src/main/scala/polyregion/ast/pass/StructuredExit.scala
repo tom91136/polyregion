@@ -368,7 +368,14 @@ object StructuredExit extends ProgramPass {
       )
 
     def slotDecls: List[p.Stmt] =
-      tags.map(_.thrown).filter(t => hasStorage(t.tpe)).map(t => p.Stmt.Var(slotOf(t), None, isMutable = true))
+      tags.map(_.thrown).filter(t => hasStorage(t.tpe)).map { thrown =>
+        val initial = thrown.tpe match {
+          case p.Type.Ptr(component, space) =>
+            Some(p.Expr.Alias(p.Term.NullPtrConst(component, space, p.Region.Opaque)))
+          case _ => None
+        }
+        p.Stmt.Var(slotOf(thrown), initial, isMutable = true)
+      }
 
     def messageDecls: List[p.Stmt] =
       Option
@@ -633,12 +640,7 @@ object StructuredExit extends ProgramPass {
                       case term @ p.Term.Select(root, Nil, _) if root == binder => term
                     }
                     .isDefined
-                  if (!usesPointerValue)
-                    return p.Stmt.Var(
-                      binder,
-                      Some(p.Expr.RefTo(projected, None, toComp, to.space, p.Region.Opaque)),
-                      isMutable = false
-                    ) :: projectedBody
+                  if (!usesPointerValue) return projectedBody
                   val nullBinder = fresh(to)
                   val nullBody = freshCopy(body.modifyAll[p.Term] {
                     case p.Term.Select(root, steps, tpe) if root == binder =>
@@ -837,7 +839,7 @@ object StructuredExit extends ProgramPass {
     }
   }
 
-  override def apply(program: p.Program, log: Log): p.Program = {
+  private def lowerEntry(program: p.Program, log: Log): p.Program = {
     val source = program.entry match {
       case Some(function) => function
       case None           => return program
@@ -891,8 +893,21 @@ object StructuredExit extends ProgramPass {
     }
   }
 
+  override def apply(program: p.Program, log: Log): p.Program = {
+    val flow = Flow(program.defs)
+    val functions = program.functions.map { function =>
+      val hasStructuredExit = function
+        .collectFirst_[p.Stmt] { case s @ (_: p.Stmt.Raise | _: p.Stmt.Try) => s }
+        .isDefined
+      if (hasStructuredExit && !function.body.exists(flow.escapes))
+        lowerEntry(p.Program(Some(function), Nil, program.defs), log).entry.getOrElse(function)
+      else function
+    }
+    lowerEntry(program.copy(functions = functions), log)
+  }
+
   private[pass] def lowerHandledFunction(f: p.Function, defs: List[p.StructDef], log: Log): p.Function = {
-    val lowered = apply(p.Program(Some(f), Nil, defs), log).entry.getOrElse(
+    val lowered = lowerEntry(p.Program(Some(f), Nil, defs), log).entry.getOrElse(
       throw IllegalStateException(s"RecursionLower: missing lowered function ${f.name.repr}")
     )
     if (lowered.args != f.args)

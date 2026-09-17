@@ -10,13 +10,13 @@ import polyregion.ast.Traversal.*
 // generic single-arena lowering for flat-address-space binding-slot backends (c_source, opencl1_1, metal).
 // the dispatch marshals the whole reachable capture graph into one device arena and binds the arena base as
 // the capture arg, so the capture sits at offset 0 and every pointer slot holds an i64 byte offset. rooted
-// field reads are unchanged; ONLY an arena-relative (Opaque) pointer deref changes - the offset resolves
+// field reads are unchanged; ONLY a solved arena-relative pointer deref changes - the offset resolves
 // through `(T*)&arena8[(u64)off]`. a Select walks step by step, resolving against the arena the moment the
 // running value is a pointer LOADED from memory (an already-read pointer field, then stepped through), so a
 // chain like vector ref -> records -> _M_p -> chars resolves itself one hop at a time
 // examples:
 //   cap.x                       ->  cap.x                                       // rooted read, unchanged
-//   p[i]   (p Opaque offset)    ->  ((T*)&arena8[(u64)p])[i]                    // arena-relative deref
+//   p[i]   (p arena offset)     ->  ((T*)&arena8[(u64)p])[i]                    // arena-relative deref
 //   vec.records._M_p[k]         ->  resolve _M_p hop, then ((T*)&arena8[..])[k] // loaded ptr crossed mid-path
 //   &result.#base (result off)  ->  (T*)((u64)&real - (u64)arena8)              // keep the address in offset space
 // edge cases:
@@ -25,39 +25,54 @@ import polyregion.ast.Traversal.*
 //   inline deref in an Intr/Math op  ->  every operand term routed through the arena
 object ArenaLower extends ProgramPass {
 
-  private enum ArenaRep {
-    case Unknown, Plain, Base, Offset, Mixed
-    case Reference(symbol: String)
-  }
-
-  private case class ArenaSlot(root: String, path: List[p.PathStep])
-
   private case class ArenaState(
-      capture: p.Named,
-      rooted: Map[p.Named, p.Region],
       localAggregates: Set[String],
-      roots: Map[String, ArenaRep] = Map.empty,
-      slots: Map[ArenaSlot, ArenaRep] = Map.empty
+      analysis: AddressRefinement.Solution
   ) {
-    def regionAt(term: p.Term): p.Region = Provenance.at(rooted, term)
+    import AddressRefinement.{Encoding, Provenance, Query}
 
-    def localRoot(root: p.Named): Option[String] =
-      rooted
-        .get(root)
-        .orElse(rooted.collectFirst { case (named, region) if named.symbol == root.symbol => region })
-        .collect { case p.Region.Rooted(n) if localAggregates(n.symbol) => n.symbol }
-        .orElse(Option.when(localAggregates(root.symbol))(root.symbol))
+    def root(symbol: String): Option[Encoding] = analysis.bindings.get(symbol).flatMap(_.encoding)
 
-    def slot(root: p.Named, steps: List[p.PathStep]): Option[(Int, ArenaRep)] =
-      localRoot(root).flatMap { symbol =>
-        slots.iterator
-          .collect { case (ArenaSlot(`symbol`, path), rep) if steps.startsWith(path) => path.size -> rep }
+    def fact(root: p.Named): AddressRefinement.AddressValue =
+      analysis.bindings.getOrElse(root.symbol, AddressRefinement.AddressValue())
+
+    def localRoot(root: p.Named): Option[(String, List[p.PathStep])] =
+      fact(root).provenances
+        .collectFirst { case Provenance.Local(symbol, path) if localAggregates(symbol) => symbol -> path }
+        .orElse(Option.when(localAggregates(root.symbol))(root.symbol -> Nil))
+
+    def slot(root: p.Named, steps: List[p.PathStep]): Option[(Int, AddressRefinement.AddressValue)] =
+      localRoot(root).flatMap { case (symbol, prefix) =>
+        val suffix = if (steps.headOption.contains(p.PathStep.Deref)) steps.tail else steps
+        val path   = prefix ++ suffix
+        analysis.slots.iterator
+          .collect {
+            case (Query.Slot(`symbol`, candidate), pointer) if AddressRefinement.slotPrefix(candidate, path) =>
+              (candidate.size - prefix.size + steps.size - suffix.size) -> pointer
+          }
+          .toList
+          .groupBy(_._1)
           .maxByOption(_._1)
+          .map { case (depth, pointers) =>
+            depth -> pointers.iterator.map(_._2).reduce(_.join(_))
+          }
       }
 
-    def root(symbol: String): ArenaRep       = roots.getOrElse(symbol, ArenaRep.Unknown)
-    def isArenaRooted(term: p.Term): Boolean = regionAt(term) == p.Region.Rooted(capture)
-    def offsetRoots: Set[String]             = roots.collect { case (symbol, ArenaRep.Offset) => symbol }.toSet
+    def isArenaRooted(term: p.Term): Boolean = {
+      val origins = analysis.value(term).provenances ++ (term match {
+        case p.Term.Select(root, _, _) => fact(root).provenances
+        case _                         => Set.empty
+      })
+      origins.exists { case Provenance.ArenaRoot(_) => true; case _ => false }
+    }
+
+    def needsResolve(target: p.Named, source: p.Expr): Boolean =
+      root(target.symbol).contains(Encoding.Absolute) &&
+        analysis.result(source).encoding.contains(Encoding.ArenaRelative)
+
+    lazy val offsetRoots: Set[String] = analysis.bindings.iterator.collect {
+      case (symbol, pointer) if pointer.encoding.contains(Encoding.ArenaRelative) => symbol
+    }.toSet
   }
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
@@ -77,9 +92,6 @@ object ArenaLower extends ProgramPass {
     case p.Term.Select(root, Nil, _) => canBeArenaOffset(root.tpe)
     case _                           => canBeArenaOffset(t.tpe)
   }
-  private def isAddressInt(t: p.Type): Boolean     = t == p.Type.IntU64 || t == p.Type.IntS64
-  private def canCarryArenaRep(t: p.Type): Boolean = canBeArenaOffset(t) || isAddressInt(t)
-
   // an arena pointer's data lives in the single global buffer, so its outermost address space is always
   // global; conformant OpenCL C rejects a cast that changes it (nvidia tolerates a stray private outer)
   private def globalOuter(t: p.Type): p.Type = t match {
@@ -89,20 +101,22 @@ object ArenaLower extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {
     val members = program.defs.iterator.map(d => d.name -> d.members).toMap
-    program.copy(entry = program.entry.map(run(members, _)), functions = program.functions.map(run(members, _)))
+    program.copy(
+      entry = program.entry.map(run(program, members, _)),
+      functions = program.functions.map(run(program, members, _))
+    )
   }
 
-  private def run(members: Map[p.Sym, List[p.Named]], f: p.Function): p.Function = captureRoot(f) match {
+  private def run(program: p.Program, members: Map[p.Sym, List[p.Named]], f: p.Function): p.Function = captureRoot(
+    f
+  ) match {
     case None => f
     case Some((capN, _)) =>
-      val rooted = Provenance.derivedIn(f)
-      val localAggregates = f
-        .collectAll[p.Stmt]
-        .collect {
-          case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
-        }
-        .toSet
-      val state     = analyseArenaState(f, ArenaState(capN, rooted, localAggregates))
+      val statements = f.collectAll[p.Stmt]
+      val localAggregates = statements.iterator.collect {
+        case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
+      }.toSet
+      val state     = ArenaState(localAggregates, AddressRefinement.solve(program, f).requireSolved)
       val arena8    = p.Named("#arena_base", BytePtr)
       val rewritten = mapStmtsRec(f.body)(rwLeaf(members, state, arena8))
       val capDecl   = p.Stmt.Var(capN, Some(p.Expr.Cast(sel(arena8), capN.tpe)), isMutable = false)
@@ -116,161 +130,12 @@ object ArenaLower extends ProgramPass {
       )
   }
 
-  private def analyseArenaState(f: p.Function, initial: ArenaState): ArenaState = {
-    import ArenaRep.*
-
-    val statements = f.collectAll[p.Stmt]
-    val assignments = statements
-      .flatMap {
-        case p.Stmt.Var(n, Some(e), _) if canCarryArenaRep(n.tpe)               => Some(n.symbol -> e)
-        case p.Stmt.Mut(p.Term.Select(n, Nil, _), e) if canCarryArenaRep(n.tpe) => Some(n.symbol -> e)
-        case _                                                                  => None
-      }
-      .groupMap(_._1)(_._2)
-    val arenaRooted = initial.rooted.collect {
-      case (named, p.Region.Rooted(root)) if root == initial.capture && canBeArenaOffset(named.tpe) => named.symbol
-    }.toSet
-    val slotAssignments = statements
-      .flatMap {
-        case p.Stmt.Mut(p.Term.Select(root, steps, tpe), e) if steps.nonEmpty && isPtr(tpe) =>
-          initial.localRoot(root).map(symbol => ArenaSlot(symbol, steps) -> e)
-        case _ => None
-      }
-      .groupMap(_._1)(_._2)
-    val slotCopies = statements.flatMap {
-      case p.Stmt.Var(target, Some(p.Expr.Alias(p.Term.Select(source, prefix, _))), _) if !isPtr(target.tpe) =>
-        initial.localRoot(source).map((target.symbol, _, prefix))
-      case p.Stmt.Mut(p.Term.Select(target, Nil, tpe), p.Expr.Alias(p.Term.Select(source, prefix, _))) if !isPtr(tpe) =>
-        initial.localRoot(source).map((target.symbol, _, prefix))
-      case _ => None
-    }
-
-    def joinAssignment(x: ArenaRep, y: ArenaRep): ArenaRep =
-      if (x == Unknown) y
-      else if (y == Unknown || x == y) x
-      else Mixed
-
-    def termRep(state: ArenaState, t: p.Term): ArenaRep = t match {
-      case p.Term.Select(root, Nil, _) if root.symbol == state.capture.symbol => Base
-      case p.Term.Select(root, Nil, _)                                        => state.root(root.symbol)
-      case p.Term.Select(root, steps, _) if steps.nonEmpty =>
-        state.slot(root, steps) match {
-          case Some((depth, Base | Offset)) if depth < steps.size && canBeArenaOffset(t.tpe) => Offset
-          case Some((_, rep))                                                                => rep
-          case None if !canBeArenaOffset(t.tpe)                                              => Plain
-          case None if state.localRoot(root).nonEmpty                                        => Unknown
-          case None if state.isArenaRooted(t)                                                => Offset
-          case None if state.root(root.symbol) == Offset                                     => Offset
-          case None                                                                          => Plain
-        }
-      case _: p.Term.NullPtrConst => Unknown
-      case _                      => Plain
-    }
-
-    def arithmeticRep(x: ArenaRep): ArenaRep = x match {
-      case Reference(_) => Plain
-      case other        => other
-    }
-    def addRep(x: ArenaRep, y: ArenaRep): ArenaRep = (arithmeticRep(x), arithmeticRep(y)) match {
-      case (Mixed, _) | (_, Mixed)         => Mixed
-      case (Offset, Base) | (Base, Offset) => Mixed
-      case (Offset, Offset) | (Base, Base) => Mixed
-      case (Offset, _) | (_, Offset)       => Offset
-      case (Base, _) | (_, Base)           => Base
-      case (Unknown, _) | (_, Unknown)     => Unknown
-      case _                               => Plain
-    }
-    def subRep(x: ArenaRep, y: ArenaRep): ArenaRep = (arithmeticRep(x), arithmeticRep(y)) match {
-      case (Mixed, _) | (_, Mixed)        => Mixed
-      case (Offset | Base, Offset | Base) => Plain
-      case (Offset, Plain)                => Offset
-      case (Base, Plain)                  => Base
-      case (Unknown, _) | (_, Unknown)    => Unknown
-      case (Plain, Plain | Offset | Base) => Plain
-      case _                              => Plain
-    }
-
-    def exprRep(state: ArenaState, e: p.Expr): ArenaRep = e match {
-      // `&p` is a real pointer to the local binding slot for `p`; indexing it later loads whatever
-      // representation `p` carries, rather than a pointer stored in the device arena.
-      case p.Expr.RefTo(p.Term.Select(root, Nil, tpe), None, comp, _, _) if isPtr(tpe) && comp == tpe =>
-        Reference(root.symbol)
-      case p.Expr.RefTo(t, _, _, p.Type.Space.Global, _) if isPtr(t.tpe) =>
-        termRep(state, t)
-      case p.Expr.RefTo(t, _, _, p.Type.Space.Global, _) =>
-        t match {
-          case p.Term.Select(_, steps, _) if steps.nonEmpty && state.isArenaRooted(t) =>
-            Offset
-          case p.Term.Select(root, _, _) if state.root(root.symbol) == Offset => Offset
-          case _                                                              => Plain
-        }
-      case p.Expr.Alias(_: p.Term.NullPtrConst) => Unknown
-      case p.Expr.Alias(t)                      => termRep(state, t)
-      case p.Expr.Cast(t, _)                    => termRep(state, t)
-      // Pointer values stored in the arena are byte-offset tokens too. This is the extra hop in
-      // pointer-to-pointer captures: indexing the outer offset loads an encoded inner pointer.
-      case p.Expr.Index(base, _, p.Type.Ptr(_, p.Type.Space.Global)) =>
-        termRep(state, base) match {
-          case Reference(symbol) => state.root(symbol)
-          case Offset | Base     => Offset
-          case Mixed             => Mixed
-          case Unknown           => Unknown
-          case _                 => Plain
-        }
-      case p.Expr.IntrOp(p.Intr.Add(x, y, _)) => addRep(termRep(state, x), termRep(state, y))
-      case p.Expr.IntrOp(p.Intr.Sub(x, y, _)) => subRep(termRep(state, x), termRep(state, y))
-      case _                                  => Plain
-    }
-
-    @annotation.tailrec
-    def close(state: ArenaState, remaining: Int): ArenaState = {
-      val roots = assignments.view
-        .mapValues { es =>
-          es.iterator.map(exprRep(state, _)).reduce(joinAssignment)
-        }
-        .map { case (symbol, rep) => symbol -> (if (rep == Plain && arenaRooted(symbol)) Offset else rep) }
-        .toMap
-      val directSlots = slotAssignments.iterator.map { case (slot, es) =>
-        val rep = es.iterator
-          .map(exprRep(state, _))
-          // ArenaLower stores real pointers in local aggregates, even when their source is encoded.
-          .map { case Offset => Base; case x => x }
-          .reduce(joinAssignment)
-        slot -> rep
-      }
-      val copiedSlots = slotCopies.iterator.flatMap { case (target, source, prefix) =>
-        state.slots.iterator.collect {
-          case (ArenaSlot(`source`, path), rep) if path.startsWith(prefix) =>
-            ArenaSlot(target, path.drop(prefix.size)) -> rep
-        }
-      }
-      val next = state.copy(
-        roots = roots,
-        slots = (directSlots ++ copiedSlots).toList.groupMapReduce(_._1)(_._2)(joinAssignment)
-      )
-      if (next == state || remaining == 0) next else close(next, remaining - 1)
-    }
-
-    val state = close(initial, assignments.size + slotAssignments.size + slotCopies.size + 1)
-    val mixed = state.roots.collect { case (symbol, Mixed) => symbol }.toList.sorted ++ state.slots
-      .collect { case (ArenaSlot(root, path), Mixed) =>
-        s"$root.${path.mkString(".")}"
-      }
-      .toList
-      .sorted
-    if (mixed.nonEmpty)
-      throw RuntimeException(
-        s"arena representation changes between real pointers and byte offsets: ${mixed.mkString(", ")}"
-      )
-    state
-  }
-
   private def rwLeaf(
       members: Map[p.Sym, List[p.Named]],
       state: ArenaState,
       arena8: p.Named
   )(leaf: p.Stmt): List[p.Stmt] = {
-    import ArenaRep.*
+    import AddressRefinement.{Provenance, Encoding}
 
     val offsetRoots = state.offsetRoots
     val pre         = ListBuffer.empty[p.Stmt]
@@ -281,39 +146,35 @@ object ArenaLower extends ProgramPass {
         offsetRoots(root.symbol) || state.isArenaRooted(t)
       case _ => false
     }
-    def localAggregateLValue(t: p.Term): Boolean = state.regionAt(t) match {
-      case p.Region.Rooted(n) => state.localAggregates(n.symbol)
-      case p.Region.Opaque    => false
+    def localAggregateLValue(t: p.Term): Boolean = t match {
+      case p.Term.Select(root, _, _) => state.localRoot(root).nonEmpty
+      case _                         => false
     }
     def offsetTerm(t: p.Term): Boolean = t match {
       case p.Term.Select(root, steps, _) =>
         state.slot(root, steps) match {
-          case Some((depth, Base))     => depth < steps.size
-          case Some((_, Offset))       => true
-          case Some((_, Plain))        => false
-          case Some((_, Unknown))      => false
-          case Some((_, Mixed))        => false
-          case Some((_, Reference(_))) => false
+          case Some((_, pointer)) if pointer.encoding.contains(Encoding.ArenaRelative) => true
+          case Some((depth, pointer))
+              if depth < steps.size && pointer.encoding.contains(Encoding.Absolute) && pointer.provenances.exists {
+                case Provenance.ArenaRoot(_) => true
+                case _                       => false
+              } =>
+            true
+          case Some(_) => false
           case None =>
+            state.analysis.value(t).encoding.contains(Encoding.ArenaRelative) ||
             offsetRoots(root.symbol) ||
             // A pointer loaded from an arena-backed field and kept in a local aggregate is a
             // real arena address, but pointer fields reached through it still hold arena offsets.
             // Treat the field load as encoded so the next dereference is rebased exactly once.
-            (steps.nonEmpty && canBeArenaOffset(t.tpe) && state.root(root.symbol) == Base) ||
+            (steps.nonEmpty && canBeArenaOffset(t.tpe) && state.fact(root).hasArenaRoot) ||
             (steps.nonEmpty && canBeArenaOffset(t.tpe) && arenaBases(root.symbol)) ||
             (steps.nonEmpty && canBeArenaOffset(t.tpe) && state.isArenaRooted(t))
         }
       case _ => false
     }
-    def offsetExpr(e: p.Expr): Boolean = e match {
-      case p.Expr.RefTo(t, _, _, p.Type.Space.Global, _) =>
-        if (isPtr(t.tpe)) offsetVal(t) else arenaLValue(t)
-      case p.Expr.Alias(t)                    => offsetTerm(t)
-      case p.Expr.Cast(t, _)                  => offsetTerm(t)
-      case p.Expr.IntrOp(p.Intr.Add(x, y, _)) => offsetTerm(x) || offsetTerm(y)
-      case p.Expr.IntrOp(p.Intr.Sub(x, _, _)) => offsetTerm(x)
-      case _                                  => false
-    }
+    def offsetExpr(e: p.Expr): Boolean =
+      state.analysis.result(e).encoding.contains(Encoding.ArenaRelative)
     def offsetVal(t: p.Term): Boolean =
       canTermBeArenaOffset(t) && offsetTerm(t)
     def offsetNamed(n: p.Named): p.Named =
@@ -355,7 +216,7 @@ object ArenaLower extends ProgramPass {
       }
 
     // bind `(baseTpe)&arena8[(u64)offVal]` and return the base var: a real arena pointer for an offset
-    def arenaBase(offVal: p.Term, baseTpe0: p.Type): p.Named = {
+    def resolveAddress(offVal: p.Term, baseTpe0: p.Type): p.Named = {
       val baseTpe       = globalOuter(baseTpe0)
       val (off, offPre) = toU64(offVal)
       pre ++= offPre
@@ -384,13 +245,13 @@ object ArenaLower extends ProgramPass {
       case sel0 @ p.Term.Select(_, Nil, _) => sel0
       case p.Term.Select(root, steps, resultT) =>
         val rootN = offsetNamed(root)
-        val base0 = if (offsetVal(sel(rootN))) arenaBase(sel(rootN), rootN.tpe) else rootN
+        val base0 = if (offsetVal(sel(rootN))) resolveAddress(sel(rootN), rootN.tpe) else rootN
         val (baseN, accSteps, _) = steps.foldLeft((base0, List.empty[p.PathStep], rootN.tpe)) {
           case ((baseN, accSteps, curTpe), raw) =>
             // a loaded pointer (a pointer field already read, then stepped through) resolves to the arena
             val (b, acc) =
               if (isPtr(curTpe) && accSteps.nonEmpty && offsetVal(p.Term.Select(baseN, accSteps, curTpe)))
-                (arenaBase(p.Term.Select(baseN, accSteps, curTpe), curTpe), Nil)
+                (resolveAddress(p.Term.Select(baseN, accSteps, curTpe), curTpe), Nil)
               else (baseN, accSteps)
             val step = rwStep(raw)
             (b, acc :+ step, stepTpe(curTpe, step))
@@ -404,7 +265,7 @@ object ArenaLower extends ProgramPass {
       case p.Expr.Cast(t, a) => p.Expr.Cast(rwTerm(t), a)
       case p.Expr.Index(b, i, comp) =>
         if (isPtr(b.tpe) && offsetVal(b))
-          p.Expr.Index(sel(arenaBase(rwTerm(b), p.Type.Ptr(comp, pointeeSpace(b.tpe)))), rwTerm(i), comp)
+          p.Expr.Index(sel(resolveAddress(rwTerm(b), p.Type.Ptr(comp, pointeeSpace(b.tpe)))), rwTerm(i), comp)
         else p.Expr.Index(rwTerm(b), rwTerm(i), comp)
       // `&p` addresses the local slot which holds an arena-relative pointer value. It is not
       // arithmetic on that value, so preserve the RefTo for the backend instead of converting
@@ -443,38 +304,59 @@ object ArenaLower extends ProgramPass {
       case op: p.Expr.MathOp => op.modifyAll[p.Term](rwTerm)
       case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, ptr, value, scope, order, rtn)) if offsetVal(ptr) =>
         p.Expr.SpecOp(
-          p.Spec.GpuAtomicRMW(op, sel(arenaBase(rwTerm(ptr), ptr.tpe)), rwTerm(value), scope, order, rtn)
+          p.Spec.GpuAtomicRMW(op, sel(resolveAddress(rwTerm(ptr), ptr.tpe)), rwTerm(value), scope, order, rtn)
+        )
+      case p.Expr.SpecOp(p.Spec.GpuAtomicCAS(ptr, expected, desired, scope, order, rtn)) if offsetVal(ptr) =>
+        p.Expr.SpecOp(
+          p.Spec.GpuAtomicCAS(
+            sel(resolveAddress(rwTerm(ptr), ptr.tpe)),
+            rwTerm(expected),
+            rwTerm(desired),
+            scope,
+            order,
+            rtn
+          )
         )
       case p.Expr.SpecOp(p.Spec.GpuVolatileLoad(ptr, rtn)) if offsetVal(ptr) =>
-        p.Expr.SpecOp(p.Spec.GpuVolatileLoad(sel(arenaBase(rwTerm(ptr), ptr.tpe)), rtn))
+        p.Expr.SpecOp(p.Spec.GpuVolatileLoad(sel(resolveAddress(rwTerm(ptr), ptr.tpe)), rtn))
       case p.Expr.SpecOp(p.Spec.GpuVolatileStore(ptr, value)) if offsetVal(ptr) =>
-        p.Expr.SpecOp(p.Spec.GpuVolatileStore(sel(arenaBase(rwTerm(ptr), ptr.tpe)), rwTerm(value)))
+        p.Expr.SpecOp(p.Spec.GpuVolatileStore(sel(resolveAddress(rwTerm(ptr), ptr.tpe)), rwTerm(value)))
       case op: p.Expr.SpecOp => op.modifyAll[p.Term](rwTerm)
       case x                 => x
     }
 
+    // A local pointer may join a capture-relative offset and an independently bound real pointer.
+    // Normalise only offset-producing coercions to real arena addresses; retaining the pointer
+    // preserves later mutation and arbitrary indexing through the selected branch.
+    def rwAssigned(n: p.Named, e: p.Expr): p.Expr = {
+      val rewritten = rwExpr(e)
+      if (isPtr(n.tpe) && state.needsResolve(n, e)) {
+        val offset = bind("am", rewritten)
+        p.Expr.Alias(sel(resolveAddress(offset, n.tpe)))
+      } else rewritten
+    }
+
     val out = leaf match {
-      case p.Stmt.Var(n, Some(e), m) => p.Stmt.Var(offsetNamed(n), Some(rwExpr(e)), m)
+      case p.Stmt.Var(n, Some(e), m) => p.Stmt.Var(offsetNamed(n), Some(rwAssigned(n, e)), m)
       case p.Stmt.Var(n, None, m)    => p.Stmt.Var(offsetNamed(n), None, m)
       case p.Stmt.Mut(t @ p.Term.Select(root, steps, targetTpe), e)
           if steps.nonEmpty && localAggregateLValue(t) && isPtr(targetTpe) && offsetExpr(e) =>
         // rwExpr may already materialise an encoded field load while walking a pointer chain.
-        // Only call arenaBase for an expression that is still an offset token; otherwise this
+        // Only call resolveAddress for an expression that is still an offset token; otherwise this
         // local aggregate would receive a pointer rebased twice.
         val lowered = rwExpr(e)
-        val value =
-          if (offsetExpr(lowered)) {
-            val token = bind("ot", lowered)
-            p.Expr.Alias(sel(arenaBase(token, e.tpe)))
-          } else lowered
+        val token   = bind("ot", lowered)
+        val value   = p.Expr.Alias(sel(resolveAddress(token, e.tpe)))
         p.Stmt.Mut(
           rwTerm(t).asInstanceOf[p.Term.Select],
           value
         )
+      case p.Stmt.Mut(t @ p.Term.Select(root, Nil, _), e) =>
+        p.Stmt.Mut(rwTerm(t).asInstanceOf[p.Term.Select], rwAssigned(root, e))
       case p.Stmt.Mut(t, e) => p.Stmt.Mut(rwTerm(t).asInstanceOf[p.Term.Select], rwExpr(e))
       case p.Stmt.Update(lhs, i, v) =>
         if (isPtr(lhs.tpe) && offsetVal(lhs))
-          p.Stmt.Update(sel(arenaBase(rwTerm(lhs), lhs.tpe)), rwTerm(i), rwTerm(v))
+          p.Stmt.Update(sel(resolveAddress(rwTerm(lhs), lhs.tpe)), rwTerm(i), rwTerm(v))
         else p.Stmt.Update(rwTerm(lhs).asInstanceOf[p.Term.Select], rwTerm(i), rwTerm(v))
       case p.Stmt.Return(e) => p.Stmt.Return(rwExpr(e))
       case s                => s

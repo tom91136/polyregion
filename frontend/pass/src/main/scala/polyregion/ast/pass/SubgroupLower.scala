@@ -19,7 +19,8 @@ import polyregion.ast.Traversal.*
 //   aggregate shuffle                  ->  one scratch buffer per scalar leaf
 //   control flow                       ->  native collectives require subgroup-uniform participation; emulation requires
 //                                         whole-workgroup-uniform participation because it synchronises local scratch
-//   width / maxGroupSize               ->  require a power-of-two width <= 32 and a divisible ceiling <= 1024
+//   width / maxGroupSize               ->  require a power-of-two width <= 32 and a divisible ceiling <= 1024;
+//                                         width 1 is a barrier-free scalar subgroup, valid under divergent control flow
 //   group lowering disabled            ->  leave GpuGroup* operations for a native backend
 case class SubgroupLower(
     width: Int = 32,
@@ -116,7 +117,7 @@ private final class Lowering(
     def requiresBarrier(op: p.Spec): Boolean = op match {
       case _: p.Spec.GpuShuffleDown | _: p.Spec.GpuShuffleUp | _: p.Spec.GpuShuffleIdx | _: p.Spec.GpuShuffleXor |
           _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot | _: p.Spec.GpuSubgroupBarrier
-          if lowerSubgroups =>
+          if lowerSubgroups && width > 1 =>
         true
       case _: p.Spec.GpuGroupReduce | _: p.Spec.GpuGroupInclusiveScan | _: p.Spec.GpuGroupExclusiveScan
           if lowerGroups =>
@@ -158,12 +159,12 @@ private final class Lowering(
         throw IllegalArgumentException(
           s"Subgroup emulation requires whole-workgroup-uniform participation; ${function.decl.name.fqcn} contains a synchronising subgroup operation under $kind"
         )
-    def exits(body: List[p.Stmt]): Boolean = body.collectAll[p.Stmt].exists {
-      case _: p.Stmt.Return | _: p.Stmt.Raise | p.Stmt.Rethrow | p.Stmt.Break | p.Stmt.Cont => true
-      case _                                                                                => false
+    def exitsFunction(body: List[p.Stmt]): Boolean = body.collectAll[p.Stmt].exists {
+      case _: p.Stmt.Return | _: p.Stmt.Raise | p.Stmt.Rethrow => true
+      case _                                                   => false
     }
     def rejectEarlyExit(function: p.Function, kind: String, body: List[p.Stmt]): Unit =
-      if (requiring(function.decl.name) && exits(body))
+      if (requiring(function.decl.name) && exitsFunction(body))
         throw IllegalArgumentException(
           s"Subgroup emulation requires whole-workgroup-uniform participation; ${function.decl.name.fqcn} contains an early exit under $kind"
         )
@@ -247,7 +248,8 @@ private final class Lowering(
   }
 
   private def expand(op: p.Spec, leaves: Leaves, pool: ScratchPool): Option[(p.Expr, List[p.Stmt])] = op match {
-    case p.Spec.GpuSubgroupSize if lowerSubgroups => Some((p.Expr.Alias(u32(width)), Nil))
+    case p.Spec.GpuSubgroupSize if lowerSubgroups          => Some((p.Expr.Alias(u32(width)), Nil))
+    case p.Spec.GpuLaneIdx if lowerSubgroups && width == 1 => Some((p.Expr.Alias(u32(0)), Nil))
     case p.Spec.GpuLaneIdx if lowerSubgroups =>
       val localId   = fresh("local_id", p.Type.IntU32)
       val localSize = fresh("local_size", p.Type.IntU32)
@@ -255,6 +257,8 @@ private final class Lowering(
         p.Expr.IntrOp(p.Intr.BAnd(sel(localId), u32(width - 1), p.Type.IntU32)) ->
           subgroupPrelude(localId, localSize)
       )
+    case p.Spec.GpuShuffleDown(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+      Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleDown(value, delta, clamp, mask, rtn) if lowerSubgroups =>
       Some(
         shuffle(
@@ -267,6 +271,8 @@ private final class Lowering(
           (lane, _) => (p.Expr.IntrOp(p.Intr.Add(lane, delta, p.Type.IntU32)), Nil)
         )
       )
+    case p.Spec.GpuShuffleUp(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+      Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleUp(value, delta, clamp, mask, rtn) if lowerSubgroups =>
       Some(
         shuffle(
@@ -279,6 +285,8 @@ private final class Lowering(
           (lane, _) => (p.Expr.IntrOp(p.Intr.Sub(lane, delta, p.Type.IntU32)), Nil)
         )
       )
+    case p.Spec.GpuShuffleIdx(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+      Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleIdx(value, sourceLane, clamp, mask, rtn) if lowerSubgroups =>
       Some(
         shuffle(
@@ -297,6 +305,8 @@ private final class Lowering(
           }
         )
       )
+    case p.Spec.GpuShuffleXor(value, _, _, _, rtn) if lowerSubgroups && width == 1 =>
+      Some(singleLaneShuffle(value, rtn))
     case p.Spec.GpuShuffleXor(value, laneMask, clamp, mask, rtn) if lowerSubgroups =>
       Some(
         shuffle(
@@ -309,6 +319,12 @@ private final class Lowering(
           (lane, _) => (p.Expr.IntrOp(p.Intr.BXor(lane, laneMask, p.Type.IntU32)), Nil)
         )
       )
+    case p.Spec.GpuVoteAny(mask, predicate) if lowerSubgroups && width == 1 =>
+      Some(singleLaneVote(mask, predicate, all = false))
+    case p.Spec.GpuVoteAll(mask, predicate) if lowerSubgroups && width == 1 =>
+      Some(singleLaneVote(mask, predicate, all = true))
+    case p.Spec.GpuBallot(mask, predicate) if lowerSubgroups && width == 1 =>
+      Some(singleLaneBallot(mask, predicate))
     case p.Spec.GpuVoteAny(mask, predicate) if lowerSubgroups => Some(vote(mask, predicate, pool, all = false))
     case p.Spec.GpuVoteAll(mask, predicate) if lowerSubgroups => Some(vote(mask, predicate, pool, all = true))
     case p.Spec.GpuBallot(mask, predicate) if lowerSubgroups  => Some(ballot(mask, predicate, pool))
@@ -317,11 +333,52 @@ private final class Lowering(
       Some(groupScan(op, value, rtn, pool, inclusive = true))
     case p.Spec.GpuGroupExclusiveScan(op, value, rtn) if lowerGroups =>
       Some(groupScan(op, value, rtn, pool, inclusive = false))
+    case p.Spec.GpuSubgroupBarrier(_) if lowerSubgroups && width == 1 =>
+      Some((p.Expr.Alias(p.Term.Unit0Const), Nil))
     case p.Spec.GpuSubgroupBarrier(p.Term.IntU32Const(-1)) if lowerSubgroups =>
       Some((p.Expr.SpecOp(p.Spec.GpuBarrierLocal), Nil))
     case p.Spec.GpuSubgroupBarrier(_) if lowerSubgroups =>
       throw IllegalArgumentException("Masked subgroup barriers cannot be emulated with a work-group barrier")
     case _ => None
+  }
+
+  private def singleLaneShuffle(value: p.Term, rtn: p.Type): (p.Expr, List[p.Stmt]) = value.tpe match {
+    case p.Type.Ptr(component, _) if component == rtn => (p.Expr.Index(value, u32(0), rtn), Nil)
+    case _                                            => (p.Expr.Alias(value), Nil)
+  }
+
+  private def singleLaneVote(mask: p.Term, predicate: p.Term, all: Boolean): (p.Expr, List[p.Stmt]) = {
+    val maskBit  = fresh("mask_bit", p.Type.IntU32)
+    val included = fresh("included", p.Type.Bool1)
+    val result =
+      if (all) p.Expr.IntrOp(p.Intr.LogicOr(sel(included), predicate))
+      else p.Expr.IntrOp(p.Intr.LogicAnd(sel(included), predicate))
+    result -> List(
+      p.Stmt.Var(maskBit, Some(p.Expr.IntrOp(p.Intr.BAnd(mask, u32(1), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(
+        included,
+        Some(
+          p.Expr.IntrOp(
+            if (all) p.Intr.LogicEq(sel(maskBit), u32(0))
+            else p.Intr.LogicNeq(sel(maskBit), u32(0))
+          )
+        ),
+        isMutable = false
+      )
+    )
+  }
+
+  private def singleLaneBallot(mask: p.Term, predicate: p.Term): (p.Expr, List[p.Stmt]) = {
+    val predicateBit = fresh("predicate_bit", p.Type.IntU32)
+    val masked       = fresh("masked", p.Type.IntU32)
+    p.Expr.Alias(sel(masked)) -> List(
+      p.Stmt.Var(predicateBit, Some(p.Expr.Cast(predicate, p.Type.IntU32)), isMutable = false),
+      p.Stmt.Var(
+        masked,
+        Some(p.Expr.IntrOp(p.Intr.BAnd(sel(predicateBit), mask, p.Type.IntU32))),
+        isMutable = false
+      )
+    )
   }
 
   private def shuffle(
@@ -434,9 +491,9 @@ private final class Lowering(
     val sx   = fresh("group_sx", p.Type.IntU32)
     val sy   = fresh("group_sy", p.Type.IntU32)
     val sz   = fresh("group_sz", p.Type.IntU32)
-    val syx  = fresh("group_syx", p.Type.IntU32)
-    val yx   = fresh("group_yx", p.Type.IntU32)
-    val szyx = fresh("group_szyx", p.Type.IntU32)
+    val syz  = fresh("group_syz", p.Type.IntU32)
+    val yz   = fresh("group_yz", p.Type.IntU32)
+    val sxyz = fresh("group_sxyz", p.Type.IntU32)
     val sxsy = fresh("group_sxsy", p.Type.IntU32)
     List(
       p.Stmt.Var(x, Some(p.Expr.SpecOp(p.Spec.GpuLocalIdx(u32(0)))), isMutable = false),
@@ -445,12 +502,12 @@ private final class Lowering(
       p.Stmt.Var(sx, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(0)))), isMutable = false),
       p.Stmt.Var(sy, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(1)))), isMutable = false),
       p.Stmt.Var(sz, Some(p.Expr.SpecOp(p.Spec.GpuLocalSize(u32(2)))), isMutable = false),
-      p.Stmt.Var(syx, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sy), sel(x), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(yx, Some(p.Expr.IntrOp(p.Intr.Add(sel(y), sel(syx), p.Type.IntU32))), isMutable = false),
-      p.Stmt.Var(szyx, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sz), sel(yx), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(syz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sy), sel(z), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(yz, Some(p.Expr.IntrOp(p.Intr.Add(sel(y), sel(syz), p.Type.IntU32))), isMutable = false),
+      p.Stmt.Var(sxyz, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(yz), p.Type.IntU32))), isMutable = false),
       p.Stmt.Var(
         localId,
-        Some(p.Expr.IntrOp(p.Intr.Add(sel(z), sel(szyx), p.Type.IntU32))),
+        Some(p.Expr.IntrOp(p.Intr.Add(sel(x), sel(sxyz), p.Type.IntU32))),
         isMutable = false
       ),
       p.Stmt.Var(sxsy, Some(p.Expr.IntrOp(p.Intr.Mul(sel(sx), sel(sy), p.Type.IntU32))), isMutable = false),

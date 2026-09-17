@@ -231,6 +231,28 @@ class PartialEvalAliasSuite extends munit.FunSuite {
     )
   }
 
+  test("a reinterpret forwards a terminal scalar read across same-width field types") {
+    val srcDef = structDef("Src", "a" -> p.Type.IntS32, "b" -> p.Type.IntS32)
+    val dstDef = structDef("Dst", "x" -> p.Type.IntU32, "y" -> p.Type.Float32)
+    val s      = named("s", p.Type.Struct(sym("Src"), Nil))
+    val d      = named("d", p.Type.Struct(sym("Dst"), Nil))
+    assertEquals(
+      returnedTerm(reinterpret(s, d, "y", srcDef, dstDef)),
+      Some(p.Term.Select(s, List(p.PathStep.Field("b")), p.Type.Float32))
+    )
+  }
+
+  test("a reinterpret does not bit-forward Boolean fields") {
+    val srcDef = structDef("Src", "value" -> p.Type.IntU8)
+    val dstDef = structDef("Dst", "value" -> p.Type.Bool1)
+    val s      = named("s", p.Type.Struct(sym("Src"), Nil))
+    val d      = named("d", p.Type.Struct(sym("Dst"), Nil))
+    assertEquals(
+      returnedTerm(reinterpret(s, d, "value", srcDef, dstDef)),
+      Some(p.Term.Select(d, List(p.PathStep.Field("value")), p.Type.Bool1))
+    )
+  }
+
   test("a reinterpret does not forward when a preceding member differs in type") {
     val srcDef = structDef("Src", "a" -> p.Type.IntS16, "b" -> p.Type.IntS16, "c" -> p.Type.IntS32)
     val dstDef = structDef("Dst", "x" -> p.Type.IntS32, "y" -> p.Type.IntS32, "z" -> p.Type.IntS32)

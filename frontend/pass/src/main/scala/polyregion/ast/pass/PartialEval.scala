@@ -67,13 +67,13 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       // a name is unsafe to substitute if it is ever reassigned (Mut) or address-taken (RefTo) anywhere in
       // the function; whole-function so forward substitution into loop/branch bodies stays sound
-      val addrTaken = addressTakenNames(f)
-      val excluded  = mutatedNames(f) ++ addrTaken
-      // addr-bind only cares about a bare re-aim (`a = ...`); a stepped write-through leaves `a`'s slot stable
-      val reassigned = f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(n, Nil, _), _) => n }.toSet
+      val statements            = f.collectAll[p.Stmt]
+      val (mutated, reassigned) = mutationInfo(statements)
+      val addrTaken             = addressTakenNames(f)
+      val excluded              = mutated ++ addrTaken
       // fold; reassociate constants across integer +/* chains; CSE identical register-arithmetic; drop
       // dead bindings. reassoc/CSE emit aliases that the next fold iteration copy-propagates and drops.
-      val st0     = St.empty.copy(casts = castAliases(f, defs, reassigned))
+      val st0     = St.empty.copy(casts = castAliases(statements, defs, reassigned))
       val folded  = f.copy(body = evalStmts(f.body, st0, excluded, reassigned, log)._1)
       val reassoc = folded.copy(body = reassocStmts(folded.body, Map.empty)._1)
       val cse     = reassoc.copy(body = cseStmts(reassoc.body, Avail.empty, addrTaken)._1)
@@ -83,48 +83,75 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     reduced
   }
 
-  // An Update writes through a pointer/array lvalue; it does not re-aim the binding itself.
-  // Only a bare Mut of the binding invalidates value/copy propagation for that name.
-  private def mutatedNames(f: p.Function): Set[p.Named] =
-    f.collectAll[p.Stmt].collect { case p.Stmt.Mut(p.Term.Select(name, _, _), _) => name }.toSet
+  // An Update writes through a pointer/array lvalue; it does not re-aim that pointer binding. It can still
+  // invalidate a local reached through an immutable address binding (`p = &x; p[0] = ...`), so propagate the
+  // write to that root without excluding `p` itself from ordinary pointer copy propagation.
+  private def mutationInfo(statements: List[p.Stmt]): (Set[p.Named], Set[p.Named]) = {
+    val refToRoots = statements.iterator.collect {
+      case p.Stmt.Var(name, Some(p.Expr.RefTo(that: p.Term.Select, None, _, _, _)), false) => name -> that.root
+    }.toMap
+    statements.foldLeft(Set.empty[p.Named] -> Set.empty[p.Named]) {
+      case ((mutated, reassigned), p.Stmt.Mut(p.Term.Select(name, steps, _), _)) =>
+        (mutated + name) -> (if (steps.isEmpty) reassigned + name else reassigned)
+      case ((mutated, reassigned), p.Stmt.Update(p.Term.Select(name, _, _), _, _)) =>
+        refToRoots.get(name).fold(mutated -> reassigned)(root => (mutated + root) -> reassigned)
+      case (state, _) => state
+    }
+  }
 
   // an immutable struct-to-struct reinterpret aliases the source storage; the substitution is a whole-function
   // property, so it is scanned once rather than threaded as a binding
   private def castAliases(
-      f: p.Function,
+      statements: List[p.Stmt],
       defs: Map[p.Sym, p.StructDef],
       reassigned: Set[p.Named]
   ): Map[p.Named, (p.Term.Select, p.StructDef, p.StructDef)] =
-    f.collectAll[p.Stmt]
-      .flatMap {
-        case p.Stmt.Var(n, Some(p.Expr.Cast(from: p.Term.Select, p.Type.Struct(to, _))), false)
-            if !reassigned.contains(from.root) =>
-          (from.tpe, defs.get(to)) match {
-            case (p.Type.Struct(fr, _), Some(toDef)) => defs.get(fr).map(fromDef => n -> (from, fromDef, toDef))
-            case _                                   => None
-          }
-        case _ => None
-      }
-      .toMap
+    statements.iterator.flatMap {
+      case p.Stmt.Var(n, Some(p.Expr.Cast(from: p.Term.Select, p.Type.Struct(to, _))), false)
+          if !reassigned.contains(from.root) =>
+        (from.tpe, defs.get(to)) match {
+          case (p.Type.Struct(fr, _), Some(toDef)) => defs.get(fr).map(fromDef => n -> (from, fromDef, toDef))
+          case _                                   => None
+        }
+      case _ => None
+    }.toMap
+
+  private def scalarBytes(t: p.Type): Option[Int] = t match {
+    case p.Type.IntU8 | p.Type.IntS8                    => Some(1)
+    case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16 => Some(2)
+    case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32 => Some(4)
+    case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 => Some(8)
+    case _                                              => None
+  }
+
+  private def storageCompatible(a: p.Type, b: p.Type): Boolean =
+    a == b || scalarBytes(a).exists(n => scalarBytes(b).contains(n))
 
   // the reinterpreted field is the source member at the same ordinal, but only when everything ahead of it
-  // matches: identical preceding member types pin the offset, and a union or an extra base shifts it
+  // has the same scalar storage width: matching offsets allow CUB's int-vector volatile load to be read as
+  // its status/value descriptor. a differently typed same-width leaf is safe only as the terminal read; a
+  // union, an extra base, or a differently sized preceding member leaves the cast residual
   private def resolveCast(root: p.Named, steps: List[p.PathStep], tpe: p.Type, st: St): Option[p.Term] =
     (steps, st.casts.get(root)) match {
       case (p.PathStep.Field(f) :: rest, Some((src, fromDef, toDef))) =>
         val i = toDef.members.indexWhere(_.symbol == f)
-        Option.when(
+        val leafCompatible =
           i >= 0 && i < fromDef.members.size &&
-            !fromDef.isUnion && !toDef.isUnion &&
+            (fromDef.members(i).tpe == toDef.members(i).tpe ||
+              (rest.isEmpty && storageCompatible(fromDef.members(i).tpe, toDef.members(i).tpe)))
+        Option.when(
+          leafCompatible && !fromDef.isUnion && !toDef.isUnion &&
             fromDef.parents == toDef.parents &&
-            fromDef.members.take(i).map(_.tpe) == toDef.members.take(i).map(_.tpe) &&
-            fromDef.members(i).tpe == toDef.members(i).tpe
+            fromDef.members.iterator
+              .zip(toDef.members.iterator)
+              .take(i)
+              .forall { case (from, to) => storageCompatible(from.tpe, to.tpe) }
         )(p.Term.Select(src.root, src.steps ::: p.PathStep.Field(fromDef.members(i).symbol) :: rest, tpe))
       case _ => None
     }
 
   private def addressTakenNames(f: p.Function): Set[p.Named] =
-    f.collectAll[p.Expr].collect { case p.Expr.RefTo(p.Term.Select(name, _, _), _, _, _, _) => name }.toSet
+    f.collectAll[p.Expr].iterator.collect { case p.Expr.RefTo(p.Term.Select(name, _, _), _, _, _, _) => name }.toSet
 
   // fold-left threading the store; once a statement emits an unconditional terminator the rest of the block
   // is unreachable and dropped
@@ -175,7 +202,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
               st.bindVal(name, sel)
             // a write through the pointer leaves its slot stable, so only a bare re-aim invalidates the bind
             case p.Expr.RefTo(sel: p.Term.Select, None, _, _, _)
-                if !reassigned.contains(name) && (!Provenance.isPtr(sel.root.tpe) || !reassigned.contains(sel.root)) =>
+                if !reassigned.contains(name) &&
+                  (!AddressRefinement.isPtr(sel.root.tpe) || !reassigned.contains(sel.root)) =>
               log.info(s"addr-bind ${name.repr} = &${sel.repr}")
               st.bindAddr(name, sel)
             case _ => st
@@ -309,7 +337,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case _ =>
           (steps, st.addrs.get(root)) match {
             case (p.PathStep.Deref :: rest, Some(a)) => p.Term.Select(a.root, a.steps ::: rest, tpe)
-            case (rest @ ((_: p.PathStep.Field) :: _), Some(a)) if Provenance.isPtr(root.tpe) =>
+            case (rest @ ((_: p.PathStep.Field) :: _), Some(a)) if AddressRefinement.isPtr(root.tpe) =>
               p.Term.Select(a.root, a.steps ::: rest, tpe)
             case _ => resolveCast(root, steps, tpe, st).getOrElse(t)
           }
@@ -488,8 +516,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   // sound wherever the pass is scheduled, rather than relying on running at Initial phase (where every
   // operand is a register value or a struct-value projection and the only memory reads are array Index)
   private def termReadsMemory(t: p.Term): Boolean = t match {
-    case p.Term.Select(root, steps, _) => steps.exists(isMemStep) || (Provenance.isPtr(root.tpe) && steps.nonEmpty)
-    case _                             => false
+    case p.Term.Select(root, steps, _) =>
+      steps.exists(isMemStep) || (AddressRefinement.isPtr(root.tpe) && steps.nonEmpty)
+    case _ => false
   }
   private def isMemStep(s: p.PathStep): Boolean = s match {
     case p.PathStep.Deref                             => true
@@ -539,7 +568,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
       s match {
         case p.Stmt.Var(n, Some(p.Expr.RefTo(p.Term.Select(b, path, selTpe), idx, comp, _, _)), false)
             if isIdentityRef(idx, selTpe) &&
-              (!reassigned(b.symbol) || (path.isEmpty && idx.isEmpty && Provenance.isPtr(selTpe) && comp == selTpe)) =>
+              (!reassigned(b.symbol) ||
+                (path.isEmpty && idx.isEmpty && AddressRefinement.isPtr(selTpe) && comp == selTpe)) =>
           val (root, base) = m.getOrElse(b.symbol, (b, Nil))
           m + (n.symbol -> (root, base ++ path))
         case _ => m
@@ -694,7 +724,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   }
 
   private def canonicaliseFn(f: p.Function): (p.Function, Int) = {
-    val reassigned    = Provenance.reassignedIn(f)
+    val reassigned    = AddressRefinement.reassignedIn(f)
     val (f1, aliased) = resolveFieldAliases(f, reassigned)
     val (f2, arrFlds) = resolveArrayFieldIndex(f1, reassigned)
     val (f3, locals)  = resolveLocalArray(f2, reassigned)

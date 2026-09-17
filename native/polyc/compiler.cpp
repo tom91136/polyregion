@@ -468,6 +468,23 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
     preEvents.emplace_back(std::move(passRun.event));
   }
 
+  switch (options.target) {
+    case compiletime::Target::Source_C_C11:
+    case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_Metal1_0: {
+      const auto strict = options.target == compiletime::Target::Source_C_C11 ? "false" : "true";
+      const auto metal = options.target == compiletime::Target::Source_C_Metal1_0 ? "true" : "false";
+      auto passRun = runPipelineChain(effective, fmt::format("SourceStorageLegalise(elideRecursivelyEmptyAggregates={});"
+                                                             "SourcePointerLegalise(requiresConcreteSpaces={});"
+                                                             "SourceSelectionLegalise;SourceNameNormalise(metalKeywords={})",
+                                                             metal, strict, metal));
+      effective = std::move(passRun.program);
+      preEvents.emplace_back(std::move(passRun.event));
+      break;
+    }
+    default: break;
+  }
+
   if (options.hostMirroring) {
     if (!effective.entry) return {{}, {}, preEvents, {}, "hostMirroring: pipeline removed the Program entry", {}};
     auto hostFns = std::vector<polyast::Function>{*effective.entry}                                                       //

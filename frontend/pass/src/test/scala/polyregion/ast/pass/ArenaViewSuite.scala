@@ -17,7 +17,7 @@ class ArenaViewSuite extends munit.FunSuite {
   private val defs = List(
     p.StructDef(nodeSym, Nil, List(named("val", p.Type.IntS32)), Nil),
     p.StructDef(iterSym, Nil, List(named("ptr", p.Type.Ptr(nodeTpe, p.Type.Space.Global))), Nil),
-    p.StructDef(capSym, Nil, Nil, Nil)
+    p.StructDef(capSym, Nil, List(named("node", p.Type.Ptr(nodeTpe, p.Type.Space.Global))), Nil)
   )
 
   // a stack-local iterator (not reachable from the capture arg) whose node pointer is chased into arena
@@ -26,10 +26,15 @@ class ArenaViewSuite extends munit.FunSuite {
     val capArg = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
     val itVal  = named("itVal", iterTpe)
     val pp     = named("p", p.Type.Ptr(iterTpe, p.Type.Space.Global))
+    val ptrTpe = p.Type.Ptr(nodeTpe, p.Type.Space.Global)
     entry(
       args = List(capArg),
       body = List(
         p.Stmt.Var(itVal, None, isMutable = true),
+        p.Stmt.Mut(
+          p.Term.Select(itVal, List(p.PathStep.Field("ptr")), ptrTpe).asInstanceOf[p.Term.Select],
+          p.Expr.Alias(p.Term.Select(capArg.named, List(p.PathStep.Field("node")), ptrTpe))
+        ),
         p.Stmt.Var(
           pp,
           Some(p.Expr.RefTo(selectT(itVal), None, iterTpe, p.Type.Space.Global, p.Region.Opaque)),
@@ -187,7 +192,9 @@ class ArenaViewSuite extends munit.FunSuite {
     val pointerMember = named("pointer", pointerTpe)
     val storage       = named("storage", p.Type.Arr(p.Type.IntS32, 2, p.Type.Space.Global))
     val pointer       = named("pointer", pointerTpe)
+    val loaded        = named("loaded", pointerTpe)
     val holder        = named("holder", holderTpe)
+    val copied        = named("copied", holderTpe)
     val same          = named("same", p.Type.Bool1)
     val capArg        = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
     val direct = p.Expr.RefTo(
@@ -209,11 +216,21 @@ class ArenaViewSuite extends munit.FunSuite {
             direct
           ),
           p.Stmt.Var(
+            loaded,
+            Some(p.Expr.Alias(p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe))),
+            isMutable = false
+          ),
+          p.Stmt.Var(copied, None, isMutable = true),
+          p.Stmt.Mut(
+            p.Term.Select(copied, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe),
+            p.Expr.Alias(selectT(loaded))
+          ),
+          p.Stmt.Var(
             same,
             Some(
               p.Expr.IntrOp(
                 p.Intr.LogicEq(
-                  p.Term.Select(holder, List(p.PathStep.Field(pointerMember.symbol)), pointerTpe),
+                  selectT(loaded),
                   selectT(pointer)
                 )
               )
@@ -234,6 +251,18 @@ class ArenaViewSuite extends munit.FunSuite {
     }
     assertEquals(fieldMut.map(_.name.tpe), Some(p.Type.IntS64))
     assertEquals(fieldMut.map(_.expr.tpe), Some(p.Type.IntS64))
+    val loadedVar = result.entry.collectAll[p.Stmt].collectFirst {
+      case v: p.Stmt.Var if v.name.symbol == loaded.symbol => v
+    }
+    assertEquals(loadedVar.map(_.name.tpe), Some(p.Type.IntS64))
+    assertEquals(loadedVar.flatMap(_.expr).map(_.tpe), Some(p.Type.IntS64))
+    val copiedFieldMut = result.entry.collectAll[p.Stmt].collectFirst {
+      case m @ p.Stmt.Mut(p.Term.Select(root, List(p.PathStep.Field("pointer")), _), _)
+          if root.symbol == copied.symbol =>
+        m
+    }
+    assertEquals(copiedFieldMut.map(_.name.tpe), Some(p.Type.IntS64))
+    assertEquals(copiedFieldMut.map(_.expr.tpe), Some(p.Type.IntS64))
     val comparison = result.entry.collectAll[p.Expr].collectFirst { case p.Expr.IntrOp(x: p.Intr.LogicEq) => x }
     assertEquals(comparison.map(_.x.tpe), Some(p.Type.IntS64))
     assertEquals(comparison.map(_.y.tpe), Some(p.Type.IntS64))
@@ -445,13 +474,14 @@ class ArenaViewSuite extends munit.FunSuite {
   }
 
   test("arena atomic and volatile accesses use a typed scalar view") {
-    val value   = named("value", p.Type.IntU32)
-    val capArg  = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
-    val ptrTpe  = p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global)
-    val pointer = named("pointer", ptrTpe)
-    val loaded  = named("loaded", p.Type.IntU32)
-    val stored  = named("stored", p.Type.Unit0)
-    val swapped = named("swapped", p.Type.IntU32)
+    val value    = named("value", p.Type.IntU32)
+    val capArg   = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val ptrTpe   = p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global)
+    val pointer  = named("pointer", ptrTpe)
+    val loaded   = named("loaded", p.Type.IntU32)
+    val stored   = named("stored", p.Type.Unit0)
+    val swapped  = named("swapped", p.Type.IntU32)
+    val compared = named("compared", p.Type.IntU32)
     val program = PassTest.program(
       entry(
         args = List(capArg),
@@ -495,6 +525,22 @@ class ArenaViewSuite extends munit.FunSuite {
             ),
             isMutable = false
           ),
+          p.Stmt.Var(
+            compared,
+            Some(
+              p.Expr.SpecOp(
+                p.Spec.GpuAtomicCAS(
+                  selectT(pointer),
+                  p.Term.IntU32Const(3),
+                  p.Term.IntU32Const(4),
+                  p.MemScope.Device,
+                  p.MemOrder.Relaxed,
+                  value.tpe
+                )
+              )
+            ),
+            isMutable = false
+          ),
           p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
         )
       ),
@@ -505,14 +551,15 @@ class ArenaViewSuite extends munit.FunSuite {
     val result = ArenaView(program, NoopLog)
     val ops = result.entry.collectAll[p.Expr].collect {
       case p.Expr.SpecOp(x: p.Spec.GpuAtomicRMW)     => x.ptr
+      case p.Expr.SpecOp(x: p.Spec.GpuAtomicCAS)     => x.ptr
       case p.Expr.SpecOp(x: p.Spec.GpuVolatileLoad)  => x.ptr
       case p.Expr.SpecOp(x: p.Spec.GpuVolatileStore) => x.ptr
     }
-    assertEquals(ops.map(_.tpe), List.fill(3)(ptrTpe))
+    assertEquals(ops.map(_.tpe), List.fill(4)(ptrTpe))
     val refs = result.entry.collectAll[p.Expr].collect {
       case x: p.Expr.RefTo if x.comp == value.tpe && x.space == p.Type.Space.Global => x
     }
-    assertEquals(refs.size, 3)
+    assertEquals(refs.size, 4)
     assert(refs.forall {
       case p.Expr.RefTo(p.Term.Select(root, Nil, _), Some(_), _, _, _) => root.symbol == "#av2"
       case _                                                           => false
@@ -567,5 +614,39 @@ class ArenaViewSuite extends munit.FunSuite {
       case p.Term.Select(root, Nil, p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global)) => root.symbol.startsWith("#vr")
       case _                                                                        => false
     })
+  }
+
+  test("a dereferenced native global pointer cannot hide in a local aggregate") {
+    val holderSym  = sym("NativeHolder")
+    val holderTpe  = p.Type.Struct(holderSym, Nil)
+    val pointerTpe = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val capArg     = arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val external   = arg("external", pointerTpe)
+    val holder     = named("holder", holderTpe)
+    val loaded     = named("loaded", pointerTpe)
+    val value      = named("value", p.Type.IntS32)
+    val field = p.Term
+      .Select(holder, List(p.PathStep.Field("pointer")), pointerTpe)
+      .asInstanceOf[p.Term.Select]
+    val program = PassTest.program(
+      entry(
+        args = List(capArg, external),
+        body = List(
+          p.Stmt.Var(holder, None, isMutable = true),
+          p.Stmt.Mut(field, p.Expr.Alias(selectT(external.named))),
+          p.Stmt.Var(loaded, Some(p.Expr.Alias(field)), isMutable = false),
+          p.Stmt.Var(value, Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32)), false),
+          p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+        )
+      ),
+      Nil,
+      List(
+        p.StructDef(capSym, Nil, Nil, Nil),
+        p.StructDef(holderSym, Nil, List(named("pointer", pointerTpe)), Nil)
+      )
+    )
+
+    val error = intercept[IllegalArgumentException](ArenaView(program, NoopLog))
+    assert(error.getMessage.contains("native global pointers in local aggregate slots"))
   }
 }

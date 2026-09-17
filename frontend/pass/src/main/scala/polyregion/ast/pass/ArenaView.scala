@@ -7,6 +7,35 @@ import scala.collection.mutable.ListBuffer
 import polyregion.ast.{Log, PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
+private[pass] object LogicalArenaViewAbi {
+  private val Global = p.Type.Space.Global
+
+  val bindings: List[p.Named] =
+    List(
+      p.Type.IntS8,
+      p.Type.IntS16,
+      p.Type.IntS32,
+      p.Type.IntS64,
+      p.Type.Float32,
+      p.Type.Float64,
+      p.Type.Float16
+    ).zipWithIndex
+      .map((tpe, index) => p.Named(s"#av$index", p.Type.Ptr(tpe, Global)))
+
+  val addressBinding: p.Named = bindings
+    .collectFirst { case binding @ p.Named(_, p.Type.Ptr(p.Type.IntS64, p.Type.Space.Global), _) =>
+      binding
+    }
+    .getOrElse(throw IllegalStateException("logical arena-view ABI lacks its address view"))
+
+  def arenaAddressBindings(bound: Iterable[p.Named]): Set[String] = {
+    val actual = bound.iterator.map(binding => binding.symbol -> binding.tpe).toMap
+    Option
+      .when(bindings.forall(binding => actual.get(binding.symbol).contains(binding.tpe)))(Set(addressBinding.symbol))
+      .getOrElse(Set.empty)
+  }
+}
+
 // generic single-arena lowering for logical SPIR-V (Vulkan glcompute): no flat address space, no int<->ptr
 // cast, no pointer load/store/offset. the capture sits at arena offset 0 and every pointer is an i64 byte
 // offset; each deref reads/writes through a fixed roster of typed scalar "view" descriptors indexed by
@@ -15,7 +44,7 @@ import polyregion.ast.Traversal.*
 // examples:
 //   cap                         ->  0                                      // capture is arena offset 0
 //   cap.x   (scalar field)      ->  view_i32[offsetof(cap, x) / 4]         // read/write via the typed view
-//   p[i]    (p Opaque offset)   ->  view_T[(p + i*sizeof T) / sizeof T]    // arena-relative deref
+//   p[i]    (p arena offset)    ->  view_T[(p + i*sizeof T) / sizeof T]    // arena-relative deref
 //   it._M_current               ->  the i64 offset directly (field retyped)
 //   struct value read           ->  local copy, scalar leaves filled from views (loadAgg)
 //   local `p = &x; s.ptr = p`   ->  stable i64 identity token when s.ptr is only stored/compared
@@ -31,15 +60,8 @@ object ArenaView extends ProgramPass {
 
   private val ctr = new AtomicLong(0L)
 
-  private val Global = p.Type.Space.Global
-  // fixed view roster, canonical binding order; the dispatch binds the one arena buffer to all. Float16 needs
-  // its own view: polyast Cast is numeric, so reading f16 bits via the i16 view would int-convert. unused
-  // views are pruned by the backend
-  private val viewTpes: List[p.Type] =
-    List(p.Type.IntS8, p.Type.IntS16, p.Type.IntS32, p.Type.IntS64, p.Type.Float32, p.Type.Float64, p.Type.Float16)
-
+  private val Global                     = p.Type.Space.Global
   private def isPtr(t: p.Type): Boolean  = t match { case _: p.Type.Ptr => true; case _ => false }
-  private def isArr(t: p.Type): Boolean  = t match { case _: p.Type.Arr => true; case _ => false }
   private def pointee(t: p.Type): p.Type = t match { case p.Type.Ptr(c, _) => c; case _ => t }
   private def elem(t: p.Type): p.Type = t match {
     case p.Type.Ptr(c, _) => c; case p.Type.Arr(c, _, _) => c; case _ => t
@@ -113,187 +135,93 @@ object ArenaView extends ProgramPass {
       idx  <- staticIndex(index)
     } yield s"${base.root.symbol}:$path:$idx"
 
-  private def arenaStructs(program: p.Program, members: Map[p.Sym, List[p.Named]]): Set[p.Sym] = {
-    def refs(t: p.Type): Set[p.Sym] = t match {
-      case p.Type.Struct(sym, args) => Set(sym) ++ args.flatMap(refs)
-      case p.Type.Ptr(c, _)         => refs(c)
-      case p.Type.Arr(c, _, _)      => refs(c)
-      case p.Type.Exec(_, as, r)    => as.flatMap(refs).toSet ++ refs(r)
-      case _                        => Set.empty
-    }
-    val roots = program.entry.flatMap(captureRoot).map(_._2.name).toSet
-    doUntilNotEq(roots) { (_, seen) =>
-      seen ++ seen.flatMap(sym => members.getOrElse(sym, Nil).flatMap(m => refs(m.tpe)))
-    }._2
-  }
-
-  private def localIdentityFields(
-      program: p.Program,
+  private def validateLogicalNativeSlots(
+      entry: p.Function,
       members: Map[p.Sym, List[p.Named]],
-      arenaDefs: Set[p.Sym]
-  ): (Set[Field], Map[p.Named, (Field, p.Term)]) = {
-    val entry   = program.entry.getOrElse(throw IllegalArgumentException("ArenaView requires a program entry"))
-    val derived = Provenance.derivedIn(entry, arena = true)
-    val cap     = captureRoot(entry).map(_._1)
-    def isLocal(t: p.Term): Boolean = Provenance.at(derived, t, arena = true) match {
-      case p.Region.Rooted(root) if !cap.contains(root) =>
-        root.tpe match {
-          case p.Type.Ptr(_, p.Type.Space.Private | p.Type.Space.Local) => true
-          case _: p.Type.Ptr                                            => false
-          case _                                                        => true
-        }
-      case _ => false
-    }
-    val reassignedPointers = program.entry
-      .collectAll[p.Stmt]
-      .collect { case p.Stmt.Mut(p.Term.Select(n, Nil, _: p.Type.Ptr), _) =>
-        n
+      identityFields: Set[Field],
+      analysis: AddressRefinement.Solution
+  ): Unit = {
+    import AddressRefinement.{Encoding, Query}
+
+    val locals = entry.collectAll[p.Stmt].collect { case p.Stmt.Var(n, _, _) => n.symbol -> n }.toMap
+    val unsupported = analysis.slots.iterator
+      .flatMap { case (Query.Slot(root, path), fact) =>
+        for {
+          local <- locals.get(root)
+          field <- fieldsAt(local.tpe, path, members).lastOption
+          if field._2 match {
+            case p.Type.Ptr(_, p.Type.Space.Global) => true
+            case _                                  => false
+          }
+          if fact.encoding.contains(Encoding.Absolute)
+          if !identityFields(field._1)
+        } yield s"$root.${path.mkString(".")}"
       }
-      .toSet
-    val stableLocalPointers = program.entry.collectAll[p.Stmt].foldLeft(Set.empty[p.Named]) {
-      case (known, p.Stmt.Var(n, Some(p.Expr.RefTo(base @ p.Term.Select(_, steps, _), idx, _, _, _)), _))
-          if isPtr(n.tpe) && !reassignedPointers(n) && isLocal(base) && staticIndex(idx).nonEmpty && !steps.exists {
-            case _: p.PathStep.IndexDyn => true
-            case _                      => false
-          } =>
-        known + n
-      case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
-          if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known(root) =>
-        known + n
-      case (known, p.Stmt.Var(n, Some(p.Expr.Cast(source @ p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
-          if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) &&
-            (known(root) || (isArr(root.tpe) && isLocal(source))) =>
-        known + n
-      case (known, _) => known
-    }
-    def stableLocal(t: p.Term): Boolean = t match {
-      case _: p.Term.NullPtrConst      => true
-      case p.Term.Select(root, Nil, _) => stableLocalPointers(root)
-      case _                           => false
-    }
-    def localIdentity(t: p.Term): Boolean = t match {
-      case _: p.Term.NullPtrConst => true
-      // Stable locals are seeded only from locally rooted RefTo expressions or casts from local arrays.
-      // Inlining can conservatively widen an alias's provenance to Opaque, so do not discard that stronger
-      // construction proof when classifying an identity-only field write.
-      case p.Term.Select(_, Nil, _) =>
-        isLocal(t) || Provenance.at(derived, t, arena = true) == p.Region.Opaque || stableLocal(t)
-      case _ => stableLocal(t)
-    }
-    def directSelectedField(t: p.Term): Option[Field] = t match {
-      case p.Term.Select(root, steps, _: p.Type.Ptr) if steps.nonEmpty =>
-        fieldsAt(root.tpe, steps, members).lastOption.collect { case (field, p.Type.Ptr(_, p.Type.Space.Global)) =>
-          field
-        }
-      case _ => None
-    }
-    // FullOpt materialises pointer-field reads into immutable SSA aliases before ArenaView. Retain
-    // the field identity through those aliases so a field used only for pointer equality is still
-    // represented by a logical token rather than an illegal pointer value.
-    val fieldAliases = doUntilNotEq(Map.empty[p.Named, (Field, p.Term)]) { (_, known) =>
-      val discovered = program.entry
-        .collectAll[p.Stmt]
-        .collect { case p.Stmt.Var(n, Some(p.Expr.Alias(source)), false) =>
-          directSelectedField(source)
-            .map(field => n -> (field, source))
-            .orElse(source match {
-              case p.Term.Select(root, Nil, _) =>
-                known.get(root).map { case (field, original) => n -> (field, original) }
-              case _ => None
-            })
-        }
-        .flatten
-        .toMap
-      known ++ discovered
-    }._2
-    def selectedField(t: p.Term): Option[Field] =
-      directSelectedField(t).orElse {
-        t match {
-          case p.Term.Select(root, Nil, _: p.Type.Ptr) => fieldAliases.get(root).map(_._1)
-          case _                                       => None
-        }
-      }
-    // Logical SPIR-V cannot store a local pointer in an aggregate, but a field used only for identity can retain
-    // C++ equality semantics as an i64 token. Arena-reachable or otherwise-observed fields keep normal lowering.
-    // A write source is either an already-tokenisable local value or another identity field.
-    def identityWriteSource(expr: p.Expr): Option[Either[Field, Boolean]] = expr match {
-      case p.Expr.Alias(rhs)               => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
-      case p.Expr.Cast(rhs, _: p.Type.Ptr) => Some(selectedField(rhs).toLeft(localIdentity(rhs)))
-      case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) =>
-        Some(Right(isLocal(base) && localReferenceKey(base, index).nonEmpty))
-      case _ => None
-    }
-    val writes = program.entry
-      .collectAll[p.Stmt]
-      .collect { case p.Stmt.Mut(target: p.Term.Select, expr) =>
-        selectedField(target).flatMap(field => identityWriteSource(expr).map(field -> _))
-      }
-      .flatten
-    def traversedPointerFields(t: p.Term): List[Field] = t match {
-      case p.Term.Select(root, steps, _) if steps.nonEmpty =>
-        fieldsAt(root.tpe, steps, members).collect { case (field, _: p.Type.Ptr) => field }
-      case _ => Nil
-    }
-    def tally(xs: List[Field]): Map[Field, Int] = xs.groupMapReduce(identity)(_ => 1)(_ + _)
-    val totalUses = tally(program.entry.collectAll[p.Term].flatMap(traversedPointerFields))
-    val identityUses = tally(
-      program.entry.collectAll[p.Stmt].flatMap {
-        case p.Stmt.Mut(t: p.Term.Select, p.Expr.Alias(rhs)) => selectedField(t).toList ++ selectedField(rhs).toList
-        case p.Stmt.Mut(t: p.Term.Select, _)                 => selectedField(t).toList
-        case _                                               => Nil
-      } ::: program.entry.collectAll[p.Expr].flatMap {
-        case p.Expr.IntrOp(p.Intr.LogicEq(x, y))  => List(x, y).flatMap(selectedField)
-        case p.Expr.IntrOp(p.Intr.LogicNeq(x, y)) => List(x, y).flatMap(selectedField)
-        case _                                    => Nil
-      }
-    )
-    val writesByField = writes.groupMap(_._1)(_._2)
-    val candidates = doUntilNotEq(Set.empty[Field]) { (_, known) =>
-      writesByField.collect {
-        case (field @ (owner, _), sources)
-            if !arenaDefs(owner) && sources.nonEmpty && totalUses.get(field) == identityUses.get(field) &&
-              sources.forall {
-                case Right(ok)  => ok
-                case Left(from) => from == field || known(from)
-              } && sources.exists {
-                case Right(ok)  => ok
-                case Left(from) => from != field && known(from)
-              } =>
-          field
-      }.toSet
-    }._2
-    def comparable(t: p.Term): Boolean = t match {
-      case _: p.Term.NullPtrConst                                   => true
-      case p.Term.Select(root, Nil, _) if stableLocalPointers(root) => true
-      case selected if selectedField(selected).exists(candidates)   => true
-      case _                                                        => false
-    }
-    val unsupported = program.entry
-      .collectAll[p.Expr]
-      .flatMap {
-        case p.Expr.IntrOp(p.Intr.LogicEq(x, y))  => List((x, y), (y, x))
-        case p.Expr.IntrOp(p.Intr.LogicNeq(x, y)) => List((x, y), (y, x))
-        case _                                    => Nil
-      }
-      .collect {
-        case (selected, other) if selectedField(selected).exists(candidates) && !comparable(other) =>
-          selectedField(selected).get
-      }
-      .toSet
-    (candidates -- unsupported, fieldAliases)
+      .toList
+      .sorted
+    if (unsupported.nonEmpty)
+      throw IllegalArgumentException(
+        s"logical SPIR-V cannot store native global pointers in local aggregate slots: ${unsupported.mkString(", ")}"
+      )
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
     // ORIGINAL member types drive the offset walk (each pointer field's pointee struct); retyping preserves
     // the layout, so emitted OffsetOf resolves the same against the retyped def
-    val members                        = program.defs.iterator.map(d => d.name -> d.members).toMap
-    val arenaDefs                      = arenaStructs(program, members)
-    val (identityFields, fieldAliases) = localIdentityFields(program, members, arenaDefs)
-    // union: copy only the canonical (largest, head) member
-    val unions  = program.defs.iterator.filter(_.isUnion).map(_.name).toSet
-    val retyped = program.defs.map(d => d.copy(members = d.members.map(m => m.copy(tpe = i64ify(m.tpe)))))
+    val members = program.defs.iterator.map(d => d.name -> d.members).toMap
     val entry   = program.entry.getOrElse(throw IllegalArgumentException("ArenaView requires a program entry"))
-    program.copy(defs = retyped, entry = Some(run(members, unions, identityFields, fieldAliases, entry)))
+    val analysis = AddressRefinement
+      .solve(program, entry, AddressRefinement.AddressModel.Logical)
+      .requireSolved
+    val logicalAddressPlan = AddressRefinement.logicalAddressPlan(program, analysis)
+    val arenaDefs          = logicalAddressPlan.arenaStructs
+    val identityFields     = logicalAddressPlan.identityFields
+    val fieldAliases       = logicalAddressPlan.fieldAliases
+    validateLogicalNativeSlots(entry, members, identityFields, analysis)
+    val locals = entry.collectAll[p.Stmt].collect { case p.Stmt.Var(n, _, _) => n.symbol -> n }.toMap
+    val offsetFields = analysis.slots.iterator.flatMap { case (AddressRefinement.Query.Slot(root, path), fact) =>
+      val referencesOffset = fact.references.exists(token =>
+        analysis.facts
+          .get(token)
+          .flatMap(_.encoding)
+          .contains(AddressRefinement.Encoding.ArenaRelative)
+      )
+      Option
+        .when(fact.encoding.contains(AddressRefinement.Encoding.ArenaRelative) || referencesOffset) {
+          locals.get(root).flatMap(n => fieldAt(n.tpe, path, members))
+        }
+        .flatten
+    }.toSet
+    val encodedFields = identityFields ++ offsetFields ++ arenaDefs.flatMap { owner =>
+      members.getOrElse(owner, Nil).collect {
+        case member if member.tpe match {
+              case p.Type.Ptr(_, p.Type.Space.Global) => true
+              case _                                  => false
+            } =>
+          owner -> member.symbol
+      }
+    }
+    // union: copy only the canonical (largest, head) member
+    val unions = program.defs.iterator.filter(_.isUnion).map(_.name).toSet
+    val retyped = program.defs.map(d =>
+      d.copy(members = d.members.map(m => if (encodedFields(d.name -> m.symbol)) m.copy(tpe = i64ify(m.tpe)) else m))
+    )
+    program.copy(
+      defs = retyped,
+      entry = Some(
+        run(
+          members,
+          unions,
+          encodedFields,
+          identityFields,
+          fieldAliases,
+          logicalAddressPlan.localPointerKeys,
+          logicalAddressPlan.directLocalPointerKeys,
+          analysis,
+          entry
+        )
+      )
+    )
   }
 
   // lift a stepped Select (the only term shape that can carry an arena access) out of a ForRange bound or
@@ -320,56 +248,34 @@ object ArenaView extends ProgramPass {
   private def run(
       members: Map[p.Sym, List[p.Named]],
       unions: Set[p.Sym],
+      encodedFields: Set[Field],
       identityFields: Set[Field],
       fieldAliases: Map[p.Named, (Field, p.Term)],
+      localPointerKeys: Map[p.Named, String],
+      directLocalPointerKeys: Set[String],
+      analysis: AddressRefinement.Solution,
       f: p.Function
   ): p.Function = captureRoot(
     f
   ) match {
     case None => f
     case Some((capN, capTpe)) =>
-      val derived = Provenance.derivedIn(f, arena = true)
-      val views   = viewTpes.zipWithIndex.map((t, i) => p.Named(s"#av$i", p.Type.Ptr(t, Global)))
+      import AddressRefinement.{Provenance, Encoding}
 
-      def rootedLocally(t: p.Term): Boolean = Provenance.at(derived, t, arena = true) match {
-        case p.Region.Rooted(root) if root != capN =>
-          root.tpe match {
-            case p.Type.Ptr(_, p.Type.Space.Private | p.Type.Space.Local) => true
-            case _: p.Type.Ptr                                            => false
-            case _                                                        => true
-          }
-        case _ => false
+      // The dispatch binds one arena buffer through this canonical typed-view ABI. Float16 needs its own view:
+      // PolyAST Cast is numeric, so reading f16 bits through the i16 view would convert rather than reinterpret.
+      // Unused views are pruned by the backend.
+      val views = LogicalArenaViewAbi.bindings
+
+      def rootedLocally(t: p.Term): Boolean = analysis.provenancesOf(t).exists {
+        case _: Provenance.Local => true
+        case _                   => false
       }
       val reassignedPointers = f
         .collectAll[p.Stmt]
         .collect { case p.Stmt.Mut(p.Term.Select(n, Nil, _: p.Type.Ptr), _) =>
           n
         }
-        .toSet
-      val localPointerKeys = f.collectAll[p.Stmt].foldLeft(Map.empty[p.Named, String]) {
-        case (known, p.Stmt.Var(n, Some(p.Expr.RefTo(base @ p.Term.Select(_, steps, _), idx, _, _, _)), _))
-            if isPtr(n.tpe) && !reassignedPointers(n) && rootedLocally(base) && staticIndex(idx).nonEmpty && !steps
-              .exists {
-                case _: p.PathStep.IndexDyn => true
-                case _                      => false
-              } =>
-          known + (n -> localReferenceKey(base, idx).get)
-        case (known, p.Stmt.Var(n, Some(p.Expr.Alias(p.Term.Select(root, Nil, _))), _))
-            if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) && known.contains(root) =>
-          known + (n -> known(root))
-        case (known, p.Stmt.Var(n, Some(p.Expr.Cast(source @ p.Term.Select(root, Nil, _), _: p.Type.Ptr)), _))
-            if isPtr(n.tpe) && !reassignedPointers(n) && !reassignedPointers(root) &&
-              (known.contains(root) || (isArr(root.tpe) && rootedLocally(source))) =>
-          known + (n -> known.getOrElse(root, s"${root.symbol}:array"))
-        case (known, _) => known
-      }
-      val directLocalPointerKeys = f
-        .collectAll[p.Expr]
-        .collect {
-          case p.Expr.RefTo(base: p.Term.Select, index, _, _, _) if rootedLocally(base) =>
-            localReferenceKey(base, index)
-        }
-        .flatten
         .toSet
       val tokenByKey = (localPointerKeys.values.toSet ++ directLocalPointerKeys).toList.sorted.zipWithIndex.map {
         case (key, i) =>
@@ -432,13 +338,11 @@ object ArenaView extends ProgramPass {
         case stmt => List(stmt)
       }
 
-      def arenaRegion(r: p.Region): Boolean = r match {
-        case p.Region.Opaque       => true
-        case p.Region.Rooted(root) => root == capN
-      }
-      // a named pointer is an arena offset iff Opaque or Rooted at the capture; the capture itself is the
-      // arena root (offset 0). a pointer Rooted at a stack local stays a real pointer
-      def isArena(n: p.Named): Boolean = n == capN || derived.get(n).exists(arenaRegion)
+      def arenaFact(fact: AddressRefinement.AddressValue): Boolean =
+        fact.hasArenaRoot || fact.encoding.contains(Encoding.ArenaRelative)
+
+      def isArena(n: p.Named): Boolean =
+        n == capN || analysis.bindings.get(n.symbol).exists(arenaFact)
 
       // ForRange bounds / Cond conditions hold terms inline (not in a visited leaf); hoist any stepped Select
       // into a preceding Var. bounds are loop-invariant so hoisting once is sound; While conds are plain vars
@@ -447,6 +351,7 @@ object ArenaView extends ProgramPass {
           rewriteLeaf(
             members,
             unions,
+            encodedFields,
             identityFields,
             fieldAliases,
             localPointerTokens,
@@ -454,8 +359,7 @@ object ArenaView extends ProgramPass {
             capN,
             capTpe,
             views,
-            derived,
-            arenaRegion,
+            analysis,
             isArena,
             f.collectAll[p.Stmt]
               .collect {
@@ -488,6 +392,7 @@ object ArenaView extends ProgramPass {
   private def rewriteLeaf(
       members: Map[p.Sym, List[p.Named]],
       unions: Set[p.Sym],
+      encodedFields: Set[Field],
       identityFields: Set[Field],
       fieldAliases: Map[p.Named, (Field, p.Term)],
       localPointerTokens: Map[p.Named, Long],
@@ -495,8 +400,7 @@ object ArenaView extends ProgramPass {
       capN: p.Named,
       capTpe: p.Type.Struct,
       views: List[p.Named],
-      derived: Map[p.Named, p.Region],
-      arenaRegion: p.Region => Boolean,
+      analysis: AddressRefinement.Solution,
       isArena: p.Named => Boolean,
       mutatedRoots: Set[p.Named]
   )(leaf: p.Stmt): List[p.Stmt] = {
@@ -516,12 +420,23 @@ object ArenaView extends ProgramPass {
       members.get(sym).flatMap(_.find(_.symbol == field).map(_.tpe)).getOrElse(I64)
     def isIdentityField(root: p.Named, steps: List[p.PathStep]): Boolean =
       fieldAt(root.tpe, steps, members).exists(identityFields)
+    def isEncodedField(root: p.Named, steps: List[p.PathStep]): Boolean =
+      fieldAt(root.tpe, steps, members).exists(encodedFields)
     // union: copy/read just the canonical (largest, head) member
     def canonicalMembers(sym: p.Sym): List[p.Named] = {
       val ms = members.getOrElse(sym, Nil); if (unions.contains(sym)) ms.take(1) else ms
     }
     def structSym(t: p.Type): Option[p.Sym] = t match { case p.Type.Struct(s, _) => Some(s); case _ => None }
-    def arenaTerm(t: p.Term): Boolean       = arenaRegion(Provenance.at(derived, t, arena = true))
+    def arenaTerm(t: p.Term): Boolean = {
+      val represented = analysis
+        .value(t)
+      val representedAsArena =
+        represented.hasArenaRoot || represented.encoding.contains(AddressRefinement.Encoding.ArenaRelative)
+      representedAsArena || analysis.provenancesOf(t).exists {
+        case AddressRefinement.Provenance.ArenaRoot(_) => true
+        case _                                         => false
+      }
+    }
 
     def viewFor(t: p.Type): (p.Named, p.Type, Int) = t match {
       case _: p.Type.Ptr                              => (views(3), p.Type.IntS64, 3)
@@ -717,11 +632,15 @@ object ArenaView extends ProgramPass {
     def rwTerm(t: p.Term): p.Term = t match {
       case p.Term.Select(root, Nil, _) if root == capN => i64(0) // the capture itself is arena offset 0
       case p.Term.Select(root, Nil, _) if isArena(root) && isPtr(root.tpe) => sel(i64Var(root))
+      case p.Term.Select(root, Nil, _) if fieldAliases.get(root).exists(x => identityFields(x._1)) =>
+        rwTerm(fieldAliases(root)._2)
       case p.Term.Select(root, steps, resultT) if steps.nonEmpty =>
         lvalueOffset(root, steps) match {
           case Some(off) => loadAt(off, if (isPtr(resultT)) I64 else resultT)
           case None =>
-            p.Term.Select(root, steps.map(rwStep), if (isPtr(resultT) && arenaTerm(t)) I64 else i64ify(resultT))
+            val result =
+              if (isPtr(resultT) && (arenaTerm(t) || isEncodedField(root, steps))) i64ify(resultT) else resultT
+            p.Term.Select(root, steps.map(rwStep), result)
         }
       case x => x
     }
@@ -887,6 +806,10 @@ object ArenaView extends ProgramPass {
       case op: p.Expr.MathOp                     => op.modifyAll[p.Term](rwTerm)
       case p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, ptr, value, scope, order, rtn)) if arenaTerm(ptr) =>
         p.Expr.SpecOp(p.Spec.GpuAtomicRMW(op, arenaScalarRef(ptr, rtn), rwTerm(value), scope, order, rtn))
+      case p.Expr.SpecOp(p.Spec.GpuAtomicCAS(ptr, expected, desired, scope, order, rtn)) if arenaTerm(ptr) =>
+        p.Expr.SpecOp(
+          p.Spec.GpuAtomicCAS(arenaScalarRef(ptr, rtn), rwTerm(expected), rwTerm(desired), scope, order, rtn)
+        )
       case p.Expr.SpecOp(p.Spec.GpuVolatileLoad(ptr, rtn)) if arenaTerm(ptr) =>
         if (isAgg(rtn))
           p.Expr.Alias(
@@ -913,7 +836,10 @@ object ArenaView extends ProgramPass {
       if (isArena(n) && isPtr(n.tpe)) {
         val nn = i64Var(n)
         e match { case p.Expr.Alias(_: p.Term.NullPtrConst) => (nn, p.Expr.Alias(i64(0))); case _ => (nn, rwExpr(e)) }
-      } else (n, rwExpr(e))
+      } else {
+        val rewritten = rwExpr(e)
+        (if (isPtr(n.tpe) && rewritten.tpe == I64) i64Var(n) else n) -> rewritten
+      }
 
     val out = leaf match {
       case p.Stmt.Var(n, Some(e), m) =>
@@ -933,7 +859,7 @@ object ArenaView extends ProgramPass {
           case None      =>
             // local struct field write; a pointer field is now i64
             val identityField = isPtr(scalarT) && isIdentityField(n, steps)
-            val lhsT          = if (identityField) I64 else i64ify(scalarT)
+            val lhsT          = if (isPtr(scalarT) && isEncodedField(n, steps)) i64ify(scalarT) else scalarT
             val rhs = e match {
               case p.Expr.Alias(_: p.Term.NullPtrConst) if identityField => p.Expr.Alias(i64(0))
               case p.Expr.Alias(p.Term.Select(root, Nil, _)) if identityField && localPointerTokens.contains(root) =>

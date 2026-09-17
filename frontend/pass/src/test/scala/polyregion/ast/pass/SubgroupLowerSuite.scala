@@ -120,20 +120,20 @@ class SubgroupLowerSuite extends munit.FunSuite {
       case p.Expr.SpecOp(p.Spec.GpuLocalSize(p.Term.IntU32Const(2))) => true
       case _                                                         => false
     })
-    val assignments = out.entry
+    val conversions = out.entry
       .collectAll[p.Stmt]
       .collect { case p.Stmt.Var(name, Some(value), _) =>
         name.symbol -> value
       }
       .toMap
-    assert(assignments.exists {
-      case (name, p.Expr.IntrOp(p.Intr.Add(p.Term.Select(z, Nil, _), p.Term.Select(szyx, Nil, _), _))) =>
-        name.contains("group_local_id") && z.symbol.contains("group_z") && szyx.symbol.contains("group_szyx")
+    assert(conversions.exists {
+      case (name, p.Expr.IntrOp(p.Intr.Add(p.Term.Select(x, Nil, _), p.Term.Select(sxyz, Nil, _), _))) =>
+        name.contains("group_local_id") && x.symbol.contains("group_x") && sxyz.symbol.contains("group_sxyz")
       case _ => false
     })
-    assert(assignments.exists {
-      case (name, p.Expr.IntrOp(p.Intr.Mul(p.Term.Select(sz, Nil, _), p.Term.Select(yx, Nil, _), _))) =>
-        name.contains("group_szyx") && sz.symbol.contains("group_sz") && yx.symbol.contains("group_yx")
+    assert(conversions.exists {
+      case (name, p.Expr.IntrOp(p.Intr.Mul(p.Term.Select(sx, Nil, _), p.Term.Select(yz, Nil, _), _))) =>
+        name.contains("group_sxyz") && sx.symbol.contains("group_sx") && yz.symbol.contains("group_yz")
       case _ => false
     })
   }
@@ -294,6 +294,83 @@ class SubgroupLowerSuite extends munit.FunSuite {
     assert(error.getMessage.contains("whole-workgroup-uniform participation"), error.getMessage)
   }
 
+  test("uses barrier-free scalar subgroups under divergent control flow") {
+    val value     = named("value", f32)
+    val predicate = named("predicate", p.Type.Bool1)
+    val mask      = p.Term.IntU32Const(-1)
+    val divergent = p.Stmt.Cond(
+      selectT(predicate),
+      List(
+        p.Stmt.Var(
+          named("shuffle", f32),
+          Some(
+            p.Expr.SpecOp(
+              p.Spec.GpuShuffleDown(
+                selectT(value),
+                p.Term.IntU32Const(1),
+                p.Term.IntU32Const(0),
+                mask,
+                f32
+              )
+            )
+          )
+        ),
+        p.Stmt.Var(named("any", p.Type.Bool1), Some(p.Expr.SpecOp(p.Spec.GpuVoteAny(mask, selectT(predicate))))),
+        p.Stmt.Var(named("all", p.Type.Bool1), Some(p.Expr.SpecOp(p.Spec.GpuVoteAll(mask, selectT(predicate))))),
+        p.Stmt.Var(named("ballot", u32), Some(p.Expr.SpecOp(p.Spec.GpuBallot(mask, selectT(predicate))))),
+        p.Stmt.Var(named("barrier", p.Type.Unit0), Some(p.Expr.SpecOp(p.Spec.GpuSubgroupBarrier(mask))))
+      ),
+      Nil
+    )
+
+    val out = run(program(entry(body = List(divergent))), width = 1, maxGroupSize = 256)
+
+    assert(localArrays(out).isEmpty)
+    assert(!specs(out).exists {
+      case _: p.Spec.GpuShuffleDown | _: p.Spec.GpuVoteAny | _: p.Spec.GpuVoteAll | _: p.Spec.GpuBallot |
+          _: p.Spec.GpuSubgroupBarrier | p.Spec.GpuBarrierLocal =>
+        true
+      case _ => false
+    })
+  }
+
+  test("scalar subgroup votes preserve the empty-mask truth table") {
+    val predicate = named("predicate", p.Type.Bool1)
+    val mask      = named("mask", u32)
+    val out = run(
+      program(
+        entry(
+          args = List(p.Arg(predicate), p.Arg(mask)),
+          body = List(
+            p.Stmt.Var(
+              named("any", p.Type.Bool1),
+              Some(p.Expr.SpecOp(p.Spec.GpuVoteAny(selectT(mask), selectT(predicate))))
+            ),
+            p.Stmt.Var(
+              named("all", p.Type.Bool1),
+              Some(p.Expr.SpecOp(p.Spec.GpuVoteAll(selectT(mask), selectT(predicate))))
+            )
+          )
+        )
+      ),
+      width = 1,
+      maxGroupSize = 256
+    )
+
+    assert(out.entry.collectAll[p.Expr].exists {
+      case p.Expr.IntrOp(_: p.Intr.LogicAnd) => true
+      case _                                 => false
+    })
+    assert(out.entry.collectAll[p.Expr].exists {
+      case p.Expr.IntrOp(_: p.Intr.LogicOr) => true
+      case _                                => false
+    })
+    assert(out.entry.collectAll[p.Expr].exists {
+      case p.Expr.IntrOp(_: p.Intr.LogicEq) => true
+      case _                                => false
+    })
+  }
+
   test("rejects conditional calls whose closure synchronises a subgroup") {
     val helper = fn(
       "helper",
@@ -378,6 +455,24 @@ class SubgroupLowerSuite extends munit.FunSuite {
       )
     }
     assert(error.getMessage.contains("early exit"), error.getMessage)
+  }
+
+  test("allows a barrier-free loop break before a later work-group collective") {
+    val loop = p.Stmt.While(
+      p.Term.Bool1Const(true),
+      List(p.Stmt.Cond(p.Term.Bool1Const(true), List(p.Stmt.Break), Nil))
+    )
+    val reduce = p.Stmt.Var(
+      named("result", p.Type.IntS32),
+      Some(p.Expr.SpecOp(p.Spec.GpuGroupReduce(p.AtomicOp.Add, p.Term.IntS32Const(1), p.Type.IntS32)))
+    )
+    val out = SubgroupLower(width = 1, maxGroupSize = 256, lowerGroups = true)(
+      program(entry(body = List(loop, reduce))),
+      NoopLog
+    )
+
+    assert(out.entry.collectAll[p.Stmt].exists(_ == p.Stmt.Break))
+    assert(!specs(out).exists(_.isInstanceOf[p.Spec.GpuGroupReduce]))
   }
 
   test("rejects conditional exits before a synchronising subgroup operation") {

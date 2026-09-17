@@ -452,6 +452,73 @@ TEST_CASE("opencl source accepts configured subgroup emulation", "[backend]") {
   CHECK(source ^ contains_slice("barrier(CLK_LOCAL_MEM_FENCE)"));
 }
 
+TEST_CASE("C source preserves same-width scalar field reinterpretation", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym sourceName({"ReinterpretSource"});
+  const auto sourceType = Type::Struct(sourceName, {}).widen();
+  const StructDef sourceDef(sourceName, {}, {Named("bits", Type::IntS32())}, {}, false);
+  const Named source("source", sourceType), result("result", Type::Float32());
+  const Function entry = mkFn(
+      "reinterpret", {Arg(source, {})}, Type::Unit0(),
+      {Var(result, Expr::Alias(Term::Select(source, {PathStep::Field("bits").widen()}, Type::Float32()).widen()).widen(), false).widen(),
+       ret()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  const Program program(entry, {}, {sourceDef}, PassPhase::Initial(), {});
+
+  for (const auto &[target, needle] : std::vector<std::pair<Target, std::string>>{
+           {Target::Source_C_C11, "union { int32_t from; float to; }"},
+           {Target::Source_C_OpenCL1_1, "as_float("},
+           {Target::Source_C_Metal1_0, "metal::as_type<float>("},
+       }) {
+    polyregion::compiler::Options options{target, ""};
+    options.pipelineSpec = "Mirror";
+    const auto compiled = polyregion::compiler::compile(program, options, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    const std::string generated(reinterpret_cast<const char *>(compiled.binary->data()), compiled.binary->size());
+    CHECK(generated ^ contains_slice(needle));
+  }
+
+  const Sym targetName({"ReinterpretTarget"});
+  const auto targetType = Type::Struct(targetName, {}).widen();
+  const StructDef targetDef(targetName, {}, {Named("value", Type::Float32())}, {}, false);
+  const Named target("target", targetType);
+  const Function writeEntry =
+      mkFn("reinterpret_write", {Arg(target, {})}, Type::Unit0(),
+           {Mut(Term::Select(target, {PathStep::Field("value").widen()}, Type::IntS32()), Expr::Alias(Term::IntS32Const(0).widen()).widen())
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  polyregion::compiler::Options writeOptions{Target::Source_C_OpenCL1_1, ""};
+  writeOptions.pipelineSpec = "Mirror";
+  const auto writeCompiled =
+      polyregion::compiler::compile(Program(writeEntry, {}, {targetDef}, PassPhase::Initial(), {}), writeOptions, OptLevel::O0);
+  REQUIRE(writeCompiled.binary);
+  const std::string writeSource(writeCompiled.binary->begin(), writeCompiled.binary->end());
+  CHECK(writeSource ^ contains_slice(".value = as_float(0);"));
+  CHECK_FALSE(writeSource ^ contains_slice("as_int("));
+
+  const Sym boolSourceName({"BoolReinterpretSource"});
+  const auto boolSourceType = Type::Struct(boolSourceName, {}).widen();
+  const StructDef boolSourceDef(boolSourceName, {}, {Named("bits", Type::IntU8())}, {}, false);
+  const Named boolSource("source", boolSourceType), boolResult("result", Type::Bool1());
+  const Function boolEntry =
+      mkFn("reinterpret_bool", {Arg(boolSource, {})}, Type::Unit0(),
+           {Var(boolResult, Expr::Alias(Term::Select(boolSource, {PathStep::Field("bits").widen()}, Type::Bool1()).widen()).widen(), false)
+                .widen(),
+            ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), false);
+  polyregion::compiler::Options boolOptions{Target::Source_C_OpenCL1_1, ""};
+  boolOptions.pipelineSpec = "Mirror";
+  const auto boolCompiled =
+      polyregion::compiler::compile(Program(boolEntry, {}, {boolSourceDef}, PassPhase::Initial(), {}), boolOptions, OptLevel::O0);
+  REQUIRE(boolCompiled.binary);
+  const std::string boolSourceText(boolCompiled.binary->begin(), boolCompiled.binary->end());
+  CHECK_FALSE(boolSourceText ^ contains_slice("as_bool("));
+}
+
 TEST_CASE("C source shares one bounded workgroup region per kernel", "[backend]") {
   polyregion::compiler::initialise();
 
@@ -599,10 +666,12 @@ TEST_CASE("C source specialises pointer-bearing structs by address space", "[bac
   polyregion::compiler::initialise();
 
   const auto boxSym = Sym({"Box"});
+  const auto reservedSym = Sym({"Box_asp"});
   const auto box = Type::Struct(boxSym, {}).widen();
   const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
   const auto localStorage = Type::Arr(Type::IntS32(), 0, TypeSpace::Local()).widen();
   const StructDef boxDef(boxSym, {}, {Named("ptr", globalPtr)}, {}, false);
+  const StructDef reservedDef(reservedSym, {}, {Named("marker", Type::IntS32())}, {}, false);
   const auto privateBoxPtrTpe = Type::Ptr(box, TypeSpace::Private()).widen();
   const Named input("input", globalPtr), value("value", Type::IntS32()), globalBox("globalBox", box), privateBox("privateBox", box),
       privateBoxPtr("privateBoxPtr", privateBoxPtrTpe), privateBoxPtrCopy("privateBoxPtrCopy", privateBoxPtrTpe),
@@ -635,22 +704,22 @@ TEST_CASE("C source specialises pointer-bearing structs by address space", "[bac
   polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
   opts.pipelineSpec = "Mirror";
   opts.workgroupMemoryBytes = 64;
-  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef, reservedDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("typedef struct Box_asp Box_asp;"));
-  CHECK(source ^ contains_slice("typedef struct Box_asg Box_asg;"));
+  CHECK(source ^ contains_slice("typedef struct Box_asp1 Box_asp1;"));
+  CHECK(source ^ contains_slice("typedef struct Box Box;"));
   CHECK(source ^ contains_slice("global int* ptr;"));
   CHECK(source ^ contains_slice("private int* ptr;"));
   CHECK(source ^ contains_slice("local int* ptr;"));
-  CHECK(source ^ contains_slice("Box_asp _v3;"));
-  CHECK(source ^ contains_slice("private Box_asp* _v4"));
-  CHECK(source ^ contains_slice("private Box_asp* _v5"));
-  CHECK(source ^ contains_slice("Box _v7;"));
+  CHECK(source ^ contains_slice("Box_asp1 _v3;"));
+  CHECK(source ^ contains_slice("private Box_asp1* _v4"));
+  CHECK(source ^ contains_slice("private Box_asp1* _v5"));
+  CHECK(source ^ contains_slice("Box_asl _v7;"));
 
   opts.target = Target::Source_C_Metal1_0;
-  const auto metal = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  const auto metal = polyregion::compiler::compile(Program(entry, {}, {boxDef, reservedDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   INFO(repr(metal));
   REQUIRE(metal.binary != std::nullopt);
   const std::string metalSource(reinterpret_cast<const char *>(metal.binary->data()), metal.binary->size());
@@ -659,11 +728,12 @@ TEST_CASE("C source specialises pointer-bearing structs by address space", "[bac
   CHECK(metalSource ^ contains_slice("device int32_t* ptr;"));
 
   opts.target = Target::Source_C_C11;
-  const auto c11 = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  const auto c11 = polyregion::compiler::compile(Program(entry, {}, {boxDef, reservedDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   INFO(repr(c11));
   REQUIRE(c11.binary != std::nullopt);
   const std::string c11Source(reinterpret_cast<const char *>(c11.binary->data()), c11.binary->size());
-  CHECK_FALSE(c11Source ^ contains_slice("Box_as"));
+  CHECK_FALSE(c11Source ^ contains_slice("Box_asg"));
+  CHECK_FALSE(c11Source ^ contains_slice("Box_asp1"));
 }
 
 TEST_CASE("C source propagates address-space specialisation through stored structs", "[backend]") {
@@ -803,7 +873,7 @@ TEST_CASE("C source combines nested struct specialisations deterministically", "
   CHECK(source ^ contains_slice("Box_asp right;"));
 }
 
-TEST_CASE("C source rejects cross-space pointer merges before dereference", "[backend]") {
+TEST_CASE("C source demotes an immediately-read cross-space pointer merge", "[backend]") {
   polyregion::compiler::initialise();
 
   const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
@@ -823,10 +893,29 @@ TEST_CASE("C source rejects cross-space pointer merges before dereference", "[ba
                Return(Expr::Alias(Term::Unit0Const().widen()).widen()).widen(),
            },
            FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
-  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
-  opts.pipelineSpec = "Mirror";
-  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("cross-address-space pointer merge"));
+  for (const auto target : {Target::Source_C_C11, Target::Source_C_OpenCL1_1, Target::Source_C_Metal1_0}) {
+    polyregion::compiler::Options opts{target, ""};
+    opts.pipelineSpec = "Mirror";
+    const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+    INFO(repr(c));
+    REQUIRE(c.binary);
+    const std::string source(c.binary->begin(), c.binary->end());
+    CHECK(source ^ contains_slice("_v2 = _v0[0];"));
+    CHECK(source ^ contains_slice("_v2 = _v1;"));
+  }
+
+  const Named second("second", Type::IntS32());
+  auto repeatedBody = entry.body;
+  repeatedBody.insert(
+      repeatedBody.end() - 1,
+      Var(second, Expr::Alias(Term::Select(merged, {PathStep::Deref().widen()}, Type::IntS32()).widen()).widen(), false).widen());
+  const Function repeatedRead = entry.withBody(std::move(repeatedBody));
+  for (const auto target : {Target::Source_C_OpenCL1_1, Target::Source_C_Metal1_0}) {
+    polyregion::compiler::Options opts{target, ""};
+    opts.pipelineSpec = "Mirror";
+    REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(repeatedRead, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0),
+                        Catch::Matchers::ContainsSubstring("cross-address-space pointer merge escapes read-only use"));
+  }
 }
 
 TEST_CASE("C source respaces a pointer phi from its private assignment", "[backend]") {
@@ -1019,7 +1108,7 @@ TEST_CASE("C source traces pointer fields through fixed array indices", "[backen
   CHECK(source ^ contains_slice("private int* ptr;"));
 }
 
-TEST_CASE("C source rejects conflicting pointer fields through fixed array indices", "[backend]") {
+TEST_CASE("C source specialises pointer fields through fixed array indices", "[backend]") {
   polyregion::compiler::initialise();
 
   const auto boxSym = Sym({"Box"});
@@ -1042,8 +1131,11 @@ TEST_CASE("C source rejects conflicting pointer fields through fixed array indic
       FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
   opts.pipelineSpec = "Mirror";
-  REQUIRE_THROWS_WITH(polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("cannot specialise indirect conflicting pointer field"));
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary);
+  const std::string source(c.binary->begin(), c.binary->end());
+  CHECK(source ^ contains_slice("private int* ptr;"));
 }
 
 TEST_CASE("C source keeps constant and global struct pointer fields distinct", "[backend]") {
@@ -2497,7 +2589,8 @@ TEST_CASE("metal source does not emit zero-size empty marker members", "[backend
   CHECK_FALSE(source ^ contains_slice("_empty pad"));
   CHECK_FALSE(source ^ contains_slice("_nested nest"));
   CHECK_FALSE(source ^ contains_slice("_v0._base_middle"));
-  CHECK(source ^ contains_slice("&(_v0)"));
+  CHECK(source ^ contains_slice("thread Derived* _v1 = &(_v0"));
+  CHECK(source ^ contains_slice("thread _nested* _v2 = ((thread _nested*) _v1)"));
   CHECK(source ^ contains_slice("uint8_t tail;"));
 }
 
@@ -2868,7 +2961,7 @@ TEST_CASE("taking the address of a constant materialises an entry block slot", "
   CHECK(ir ^ contains_slice("store i32 1"));
 }
 
-TEST_CASE("OpenCL source takes the address of a constant through a compound literal", "[backend]") {
+TEST_CASE("OpenCL source materialises the address of a scalar constant", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
@@ -2887,7 +2980,8 @@ TEST_CASE("OpenCL source takes the address of a constant through a compound lite
   INFO(repr(c));
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("private uint* _v0 = &((private uint){1})"));
+  CHECK(source ^ contains_slice("uint _v0 = 1;"));
+  CHECK(source ^ contains_slice("private uint* _v1 = &(_v0"));
   CHECK_FALSE(source ^ contains_slice("&(1 /*uint*/)"));
 }
 
@@ -2912,8 +3006,8 @@ TEST_CASE("Metal source materialises the address of a scalar constant", "[backen
   const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("thread uint32_t _v1 = 1;"));
-  CHECK(source ^ contains_slice("thread uint32_t* _v0 = &_v1;"));
+  CHECK(source ^ contains_slice("uint32_t _v0 = 1;"));
+  CHECK(source ^ contains_slice("thread uint32_t* _v1 = &(_v0"));
   CHECK_FALSE(source ^ contains_slice("&(1 /*uint32_t*/)"));
 }
 
@@ -2938,8 +3032,31 @@ TEST_CASE("Metal source materialises scalar references assigned through captures
   const auto c = polyregion::compiler::compile(Program(entry, {}, {boxDef}, PassPhase::Initial(), {}), opts, OptLevel::O0);
   REQUIRE(c.binary != std::nullopt);
   const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
-  CHECK(source ^ contains_slice("thread uint32_t _v1 = 3;"));
+  CHECK(source ^ contains_slice("uint32_t _v1 = 3;"));
   CHECK_FALSE(source ^ contains_slice("&(3 /*uint32_t*/)"));
+}
+
+TEST_CASE("Metal source materialises an address-taken constant in thread-local storage", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named ref("p", Type::Ptr(Type::Bool1(), TypeSpace::Private()));
+  Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {
+          Var(ref, Expr::RefTo(Term::Bool1Const(true), {}, Type::Bool1(), TypeSpace::Private(), Region::Opaque()).widen(), false).widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  polyregion::compiler::Options opts{Target::Source_C_Metal1_0, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source ^ contains_slice("bool _v0 = true;"));
+  CHECK(source ^ contains_slice("thread bool* _v1 = &(_v0"));
+  CHECK_FALSE(source ^ contains_slice("&(true /*bool*/)"));
 }
 
 TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its address", "[backend]") {

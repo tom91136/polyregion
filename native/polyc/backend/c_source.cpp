@@ -47,30 +47,6 @@ static bool isPoisonInit(const Expr::Any &e) {
   return alias && alias->ref.template is<Term::Poison>();
 }
 
-static bool isNullPtrInit(const Expr::Any &e) {
-  const auto alias = e.template get<Expr::Alias>();
-  return alias && alias->ref.template is<Term::NullPtrConst>();
-}
-
-static std::optional<Sym> structNameOf(const Type::Any &t) {
-  Type::Any base = t;
-  if (const auto ptr = base.template get<Type::Ptr>()) base = ptr->comp;
-  if (const auto structure = base.template get<Type::Struct>()) return structure->name;
-  return std::nullopt;
-}
-
-static std::optional<Term::Select> aliasSelect(const Expr::Any &e) {
-  if (const auto alias = e.template get<Expr::Alias>()) return alias->ref.template get<Term::Select>();
-  return std::nullopt;
-}
-
-static std::optional<Term::Select> initSelect(const Expr::Any &e) {
-  if (const auto alias = e.template get<Expr::Alias>()) return alias->ref.template get<Term::Select>();
-  if (const auto ref = e.template get<Expr::RefTo>()) return ref->lhs.template get<Term::Select>();
-  if (const auto cast = e.template get<Expr::Cast>()) return cast->from.template get<Term::Select>();
-  return std::nullopt;
-}
-
 static std::string volatileHelperName(const bool load, const std::string &space, const std::string &element) {
   return fmt::format("_pr_v{}_{}_{}", load ? "ld" : "st", space, element);
 }
@@ -79,30 +55,12 @@ static std::string atomicMinMaxHelperName(const bool minimum, const std::string 
   return fmt::format("_pr_atomic_{}_{}", minimum ? "min" : "max", element);
 }
 
-struct SlotUnion {
-  Map<std::string, std::string> parent;
-  std::string find(const std::string &key) {
-    const auto it = parent.find(key);
-    if (it == parent.end()) return parent[key] = key;
-    return it->second == key ? key : parent[key] = find(it->second);
-  }
-  void unite(const std::string &lhs, const std::string &rhs) {
-    const auto l = find(lhs), r = find(rhs);
-    if (l != r) parent[l] = r;
-  }
-};
-
 static std::optional<uint64_t> scalarBytes(const Type::Any &t) {
   if (t.template is<Type::Bool1>() || t.template is<Type::IntU8>() || t.template is<Type::IntS8>()) return 1;
   if (t.template is<Type::Float16>() || t.template is<Type::IntU16>() || t.template is<Type::IntS16>()) return 2;
   if (t.template is<Type::Float32>() || t.template is<Type::IntU32>() || t.template is<Type::IntS32>()) return 4;
   if (t.template is<Type::Float64>() || t.template is<Type::IntU64>() || t.template is<Type::IntS64>()) return 8;
   return std::nullopt;
-}
-
-static bool needsMslRefTemporary(const Expr::RefTo &ref) {
-  return ref.space.template is<TypeSpace::Private>() && scalarBytes(ref.comp).has_value() && !ref.lhs.template is<Term::Select>()
-         && !ref.lhs.template is<Term::StringConst>() && !ref.lhs.tpe().template is<Type::Ptr>() && !ref.lhs.tpe().template is<Type::Arr>();
 }
 
 struct ArrayExtent {
@@ -131,841 +89,6 @@ template <typename T> static bool usesTpe(const std::vector<Function> &fns, cons
              }));
 }
 
-struct CLAddressSpaceTracePass {
-
-  bool strictSpaces = true;
-
-  struct StackScope {
-    Map<std::string, Named> vars;
-  };
-
-  struct SpacedTerm {
-    Term::Any actual;
-    TypeSpace::Any space = TypeSpace::Private();
-  };
-
-  struct SpacedExpr {
-    Expr::Any actual;
-    TypeSpace::Any space = TypeSpace::Private();
-  };
-
-  Map<Sym, Map<std::string, Type::Any>> fields;
-
-  std::optional<Type::Any> fieldType(const Type::Any &owner, const std::string &name) const {
-    Type::Any t = owner;
-    if (const auto p = t.template get<Type::Ptr>()) t = p->comp;
-    const auto s = t.template get<Type::Struct>();
-    if (!s) return std::nullopt;
-    if (const auto members = fields ^ get_maybe(s->name)) return *members ^ get_maybe(name);
-    return std::nullopt;
-  }
-
-  struct PathWalk {
-    Type::Any type;
-    TypeSpace::Any space;
-  };
-
-  PathWalk walkPath(const Type::Any &rootTpe, const std::vector<PathStep::Any> &steps, size_t upto) const {
-    Type::Any current = rootTpe;
-    TypeSpace::Any live = rootTpe.template get<Type::Ptr>() | map([](const auto &p) { return p.space; })
-                          | get_or_else(isLocalArr(rootTpe) ? TypeSpace::Local().widen() : TypeSpace::Private().widen());
-    for (size_t i = 0; i < upto && i < steps.size(); ++i) {
-      steps[i].match_total(
-          [&](const PathStep::Field &f) {
-            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
-            if (const auto tpe = fieldType(current, f.name)) current = *tpe;
-          },
-          [&](const PathStep::Deref &) {
-            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
-          },
-          [&](const PathStep::Index &) {
-            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
-            else if (const auto a = current.template get<Type::Arr>()) current = a->comp;
-          },
-          [&](const PathStep::IndexDyn &) {
-            if (const auto p = current.template get<Type::Ptr>()) live = p->space, current = p->comp;
-            else if (const auto a = current.template get<Type::Arr>()) current = a->comp;
-          });
-    }
-    return {current, live};
-  }
-
-  // Map a Term: only Term::Select needs scope rewiring; all other Term variants are pure atoms.
-  SpacedTerm mapTerm(const Term::Any &term, StackScope &scope) {
-    if (auto sel = term.template get<Term::Select>()) {
-      const auto rebound = scope.vars ^ get_or_default(sel->root.symbol, sel->root);
-      const auto walked = walkPath(rebound.tpe, sel->steps, sel->steps.size());
-      const auto liveSpace = walked.space;
-      auto declared = sel->steps.empty() ? std::optional<Type::Ptr>{} : sel->tpe.template get<Type::Ptr>();
-      if (declared)
-        if (const auto field = sel->steps.back().template get<PathStep::Field>())
-          if (const auto tpe = fieldType(walkPath(rebound.tpe, sel->steps, sel->steps.size() - 1).type, field->name))
-            declared = tpe->template get<Type::Ptr>() ^ get_or_else(*declared);
-      const auto space = declared | map([](const auto &p) { return p.space; }) | get_or_else(liveSpace);
-      // The conflict-splitting pass can replace the root with an address-space-specialised
-      // struct. Carry that structural replacement through aliases; retaining sel->tpe here
-      // silently converts `private Box_asp*` back to `private Box*`. Preserve the declared
-      // type otherwise because non-entry helper arguments deliberately retain their original
-      // address-space contract even though their local binding is private.
-      auto actualTpe = sel->tpe;
-      const auto declaredStruct = structNameOf(actualTpe), walkedStruct = structNameOf(walked.type);
-      if (declaredStruct && walkedStruct && *declaredStruct != *walkedStruct) actualTpe = walked.type;
-      return SpacedTerm{Term::Select(rebound, sel->steps, actualTpe), space};
-    }
-    // XXX null seeds its space from the pointee (refTpe=Global) so `T* p = nullptr` later infers Global not Private
-    if (auto np = term.template get<Term::NullPtrConst>()) return SpacedTerm{term, np->space};
-    if (term.template is<Term::StringConst>()) return SpacedTerm{term, TypeSpace::Constant()};
-    return SpacedTerm{term};
-  }
-
-  SpacedExpr mapExpr(const Expr::Any &expr, StackScope &scope) {
-    auto mapTerm_ = [&](const Term::Any &t) { return mapTerm(t, scope); };
-    auto mapTerm0_ = [&](const Term::Any &t) { return mapTerm(t, scope).actual; };
-    return expr.match_total(
-        [&](const Expr::Alias &x) -> SpacedExpr {
-          auto st = mapTerm_(x.ref);
-          return {Expr::Alias(st.actual), st.space};
-        },
-        [&](const Expr::SpecOp &x) -> SpacedExpr { return {Expr::SpecOp(x.op.modify_all<Term::Any>(mapTerm0_))}; },
-        [&](const Expr::IntrOp &x) -> SpacedExpr { return {Expr::IntrOp(x.op.modify_all<Term::Any>(mapTerm0_))}; },
-        [&](const Expr::MathOp &x) -> SpacedExpr { return {Expr::MathOp(x.op.modify_all<Term::Any>(mapTerm0_))}; },
-        [&](const Expr::Cast &x) -> SpacedExpr {
-          auto st = mapTerm_(x.from);
-          if (auto asPtr = x.as.template get<Type::Ptr>(); asPtr && !x.from.tpe().template is<Type::Ptr>())
-            return {Expr::Cast(st.actual, x.as), asPtr->space};
-          // re-space the cast target so OpenCL doesn't see a global<-private mismatch
-          auto as = x.as.template get<Type::Ptr>()                                            //
-                    | map([&](const auto &p) { return Type::Ptr(p.comp, st.space).widen(); }) //
-                    | get_or_else(x.as);
-          return {Expr::Cast(st.actual, as), st.space};
-        },
-        [&](const Expr::BitCast &x) -> SpacedExpr {
-          auto st = mapTerm_(x.from);
-          return {Expr::BitCast(st.actual, x.as), st.space};
-        },
-        [&](const Expr::Invoke &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },
-        [&](const Expr::Index &x) -> SpacedExpr {
-          auto stLhs = mapTerm_(x.lhs);
-          auto stIdx = mapTerm_(x.idx);
-          const auto space = x.comp.template get<Type::Ptr>() ^ fold([](const auto &p) { return p.space; }, [&] { return stLhs.space; });
-          return {Expr::Index(stLhs.actual, stIdx.actual, x.comp), space};
-        },
-        [&](const Expr::RefTo &x) -> SpacedExpr {
-          auto stLhs = mapTerm_(x.lhs);
-          // `&p` addresses the private binding slot which contains `p`; it does not address the
-          // global/local resource to which the value of `p` points. Keep both pointer layers
-          // distinct. Indexed address-taking (`&p[i]`) still inherits the pointee space.
-          const auto select = stLhs.actual.template get<Term::Select>();
-          const auto pointerSlot = !x.idx && select && select->steps.empty() && stLhs.actual.tpe().template is<Type::Ptr>();
-          const auto space = pointerSlot ? TypeSpace::Private().widen() : x.space.template is<TypeSpace::Private>() ? x.space : stLhs.space;
-          const auto comp = pointerSlot ? stLhs.actual.tpe() : x.comp;
-          return {Expr::RefTo(stLhs.actual, x.idx ^ map(mapTerm0_), comp, space, Region::Opaque()), space};
-        },
-        [&](const Expr::Alloc &x) -> SpacedExpr { return {Expr::Alloc(x.comp, mapTerm0_(x.size), x.space, Region::Opaque())}; },
-        [&](const Expr::ForeignCall &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },
-        [&](const Expr::OffsetOf &x) -> SpacedExpr { return {Expr::OffsetOf(x.structTpe, x.field)}; },
-        [&](const Expr::SizeOf &x) -> SpacedExpr { return {Expr::SizeOf(x.forTpe)}; });
-  }
-
-  std::optional<std::pair<Sym, std::string>> memberStoreTarget(const Term::Select &select, StackScope &scope) const {
-    if (select.steps.empty()) return std::nullopt;
-    const auto field = select.steps.back().template get<PathStep::Field>();
-    if (!field) return std::nullopt;
-    const auto rebound = scope.vars ^ get_or_default(select.root.symbol, select.root);
-    Type::Any owner = walkPath(rebound.tpe, select.steps, select.steps.size() - 1).type;
-    if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
-    const auto structure = owner.template get<Type::Struct>();
-    if (!structure) return std::nullopt;
-    const auto tpe = fieldType(owner, field->name);
-    return tpe && tpe->template is<Type::Ptr>() ? std::optional<std::pair<Sym, std::string>>{{structure->name, field->name}} : std::nullopt;
-  }
-
-  struct MemberStores {
-    Map<Sym, Set<std::string>> global, constant, local, priv;
-  };
-
-  static void eachStmt(const std::vector<Stmt::Any> &stmts, const std::function<void(const Stmt::Any &)> &f) {
-    for (const auto &stmt : stmts) {
-      f(stmt);
-      if (const auto c = stmt.template get<Stmt::Cond>()) eachStmt(c->trueBr, f), eachStmt(c->falseBr, f);
-      else if (const auto w = stmt.template get<Stmt::While>()) eachStmt(w->body, f);
-      else if (const auto r = stmt.template get<Stmt::ForRange>()) eachStmt(r->body, f);
-      else if (const auto a = stmt.template get<Stmt::Annotated>()) eachStmt({a->inner}, f);
-    }
-  }
-
-  Function mapFn(const Function &fn, MemberStores *memberStores = nullptr) {
-
-    StackScope scope{.vars = fn.decl.args                                                                   //
-                             | flat_map([&](const auto &arg) { return arg.template collect_all<Named>(); }) //
-                             | filter([](const auto &n) { return n.tpe.template is<Type::Ptr>(); })         //
-                             | map([](const auto &n) { return std::pair(n.symbol, n); })                    //
-                             | to<Map>()};
-
-    // a phi pointer var (declared with no initialiser, assigned in branches) keeps its declared space;
-    // pre-scan its Mut assignments so the decl takes the assigned value's space, else OpenCL rejects the
-    // `global* = private*` of e.g. std::min(&a, &b) over stack scalars in basic_string::max_size
-    Map<std::string, TypeSpace::Any> phiSpace;
-    Map<std::string, int> phiKinds;
-    {
-      auto spaceKind = [](const TypeSpace::Any &s) {
-        return s.match_total([](const TypeSpace::Global &) { return 0; }, [](const TypeSpace::Constant &) { return 1; },
-                             [](const TypeSpace::Local &) { return 2; }, [](const TypeSpace::Private &) { return 3; });
-      };
-      // a no-initialiser phi pointer's space comes from its branch Muts, which can read OTHER phi vars
-      // over a loop back-edge (swg's std::max row-swap); iterate to a fixpoint so a phi-var read uses the
-      // inferred (not declared) space and the chain converges
-      bool changed = true;
-      for (size_t iter = 0; changed && iter <= scope.vars.size() + 2; ++iter) {
-        changed = false;
-        Map<std::string, TypeSpace::Any> next;
-        Map<std::string, int> nextKinds;
-        StackScope scan{.vars = scope.vars};
-        std::function<void(const std::vector<Stmt::Any> &)> walk = [&](const std::vector<Stmt::Any> &stmts) {
-          for (auto &s : stmts) {
-            if (auto var = s.template get<Stmt::Var>()) {
-              auto name = var->name;
-              if (auto expr = var->expr ^ map([&](const auto &e) { return mapExpr(e, scan); })) {
-                if (auto ptr = expr->actual.tpe().template get<Type::Ptr>()) {
-                  const auto space = isNullPtrInit(*var->expr) ? phiSpace ^ get_or_default(var->name.symbol, expr->space) : expr->space;
-                  name = Named(var->name.symbol, Type::Ptr(ptr->comp, space));
-                }
-              } else if (auto ptr = var->name.tpe.template get<Type::Ptr>()) {
-                if (auto sp = phiSpace ^ get_maybe(var->name.symbol)) name = Named(var->name.symbol, Type::Ptr(ptr->comp, *sp));
-              }
-              scan.vars.insert_or_assign(name.symbol, name);
-            } else if (auto mut = s.template get<Stmt::Mut>()) {
-              if (mut->name.steps.empty() && mut->name.root.tpe.template is<Type::Ptr>()) {
-                const auto sp = mapExpr(mut->expr, scan).space;
-                nextKinds[mut->name.root.symbol] |= 1 << spaceKind(sp);
-                // a private<-private+global merge can't be a global pointer in CL 1.2; keep it private
-                const auto prev = next ^ get_maybe(mut->name.root.symbol);
-                next.insert_or_assign(mut->name.root.symbol,
-                                      (prev && (prev->template is<TypeSpace::Private>() || sp.template is<TypeSpace::Private>()))
-                                          ? TypeSpace::Private().widen()
-                                          : sp);
-              }
-            } else if (auto c = s.template get<Stmt::Cond>()) {
-              walk(c->trueBr);
-              walk(c->falseBr);
-            } else if (auto w = s.template get<Stmt::While>()) walk(w->body);
-            else if (auto fr = s.template get<Stmt::ForRange>()) walk(fr->body);
-            else if (auto an = s.template get<Stmt::Annotated>()) walk(std::vector<Stmt::Any>{an->inner});
-          }
-        };
-        walk(fn.body);
-        if (next.size() != phiSpace.size()) changed = true;
-        else
-          for (auto &[k, v] : next) {
-            const auto old = phiSpace ^ get_maybe(k);
-            if (!old || spaceKind(*old) != spaceKind(v)) {
-              changed = true;
-              break;
-            }
-          }
-        phiSpace = next;
-        phiKinds = nextKinds;
-      }
-    }
-
-    if (strictSpaces) {
-      const auto conflicted =
-          phiKinds | filter([](const auto &, const auto mask) { return (mask & (mask - 1)) != 0; }) | keys() | to<Set>();
-      if (!conflicted.empty()) throw backend::BackendException("cross-address-space pointer merge escapes read-only use");
-    }
-
-    auto body = fn.body ^ map([&](const auto &s) {
-                  return s
-                      .template modify_all<Stmt::Var>([&](const auto &var) { //
-                        if (auto expr = var.expr ^ map([&](const auto &e) { return mapExpr(e, scope); })) {
-                          auto name = var.name;
-                          if (auto ptr = expr->actual.tpe().template get<Type::Ptr>()) {
-                            const auto space =
-                                isNullPtrInit(*var.expr) ? phiSpace ^ get_or_default(var.name.symbol, expr->space) : expr->space;
-                            name = Named(var.name.symbol, Type::Ptr(ptr->comp, space));
-                          }
-                          scope.vars.emplace(name.symbol, name);
-                          return Stmt::Var(name, expr->actual, var.isMutable);
-                        }
-                        auto name = var.name;
-                        if (auto ptr = var.name.tpe.template get<Type::Ptr>())
-                          if (auto sp = phiSpace ^ get_maybe(var.name.symbol)) name = Named(var.name.symbol, Type::Ptr(ptr->comp, *sp));
-                        scope.vars.emplace(name.symbol, name);
-                        return Stmt::Var(name, {}, var.isMutable);
-                      })
-                      .template modify_all<Expr::Any>([&](const auto &e) { return mapExpr(e, scope).actual; }); //
-                });
-
-    if (memberStores) {
-      eachStmt(fn.body, [&](const Stmt::Any &stmt) {
-        const auto mut = stmt.template get<Stmt::Mut>();
-        if (!mut) return;
-        if (const auto target = memberStoreTarget(mut->name, scope)) {
-          const auto space = mapExpr(mut->expr, scope).space;
-          auto &bucket = space.template is<TypeSpace::Global>()     ? memberStores->global
-                         : space.template is<TypeSpace::Constant>() ? memberStores->constant
-                         : space.template is<TypeSpace::Local>()    ? memberStores->local
-                                                                    : memberStores->priv;
-          bucket[target->first].insert(target->second);
-        }
-      });
-    }
-
-    const auto tracedRtnTpes = body                                                                              //
-                               | flat_map([&](const auto &s) { return s.template collect_all<Stmt::Return>(); }) //
-                               | map([&](const auto &r) { return r.value.tpe(); })                               //
-                               | distinct()                                                                      //
-                               | to_vector();
-    return Function(fn.decl.withRtn(tracedRtnTpes[0]), body, fn.visibility, fn.fpMode, fn.convention, fn.implements,
-                    fn.requiredCapabilities);
-  }
-
-  struct ConflictSplit {
-    Map<Sym, StructDef> clones;
-    Map<Sym, Map<std::string, Sym>> memberRetype;
-    Map<std::string, Map<std::string, Sym>> fnVarRetype;
-  };
-
-  static std::string functionKey(const Function &fn) {
-    const auto types = [](const std::vector<Arg> &args) {
-      std::vector<Type::Any> result;
-      result.reserve(args.size());
-      for (const auto &arg : args)
-        result.push_back(arg.named.tpe);
-      return result;
-    };
-    std::optional<Type::Any> receiver;
-    if (fn.decl.receiver) receiver = fn.decl.receiver->named.tpe;
-    return signatureKey(Signature(fn.decl.name, fn.decl.tpeVars, receiver, types(fn.decl.args), types(fn.decl.moduleCaptures),
-                                  types(fn.decl.termCaptures), Type::Unit0()));
-  }
-
-  static Type::Any retypeStructOccurrence(const Type::Any &tpe, const Sym &clone) {
-    if (const auto structure = tpe.template get<Type::Struct>()) return Type::Struct(clone, structure->args).widen();
-    if (const auto ptr = tpe.template get<Type::Ptr>())
-      if (const auto structure = ptr->comp.template get<Type::Struct>())
-        return Type::Ptr(Type::Struct(clone, structure->args).widen(), ptr->space).widen();
-    return tpe;
-  }
-
-  static int spaceCode(const TypeSpace::Any &space) {
-    return space.match_total([](const TypeSpace::Global &) { return 0; }, [](const TypeSpace::Constant &) { return 1; },
-                             [](const TypeSpace::Local &) { return 2; }, [](const TypeSpace::Private &) { return 3; });
-  }
-
-  static TypeSpace::Any spaceFromCode(int code) {
-    return code == 1   ? TypeSpace::Constant().widen()
-           : code == 2 ? TypeSpace::Local().widen()
-           : code == 3 ? TypeSpace::Private().widen()
-                       : TypeSpace::Global().widen();
-  }
-
-  std::optional<ConflictSplit> planConflictSplit(const std::vector<Function> &functions, const Set<Sym> &conflicted,
-                                                 const Map<Sym, StructDef> &structDefs) {
-    const auto carries = [&](const Type::Any &tpe) -> std::optional<Sym> {
-      const auto structure = structNameOf(tpe);
-      return structure && (conflicted ^ contains(*structure)) ? structure : std::nullopt;
-    };
-
-    SlotUnion slots;
-    Map<std::string, Sym> slotStruct;
-    Map<std::string, std::pair<std::string, std::string>> variableSlots;
-    Map<std::string, std::pair<Sym, std::string>> memberSlots;
-    const auto variableKey = [](const std::string &fn, const std::string &symbol) { return "V\x1f" + fn + "\x1f" + symbol; };
-    const auto memberKey = [](const Sym &owner, const std::string &member) { return "M\x1f" + fqcn(owner) + "\x1f" + member; };
-    const auto registerVariable = [&](const std::string &fn, const std::string &symbol, const Sym &structure) {
-      const auto key = variableKey(fn, symbol);
-      slotStruct.insert_or_assign(key, structure);
-      variableSlots.insert_or_assign(key, std::pair{fn, symbol});
-      slots.find(key);
-      return key;
-    };
-    const auto registerMember = [&](const Sym &owner, const std::string &member, const Sym &structure) {
-      const auto key = memberKey(owner, member);
-      slotStruct.insert_or_assign(key, structure);
-      memberSlots.insert_or_assign(key, std::pair{owner, member});
-      slots.find(key);
-      return key;
-    };
-
-    std::vector<std::tuple<std::string, std::string, int>> colours;
-
-    std::function<std::optional<std::string>(const std::string &, const Term::Select &)> designated;
-    designated = [&](const std::string &fn, const Term::Select &select) -> std::optional<std::string> {
-      if (select.steps.empty()) {
-        if (const auto structure = carries(select.root.tpe)) return registerVariable(fn, select.root.symbol, *structure);
-        return std::nullopt;
-      }
-      const auto field = select.steps.back().template get<PathStep::Field>();
-      if (!field) return std::nullopt;
-      Type::Any owner = walkPath(select.root.tpe, select.steps, select.steps.size() - 1).type;
-      if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
-      const auto structure = owner.template get<Type::Struct>();
-      if (!structure) return std::nullopt;
-      if (const auto tpe = fieldType(owner, field->name)) {
-        if (const auto carried = carries(*tpe)) return registerMember(structure->name, field->name, *carried);
-        // An aggregate initialized from a pointer field (e.g. `PointerHolder copied{a.ptr}`)
-        // inherits the address-space-specialised representation of the source aggregate. The
-        // field itself carries a scalar pointer, so `carries` cannot identify that relationship.
-        if (tpe->template is<Type::Ptr>() && (conflicted ^ contains(structure->name))) {
-          if (select.steps.size() == 1) return registerVariable(fn, select.root.symbol, structure->name);
-          auto ownerSteps = select.steps;
-          ownerSteps.pop_back();
-          const Term::Select ownerSelect(select.root, ownerSteps, walkPath(select.root.tpe, ownerSteps, ownerSteps.size()).type);
-          return designated(fn, ownerSelect);
-        }
-      }
-      return std::nullopt;
-    };
-    const auto expressionSpace = [&](const std::string &fn, const Expr::Any &expr) {
-      if (const auto alias = expr.template get<Expr::Alias>())
-        if (const auto select = alias->ref.template get<Term::Select>()) {
-          // A pointer field read carries the source aggregate's specialised field colour. The
-          // declared field type is still the unspecialised (usually global) pointer until the
-          // conflict split is applied, so consulting only walkPath here loses the private colour
-          // and makes a copied aggregate use the wrong address space.
-          if (!select->steps.empty())
-            if (const auto field = select->steps.back().template get<PathStep::Field>())
-              if (const auto source = designated(fn, *select)) {
-                const auto component = slots.find(*source);
-                for (const auto &[slot, member, code] : colours)
-                  if (slots.find(slot) == component && member == field->name) return code;
-              }
-          return spaceCode(walkPath(select->root.tpe, select->steps, select->steps.size()).space);
-        }
-      if (const auto ref = expr.template get<Expr::RefTo>()) return spaceCode(ref->space);
-      if (const auto ptr = expr.tpe().template get<Type::Ptr>()) return spaceCode(ptr->space);
-      return 3;
-    };
-
-    bool valid = true;
-    struct NestedCopy {
-      std::string function;
-      Sym owner;
-      std::string destination, member, source;
-    };
-    std::vector<NestedCopy> nestedCopies;
-    struct AggregateCopy {
-      std::string function, destination, source;
-    };
-    std::vector<AggregateCopy> aggregateCopies;
-    for (const auto &function : functions) {
-      const auto fn = functionKey(function);
-      Map<std::string, Term::Select> pointerAliases;
-      const auto resolvePointerAlias = [&](Term::Select select) {
-        Set<std::string> seen;
-        while (select.steps.empty()) {
-          if (!seen.insert(select.root.symbol).second) break;
-          const auto source = pointerAliases.find(select.root.symbol);
-          if (source == pointerAliases.end()) break;
-          select = source->second;
-        }
-        return select;
-      };
-      eachStmt(function.body, [&](const Stmt::Any &stmt) {
-        if (const auto var = stmt.template get<Stmt::Var>()) {
-          if (var->expr)
-            if (const auto source = aliasSelect(*var->expr)) pointerAliases.insert_or_assign(var->name.symbol, *source);
-          if (const auto structure = carries(var->name.tpe)) {
-            const auto dst = registerVariable(fn, var->name.symbol, *structure);
-            if (var->expr && !isPoisonInit(*var->expr)) {
-              const auto source = initSelect(*var->expr);
-              const auto src = source ^ flat_map([&](const auto &select) { return designated(fn, select); });
-              if (src) slots.unite(dst, *src);
-              else valid = false;
-            }
-          }
-          if (var->name.tpe.template is<Type::Struct>() && var->expr && !isPoisonInit(*var->expr))
-            if (const auto source = initSelect(*var->expr); source && source->steps.empty() && source->root.tpe == var->name.tpe)
-              aggregateCopies.push_back({fn, var->name.symbol, source->root.symbol});
-          return;
-        }
-        const auto mut = stmt.template get<Stmt::Mut>();
-        if (!mut) return;
-        const auto &select = mut->name;
-        if (select.steps.empty()) {
-          if (const auto structure = carries(select.root.tpe)) {
-            const auto source = aliasSelect(mut->expr);
-            const auto src = source ^ flat_map([&](const auto &value) { return designated(fn, value); });
-            if (src) slots.unite(registerVariable(fn, select.root.symbol, *structure), *src);
-            else valid = false;
-          }
-          if (select.root.tpe.template is<Type::Struct>())
-            if (const auto source = aliasSelect(mut->expr); source && source->steps.empty() && source->root.tpe == select.root.tpe)
-              aggregateCopies.push_back({fn, select.root.symbol, source->root.symbol});
-          return;
-        }
-        const auto field = select.steps.back().template get<PathStep::Field>();
-        if (!field) return;
-        Type::Any owner = walkPath(select.root.tpe, select.steps, select.steps.size() - 1).type;
-        if (const auto ptr = owner.template get<Type::Ptr>()) owner = ptr->comp;
-        const auto structure = owner.template get<Type::Struct>();
-        const auto tpe = structure ? fieldType(owner, field->name) : std::nullopt;
-        if (structure && tpe && tpe->template is<Type::Ptr>() && (conflicted ^ contains(structure->name))) {
-          std::optional<std::string> slot;
-          if (select.steps.size() == 1) {
-            slot = registerVariable(fn, select.root.symbol, structure->name);
-          } else {
-            auto ownerSteps = select.steps;
-            ownerSteps.pop_back();
-            const Term::Select ownerSelect(select.root, ownerSteps, walkPath(select.root.tpe, ownerSteps, ownerSteps.size()).type);
-            slot = designated(fn, ownerSelect);
-          }
-          if (!slot) throw backend::BackendException("cannot specialise indirect conflicting pointer field");
-          if (const auto source = aliasSelect(mut->expr))
-            if (const auto sourceSlot = designated(fn, resolvePointerAlias(*source))) {
-              if (slotStruct[*slot] == slotStruct[*sourceSlot]) {
-                // Copying a pointer field between aggregates of the same type preserves the
-                // source aggregate's specialised representation (the source slot already carries
-                // the field colour discovered earlier in this function).
-                slots.unite(*slot, *sourceSlot);
-                return;
-              }
-            }
-          colours.emplace_back(*slot, field->name, expressionSpace(fn, mut->expr));
-        } else if (structure && tpe) {
-          if (const auto carried = carries(*tpe)) {
-            const auto source = aliasSelect(mut->expr);
-            if (source && select.steps.size() == 1 && source->steps.empty() && select.root.tpe.template is<Type::Struct>())
-              nestedCopies.push_back({fn, structure->name, select.root.symbol, field->name, source->root.symbol});
-            else {
-              const auto src = source ^ flat_map([&](const auto &value) { return designated(fn, value); });
-              if (src) slots.unite(registerMember(structure->name, field->name, *carried), *src);
-              else valid = false;
-            }
-          }
-        }
-      });
-    }
-    if (!valid) return std::nullopt;
-
-    Map<std::string, Map<std::string, int>> componentColours;
-    for (const auto &[slot, member, code] : colours) {
-      auto &signature = componentColours[slots.find(slot)];
-      if (const auto it = signature.find(member); it != signature.end() && it->second != code) return std::nullopt;
-      signature[member] = code;
-    }
-
-    ConflictSplit plan;
-    Map<std::string, Sym> clones;
-    for (const auto &[slot, structure] : slotStruct) {
-      const auto component = slots.find(slot);
-      const auto coloursIt = componentColours.find(component);
-      if (coloursIt == componentColours.end()) continue;
-      const auto fieldsIt = fields.find(structure);
-      bool differs = false;
-      for (const auto &[member, code] : coloursIt->second) {
-        const auto tpe = fieldsIt != fields.end() ? fieldsIt->second ^ get_maybe(member) : std::nullopt;
-        differs |= !tpe || !tpe->template is<Type::Ptr>() || spaceCode(tpe->template get<Type::Ptr>()->space) != code;
-      }
-      if (!differs) continue;
-
-      std::map<std::string, int> signature;
-      if (const auto def = structDefs.find(structure); def != structDefs.end())
-        for (const auto &member : def->second.members)
-          if (const auto ptr = member.tpe.template get<Type::Ptr>()) signature.emplace(member.symbol, spaceCode(ptr->space));
-      for (const auto &[member, code] : coloursIt->second)
-        signature.insert_or_assign(member, code);
-      const auto suffix = signature | values() | fold_left(std::string("_as"), [](const auto &acc, const auto code) {
-                            return acc + (code == 1 ? "c" : code == 2 ? "l" : code == 3 ? "p" : "g");
-                          });
-      auto cloneName = structure.fqn;
-      if (cloneName.empty()) cloneName.push_back(suffix);
-      else cloneName.back() += suffix;
-      const auto clone = clones ^ get_or_default(component, Sym(cloneName));
-      clones.emplace(component, clone);
-      if (!plan.clones.contains(clone))
-        if (const auto def = structDefs.find(structure); def != structDefs.end())
-          plan.clones.emplace(clone, def->second.withName(clone).withMembers(
-                                         def->second.members ^ map([&](const Named &member) {
-                                           const auto code = signature ^ get_maybe(member.symbol);
-                                           const auto ptr = member.tpe.template get<Type::Ptr>();
-                                           return code && ptr ? member.withTpe(Type::Ptr(ptr->comp, spaceFromCode(*code)).widen()) : member;
-                                         })));
-      if (const auto variable = variableSlots.find(slot); variable != variableSlots.end())
-        plan.fnVarRetype[variable->second.first].insert_or_assign(variable->second.second, clone);
-      if (const auto member = memberSlots.find(slot); member != memberSlots.end())
-        plan.memberRetype[member->second.first].insert_or_assign(member->second.second, clone);
-    }
-
-    Map<std::string, Sym> nestedClones;
-    if (strictSpaces)
-      for (bool changed = true; changed;) {
-        changed = false;
-        Map<std::string, std::vector<NestedCopy>> groups;
-        for (const auto &copy : nestedCopies)
-          groups[copy.function + "\x1f" + copy.destination].push_back(copy);
-        for (const auto &[_, copies] : groups) {
-          if (copies.empty()) continue;
-          auto function = plan.fnVarRetype.find(copies.front().function);
-          const auto owner = structDefs.find(copies.front().owner);
-          if (function == plan.fnVarRetype.end() || owner == structDefs.end()) continue;
-          std::map<std::string, Sym> replacements;
-          for (const auto &copy : copies)
-            if (const auto source = function->second.find(copy.source); source != function->second.end())
-              replacements.insert_or_assign(copy.member, source->second);
-          if (replacements.empty()) continue;
-
-          std::string suffix = "_as", key = fqcn(copies.front().owner);
-          for (const auto &member : owner->second.members) {
-            const auto carried = structNameOf(member.tpe);
-            if (!carried || !(conflicted ^ contains(*carried))) continue;
-            if (const auto replacement = replacements.find(member.symbol); replacement != replacements.end()) {
-              const auto child = fqcn(replacement->second);
-              const auto parts = child ^ split("_as");
-              const auto code = parts.size() == 1 ? "g" : parts.back();
-              suffix += code;
-              key += "\x1f" + member.symbol + "\x1f" + child;
-            } else {
-              suffix += "g";
-              key += "\x1f" + member.symbol + "\x1f";
-            }
-          }
-          auto clone = nestedClones ^ get_maybe(key);
-          if (!clone) {
-            auto name = copies.front().owner.fqn;
-            if (name.empty()) name.push_back(suffix);
-            else name.back() += suffix;
-            clone = Sym(name);
-            nestedClones.emplace(key, *clone);
-            plan.clones.emplace(*clone, owner->second.withName(*clone).withMembers(
-                                            owner->second.members ^ map([&](const Named &member) {
-                                              const auto replacement = replacements.find(member.symbol);
-                                              return replacement == replacements.end()
-                                                         ? member
-                                                         : member.withTpe(retypeStructOccurrence(member.tpe, replacement->second));
-                                            })));
-          }
-          const auto current = function->second.find(copies.front().destination);
-          if (current == function->second.end() || current->second != *clone) {
-            function->second.insert_or_assign(copies.front().destination, *clone);
-            changed = true;
-          }
-        }
-        for (const auto &copy : aggregateCopies) {
-          const auto function = plan.fnVarRetype.find(copy.function);
-          if (function == plan.fnVarRetype.end()) continue;
-          const auto source = function->second.find(copy.source);
-          if (source == function->second.end()) continue;
-          const auto destination = function->second.find(copy.destination);
-          if (destination == function->second.end() || destination->second != source->second) {
-            function->second.insert_or_assign(copy.destination, source->second);
-            changed = true;
-          }
-        }
-      }
-    return plan;
-  }
-
-  Function retypeConflicted(const Function &fn, const ConflictSplit &plan) {
-    const auto it = plan.fnVarRetype.find(functionKey(fn));
-    if (it == plan.fnVarRetype.end()) return fn;
-    const auto &types = it->second;
-    auto retyped = fn.template modify_all<Named>([&](const Named &named) {
-      const auto type = types.find(named.symbol);
-      return type == types.end() ? named : named.withTpe(retypeStructOccurrence(named.tpe, type->second));
-    });
-    return retyped.template modify_all<Expr::RefTo>([&](const Expr::RefTo &ref) {
-      const auto select = ref.lhs.template get<Term::Select>();
-      if (!select || !(types ^ get_maybe(select->root.symbol))) return ref;
-      return Expr::RefTo(ref.lhs, ref.idx, walkPath(select->root.tpe, select->steps, select->steps.size()).type, ref.space, ref.region);
-    });
-  }
-
-  static Program execute(const Program &p, bool strictSpaces) {
-    CLAddressSpaceTracePass pass;
-    pass.strictSpaces = strictSpaces;
-    for (const auto &def : p.defs)
-      pass.fields.emplace(def.name, def.members | map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) | to<Map>());
-
-    const auto argRespace = [](const Function &f) {
-      const auto offloadEntry = f.convention.is<CallConvention::OffloadEntry>();
-      auto remapSpace = [&](const auto &s) {
-        return s.match_total(
-            [&](const TypeSpace::Global &) { return offloadEntry ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); }, //
-            [&](const TypeSpace::Constant &) { return offloadEntry ? TypeSpace::Global().widen() : TypeSpace::Private().widen(); },
-            [&](const TypeSpace::Local &x) { return x.widen(); }, //
-            [&](const TypeSpace::Private &x) { return x.widen(); });
-      };
-      return f.withDecl(
-          f.decl.withArgs(f.decl.args ^ map([&](const auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
-    };
-
-    auto seeds = p.functions ^ map(argRespace);
-    if (p.entry) seeds ^= prepend(argRespace(*p.entry));
-    for (bool changed = true; changed;) {
-      changed = false;
-      MemberStores stores;
-      for (const auto &function : seeds)
-        pass.mapFn(function, &stores);
-      const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
-        const auto it = members.find(structure);
-        return it != members.end() && (it->second ^ contains(field));
-      };
-      const auto respace = [&](const auto &members, const TypeSpace::Any &space, const auto &skip) {
-        for (const auto &[structure, names] : members)
-          for (const auto &name : names) {
-            if (skip(structure, name)) continue;
-            const auto owner = pass.fields.find(structure);
-            if (owner == pass.fields.end()) continue;
-            const auto field = owner->second.find(name);
-            if (field == owner->second.end()) continue;
-            if (const auto ptr = field->second.template get<Type::Ptr>(); ptr && ptr->space != space)
-              field->second = Type::Ptr(ptr->comp, space).widen(), changed = true;
-          }
-      };
-      respace(stores.constant, TypeSpace::Constant().widen(), [&](const auto &structure, const auto &field) {
-        return has(stores.global, structure, field) || has(stores.local, structure, field) || has(stores.priv, structure, field);
-      });
-      respace(stores.local, TypeSpace::Local().widen(), [](const auto &, const auto &) { return false; });
-      respace(stores.priv, TypeSpace::Private().widen(), [&](const auto &structure, const auto &field) {
-        return has(stores.global, structure, field) || has(stores.constant, structure, field) || has(stores.local, structure, field);
-      });
-    }
-
-    MemberStores stores;
-    if (strictSpaces)
-      for (const auto &function : seeds)
-        pass.mapFn(function, &stores);
-    const auto has = [](const auto &members, const Sym &structure, const std::string &field) {
-      const auto it = members.find(structure);
-      return it != members.end() && (it->second ^ contains(field));
-    };
-    Set<Sym> conflicted;
-    for (const auto *bucket : {&stores.global, &stores.constant, &stores.local, &stores.priv})
-      for (const auto &[structure, fields] : *bucket)
-        for (const auto &field : fields)
-          if (static_cast<int>(has(stores.global, structure, field)) + static_cast<int>(has(stores.constant, structure, field))
-                  + static_cast<int>(has(stores.local, structure, field)) + static_cast<int>(has(stores.priv, structure, field))
-              >= 2)
-            conflicted.insert(structure);
-    ConflictSplit split;
-    if (!conflicted.empty()) {
-      const auto structDefs = p.defs | map([](const auto &def) { return std::pair{def.name, def}; }) | to<Map>();
-      const auto planned =
-          pass.planConflictSplit(seeds ^ map([&](const auto &function) { return pass.mapFn(function); }), conflicted, structDefs);
-      if (!planned) throw backend::BackendException("address-space-specialized struct escapes representable storage");
-      split = *planned;
-    }
-    for (const auto &[owner, members] : split.memberRetype)
-      if (const auto fields = pass.fields.find(owner); fields != pass.fields.end())
-        for (const auto &[member, clone] : members)
-          if (const auto field = fields->second.find(member); field != fields->second.end())
-            field->second = retypeStructOccurrence(field->second, clone);
-    for (const auto &[name, def] : split.clones)
-      pass.fields.insert_or_assign(name,
-                                   def.members | map([](const auto &member) { return std::pair{member.symbol, member.tpe}; }) | to<Map>());
-    const auto reify = [&](const StructDef &def) {
-      const auto fields = pass.fields.find(def.name);
-      return fields == pass.fields.end() ? def : def.withMembers(def.members ^ map([&](const auto &member) {
-                                                                   const auto field = fields->second.find(member.symbol);
-                                                                   return field == fields->second.end() ? member
-                                                                                                        : member.withTpe(field->second);
-                                                                 }));
-    };
-    auto defs = p.defs ^ map(reify);
-    auto cloneDefs = split.clones | values() | map(reify) | to_vector();
-    std::sort(cloneDefs.begin(), cloneDefs.end(), [](const auto &lhs, const auto &rhs) { return fqcn(lhs.name) < fqcn(rhs.name); });
-    defs ^= concat(cloneDefs);
-
-    const auto remap = [&](const Function &function) { return pass.mapFn(pass.retypeConflicted(argRespace(function), split)); };
-    auto entry = p.entry;
-    if (entry) entry = remap(*entry);
-    auto fns = p.functions ^ map(remap);
-
-    auto sigOf = [](const Expr::Invoke &inv) {
-      return Signature(calleeName(inv), /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](const auto &e) { return e.tpe(); }),
-                       /*moduleCaptures*/ {}, /*termCaptures*/ {}, inv.rtn);
-    };
-
-    Map<Signature, std::shared_ptr<Function>> functionTable;
-    for (const auto &f : fns) {
-      const Signature sig(f.decl.name, /*tpeVars*/ {}, /*receiver*/ {}, f.decl.args ^ map([](const auto &e) { return e.named.tpe; }),
-                          /*moduleCaptures*/ {},
-                          /*termCaptures*/ {}, f.decl.rtn);
-      functionTable[sig] = std::make_shared<Function>(f);
-    }
-
-    while (true) {
-      const auto specialised = functionTable                                                                                      //
-                               | flat_map([&](const auto &, const auto &f) { return f->template collect_all<Expr::Invoke>(); })   //
-                               | collect([&](const auto &inv) -> std::optional<std::pair<Signature, std::shared_ptr<Function>>> { //
-                                   if (const auto sig = sigOf(inv); !(functionTable ^ get_maybe(sig))) {
-                                     if (auto spec = functionTable ^ find([&](const auto &lhs, const auto &) {
-                                                       return lhs.name == sig.name && lhs.args.size() == sig.args.size();
-                                                     })) {
-                                       const auto fn = *spec->second;
-                                       const auto args =
-                                           fn.decl.args                                                                                  //
-                                           | zip(sig.args)                                                                               //
-                                           | map([](const auto &arg, const auto &tpe) { return arg.withNamed(arg.named.withTpe(tpe)); }) //
-                                           | to_vector();
-
-                                       return std::pair{sig, std::make_shared<Function>(pass.mapFn(fn.withDecl(fn.decl.withArgs(args))))};
-                                     }
-                                   }
-                                   return {};
-                                 }) //
-                               | to<Map>();
-      if (specialised.empty()) break;
-      functionTable.insert(specialised.begin(), specialised.end());
-    }
-
-    const auto spaceSpecialisedName = [](const Sym &name, const std::vector<TypeSpace::Any> &ts) -> Sym {
-      auto suffix = ts ^ mk_string("", [&](const auto &s) {
-                      return s.match_total([&](TypeSpace::Global) { return "g"; },                                          //
-                                           [&](TypeSpace::Constant) { return "g"; }, [&](TypeSpace::Local) { return "l"; }, //
-                                           [&](TypeSpace::Private) { return "p"; });
-                    });
-      auto fqn = name.fqn;
-      if (!fqn.empty()) fqn.back() = fqn.back() + "_" + suffix;
-      else fqn.push_back("_" + suffix);
-      return Sym(fqn);
-    };
-
-    auto spaces = [&](const auto &a) { return a.template collect_all<TypeSpace::Any>(); };
-    const auto renameInvokes = [&](const Function &f) {
-      return f.template modify_all<Expr::Invoke>(
-          [&](const auto &inv) { return inv.withCallee(Type::FnRef(spaceSpecialisedName(calleeName(inv), inv.args ^ flat_map(spaces)))); });
-    };
-    const auto spaceSpecialisedFns =           //
-        functionTable                          //
-        | values()                             //
-        | map([&](const auto &f) -> Function { //
-            const auto name = f->convention.template is<CallConvention::OffloadEntry>()
-                                  ? f->decl.name
-                                  : spaceSpecialisedName(f->decl.name, f->decl.args ^ flat_map(spaces));
-            const auto renamed = renameInvokes(*f);
-            return renamed.withDecl(renamed.decl.withName(name));
-          }) //
-        | to_vector();
-
-    if (entry) entry = renameInvokes(*entry);
-    return Program(std::move(entry), spaceSpecialisedFns, defs, p.phase, p.metadata);
-  }
-};
-
-std::string backend::CSource::normalise(const std::string &s) const {
-  // a member named `long4` would otherwise make `x.long4__x` parse as an illegal vector swizzle
-  static const Set<std::string> reserved = [] {
-    Set<std::string> ws = {"global", "local", "kernel", "constant", "private"};
-    for (const auto *base : {"char", "uchar", "short", "ushort", "int", "uint", "long", "ulong", "float", "double", "half"})
-      for (const auto *width : {"2", "3", "4", "8", "16"})
-        ws.emplace(std::string(base) + width);
-    return ws;
-  }();
-  static const Set<std::string> mslReserved = {"device", "threadgroup", "thread"};
-  // allowlist non-identifier chars to `_`: a stray `=` from `operator=` parses as an OpenCL assignment
-  auto out = s ^ map([](const auto &c) {
-               return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') ? c : '_';
-             });
-  // escape whole identifiers only: a symbol merely containing `kernel` must stay verbatim to match the launch lookup
-  if ((reserved ^ contains(out)) || (dialect == Dialect::MSL1_0 && (mslReserved ^ contains(out)))) out = "_" + out;
-  return out;
-}
-
-std::string backend::CSource::normalise(const Sym &s) const { return normalise(fqcn(s)); }
-
 static std::string sourceIdent(const Origin &origin) {
   if (!origin.source) return {};
   const auto ignored = [](const char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
@@ -976,6 +99,11 @@ static std::string sourceIdent(const Origin &origin) {
   if (s.empty() || (!std::isalpha(static_cast<unsigned char>(s.front())) && s.front() != '_')) return {};
   if (s ^ exists([](const char c) { return !std::isalnum(static_cast<unsigned char>(c)) && c != '_'; })) return {};
   return s;
+}
+
+static std::string safeLocalIdentifier(const std::string &s) {
+  static const Set<std::string> reserved = {"global", "local", "kernel", "constant", "private", "device", "threadgroup", "thread"};
+  return reserved ^ contains(s) ? "_" + s : s;
 }
 
 static std::string denseName(size_t n) {
@@ -1005,7 +133,7 @@ void backend::CSource::bindLocalNames(const Function &fn) {
     if (localNames.contains(named.symbol)) return;
     auto name = verbose ? sourceIdent(named.origin) : std::string{};
     if (!name.empty()) {
-      const auto base = normalise(name);
+      const auto base = safeLocalIdentifier(name);
       name = base;
       for (size_t suffix = 1; used ^ contains(name); ++suffix)
         name = base + "_" + std::to_string(suffix);
@@ -1025,9 +153,8 @@ void backend::CSource::bindLocalNames(const Function &fn) {
 
 Type::Any backend::CSource::resolveFieldType(const Type::Any &owner, const std::string &fieldName) const {
   if (auto s = owner.get<Type::Struct>()) {
-    if (auto it = structDefsByName.find(normalise(s->name)); it != structDefsByName.end()) {
-      const auto field = normalise(fieldName);
-      if (auto m = it->second ^ find([&](const auto &name, const auto &) { return name == field; })) return m->second;
+    if (auto it = structDefsByName.find(fqcn(s->name)); it != structDefsByName.end()) {
+      if (auto m = it->second ^ find([&](const auto &name, const auto &) { return name == fieldName; })) return m->second;
     }
     throw std::logic_error("field " + fieldName + " not found on struct " + repr(s->name));
   }
@@ -1063,7 +190,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Unit0 &) { return "void"s; },          //
                              [&](const Type::Bool1 &) { return "bool"s; },          //
 
-                             [&](const Type::Struct &x) { return normalise(x.name); }, //
+                             [&](const Type::Struct &x) { return fqcn(x.name); }, //
                              [&](const Type::Ptr &x) {
                                if (x.comp.template is<Type::Nothing>()) {
                                  if (dialect == Dialect::MSL1_0) return fmt::format("{} char*", mslPtrPrefix(x.space));
@@ -1104,7 +231,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Unit0 &) { return "void"s; },          //
                              [&](const Type::Bool1 &) { return "char"s; },          //
 
-                             [&](const Type::Struct &x) { return normalise(x.name); }, //
+                             [&](const Type::Struct &x) { return fqcn(x.name); }, //
                              [&](const Type::Ptr &x) {
                                auto prefix = x.space.match_total([&](TypeSpace::Global) { return "global"; },     //
                                                                  [&](TypeSpace::Constant) { return "constant"; }, //
@@ -1252,7 +379,7 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                                       current = p->comp;
                                     }
                                     acc += ".";
-                                    acc += normalise(f.name);
+                                    acc += f.name;
                                     current = resolveFieldType(current, f.name);
                                   },
                                   [&](const PathStep::Deref &) {
@@ -1613,7 +740,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
       [&](const Expr::BitCast &x) { return reinterpretScalar(mkTerm(x.from), x.from.tpe(), x.as); },
       [&](const Expr::Invoke &x) {
-        return fmt::format("{}({})", normalise(calleeName(x)), x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
+        return fmt::format("{}({})", fqcn(calleeName(x)), x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       }, //
       [&](const Expr::Index &x) { return fmt::format("{}[{}]", mkTerm(x.lhs), mkTerm(x.idx)); },
       [&](const Expr::RefTo &x) {
@@ -1621,68 +748,17 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
         if (x.idx)
           if (auto pt = x.lhs.tpe().template get<Type::Ptr>(); pt && pt->comp.template is<Type::Arr>())
             return fmt::format("&({})[0][{}]", mkTerm(x.lhs), mkTerm(*x.idx));
-        std::string str;
-        // OpenCL C has no C++ temporary materialisation: `&(1)` is invalid.  A C99
-        // compound literal provides the required private lvalue and preserves RefTo's
-        // lifetime for the enclosing block.
-        if (dialect == Dialect::OpenCL1_1 && !x.lhs.template is<Term::Select>() && !x.lhs.template is<Term::StringConst>())
-          str = fmt::format("&((private {}){{{}}})", mkTpe(x.comp), mkTerm(x.lhs));
-        else str = fmt::format("&({} /*{}*/)", mkTerm(x.lhs), mkTpe(x.comp));
+        auto str = fmt::format("&({} /*{}*/)", mkTerm(x.lhs), mkTpe(x.comp));
         // a value lhs would make `&value[idx]` illegal C, so drop the idx; a pointer/array lhs keeps it
         const bool valueLhs = !x.lhs.tpe().template is<Type::Ptr>() && !x.lhs.tpe().template is<Type::Arr>();
         if (x.idx && !valueLhs) str += fmt::format("[{}]", mkTerm(*x.idx));
-        const auto lhsSel = x.lhs.template get<Term::Select>();
-        const auto lastField = lhsSel && !lhsSel->steps.empty() ? lhsSel->steps.back().template get<PathStep::Field>() : std::nullopt;
-        // EBO empty base addressed as the base type: cast to the declared pointer type so Rusticl accepts it
-        if (lastField && (lastField->name ^ starts_with(conventions::BaseFieldPrefix)) && x.comp.template is<Type::Struct>()) {
-          // an empty base is elided from the struct, so `&obj.#base_X` is dangling: address the parent (offset
-          // 0) instead. the Select is typed as the logical base, so key elision on the field's owner-declared
-          // type (#empty for an EBO base), not the Select type
-          Type::Any owner = lhsSel->root.tpe;
-          std::vector<bool> elidedBaseSteps;
-          for (const auto &step : lhsSel->steps)
-            step.match_total(
-                [&](const PathStep::Field &f) {
-                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-                  const auto selected = resolveFieldType(owner, f.name);
-                  const bool elided = (f.name ^ starts_with(conventions::BaseFieldPrefix))
-                                      && (selected.template get<Type::Struct>() //
-                                          ^ exists([&](const auto &s) { return zeroSizeStructNames ^ contains(normalise(s.name)); }));
-                  elidedBaseSteps.emplace_back(elided);
-                  owner = selected;
-                },
-                [&](const PathStep::Deref &) {
-                  elidedBaseSteps.emplace_back(false);
-                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-                },
-                [&](const PathStep::Index &) {
-                  elidedBaseSteps.emplace_back(false);
-                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-                  else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
-                },
-                [&](const PathStep::IndexDyn &) {
-                  elidedBaseSteps.emplace_back(false);
-                  if (auto p = owner.template get<Type::Ptr>()) owner = p->comp;
-                  else if (auto a = owner.template get<Type::Arr>()) owner = a->comp;
-                });
-          if (!elidedBaseSteps.empty() && elidedBaseSteps.back()) {
-            auto parent = mkTerm(x.lhs);
-            for (auto it = elidedBaseSteps.rbegin(); it != elidedBaseSteps.rend() && *it; ++it) {
-              const auto cut = parent ^ last_index_of('.');
-              if (cut < 0) break;
-              parent.resize(cut);
-            }
-            str = fmt::format("&({})", parent);
-          }
-          str = fmt::format("(({}) {})", mkTpe(Type::Ptr(x.comp, x.space).widen()), str);
-        }
         return str;
       },
       [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); },
       [&](const Expr::ForeignCall &x) {
         return fmt::format("{}({})", x.name, x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       },
-      [&](const Expr::OffsetOf &x) { return fmt::format("__builtin_offsetof({}, {})", mkTpe(x.structTpe), normalise(x.field)); },
+      [&](const Expr::OffsetOf &x) { return fmt::format("__builtin_offsetof({}, {})", mkTpe(x.structTpe), x.field); },
       [&](const Expr::SizeOf &x) { return fmt::format("sizeof({})", mkTpe(x.forTpe)); });
 }
 
@@ -1696,18 +772,13 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
   // XXX rusticl zeroes a whole-struct read of a private var in a loop, so copy scalar leaves:
   // XXX   S s; s.off = x; for (...) { S t = s; }  ->  t.off reads back 0
   if (auto s = tpe.template get<Type::Struct>(); s && dialect == Dialect::OpenCL1_1) {
-    const auto name = normalise(s->name);
+    const auto name = fqcn(s->name);
     // a populated union stays whole; naming its members would not preserve the active one
     // a zero-size member has no storage in the emitted body, so it must not be named
     if (auto it = structDefsByName.find(name); it != structDefsByName.end() && (it->second.empty() || !(unionDefNames ^ contains(name))))
-      return it->second | filter([&](const auto &m) {
-               return !m.second.template is<Type::FnRef>() && !(m.second.template get<Type::Struct>() ^ exists([&](const auto &nested) {
-                                                                  return zeroSizeStructNames ^ contains(normalise(nested.name));
-                                                                }));
-             })
-             | map([&](const auto &m) {
-                 return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
-               })                                                     //
+      return it->second | map([&](const auto &m) {
+               return mkValueCopy(fmt::format("{}.{}", lhs, m.first), fmt::format("{}.{}", rhs, m.first), m.second, depth);
+             })                                                       //
              | filter([](const auto &copy) { return !copy.empty(); }) //
              | mk_string(" ");
   }
@@ -1721,20 +792,15 @@ std::string backend::CSource::mkVolatileCopy(const std::string &lhs, const std::
                        mkVolatileCopy(fmt::format("{}[{}]", lhs, index), fmt::format("{}[{}]", rhs, index), array->comp, depth + 1));
   }
   if (const auto structure = tpe.template get<Type::Struct>()) {
-    const auto name = normalise(structure->name);
+    const auto name = fqcn(structure->name);
     if (unionDefNames ^ contains(name))
       throw BackendException("volatile access to union " + repr(structure->name) + " is unsupported for MSL");
     const auto members = structDefsByName.find(name);
     if (members == structDefsByName.end()) throw BackendException("volatile access to undeclared struct " + repr(structure->name));
-    return members->second | filter([&](const auto &member) {
-             return !member.second.template is<Type::FnRef>()
-                    && !(member.second.template get<Type::Struct>()
-                         ^ exists([&](const auto &nested) { return zeroSizeStructNames ^ contains(normalise(nested.name)); }));
+    return members->second | map([&](const auto &member) {
+             return mkVolatileCopy(fmt::format("{}.{}", lhs, member.first), fmt::format("{}.{}", rhs, member.first), member.second,
+                                   depth + 1);
            })
-           | map([&](const auto &member) {
-               return mkVolatileCopy(fmt::format("{}.{}", lhs, member.first), fmt::format("{}.{}", rhs, member.first), member.second,
-                                     depth + 1);
-             })
            | mk_string(" ");
   }
   return fmt::format("{} = {};", lhs, rhs);
@@ -1754,15 +820,9 @@ std::optional<std::string> backend::CSource::mkZeroInit(const Type::Any &tpe) co
     if (depth > 32) return false;
     if (const auto a = t.template get<Type::Arr>()) return a->length > 0 && reachesScalar(a->comp, depth + 1);
     if (const auto s = t.template get<Type::Struct>()) {
-      const auto members = structDefsByName.find(normalise(s->name));
+      const auto members = structDefsByName.find(fqcn(s->name));
       if (members == structDefsByName.end()) return false;
-      const auto first =
-          members->second ^ find([&](const auto &member) {
-            const auto &memberTpe = member.second;
-            return !memberTpe.template is<Type::FnRef>() && !(memberTpe.template get<Type::Struct>() ^ exists([&](const auto &nested) {
-                                                                return zeroSizeStructNames ^ contains(normalise(nested.name));
-                                                              }));
-          });
+      const auto first = members->second ^ find([](const auto &) { return true; });
       return first ^ exists([&](const auto &member) { return reachesScalar(member.second, depth + 1); });
     }
     return !t.template is<Type::FnRef>() && !t.template is<Type::Unit0>() && !t.template is<Type::Nothing>();
@@ -1779,12 +839,6 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::FnRef>()) return ""s;
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
-        if (dialect == Dialect::MSL1_0 && x.expr)
-          if (const auto ref = x.expr->template get<Expr::RefTo>(); ref && needsMslRefTemporary(*ref)) {
-            const auto temp = denseName(localNameCounter++);
-            return fmt::format("thread {} {} = {}; {} = &{};", mkTpe(ref->comp), temp, mkTerm(ref->lhs),
-                               mkDecl(x.name.tpe, localName(x.name.symbol)), temp);
-          }
         if (isLocalArr(x.name.tpe)) {
           if (!x.expr || isPoisonInit(*x.expr)) return ""s;
           if (memberwise(x.name.tpe, x.expr->template is<Expr::Alias>()))
@@ -1808,11 +862,6 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
         if (x.name.tpe.template is<Type::FnRef>()) return ""s;
         if (isPoisonInit(x.expr) && (x.name.tpe.template is<Type::Struct>() || x.name.tpe.template is<Type::Arr>())) return ""s;
         if (x.name.tpe.template is<Type::Unit0>()) return fmt::format("{};", mkExpr(x.expr));
-        if (dialect == Dialect::MSL1_0)
-          if (const auto ref = x.expr.template get<Expr::RefTo>(); ref && needsMslRefTemporary(*ref)) {
-            const auto temp = denseName(localNameCounter++);
-            return fmt::format("thread {} {} = {}; {} = &{};", mkTpe(ref->comp), temp, mkTerm(ref->lhs), mkTerm(x.name), temp);
-          }
         if (memberwise(x.name.tpe, x.expr.template is<Expr::Alias>())) return mkValueCopy(mkTerm(x.name), mkExpr(x.expr), x.name.tpe, 0);
         return fmt::format("{} = {};", mkTerm(x.name), mkExpr(x.expr));
       },
@@ -1875,10 +924,8 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
                 decl = arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
                                               [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
                                               [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
-                                              [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }    //
-                );
+                                              [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); });
               } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
-
               break;
             }
             default: break;
@@ -1916,11 +963,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
     default: fnPrefix = "";
   }
 
-  return fmt::format("{}{} {}({})",
-                     fnPrefix,                    //
-                     mkTpe(fnTree.decl.rtn),      //
-                     normalise(fnTree.decl.name), //
-                     argExprs ^ mk_string(", "));
+  return fmt::format("{}{} {}({})", fnPrefix, mkTpe(fnTree.decl.rtn), fqcn(fnTree.decl.name), argExprs ^ mk_string(", "));
 }
 
 std::string backend::CSource::mkFn(const Function &fnTree) {
@@ -1995,46 +1038,19 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
 }
 
 CompileResult backend::CSource::compileProgram(const Program &program_, const compiletime::OptLevel &opt) {
-  const auto tracePassStart = compiler::nowMono();
-  auto program = CLAddressSpaceTracePass::execute(program_, dialect != Dialect::C11);
-  CompileEvent cltpEvent(compiler::nowMs(), compiler::elapsedNs(tracePassStart), "polyast_cltp", repr(program), {});
+  auto program = program_;
 
   const auto start = compiler::nowMono();
 
-  structDefsByName =
-      program.defs | map([&](const auto &def) {
-        return std::pair{normalise(def.name), def.members ^ map([&](const auto &m) { return std::pair{normalise(m.symbol), m.tpe}; })};
-      }) //
-      | to<Map>();
-  unionDefNames = program.defs                                                //
-                  | filter([](const auto &def) { return def.isUnion; })       //
-                  | map([&](const auto &def) { return normalise(def.name); }) //
+  structDefsByName = program.defs | map([&](const auto &def) {
+                       return std::pair{fqcn(def.name), def.members ^ map([&](const auto &m) { return std::pair{m.symbol, m.tpe}; })};
+                     }) //
+                     | to<Map>();
+  unionDefNames = program.defs                                           //
+                  | filter([](const auto &def) { return def.isUnion; })  //
+                  | map([&](const auto &def) { return fqcn(def.name); }) //
                   | to<Set>();
-  Set<Sym> zeroSizeStructs = program.defs                                                  //
-                             | filter([](const auto &def) { return def.members.empty(); }) //
-                             | map([](const auto &def) { return def.name; })               //
-                             | to<Set>();
-  auto zeroSizeMember = [&](const Named &m) {
-    return m.tpe.template get<Type::Struct>() ^ exists([&](const auto &s) { return zeroSizeStructs ^ contains(s.name); });
-  };
-  // metal rejects an all-zero-size body as a `[[buffer]]` pointee; OpenCL-C tolerates the empty member
-  if (dialect == Dialect::MSL1_0)
-    for (bool changed = true; changed;) {
-      const auto seen = zeroSizeStructs.size();
-      for (const auto &def : program.defs)
-        if (def.members ^ forall(zeroSizeMember)) zeroSizeStructs.emplace(def.name);
-      changed = zeroSizeStructs.size() != seen;
-    }
-  zeroSizeStructNames = zeroSizeStructs ^ map([&](const auto &name) { return normalise(name); });
-  auto realStorageMember = [&](const Named &m) { return !zeroSizeMember(m); };
-  auto renderStorageMember = [&](const Named &m) {
-    // FnRef is an erased stateless callable, but its originating C++ object still occupies one byte when
-    // captured as a data member.  Keeping that byte is ABI-significant: otherwise every later capture is read
-    // at the preceding offset (for example `fn, init, step` becomes `init, step, ...`).  Calls and standalone
-    // FnRef values remain erased; this is only their aggregate storage slot.
-    const auto storageTpe = m.tpe.template is<Type::FnRef>() ? Type::IntU8().widen() : m.tpe;
-    return fmt::format("  {};", mkDecl(storageTpe, normalise(m.symbol)));
-  };
+  auto renderStorageMember = [&](const Named &m) { return fmt::format("  {};", mkDecl(m.tpe, m.symbol)); };
 
   // only by-value members create a definition-order dependency; pointer members resolve via the forward decl
   auto structsAndDeps = program.defs | map([&](const auto &def) {
@@ -2053,10 +1069,9 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
           ? std::vector<std::string>{"#include <stdint.h>\n#include <stdbool.h>\n#include <math.h>\n#include <stdatomic.h>"}
           : std::vector<std::string>{};
   // forward-declare every struct so pointer members (including cyclic ones) resolve
-  const auto typedefs =
-      program.defs ^ map([&](const auto &def) {
-        return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", normalise(def.name), normalise(def.name));
-      });
+  const auto typedefs = program.defs ^ map([&](const auto &def) {
+                          return fmt::format("typedef {} {} {};", def.isUnion ? "union" : "struct", fqcn(def.name), fqcn(def.name));
+                        });
 
   // emit struct bodies in by-value dependency order; a recursive cycle bails with a note
   std::vector<std::string> structBodies;
@@ -2073,8 +1088,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
       break;
     }
     structBodies ^= concat(noDeps ^ map([&](const auto &s) {
-                             return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", normalise(s.name),
-                                                s.members | filter(realStorageMember) | mk_string("{\n", "\n", "\n}", renderStorageMember));
+                             return fmt::format("{} {} {};\n", s.isUnion ? "union" : "struct", fqcn(s.name),
+                                                s.members | mk_string("{\n", "\n", "\n}", renderStorageMember));
                            }));
     resolved ^= concat(noDeps ^ map([](const auto &s) { return s.name; }));
   }
@@ -2099,13 +1114,13 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         }) //
       | to_vector();
 
-  const auto typeNames = program.defs ^ flat_map([&](const auto &def) {
-                           return std::vector<std::string>{normalise(def.name)}
-                                  ^ concat(def.members ^ map([&](const auto &member) { return normalise(member.symbol); }));
-                         });
-  fileScopeNames = typeNames                                                                       //
-                   | concat(allFns ^ map([&](const auto &fn) { return normalise(fn.decl.name); })) //
-                   | concat(stringConstNames ^ values())                                           //
+  const auto typeNames =
+      program.defs ^ flat_map([&](const auto &def) {
+        return std::vector<std::string>{fqcn(def.name)} ^ concat(def.members ^ map([&](const auto &member) { return member.symbol; }));
+      });
+  fileScopeNames = typeNames                                                                  //
+                   | concat(allFns ^ map([&](const auto &fn) { return fqcn(fn.decl.name); })) //
+                   | concat(stringConstNames ^ values())                                      //
                    | to<Set>();
 
   std::vector<std::string> volatileHelpers;
@@ -2231,7 +1246,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
 
   return {std::vector<int8_t>(code.begin(), code.end()),
           features,
-          {cltpEvent, {compiler::nowMs(), compiler::elapsedNs(start), fmt::format("polyast_to_{}_c", dialectName), code, {}}},
+          {{compiler::nowMs(), compiler::elapsedNs(start), fmt::format("polyast_to_{}_c", dialectName), code, {}}},
           {},
           "",
           {}};
