@@ -143,6 +143,16 @@ class InterpreterSuite extends munit.FunSuite {
     assertEquals(Interpreter.Vm(program(entry(), List(sq))).call("fsq", List(f32 -> V.D(3.0))), V.D(9.0))
   }
 
+  test("bit-cast preserves the scalar representation") {
+    val bits = fn(
+      "bits",
+      Nil,
+      f32,
+      List(ret(p.Expr.BitCast(p.Term.IntU32Const(0x3f800000), f32)))
+    )
+    assertEquals(Interpreter.Vm(program(entry(), List(bits))).call("bits", Nil), V.D(1.0))
+  }
+
   test("PartialEval preserves semantics (differential)") {
     val k = fn(
       "k",

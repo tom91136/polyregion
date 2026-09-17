@@ -31,6 +31,8 @@ namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT json introp_to_json(const Expr::IntrOp &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Cast cast_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json cast_to_json(const Expr::Cast &);
+[[nodiscard]] POLYREGION_EXPORT Expr::BitCast bitcast_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json bitcast_to_json(const Expr::BitCast &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Index index_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json index_to_json(const Expr::Index &);
 [[nodiscard]] POLYREGION_EXPORT Expr::RefTo refto_from_json(const json &);
@@ -297,6 +299,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json stringconst_to_json(const Term::StringConst &);
 [[nodiscard]] POLYREGION_EXPORT Term::Poison poison_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json poison_to_json(const Term::Poison &);
+[[nodiscard]] POLYREGION_EXPORT Term::Defer defer_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json defer_to_json(const Term::Defer &);
 [[nodiscard]] POLYREGION_EXPORT Term::Select select_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json select_to_json(const Term::Select &);
 [[nodiscard]] POLYREGION_EXPORT Term::Any any_from_json(const json &);

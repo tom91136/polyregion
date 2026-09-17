@@ -230,6 +230,17 @@ object Verify {
           case (a, b) if isNumeric(a) && isNumeric(b) => c0
           case (a, b) => c0 ~ s"Cannot cast unrelated type ${a.repr} to ${b.repr}: ${e.repr}"
         }
+      case p.Expr.BitCast(from, as) =>
+        val c0 = validateTerm(c, from)
+        def width(tpe: p.Type): Option[Int] = tpe match {
+          case p.Type.Bool1 | p.Type.IntU8 | p.Type.IntS8     => Some(1)
+          case p.Type.IntU16 | p.Type.IntS16 | p.Type.Float16 => Some(2)
+          case p.Type.IntU32 | p.Type.IntS32 | p.Type.Float32 => Some(4)
+          case p.Type.IntU64 | p.Type.IntS64 | p.Type.Float64 => Some(8)
+          case _                                              => None
+        }
+        if (width(from.tpe).nonEmpty && width(from.tpe) == width(as)) c0
+        else c0 ~ s"Cannot bit-cast differently-sized or non-scalar type ${from.tpe.repr} to ${as.repr}: ${e.repr}"
       case p.Expr.Invoke(_, _, receiver, args, _) =>
         val c0 = receiver.map(validateTerm(c, _)).getOrElse(c)
         args.foldLeft(c0)(validateTerm(_, _))

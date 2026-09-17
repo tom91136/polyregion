@@ -274,6 +274,7 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
         case Some(c) => p.Expr.Alias(c)
         case None    => p.Expr.Cast(from2, as)
       }
+    case p.Expr.BitCast(from, as) => p.Expr.BitCast(resolveTerm(from, st), as)
     case p.Expr.Index(lhs, idx, comp) =>
       val lhs2 = resolveTerm(lhs, st)
       val idx2 = resolveTerm(idx, st)
@@ -338,8 +339,8 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
   // pure and dropping it also lets a no-longer-address-taken root become foldable next iteration; loads
   // (Index), Alloc, calls and Spec ops are conservatively retained
   private def isPure(e: p.Expr): Boolean = e match {
-    case _: p.Expr.Alias | _: p.Expr.IntrOp | _: p.Expr.MathOp | _: p.Expr.Cast | _: p.Expr.RefTo | _: p.Expr.OffsetOf |
-        _: p.Expr.SizeOf =>
+    case _: p.Expr.Alias | _: p.Expr.IntrOp | _: p.Expr.MathOp | _: p.Expr.Cast | _: p.Expr.BitCast | _: p.Expr.RefTo |
+        _: p.Expr.OffsetOf | _: p.Expr.SizeOf =>
       true
     case _ => false
   }
@@ -473,8 +474,10 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     }
 
   private def cseEligible(e: p.Expr): Boolean = (e match {
-    case _: p.Expr.IntrOp | _: p.Expr.MathOp | _: p.Expr.Cast | _: p.Expr.OffsetOf | _: p.Expr.SizeOf => true
-    case _                                                                                            => false
+    case _: p.Expr.IntrOp | _: p.Expr.MathOp | _: p.Expr.Cast | _: p.Expr.BitCast | _: p.Expr.OffsetOf |
+        _: p.Expr.SizeOf =>
+      true
+    case _ => false
   }) && !readsMemory(e)
 
   private def readsMemory(e: p.Expr): Boolean =

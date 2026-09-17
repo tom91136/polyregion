@@ -209,6 +209,9 @@ std::string repr(const Term::Any &t) {
     if (auto _x = t.get<Term::Poison>()) {
       return fmt::format("__poison__ /* poison of type {} */", repr(_x->t));
     }
+    if (auto _x = t.get<Term::Defer>()) {
+      return fmt::format("__defer__ /* deferred value of type {} */", repr(_x->t));
+    }
     if (auto _x = t.get<Term::Select>()) {
       return fmt::format("{}: {}{}", _x->root.symbol, repr(_x->root.tpe),
                          (_x->steps | map([&](const PathStep::Any &_v7_0) { return repr(_v7_0); }) | mk_string(""s)));
@@ -507,6 +510,9 @@ std::string repr(const Expr::Any &e) {
     }
     if (auto _x = e.get<Expr::Cast>()) {
       return fmt::format("({}).to[{}]", repr(_x->from), repr(_x->as));
+    }
+    if (auto _x = e.get<Expr::BitCast>()) {
+      return fmt::format("({}).bits[{}]", repr(_x->from), repr(_x->as));
     }
     if (auto _x = e.get<Expr::Index>()) {
       return fmt::format("({}).index[{}]({})", repr(_x->lhs), repr(_x->comp), repr(_x->idx));

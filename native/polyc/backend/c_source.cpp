@@ -239,6 +239,10 @@ struct CLAddressSpaceTracePass {
                     | get_or_else(x.as);
           return {Expr::Cast(st.actual, as), st.space};
         },
+        [&](const Expr::BitCast &x) -> SpacedExpr {
+          auto st = mapTerm_(x.from);
+          return {Expr::BitCast(st.actual, x.as), st.space};
+        },
         [&](const Expr::Invoke &x) -> SpacedExpr { return {x.modify_all<Term::Any>(mapTerm0_)}; },
         [&](const Expr::Index &x) -> SpacedExpr {
           auto stLhs = mapTerm_(x.lhs);
@@ -1200,6 +1204,14 @@ std::optional<std::string> backend::CSource::mkArrayAliasDecl(const Type::Any &t
   return fmt::format("{} = {}", mkDecl(Type::Ptr(array->comp, space).widen(), name), mkTerm(*select));
 }
 
+std::string backend::CSource::reinterpretScalar(const std::string &value, const Type::Any &from, const Type::Any &to) {
+  switch (dialect) {
+    case Dialect::C11: return fmt::format("((union {{ {} from; {} to; }}){{ .from = ({}) }}).to", mkTpe(from), mkTpe(to), value);
+    case Dialect::OpenCL1_1: return fmt::format("as_{}({})", mkTpe(to), value);
+    case Dialect::MSL1_0: return fmt::format("metal::as_type<{}>({})", mkTpe(to), value);
+  }
+}
+
 std::string backend::CSource::mkTerm(const Term::Any &term) {
   return term.match_total([](const Term::Float16Const &x) { return cFloatLiteral(x.value, ""); },  //
                           [](const Term::Float32Const &x) { return cFloatLiteral(x.value, "f"); }, //
@@ -1222,7 +1234,8 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                             // `0` not `NULL`: comgr doesn't predefine NULL for AMD kernel sources (non-ptr poison still casts)
                             if (x.tpe.is<Type::Ptr>()) return fmt::format("(0 /*{}*/)", repr(x.tpe));
                             return fmt::format("(({})0 /*poison {}*/)", mkTpe(x.tpe), repr(x.tpe));
-                          }, //
+                          },                                                                              //
+                          [&](const Term::Defer &x) { return fmt::format("(({}){{0}})", mkTpe(x.tpe)); }, //
                           [&](const Term::StringConst &x) {
                             // an inline OpenCL literal has no addressable storage so it must be referenced by name
                             return stringConstNames ^ get_or_default(x.value, fmt::format("\"{}\"", escapeCString(x.value)));
@@ -1598,6 +1611,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             [&](const Math::Hypot &v) { return fmt::format("{}({}, {})", mathFn("hypot"), mkTerm(v.x), mkTerm(v.y)); });
       },
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkTerm(x.from)); },
+      [&](const Expr::BitCast &x) { return reinterpretScalar(mkTerm(x.from), x.from.tpe(), x.as); },
       [&](const Expr::Invoke &x) {
         return fmt::format("{}({})", normalise(calleeName(x)), x.args ^ mk_string(", ", [&](const auto &arg) { return mkTerm(arg); }));
       }, //

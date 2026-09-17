@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "8af0b52951e8eaa1c3ef5235508e3170";
-constexpr auto ProgramHash = "9ed09edfb092999d42d81a77e801a4d0";
-constexpr auto PackageHash = "6b48c7364f320d41387092483194a595";
-constexpr auto PackageWireHash = "d17615421943c184d0b81bf0b8b3fded";
+constexpr auto AdtHash = "c94edbd87447a7e68bf9421ee351d917";
+constexpr auto ProgramHash = "792769dfaf6d9bfdf062cfee1ab403ea";
+constexpr auto PackageHash = "011b089db26b9ccb5c33ba7ecd65dc17";
+constexpr auto PackageWireHash = "261b8a315a3939a4197e316dc7e7c850";
 constexpr auto CompileWireHash = "e6b6255e589708b2bd5b064b6b4fe04a";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -579,6 +579,16 @@ json Term::poison_to_json(const Term::Poison &x_) {
   return json::array({t});
 }
 
+Term::Defer Term::defer_from_json(const json &j_) {
+  auto t = Type::any_from_json(j_.at(0));
+  return Term::Defer(t);
+}
+
+json Term::defer_to_json(const Term::Defer &x_) {
+  auto t = Type::any_to_json(x_.t);
+  return json::array({t});
+}
+
 Term::Select Term::select_from_json(const json &j_) {
   auto root = named_from_json(j_.at(0));
   std::vector<PathStep::Any> steps;
@@ -619,7 +629,8 @@ Term::Any Term::any_from_json(const json &j_) {
     case 13: return Term::nullptrconst_from_json(t_);
     case 14: return Term::stringconst_from_json(t_);
     case 15: return Term::poison_from_json(t_);
-    case 16: return Term::select_from_json(t_);
+    case 16: return Term::defer_from_json(t_);
+    case 17: return Term::select_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -641,7 +652,8 @@ json Term::any_to_json(const Term::Any &x_) {
                         [](const Term::NullPtrConst &y_) -> json { return {13, Term::nullptrconst_to_json(y_)}; },
                         [](const Term::StringConst &y_) -> json { return {14, Term::stringconst_to_json(y_)}; },
                         [](const Term::Poison &y_) -> json { return {15, Term::poison_to_json(y_)}; },
-                        [](const Term::Select &y_) -> json { return {16, Term::select_to_json(y_)}; });
+                        [](const Term::Defer &y_) -> json { return {16, Term::defer_to_json(y_)}; },
+                        [](const Term::Select &y_) -> json { return {17, Term::select_to_json(y_)}; });
 }
 
 Expr::Alias Expr::alias_from_json(const json &j_) {
@@ -691,6 +703,18 @@ Expr::Cast Expr::cast_from_json(const json &j_) {
 }
 
 json Expr::cast_to_json(const Expr::Cast &x_) {
+  auto from = Term::any_to_json(x_.from);
+  auto as = Type::any_to_json(x_.as);
+  return json::array({from, as});
+}
+
+Expr::BitCast Expr::bitcast_from_json(const json &j_) {
+  auto from = Term::any_from_json(j_.at(0));
+  auto as = Type::any_from_json(j_.at(1));
+  return {from, as};
+}
+
+json Expr::bitcast_to_json(const Expr::BitCast &x_) {
   auto from = Term::any_to_json(x_.from);
   auto as = Type::any_to_json(x_.as);
   return json::array({from, as});
@@ -825,13 +849,14 @@ Expr::Any Expr::any_from_json(const json &j_) {
     case 2: return Expr::mathop_from_json(t_);
     case 3: return Expr::introp_from_json(t_);
     case 4: return Expr::cast_from_json(t_);
-    case 5: return Expr::index_from_json(t_);
-    case 6: return Expr::refto_from_json(t_);
-    case 7: return Expr::alloc_from_json(t_);
-    case 8: return Expr::invoke_from_json(t_);
-    case 9: return Expr::foreigncall_from_json(t_);
-    case 10: return Expr::offsetof_from_json(t_);
-    case 11: return Expr::sizeof_from_json(t_);
+    case 5: return Expr::bitcast_from_json(t_);
+    case 6: return Expr::index_from_json(t_);
+    case 7: return Expr::refto_from_json(t_);
+    case 8: return Expr::alloc_from_json(t_);
+    case 9: return Expr::invoke_from_json(t_);
+    case 10: return Expr::foreigncall_from_json(t_);
+    case 11: return Expr::offsetof_from_json(t_);
+    case 12: return Expr::sizeof_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -842,13 +867,14 @@ json Expr::any_to_json(const Expr::Any &x_) {
                         [](const Expr::MathOp &y_) -> json { return {2, Expr::mathop_to_json(y_)}; },
                         [](const Expr::IntrOp &y_) -> json { return {3, Expr::introp_to_json(y_)}; },
                         [](const Expr::Cast &y_) -> json { return {4, Expr::cast_to_json(y_)}; },
-                        [](const Expr::Index &y_) -> json { return {5, Expr::index_to_json(y_)}; },
-                        [](const Expr::RefTo &y_) -> json { return {6, Expr::refto_to_json(y_)}; },
-                        [](const Expr::Alloc &y_) -> json { return {7, Expr::alloc_to_json(y_)}; },
-                        [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; },
-                        [](const Expr::ForeignCall &y_) -> json { return {9, Expr::foreigncall_to_json(y_)}; },
-                        [](const Expr::OffsetOf &y_) -> json { return {10, Expr::offsetof_to_json(y_)}; },
-                        [](const Expr::SizeOf &y_) -> json { return {11, Expr::sizeof_to_json(y_)}; });
+                        [](const Expr::BitCast &y_) -> json { return {5, Expr::bitcast_to_json(y_)}; },
+                        [](const Expr::Index &y_) -> json { return {6, Expr::index_to_json(y_)}; },
+                        [](const Expr::RefTo &y_) -> json { return {7, Expr::refto_to_json(y_)}; },
+                        [](const Expr::Alloc &y_) -> json { return {8, Expr::alloc_to_json(y_)}; },
+                        [](const Expr::Invoke &y_) -> json { return {9, Expr::invoke_to_json(y_)}; },
+                        [](const Expr::ForeignCall &y_) -> json { return {10, Expr::foreigncall_to_json(y_)}; },
+                        [](const Expr::OffsetOf &y_) -> json { return {11, Expr::offsetof_to_json(y_)}; },
+                        [](const Expr::SizeOf &y_) -> json { return {12, Expr::sizeof_to_json(y_)}; });
 }
 
 Overload overload_from_json(const json &j_) {
@@ -3424,6 +3450,10 @@ Expr::Cast cast_fields_from_msgpack(MsgpackReader &, size_t);
 void cast_fields_to_msgpack(MsgpackWriter &, const Expr::Cast &);
 Expr::Cast cast_from_msgpack(MsgpackReader &);
 void cast_to_msgpack(MsgpackWriter &, const Expr::Cast &);
+Expr::BitCast bitcast_fields_from_msgpack(MsgpackReader &, size_t);
+void bitcast_fields_to_msgpack(MsgpackWriter &, const Expr::BitCast &);
+Expr::BitCast bitcast_from_msgpack(MsgpackReader &);
+void bitcast_to_msgpack(MsgpackWriter &, const Expr::BitCast &);
 Expr::Index index_fields_from_msgpack(MsgpackReader &, size_t);
 void index_fields_to_msgpack(MsgpackWriter &, const Expr::Index &);
 Expr::Index index_from_msgpack(MsgpackReader &);
@@ -3916,6 +3946,10 @@ Term::Poison poison_fields_from_msgpack(MsgpackReader &, size_t);
 void poison_fields_to_msgpack(MsgpackWriter &, const Term::Poison &);
 Term::Poison poison_from_msgpack(MsgpackReader &);
 void poison_to_msgpack(MsgpackWriter &, const Term::Poison &);
+Term::Defer defer_fields_from_msgpack(MsgpackReader &, size_t);
+void defer_fields_to_msgpack(MsgpackWriter &, const Term::Defer &);
+Term::Defer defer_from_msgpack(MsgpackReader &);
+void defer_to_msgpack(MsgpackWriter &, const Term::Defer &);
 Term::Select select_fields_from_msgpack(MsgpackReader &, size_t);
 void select_fields_to_msgpack(MsgpackWriter &, const Term::Select &);
 Term::Select select_from_msgpack(MsgpackReader &);
@@ -5727,6 +5761,24 @@ void Term::poison_to_msgpack(MsgpackWriter &w_, const Term::Poison &x_) {
   Term::poison_fields_to_msgpack(w_, x_);
 }
 
+Term::Defer Term::defer_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 1) throw std::runtime_error("Expected Term::Defer with 1 field(s)");
+  auto t = Type::any_from_msgpack(r_);
+  return Term::Defer(t);
+}
+
+void Term::defer_fields_to_msgpack(MsgpackWriter &w_, const Term::Defer &x_) { Type::any_to_msgpack(w_, x_.t); }
+
+Term::Defer Term::defer_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Term::defer_fields_from_msgpack(r_, n_);
+}
+
+void Term::defer_to_msgpack(MsgpackWriter &w_, const Term::Defer &x_) {
+  w_.writeArrayHeader(1);
+  Term::defer_fields_to_msgpack(w_, x_);
+}
+
 Term::Select Term::select_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 3) throw std::runtime_error("Expected Term::Select with 3 field(s)");
   auto root = named_from_msgpack(r_);
@@ -5784,7 +5836,8 @@ Term::Any Term::any_from_msgpack(MsgpackReader &r_) {
       case 13: return Term::nullptrconst_fields_from_msgpack(r_, n_ - 1);
       case 14: return Term::stringconst_fields_from_msgpack(r_, n_ - 1);
       case 15: return Term::poison_fields_from_msgpack(r_, n_ - 1);
-      case 16: return Term::select_fields_from_msgpack(r_, n_ - 1);
+      case 16: return Term::defer_fields_from_msgpack(r_, n_ - 1);
+      case 17: return Term::select_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -5807,6 +5860,7 @@ Term::Any Term::any_from_msgpack(MsgpackReader &r_) {
       case 14: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 15: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 16: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 17: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -5890,9 +5944,14 @@ void Term::any_to_msgpack(MsgpackWriter &w_, const Term::Any &x_) {
         w_.writeInt32(15);
         Term::poison_fields_to_msgpack(w_, y_);
       },
+      [&](const Term::Defer &y_) -> void {
+        w_.writeArrayHeader(2);
+        w_.writeInt32(16);
+        Term::defer_fields_to_msgpack(w_, y_);
+      },
       [&](const Term::Select &y_) -> void {
         w_.writeArrayHeader(4);
-        w_.writeInt32(16);
+        w_.writeInt32(17);
         Term::select_fields_to_msgpack(w_, y_);
       });
 }
@@ -5989,6 +6048,28 @@ Expr::Cast Expr::cast_from_msgpack(MsgpackReader &r_) {
 void Expr::cast_to_msgpack(MsgpackWriter &w_, const Expr::Cast &x_) {
   w_.writeArrayHeader(2);
   Expr::cast_fields_to_msgpack(w_, x_);
+}
+
+Expr::BitCast Expr::bitcast_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Expr::BitCast with 2 field(s)");
+  auto from = Term::any_from_msgpack(r_);
+  auto as = Type::any_from_msgpack(r_);
+  return {from, as};
+}
+
+void Expr::bitcast_fields_to_msgpack(MsgpackWriter &w_, const Expr::BitCast &x_) {
+  Term::any_to_msgpack(w_, x_.from);
+  Type::any_to_msgpack(w_, x_.as);
+}
+
+Expr::BitCast Expr::bitcast_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Expr::bitcast_fields_from_msgpack(r_, n_);
+}
+
+void Expr::bitcast_to_msgpack(MsgpackWriter &w_, const Expr::BitCast &x_) {
+  w_.writeArrayHeader(2);
+  Expr::bitcast_fields_to_msgpack(w_, x_);
 }
 
 Expr::Index Expr::index_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
@@ -6221,13 +6302,14 @@ Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
       case 2: return Expr::mathop_fields_from_msgpack(r_, n_ - 1);
       case 3: return Expr::introp_fields_from_msgpack(r_, n_ - 1);
       case 4: return Expr::cast_fields_from_msgpack(r_, n_ - 1);
-      case 5: return Expr::index_fields_from_msgpack(r_, n_ - 1);
-      case 6: return Expr::refto_fields_from_msgpack(r_, n_ - 1);
-      case 7: return Expr::alloc_fields_from_msgpack(r_, n_ - 1);
-      case 8: return Expr::invoke_fields_from_msgpack(r_, n_ - 1);
-      case 9: return Expr::foreigncall_fields_from_msgpack(r_, n_ - 1);
-      case 10: return Expr::offsetof_fields_from_msgpack(r_, n_ - 1);
-      case 11: return Expr::sizeof_fields_from_msgpack(r_, n_ - 1);
+      case 5: return Expr::bitcast_fields_from_msgpack(r_, n_ - 1);
+      case 6: return Expr::index_fields_from_msgpack(r_, n_ - 1);
+      case 7: return Expr::refto_fields_from_msgpack(r_, n_ - 1);
+      case 8: return Expr::alloc_fields_from_msgpack(r_, n_ - 1);
+      case 9: return Expr::invoke_fields_from_msgpack(r_, n_ - 1);
+      case 10: return Expr::foreigncall_fields_from_msgpack(r_, n_ - 1);
+      case 11: return Expr::offsetof_fields_from_msgpack(r_, n_ - 1);
+      case 12: return Expr::sizeof_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -6245,6 +6327,7 @@ Expr::Any Expr::any_from_msgpack(MsgpackReader &r_) {
       case 9: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 10: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 11: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 12: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -6277,39 +6360,44 @@ void Expr::any_to_msgpack(MsgpackWriter &w_, const Expr::Any &x_) {
         w_.writeInt32(4);
         Expr::cast_fields_to_msgpack(w_, y_);
       },
+      [&](const Expr::BitCast &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(5);
+        Expr::bitcast_fields_to_msgpack(w_, y_);
+      },
       [&](const Expr::Index &y_) -> void {
         w_.writeArrayHeader(4);
-        w_.writeInt32(5);
+        w_.writeInt32(6);
         Expr::index_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::RefTo &y_) -> void {
         w_.writeArrayHeader(6);
-        w_.writeInt32(6);
+        w_.writeInt32(7);
         Expr::refto_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::Alloc &y_) -> void {
         w_.writeArrayHeader(5);
-        w_.writeInt32(7);
+        w_.writeInt32(8);
         Expr::alloc_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::Invoke &y_) -> void {
         w_.writeArrayHeader(6);
-        w_.writeInt32(8);
+        w_.writeInt32(9);
         Expr::invoke_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::ForeignCall &y_) -> void {
         w_.writeArrayHeader(4);
-        w_.writeInt32(9);
+        w_.writeInt32(10);
         Expr::foreigncall_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::OffsetOf &y_) -> void {
         w_.writeArrayHeader(3);
-        w_.writeInt32(10);
+        w_.writeInt32(11);
         Expr::offsetof_fields_to_msgpack(w_, y_);
       },
       [&](const Expr::SizeOf &y_) -> void {
         w_.writeArrayHeader(2);
-        w_.writeInt32(11);
+        w_.writeInt32(12);
         Expr::sizeof_fields_to_msgpack(w_, y_);
       });
 }

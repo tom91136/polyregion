@@ -636,6 +636,7 @@ ValPtr CodeGen::mkTermVal(const Term::Any &term, const std::string &key) {
         }
         return llvm::PoisonValue::get(tpe);
       },
+      [&](const Term::Defer &x) -> ValPtr { return llvm::Constant::getNullValue(resolveType(x.t)); },
       [&](const Term::StringConst &x) -> ValPtr {
         // XXX __constant, not __global: rusticl's program loader panics on a __global initialised string
         return B.CreateGlobalString(x.value, "strlit", C.addressSpace(TypeSpace::Constant()), &M);
@@ -898,6 +899,14 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
           return B.CreateFPCast(from, toTpe, "fractional_cast");
         } else throw BackendException("unhandled cast");
+      },
+      [&](const Expr::BitCast &x) -> ValPtr {
+        const auto from = mkTermVal(x.from);
+        const auto to = resolveType(x.as);
+        if (B.GetInsertBlock()->getModule()->getDataLayout().getTypeSizeInBits(from->getType())
+            != B.GetInsertBlock()->getModule()->getDataLayout().getTypeSizeInBits(to))
+          throw BackendException::semantic("bit-cast changes width from " + to_string(x.from.tpe()) + " to " + to_string(x.as));
+        return B.CreateBitCast(from, to);
       },
       [&](const Expr::Invoke &x) -> ValPtr {
         auto allArgs = x.args;

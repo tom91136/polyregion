@@ -393,6 +393,7 @@ object Interpreter {
       case p.Expr.MathOp(op)            => mathOp(op, fr)
       case p.Expr.SpecOp(op)            => spec(op)
       case p.Expr.Cast(from, as)        => cast(evalT(from, fr), from.tpe, as)
+      case p.Expr.BitCast(from, as)     => decode(encode(evalT(from, fr), from.tpe), as)
       case p.Expr.Index(lhs, idx, comp) => load(base(lhs, fr) + asI(evalT(idx, fr)) * sizeOf(comp), comp)
       case p.Expr.RefTo(lhs, idx, comp, _, _) =>
         val b = idx match { case Some(_) => base(lhs, fr); case None => addressOf(lhs, fr) }
@@ -426,6 +427,13 @@ object Interpreter {
         storeBits(addr + s.length, 1, 0L)
         V.I(addr)
       case p.Term.Poison(_) => sys.error("poison evaluated")
+      case p.Term.Defer(tpe) =>
+        tpe.kind match {
+          case p.Type.Kind.Fractional   => V.D(0)
+          case p.Type.Kind.Integral     => V.I(0)
+          case _ if tpe == p.Type.Unit0 => V.U
+          case _                        => V.I(0)
+        }
       case s: p.Term.Select => val (a, lt) = resolve(s.root, s.steps, fr); load(a, lt)
     }
 

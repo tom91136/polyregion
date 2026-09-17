@@ -916,6 +916,22 @@ POLYREGION_EXPORT bool Term::Poison::operator==(const Base &rhs_) const {
 Term::Poison::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Poison>(*this)); }
 Term::Any Term::Poison::widen() const { return Any(*this); };
 
+Term::Defer::Defer(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
+uint32_t Term::Defer::id() const { return variant_id; };
+size_t Term::Defer::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(t)>()(t) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Term::Defer Term::Defer::withT(const Type::Any &v_) const { return Term::Defer(v_); }
+POLYREGION_EXPORT bool Term::Defer::operator==(const Term::Defer &rhs) const { return (this->t == rhs.t); }
+POLYREGION_EXPORT bool Term::Defer::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Term::Defer &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Term::Defer::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Defer>(*this)); }
+Term::Any Term::Defer::widen() const { return Any(*this); };
+
 Term::Select::Select(Named root, std::vector<PathStep::Any> steps, Type::Any tpe) noexcept
     : Term::Base(tpe), root(std::move(root)), steps(std::move(steps)), tpe(std::move(tpe)) {}
 uint32_t Term::Select::id() const { return variant_id; };
@@ -1030,6 +1046,26 @@ POLYREGION_EXPORT bool Expr::Cast::operator==(const Base &rhs_) const {
 }
 Expr::Cast::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cast>(*this)); }
 Expr::Any Expr::Cast::widen() const { return Any(*this); };
+
+Expr::BitCast::BitCast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
+uint32_t Expr::BitCast::id() const { return variant_id; };
+size_t Expr::BitCast::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(from)>()(from) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(as)>()(as) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Expr::BitCast Expr::BitCast::withFrom(const Term::Any &v_) const { return Expr::BitCast(v_, as); }
+Expr::BitCast Expr::BitCast::withAs(const Type::Any &v_) const { return Expr::BitCast(from, v_); }
+POLYREGION_EXPORT bool Expr::BitCast::operator==(const Expr::BitCast &rhs) const {
+  return (this->from == rhs.from) && (this->as == rhs.as);
+}
+POLYREGION_EXPORT bool Expr::BitCast::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Expr::BitCast &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Expr::BitCast::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BitCast>(*this)); }
+Expr::Any Expr::BitCast::widen() const { return Any(*this); };
 
 Expr::Index::Index(Term::Any lhs, Term::Any idx, Type::Any comp) noexcept
     : Expr::Base(comp), lhs(std::move(lhs)), idx(std::move(idx)), comp(std::move(comp)) {}
@@ -5176,6 +5212,9 @@ std::size_t std::hash<polyregion::polyast::Term::StringConst>::operator()(const 
 std::size_t std::hash<polyregion::polyast::Term::Poison>::operator()(const polyregion::polyast::Term::Poison &x) const noexcept {
   return x.hash_code();
 }
+std::size_t std::hash<polyregion::polyast::Term::Defer>::operator()(const polyregion::polyast::Term::Defer &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Term::Select>::operator()(const polyregion::polyast::Term::Select &x) const noexcept {
   return x.hash_code();
 }
@@ -5195,6 +5234,9 @@ std::size_t std::hash<polyregion::polyast::Expr::IntrOp>::operator()(const polyr
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Expr::Cast>::operator()(const polyregion::polyast::Expr::Cast &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::Expr::BitCast>::operator()(const polyregion::polyast::Expr::BitCast &x) const noexcept {
   return x.hash_code();
 }
 std::size_t std::hash<polyregion::polyast::Expr::Index>::operator()(const polyregion::polyast::Expr::Index &x) const noexcept {

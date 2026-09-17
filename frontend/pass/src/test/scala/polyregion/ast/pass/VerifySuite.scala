@@ -57,6 +57,20 @@ class VerifySuite extends munit.FunSuite {
     assert(entryErrs.nonEmpty, s"expected at least one error for entry, got: $errs")
   }
 
+  test("bit-casts require equal-width scalar types") {
+    val valid = errors(
+      List(p.Stmt.Var(named("sameWidth", p.Type.Float32), Some(p.Expr.BitCast(p.Term.IntU32Const(0), p.Type.Float32))))
+    )
+    assertEquals(valid, Nil)
+
+    val invalid = errors(
+      List(
+        p.Stmt.Var(named("differentWidth", p.Type.Float64), Some(p.Expr.BitCast(p.Term.IntU32Const(0), p.Type.Float64)))
+      )
+    )
+    assert(invalid.exists(_.contains("Cannot bit-cast differently-sized or non-scalar type")), invalid.mkString("\n"))
+  }
+
   private def errors(body: List[p.Stmt]): List[String] =
     Verify(
       program(entry(body = body :+ p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))),

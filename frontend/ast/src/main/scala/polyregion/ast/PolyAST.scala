@@ -103,6 +103,9 @@ object PolyAST {
     case StringConst(value: String) extends Term(Type.Ptr(Type.IntS8, Type.Space.Constant))
     case Poison(t: Type)            extends Term(t)
 
+    /** Holds a type-dependent value until specialisation makes its representation concrete. */
+    case Defer(t: Type) extends Term(t)
+
     case Select(root: Named, steps: List[PathStep], override val tpe: Type) extends Term(tpe)
   }
 
@@ -112,6 +115,7 @@ object PolyAST {
     case MathOp(op: Math)                        extends Expr(op.tpe)
     case IntrOp(op: Intr)                        extends Expr(op.tpe)
     case Cast(from: Term, as: Type)              extends Expr(as)
+    case BitCast(from: Term, as: Type)           extends Expr(as)
     case Index(lhs: Term, idx: Term, comp: Type) extends Expr(comp)
     case RefTo(lhs: Term, idx: Option[Term], comp: Type, space: Type.Space, region: Region)
         extends Expr(Type.Ptr(comp, space))
@@ -1006,6 +1010,7 @@ object PolyAST {
       case Term.NullPtrConst(x, space, region) => s"nullptr[${x.repr}, ${space.repr}${region.repr}]"
       case Term.StringConst(value)             => s"str($value)"
       case Term.Poison(t)                      => s"__poison__ /* poison of type ${t.repr} */"
+      case Term.Defer(t)                       => s"__defer__ /* deferred value of type ${t.repr} */"
       case Term.Select(root, steps, tpe) =>
         s"${root.symbol}: ${root.tpe.repr}${steps.map(_.repr).mkString("")}"
     }
@@ -1119,6 +1124,7 @@ object PolyAST {
         }
 
       case Expr.Cast(from, as)        => s"(${from.repr}).to[${as.repr}]"
+      case Expr.BitCast(from, as)     => s"(${from.repr}).bits[${as.repr}]"
       case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
       case Expr.RefTo(lhs, idx, comp, space, region) =>
         s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}${region.repr}](${idx.map(_.repr).getOrElse("")})"
