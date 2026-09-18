@@ -2999,6 +2999,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           r.push(Stmt::Var(*conditionalCode, Expr::Alias(Term::IntS32Const(0)), /*isMutable*/ true));
           r.exceptionCodes.emplace(exceptionMetadataKey(expr), *conditionalCode);
         }
+        const auto conditionalStorage = expr->isGLValue() ? Opt<Named>{r.newName(valueTpe)} : Opt<Named>{};
+        if (conditionalStorage) r.push(Stmt::Var(*conditionalStorage, std::optional<Expr::Any>{}, /*isMutable*/ true));
         auto arm = [&](RemapContext &r_, const clang::Expr *source) -> Expr::Any {
           const auto e = handleExpr(source, r_);
           if (conditionalWhat) {
@@ -3019,12 +3021,22 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               raise(fmt::format("Unsupported conditional standard exception without code metadata: {}", pretty_string(source, context)));
             r_.push(Stmt::Mut(select(r_, {}, *conditionalCode), Expr::Alias(select(r_, {}, *code))));
           }
+          // Namespace-scope constants are folded to values, even when Clang models the source arm as a glvalue.
+          // `conform` would materialise such a value inside this arm and return its address through `lhs`; that
+          // address is dead as soon as the arm ends. Give any folded glvalue arm shared storage in the enclosing
+          // full-expression scope. Genuine lvalues still retain their original address.
+          const auto alias = e.get<Expr::Alias>();
+          const bool addressable = (alias && alias->ref.template get<Term::Select>()) || e.get<Expr::Index>();
+          if (expr->isGLValue() && e.tpe() == valueTpe && !addressable) {
+            r_.push(Stmt::Mut(select(r_, {}, *conditionalStorage), conform(r_, e, valueTpe)));
+            return conform(r_, Expr::Alias(select(r_, {}, *conditionalStorage)), lhs.tpe);
+          }
           return conform(r_, e, lhs.tpe);
         };
         auto condTerm = r.newVar(handleExpr(expr->getCond(), r));
-        r.push(Stmt::Cond(condTerm, //
-                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getTrueExpr()))); }),
-                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getFalseExpr()))); })));
+        auto trueArm = r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getTrueExpr()))); });
+        auto falseArm = r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, arm(r_, expr->getFalseExpr()))); });
+        r.push(Stmt::Cond(condTerm, trueArm, falseArm));
         return Expr::Alias(lhs);
       },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {

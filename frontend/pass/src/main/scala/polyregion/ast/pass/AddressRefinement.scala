@@ -760,6 +760,7 @@ private[pass] object AddressRefinement {
         state: Map[Query[AddressValue], AddressValue],
         term: p.Term,
         pointsToBinding: Boolean,
+        materialisesStorageAddress: Boolean,
         space: p.Type.Space
     ): AddressValue =
       term match {
@@ -779,10 +780,16 @@ private[pass] object AddressRefinement {
               AddressValue.absolute(
                 Some(Provenance.Local(root.symbol, steps)),
                 Some(
-                  root.tpe match {
-                    case _: p.Type.Struct | _: p.Type.Arr => p.Type.Space.Private
-                    case _                                => spaceOf(root.tpe).getOrElse(space)
-                  }
+                  if (materialisesStorageAddress && localAggregates(root.symbol))
+                    root.tpe match {
+                      case p.Type.Arr(_, _, declared) if declared != p.Type.Space.Global => declared
+                      case _                                                             => p.Type.Space.Private
+                    }
+                  else
+                    root.tpe match {
+                      case _: p.Type.Struct => p.Type.Space.Private
+                      case _                => spaceOf(root.tpe).getOrElse(space)
+                    }
                 )
               )
             else {
@@ -816,7 +823,11 @@ private[pass] object AddressRefinement {
     def exprFact(state: Map[Query[AddressValue], AddressValue], expr: p.Expr): AddressValue = expr match {
       case p.Expr.Alias(term) => termFact(state, term)
       case p.Expr.Cast(term: p.Term.Select, p.Type.Ptr(_, space)) if !isCarrier(term.tpe) =>
-        addressFact(state, term, pointsToBinding = false, space)
+        val materialisesStorageAddress = term.tpe match {
+          case _: p.Type.Arr => true
+          case _             => false
+        }
+        addressFact(state, term, pointsToBinding = false, materialisesStorageAddress, space)
       case p.Expr.Cast(term, _) => termFact(state, term)
       case p.Expr.RefTo(
             p.Term.Select(root, Nil, p.Type.Ptr(component, _)),
@@ -831,6 +842,7 @@ private[pass] object AddressRefinement {
           state,
           term,
           index.isEmpty && isPtr(term.tpe) && comp == term.tpe,
+          materialisesStorageAddress = true,
           space
         )
       case p.Expr.Alloc(_, _, space, _) =>
@@ -1081,7 +1093,14 @@ private[pass] object AddressRefinement {
           Diagnostic(
             "incompatible-address-spaces",
             s"$label may denote pointers in incompatible address spaces in $context",
-            fact.spaces.toList.map(space => s"possible address space: $space").sortBy(identity)
+            fact.alternatives.toList
+              .map {
+                case address @ AbstractAddress.Absolute(Some(Provenance.Local(symbol, _)), _) =>
+                  val declared = declarations.get(symbol).map(_.tpe.repr).getOrElse("<unknown>")
+                  s"possible address: $address (storage type: $declared)"
+                case address => s"possible address: $address"
+              }
+              .sortBy(identity)
           )
         )
       else

@@ -189,7 +189,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         .mapValues(_.toSet)
         .toMap
       val effective = (grouped.keySet ++ stores.keySet).iterator.map { slot =>
-        slot -> grouped.get(slot).filter(_.nonEmpty).orElse(stores.get(slot)).getOrElse(Set.empty)
+        slot -> stores.get(slot).filter(_.nonEmpty).orElse(grouped.get(slot)).getOrElse(Set.empty)
       }.toMap
       val ambiguous = effective.collect {
         case ((root, path), spaces) if spaces.size > 1 => s"$root.${path.mkString(".")}"
@@ -223,7 +223,11 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         fallback: p.Type.Space
     ): p.Type.Space =
       if (select.steps.isEmpty && index.isEmpty) p.Type.Space.Private
-      else if (localStorage(select.root.symbol) && !AddressRefinement.isPtr(select.root.tpe)) p.Type.Space.Private
+      else if (localStorage(select.root.symbol) && !AddressRefinement.isPtr(select.root.tpe))
+        select.root.tpe match {
+          case p.Type.Arr(_, _, p.Type.Space.Global) => p.Type.Space.Private
+          case _ => AddressRefinement.spaceOf(select.root.tpe).getOrElse(p.Type.Space.Private)
+        }
       else if (select.steps.isEmpty) AddressRefinement.spaceOf(selected).getOrElse(fallback)
       else fallback
 

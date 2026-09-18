@@ -367,6 +367,39 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     )
   }
 
+  test("a pointer assigned from an explicitly local array remains local") {
+    val localPtr = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+    val values   = named("values", p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Local))
+    val assigned = named("assigned", localPtr)
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(values, None, isMutable = true),
+        p.Stmt.Var(
+          assigned,
+          Some(
+            p.Expr.RefTo(
+              selectT(values),
+              Some(p.Term.IntS64Const(0)),
+              p.Type.IntS32,
+              p.Type.Space.Local,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourcePointerLegalise()(program(kernel), NoopLog).entry.required
+
+    assertEquals(
+      out.collectAll[p.Stmt].collectFirst {
+        case p.Stmt.Var(name, _, _) if name.symbol == assigned.symbol => name.tpe
+      },
+      Some[p.Type](localPtr)
+    )
+  }
+
   test("pointer casts retain the refined source address space") {
     val value  = named("value")
     val source = named("source", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private))

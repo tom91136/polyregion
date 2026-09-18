@@ -41,6 +41,41 @@ class AddressRefinementSuite extends munit.FunSuite {
     assert(AddressValue.arenaRoot("capture").hasArenaRoot)
   }
 
+  test("taking a local scalar address refines a stale global pointer to private") {
+    val value   = named("value", p.Type.IntS32)
+    val pointer = named("pointer", ptrTpe)
+    val out     = named("out", p.Type.IntS32)
+    val analysis = analyse(
+      List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Var(
+          pointer,
+          Some(p.Expr.RefTo(selectT(value), None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))
+        ),
+        p.Stmt.Var(out, Some(p.Expr.Index(selectT(pointer), p.Term.IntS64Const(0), p.Type.IntS32)), false)
+      ),
+      Nil
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+    assertEquals(analysis.refinedSpace(pointer), Some(p.Type.Space.Private))
+  }
+
+  test("casting local array storage refines a stale global pointer to private") {
+    val storage = named("storage", p.Type.Arr(p.Type.IntU8, 16, p.Type.Space.Global))
+    val pointer = named("pointer", p.Type.Ptr(p.Type.IntU8, p.Type.Space.Global))
+    val analysis = analyse(
+      List(
+        p.Stmt.Var(storage, None, isMutable = true),
+        p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(storage), pointer.tpe)), isMutable = false)
+      ),
+      Nil
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+    assertEquals(analysis.refinedSpace(pointer), Some(p.Type.Space.Private))
+  }
+
   test("the logical model encodes a local arena-root address relatively") {
     val cap     = named(p.Conventions.CaptureArg, capPtr)
     val pointer = named("pointer", capPtr)
