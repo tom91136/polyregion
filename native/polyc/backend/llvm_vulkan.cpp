@@ -318,7 +318,7 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
                      | zip_with_index<unsigned>()                                                                        //
                      | map([&](const auto &arg, const auto &binding) {
                          const auto p = *arg.named.tpe.template get<Type::Ptr>();
-                         auto *handle = bufferHandle(cg.resolveType(p.comp), binding, arg.named.symbol);
+                         auto *handle = bufferHandle(physicalLocalType(cg, p.comp), binding, arg.named.symbol);
                          auto *base = bufferElementPtr(arg.named.tpe, handle, i64Zero());
                          auto *slot = cg.C.allocaAS(B, base->getType(), cg.C.AllocaAS, arg.named.symbol + "_base");
                          auto _ = cg.C.store(B, base, slot);

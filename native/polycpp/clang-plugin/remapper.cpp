@@ -131,7 +131,7 @@ struct VariableMarker {
       [&](const Type::Bool1 &) -> Expr::Any { return Expr::Alias(Term::Bool1Const(false)); }, //
       [&](const Type::Unit0 &) -> Expr::Any { return Expr::Alias(Term::Unit0Const()); },      //
       [&](const Type::Nothing &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },           //
-      [&](const Type::Struct &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },            //
+      [&](const Type::Struct &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },       //
       [&](const Type::Ptr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
       [&](const Type::Arr &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
       [&](const Type::Var &x) -> Expr::Any { return Expr::Alias(Term::Poison(x)); },          //
@@ -141,7 +141,8 @@ struct VariableMarker {
 }
 
 [[nodiscard]] static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
-                                      const std::function<bool(const StructDef &)> &predicate, Vector<std::shared_ptr<StructDef>> &chain) {
+                                      const std::function<bool(const StructDef &)> &predicate, Vector<std::shared_ptr<StructDef>> &chain,
+                                      const Opt<Named> &searchMember = {}) {
 
   const auto parents = r.parents ^ get_maybe(fqcn(derived.name));
   if (!parents) return false;
@@ -149,7 +150,7 @@ struct VariableMarker {
   if (const auto directBases = *parents ^ filter([&](const auto &p) { return predicate(*p); }); directBases.empty()) {
     const auto path = *parents ^ collect_first([&](const auto &parent) -> Opt<Vector<std::shared_ptr<StructDef>>> {
       Vector<std::shared_ptr<StructDef>> tail;
-      if (!walkParents(r, Type::Struct(parent->name, {}), predicate, tail)) return {};
+      if (!walkParents(r, Type::Struct(parent->name, {}), predicate, tail, searchMember)) return {};
       Vector<std::shared_ptr<StructDef>> result{parent};
       result ^= concat(tail);
       return result;
@@ -159,89 +160,113 @@ struct VariableMarker {
       return true;
     }
     return false;
-  } else if (directBases.size() != 1) {
-    // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
-    raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
-                      directBases ^ mk_string(", ", [](const auto &s) { return fqcn(s->name); }), repr(derived),
-                      chain ^ mk_string("->", [](const auto &s) { return fqcn(s->name); })));
   } else {
+    const auto distinctBases = directBases | map([](const auto &base) { return fqcn(base->name); }) | to<Set>();
+    if (distinctBases.size() != 1) {
+      if (searchMember) {
+        const auto typed = directBases ^ filter([&](const auto &base) {
+                             return base->members ^ exists([&](const auto &member) { return member.tpe == searchMember->tpe; });
+                           });
+        const auto typedNames = typed | map([](const auto &base) { return fqcn(base->name); }) | to<Set>();
+        if (typedNames.size() == 1) {
+          chain.emplace_back(typed[0]);
+          return true;
+        }
+      }
+      // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases.
+      raise(fmt::format("Ambiguous base {} for derived {} while selecting {}:{}, current chain is {}",
+                        directBases ^ mk_string(", ", [](const auto &s) { return fqcn(s->name); }), repr(derived),
+                        searchMember ? searchMember->symbol : "<unknown>", searchMember ? repr(searchMember->tpe) : "<unknown>",
+                        chain ^ mk_string("->", [](const auto &s) { return fqcn(s->name); })));
+    }
     chain.emplace_back(directBases[0]);
     return true;
   }
 }
 
+[[nodiscard]] static Type::Struct structWithVariables(const StructDef &def) {
+  return Type::Struct(def.name, def.tpeVars | map([](const auto &variable) { return variable.widen(); }) | to_vector());
+}
+
 [[nodiscard]] static Named baseMember(const StructDef &s) {
-  return Named(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(s.name)), Type::Struct(s.name, {}));
+  return Named(fmt::format("{}_{}", polyregion::conventions::BaseFieldPrefix, fqcn(s.name)), structWithVariables(s));
 }
 
 [[nodiscard]] static Term::Select select(Remapper::RemapContext &r, const Vector<Named> &init, const Named &last) {
-  // Members are matched by symbol only: callers sometimes pass Type::Nothing as the segment tpe
-  // because per-step types aren't carried in the IR anymore; the struct def's members have the
-  // real type, so a `Named ==` comparison would miss every reach-through.
-  const auto memberSymbolMatches = [](const Named &member) { return [&member](const Named &m) { return m.symbol == member.symbol; }; };
+  const auto unqualified = [](const std::string_view symbol) {
+    const auto offset = symbol.rfind("::");
+    return offset == std::string_view::npos ? symbol : symbol.substr(offset + 2);
+  };
+  const auto memberSymbolMatches = [&unqualified](const Named &member) {
+    const std::string_view symbol = member.symbol;
+    const auto requested = unqualified(symbol);
+    return [&unqualified, symbol, requested](const Named &candidate) {
+      // A member expression can retain the FieldDecl's template-specialisation owner while its base has already
+      // been canonicalised to an ABI-equivalent specialisation (notably CCCL's T* / const T* agent storage).
+      // Field names are unique within the struct selected below, so resolve against that struct's canonical member
+      // even when both spellings are qualified by different owners.
+      return candidate.symbol == symbol || unqualified(candidate.symbol) == requested;
+    };
+  };
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
-    auto expand = [&](const Type::Struct &s) -> Vector<Named> {
-      if (r.findStruct(fqcn(s.name), "select")->members ^ exists(memberSymbolMatches(member))) return {base};
+    auto expand = [&](const Type::Struct &s) -> std::pair<Vector<Named>, Named> {
+      const auto canonical = [&](const std::shared_ptr<StructDef> &def) -> Opt<Named> {
+        return def->members | find(memberSymbolMatches(member))
+               | map([&](const auto &actual) { return Named(actual.symbol, member.tpe.is<Type::Nothing>() ? actual.tpe : member.tpe); });
+      };
+      const auto owner = r.findStruct(fqcn(s.name), "select");
+      if (auto actual = canonical(owner)) return {{base}, *actual};
       if (Vector<std::shared_ptr<StructDef>> path;
-          walkParents(r, s, [&](const auto &p) { return p.members ^ exists(memberSymbolMatches(member)); }, path)) {
-        return path | map([&](const auto &def) { return baseMember(*def); }) | prepend(base) | to_vector();
-      }
-      const auto sd = r.findStruct(fqcn(s.name), "select");
-      const auto memberDump = sd->members ^ mk_string(", ", [](const auto &m) { return m.symbol + ":" + repr(m.tpe); });
+          walkParents(r, s, [&](const auto &p) { return p.members ^ exists(memberSymbolMatches(member)); }, path, member))
+        if (auto actual = canonical(path.back()))
+          return {path | map([&](const auto &def) { return baseMember(*def); }) | prepend(base) | to_vector(), *actual};
+      const auto memberDump = owner->members ^ mk_string(", ", [](const auto &m) { return m.symbol + ":" + repr(m.tpe); });
       raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]", member.symbol,
                         repr(member.tpe), repr(s), memberDump));
     };
-    if (const auto s = base.tpe.get<Type::Struct>()) return expand(*s);
-    if (const auto ptr = base.tpe.get<Type::Ptr>()) {
-      if (const auto s = ptr->comp.get<Type::Struct>()) return expand(*s);
+    // Struct storage may be wrapped by pointers (captures/references) or a one-element local array (__shared__).
+    for (Type::Any type = base.tpe;;) {
+      if (const auto s = type.get<Type::Struct>()) return expand(*s);
+      if (const auto ptr = type.get<Type::Ptr>()) {
+        type = ptr->comp;
+        continue;
+      }
+      if (const auto array = type.get<Type::Arr>()) {
+        type = array->comp;
+        continue;
+      }
+      break;
     }
-    raise(fmt::format("Selecting non-struct type {}", repr(base)));
+    raise(fmt::format("Selecting non-struct type {} (base {}) for member {}", repr(base.tpe), repr(base), last.symbol));
   };
 
+  // Marker erasure turns an element record into its Type.Var. Selecting the record's placeholder byte is therefore
+  // the element itself; rocThrust does this while value-initialising scan accumulators.
+  if (!init.empty())
+    if (const auto variable = init.back().tpe.get<Type::Var>(); variable && !(r.callableVariables ^ contains(variable->name)))
+      return select(r, Vector<Named>(init.begin(), init.end() - 1), init.back());
+
   if (init.empty()) return dsl::Select(Vector<Named>{}, last);
-  if (init.size() == 1) {
-    return dsl::Select(selectWithInheritance(init[0], last), last);
-  } else {
-    // Walk the path step by step, looking up each segment's actual type from the previous
-    // segment's struct definition. The path's intermediate Nameds carry Type::Nothing
-    // (per-step types aren't preserved in the new AST), but selectWithInheritance needs a
-    // Struct/Ptr<Struct> base to dispatch on, so we re-hydrate types as we go.
-    auto resolveTpe = [&](const Named &n, const Type::Any &fallback) -> Type::Any {
-      if (!n.tpe.is<Type::Nothing>()) return n.tpe;
-      // Fallback type is the previous struct; look up the member with this symbol there.
-      auto sname = fallback.get<Type::Struct>();
-      if (!sname) {
-        if (auto p = fallback.get<Type::Ptr>()) sname = p->comp.get<Type::Struct>();
-      }
-      if (!sname) return Type::Nothing();
-      auto def = r.findStruct(fqcn(sname->name), "select-walk");
-      auto m = def->members ^ find([&](const auto &mm) { return mm.symbol == n.symbol; });
-      return m ? m->tpe : Type::Nothing();
-    };
-    Vector<Named> rehydrated;
-    rehydrated.reserve(init.size() + 1);
-    auto path = init ^ append(last);
-    Type::Any prev = Type::Nothing();
-    for (auto &n : path) {
-      auto tpe = resolveTpe(n, prev);
-      rehydrated.emplace_back(n.symbol, tpe);
-      prev = tpe;
-    }
-    return dsl::Select(
-        rehydrated | sliding(2, 1) | flat_map([&](const auto &xs) { return selectWithInheritance(xs[0], xs[1]); }) | to_vector(), last);
-  }
+  Vector<Named> path{init.front()};
+  path.reserve(init.size() + 1);
+  const auto extend = [&](const Named &requested) {
+    auto [prefix, member] = selectWithInheritance(path.back(), requested);
+    path.insert(path.end(), prefix.begin() + 1, prefix.end());
+    path.emplace_back(member);
+  };
+  for (auto requested = std::next(init.begin()); requested != init.end(); ++requested)
+    extend(*requested);
+  extend(last);
+  return dsl::Select(Vector<Named>(path.begin(), path.end() - 1), path.back());
 }
 
 Term::Select Remapper::selectPath(RemapContext &r, const Vector<Named> &prefix, const Named &leaf) const { return select(r, prefix, leaf); }
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const Named &root) {
   if (auto def = r.structs ^ get_maybe(fqcn(tpe.name))) {
-    // XXX zero-init the synthesised placeholder byte, otherwise it's poison @ O3+LTO as it propagates through empty-struct copies into
-    // adjacent stack slots
-    if (r.emptyStruct(**def)) {
-      r.push(Stmt::Mut(select(r, {root}, EmptyStructMarker), defaultValue(EmptyStructMarker.tpe)));
-      return;
-    }
+    // An empty struct has no source-level member to select. Backend struct allocation owns the synthetic placeholder
+    // byte, including when this type appears as a nested empty base.
+    if (r.emptyStruct(**def)) return;
     for (auto &named : (*def)->members) {
       if (named.tpe.template is<Type::Struct>()) continue;
       if (const auto arr = named.tpe.template get<Type::Arr>()) {
@@ -254,7 +279,7 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
         const auto lim = static_cast<uint64_t>(arr->length);
         for (uint64_t i = 0; i < lim; ++i) {
           const auto defv = defaultValue(arr->comp);
-          const auto tmp = Named("#init_v" + std::to_string(i), arr->comp);
+          const auto tmp = r.newName(arr->comp);
           r.push(Stmt::Var(tmp, defv, /*isMutable*/ false));
           r.push(Stmt::Update(member, Term::IntU64Const(i), select(r, {}, tmp)));
         }
@@ -282,6 +307,7 @@ Expr::Any Remapper::zeroInitialise(RemapContext &r, const Type::Any &tpe) {
       r.push(Stmt::Update(slots, Term::IntU64Const(i), r.newVar(zeroInitialise(r, arrTpe->comp))));
     return Expr::Alias(slots);
   }
+  if (tpe.is<Type::Var>()) return Expr::Alias(Term::Defer(tpe));
   return defaultValue(tpe);
 }
 
@@ -410,7 +436,14 @@ static void copyUnionStorage(Remapper::RemapContext &r, const Named &dst, const 
       [&](const Vector<Named> &path, const Type::Struct &current, const clang::APValue &structure) {
         if (!structure.isStruct() || structure.getStructNumBases() != 0) return false;
         const auto definition = r.structs ^ get_maybe(fqcn(current.name));
-        if (!definition || static_cast<size_t>(structure.getStructNumFields()) != (*definition)->members.size()) return false;
+        if (!definition) return false;
+        // PolyAST gives an empty C++ record one synthetic byte so it remains a
+        // representable value type. Clang's APValue correctly has no fields;
+        // there is therefore nothing to initialise in that storage marker.
+        if (structure.getStructNumFields() == 0 && (*definition)->members.size() == 1
+            && (*definition)->members.front().symbol == EmptyStructMarker.symbol)
+          return true;
+        if (static_cast<size_t>(structure.getStructNumFields()) != (*definition)->members.size()) return false;
         for (size_t i = 0; i < (*definition)->members.size(); ++i) {
           const auto &member = (*definition)->members[i];
           const auto &field = structure.getStructField(i);
@@ -1220,11 +1253,10 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                   }
                   handleStmt(decl->getBody(), r);
                   r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
-                } else if (const auto variable = instancePtr->comp.template get<Type::Var>();
-                           variable && (r.callableVariables ^ contains(variable->name))) {
-                  // Callable variables erase their marker record. Their implicit constructors still
+                } else if (instancePtr->comp.template is<Type::Var>()) {
+                  // Type variables erase their marker record. Their implicit constructors still
                   // surface while lowering instantiated vendor templates, so preserve the only
-                  // observable operation: copy/move construction copies the function identity.
+                  // observable operation: copy/move construction copies the erased value.
                   if (!ctor->isTrivial())
                     raise(fmt::format("non-trivial type-variable constructor `{}` is unsupported", decl->getQualifiedNameAsString()));
                   if (ctor->isCopyConstructor() || ctor->isMoveConstructor()) {
@@ -1256,13 +1288,11 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                                                && args.size() == 1;
               const auto receiverPtr = receiver ? receiver->named.tpe.get<Type::Ptr>() : Opt<Type::Ptr>{};
               const auto receiverVariable = receiverPtr ? receiverPtr->comp.get<Type::Var>() : Opt<Type::Var>{};
-              const bool callableVariableAssignment = method && receiverVariable && (r.callableVariables ^ contains(receiverVariable->name))
-                                                      && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator());
-              if (callableVariableAssignment && !defaultedAssignment)
-                raise(fmt::format("non-trivial callable-variable assignment `{}` is unsupported", decl->getQualifiedNameAsString()));
-              const bool callableAssignment =
-                  defaultedAssignment && receiverVariable && (r.callableVariables ^ contains(receiverVariable->name));
-              if (callableAssignment) {
+              const bool typeVariableAssignment =
+                  method && receiverVariable && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator());
+              if (typeVariableAssignment && !defaultedAssignment)
+                raise(fmt::format("non-trivial type-variable assignment `{}` is unsupported", decl->getQualifiedNameAsString()));
+              if (defaultedAssignment && receiverVariable) {
                 const auto lhs = Term::Select(receiver->named, {PathStep::Deref().widen()}, receiverPtr->comp);
                 const auto rhs = [&]() -> Term::Any {
                   if (const auto sourcePtr = args[0].named.tpe.get<Type::Ptr>(); sourcePtr && sourcePtr->comp == receiverPtr->comp)
@@ -1981,6 +2011,20 @@ void Remapper::recordExceptionCode(const clang::Stmt &stmt, const Named &code, R
   return nullptr;
 }
 
+[[nodiscard]] static bool isZeroValueInitialisation(const clang::Expr *expr) {
+  while (const auto *next = transparentExceptionExpr(expr))
+    expr = next;
+  if (llvm::isa<clang::ImplicitValueInitExpr, clang::CXXScalarValueInitExpr>(expr)) return true;
+  if (const auto *construct = llvm::dyn_cast<clang::CXXConstructExpr>(expr)) return construct->requiresZeroInitialization();
+  if (const auto *init = llvm::dyn_cast<clang::InitListExpr>(expr)) {
+    const auto *syntax = init->isSemanticForm() ? init->getSyntacticForm() : init;
+    return syntax && (syntax->getNumInits() == 0 || llvm::all_of(syntax->inits(), [](const auto *element) {
+                        return llvm::isa<clang::ImplicitValueInitExpr>(element);
+                      }));
+  }
+  return false;
+}
+
 [[nodiscard]] static const clang::MaterializeTemporaryExpr *lifetimeExtendedTemporary(const clang::VarDecl *var) {
   const clang::Stmt *current = var ? var->getInit() : nullptr;
   while (current) {
@@ -2479,6 +2523,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       // scalar/pointer brace-init: T{} is zero, T{x} is x (member inits like `_M_len{__len}` in libstdc++)
       [&](const clang::InitListExpr *expr) -> Expr::Any {
         const auto tpe = handleType(expr->getType(), r);
+        if (tpe.is<Type::Var>() && isZeroValueInitialisation(expr)) return zeroInitialise(r, tpe);
         if (const auto structTpe = tpe.get<Type::Struct>()) {
           const auto destination = r.constructInto;
           r.constructInto.reset();
@@ -2549,7 +2594,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           initArray(slots, *arrTpe, expr);
           return Expr::Alias(slots);
         }
-        if (expr->getNumInits() == 0) return integralConstOfType(tpe, 0);
+        if (expr->getNumInits() == 0) return zeroInitialise(r, tpe);
         if (expr->getNumInits() == 1) return conform(r, handleExpr(expr->getInit(0), r), tpe);
         failExpr();
         return Expr::Alias(Term::Poison(tpe));
@@ -2681,6 +2726,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::CastExpr *stmt) -> Expr::Any {
         const auto targetTpe = handleType(stmt->getType(), r);
+        if (targetTpe.is<Type::Var>() && isZeroValueInitialisation(stmt)) return zeroInitialise(r, targetTpe);
         const auto sourceExpr = handleExpr(stmt->getSubExpr(), r);
         switch (stmt->getCastKind()) {
           case clang::CK_FloatingCast:
@@ -2715,7 +2761,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               auto idx = r.newVar(integralConstOfType(Type::IntS64(), 0));
               return Expr::Index(base, idx, ptrTpe->comp);
             } else if (const auto src = sourceExpr.tpe().get<Type::Ptr>(), dst = targetTpe.get<Type::Ptr>();
-                       src && dst && src->comp == dst->comp) {
+                       src && dst && sameTypeShape(src->comp, dst->comp)) {
+              // Address refinement can specialise every level of a nested pointer. Clang's source type has no
+              // equivalent inferred spaces, so retain the refined value when only those spaces differ.
               return sourceExpr;
             } else
               raise(fmt::format("Unsupported {} at {} ({} does not load as {})", stmt->getCastKindName(),
@@ -2818,13 +2866,17 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_LValueToRValueBitCast: {
             const auto srcPtr = sourceExpr.tpe().get<Type::Ptr>();
             const auto storageTpe = srcPtr ? srcPtr->comp : sourceExpr.tpe();
-            const auto scalar = [](const Type::Any &tpe) {
-              const auto k = tpe.kind();
-              return k.is<TypeKind::Integral>() || k.is<TypeKind::Fractional>();
-            };
-            if (!scalar(storageTpe) || !scalar(targetTpe))
-              raise(fmt::format("Unsupported cast {} at {} ({} does not reinterpret as {})", stmt->getCastKindName(),
-                                stmt->getBeginLoc().printToString(context.getSourceManager()), repr(storageTpe), repr(targetTpe)));
+            // Clang uses an lvalue bitcast for vendor-library storage wrappers even when
+            // marker erasure leaves both sides with the same PolyAST shape. No storage pun
+            // is required in that case; preserve the glvalue/load distinction of the cast.
+            if (srcPtr && sameTypeShape(storageTpe, targetTpe)) {
+              const auto source = r.newVar(sourceExpr);
+              if (stmt->getCastKind() == clang::CK_LValueBitCast) return Expr::Alias(source);
+              return deref(source);
+            }
+            // An lvalue bitcast always carries addressable storage and Clang has already
+            // validated the C++ reinterpretation. Preserve that storage and change only its
+            // pointer view; this also covers vendor wrappers which alias aggregate records.
             auto source = r.newVar(sourceExpr);
             if (!srcPtr && !source.get<Term::Select>()) { // a literal source has no storage to pun, so give it a slot
               const auto slot = select(r, {}, r.newVar(storageTpe));
@@ -2854,14 +2906,18 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         using AO = clang::AtomicExpr;
         const auto pointer = r.newVar(handleExpr(expr->getPtr(), r));
         const auto valueType = handleType(expr->getPtr()->getType()->getPointeeType().getUnqualifiedType(), r);
-        const auto constant = [&](const clang::Expr *value, const std::string_view label) {
+        const auto constant = [&](const clang::Expr *value) -> Opt<uint64_t> {
           clang::Expr::EvalResult evaluated;
-          if (!value->EvaluateAsInt(evaluated, context) || !evaluated.Val.isInt())
-            raise(fmt::format("Atomic {} must be a constant at {}", label, value->getBeginLoc().printToString(context.getSourceManager())));
+          if (!value->EvaluateAsInt(evaluated, context) || !evaluated.Val.isInt()) return {};
           return evaluated.Val.getInt().getZExtValue();
         };
         const auto order = [&]() -> MemOrder::Any {
-          switch (constant(expr->getOrder(), "memory order")) {
+          // libstdc++ implements std::atomic operations in methods whose memory-order argument is a
+          // parameter, even when every caller uses the default. Lower those definitions conservatively:
+          // strengthening a dynamic valid order to sequentially consistent preserves its semantics.
+          const auto raw = constant(expr->getOrder());
+          if (!raw) return MemOrder::SeqCst();
+          switch (*raw) {
             case 0: return MemOrder::Relaxed();
             case 1:
             case 2: return MemOrder::Acquire();
@@ -2874,9 +2930,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto scope = [&]() -> MemScope::Any {
           const auto model = expr->getScopeModel();
           if (!model) return MemScope::Device();
-          const auto raw = constant(expr->getScope(), "memory scope");
-          if (!model->isValid(raw)) raise("Unsupported atomic memory scope");
-          switch (model->map(raw)) {
+          // A runtime scope cannot be represented by PolyAST. System is the widest scope and is
+          // therefore a safe conservative lowering for vendor wrappers which forward the scope.
+          const auto raw = constant(expr->getScope());
+          if (!raw) return MemScope::System();
+          if (!model->isValid(*raw)) raise("Unsupported atomic memory scope");
+          switch (model->map(*raw)) {
             case clang::SyncScope::WavefrontScope:
             case clang::SyncScope::HIPWavefront:
             case clang::SyncScope::OpenCLSubGroup: return MemScope::Subgroup();
@@ -2892,8 +2951,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             default: raise("Unsupported atomic memory scope");
           }
         }();
+        const auto rocprimVolatilePolling = [&] {
+          if (!order.is<MemOrder::Relaxed>() || !scope.is<MemScope::Device>() || !r.function) return false;
+          const auto name = r.function->getQualifiedNameAsString();
+          return name == "rocprim::detail::atomic_load" || name == "rocprim::detail::atomic_store";
+        }();
         const auto load = [&]() -> Expr::Any {
-          const auto unchanged = r.newVar(defaultValue(valueType));
+          const auto unchanged = r.newVar(zeroInitialise(r, valueType));
           return Expr::SpecOp(Spec::GpuAtomicCAS(pointer, unchanged, unchanged, scope, order, valueType));
         };
         const auto store = [&](const Expr::Any &value) -> Expr::Any {
@@ -2909,23 +2973,53 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           return Expr::Any(
               Expr::SpecOp(Spec::GpuAtomicRMW(operation, pointer, r.newVar(handleExpr(expr->getVal1(), r)), scope, order, valueType)));
         };
+        const auto compareExchange = [&](const Expr::Any &desired) -> Expr::Any {
+          if (valueType.is<Type::Struct>() || valueType.is<Type::Arr>())
+            raise("Aggregate atomic compare-exchange is not representable by PolyAST");
+          const auto expectedPointer = r.newVar(handleExpr(expr->getVal1(), r));
+          const auto expected = r.newVar(Expr::Index(expectedPointer, Term::IntU64Const(0), valueType));
+          const auto observed = r.newVar(
+              Expr::SpecOp(Spec::GpuAtomicCAS(pointer, expected, r.newVar(conform(r, desired, valueType)), scope, order, valueType)));
+          const auto success = r.newVar(Expr::IntrOp(Intr::LogicEq(observed, expected)));
+          r.push(Stmt::Cond(success, {}, r.scoped([&](RemapContext &rc) {
+            rc.push(Stmt::Update(termToSel(expectedPointer), Term::IntU64Const(0), observed));
+          })));
+          return Expr::Alias(success);
+        };
         switch (expr->getOp()) {
           case AO::AO__atomic_load: storeThrough(expr->getVal1(), load()); return Expr::Alias(Term::Unit0Const());
           case AO::AO__atomic_load_n:
           case AO::AO__c11_atomic_load:
           case AO::AO__opencl_atomic_load: return load();
           case AO::AO__hip_atomic_load:
+            // rocPRIM's relaxed, agent-scoped wrappers back decoupled look-back polling. Keep only that
+            // source shape volatile so optimisation repeatedly observes the peer descriptor; ordinary HIP
+            // atomics retain their memory order and scope through the CAS lowering.
+            return rocprimVolatilePolling ? Expr::Any(Expr::SpecOp(Spec::GpuVolatileLoad(pointer, valueType))) : load();
           case AO::AO__scoped_atomic_load_n: return load();
           case AO::AO__atomic_store:
           case AO::AO__scoped_atomic_store: return store(deref(r.newVar(handleExpr(expr->getVal1(), r))));
           case AO::AO__atomic_store_n:
           case AO::AO__c11_atomic_store:
-          case AO::AO__opencl_atomic_store:
+          case AO::AO__opencl_atomic_store: return store(handleExpr(expr->getVal1(), r));
           case AO::AO__hip_atomic_store:
+            if (rocprimVolatilePolling) {
+              (void)r.newVar(
+                  Expr::SpecOp(Spec::GpuVolatileStore(pointer, r.newVar(conform(r, handleExpr(expr->getVal1(), r), valueType)))));
+              return Expr::Alias(Term::Unit0Const());
+            }
+            return store(handleExpr(expr->getVal1(), r));
           case AO::AO__scoped_atomic_store_n: return store(handleExpr(expr->getVal1(), r));
           case AO::AO__atomic_exchange_n:
           case AO::AO__c11_atomic_exchange:
           case AO::AO__scoped_atomic_exchange_n: return rmw(AtomicOp::Xchg());
+          case AO::AO__atomic_exchange: {
+            const auto input = deref(r.newVar(handleExpr(expr->getVal1(), r)));
+            const auto observed = Expr::SpecOp(
+                Spec::GpuAtomicRMW(AtomicOp::Xchg(), pointer, r.newVar(conform(r, input, valueType)), scope, order, valueType));
+            storeThrough(expr->getVal2(), observed);
+            return Expr::Alias(Term::Unit0Const());
+          }
           case AO::AO__atomic_fetch_add:
           case AO::AO__c11_atomic_fetch_add:
           case AO::AO__scoped_atomic_fetch_add: return rmw(AtomicOp::Add());
@@ -2938,21 +3032,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case AO::AO__c11_atomic_fetch_or: return rmw(AtomicOp::Or());
           case AO::AO__atomic_fetch_xor:
           case AO::AO__c11_atomic_fetch_xor: return rmw(AtomicOp::Xor());
+          case AO::AO__atomic_compare_exchange: return compareExchange(deref(r.newVar(handleExpr(expr->getVal2(), r))));
           case AO::AO__atomic_compare_exchange_n:
           case AO::AO__c11_atomic_compare_exchange_strong:
-          case AO::AO__c11_atomic_compare_exchange_weak: {
-            const auto expectedPointer = r.newVar(handleExpr(expr->getVal1(), r));
-            const auto expected = r.newVar(Expr::Index(expectedPointer, Term::IntU64Const(0), valueType));
-            const auto observed = r.newVar(
-                Expr::SpecOp(Spec::GpuAtomicCAS(pointer, expected, r.newVar(handleExpr(expr->getVal2(), r)), scope, order, valueType)));
-            const auto success = r.newVar(Expr::IntrOp(Intr::LogicEq(observed, expected)));
-            r.push(Stmt::Cond(success, {}, r.scoped([&](RemapContext &rc) {
-              rc.push(Stmt::Update(termToSel(expectedPointer), Term::IntU64Const(0), observed));
-            })));
-            return Expr::Alias(success);
-          }
+          case AO::AO__c11_atomic_compare_exchange_weak: return compareExchange(handleExpr(expr->getVal2(), r));
           default:
-            raise(fmt::format("Unsupported atomic operation {} at {}", static_cast<int>(expr->getOp()),
+            raise(fmt::format("Unsupported atomic operation {} at {}", expr->getOpAsString(),
                               expr->getBeginLoc().printToString(context.getSourceManager())));
         }
       },
@@ -3184,9 +3269,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           } else if (auto ref = arrTpe->comp.get<Type::Ptr>(); ref && ref->comp == exprTpe) {
             // Ptr[Ptr[C]] => C
             return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace, Region::Opaque());
-          } else if (arrTpe->comp == exprTpe) {
+          } else if (sameTypeShape(arrTpe->comp, exprTpe)) {
             // Ptr[C] => C
-            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, baseSpace, Region::Opaque());
+            // As with unary dereference, keep any recursively inferred spaces on a pointer-valued C.
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, arrTpe->comp, baseSpace, Region::Opaque());
           } else if (arrTpe->comp.get<Type::Ptr>() && exprTpe.get<Type::Ptr>()) {
             // Array-of-pointers indexing returns the stored pointer value. Keep the container's
             // address space on the lvalue even when its pointee type differs after a cast.
@@ -3197,6 +3283,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         } else if (auto arrTpe = baseExpr.tpe().get<Type::Arr>(); arrTpe) {
           if (arrTpe->comp == exprTpe) {
             return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, arrTpe->space, Region::Opaque());
+          } else if (primitiveSize(arrTpe->comp) == 1u && (primitiveSize(exprTpe) || exprTpe.is<Type::Struct>())) {
+            // Reinterpreting a byte array as typed storage scales the element index in bytes. In
+            // particular, CUB overlays typed TempStorage on `__shared__ char[]`; retaining the
+            // array's Local space here is what makes the backend emit shared-memory accesses.
+            const auto indexType = idxExpr.tpe();
+            const auto structBytes = static_cast<uint64_t>(context.getTypeSizeInChars(expr->getType()).getQuantity());
+            const auto elementBytes = r.newVar(integralConstOfType(indexType, primitiveSize(exprTpe).value_or(structBytes)));
+            const auto byteOffset = r.newVar(Expr::IntrOp(Intr::Mul(idxExpr, elementBytes, indexType)));
+            const auto byteRef = r.newVar(Expr::RefTo(r.newVar(baseExpr), byteOffset, arrTpe->comp, arrTpe->space, Region::Opaque()));
+            return Expr::Cast(byteRef, Type::Ptr(exprTpe, arrTpe->space));
           } else {
             raise("Cannot index sized-array expressions with mismatching expected components");
           }
@@ -3280,7 +3376,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::UO_Deref: {
             auto idx = r.newVar(integralConstOfType(Type::IntU64(), 0));
             const auto ptrTpe = lhs.tpe().get<Type::Ptr>();
-            if (ptrTpe) return Expr::RefTo(termToSel(lhs), idx, exprTpe, ptrTpe->space, Region::Opaque());
+            if (ptrTpe) {
+              // Clang's pointee type has no inferred address spaces. Retain the recursively refined
+              // component carried by the PolyAST pointer so dereferencing T** still denotes the T*
+              // slot, rather than rebuilding an incompatible generic pointer at every `*`.
+              const auto component = sameTypeShape(ptrTpe->comp, exprTpe) ? ptrTpe->comp : exprTpe;
+              return Expr::RefTo(termToSel(lhs), idx, component, ptrTpe->space, Region::Opaque());
+            }
             // Array-to-pointer decay is intentionally storage-preserving in PolyAST, so `*array`
             // still has an Arr operand here. Dereference it as the equivalent `array[0]` lvalue.
             const auto arrTpe = lhs.tpe().get<Type::Arr>();
@@ -3397,8 +3499,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::BO_Mul: return Expr::IntrOp(Intr::Mul(dl(), dr(), tpe_));
           case clang::BO_Div: return Expr::IntrOp(Intr::Div(dl(), dr(), tpe_));
           case clang::BO_Rem: return Expr::IntrOp(Intr::Rem(dl(), dr(), tpe_));
-          case clang::BO_Shl: return Expr::IntrOp(Intr::BSL(dl(), dr(), tpe_));
-          case clang::BO_Shr: return Expr::IntrOp(Intr::BSR(dl(), dr(), tpe_));
+          case clang::BO_Shl: return Expr::IntrOp(Intr::BSL(cl(), cr(), compTpe));
+          case clang::BO_Shr: return Expr::IntrOp(Intr::BSR(cl(), cr(), compTpe));
           case clang::BO_Cmp: return failExpr(); // TODO spaceship?
           case clang::BO_LT: return Expr::IntrOp(Intr::LogicLt(rl(), rr()));
           case clang::BO_GT: return Expr::IntrOp(Intr::LogicGt(rl(), rr()));
@@ -3412,9 +3514,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             if (lhs.tpe().is<Type::Ptr>() && rhs.tpe().is<Type::Ptr>())
               return Expr::IntrOp(Intr::LogicNeq(lhs, r.newVar(conform(r, Expr::Alias(rhs), lhs.tpe()))));
             return Expr::IntrOp(Intr::LogicNeq(rl(), rr()));
-          case clang::BO_And: return Expr::IntrOp(Intr::BAnd(dl(), dr(), tpe_));
-          case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(dl(), dr(), tpe_));
-          case clang::BO_Or: return Expr::IntrOp(Intr::BOr(dl(), dr(), tpe_));
+          case clang::BO_And: return Expr::IntrOp(Intr::BAnd(cl(), cr(), compTpe));
+          case clang::BO_Xor: return Expr::IntrOp(Intr::BXor(cl(), cr(), compTpe));
+          case clang::BO_Or: return Expr::IntrOp(Intr::BOr(cl(), cr(), compTpe));
           case clang::BO_LAnd:
           case clang::BO_LOr: raise("unreachable short-circuit lowering");
           case clang::BO_Assign:
@@ -3436,11 +3538,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               if (const auto rebased = rebasePointer(lhs, negativeIdx, tpe_)) return Expr::Alias(*rebased);
             }
             return Expr::Alias(opAssign(Intr::Sub(cl(), cr(), compTpe)));
-          case clang::BO_ShlAssign: return Expr::Alias(opAssign(Intr::BSL(dl(), dr(), tpe_)));
-          case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(dl(), dr(), tpe_)));
-          case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(dl(), dr(), tpe_)));
-          case clang::BO_XorAssign: return Expr::Alias(opAssign(Intr::BXor(dl(), dr(), tpe_)));
-          case clang::BO_OrAssign: return Expr::Alias(opAssign(Intr::BOr(dl(), dr(), tpe_)));
+          case clang::BO_ShlAssign: return Expr::Alias(opAssign(Intr::BSL(cl(), cr(), compTpe)));
+          case clang::BO_ShrAssign: return Expr::Alias(opAssign(Intr::BSR(cl(), cr(), compTpe)));
+          case clang::BO_AndAssign: return Expr::Alias(opAssign(Intr::BAnd(cl(), cr(), compTpe)));
+          case clang::BO_XorAssign: return Expr::Alias(opAssign(Intr::BXor(cl(), cr(), compTpe)));
+          case clang::BO_OrAssign: return Expr::Alias(opAssign(Intr::BOr(cl(), cr(), compTpe)));
           case clang::BO_Comma: return Expr::Alias(rhs);
         }
 
@@ -3621,6 +3723,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if ((r.callableVariables ^ contains(variable->name)) && (constructor->isCopyConstructor() || constructor->isMoveConstructor())
               && !constructor->isTrivial())
             raise(fmt::format("non-trivial callable-variable constructor `{}` is unsupported", constructor->getQualifiedNameAsString()));
+          if (expr->requiresZeroInitialization()) return zeroInitialise(r, ctorTpe);
           if (expr->getNumArgs() == 1) {
             const clang::Expr *argument = expr->getArg(0)->IgnoreImplicit();
             while (const auto construct = llvm::dyn_cast<clang::CXXConstructExpr>(argument)) {
@@ -3637,6 +3740,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             }
             if (!(r.callableVariables ^ contains(variable->name))) return conform(r, handleExpr(expr->getArg(0), r), ctorTpe);
           }
+          if (expr->getNumArgs() == 0 && constructor->isDefaultConstructor()) return zeroInitialise(r, ctorTpe);
           return Expr::Any(Expr::Alias(Term::Poison(ctorTpe)));
         }
 
@@ -3725,7 +3829,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 const auto *member = llvm::dyn_cast<clang::MemberExpr>(expr->getCallee()->IgnoreParenImpCasts());
                 return member && member->performsVirtualDispatch(context.getLangOpts());
               }())
-            raise("Virtual shared-control dispatch is not supported in package programs");
+            raise(fmt::format("Virtual shared-control dispatch is not supported in package programs: {}", pretty_string(expr, context)));
         if (const auto lowered = lowerSpecialCall(*expr, *calleeFn, r)) return *lowered;
         if (const auto method = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);
             method && (method->isCopyAssignmentOperator() || method->isMoveAssignmentOperator()) && expr->getNumArgs() == 1)
@@ -3885,7 +3989,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             configValues.emplace_back(r.newVar(handleExpr(argument, r)));
         }
         const auto dimension = [&](const Term::Any &value, const unsigned index) -> Term::Any {
-          const auto type = value.tpe().get<Type::Struct>();
+          auto type = value.tpe().get<Type::Struct>();
+          bool indirect = false;
+          if (!type)
+            if (const auto pointer = value.tpe().get<Type::Ptr>()) {
+              type = pointer->comp.get<Type::Struct>();
+              indirect = type.has_value();
+            }
           if (!type) return index == 0 ? value : Term::Any(Term::IntU32Const(1));
           const std::string_view axis = index == 0 ? "x" : index == 1 ? "y" : "z";
           const auto definition = r.findStruct(fqcn(type->name), "launch dimension");
@@ -3897,6 +4007,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           if (!member) raise(fmt::format("Cannot find launch dimension {} in {}", axis, canonicalName(type->widen())));
           const auto root = seedSelect(r, Expr::Alias(value));
           auto steps = root.steps;
+          if (indirect) steps.emplace_back(PathStep::Deref());
           steps.emplace_back(PathStep::Field(member->symbol));
           return Term::Select(root.root, steps, member->tpe);
         };
@@ -3914,7 +4025,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             configValues.size() > 2 ? r.newVar(conform(r, Expr::Alias(configValues[2]), Type::IntU32())) : Term::Any(Term::IntU32Const(0));
         if (config && config->getNumArgs() > 3
             && !config->getArg(3)->isNullPointerConstant(context, clang::Expr::NPC_ValueDependentIsNotNull))
-          raise("Non-default CUDA/HIP launch streams are not supported in package code");
+          raise(fmt::format("Non-default CUDA/HIP launch streams are not supported in package code at {}: {}",
+                            config->getArg(3)->getExprLoc().printToString(context.getSourceManager()),
+                            pretty_string(config->getArg(3), context)));
         Vector<Term::Any> arguments;
         arguments.reserve(expr->getNumArgs());
         if (function && function->decl.args.size() != expr->getNumArgs())
@@ -4024,6 +4137,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             const auto functionName = r.function ? diagnosticName(r.function, context) : std::string{};
             const bool runtimeReduce = functionName.find("rocprim::detail::reduce_impl") != std::string::npos;
             const bool runtimeCopy = functionName.find("kernel_config_params::kernel_config_params") != std::string::npos;
+            const bool runtimePartition = functionName.find("rocprim::detail::partition_impl") != std::string::npos;
             bool tupleValue = false;
             bool adjacentDifference = false;
             for (const clang::Expr *base = expr->getBase() ? expr->getBase()->IgnoreParenImpCasts() : nullptr; base;) {
@@ -4034,7 +4148,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               if (!member) break;
               base = member->getBase() ? member->getBase()->IgnoreParenImpCasts() : nullptr;
             }
-            if (!runtimeReduce && !runtimeCopy && !adjacentDifference) {
+            if (!runtimeReduce && !runtimeCopy && !runtimePartition && !adjacentDifference) {
               if (field->getName() == "block_size") return integralConstOfType(type, tupleValue ? 128 : 256);
               if (field->getName() == "items_per_thread") return integralConstOfType(type, tupleValue ? 2 : 4);
               if (field->getName() == "size_limit") return integralConstOfType(type, 0xffffffffu);
@@ -4337,10 +4451,23 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
                   r.push(Stmt::Update(select(r, {}, name), idx, val));
                 }
                 auto compTpe = handleType(cArr->getElementType(), r);
-                for (size_t i = initList->getNumInits(); i < cArr->getSize().getLimitedValue(); ++i) {
-                  auto idx = r.newVar(Expr::Alias(Term::IntU64Const(i)));
-                  auto z = r.newVar(integralConstOfType(compTpe, 0));
-                  r.push(Stmt::Update(select(r, {}, name), idx, z));
+                const auto begin = static_cast<uint64_t>(initList->getNumInits());
+                const auto end = cArr->getSize().getLimitedValue();
+                if (begin < end) {
+                  const auto zero = r.newVar(zeroInitialise(r, compTpe));
+                  const auto index = r.newName(Type::IntU64());
+                  r.push(Stmt::Var(index, Expr::Alias(Term::IntU64Const(begin)), /*isMutable*/ true));
+                  const auto condition = r.newName(Type::Bool1());
+                  r.push(Stmt::Var(condition, Expr::IntrOp(Intr::LogicLt(select(r, {}, index), Term::IntU64Const(end))),
+                                   /*isMutable*/ true));
+                  const auto body = r.scoped([&](auto &ri) {
+                    ri.push(Stmt::Update(select(ri, {}, name), select(ri, {}, index), zero));
+                    ri.push(Stmt::Mut(select(ri, {}, index),
+                                      Expr::IntrOp(Intr::Add(select(ri, {}, index), Term::IntU64Const(1), Type::IntU64()))));
+                    ri.push(
+                        Stmt::Mut(select(ri, {}, condition), Expr::IntrOp(Intr::LogicLt(select(ri, {}, index), Term::IntU64Const(end)))));
+                  });
+                  r.push(Stmt::While(select(r, {}, condition), body));
                 }
               } else {
                 if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
@@ -4362,7 +4489,11 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               const bool isMutable = !var->getType().isConstQualified();
               const auto previousBoundTemporaryType = r.boundTemporaryType;
               if (cleanup) r.boundTemporaryType = var->getType();
-              const auto initialiser = pointerInit ? *pointerInit : conform(r, handleExpr(var->getInit(), r), name.tpe);
+              const auto initialiser = [&]() -> Expr::Any {
+                if (pointerInit) return *pointerInit;
+                if (name.tpe.is<Type::Var>() && isZeroValueInitialisation(var->getInit())) return zeroInitialise(r, name.tpe);
+                return conform(r, handleExpr(var->getInit(), r), name.tpe);
+              }();
               r.boundTemporaryType = previousBoundTemporaryType;
               r.push(Stmt::Var(name, initialiser, isMutable));
             } else if (auto arrInit = createInit(var->getType(), name.tpe); arrInit) {
@@ -4490,7 +4621,11 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         const auto rv = stmt->getRetValue();
         const auto previousBoundTemporaryType = r.boundTemporaryType;
         if (rv && rv->getType().getNonReferenceType()->getAsCXXRecordDecl()) r.boundTemporaryType = rv->getType();
-        const auto value = rv ? conform(r, handleExpr(rv, r), r.rtnType) : Expr::Any(Expr::Alias(Term::Unit0Const()));
+        const auto value = [&]() -> Expr::Any {
+          if (!rv) return Expr::Alias(Term::Unit0Const());
+          if (r.rtnType.is<Type::Var>() && isZeroValueInitialisation(rv)) return zeroInitialise(r, r.rtnType);
+          return conform(r, handleExpr(rv, r), r.rtnType);
+        }();
         r.boundTemporaryType = previousBoundTemporaryType;
         // the result is read before any local dies; skipping the temp when nothing is destroyed also keeps
         // `_v<N>` numbering unchanged for every region without cleanups

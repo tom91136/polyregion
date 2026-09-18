@@ -269,7 +269,7 @@ void polyregion::polyrt::initialise() {
 
 polyregion::polyrt::ExecutionContext *polyregion::polyrt::currentContext() {
   initialise();
-  static ExecutionContext context{currentPlatform.get(), currentDevice.get(), currentQueue.get(), {}};
+  static ExecutionContext context{currentPlatform.get(), currentDevice.get(), currentQueue.get(), {}, {}};
   return context.platform && context.device && context.queue ? &context : nullptr;
 }
 
@@ -296,10 +296,11 @@ POLYREGION_EXPORT extern "C" uint64_t polyrt_device_subgroup_size(void *context)
   switch (device.moduleFormat()) {
     case polyregion::runtime::ModuleFormat::Source: {
       if (execution.platform && execution.platform->kind() == PlatformKind::HostThreaded) return device.subgroupSize();
-      return 32;
+      // Portable Metal/OpenCL source packages lower subgroup operations to scalar work-items.
+      return 1;
     }
     case polyregion::runtime::ModuleFormat::SPIRV_Kernel:
-    case polyregion::runtime::ModuleFormat::SPIRV_GLCompute: return 32;
+    case polyregion::runtime::ModuleFormat::SPIRV_GLCompute: return device.subgroupSize();
     default: return device.subgroupSize();
   }
 }
@@ -341,11 +342,28 @@ POLYREGION_EXPORT extern "C" void polyrt_host_free(void *pointer) { std::free(po
 
 POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) noexcept(false) {
   if (bytes == 0) return 0;
-  return requireContext(context, __func__).device->mallocDevice(bytes, Access::RW);
+  auto &execution = requireContext(context, __func__);
+  const std::lock_guard lock(execution.transaction);
+  const auto pointer = execution.device->mallocDevice(bytes, Access::RW);
+  try {
+    execution.remoteAllocations.insert_or_assign(pointer, bytes);
+  } catch (...) {
+    const auto failure = std::current_exception();
+    try {
+      execution.device->freeDevice(pointer);
+    } catch (...) {
+    }
+    std::rethrow_exception(failure);
+  }
+  return pointer;
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_free(void *context, const uintptr_t ptr) noexcept(false) {
-  if (ptr != 0) requireContext(context, __func__).device->freeDevice(ptr);
+  if (ptr == 0) return;
+  auto &execution = requireContext(context, __func__);
+  const std::lock_guard lock(execution.transaction);
+  execution.device->freeDevice(ptr);
+  execution.remoteAllocations.erase(ptr);
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_memcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
@@ -446,39 +464,60 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char
   value.queue->enqueueWaitBlocking();
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_cleanup(void *context, const char *moduleName, const char *kernelName,
+POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName,
                                                                     const size_t gridX, const size_t gridY, const size_t gridZ,
                                                                     const size_t blockX, const size_t blockY, const size_t blockZ,
                                                                     const size_t localMemBytes, const size_t argCount,
                                                                     const uint8_t *argTypes, void *const *argPtrs,
-                                                                    const size_t *mirrorSizes) noexcept(false) {
-  std::vector<uintptr_t> mirrors(argCount, 0);
+                                                                    const size_t *mirrorSizes, const uint8_t *mirrorKinds) noexcept(false) {
+  auto &execution = requireContext(context, __func__);
+  struct Mirror {
+    uintptr_t remote = 0;
+    uintptr_t source = 0;
+  };
+  std::vector<Mirror> mirrors(argCount);
   std::vector<void *> launchArgPtrs(argCount, nullptr);
-  std::vector<uintptr_t> allocations;
-  allocations.reserve(argCount);
   const auto release = [&]() noexcept {
     std::exception_ptr failure;
-    for (const auto allocation : allocations) {
+    for (auto &mirror : mirrors) {
+      if (mirror.remote == 0) continue;
       try {
-        polyrt_remote_free(context, allocation);
+        polyrt_remote_free(context, mirror.remote);
       } catch (...) {
         if (!failure) failure = std::current_exception();
       }
+      mirror.remote = 0;
     }
-    allocations.clear();
     return failure;
   };
   try {
     for (size_t i = 0; i < argCount; ++i) {
       launchArgPtrs[i] = argPtrs[i];
-      if (mirrorSizes[i] == 0) continue;
-      mirrors[i] = polyrt_remote_malloc(context, mirrorSizes[i]);
-      allocations.emplace_back(mirrors[i]);
-      polyrt_remote_memcpy(context, mirrors[i], reinterpret_cast<uintptr_t>(argPtrs[i]), mirrorSizes[i], 0);
-      launchArgPtrs[i] = &mirrors[i];
+      if (mirrorKinds[i] == 0 || mirrorSizes[i] == 0) continue;
+      uintptr_t source;
+      if (mirrorKinds[i] == 2) {
+        source = *static_cast<const uintptr_t *>(argPtrs[i]);
+        if (source == 0) continue;
+        const std::lock_guard lock(execution.transaction);
+        const auto upper = execution.remoteAllocations.upper_bound(source);
+        const auto remote = upper != execution.remoteAllocations.begin() && [&] {
+          const auto &[base, size] = *std::prev(upper);
+          return source - base < size;
+        }();
+        if (remote) continue;
+      } else {
+        source = reinterpret_cast<uintptr_t>(argPtrs[i]);
+      }
+      mirrors[i] = {polyrt_remote_malloc(context, mirrorSizes[i]), source};
+      polyrt_remote_memcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
+      launchArgPtrs[i] = &mirrors[i].remote;
     }
     polyrt_remote_launch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
                          launchArgPtrs.data());
+    for (size_t i = 0; i < argCount; ++i)
+      if (mirrorKinds[i] == 2 && mirrors[i].remote != 0) {
+        polyrt_remote_memcpy(context, mirrors[i].source, mirrors[i].remote, mirrorSizes[i], 1);
+      }
   } catch (...) {
     const auto failure = std::current_exception();
     (void)release();

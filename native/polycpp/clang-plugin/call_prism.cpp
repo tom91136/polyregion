@@ -140,6 +140,12 @@ static Opt<MatchedCall> match(const clang::CallExpr &call, const clang::Function
 } // namespace call_prism
 
 Opt<Expr::Any> Remapper::lowerSpecialCall(const clang::CallExpr &call, const clang::FunctionDecl &decl, RemapContext &r) {
+  if (decl.getBuiltinID() == clang::Builtin::BI__builtin_launder || decl.getQualifiedNameAsString() == "std::launder") {
+    if (call.getNumArgs() != 1) raise(fmt::format("{} expected one argument, got {}", decl.getQualifiedNameAsString(), call.getNumArgs()));
+    // PolyAST has no stale-object identity to discard. Lower laundering at the call site so the argument's refined
+    // pointer type and address space survive Clang's opaque builtin signature and the std::launder wrapper.
+    return handleExpr(call.getArg(0)->IgnoreParenImpCasts(), r);
+  }
   return call_prism::match(call, decl, context) ^ map([&](const auto &matched) { return matched.lower(*this, r); });
 }
 

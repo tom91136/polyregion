@@ -317,11 +317,17 @@ Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<S
     const auto fs = overlayFields(mts);
     return fs.size() == 1 ? fs[0] : llvm::StructType::get(actual, fs);
   };
+  std::function<llvm::Type *(const Type::Any &)> storageType = [&](const Type::Any &tpe) -> llvm::Type * {
+    if (isVulkan() && tpe.template is<Type::Bool1>()) return llvm::Type::getInt8Ty(actual);
+    if (isVulkan())
+      if (const auto array = tpe.template get<Type::Arr>()) return llvm::ArrayType::get(storageType(array->comp), array->length);
+    return resolveType(tpe, resolved, /*functionBoundary*/ false);
+  };
   auto setBody = [&](const StructDef &def) {
     auto *tpe = opaqueTypes.at(fqcn(def.name));
     if (!tpe->isOpaque()) return true; // body already set; safe in case of duplicate StructDefs
     if (def.isUnion && !(def.members ^ forall([&](const auto &m) { return typeReadyForUnionStorage(m.tpe); }))) return false;
-    const auto memberTypes = def.members ^ map([&](const auto &m) { return resolveType(m.tpe, resolved, /*functionBoundary*/ false); });
+    const auto memberTypes = def.members ^ map([&](const auto &m) { return storageType(m.tpe); });
     if (def.isUnion && (deAliasedUnions ^ contains(fqcn(def.name))) && !memberTypes.empty()) {
       const auto typedMembers = def.members ^ zip(memberTypes);
       const auto overlayTys = typedMembers ^ collect([&](const auto &member, auto *memberType) -> Opt<llvm::Type *> {

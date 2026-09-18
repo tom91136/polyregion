@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 
@@ -26,6 +27,7 @@ struct ExecutionContext {
   Device *device;
   DeviceQueue *queue;
   std::recursive_mutex transaction;
+  std::map<uintptr_t, size_t> remoteAllocations;
 };
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Platform> currentPlatform;
@@ -94,9 +96,10 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_launch(void *context,
                                                                   size_t blockZ, size_t localMemBytes, size_t argCount,
                                                                   const uint8_t *argTypes, void *const *argPtrs) noexcept(false);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void
-polyrt_remote_launch_with_cleanup(void *context, const char *moduleName, const char *kernelName, size_t gridX, size_t gridY, size_t gridZ,
+polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName, size_t gridX, size_t gridY, size_t gridZ,
                                   size_t blockX, size_t blockY, size_t blockZ, size_t localMemBytes, size_t argCount,
-                                  const uint8_t *argTypes, void *const *argPtrs, const size_t *mirrorSizes) noexcept(false);
+                                  const uint8_t *argTypes, void *const *argPtrs, const size_t *mirrorSizes,
+                                  const uint8_t *mirrorKinds) noexcept(false);
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_read(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_write(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);

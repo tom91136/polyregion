@@ -1,6 +1,9 @@
 #pragma region case: package-phantom-type-variables
 #pragma region offload-only
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -c -o {output}.o {input}
+#pragma region do: {package_fixture} --assert-no-value-pointer-assignments {output}.polyast
+#pragma region do: {package_fixture} --assert-zero-type-variable {output}.polyast
+#pragma region do: {package_fixture} --assert-zero-type-variable-return {output}.polyast
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 #define POLYREGION_TYPE_VARIABLE(name) [[clang::annotate("polyregion_type_variable:" name)]]
@@ -46,6 +49,16 @@ template <class T> Ref<T> makeRef(Left<T> *left) {
   return {left};
 }
 
+Element copyElement(Element value) {
+  Element copy(value);
+  Element moved(static_cast<Element &&>(copy));
+  return moved;
+}
+
+POLYREGION_EXPORT_AS("foo.implementation.zero") Element zeroElement() { return Element{}; }
+
+Element chooseElement(bool takeFirst, Element *values) { return takeFirst ? values[0] : values[1]; }
+
 int increment(int value) { return value + 1; }
 int invoke(int (*fn)(int), int value);
 
@@ -58,6 +71,10 @@ struct OperatorSink {
 };
 
 POLYREGION_EXPORT_AS("foo.implementation.apply") Element apply(Element value, Callable callable) {
+  Element values[2]{};
+  values[0] = value;
+  values[1] = values[0];
+  auto incrementPointer = &increment;
   Left<Element> left{};
   (void)makeRef(&left);
   Box<Closure> box{};
@@ -67,6 +84,7 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") Element apply(Element value, Ca
   (void)sink.invoke(&increment, 1);
   OperatorSink operatorSink{};
   (void)(operatorSink << &increment);
+  (void)incrementPointer;
   (void)callable;
-  return value;
+  return copyElement(chooseElement(incrementPointer != nullptr, values));
 }

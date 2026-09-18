@@ -1,7 +1,7 @@
 #pragma region case: narrow_bitwise_signed
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
 #pragma region do: {output}
-#pragma region requires: -2 254 1
+#pragma region requires: -2 254 1 254 1024 256
 
 #include <cstdint>
 #include <cstdio>
@@ -17,7 +17,17 @@ int main() {
     return (static_cast<uint32_t>(static_cast<uint8_t>(signedLow)) << uint32_t{16}) | (static_cast<uint32_t>(unsignedLow) << uint32_t{8})
            | invertedLow;
   });
-  std::printf("%d %u %u", static_cast<int>(static_cast<int8_t>(result >> 16)), static_cast<unsigned>((result >> 8) & 0xFF),
-              static_cast<unsigned>(result & 0xFF));
+  const auto mixed = __polyregion_offload_f1__([]() {
+    int value = -1;
+    value &= uint32_t{0xFE};
+    return value;
+  });
+  const auto shifts = __polyregion_offload_f1__([]() {
+    int64_t left = 1;
+    left <<= int32_t{10};
+    return left | (int64_t{1024} >> int32_t{2});
+  });
+  std::printf("%d %u %u %d %lld %lld", static_cast<int>(static_cast<int8_t>(result >> 16)), static_cast<unsigned>((result >> 8) & 0xFF),
+              static_cast<unsigned>(result & 0xFF), mixed, static_cast<long long>(shifts & 1024), static_cast<long long>(shifts & 256));
   return 0;
 }

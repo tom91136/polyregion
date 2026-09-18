@@ -111,6 +111,8 @@ int get_device_arch(int, target_arch &architecture) {
   architecture = target_arch::invalid;
   return 0;
 }
+int atomic_load(int *address) { return __hip_atomic_load(address, __ATOMIC_RELAXED, 4); }
+void atomic_store(int *address, int value) { __hip_atomic_store(address, value, __ATOMIC_RELAXED, 4); }
 } // namespace detail
 } // namespace rocprim
 
@@ -253,6 +255,8 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   cub::ThreadStore<cub::STORE_DEFAULT>(&state, loaded + 1);
   const int hipLoaded = __hip_atomic_load(&state, __ATOMIC_RELAXED, 4);
   __hip_atomic_store(&state, hipLoaded + 1, __ATOMIC_RELAXED, 4);
+  const int rocprimLoaded = rocprim::detail::atomic_load(&state);
+  rocprim::detail::atomic_store(&state, rocprimLoaded + 1);
   const int atomic = atomicAdd(&state, 2) + atomicCAS(&state, value + 3, value);
   const int bits = int(__nv_brev(unsigned(value))) + __nv_clz(unsigned(value)) + __nv_popc(unsigned(value))
                    + __nv_popcll(static_cast<unsigned long long>(unsigned(value))) + __builtin_ctz(unsigned(value) | 1u);
@@ -285,10 +289,11 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
   __threadfence_system();
   cudaFree(cuda);
   hipFree(hip);
-  return shuffled + voted + atomic + bits + hipBallot + hipLoaded + int(extracted[0] + laneMask) + scanned + unrelatedScanned + cudaWarpSize
-         + hipWarpSize + cudaComputeUnits + cudaLocalMemory + cudaMaxGridX + cudaComputeMajor + cudaComputeMinor
-         + application::basic_ostream_count(value) + int(relocated.m_iterator != nullptr) + int(relocatedRange.m_iterator != nullptr)
-         + errorState + cudaDevice + hipDevice + deviceQueryState + hostArchitectureState + deviceArchitectureState;
+  return shuffled + voted + atomic + bits + hipBallot + hipLoaded + rocprimLoaded + int(extracted[0] + laneMask) + scanned
+         + unrelatedScanned + cudaWarpSize + hipWarpSize + cudaComputeUnits + cudaLocalMemory + cudaMaxGridX + cudaComputeMajor
+         + cudaComputeMinor + application::basic_ostream_count(value) + int(relocated.m_iterator != nullptr)
+         + int(relocatedRange.m_iterator != nullptr) + errorState + cudaDevice + hipDevice + deviceQueryState + hostArchitectureState
+         + deviceArchitectureState;
 }
 
 #ifdef CHECK_NON_DEFAULT_STREAM

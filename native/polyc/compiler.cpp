@@ -261,12 +261,16 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::op
   switch (target) {
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
       return opt
-             + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;"
+             + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;"
+               "RegionRespace;"
                "VerifyAnchors(strict=true)";
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: return opt + ";StructuredExit;RegionRespace;ArenaLower";
+    case compiletime::Target::Source_C_Metal1_0:
     case compiletime::Target::Source_C_OpenCL1_1:
-    case compiletime::Target::Source_C_Metal1_0: return opt + ";SubgroupLower;StructuredExit;RegionRespace;ArenaLower";
+      return opt + ";SubgroupLower(width=1,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower";
+    case compiletime::Target::Object_LLVM_NVPTX64: return opt + ";StructuredExit;RegionRespace";
+    case compiletime::Target::Object_LLVM_AMDGCN: return opt + ";StructuredExit";
     default: return opt + ";StructuredExit";
   }
 }

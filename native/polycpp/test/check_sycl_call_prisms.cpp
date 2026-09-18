@@ -43,6 +43,11 @@
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_EXCLUSIVE_BITWISE_SCAN -fstdpar-emit-library={output}.polyast -fsyntax-only {input}
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
+#define POLYREGION_TYPE_VARIABLE(name) [[clang::annotate("polyregion_type_variable:" name)]]
+
+struct POLYREGION_TYPE_VARIABLE("Element") Element {
+  int value;
+};
 
 namespace std {
 template <typename T> struct __shared_ptr {
@@ -262,13 +267,13 @@ POLYREGION_EXPORT_AS("foo.implementation.apply") int apply(int value) {
          + int(deviceInfo) + int(item.get_local_linear_id()) + int(item.get_group_linear_id());
 }
 
-POLYREGION_EXPORT_AS("foo.implementation.apply_nd") void apply_nd(int *allocation, int value) {
+POLYREGION_EXPORT_AS("foo.implementation.apply_nd") void apply_nd(Element *allocation, int value) {
   sycl::queue queue;
   queue
       .submit([&](sycl::handler &handler) {
         const sycl::nd_range<2> extent(sycl::range<2>(8, 4), sycl::range<2>(4, 2));
         handler.parallel_for(extent, [=](sycl::nd_item<2> thread) {
-          allocation[thread.get_global_linear_id()] = value + int(thread.get_local_linear_id());
+          allocation[thread.get_global_linear_id()] = Element{value + int(thread.get_local_linear_id())};
         });
       })
       .wait();

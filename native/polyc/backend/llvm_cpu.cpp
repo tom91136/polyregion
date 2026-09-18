@@ -1,11 +1,40 @@
 #include "llvm_cpu.h"
 
+#include "llvm/Analysis/ValueTracking.h"
+
 #include "aspartame/all.hpp"
 
 #include "polyregion/enums.h"
 
 using namespace polyregion::backend::details;
 using namespace aspartame;
+
+static bool pointerFreeAggregate(llvm::Type *type) {
+  if (type->isPointerTy()) return false;
+  if (const auto *structure = llvm::dyn_cast<llvm::StructType>(type)) return llvm::all_of(structure->elements(), pointerFreeAggregate);
+  if (const auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) return pointerFreeAggregate(array->getElementType());
+  if (const auto *vector = llvm::dyn_cast<llvm::VectorType>(type)) return pointerFreeAggregate(vector->getElementType());
+  return true;
+}
+
+static llvm::Value *recoverSingleStoredPointer(llvm::Value *value) {
+  auto *load = llvm::dyn_cast<llvm::LoadInst>(value);
+  if (!load) return value;
+  auto *slot = load->getPointerOperand()->stripPointerCasts();
+  if (!llvm::isa<llvm::AllocaInst>(slot)) return value;
+  llvm::StoreInst *definition = nullptr;
+  for (auto *user : slot->users()) {
+    if (auto *store = llvm::dyn_cast<llvm::StoreInst>(user)) {
+      if (store->getPointerOperand()->stripPointerCasts() != slot || definition) return value;
+      definition = store;
+    } else if (const auto *read = llvm::dyn_cast<llvm::LoadInst>(user)) {
+      if (read->getPointerOperand()->stripPointerCasts() != slot) return value;
+    } else {
+      return value;
+    }
+  }
+  return definition ? definition->getValueOperand() : value;
+}
 
 void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const Function &source) {
   if (!source.visibility.is<FunctionVisibility::Exported>()) {
@@ -56,6 +85,9 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
     if (tpe.is<Type::Float16>()) return value(RuntimeType::Float16);
     if (tpe.is<Type::Float32>()) return value(RuntimeType::Float32);
     if (tpe.is<Type::Float64>()) return value(RuntimeType::Float64);
+    // Stateless callables have no runtime state, but offload kernel boundaries retain a one-byte
+    // placeholder so their physical ABI remains stable while the callable body is specialised.
+    if (tpe.is<Type::FnRef>()) return value(RuntimeType::IntU8);
     return value(RuntimeType::Ptr);
   };
   return expr.op.match_total( //
@@ -109,13 +141,17 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         auto *argPointersType = llvm::ArrayType::get(ptr, count ? count : 1);
         auto *argTypesType = llvm::ArrayType::get(i8, count ? count : 1);
         auto *mirrorSizesType = llvm::ArrayType::get(sizeTy, count ? count : 1);
+        auto *mirrorKindsType = llvm::ArrayType::get(i8, count ? count : 1);
         auto *argPointers = cg.B.CreateAlloca(argPointersType, nullptr, "remote_argptrs");
         auto *argTypes = cg.B.CreateAlloca(argTypesType, nullptr, "remote_argtypes");
         auto *mirrorSizes = cg.B.CreateAlloca(mirrorSizesType, nullptr, "remote_mirror_sizes");
+        auto *mirrorKinds = cg.B.CreateAlloca(mirrorKindsType, nullptr, "remote_mirror_kinds");
         for (size_t index = 0; index < v.args.size(); ++index) {
           const auto &arg = v.args[index];
           ValPtr value;
+          bool directAggregate = false;
           auto *mirrorSize = llvm::ConstantInt::get(sizeTy, 0);
+          auto *mirrorKind = llvm::ConstantInt::get(i8, 0);
           if (arg.tpe().template is<Type::Struct>()) {
             auto *type = cg.resolveType(arg.tpe());
             const auto allocationSize = cg.M.getDataLayout().getTypeAllocSize(type).getFixedValue();
@@ -130,9 +166,27 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
               value = local;
               mirrorSize = llvm::ConstantInt::get(sizeTy, allocationSize);
             }
-          } else value = cg.mkTermVal(arg);
+            directAggregate = true;
+            mirrorKind = llvm::ConstantInt::get(i8, 1);
+          } else {
+            value = cg.mkTermVal(arg);
+            if (const auto pointer = arg.tpe().template get<Type::Ptr>(); pointer && pointer->comp.template is<Type::Struct>()) {
+              int64_t allocationOffset = 0;
+              auto *origin = recoverSingleStoredPointer(value);
+              const auto *allocation =
+                  llvm::dyn_cast<llvm::AllocaInst>(llvm::GetPointerBaseWithConstantOffset(origin, allocationOffset, cg.M.getDataLayout()));
+              if (allocation && allocationOffset == 0) {
+                auto *pointeeType = cg.resolveType(pointer->comp);
+                if (allocation->getAllocatedType() == pointeeType && pointerFreeAggregate(pointeeType)) {
+                  const auto allocationSize = cg.M.getDataLayout().getTypeAllocSize(pointeeType).getFixedValue();
+                  mirrorSize = llvm::ConstantInt::get(sizeTy, allocationSize == 0 ? 1 : allocationSize);
+                  mirrorKind = llvm::ConstantInt::get(i8, 2);
+                }
+              }
+            }
+          }
           auto *offset = llvm::ConstantInt::get(i64, index);
-          if (mirrorSize->isZero()) {
+          if (!directAggregate) {
             auto *slot = cg.B.CreateAlloca(value->getType(), nullptr, "remote_arg");
             cg.B.CreateStore(value, slot);
             cg.B.CreateStore(cg.B.CreatePointerCast(slot, ptr), cg.B.CreateGEP(argPointersType, argPointers, {zero, offset}));
@@ -141,19 +195,21 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
           }
           cg.B.CreateStore(llvm::ConstantInt::get(i8, runtimeType(arg.tpe())), cg.B.CreateGEP(argTypesType, argTypes, {zero, offset}));
           cg.B.CreateStore(mirrorSize, cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, offset}));
+          cg.B.CreateStore(mirrorKind, cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, offset}));
         }
         std::string kernelName = "_kernel";
         if (const auto fn = v.kernel.tpe().get<Type::FnRef>()) {
-          kernelName = fqcn(fn->name) ^ map([](const auto c) { return std::isalnum(c) || c == '_' ? c : '_'; });
+          kernelName = normaliseSymbol(fn->name);
         }
         auto *module = cg.B.CreateGlobalString(kernelName, "remote_module", 0, &cg.M);
         auto *kernel = cg.B.CreateGlobalString(kernelName, "remote_kernel", 0, &cg.M);
-        cg.B.CreateCall(external("polyrt_remote_launch_with_cleanup", unit,
-                                 {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr}),
+        cg.B.CreateCall(external("polyrt_remote_launch_with_mirrors", unit,
+                                 {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr, ptr}),
                         {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX),
                          asSize(v.blockY), asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count),
                          cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}), cg.B.CreateGEP(argPointersType, argPointers, {zero, zero}),
-                         cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, zero})});
+                         cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, zero}),
+                         cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, zero})});
         return noop();
       },
       [&](const Spec::RemoteAlloc &v) -> ValPtr {

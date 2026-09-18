@@ -1,5 +1,6 @@
 #include <string>
 #include <system_error>
+#include <unordered_map>
 
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
@@ -32,6 +33,25 @@ int main(int argc, char **argv) {
         hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
     llvm::outs() << repr(program) << '\n';
     return 0;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-no-value-pointer-assignments") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 21;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto mismatches = program.collect_all<Stmt::Any>() ^ count([](const auto &statement) {
+                              if (const auto variable = statement.template get<Stmt::Var>(); variable && variable->expr) {
+                                const auto pointer = variable->expr->tpe().template get<Type::Ptr>();
+                                return pointer && pointer->comp == variable->name.tpe;
+                              }
+                              if (const auto mutation = statement.template get<Stmt::Mut>()) {
+                                const auto pointer = mutation->expr.tpe().template get<Type::Ptr>();
+                                return pointer && pointer->comp == mutation->name.tpe;
+                              }
+                              return false;
+                            });
+    return mismatches == 0 ? 0 : 21;
   }
   if (argc == 3 && std::string(argv[1]) == "--remove-prefix") {
     llvm::SmallString<256> directory(argv[2]);
@@ -97,6 +117,20 @@ int main(int argc, char **argv) {
                        });
     return found ? 0 : 13;
   }
+  if (argc == 3 && std::string(argv[1]) == "--assert-launch-dimensions-dereferenced") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 24;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto dereferenced = [](const Term::Any &value) {
+      const auto selection = value.template get<Term::Select>();
+      return selection && selection->steps ^ exists([](const auto &step) { return step.template is<PathStep::Deref>(); });
+    };
+    const auto found = program.collect_all<Spec::RemoteLaunch>()
+                       ^ exists([&](const auto &launch) { return dereferenced(launch.gridX) && dereferenced(launch.blockX); });
+    return found ? 0 : 24;
+  }
   if (argc == 4 && std::string(argv[1]) == "--assert-i32-constant") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
     if (!source) return 18;
@@ -106,6 +140,28 @@ int main(int argc, char **argv) {
     const auto expected = std::stoi(argv[3]);
     const auto found = program.collect_all<Term::IntS32Const>() ^ exists([&](const auto &constant) { return constant.value == expected; });
     return found ? 0 : 18;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-zero-type-variable") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 22;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto found = program.collect_all<Term::Defer>() ^ exists([](const auto &defer) { return defer.t.template is<Type::Var>(); });
+    return found ? 0 : 22;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-zero-type-variable-return") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 23;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto found = program.functions ^ exists([](const auto &function) {
+                         return function.decl.name == Sym({"foo", "implementation", "zero"})
+                                && (function.template collect_all<Term::Defer>()
+                                    ^ exists([](const auto &defer) { return defer.t.template is<Type::Var>(); }));
+                       });
+    return found ? 0 : 23;
   }
   if (argc == 3 && std::string(argv[1]) == "--assert-source-idioms") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
@@ -147,7 +203,15 @@ int main(int argc, char **argv) {
                                  });
     const auto preservesConditionalReference = selectReference && selectReference->template collect_all<Expr::RefTo>().empty()
                                                && selectReference->decl.rtn.template is<Type::Ptr>();
-    return hasMemcpy && hasBitCast && hasVisit && !hasVariantException && hasNext && preservesConditionalReference ? 0 : 19;
+    const auto cache = program.functions ^ collect_first([](const auto &candidate) -> std::optional<Function> {
+                         if (fqcn(candidate.decl.name).find("readCache") != std::string::npos) return candidate;
+                         return {};
+                       });
+    const auto hasCompactZeroFill =
+        cache && cache->template collect_all<Stmt::While>().size() == 1 && cache->template collect_all<Term::Poison>().empty();
+    return hasMemcpy && hasBitCast && hasVisit && !hasVariantException && hasNext && hasCompactZeroFill && preservesConditionalReference
+               ? 0
+               : 19;
   }
   if (argc == 3 && std::string(argv[1]) == "--assert-allocation-control-scaffolding") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
@@ -170,6 +234,20 @@ int main(int argc, char **argv) {
     const auto allocations = program.collect_all<Spec::RemoteAlloc>().size();
     const auto frees = program.collect_all<Spec::RemoteFree>().size();
     const auto launches = program.collect_all<Spec::RemoteLaunch>().size();
+    const auto functionsByName =
+        program.functions ^ map([](const auto &function) { return std::pair{function.decl.name, &function}; }) ^ to<std::unordered_map>();
+    const auto genericLaunches = program.collect_all<Spec::RemoteLaunch>() ^ count([&](const auto &launch) {
+                                   const auto callee =
+                                       launch.kernel.tpe().template get<Type::FnRef>()
+                                       ^ flat_map([&](const auto &reference) { return functionsByName ^ get_maybe(reference.name); });
+                                   return callee && !(*callee)->decl.tpeVars.empty();
+                                 });
+    const auto completedGenericLaunches =
+        program.collect_all<Spec::RemoteLaunch>() ^ count([&](const auto &launch) {
+          const auto callee = launch.kernel.tpe().template get<Type::FnRef>()
+                              ^ flat_map([&](const auto &reference) { return functionsByName ^ get_maybe(reference.name); });
+          return callee && !(*callee)->decl.tpeVars.empty() && launch.tpeArgs.size() == (*callee)->decl.tpeVars.size();
+        });
     const auto entries =
         program.functions ^ count([](const auto &function) { return function.convention.template is<CallConvention::OffloadEntry>(); });
     const auto reductions = program.collect_all<Spec::GpuGroupReduce>().size();
@@ -201,14 +279,15 @@ int main(int argc, char **argv) {
                                           || call.name == "polyrt_device_global_memory_bytes" || call.name == "polyrt_device_compute_units";
                                  });
     const auto deviceLimitCaps = program.collect_all<Intr::Min>().size();
-    const bool valid = allocations == 6 && frees == 5 && launches == 2 && entries == 2 && reductions == 3 && inclusiveScans == 2
-                       && exclusiveScans == 1 && bitwiseReductions == 1 && logicalReductions == 1 && bitwiseInclusiveScans == 1
-                       && copies.size() == 9 && localToRemote == 1 && remoteToLocal == 3 && remoteToRemote == 5 && barriers == 0
-                       && allBarriers == 2 && subgroupBarriers == 1 && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4
-                       && globalIndices >= 5 && localIndices >= 5 && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4
-                       && deviceLimitCaps >= 1;
+    const bool valid = allocations == 6 && frees == 5 && launches == 2 && genericLaunches == 1 && completedGenericLaunches == 1
+                       && entries == 2 && reductions == 3 && inclusiveScans == 2 && exclusiveScans == 1 && bitwiseReductions == 1
+                       && logicalReductions == 1 && bitwiseInclusiveScans == 1 && copies.size() == 9 && localToRemote == 1
+                       && remoteToLocal == 3 && remoteToRemote == 5 && barriers == 0 && allBarriers == 2 && subgroupBarriers == 1
+                       && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4 && globalIndices >= 5 && localIndices >= 5
+                       && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4 && deviceLimitCaps >= 1;
     if (!valid)
       llvm::errs() << "Unexpected SYCL prism counts: alloc=" << allocations << " free=" << frees << " launch=" << launches
+                   << " generic-launch=" << genericLaunches << " completed-generic-launch=" << completedGenericLaunches
                    << " entries=" << entries << " reduce=" << reductions << " copies=" << copies.size() << " inclusive=" << inclusiveScans
                    << " exclusive=" << exclusiveScans << " local-to-remote=" << localToRemote << " remote-to-local=" << remoteToLocal
                    << " remote-to-remote=" << remoteToRemote << " bitwise-reduce=" << bitwiseReductions
@@ -271,14 +350,16 @@ int main(int argc, char **argv) {
                                                return name.find("rocprim::detail::host_target_arch") != std::string::npos
                                                       || name.find("rocprim::detail::get_device_arch") != std::string::npos;
                                              });
+    // CUB ThreadLoad/ThreadStore and rocPRIM's polling wrappers stay volatile. The direct HIP pair retains
+    // its atomic semantics, joining atomicAdd and atomicCAS as the second RMW/CAS pair.
     const auto valid = program.collect_all<Spec::RemoteAlloc>().size() == 2 && program.collect_all<Spec::RemoteFree>().size() == 2
                        && shuffleDowns.size() == 1 && shuffleDowns ^ forall(logicalWidth) && shuffleUps.size() == 4
                        && (shuffleUps ^ count(logicalWidth)) >= 2 && shuffleIndices.size() == 1 && (shuffleIndices ^ forall(logicalWidth))
                        && shuffleXors.size() == 2 && program.collect_all<Spec::GpuBallot>().size() == 3
                        && program.collect_all<Spec::GpuSubgroupBarrier>().size() == 1
                        && program.collect_all<Spec::GpuFenceLocal>().size() == 1 && program.collect_all<Spec::GpuFenceGlobal>().size() == 1
-                       && program.collect_all<Spec::GpuFenceAll>().size() == 1 && program.collect_all<Spec::GpuVolatileLoad>().size() == 1
-                       && program.collect_all<Spec::GpuVolatileStore>().size() == 1 && program.collect_all<Spec::GpuAtomicRMW>().size() == 2
+                       && program.collect_all<Spec::GpuFenceAll>().size() == 1 && program.collect_all<Spec::GpuVolatileLoad>().size() == 2
+                       && program.collect_all<Spec::GpuVolatileStore>().size() == 2 && program.collect_all<Spec::GpuAtomicRMW>().size() == 2
                        && program.collect_all<Spec::GpuAtomicCAS>().size() == 2 && program.collect_all<Spec::GpuSubgroupSize>().empty()
                        && !program.collect_all<Spec::GpuLaneIdx>().empty() && pointerUpdates >= 2 && preservedHostHelper && indexedAsmOutput
                        && cudaDeviceQueries == 2 && launches == 1 && conformedLaunchArguments && pointerInitialisedValues == 0
@@ -331,11 +412,37 @@ int main(int argc, char **argv) {
               });
           return pointerSlotUpdate || !function.template collect_all<Stmt::Mut>().empty();
         });
+    const auto indexedPrivateReferences = program.collect_all<Expr::RefTo>() ^ count([](const auto &reference) {
+                                            return reference.idx && reference.space.template is<TypeSpace::Private>();
+                                          });
+    const auto offloadContextArguments =
+        program.functions ^ count([](const auto &function) {
+          return function.decl.affinity.template is<FunctionAffinity::Offload>()
+                 && function.decl.args ^ exists([](const auto &argument) { return argument.named.symbol == "#context"; });
+        });
+    const auto offloadContextReferences = program.functions ^ count([](const auto &function) {
+                                            return function.decl.affinity.template is<FunctionAffinity::Offload>()
+                                                   && function.template collect_all<Term::Select>() ^ exists([](const auto &selection) {
+                                                        return selection.root.symbol == "#context";
+                                                      });
+                                          });
+    // The device helper occurs in both phase fragments, hence two exchanges and four compare-exchanges after merge.
     const auto valid = program.collect_all<Spec::GpuLocalIdx>().size() >= 3 && program.collect_all<Spec::GpuGroupIdx>().size() >= 3
                        && program.collect_all<Spec::GpuLocalSize>().size() >= 3 && program.collect_all<Spec::GpuGroupSize>().size() >= 3
-                       && program.collect_all<Spec::GpuAtomicCAS>().size() == 2 && program.collect_all<Spec::GpuAtomicRMW>().size() == 1
-                       && localArrays >= 2 && privatePointers >= 1 && invokesDiscardedCall && mutablePointerReference;
-    if (!valid) llvm::errs() << "Unexpected native CUDA semantics program:\n" << repr(program) << '\n';
+                       && program.collect_all<Spec::GpuAtomicCAS>().size() == 4 && program.collect_all<Spec::GpuAtomicRMW>().size() == 5
+                       && localArrays >= 2 && privatePointers >= 1 && invokesDiscardedCall && mutablePointerReference
+                       && indexedPrivateReferences >= 1 && offloadContextArguments == 0 && offloadContextReferences == 0;
+    if (!valid)
+      llvm::errs() << "Unexpected native CUDA semantics counts: local-index=" << program.collect_all<Spec::GpuLocalIdx>().size()
+                   << " group-index=" << program.collect_all<Spec::GpuGroupIdx>().size()
+                   << " local-size=" << program.collect_all<Spec::GpuLocalSize>().size()
+                   << " group-size=" << program.collect_all<Spec::GpuGroupSize>().size()
+                   << " atomic-cas=" << program.collect_all<Spec::GpuAtomicCAS>().size()
+                   << " atomic-rmw=" << program.collect_all<Spec::GpuAtomicRMW>().size() << " local-arrays=" << localArrays
+                   << " private-pointers=" << privatePointers << " discarded-call=" << invokesDiscardedCall
+                   << " mutable-pointer-reference=" << mutablePointerReference << " indexed-private-references=" << indexedPrivateReferences
+                   << " offload-context-arguments=" << offloadContextArguments << " offload-context-references=" << offloadContextReferences
+                   << '\n';
     return valid ? 0 : 21;
   }
   if (argc == 3 && std::string(argv[1]) == "--write-marker-interface") {

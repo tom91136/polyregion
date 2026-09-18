@@ -28,6 +28,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
@@ -43,6 +44,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/Pass.h"
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
@@ -138,6 +140,13 @@ void llvmc::initialise() {
   llvm::InitializeAllTargetMCs();
   llvm::InitializeAllAsmPrinters();
   llvm::InitializeAllAsmParsers();
+
+  static const bool nvptxShortPointers = [] {
+    auto *option = llvm::cl::getRegisteredOptions().lookup("nvptx-short-ptr");
+    if (!option || option->addOccurrence(0, "nvptx-short-ptr", "true")) throw std::logic_error("unable to enable NVPTX short pointers");
+    return true;
+  }();
+  (void)nvptxShortPointers;
 
   // Initialize codegen and IR passes used by llc so that the -print-after,
   // -print-before, and -stop-after options work.
@@ -704,6 +713,53 @@ static void foldConstantBranches(llvm::Function &F) {
   if (changed) llvm::removeUnreachableBlocks(F);
 }
 
+// SROA represents conditionally assigned pointer locals as phis. StructuredExit emits the condition in a parallel
+// boolean phi, so a use below its true/false successor has one provable pointer value. Preserve the structured CFG
+// while specialising those uses; otherwise LLVM's SPIR-V translator also translates an untaken null-derived GEP and
+// assigns its opaque pointer an i8 pointee, producing an invalid multi-index OpAccessChain.
+static void specialisePointersByBooleanPhi(llvm::Function &F) {
+  llvm::DominatorTree DT(F);
+  for (llvm::BasicBlock &BB : F) {
+    auto *branch = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator());
+    auto *guard = branch && branch->isConditional() ? llvm::dyn_cast<llvm::PHINode>(branch->getCondition()) : nullptr;
+    if (!guard || guard->getParent() != &BB) continue;
+    if (branch->getSuccessor(0) == branch->getSuccessor(1)) continue;
+    if (!(guard->incoming_values() ^ forall([](const auto &value) { return llvm::isa<llvm::ConstantInt>(value); }))) continue;
+
+    auto commonIncoming = [&](llvm::PHINode &phi, const bool wanted) -> llvm::Value * {
+      llvm::Value *common = nullptr;
+      for (unsigned i = 0; i < guard->getNumIncomingValues(); ++i) {
+        auto *constant = llvm::dyn_cast<llvm::ConstantInt>(guard->getIncomingValue(i));
+        if (!constant || constant->isOne() != wanted) continue;
+        auto *value = phi.getIncomingValueForBlock(guard->getIncomingBlock(i));
+        if (!value || (common && common != value)) return nullptr;
+        common = value;
+      }
+      return common;
+    };
+    auto dominates = [&](llvm::Value *value, llvm::Instruction *use) {
+      if (llvm::isa<llvm::Constant>(value) || llvm::isa<llvm::Argument>(value)) return true;
+      if (auto *definition = llvm::dyn_cast<llvm::Instruction>(value)) return DT.dominates(definition, use);
+      return false;
+    };
+
+    for (llvm::PHINode &phi : BB.phis()) {
+      if (&phi == guard || !phi.getType()->isPointerTy()) continue;
+      auto *trueValue = commonIncoming(phi, true);
+      auto *falseValue = commonIncoming(phi, false);
+      if (!trueValue || !falseValue) continue;
+      for (llvm::User *user : llvm::make_early_inc_range(phi.users())) {
+        auto *instruction = llvm::dyn_cast<llvm::Instruction>(user);
+        if (!instruction || llvm::isa<llvm::PHINode>(instruction)) continue;
+        llvm::Value *replacement = nullptr;
+        if (DT.dominates(branch->getSuccessor(0), instruction->getParent())) replacement = trueValue;
+        else if (DT.dominates(branch->getSuccessor(1), instruction->getParent())) replacement = falseValue;
+        if (replacement && replacement != &phi && dominates(replacement, instruction)) instruction->replaceUsesOfWith(&phi, replacement);
+      }
+    }
+  }
+}
+
 static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bool logical) {
   llvm::PassBuilder PB(&TM);
   llvm::LoopAnalysisManager LAM;
@@ -743,6 +799,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
     if (!F.isDeclaration() && !F.getEntryBlock().empty()) {
       FPM.run(F, FAM);
       if (logical) {
+        specialisePointersByBooleanPhi(F);
         // Full SimplifyCFG drops SPIR-V merge structure from some lowered exits. Only fold constant
         // guards, which releases otherwise unreachable null edges that pin private pointer phis.
         foldConstantBranches(F);
@@ -755,6 +812,9 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         // narrow cleanup to a fixed shape without simplifying non-constant structured branches.
         foldConstantBranches(F);
         sinkLoadsThroughPointerPhis(F);
+        FAM.invalidate(F, llvm::PreservedAnalyses::none());
+        cleanup.run(F, FAM);
+        specialisePointersByBooleanPhi(F);
         FAM.invalidate(F, llvm::PreservedAnalyses::none());
         cleanup.run(F, FAM);
         normaliseUnitSignSelects(F);

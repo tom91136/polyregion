@@ -227,6 +227,18 @@ static ValPtr emitGroupPredicate(CodeGen &cg, const std::string &name, const Ter
   return call->getType() == valueV->getType() ? call : cg.B.CreateIntCast(call, valueV->getType(), /*isSigned*/ false);
 }
 
+// OpenCL subgroup predicates take and return int. The core builtin covers all active lanes; retain an explicit
+// diagnostic for masked votes rather than silently weakening PolyAST's CUDA/HIP-compatible mask semantics.
+static ValPtr emitSubgroupPredicate(CodeGen &cg, const std::string &name, const Term::Any &mask, const Term::Any &predicate) {
+  const auto literal = mask.get<Term::IntU32Const>();
+  if (!literal || literal->value != -1) throw BackendException("Masked subgroup votes are unsupported for SPIRV-OpenCL");
+  auto *i32Ty = cg.C.i32Ty();
+  auto *predicateV = cg.mkTermVal(predicate);
+  if (predicateV->getType() != i32Ty) predicateV = cg.B.CreateIntCast(predicateV, i32Ty, /*isSigned*/ false);
+  auto *vote = callSpirFunc(cg, mangleOcl(name, "i"), i32Ty, {predicateV});
+  return cg.B.CreateICmpNE(vote, llvm::ConstantInt::get(i32Ty, 0));
+}
+
 // OpenCL Itanium mangle suffix for a scalar shuffle element from the polyast type; nullptr if not a scalar
 static const char *scalarShuffleMangle(const Type::Any &rtn) {
   return rtn.is<Type::Float32>()   ? "f"
@@ -363,6 +375,33 @@ static ValPtr emitClampedSubgroupShuffle(CodeGen &cg, const char kind, const Ter
   return emitSubgroupShuffle(cg, "sub_group_shuffle", value, safeSrcLane, rtn);
 }
 
+static ValPtr emitVulkanSubgroupShuffleValue(CodeGen &cg, ValPtr value, ValPtr srcLane) {
+  auto *ty = value->getType();
+  if (ty->isStructTy() || ty->isArrayTy()) {
+    const unsigned n = ty->isStructTy() ? ty->getStructNumElements() : static_cast<unsigned>(ty->getArrayNumElements());
+    ValPtr result = llvm::UndefValue::get(ty);
+    for (unsigned i = 0; i < n; ++i)
+      result = cg.B.CreateInsertValue(result, emitVulkanSubgroupShuffleValue(cg, cg.B.CreateExtractValue(value, {i}), srcLane), {i});
+    return result;
+  }
+  return cg.B.CreateIntrinsic(llvm::Intrinsic::spv_wave_readlane, {ty}, {value, srcLane});
+}
+
+static void emitVulkanSubgroupShufflePtr(CodeGen &cg, llvm::Type *ty, ValPtr srcPtr, ValPtr dstPtr, ValPtr srcLane) {
+  auto *i32 = cg.C.i32Ty();
+  if (ty->isStructTy() || ty->isArrayTy()) {
+    const unsigned n = ty->isStructTy() ? ty->getStructNumElements() : static_cast<unsigned>(ty->getArrayNumElements());
+    for (unsigned i = 0; i < n; ++i) {
+      auto *elemTy = ty->isStructTy() ? ty->getStructElementType(i) : ty->getArrayElementType();
+      llvm::Value *idx[] = {llvm::ConstantInt::get(i32, 0), llvm::ConstantInt::get(i32, i)};
+      emitVulkanSubgroupShufflePtr(cg, elemTy, cg.B.CreateInBoundsGEP(ty, srcPtr, idx), cg.B.CreateInBoundsGEP(ty, dstPtr, idx), srcLane);
+    }
+  } else {
+    auto *value = cg.B.CreateLoad(ty, srcPtr);
+    cg.B.CreateStore(cg.B.CreateIntrinsic(llvm::Intrinsic::spv_wave_readlane, {ty}, {value, srcLane}), dstPtr);
+  }
+}
+
 // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
 ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   auto &ctx = cg.C.actual;
@@ -411,8 +450,8 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
         return subgroupBarrier();
       },
       [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuVoteAny &v) -> ValPtr { return emitSubgroupPredicate(cg, "sub_group_any", v.mask, v.pred); },
+      [&](const Spec::GpuVoteAll &v) -> ValPtr { return emitSubgroupPredicate(cg, "sub_group_all", v.mask, v.pred); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, ""); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, ""); },
       [&](const Spec::GpuGroupReduce &v) -> ValPtr {
@@ -472,6 +511,75 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
     B.CreateIntrinsic(llvm::Type::getVoidTy(ctx), llvm::Intrinsic::spv_group_memory_barrier_with_group_sync, {});
     return cg.mkTermVal(Term::Unit0Const());
   };
+  auto laneIdx = [&]() -> ValPtr { return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_subgroup_local_invocation_id, {}); };
+  auto subgroupSize = [&]() -> ValPtr { return B.CreateIntrinsic(i32t, llvm::Intrinsic::spv_subgroup_size, {}); };
+  auto maskMember = [&](const AnyTerm &mask, ValPtr lane) -> ValPtr {
+    auto *maskV = B.CreateIntCast(cg.mkTermVal(mask), i32t, false);
+    auto *isAll = B.CreateICmpEQ(maskV, llvm::ConstantInt::get(i32t, 0xFFFFFFFFu));
+    auto *bit = B.CreateAnd(lane, llvm::ConstantInt::get(i32t, 31));
+    auto *set = B.CreateICmpNE(B.CreateAnd(B.CreateLShr(maskV, bit), llvm::ConstantInt::get(i32t, 1)), llvm::ConstantInt::get(i32t, 0));
+    return B.CreateOr(isAll, set);
+  };
+  auto shuffle = [&](const char kind, const AnyTerm &value, const AnyTerm &arg, const AnyTerm &bound, const AnyTerm &mask,
+                     const AnyType &rtn) -> ValPtr {
+    auto *lane = laneIdx();
+    auto *a = B.CreateIntCast(cg.mkTermVal(arg), i32t, false);
+    auto *clamp = B.CreateIntCast(cg.mkTermVal(bound), i32t, false);
+    auto *segmentBase = B.CreateAnd(lane, B.CreateNot(clamp));
+    auto *segmentLast = B.CreateOr(segmentBase, clamp);
+    ValPtr srcLane;
+    ValPtr inRange;
+    switch (kind) {
+      case 'd':
+        srcLane = B.CreateAdd(lane, a);
+        inRange = B.CreateICmpULE(a, B.CreateSub(segmentLast, lane));
+        break;
+      case 'u':
+        srcLane = B.CreateSub(lane, a);
+        inRange = B.CreateICmpULE(a, B.CreateSub(lane, segmentBase));
+        break;
+      case 'x':
+        srcLane = B.CreateXor(lane, a);
+        inRange = B.CreateAnd(B.CreateICmpUGE(srcLane, segmentBase), B.CreateICmpULE(srcLane, segmentLast));
+        break;
+      default:
+        srcLane = B.CreateOr(segmentBase, B.CreateAnd(a, clamp));
+        inRange = B.CreateICmpULE(srcLane, segmentLast);
+        break;
+    }
+    inRange = B.CreateAnd(inRange, B.CreateICmpULT(srcLane, subgroupSize()));
+    inRange = B.CreateAnd(inRange, B.CreateAnd(maskMember(mask, lane), maskMember(mask, srcLane)));
+    auto *safeSrcLane = B.CreateSelect(inRange, srcLane, lane);
+    auto *valueV = cg.mkTermVal(value);
+    if (valueV->getType()->isPointerTy() && (rtn.is<Type::Struct>() || rtn.is<Type::Arr>())) {
+      auto *aggTy = cg.resolveType(rtn);
+      auto *slot = B.CreateAlloca(aggTy, cg.C.AllocaAS, nullptr, "sg_shuffle_agg");
+      emitVulkanSubgroupShufflePtr(cg, aggTy, valueV, slot, safeSrcLane);
+      return slot;
+    }
+    return emitVulkanSubgroupShuffleValue(cg, valueV, safeSrcLane);
+  };
+  auto ballotWord = [&](ValPtr predicate) -> ValPtr {
+    auto *bits = B.CreateIntrinsic(llvm::FixedVectorType::get(i32t, 4), llvm::Intrinsic::spv_wave_ballot, {predicate});
+    auto *word = B.CreateAnd(B.CreateLShr(laneIdx(), llvm::ConstantInt::get(i32t, 5)), llvm::ConstantInt::get(i32t, 3));
+    return B.CreateExtractElement(bits, word);
+  };
+  auto segmentMask = [&]() -> ValPtr {
+    auto *base = B.CreateAnd(laneIdx(), llvm::ConstantInt::get(i32t, ~31u));
+    auto *remaining = B.CreateSub(subgroupSize(), base);
+    auto *count = B.CreateSelect(B.CreateICmpULT(remaining, llvm::ConstantInt::get(i32t, 32)), remaining, llvm::ConstantInt::get(i32t, 32));
+    auto *wideOne = llvm::ConstantInt::get(B.getInt64Ty(), 1);
+    auto *valid = B.CreateTrunc(B.CreateSub(B.CreateShl(wideOne, B.CreateZExt(count, B.getInt64Ty())), wideOne), i32t);
+    return valid;
+  };
+  auto vote = [&](const AnyTerm &mask, const AnyTerm &predicate, bool all) -> ValPtr {
+    auto *valid = segmentMask();
+    auto *requested = B.CreateIntCast(cg.mkTermVal(mask), i32t, false);
+    auto *isAll = B.CreateICmpEQ(requested, llvm::ConstantInt::get(i32t, 0xFFFFFFFFu));
+    auto *effective = B.CreateAnd(B.CreateSelect(isAll, valid, requested), valid);
+    auto *selected = B.CreateAnd(ballotWord(cg.mkTermVal(predicate)), effective);
+    return all ? B.CreateICmpEQ(selected, effective) : B.CreateICmpNE(selected, llvm::ConstantInt::get(i32t, 0));
+  };
   auto atomicScope = [](const MemScope::Any &scope) -> std::string {
     return scope.match_total([](const MemScope::Subgroup &) -> std::string { return "subgroup"; },
                              [](const MemScope::Workgroup &) -> std::string { return "workgroup"; },
@@ -494,27 +602,21 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuBarrierAll &) -> ValPtr { return groupBarrier(); },
       [&](const Spec::GpuFenceGlobal &) -> ValPtr { return groupBarrier(); },
       [&](const Spec::GpuFenceLocal &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(); },
-      [&](const Spec::GpuLaneIdx &) -> ValPtr { throw BackendException("Spec::GpuLaneIdx requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuSubgroupSize &) -> ValPtr {
-        throw BackendException("Spec::GpuSubgroupSize requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleDown &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleDown requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleUp &) -> ValPtr { throw BackendException("Spec::GpuShuffleUp requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuShuffleIdx &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleIdx requires native lowering or SubgroupLower");
-      },
-      [&](const Spec::GpuShuffleXor &) -> ValPtr {
-        throw BackendException("Spec::GpuShuffleXor requires native lowering or SubgroupLower");
-      },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return groupBarrier(); }, //
+      [&](const Spec::GpuLaneIdx &) -> ValPtr { return laneIdx(); },
+      [&](const Spec::GpuSubgroupSize &) -> ValPtr { return subgroupSize(); },
+      [&](const Spec::GpuShuffleDown &v) -> ValPtr { return shuffle('d', v.value, v.delta, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleUp &v) -> ValPtr { return shuffle('u', v.value, v.delta, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleIdx &v) -> ValPtr { return shuffle('i', v.value, v.srcLane, v.width, v.mask, v.rtn); },
+      [&](const Spec::GpuShuffleXor &v) -> ValPtr { return shuffle('x', v.value, v.laneMask, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuSubgroupBarrier &) -> ValPtr {
         throw BackendException("Spec::GpuSubgroupBarrier is unsupported for SPIRV-Vulkan");
       },
-      [&](const Spec::GpuBallot &) -> ValPtr { throw BackendException("Spec::GpuBallot requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAny &) -> ValPtr { throw BackendException("Spec::GpuVoteAny requires native lowering or SubgroupLower"); },
-      [&](const Spec::GpuVoteAll &) -> ValPtr { throw BackendException("Spec::GpuVoteAll requires native lowering or SubgroupLower"); },
+      [&](const Spec::GpuBallot &v) -> ValPtr {
+        return B.CreateAnd(ballotWord(cg.mkTermVal(v.pred)), B.CreateIntCast(cg.mkTermVal(v.mask), i32t, false));
+      },
+      [&](const Spec::GpuVoteAny &v) -> ValPtr { return vote(v.mask, v.pred, false); },
+      [&](const Spec::GpuVoteAll &v) -> ValPtr { return vote(v.mask, v.pred, true); },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, atomicScope(v.scope)); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, atomicScope(v.scope)); },
       [&](const Spec::GpuGroupReduce &) -> ValPtr {

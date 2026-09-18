@@ -3,6 +3,7 @@
 
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <set>
@@ -907,32 +908,38 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 
   const auto entry = fnTree.convention.is<CallConvention::OffloadEntry>();
 
-  std::vector<std::string> argExprs =
-      fnTree.decl.args   //
-      | zip_with_index() //
-      | map([&](const auto &arg, const auto &idx) {
-          auto tpe = mkTpe(arg.named.tpe);
-          auto name = localName(arg.named.symbol);
-          std::string decl;
-          switch (dialect) {
-            case Dialect::OpenCL1_1: {
-              decl = mkDecl(arg.named.tpe, name);
-              break;
-            }
-            case Dialect::MSL1_0: {
-              if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
-                decl = arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
-                                              [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
-                                              [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
-                                              [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); });
-              } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
-              break;
-            }
-            default: break;
-          }
-          return decl;
-        }) //
-      | to_vector();
+  std::vector<std::string> argExprs;
+  argExprs.reserve(fnTree.decl.args.size() * 2);
+  for (size_t idx = 0; idx < fnTree.decl.args.size(); ++idx) {
+    const auto &arg = fnTree.decl.args[idx];
+    const auto tpe = mkTpe(arg.named.tpe);
+    const auto name = localName(arg.named.symbol);
+    switch (dialect) {
+      case Dialect::OpenCL1_1: {
+        // clSetKernelArg binds an owning cl_mem, not an arbitrary interior pointer.  Source kernels receive
+        // each Global/Constant pointer as owner+byte-offset and reconstruct the logical typed pointer in mkFn.
+        const auto ptr = arg.named.tpe.template get<Type::Ptr>();
+        const bool offsetAbi =
+            entry && ptr && (ptr->space.template is<TypeSpace::Global>() || ptr->space.template is<TypeSpace::Constant>());
+        if (offsetAbi) {
+          argExprs.push_back(mkDecl(arg.named.tpe, fmt::format("_polyregion_arg_base_{}", idx)));
+          argExprs.push_back(fmt::format("ulong _polyregion_arg_byte_offset_{}", idx));
+        } else argExprs.push_back(mkDecl(arg.named.tpe, name));
+        break;
+      }
+      case Dialect::MSL1_0: {
+        if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
+          argExprs.push_back(
+              arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
+                                     [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
+                                     [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
+                                     [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }));
+        } else argExprs.push_back(fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx));
+        break;
+      }
+      default: break;
+    }
+  }
 
   if (dialect == Dialect::MSL1_0) {
 
@@ -1023,6 +1030,21 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
   std::vector<std::string> regionDecls;
   if (usage.dynamic && !inPlace) regionDecls.push_back(regionDecl(Type::IntS8(), TypeSpace::Local(), regionName));
 
+  std::vector<std::string> entryAbiDecls;
+  if (dialect == Dialect::OpenCL1_1 && fnTree.convention.is<CallConvention::OffloadEntry>()) {
+    for (size_t idx = 0; idx < fnTree.decl.args.size(); ++idx) {
+      const auto &arg = fnTree.decl.args[idx];
+      const auto ptr = arg.named.tpe.template get<Type::Ptr>();
+      if (!ptr || (!ptr->space.template is<TypeSpace::Global>() && !ptr->space.template is<TypeSpace::Constant>())) continue;
+      const auto bytePtr = ptr->space.template is<TypeSpace::Global>() ? "global uchar*" : "constant uchar*";
+      const auto base = fmt::format("_polyregion_arg_base_{}", idx);
+      const auto offset = fmt::format("_polyregion_arg_byte_offset_{}", idx);
+      entryAbiDecls.push_back(fmt::format("{} = {} == POLYREGION_OPENCL_NULL_POINTER_OFFSET ? (({}) 0) : (({}) ((({}) {}) + {}));",
+                                          mkDecl(arg.named.tpe, localName(arg.named.symbol)), offset, mkTpe(arg.named.tpe),
+                                          mkTpe(arg.named.tpe), bytePtr, base, offset));
+    }
+  }
+
   const auto localDecls = localVars ^ map([&](const auto &v) {
                             const auto a = v.name.tpe.template get<Type::Arr>();
                             if (!a || a->length != 0) return fmt::format("{};", mkDecl(v.name.tpe, localName(v.name.symbol)));
@@ -1033,7 +1055,8 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
                           });
   if (!usage.fixedSizeExprs.empty() && !usage.dynamic)
     regionDecls.push_back(fmt::format("typedef char _polyregion_workgroup_capacity[({}) <= {} ? 1 : -1];", fixedExpr, remaining));
-  const auto stmts = concat(concat(regionDecls, localDecls), fnTree.body ^ map([&](const auto &s) { return mkStmt(s); }));
+  const auto stmts =
+      concat(concat(concat(entryAbiDecls, regionDecls), localDecls), fnTree.body ^ map([&](const auto &s) { return mkStmt(s); }));
   return fmt::format("{} {}", mkFnProto(fnTree), stmts ^ mk_string("{\n", "\n", "\n}", [&](const auto &s) { return s ^ indent(2); }));
 }
 
@@ -1232,7 +1255,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
                "#define POLY_SIN native_sin\n#define POLY_COS native_cos\n#define POLY_TAN native_tan\n"
                "#else\n"
                "#define POLY_SIN sin\n#define POLY_COS cos\n#define POLY_TAN tan\n"
-               "#endif\n";
+               "#endif\n"
+               "#define POLYREGION_OPENCL_NULL_POINTER_OFFSET ((ulong)-1)\n";
     code = pragmas + code;
   }
 

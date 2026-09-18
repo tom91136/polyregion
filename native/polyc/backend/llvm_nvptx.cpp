@@ -273,7 +273,116 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       },
       [&](const Spec::GpuAtomicRMW &v) -> ValPtr { return cg.mkAtomicRMW(v, nvptxScope(v.scope)); },
       [&](const Spec::GpuAtomicCAS &v) -> ValPtr { return cg.mkAtomicCAS(v, nvptxScope(v.scope)); },
-      [&](const Spec::GpuGroupReduce &) -> ValPtr { throw BackendException("Spec::GpuGroupReduce lowering not yet implemented"); },
+      [&](const Spec::GpuGroupReduce &v) -> ValPtr {
+        if (v.op.is<AtomicOp::Xchg>() || v.op.is<AtomicOp::Sub>())
+          throw BackendException("work-group reduction requires an associative operation");
+        // Reduce each physical warp, publish one value per warp, then let thread zero fold those partials.
+        // CUDA's linear thread ordering is x-major, matching lane/warp numbering even for 2-D/3-D blocks.
+        auto &B = cg.B;
+        auto &ctx = cg.C.actual;
+        auto *i32Ty = cg.C.i32Ty();
+        auto *valTy = cg.resolveType(v.rtn);
+        const auto numeric = classifyNumeric(v.value.tpe());
+        const auto ci32 = [&](uint32_t value) { return llvm::ConstantInt::get(i32Ty, value); };
+        const auto combine = [&](llvm::Value *a, llvm::Value *b) -> llvm::Value * {
+          return v.op.match_total(                                                                                              //
+              [&](const AtomicOp::Xchg &) -> llvm::Value * { throw BackendException("non-associative work-group reduction"); }, //
+              [&](const AtomicOp::Add &) -> llvm::Value * { return numeric.isFloat ? B.CreateFAdd(a, b) : B.CreateAdd(a, b); },
+              [&](const AtomicOp::Sub &) -> llvm::Value * { throw BackendException("non-associative work-group reduction"); },
+              [&](const AtomicOp::And &) -> llvm::Value * { return B.CreateAnd(a, b); },
+              [&](const AtomicOp::Or &) -> llvm::Value * { return B.CreateOr(a, b); },
+              [&](const AtomicOp::Xor &) -> llvm::Value * { return B.CreateXor(a, b); },
+              [&](const AtomicOp::Min &) -> llvm::Value * {
+                auto *less = numeric.isFloat ? B.CreateFCmpOLT(a, b) : (numeric.isSigned ? B.CreateICmpSLT(a, b) : B.CreateICmpULT(a, b));
+                return B.CreateSelect(less, a, b);
+              },
+              [&](const AtomicOp::Max &) -> llvm::Value * {
+                auto *greater =
+                    numeric.isFloat ? B.CreateFCmpOGT(a, b) : (numeric.isSigned ? B.CreateICmpSGT(a, b) : B.CreateICmpUGT(a, b));
+                return B.CreateSelect(greater, a, b);
+              });
+        };
+        const auto words = nvptxShuffleWords(cg, valTy);
+        if (words > 2) throw BackendException("NVPTX work-group reduction supports values up to 8 bytes");
+        const auto shfl = [&](llvm::Intrinsic::ID syncId, llvm::Intrinsic::ID legacyId, llvm::Value *value, llvm::Value *index,
+                              uint32_t clamp) -> llvm::Value * {
+          auto *callee = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, legacySubgroup ? legacyId : syncId, {});
+          auto *active = activeMask();
+          return cg.shuffleStage(valTy, valTy, words, value, "group_reduce", [&](llvm::Value *word) {
+            return legacySubgroup ? B.CreateCall(callee, {word, index, ci32(clamp)})
+                                  : B.CreateCall(callee, {active, word, index, ci32(clamp)});
+          });
+        };
+
+        auto *x = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x);
+        auto *y = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_tid_y);
+        auto *z = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_tid_z);
+        auto *sx = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x);
+        auto *sy = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_y);
+        auto *sz = cg.intr0(llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_z);
+        auto *thread = B.CreateAdd(x, B.CreateMul(sx, B.CreateAdd(y, B.CreateMul(sy, z))));
+        auto *threads = B.CreateMul(sx, B.CreateMul(sy, sz));
+        auto *lane = B.CreateAnd(thread, ci32(31));
+        auto *warp = B.CreateLShr(thread, ci32(5));
+        auto *warps = B.CreateLShr(B.CreateAdd(threads, ci32(31)), ci32(5));
+        auto *warpStart = B.CreateShl(warp, ci32(5));
+        auto *warpThreads = B.CreateSub(threads, warpStart);
+        warpThreads = B.CreateSelect(B.CreateICmpULT(warpThreads, ci32(32)), warpThreads, ci32(32));
+        auto *value = cg.mkTermVal(v.value);
+        for (uint32_t offset = 16; offset > 0; offset >>= 1) {
+          auto *incoming = shfl(llvm::Intrinsic::nvvm_shfl_sync_down_i32, llvm::Intrinsic::nvvm_shfl_down_i32, value, ci32(offset), 0x1f);
+          auto *valid = B.CreateICmpULT(B.CreateAdd(lane, ci32(offset)), warpThreads);
+          value = B.CreateSelect(valid, combine(value, incoming), value);
+        }
+
+        constexpr auto ScratchName = "__polyc_group_reduce_scratch";
+        auto *scratchTy = llvm::ArrayType::get(cg.C.i64Ty(), 32);
+        auto *scratch = cg.M.getNamedGlobal(ScratchName);
+        if (!scratch)
+          scratch = new llvm::GlobalVariable(cg.M, scratchTy, false, llvm::GlobalValue::InternalLinkage,
+                                             llvm::ConstantAggregateZero::get(scratchTy), ScratchName, nullptr,
+                                             llvm::GlobalValue::NotThreadLocal, AddrSpace::Workgroup);
+        scratch->setAlignment(llvm::Align(16));
+
+        auto *fn = B.GetInsertBlock()->getParent();
+        auto *publish = llvm::BasicBlock::Create(ctx, "group_reduce_publish", fn);
+        auto *published = llvm::BasicBlock::Create(ctx, "group_reduce_published", fn);
+        B.CreateCondBr(B.CreateICmpEQ(lane, ci32(0)), publish, published);
+        B.SetInsertPoint(publish);
+        (void)cg.C.store(B, value, B.CreateGEP(scratchTy, scratch, {ci32(0), warp}));
+        B.CreateBr(published);
+        B.SetInsertPoint(published);
+        barrier0();
+
+        auto *acc = cg.C.allocaAS(B, valTy, cg.C.AllocaAS, "group_reduce_acc");
+        auto *index = cg.C.allocaAS(B, i32Ty, cg.C.AllocaAS, "group_reduce_index");
+        auto *leader = llvm::BasicBlock::Create(ctx, "group_reduce_leader", fn);
+        auto *complete = llvm::BasicBlock::Create(ctx, "group_reduce_complete", fn);
+        B.CreateCondBr(B.CreateICmpEQ(thread, ci32(0)), leader, complete);
+        B.SetInsertPoint(leader);
+        (void)cg.C.store(B, cg.C.load(B, B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}), valTy), acc);
+        (void)cg.C.store(B, ci32(1), index);
+        auto *test = llvm::BasicBlock::Create(ctx, "group_reduce_test", fn);
+        auto *body = llvm::BasicBlock::Create(ctx, "group_reduce_body", fn);
+        auto *exit = llvm::BasicBlock::Create(ctx, "group_reduce_exit", fn);
+        B.CreateBr(test);
+        B.SetInsertPoint(test);
+        auto *current = cg.C.load(B, index, i32Ty);
+        B.CreateCondBr(B.CreateICmpULT(current, warps), body, exit);
+        B.SetInsertPoint(body);
+        auto *partial = cg.C.load(B, B.CreateGEP(scratchTy, scratch, {ci32(0), current}), valTy);
+        (void)cg.C.store(B, combine(cg.C.load(B, acc, valTy), partial), acc);
+        (void)cg.C.store(B, B.CreateAdd(current, ci32(1)), index);
+        B.CreateBr(test);
+        B.SetInsertPoint(exit);
+        (void)cg.C.store(B, cg.C.load(B, acc, valTy), B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}));
+        B.CreateBr(complete);
+        B.SetInsertPoint(complete);
+        barrier0();
+        auto *result = cg.C.load(B, B.CreateGEP(scratchTy, scratch, {ci32(0), ci32(0)}), valTy);
+        barrier0();
+        return result;
+      },
       [&](const Spec::GpuGroupInclusiveScan &) -> ValPtr {
         throw BackendException("Spec::GpuGroupInclusiveScan lowering not yet implemented");
       },

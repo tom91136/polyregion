@@ -74,6 +74,82 @@ static Program arenaOffsetCastProgram() {
   return Program(entry, {}, {}, PassPhase::Initial(), {});
 }
 
+TEST_CASE("compiler options use target workgroup storage defaults", "[backend]") {
+  const polyregion::compiler::Options defaults{};
+  const polyregion::compiler::Options amd{Target::Object_LLVM_AMDGCN, "gfx1036"};
+  const polyregion::compiler::Options cuda{Target::Object_LLVM_NVPTX64, "sm_89"};
+  CHECK(defaults.target == Target::Object_LLVM_HOST);
+  CHECK(defaults.workgroupMemoryBytes == polyregion::compiler::DefaultWorkgroupMemoryBytes);
+  CHECK(amd.workgroupMemoryBytes == 65536);
+  CHECK(cuda.workgroupMemoryBytes == polyregion::compiler::DefaultWorkgroupMemoryBytes);
+}
+
+TEST_CASE("LLVM lowers aggregate atomic exchange through an integer of the same width", "[backend][atomic]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const Sym stateName({"AtomicState"});
+  const auto state = Type::Struct(stateName, {}).widen();
+  const StructDef stateDef(stateName, {}, {Named("value", Type::IntS64())}, {}, false);
+  const auto pointerType = Type::Ptr(state, TypeSpace::Global()).widen();
+  const Named pointer("pointer", pointerType), value("value", state), expected("expected", state), exchanged("exchanged", state),
+      compared("compared", state);
+  const Function entry = mkFn("kernel", {Arg(pointer, {}), Arg(value, {}), Arg(expected, {})}, Type::Unit0(),
+                              {Var(exchanged,
+                                   Expr::SpecOp(Spec::GpuAtomicRMW(AtomicOp::Xchg(), selectNamed(pointer), selectNamed(value),
+                                                                   MemScope::System(), MemOrder::SeqCst(), state))
+                                       .widen(),
+                                   false)
+                                   .widen(),
+                               Var(compared,
+                                   Expr::SpecOp(Spec::GpuAtomicCAS(selectNamed(pointer), selectNamed(expected), selectNamed(value),
+                                                                   MemScope::System(), MemOrder::SeqCst(), state))
+                                       .widen(),
+                                   false)
+                                   .widen(),
+                               ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
+  options.pipelineSpec = "Mirror";
+
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {stateDef}, PassPhase::Initial(), {}), options, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK(llvmIrOf(compiled) ^ contains_slice("atomicrmw xchg ptr"));
+  CHECK(llvmIrOf(compiled) ^ contains_slice("cmpxchg ptr"));
+  CHECK(llvmIrOf(compiled) ^ contains_slice("i64"));
+}
+
+TEST_CASE("LLVM defines aggregate atomic padding before packing storage", "[backend][atomic]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const Sym stateName({"PaddedAtomicState"});
+  const auto state = Type::Struct(stateName, {}).widen();
+  const StructDef stateDef(stateName, {}, {Named("valid", Type::Bool1()), Named("value", Type::IntS32())}, {}, false);
+  const auto pointerType = Type::Ptr(state, TypeSpace::Global()).widen();
+  const Named pointer("pointer", pointerType), value("value", state), exchanged("exchanged", state);
+  const Function entry = mkFn("kernel", {Arg(pointer, {}), Arg(value, {})}, Type::Unit0(),
+                              {Var(exchanged,
+                                   Expr::SpecOp(Spec::GpuAtomicRMW(AtomicOp::Xchg(), selectNamed(pointer), selectNamed(value),
+                                                                   MemScope::System(), MemOrder::SeqCst(), state))
+                                       .widen(),
+                                   false)
+                                   .widen(),
+                               ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
+  options.pipelineSpec = "Mirror";
+
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {stateDef}, PassPhase::Initial(), {}), options, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK(llvmIrOf(compiled) ^ contains_slice("atomicrmw xchg ptr"));
+  CHECK(llvmIrOf(compiled) ^ contains_slice("memset"));
+}
+
 TEST_CASE("LLVM IR event payloads are opt-in", "[backend]") {
   polyregion::compiler::initialise();
   const ScopedEnv noDebug(polyregion::env::PolyregionDebug, std::nullopt);
@@ -93,6 +169,24 @@ TEST_CASE("LLVM IR event payloads are opt-in", "[backend]") {
     CHECK_FALSE(eventDataOf(diagnostic, "ast_to_llvm_ir").empty());
     CHECK_FALSE(eventDataOf(diagnostic, "llvm_to_obj_opt").empty());
   }
+}
+
+TEST_CASE("LLVM backend lowers an erased kernel handle local", "[backend][callable]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto fnTpe = Type::FnRef(Sym({"kernel"})).widen();
+  const auto erasedTpe = Type::Ptr(Type::Nothing(), TypeSpace::Global()).widen();
+  const Named handle("handle", erasedTpe);
+  const Function entry =
+      mkFn("entry", {}, Type::Unit0(), {Var(handle, Expr::Alias(Term::Poison(fnTpe).widen()).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
+  options.pipelineSpec = "FullOpt(level=0)";
+
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), options, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
 }
 
 TEST_CASE("entry-less libraries compile their exported closure", "[backend][library]") {
@@ -349,7 +443,7 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
                        fmt::format("declare void @polyrt_remote_memcpy(ptr, {}, {}, {}, i32)", sizeType, sizeType, sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format(
-                       "declare void @polyrt_remote_launch_with_cleanup(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
+                       "declare void @polyrt_remote_launch_with_mirrors(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare void @polyrt_remote_free(ptr, {})", sizeType)));
     if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
   };
@@ -1447,7 +1541,7 @@ TEST_CASE("OpenCL C rejects unavailable workgroup collectives", "[backend][group
                     Catch::Matchers::ContainsSubstring("Spec::GpuGroupExclusiveScan lowering is not available"));
 }
 
-TEST_CASE("LLVM CUDA and HIP retain explicit workgroup collective diagnostics", "[backend][group]") {
+TEST_CASE("LLVM GPU workgroup collectives report target-specific support", "[backend][group]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
@@ -1459,20 +1553,24 @@ TEST_CASE("LLVM CUDA and HIP retain explicit workgroup collective diagnostics", 
     return Program(entry, {}, {}, PassPhase::Initial(), {});
   };
 
-  for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
-           {Target::Object_LLVM_NVPTX64, "sm_70"},
-           {Target::Object_LLVM_AMDGCN, "gfx906"},
-       }) {
-    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)), {target, arch},
-                                                    OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("Spec::GpuGroupReduce lowering not yet implemented"));
-    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
-                                                    {target, arch}, OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("Spec::GpuGroupInclusiveScan lowering not yet implemented"));
-    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
-                                                    {target, arch}, OptLevel::O0),
-                      Catch::Matchers::ContainsSubstring("Spec::GpuGroupExclusiveScan lowering not yet implemented"));
-  }
+  const auto nvptxReduce = polyregion::compiler::compile(program(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                                                         {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
+  INFO(repr(nvptxReduce));
+  REQUIRE(nvptxReduce.binary);
+  for (const auto &op : {AtomicOp::Any(AtomicOp::Sub()), AtomicOp::Any(AtomicOp::Xchg())})
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(Spec::GpuGroupReduce(op, selectNamed(value), tpe)),
+                                                    {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("associative operation"));
+  for (const auto &op : {Spec::Any(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                         Spec::Any(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe))})
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(op), {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("lowering not yet implemented"));
+
+  for (const auto &op : {Spec::Any(Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                         Spec::Any(Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                         Spec::Any(Spec::GpuGroupExclusiveScan(AtomicOp::Add(), selectNamed(value), tpe))})
+    CHECK_THROWS_WITH(polyregion::compiler::compile(program(op), {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O0),
+                      Catch::Matchers::ContainsSubstring("lowering not yet implemented"));
 }
 
 TEST_CASE("package entry pipelines lower workgroup collectives on non-native routes", "[backend][group]") {
@@ -1511,7 +1609,7 @@ TEST_CASE("package entry pipelines lower workgroup collectives on non-native rou
   }
 }
 
-TEST_CASE("LLVM aggregate volatile access keeps the pointee alignment", "[backend][volatile]") {
+TEST_CASE("LLVM aggregate volatile access uses its natural transaction alignment", "[backend][volatile]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
@@ -1532,7 +1630,7 @@ TEST_CASE("LLVM aggregate volatile access keeps the pointee alignment", "[backen
     REQUIRE(compiled.binary);
     CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("load volatile i64, ptr"));
     CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store volatile i64"));
-    CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring(", align 4"));
+    CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring(", align 8"));
   }
 }
 
@@ -1607,6 +1705,31 @@ TEST_CASE("Vulkan zeroes Boolean struct fields through their byte storage", "[ba
   CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("store %Flag zeroinitializer"));
 }
 
+TEST_CASE("Vulkan consistently accesses live Boolean struct fields through byte storage", "[backend][vulkan]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym flagName({"Flag"});
+  const auto flagTpe = Type::Struct(flagName, {}).widen();
+  const StructDef flag(flagName, {}, {Named("set", Type::Bool1())}, {}, false);
+  const Named value("value", flagTpe), loaded("loaded", Type::Bool1()), output("output", Type::Ptr(Type::Bool1(), TypeSpace::Global()));
+  const Term::Select field(value, {PathStep::Field("set").widen()}, Type::Bool1());
+  const Function entry =
+      mkFn("kernel", {Arg(output, {})}, Type::Unit0(),
+           {Var(value, std::optional<Expr::Any>{}, true).widen(), Mut(field, Expr::Alias(Term::Bool1Const(true).widen()).widen()).widen(),
+            Var(loaded, Expr::Alias(field.widen()).widen(), false).widen(),
+            Update(selectNamed(output), Term::IntU32Const(0).widen(), selectNamed(loaded)).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {flag}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV_GLCompute, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store i8 1"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("load i8"));
+}
+
 TEST_CASE("Vulkan retains multidimensional workgroup-array strides", "[backend][subgroup][vulkan]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -1651,7 +1774,7 @@ TEST_CASE("Vulkan retains multidimensional private-array strides", "[backend][vu
   CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("i64 19"));
 }
 
-TEST_CASE("LLVM CUDA and HIP targets lower subgroup votes", "[backend][subgroup]") {
+TEST_CASE("LLVM GPU targets lower subgroup votes", "[backend][subgroup]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
@@ -1668,12 +1791,33 @@ TEST_CASE("LLVM CUDA and HIP targets lower subgroup votes", "[backend][subgroup]
   for (const auto &[target, arch] : std::vector<std::pair<Target, std::string>>{
            {Target::Object_LLVM_NVPTX64, "sm_35"},
            {Target::Object_LLVM_AMDGCN, "gfx906"},
+           {Target::Object_LLVM_SPIRV_GLCompute, ""},
        }) {
     INFO(arch);
     auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
     CHECK(compiled.messages == "");
     CHECK(compiled.binary != std::nullopt);
   }
+}
+
+TEST_CASE("SPIR-V OpenCL lowers full-mask subgroup votes natively", "[backend][subgroup][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto mask = Term::IntU32Const(-1).widen();
+  const auto predicate = Term::Bool1Const(true).widen();
+  const Function entry =
+      mkFn("kernel", {}, Type::Unit0(),
+           {Var(Named("any", Type::Bool1()), Expr::SpecOp(Spec::GpuVoteAny(mask, predicate)).widen(), false).widen(),
+            Var(Named("all", Type::Bool1()), Expr::SpecOp(Spec::GpuVoteAll(mask, predicate)).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_SPIRV64_Kernel, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("sub_group_any"));
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("sub_group_all"));
 }
 
 TEST_CASE("NVPTX subgroup barriers support legacy and synchronised warps", "[backend][subgroup]") {
@@ -1736,6 +1880,7 @@ TEST_CASE("LLVM GPU shuffles pad narrow values without widening the result", "[b
            {Target::Object_LLVM_NVPTX64, "sm_60"},
            {Target::Object_LLVM_AMDGCN, "gfx906"},
            {Target::Object_LLVM_SPIRV64_Kernel, ""},
+           {Target::Object_LLVM_SPIRV_GLCompute, ""},
        }) {
     INFO(arch);
     const auto compiled = polyregion::compiler::compile(program, {target, arch}, OptLevel::O0);
@@ -1851,6 +1996,30 @@ TEST_CASE("AMDGPU isolates vendor reuse unions and clamps the affected optimisat
   CHECK(layout->get().members[0].offsetInBytes == 0);
   CHECK(layout->get().members[1].offsetInBytes > 0);
   CHECK_THAT(eventDataOf(compiled, "llvm_to_obj_opt"), Catch::Matchers::ContainsSubstring("alloca i32"));
+}
+
+TEST_CASE("NVPTX compaction workaround matches only canonical CCCL agent owners", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named temporary("temporary", Type::IntS32());
+  const auto agent = [&](const std::string &name) {
+    return mkFn(name, {}, Type::Unit0(), {Var(temporary, Expr::Alias(Term::IntS32Const(1).widen()).widen(), true).widen(), ret()},
+                FunctionVisibility::Internal());
+  };
+  const auto entry = mkFn("kernel", {}, Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  polyregion::backend::LLVMBackend backend({.target = polyregion::backend::LLVMBackend::Target::NVPTX64, .arch = "sm_70"});
+
+  const auto canonical = backend.compileProgram(
+      Program(entry, {agent("thrust::cuda_cub::__copy_if::CopyIfAgent<int>::run")}, {}, PassPhase::Initial(), {}), OptLevel::O3);
+  REQUIRE(canonical.binary);
+  CHECK(eventDataOf(canonical, "llvm_to_obj_opt") ^ contains_slice("alloca i32"));
+
+  const auto nearMiss = backend.compileProgram(
+      Program(entry, {agent("my_thrust::cuda_cub::__copy_if::CopyIfAgentDiagnostic")}, {}, PassPhase::Initial(), {}), OptLevel::O3);
+  REQUIRE(nearMiss.binary);
+  CHECK_FALSE(eventDataOf(nearMiss, "llvm_to_obj_opt") ^ contains_slice("alloca i32"));
 }
 
 TEST_CASE("LLVM GPU kernels accept stateless callable parameters", "[backend][callable]") {
@@ -2159,10 +2328,26 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
   const Sym payloadName({"Payload"});
   const Type::Struct payloadType(payloadName, {});
   const StructDef payload(payloadName, {}, {Named("value", Type::IntS32())}, {}, false);
+  const Sym pointerPayloadName({"PointerPayload"});
+  const Type::Struct pointerPayloadType(pointerPayloadName, {});
+  const StructDef pointerPayload(pointerPayloadName, {}, {Named("value", Type::Ptr(Type::IntS32(), TypeSpace::Global()))}, {}, false);
   const Named remote("remote", Type::Ptr(payloadType, TypeSpace::Global()));
   const Named closure("closure", payloadType);
-  const auto kernel = mkFn("remote.kernel", {Arg(Named("remote", remote.tpe), {}), Arg(Named("closure", closure.tpe), {})}, Type::Unit0(),
-                           {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto payloadPointerType = Type::Ptr(payloadType, TypeSpace::Private()).widen();
+  const auto payloadArrayType = Type::Arr(payloadType, 2, TypeSpace::Private()).widen();
+  const auto pointerPayloadPointerType = Type::Ptr(pointerPayloadType, TypeSpace::Private()).widen();
+  const auto payloadPointerSlotType = Type::Ptr(payloadPointerType, TypeSpace::Private()).widen();
+  const Named localPayload("localPayload", payloadType), localPayloadPointer("localPayloadPointer", payloadPointerType),
+      localPayloadArray("localPayloadArray", payloadArrayType), onePastPayloadPointer("onePastPayloadPointer", payloadPointerType),
+      localPointerPayload("localPointerPayload", pointerPayloadType),
+      localPointerPayloadPointer("localPointerPayloadPointer", pointerPayloadPointerType), escapedPayload("escapedPayload", payloadType),
+      escapedPayloadPointer("escapedPayloadPointer", payloadPointerType),
+      escapedPayloadPointerSlot("escapedPayloadPointerSlot", payloadPointerSlotType), rebased("rebased", Type::Unit0());
+  const auto kernel = mkFn("remote.kernel",
+                           {Arg(Named("remote", remote.tpe), {}), Arg(Named("closure", closure.tpe), {}),
+                            Arg(Named("local", payloadPointerType), {}), Arg(Named("onePast", payloadPointerType), {}),
+                            Arg(Named("pointerBearing", pointerPayloadPointerType), {}), Arg(Named("escaped", payloadPointerType), {})},
+                           Type::Unit0(), {ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   const auto one = Term::IntU32Const(1).widen();
   const auto zero = Term::IntU32Const(0).widen();
   const auto launch = Spec::RemoteLaunch(/*context*/ selectNamed(context).widen(),
@@ -2175,13 +2360,42 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
                                          /*blockY*/ one,
                                          /*blockZ*/ one,
                                          /*shmem*/ zero,
-                                         /*args*/ {selectNamed(remote).widen(), selectNamed(closure).widen()});
+                                         /*args*/
+                                         {selectNamed(remote).widen(), selectNamed(closure).widen(),
+                                          selectNamed(localPayloadPointer).widen(), selectNamed(onePastPayloadPointer).widen(),
+                                          selectNamed(localPointerPayloadPointer).widen(), selectNamed(escapedPayloadPointer).widen()});
   const Named launched("launched", Type::Unit0());
-  const Function driver(FunctionDecl(Sym({"driver"}), {}, {}, {Arg(context, {}), Arg(remote, {}), Arg(closure, {})}, {}, {}, Type::Unit0(),
-                                     FunctionAffinity::Host()),
-                        {Var(launched, Expr::SpecOp(launch).widen(), false).widen(), ret()}, FunctionVisibility::Exported(),
-                        FunctionFpMode::Relaxed(), CallConvention::RegularCall());
-  const Program program(driver, {kernel}, {payload}, PassPhase::Initial(), {});
+  const Function driver(
+      FunctionDecl(Sym({"driver"}), {}, {}, {Arg(context, {}), Arg(remote, {}), Arg(closure, {})}, {}, {}, Type::Unit0(),
+                   FunctionAffinity::Host()),
+      {Var(localPayload, std::optional<Expr::Any>{}, true).widen(),
+       Var(localPayloadPointer,
+           Expr::RefTo(selectNamed(localPayload).widen(), {}, payloadType, TypeSpace::Private(), Region::Opaque()).widen(), false)
+           .widen(),
+       Var(localPayloadArray, std::optional<Expr::Any>{}, true).widen(),
+       Var(onePastPayloadPointer,
+           Expr::RefTo(selectNamed(localPayloadArray).widen(), Term::IntS32Const(1).widen(), payloadType, TypeSpace::Private(),
+                       Region::Opaque())
+               .widen(),
+           false)
+           .widen(),
+       Var(localPointerPayload, std::optional<Expr::Any>{}, true).widen(),
+       Var(localPointerPayloadPointer,
+           Expr::RefTo(selectNamed(localPointerPayload).widen(), {}, pointerPayloadType, TypeSpace::Private(), Region::Opaque()).widen(),
+           false)
+           .widen(),
+       Var(escapedPayload, std::optional<Expr::Any>{}, true).widen(),
+       Var(escapedPayloadPointer,
+           Expr::RefTo(selectNamed(escapedPayload).widen(), {}, payloadType, TypeSpace::Private(), Region::Opaque()).widen(), false)
+           .widen(),
+       Var(escapedPayloadPointerSlot,
+           Expr::RefTo(selectNamed(escapedPayloadPointer).widen(), {}, payloadPointerType, TypeSpace::Private(), Region::Opaque()).widen(),
+           false)
+           .widen(),
+       Var(rebased, Expr::ForeignCall("rebase_payload", {selectNamed(escapedPayloadPointerSlot)}, Type::Unit0()).widen(), false).widen(),
+       Var(launched, Expr::SpecOp(launch).widen(), false).widen(), ret()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const Program program(driver, {kernel}, {payload, pointerPayload}, PassPhase::Initial(), {});
   polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
   options.pipelineSpec = "FullOpt(level=0)";
 
@@ -2190,17 +2404,66 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
   REQUIRE(compiled.binary);
   const auto &ir = llvmIrOf(compiled);
   INFO(ir);
-  CHECK(ir ^ contains_slice("polyrt_remote_launch_with_cleanup"));
+  CHECK(ir ^ contains_slice("polyrt_remote_launch_with_mirrors"));
   const auto callCount = [&](const std::string &callee) {
     const auto needle = "@" + callee + "(";
     const auto lines = ir ^ split('\n');
     return lines ^ count([&](const auto &line) { return (line ^ contains_slice("call ")) && (line ^ contains_slice(needle)); });
   };
-  // The runtime mirrors the by-value aggregate and forwards the pointer argument unchanged.
-  CHECK(callCount("polyrt_remote_launch_with_cleanup") == 1);
+  // By-value aggregates are always mirrored. Pointer arguments are mirrored only when they resolve
+  // to the start of a pointer-free, unescaped local aggregate; remote, interior, pointer-bearing, and escaped values stay opaque.
+  CHECK(callCount("polyrt_remote_launch_with_mirrors") == 1);
   CHECK(callCount("polyrt_remote_malloc") == 0);
   CHECK(callCount("polyrt_remote_memcpy") == 0);
   CHECK(ir ^ contains_slice("store i" + std::to_string(sizeof(size_t) * 8) + " 4"));
+  CHECK(ir ^ contains_slice("store i8 0, ptr"));
+  CHECK(ir ^ contains_slice("store i8 1, ptr"));
+  const auto mirrorKindTwoStores = ir ^ split('\n') ^ count([](const auto &line) { return line ^ contains_slice("store i8 2, ptr"); });
+  CHECK(mirrorKindTwoStores == 1);
+}
+
+TEST_CASE("host orchestration transports stateless callable kernel slots as one byte", "[backend]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const auto contextType = Type::Ptr(Type::IntU8(), TypeSpace::Global()).widen();
+  const auto callableType = Type::FnRef(Sym({"predicate"})).widen();
+  const Named context("context", contextType);
+  const Named callable("callable", callableType);
+  const Named count("count", Type::IntS32());
+  const auto kernel = mkFn("remote.callable.kernel", {Arg(callable, {}), Arg(count, {})}, Type::Unit0(), {ret()},
+                           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto one = Term::IntU32Const(1).widen();
+  const auto zero = Term::IntU32Const(0).widen();
+  const auto launch = Spec::RemoteLaunch(/*context*/ selectNamed(context).widen(),
+                                         /*kernel*/ Term::Poison(Type::FnRef(kernel.decl.name)).widen(),
+                                         /*tpeArgs*/ {},
+                                         /*gridX*/ one,
+                                         /*gridY*/ one,
+                                         /*gridZ*/ one,
+                                         /*blockX*/ one,
+                                         /*blockY*/ one,
+                                         /*blockZ*/ one,
+                                         /*shmem*/ zero,
+                                         /*args*/ {Term::Poison(callableType).widen(), selectNamed(count).widen()});
+  const Named launched("launched", Type::Unit0());
+  const Function driver(
+      FunctionDecl(Sym({"driver"}), {}, {}, {Arg(context, {}), Arg(count, {})}, {}, {}, Type::Unit0(), FunctionAffinity::Host()),
+      {Var(launched, Expr::SpecOp(launch).widen(), false).widen(), ret()}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
+      CallConvention::RegularCall());
+  const Program program(driver, {kernel}, {}, PassPhase::Initial(), {});
+  polyregion::compiler::Options options{Target::Object_LLVM_HOST, "native"};
+  options.pipelineSpec = "FullOpt(level=0)";
+
+  const auto compiled = polyregion::compiler::compile(program, options, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  const auto &ir = llvmIrOf(compiled);
+  INFO(ir);
+  CHECK(ir ^ contains_slice("store i8 3, ptr"));
+  CHECK(ir ^ contains_slice("store i8 9, ptr"));
+  CHECK(ir ^ contains_slice("i64 2, ptr"));
 }
 
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {
@@ -2322,6 +2585,31 @@ TEST_CASE("ArenaView preserves immutable SPIR-V array aliases", "[backend][spirv
   INFO(ir);
   CHECK_FALSE(ir ^ contains_slice("llvm.memcpy"));
   CHECK_FALSE(ir ^ contains_slice("view_stack_ptr"));
+}
+
+TEST_CASE("NVPTX materialises indeterminate private integers without widening the workaround", "[backend][nvptx]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const Named integer("integer", Type::IntS32());
+  const Named floating("floating", Type::Float32());
+  Function entry = mkFn("kernel", {}, Type::Unit0(),
+                        {
+                            Stmt::Var(integer, std::optional<Expr::Any>{}, true).widen(),
+                            Stmt::Var(floating, std::optional<Expr::Any>{}, true).widen(),
+                            ret(),
+                        },
+                        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  Program program(entry, {}, {}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options options{Target::Object_LLVM_NVPTX64, "sm_70"};
+  options.pipelineSpec = "StructuredExit";
+  const auto compiled = polyregion::compiler::compile(program, options, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("store i32 0"));
+  CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("store float"));
 }
 
 TEST_CASE("SPIR-V dynamic workgroup views do not initialise shared storage", "[backend][spirv]") {
@@ -2808,6 +3096,38 @@ TEST_CASE("taking the address of a pointer variable yields its slot", "[backend]
   CHECK_FALSE(llvmIrOf(c) ^ contains_slice("load ptr"));
 }
 
+TEST_CASE("taking the address of a pointer field yields its slot", "[backend]") {
+  polyregion::compiler::initialise();
+  const ScopedEnv captureIr(polyregion::env::PolyregionDebug, std::string("1"));
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global());
+  const auto holderTpe = Type::Struct(Sym({"Holder"}), {});
+  const Named pointerField("pointer", ptrTpe);
+  const StructDef holderDef(holderTpe.name, {}, {pointerField}, {}, false);
+  const Named holder("holder", holderTpe);
+  const Named ref("ref", Type::Ptr(ptrTpe.widen(), TypeSpace::Global()));
+  const auto selectedField = Term::Select(holder, {PathStep::Field(pointerField.symbol)}, ptrTpe.widen());
+  Function entry = mkFn(
+      "kernel", {}, Type::Unit0(),
+      {
+          Var(holder, std::optional<Expr::Any>{}, true).widen(),
+          Var(ref, Expr::RefTo(selectedField.widen(), {}, ptrTpe.widen(), TypeSpace::Global(), Region::Opaque()).widen(), false).widen(),
+          ret(),
+      },
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  Program p(entry, {}, {holderDef}, PassPhase::Initial(), {});
+
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "FullOpt(level=0)";
+  auto c = polyregion::compiler::compile(p, opts, OptLevel::O0);
+  INFO(repr(c));
+  CHECK(c.messages == "");
+  REQUIRE(c.binary != std::nullopt);
+
+  CHECK_FALSE(llvmIrOf(c) ^ contains_slice("load ptr"));
+}
+
 TEST_CASE("OpenCL address-of preserves a pointer variable's private slot", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -3057,6 +3377,29 @@ TEST_CASE("Metal source materialises an address-taken constant in thread-local s
   CHECK(source ^ contains_slice("bool _v0 = true;"));
   CHECK(source ^ contains_slice("thread bool* _v1 = &(_v0"));
   CHECK_FALSE(source ^ contains_slice("&(true /*bool*/)"));
+}
+
+TEST_CASE("OpenCL source entries preserve arbitrary interior pointer offsets", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto ptrTpe = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named input("input", ptrTpe), value("value", Type::IntS32());
+  const Function entry =
+      mkFn("kernel", {Arg(input, {})}, Type::Unit0(),
+           {Var(value, Expr::Index(selectNamed(input), Term::IntS32Const(0).widen(), Type::IntS32()).widen(), false).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), /*offloadEntry*/ true);
+  polyregion::compiler::Options opts{Target::Source_C_OpenCL1_1, ""};
+  opts.pipelineSpec = "Mirror";
+  const auto c = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(c));
+  REQUIRE(c.binary != std::nullopt);
+  const std::string source(reinterpret_cast<const char *>(c.binary->data()), c.binary->size());
+  CHECK(source ^ contains_slice("kernel void _kernel(global int* _polyregion_arg_base_0, ulong _polyregion_arg_byte_offset_0)"));
+  CHECK(source
+        ^ contains_slice(
+            "global int* _v0 = _polyregion_arg_byte_offset_0 == POLYREGION_OPENCL_NULL_POINTER_OFFSET ? ((global int*) 0) : ((global int*) "
+            "(((global uchar*) _polyregion_arg_base_0) + _polyregion_arg_byte_offset_0))"));
 }
 
 TEST_CASE("a narrowing struct-to-struct cast reads the source members, not its address", "[backend]") {

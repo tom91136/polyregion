@@ -2,6 +2,7 @@
 #pragma region offload-only
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -x cuda --cuda-gpu-arch=sm_35 -nocudainc -nocudalib -fsyntax-only {input}
 #pragma region do: {package_fixture} --assert-offload-i32-constant {output}.polyast 9
+#pragma region do: {package_fixture} --assert-launch-dimensions-dereferenced {output}.polyast
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 
@@ -25,9 +26,13 @@ template <typename T> __attribute__((global)) void phase_kernel(T *out) {
 
 template __attribute__((global)) void phase_kernel<int>(int *);
 
+// By-value dimensions are represented indirectly in the host program; launch lowering must read their fields.
+void launch(dim3 grid, dim3 block, int *out) { phase_kernel<int><<<grid, block>>>(out); }
+
 POLYREGION_EXPORT_AS("foo.implementation.apply") void apply(int *out) {
 #ifndef __CUDA_ARCH__
   auto kernel = &phase_kernel<int>;
   kernel<<<dim3(1), dim3(1)>>>(out);
+  launch(dim3(2), dim3(4), out);
 #endif
 }

@@ -20,6 +20,17 @@ struct Pair {
 struct EmptyA {};
 struct EmptyB {};
 
+struct CacheEntry {
+  std::uint32_t value;
+};
+
+static std::uint32_t readCache(const std::uint32_t index) {
+  static CacheEntry cache[512] = {};
+  const auto value = cache[index].value;
+  cache[index].value = 17;
+  return value;
+}
+
 static const std::uint32_t &selectReference(const std::uint32_t &left, const std::uint32_t &right) { return left < right ? right : left; }
 
 POLYREGION_EXPORT_AS("source_idioms.implementation.apply")
@@ -36,5 +47,5 @@ std::uint64_t apply(Pair *destination, const Pair *source, int *values, std::var
 #else
   if (bits == UINT64_MAX) std::__throw_bad_variant_access(false);
 #endif
-  return bits + std::uint64_t(*thrust::next(values, selected)) + selectReference(destination->left, source->right);
+  return bits + std::uint64_t(*thrust::next(values, selected)) + readCache(0) + selectReference(destination->left, source->right);
 }

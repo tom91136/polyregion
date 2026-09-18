@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <numeric>
 
@@ -29,6 +30,7 @@ struct StubDevice final : object::ObjectDevice {
   uint32_t cudaMajor = 9;
   uint32_t cudaMinor = 1;
   ModuleFormat format;
+  bool failRemoteFree = false;
   size_t sharedAllocs = 0, sharedFrees = 0, remoteAllocs = 0, remoteFrees = 0;
 
   explicit StubDevice(const bool shared, const bool cpu = true, const size_t threads = 1024, const size_t subgroup = 1,
@@ -62,6 +64,7 @@ struct StubDevice final : object::ObjectDevice {
   }
   void freeDevice(uintptr_t ptr) override {
     remoteFrees++;
+    if (failRemoteFree) throw std::runtime_error("injected free failure");
     ObjectDevice::freeDevice(ptr);
   }
   std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &) override { return {}; }
@@ -71,10 +74,19 @@ struct StubQueue final : object::ObjectDeviceQueue {
   using ObjectDeviceQueue::ObjectDeviceQueue;
 
   bool failInvoke = false;
+  bool mutateFirstPointer = false;
 
-  void enqueueInvokeAsync(const std::string &, const std::string &, const std::vector<Type> &, std::vector<std::byte>, const Policy &,
-                          const MaybeCallback &) override {
+  void enqueueInvokeAsync(const std::string &, const std::string &, const std::vector<Type> &types, std::vector<std::byte> data,
+                          const Policy &, const MaybeCallback &) override {
     if (failInvoke) throw std::runtime_error("injected launch failure");
+    if (mutateFirstPointer) {
+      const auto arguments = detail::argDataAsPointers(types, data);
+      const auto pointerArgument = std::ranges::find(types, Type::Ptr);
+      REQUIRE(pointerArgument != types.end());
+      uintptr_t pointer = 0;
+      std::memcpy(&pointer, arguments[std::distance(types.begin(), pointerArgument)], sizeof(pointer));
+      *reinterpret_cast<uint64_t *>(pointer) = 0x123456789ABCDEF0ull;
+    }
   }
 };
 
@@ -98,7 +110,7 @@ struct WithStubDevice {
 TEST_CASE("device queries describe the selected runtime device") {
   {
     WithStubDevice device(false, true, 73);
-    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}, {}};
     CHECK(polyrt_device_max_threads_per_block(&context) == 73);
     CHECK(polyrt_device_subgroup_size(&context) == 1);
     CHECK(polyrt_device_local_memory_bytes(&context) == 12345);
@@ -110,27 +122,44 @@ TEST_CASE("device queries describe the selected runtime device") {
   }
   {
     WithStubDevice device(false, false, 511, 64);
-    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}, {}};
     CHECK(polyrt_device_max_threads_per_block(&context) == 511);
     CHECK(polyrt_device_subgroup_size(&context) == 64);
     CHECK(polyrt_device_kind(&context) == polyregion::polyrt::DeviceKind::GPU);
   }
   {
+    WithStubDevice device(false, false, 511, 16, ModuleFormat::SPIRV_Kernel);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}, {}};
+    CHECK(polyrt_device_subgroup_size(&context) == 16);
+  }
+  {
     WithStubDevice device(false, false, 511, 64, ModuleFormat::SPIRV_GLCompute);
-    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
-    CHECK(polyrt_device_subgroup_size(&context) == 32);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}, {}};
+    CHECK(polyrt_device_subgroup_size(&context) == 64);
   }
   {
     WithStubDevice device(false, true, 2048, 1, ModuleFormat::Source);
-    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}};
-    CHECK(polyrt_device_subgroup_size(&context) == 32);
+    polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}, {}};
+    CHECK(polyrt_device_subgroup_size(&context) == 1);
   }
+}
+
+TEST_CASE("failed remote frees remain tracked for retry") {
+  WithStubDevice device(false);
+  polyregion::polyrt::ExecutionContext context{nullptr, device.stub, nullptr, {}, {}};
+  const auto remote = polyrt_remote_malloc(&context, 8);
+  device.stub->failRemoteFree = true;
+  CHECK_THROWS(polyrt_remote_free(&context, remote));
+  CHECK(context.remoteAllocations.contains(remote));
+  device.stub->failRemoteFree = false;
+  polyrt_remote_free(&context, remote);
+  CHECK(context.remoteAllocations.empty());
 }
 
 TEST_CASE("device memset and USM host access use the supplied execution context") {
   WithStubDevice device(false);
   StubQueue queue(std::chrono::seconds(1));
-  polyregion::polyrt::ExecutionContext context{nullptr, device.stub, &queue, {}};
+  polyregion::polyrt::ExecutionContext context{nullptr, device.stub, &queue, {}, {}};
   std::array<uint8_t, 5> remote{1, 2, 3, 4, 5};
 
   polyrt_device_memset(&context, remote.data(), 0xA5, remote.size());
@@ -150,16 +179,71 @@ TEST_CASE("remote launch releases mirrored arguments after a failure") {
   WithStubDevice device(false);
   StubQueue queue(std::chrono::seconds(1));
   queue.failInvoke = true;
-  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue, {}};
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue, {}, {}};
   std::array<uint8_t, 4> first{};
   std::array<uint8_t, 8> second{};
   const std::array<uint8_t, 2> types{static_cast<uint8_t>(Type::Ptr), static_cast<uint8_t>(Type::Ptr)};
   const std::array<void *, 2> arguments{first.data(), second.data()};
   const std::array<size_t, 2> mirrorSizes{first.size(), second.size()};
-  CHECK_THROWS(polyrt_remote_launch_with_cleanup(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                                 arguments.data(), mirrorSizes.data()));
+  const std::array<uint8_t, 2> mirrorKinds{1, 1};
+  CHECK_THROWS(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                                 arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
   CHECK(device.stub->remoteAllocs == 2);
   CHECK(device.stub->remoteFrees == 2);
+  CHECK(context.remoteAllocations.empty());
+}
+
+TEST_CASE("remote launch preserves tracked aggregate pointers and mirrors local ones") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue, {}, {}};
+  std::array<uint8_t, 8> local{};
+  auto remote = polyrt_remote_malloc(&context, local.size());
+  auto localPointer = reinterpret_cast<uintptr_t>(local.data());
+  const std::array<uint8_t, 2> types{static_cast<uint8_t>(Type::Ptr), static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 2> arguments{&remote, &localPointer};
+  const std::array<size_t, 2> mirrorSizes{local.size(), local.size()};
+  const std::array<uint8_t, 2> mirrorKinds{2, 2};
+  polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data(),
+                                    mirrorSizes.data(), mirrorKinds.data());
+  CHECK(device.stub->remoteAllocs == 2);
+  CHECK(device.stub->remoteFrees == 1);
+  CHECK(context.remoteAllocations.size() == 1);
+  polyrt_remote_free(&context, remote);
+  CHECK(device.stub->remoteFrees == 2);
+  CHECK(context.remoteAllocations.empty());
+}
+
+TEST_CASE("remote launch copies a mutated local aggregate back from its mirror") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  queue.mutateFirstPointer = true;
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue, {}, {}};
+  uint64_t local = 0;
+  auto localPointer = reinterpret_cast<uintptr_t>(&local);
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&localPointer};
+  const std::array<size_t, 1> mirrorSizes{sizeof(local)};
+  const std::array<uint8_t, 1> mirrorKinds{2};
+  polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data(),
+                                    mirrorSizes.data(), mirrorKinds.data());
+  CHECK(local == 0x123456789ABCDEF0ull);
+}
+
+TEST_CASE("remote launch preserves null aggregate pointers") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue, {}, {}};
+  uintptr_t nullPointer = 0;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&nullPointer};
+  const std::array<size_t, 1> mirrorSizes{sizeof(uintptr_t)};
+  const std::array<uint8_t, 1> mirrorKinds{2};
+  polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data(),
+                                    mirrorSizes.data(), mirrorKinds.data());
+  CHECK(device.stub->remoteAllocs == 0);
+  CHECK(device.stub->remoteFrees == 0);
+  CHECK(context.remoteAllocations.empty());
 }
 
 TEST_CASE("usm free returns a host fallback allocation to the host heap") {
