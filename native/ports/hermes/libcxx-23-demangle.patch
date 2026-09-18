@@ -1,0 +1,35 @@
+libc++ 23 no longer exposes std::terminate transitively and has removed
+std::is_pod. Include the owning headers and spell the pre-C++20 POD
+requirement in terms of its two constituent traits.
+diff --git a/external/llvh/include/llvh/Demangle/ItaniumDemangle.h b/external/llvh/include/llvh/Demangle/ItaniumDemangle.h
+--- a/external/llvh/include/llvh/Demangle/ItaniumDemangle.h
++++ b/external/llvh/include/llvh/Demangle/ItaniumDemangle.h
+@@ -22,6 +22,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <numeric>
++#include <type_traits>
+ #include <utility>
+ 
+ #define FOR_EACH_NODE_KIND(X) \
+@@ -2017,7 +2018,8 @@ template<> struct NodeKind<X> { \
+ 
+ template <class T, size_t N>
+ class PODSmallVector {
+-  static_assert(std::is_pod<T>::value,
++  static_assert(std::is_trivial<T>::value &&
++                    std::is_standard_layout<T>::value,
+                 "T is required to be a plain old data type");
+ 
+   T* First;
+diff --git a/external/llvh/include/llvh/Demangle/Utility.h b/external/llvh/include/llvh/Demangle/Utility.h
+--- a/external/llvh/include/llvh/Demangle/Utility.h
++++ b/external/llvh/include/llvh/Demangle/Utility.h
+@@ -14,6 +14,7 @@
+ 
+ #include <cstdint>
+ #include <cstdlib>
+ #include <cstring>
++#include <exception>
+ #include <iterator>
+ #include <limits>

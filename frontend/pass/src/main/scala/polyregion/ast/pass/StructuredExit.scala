@@ -32,20 +32,21 @@ object StructuredExit extends ProgramPass {
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
-  private val AssertedSym            = p.Conventions.AssertedFlag
-  private val ErrorSym               = p.Conventions.ErrorArg
-  private val ErrorPtr               = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)
-  private val CodeBytes              = 4 // the [code:u32 little-endian] prefix; matches polyrt::assertCodeBytes
-  private val MessageLimit           = p.Conventions.assertMessageLimit
-  private val TagSym                 = "#exn_tag"
-  private val SlotPrefix             = "#exn_v"
-  private val ExceptionSym           = p.Conventions.ExceptionValue
-  private val ExceptionWhatSym       = p.Conventions.ExceptionWhat
-  private val ExceptionWhatBufferSym = "#exn_what"
-  private val ExceptionWhatBuffer    = p.Type.Arr(p.Type.IntS8, MessageLimit, p.Type.Space.Private)
-  private val ExceptionWhatPtr       = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Private)
-  private val ExceptionCodeSym       = p.Conventions.ExceptionCode
-  private val AssertTag              = 0
+  private val AssertedSym               = p.Conventions.AssertedFlag
+  private val ErrorSym                  = p.Conventions.ErrorArg
+  private val ErrorPtr                  = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Global)
+  private val CodeBytes                 = 4 // the [code:u32 little-endian] prefix; matches polyrt::assertCodeBytes
+  private val MessageLimit              = p.Conventions.assertMessageLimit
+  private val TagSym                    = "#exn_tag"
+  private[pass] val ExceptionSlotPrefix = "#exn_v"
+  private val SlotPrefix                = ExceptionSlotPrefix
+  private val ExceptionSym              = p.Conventions.ExceptionValue
+  private val ExceptionWhatSym          = p.Conventions.ExceptionWhat
+  private val ExceptionWhatBufferSym    = "#exn_what"
+  private val ExceptionWhatBuffer       = p.Type.Arr(p.Type.IntS8, MessageLimit, p.Type.Space.Private)
+  private val ExceptionWhatPtr          = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Private)
+  private val ExceptionCodeSym          = p.Conventions.ExceptionCode
+  private val AssertTag                 = 0
 
   private val asserted = sel(p.Named(AssertedSym, p.Type.Bool1))
   private val error    = sel(p.Named(ErrorSym, ErrorPtr))
@@ -368,14 +369,7 @@ object StructuredExit extends ProgramPass {
       )
 
     def slotDecls: List[p.Stmt] =
-      tags.map(_.thrown).filter(t => hasStorage(t.tpe)).map { thrown =>
-        val initial = thrown.tpe match {
-          case p.Type.Ptr(component, space) =>
-            Some(p.Expr.Alias(p.Term.NullPtrConst(component, space, p.Region.Opaque)))
-          case _ => None
-        }
-        p.Stmt.Var(slotOf(thrown), initial, isMutable = true)
-      }
+      tags.map(_.thrown).filter(t => hasStorage(t.tpe)).map(t => p.Stmt.Var(slotOf(t), None, isMutable = true))
 
     def messageDecls: List[p.Stmt] =
       Option

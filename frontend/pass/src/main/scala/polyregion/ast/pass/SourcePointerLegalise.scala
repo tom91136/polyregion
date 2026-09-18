@@ -69,11 +69,21 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
 
     private def fieldPath(steps: List[p.PathStep]): FieldPath = steps.collect { case p.PathStep.Field(name) => name }
 
-    private def expressionSpace(expression: p.Expr): Option[p.Type.Space] = expression match {
-      case p.Expr.RefTo(_, _, _, space, _)     => Some(space)
-      case p.Expr.Alias(_: p.Term.StringConst) => Some(p.Type.Space.Constant)
-      case p.Expr.Alias(term)                  => AddressRefinement.spaceOf(term.tpe)
-      case other                               => AddressRefinement.spaceOf(other.tpe)
+    private def expressionSpace(
+        expression: p.Expr,
+        solution: AddressRefinement.Solution
+    ): Option[p.Type.Space] = {
+      val spaces = solution.result(expression).spaces
+      Option
+        .when(spaces.size == 1)(spaces.head)
+        .orElse {
+          expression match {
+            case p.Expr.RefTo(_, _, _, space, _)     => Some(space)
+            case p.Expr.Alias(_: p.Term.StringConst) => Some(p.Type.Space.Constant)
+            case p.Expr.Alias(term)                  => AddressRefinement.spaceOf(term.tpe)
+            case other                               => AddressRefinement.spaceOf(other.tpe)
+          }
+        }
     }
 
     private def pointerLeaves(tpe: p.Type, seen: Set[p.Sym] = Set.empty): List[p.Type.Space] = tpe match {
@@ -122,7 +132,16 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             val signature            = members.flatMap(member => pointerLeaves(member.tpe)).map(spaceCode).mkString
             val name                 = freshName(structure.name, signature)
             val clone: p.Type.Struct = p.Type.Struct(name, structure.args)
-            definitions(name) = definition.copy(name = name, members = members)
+            def retargetSelf(tpe: p.Type): p.Type = tpe match {
+              case value: p.Type.Struct if value == structure => clone
+              case p.Type.Ptr(component, space)               => p.Type.Ptr(retargetSelf(component), space)
+              case p.Type.Arr(component, size, space)         => p.Type.Arr(retargetSelf(component), size, space)
+              case other                                      => other
+            }
+            definitions(name) = definition.copy(
+              name = name,
+              members = members.map(member => member.copy(tpe = retargetSelf(member.tpe)))
+            )
             clone
           }
         }
@@ -160,7 +179,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             val path = fieldPath(steps)
             Option
               .when(path.nonEmpty && AddressRefinement.isPtr(typeAt(root.tpe, steps))) {
-                expressionSpace(expression).map(space => (root.symbol -> path) -> space)
+                expressionSpace(expression, solution).map(space => (root.symbol -> path) -> space)
               }
               .flatten
           case _ => None
@@ -169,9 +188,9 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         .view
         .mapValues(_.toSet)
         .toMap
-      val effective = grouped.map { case (slot, spaces) =>
-        slot -> stores.get(slot).filter(_.nonEmpty).getOrElse(spaces)
-      }
+      val effective = (grouped.keySet ++ stores.keySet).iterator.map { slot =>
+        slot -> grouped.get(slot).filter(_.nonEmpty).orElse(stores.get(slot)).getOrElse(Set.empty)
+      }.toMap
       val ambiguous = effective.collect {
         case ((root, path), spaces) if spaces.size > 1 => s"$root.${path.mkString(".")}"
       }
@@ -191,8 +210,26 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     private def selectedType(select: p.Term.Select, types: Map[String, p.Type]): p.Type =
       typeAt(types.getOrElse(select.root.symbol, select.root.tpe), select.steps)
 
+    private def indexedComponent(selected: p.Type, fallback: p.Type): p.Type =
+      structOf(selected)
+        .filterNot(structure => originalDefs.contains(structure.name))
+        .fold(fallback)(retypeStruct(fallback, _))
+
+    private def referenceSpace(
+        localStorage: Set[String],
+        select: p.Term.Select,
+        index: Option[p.Term],
+        selected: p.Type,
+        fallback: p.Type.Space
+    ): p.Type.Space =
+      if (select.steps.isEmpty && index.isEmpty) p.Type.Space.Private
+      else if (localStorage(select.root.symbol) && !AddressRefinement.isPtr(select.root.tpe)) p.Type.Space.Private
+      else if (select.steps.isEmpty) AddressRefinement.spaceOf(selected).getOrElse(fallback)
+      else fallback
+
     private def inferredTypes(function: p.Function, requirement: Map[String, Requirement]): Map[String, p.Type] = {
-      val declared = declarations(function)
+      val declared     = declarations(function)
+      val localStorage = function.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) => name.symbol }.toSet
       val initial = declared.iterator.map { case (symbol, named) =>
         val retyped = structOf(named.tpe)
           .flatMap { structure =>
@@ -201,30 +238,61 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
           .getOrElse(named.tpe)
         symbol -> retyped
       }.toMap
+      def propagatePointerStruct(
+          types: Map[String, p.Type],
+          name: p.Named,
+          source: p.Term.Select,
+          followSourceType: Boolean
+      ): Map[String, p.Type] = {
+        val targetType = types.getOrElse(name.symbol, name.tpe)
+        val sourceType = selectedType(source, types)
+        val specialised = List(targetType, sourceType)
+          .flatMap(structOf)
+          .find(structure => !originalDefs.contains(structure.name))
+        specialised match {
+          case Some(structure) =>
+            val target     = retypeStruct(targetType, structure)
+            val withTarget = types.updated(name.symbol, target)
+            if (source.steps.isEmpty && structOf(sourceType).nonEmpty)
+              withTarget.updated(source.root.symbol, retypeStruct(sourceType, structure))
+            else withTarget
+          case None =>
+            sourceType match {
+              case pointer: p.Type.Ptr if followSourceType => types.updated(name.symbol, pointer)
+              case _                                       => types
+            }
+        }
+      }
       doUntilNotEq(initial) { (_, known) =>
         function.collectAll[p.Stmt].foldLeft(known) {
           case (types, p.Stmt.Var(name @ p.Named(_, _: p.Type.Ptr, _), Some(p.Expr.Alias(select: p.Term.Select)), _)) =>
-            selectedType(select, types) match {
-              case pointer: p.Type.Ptr => types.updated(name.symbol, pointer)
-              case _                   => types
-            }
+            propagatePointerStruct(types, name, select, followSourceType = true)
           case (
                 types,
                 p.Stmt.Var(
                   name @ p.Named(_, _: p.Type.Ptr, _),
-                  Some(ref @ p.Expr.RefTo(select: p.Term.Select, index, _, _, _)),
+                  Some(p.Expr.Cast(select: p.Term.Select, _: p.Type.Ptr)),
+                  _
+                )
+              ) =>
+            propagatePointerStruct(types, name, select, followSourceType = false)
+          case (
+                types,
+                p.Stmt.Var(
+                  name @ p.Named(_, _: p.Type.Ptr, _),
+                  Some(ref @ p.Expr.RefTo(select: p.Term.Select, index, _, space, _)),
                   _
                 )
               ) =>
             val selected = selectedType(select, types)
             val component =
               if (select.steps.isEmpty && index.isEmpty) types.getOrElse(select.root.symbol, select.root.tpe)
-              else ref.comp
-            val space =
-              if (select.steps.isEmpty && index.isEmpty) p.Type.Space.Private
-              else if (select.steps.isEmpty) AddressRefinement.spaceOf(selected).getOrElse(ref.space)
-              else ref.space
-            types.updated(name.symbol, p.Type.Ptr(component, space))
+              else if (index.nonEmpty) indexedComponent(selected, ref.comp)
+              else structOf(selected).fold(ref.comp)(_ => selected)
+            types.updated(
+              name.symbol,
+              p.Type.Ptr(component, referenceSpace(localStorage, select, index, selected, space))
+            )
           case (types, p.Stmt.Var(name, Some(p.Expr.Alias(select: p.Term.Select)), _)) if structOf(name.tpe).nonEmpty =>
             val source = selectedType(select, types)
             if (structOf(source).nonEmpty) types.updated(name.symbol, source) else types
@@ -243,9 +311,14 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     }
 
     def rewrite(function: p.Function): p.Function = {
-      val types                          = inferredTypes(function, requirements(function))
+      val types        = inferredTypes(function, requirements(function))
+      val localStorage = function.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) => name.symbol }.toSet
       def retype(name: p.Named): p.Named = types.get(name.symbol).fold(name)(tpe => name.copy(tpe = tpe))
       def retypeArg(arg: p.Arg): p.Arg   = arg.copy(named = retype(arg.named))
+      def conform(expression: p.Expr, expected: p.Type): p.Expr = expression match {
+        case cast @ p.Expr.Cast(_, _: p.Type.Ptr) if AddressRefinement.isPtr(expected) => cast.copy(as = expected)
+        case other                                                                     => other
+      }
       val rewritten = function
         .modifyAll[p.Term] {
           case select: p.Term.Select =>
@@ -266,16 +339,21 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             val resolved = typeAt(select.root.tpe, select.steps)
             val component =
               if (select.steps.isEmpty && ref.idx.isEmpty) select.root.tpe
+              else if (ref.idx.nonEmpty) indexedComponent(resolved, ref.comp)
               else structOf(resolved).fold(ref.comp)(_ => resolved)
-            val space =
-              if (select.steps.isEmpty && ref.idx.isEmpty) p.Type.Space.Private
-              else if (select.steps.isEmpty) AddressRefinement.spaceOf(select.root.tpe).getOrElse(ref.space)
-              else ref.space
-            ref.copy(lhs = select, comp = component, space = space)
+            ref.copy(
+              lhs = select,
+              comp = component,
+              space = referenceSpace(localStorage, select, ref.idx, select.root.tpe, ref.space)
+            )
           case expression => expression
         }
         .modifyAll[p.Stmt] {
-          case variable: p.Stmt.Var   => variable.copy(name = retype(variable.name))
+          case variable: p.Stmt.Var =>
+            val name = retype(variable.name)
+            variable.copy(name = name, expr = variable.expr.map(conform(_, name.tpe)))
+          case mutation @ p.Stmt.Mut(target, expression) =>
+            mutation.copy(expr = conform(expression, typeAt(target.root.tpe, target.steps)))
           case range: p.Stmt.ForRange => range.copy(induction = retype(range.induction))
           case statement              => statement
         }

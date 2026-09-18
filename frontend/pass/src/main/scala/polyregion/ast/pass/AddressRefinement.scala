@@ -778,10 +778,12 @@ private[pass] object AddressRefinement {
             if (localAggregates(root.symbol) || !isPtr(root.tpe))
               AddressValue.absolute(
                 Some(Provenance.Local(root.symbol, steps)),
-                Some(root.tpe match {
-                  case _: p.Type.Struct => p.Type.Space.Private
-                  case _                => spaceOf(root.tpe).getOrElse(space)
-                })
+                Some(
+                  root.tpe match {
+                    case _: p.Type.Struct | _: p.Type.Arr => p.Type.Space.Private
+                    case _                                => spaceOf(root.tpe).getOrElse(space)
+                  }
+                )
               )
             else {
               val base              = read(state, tokenOf(root))
@@ -1254,7 +1256,13 @@ private[pass] object AddressRefinement {
     }
 
     val flowSeeds = seeds.iterator.map { case (token, fact) =>
-      val initialised = fact.encodings.nonEmpty || fact.provenances.nonEmpty || fact.includesNull
+      // StructuredExit payload slots are a tagged union: they are only read after the matching tag is written.
+      val pendingExceptionPayload = token match {
+        case Query.Binding(symbol) => symbol.startsWith(StructuredExit.ExceptionSlotPrefix)
+        case _                     => false
+      }
+      val initialised =
+        fact.encodings.nonEmpty || fact.provenances.nonEmpty || fact.includesNull || pendingExceptionPayload
       token -> Option
         .when(!initialised) {
           fact.copy(obligations = Set(s"${token.label} may be uninitialised on this path"))

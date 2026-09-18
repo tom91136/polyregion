@@ -10,6 +10,7 @@ vcpkg_from_github(
     HEAD_REF main
     PATCHES
         boost-context-asm-marmasm.patch
+        libcxx-23-demangle.patch
         msvc-mp-cxx-only.patch
 )
 

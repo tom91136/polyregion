@@ -89,6 +89,185 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     assertEquals(privateType, Some(p.Type.Struct(privateClone.name, Nil)))
   }
 
+  test("aggregate pointer fields use refined provenance through stale casts") {
+    val boxSym                 = sym("Box")
+    val box                    = p.Type.Struct(boxSym, Nil)
+    val boxDef                 = p.StructDef(boxSym, Nil, List(named("ptr", globalPtr)), Nil)
+    val value                  = named("value")
+    val source                 = named("source", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private))
+    val local                  = named("local", box)
+    val pointer: p.Term.Select = p.Term.Select(local, List(p.PathStep.Field("ptr")), globalPtr)
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Var(
+          source,
+          Some(p.Expr.RefTo(selectT(value), None, p.Type.IntS32, p.Type.Space.Private, p.Region.Opaque))
+        ),
+        p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.Poison(box))), isMutable = true),
+        p.Stmt.Mut(pointer, p.Expr.Cast(selectT(source), globalPtr)),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourcePointerLegalise()(program(kernel, defs = List(boxDef)), NoopLog)
+
+    val localType = out.entry.required.collectAll[p.Stmt].collectFirst {
+      case p.Stmt.Var(name, _, _) if name.symbol == local.symbol => name.tpe
+    }
+    val clone = localType.collect { case structure: p.Type.Struct if structure.name != boxSym => structure }
+    assert(clone.nonEmpty, clues(out.defs, out.entry))
+    assertEquals(
+      out.defs.find(_.name == clone.get.name).flatMap(_.members.headOption.map(_.tpe)),
+      Some[p.Type](p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private))
+    )
+    assertEquals(
+      out.entry.required.collectAll[p.Stmt].collectFirst { case p.Stmt.Mut(_, p.Expr.Cast(_, as)) =>
+        as
+      },
+      Some[p.Type](p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private))
+    )
+  }
+
+  test("an address-space-specialised recursive aggregate points to its specialised type") {
+    val nodeSym = sym("Node")
+    val node    = p.Type.Struct(nodeSym, Nil)
+    val nodeDef = p.StructDef(
+      nodeSym,
+      Nil,
+      List(named("self", p.Type.Ptr(node, p.Type.Space.Global))),
+      Nil
+    )
+    val local   = named("local", node)
+    val address = named("address", p.Type.Ptr(node, p.Type.Space.Private))
+    val self: p.Term.Select =
+      p.Term.Select(local, List(p.PathStep.Field("self")), p.Type.Ptr(node, p.Type.Space.Global))
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(local, Some(p.Expr.Alias(p.Term.Poison(node))), isMutable = true),
+        p.Stmt.Var(
+          address,
+          Some(p.Expr.RefTo(selectT(local), None, node, p.Type.Space.Private, p.Region.Opaque))
+        ),
+        p.Stmt.Mut(self, p.Expr.Alias(selectT(address))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out   = SourcePointerLegalise()(program(kernel, defs = List(nodeDef)), NoopLog)
+    val clone = out.defs.find(_.name != nodeSym).getOrElse(fail("missing private Node specialisation"))
+
+    assertEquals(
+      clone.members.head.tpe,
+      p.Type.Ptr(p.Type.Struct(clone.name, Nil), p.Type.Space.Private)
+    )
+  }
+
+  test("a recursive aggregate reached through a pointer uses refined cast provenance") {
+    val nodeSym = sym("Node")
+    val node    = p.Type.Struct(nodeSym, Nil)
+    val nodePtr = p.Type.Ptr(node, p.Type.Space.Private)
+    val bytePtr = p.Type.Ptr(p.Type.IntU8, p.Type.Space.Private)
+    val voidPtr = p.Type.Ptr(p.Type.Nothing, p.Type.Space.Private)
+    val nodeDef = p.StructDef(
+      nodeSym,
+      Nil,
+      List(named("self", p.Type.Ptr(node, p.Type.Space.Global))),
+      Nil
+    )
+    val storage = named("storage", p.Type.Arr(p.Type.IntU8, 16, p.Type.Space.Global))
+    val address = named("address", bytePtr)
+    val erased  = named("erased", voidPtr)
+    val pointer = named("pointer", nodePtr)
+    val self: p.Term.Select = p.Term.Select(
+      pointer,
+      List(p.PathStep.Deref, p.PathStep.Field("self")),
+      p.Type.Ptr(node, p.Type.Space.Global)
+    )
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(storage, None, isMutable = true),
+        p.Stmt.Var(
+          address,
+          Some(
+            p.Expr.RefTo(
+              selectT(storage),
+              Some(p.Term.IntS64Const(0)),
+              p.Type.IntU8,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Var(erased, Some(p.Expr.Cast(selectT(address), voidPtr))),
+        p.Stmt.Var(pointer, Some(p.Expr.Cast(selectT(erased), nodePtr))),
+        p.Stmt.Mut(self, p.Expr.Cast(selectT(pointer), p.Type.Ptr(node, p.Type.Space.Global))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out   = SourcePointerLegalise()(program(kernel, defs = List(nodeDef)), NoopLog)
+    val clone = out.defs.find(_.name != nodeSym).getOrElse(fail("missing private Node specialisation"))
+
+    assertEquals(
+      clone.members.head.tpe,
+      p.Type.Ptr(p.Type.Struct(clone.name, Nil), p.Type.Space.Private)
+    )
+    assertEquals(
+      out.entry.required.collectAll[p.Expr].collectFirst {
+        case p.Expr.Cast(p.Term.Select(root, Nil, _), as) if root.symbol == pointer.symbol => as: p.Type
+      },
+      Some[p.Type](p.Type.Ptr(p.Type.Struct(clone.name, Nil), p.Type.Space.Private))
+    )
+  }
+
+  test("an indexed aggregate address points to its specialised element") {
+    val nodeSym = sym("Node")
+    val node    = p.Type.Struct(nodeSym, Nil)
+    val nodeDef = p.StructDef(
+      nodeSym,
+      Nil,
+      List(named("self", p.Type.Ptr(node, p.Type.Space.Global))),
+      Nil
+    )
+    val values  = named("values", p.Type.Arr(node, 2, p.Type.Space.Global))
+    val pointer = named("pointer", p.Type.Ptr(node, p.Type.Space.Private))
+    val self: p.Term.Select = p.Term.Select(
+      pointer,
+      List(p.PathStep.Deref, p.PathStep.Field("self")),
+      p.Type.Ptr(node, p.Type.Space.Global)
+    )
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(values, None, isMutable = true),
+        p.Stmt.Var(
+          pointer,
+          Some(
+            p.Expr.RefTo(
+              selectT(values),
+              Some(p.Term.IntS64Const(0)),
+              node,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Mut(self, p.Expr.Cast(selectT(pointer), p.Type.Ptr(node, p.Type.Space.Global))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out   = SourcePointerLegalise()(program(kernel, defs = List(nodeDef)), NoopLog)
+    val clone = out.defs.find(_.name != nodeSym).getOrElse(fail("missing private Node specialisation"))
+
+    assertEquals(
+      out.entry.required.collectAll[p.Stmt].collectFirst {
+        case p.Stmt.Var(name, _, _) if name.symbol == pointer.symbol => name.tpe: p.Type
+      },
+      Some[p.Type](p.Type.Ptr(p.Type.Struct(clone.name, Nil), p.Type.Space.Private))
+    )
+  }
+
   test("taking the address of a pointer preserves its pointee space and uses private slot storage") {
     val local   = named("local", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local))
     val stale   = p.Type.Ptr(p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global), p.Type.Space.Global)
@@ -150,6 +329,41 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     assertEquals(
       out.collectAll[p.Expr].collectFirst { case ref: p.Expr.RefTo => ref.tpe },
       Some(globalPtr)
+    )
+  }
+
+  test("a pointer assigned from a private array is respaced to private") {
+    val values   = named("values", p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Global))
+    val assigned = named("assigned", globalPtr)
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(values, None, isMutable = true),
+        p.Stmt.Var(
+          assigned,
+          Some(p.Expr.Alias(p.Term.NullPtrConst(p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
+          isMutable = true
+        ),
+        p.Stmt.Mut(
+          selectT(assigned),
+          p.Expr.RefTo(
+            selectT(values),
+            Some(p.Term.IntS64Const(0)),
+            p.Type.IntS32,
+            p.Type.Space.Global,
+            p.Region.Opaque
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourcePointerLegalise()(program(kernel), NoopLog).entry.required
+
+    assertEquals(
+      out.collectAll[p.Stmt].collectFirst {
+        case p.Stmt.Var(name, _, _) if name.symbol == assigned.symbol => name.tpe
+      },
+      Some(p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private))
     )
   }
 

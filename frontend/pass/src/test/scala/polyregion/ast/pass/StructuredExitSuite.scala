@@ -629,9 +629,19 @@ class StructuredExitSuite extends munit.FunSuite {
       defs = List(baseDef, derivedDef)
     )
 
-    val out = StructuredExit(in, NoopLog)
+    val out        = StructuredExit(in, NoopLog)
+    val refinement = AddressRefinement.solve(out, out.entry.getOrElse(fail("missing entry")))
 
+    assertEquals(refinement.diagnostics, Nil)
     assertEquals(out.entry.collectWhere[p.Stmt] { case p.Stmt.Var(`caught`, _, _) => () }, Nil)
+    assert(
+      out.entry.collectAll[p.Stmt].exists {
+        case p.Stmt.Var(name, None, true) =>
+          name.symbol.startsWith(StructuredExit.ExceptionSlotPrefix) && name.tpe == derivedPtr
+        case _ => false
+      },
+      "a pending pointer payload must not materialise a null-derived base projection"
+    )
     assert(
       out.entry.collectAll[p.Stmt].exists {
         case p.Stmt.Var(
