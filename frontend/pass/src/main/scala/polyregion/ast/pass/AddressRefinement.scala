@@ -930,7 +930,10 @@ private[pass] object AddressRefinement {
         current: Map[Query[AddressValue], AddressValue],
         remaining: Int
     ): (Map[Query[AddressValue], AddressValue], Map[String, String]) = {
-      val assigned = pending.foldLeft(seeds) { (facts, assignment) =>
+      // This is a constraint closure, not a control-flow transfer. Retain facts learned by earlier
+      // iterations so canonical slot aliases can only add evidence rather than oscillating as an
+      // alias becomes known and changes where the same constraint is recorded.
+      val assigned = pending.foldLeft(current) { (facts, assignment) =>
         val target = targetOf(assignment, current)
         // Missing-evidence messages describe the current approximation, not lattice facts. Carrying them through
         // closure makes a resolved pointer graph alternate between "not known yet" and its eventual origin.

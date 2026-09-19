@@ -2463,7 +2463,7 @@ TEST_CASE("host orchestration transports stateless callable kernel slots as one 
   INFO(ir);
   CHECK(ir ^ contains_slice("store i8 3, ptr"));
   CHECK(ir ^ contains_slice("store i8 9, ptr"));
-  CHECK(ir ^ contains_slice("i64 2, ptr"));
+  CHECK(ir ^ contains_slice("i" + std::to_string(sizeof(size_t) * 8) + " 2, ptr"));
 }
 
 TEST_CASE("glcompute arena views do not demand fp16 for a float-only kernel", "[backend]") {

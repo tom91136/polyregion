@@ -197,29 +197,35 @@ struct VariableMarker {
     const auto offset = symbol.rfind("::");
     return offset == std::string_view::npos ? symbol : symbol.substr(offset + 2);
   };
-  const auto memberSymbolMatches = [&unqualified](const Named &member) {
+  const auto memberSymbolMatches = [&unqualified](const Named &member, const bool allowUnqualified) {
     const std::string_view symbol = member.symbol;
     const auto requested = unqualified(symbol);
-    return [&unqualified, symbol, requested](const Named &candidate) {
+    return [&unqualified, symbol, requested, allowUnqualified](const Named &candidate) {
       // A member expression can retain the FieldDecl's template-specialisation owner while its base has already
       // been canonicalised to an ABI-equivalent specialisation (notably CCCL's T* / const T* agent storage).
-      // Field names are unique within the struct selected below, so resolve against that struct's canonical member
-      // even when both spellings are qualified by different owners.
-      return candidate.symbol == symbol || unqualified(candidate.symbol) == requested;
+      // Prefer the exact owner-qualified field across the inheritance chain before falling back to its unqualified
+      // spelling. Otherwise a hidden derived field can capture an access to an equally named base field.
+      return candidate.symbol == symbol || (allowUnqualified && unqualified(candidate.symbol) == requested);
     };
   };
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
     auto expand = [&](const Type::Struct &s) -> std::pair<Vector<Named>, Named> {
-      const auto canonical = [&](const std::shared_ptr<StructDef> &def) -> Opt<Named> {
-        return def->members | find(memberSymbolMatches(member))
-               | map([&](const auto &actual) { return Named(actual.symbol, member.tpe.is<Type::Nothing>() ? actual.tpe : member.tpe); });
-      };
       const auto owner = r.findStruct(fqcn(s.name), "select");
-      if (auto actual = canonical(owner)) return {{base}, *actual};
-      if (Vector<std::shared_ptr<StructDef>> path;
-          walkParents(r, s, [&](const auto &p) { return p.members ^ exists(memberSymbolMatches(member)); }, path, member))
-        if (auto actual = canonical(path.back()))
-          return {path | map([&](const auto &def) { return baseMember(*def); }) | prepend(base) | to_vector(), *actual};
+      const auto resolve = [&](const bool allowUnqualified) -> Opt<std::pair<Vector<Named>, Named>> {
+        const auto matches = memberSymbolMatches(member, allowUnqualified);
+        const auto canonical = [&](const std::shared_ptr<StructDef> &def) -> Opt<Named> {
+          return def->members | find(matches)
+                 | map([&](const auto &actual) { return Named(actual.symbol, member.tpe.is<Type::Nothing>() ? actual.tpe : member.tpe); });
+        };
+        if (auto actual = canonical(owner)) return std::pair{Vector<Named>{base}, *actual};
+        if (Vector<std::shared_ptr<StructDef>> path;
+            walkParents(r, s, [&](const auto &p) { return p.members ^ exists(matches); }, path, member))
+          if (auto actual = canonical(path.back()))
+            return std::pair{path | map([&](const auto &def) { return baseMember(*def); }) | prepend(base) | to_vector(), *actual};
+        return {};
+      };
+      if (auto exact = resolve(/*allowUnqualified*/ false)) return *exact;
+      if (auto canonical = resolve(/*allowUnqualified*/ true)) return *canonical;
       const auto memberDump = owner->members ^ mk_string(", ", [](const auto &m) { return m.symbol + ":" + repr(m.tpe); });
       raise(fmt::format("Cannot generate select for member {}:{} against type {}; struct has members: [{}]", member.symbol,
                         repr(member.tpe), repr(s), memberDump));
