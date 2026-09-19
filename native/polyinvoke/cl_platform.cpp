@@ -192,7 +192,7 @@ cl_details::LaunchDimensions cl_details::launchDimensions(const Dim3 &groups, co
 
 std::optional<cl_details::LaunchDimensions> cl_details::retryLaunchDimensions(cl_int error, const Dim3 &groups, const Dim3 &local,
                                                                               size_t kernelMax) {
-  if (error != CL_INVALID_WORK_GROUP_SIZE || local.x <= 1 || kernelMax == 0) return {};
+  if ((error != CL_INVALID_WORK_GROUP_SIZE && error != CL_INVALID_WORK_ITEM_SIZE) || local.x <= 1 || kernelMax == 0) return {};
   const auto yz = local.y * local.z;
   return std::optional{kernelMax / yz} | aspartame::filter([&](size_t x) { return yz <= kernelMax && x > 0 && x < local.x; })
          | aspartame::map([&](size_t x) { return launchDimensions(groups, Dim3{x, local.y, local.z}); });
@@ -965,7 +965,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   };
   auto dimensions = cl_details::launchDimensions(policy.global, local);
   cl_int result = enqueue(dimensions);
-  if (result == CL_INVALID_WORK_GROUP_SIZE) {
+  if (result == CL_INVALID_WORK_GROUP_SIZE || result == CL_INVALID_WORK_ITEM_SIZE) {
     cl_device_id device = {};
     size_t kernelMax = 0;
     if (clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof(device), &device, nullptr) == CL_SUCCESS

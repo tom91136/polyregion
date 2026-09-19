@@ -764,6 +764,10 @@ private[pass] object AddressRefinement {
         space: p.Type.Space
     ): AddressValue =
       term match {
+        // Pointer arithmetic on a pointer-valued field follows the stored pointer. Only a RefTo whose component is
+        // the pointer itself materialises the address of the field's storage.
+        case selected: p.Term.Select if selected.steps.nonEmpty && isPtr(selected.tpe) && !pointsToBinding =>
+          termFact(state, selected).copy(references = Set.empty)
         case p.Term.Select(root, Nil, tpe) if isPtr(tpe) && pointsToBinding =>
           AddressValue
             .absolute(Some(Provenance.Local(root.symbol)), Some(space))

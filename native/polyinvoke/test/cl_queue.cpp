@@ -27,13 +27,15 @@ int runLaunchDimensions() {
   POLYTEST_CHECK(ctx, !details::retryLaunchDimensions(CL_OUT_OF_RESOURCES, groups, local, 128));
   POLYTEST_CHECK(ctx, !details::retryLaunchDimensions(CL_INVALID_WORK_GROUP_SIZE, groups, local, 512));
 
-  const auto retry = details::retryLaunchDimensions(CL_INVALID_WORK_GROUP_SIZE, groups, local, 128);
-  POLYTEST_REQUIRE(ctx, retry.has_value());
-  checkDim(ctx, retry->local, Dim3{64, 2, 1}, "retry local size");
-  checkDim(ctx, retry->global, Dim3{448, 10, 3}, "retry global size");
-  POLYTEST_CHECK(ctx, retry->global.x / retry->local.x == groups.x);
-  POLYTEST_CHECK(ctx, retry->global.y / retry->local.y == groups.y);
-  POLYTEST_CHECK(ctx, retry->global.z / retry->local.z == groups.z);
+  for (const auto error : {CL_INVALID_WORK_GROUP_SIZE, CL_INVALID_WORK_ITEM_SIZE}) {
+    const auto retry = details::retryLaunchDimensions(error, groups, local, 128);
+    POLYTEST_REQUIRE(ctx, retry.has_value());
+    checkDim(ctx, retry->local, Dim3{64, 2, 1}, "retry local size");
+    checkDim(ctx, retry->global, Dim3{448, 10, 3}, "retry global size");
+    POLYTEST_CHECK(ctx, retry->global.x / retry->local.x == groups.x);
+    POLYTEST_CHECK(ctx, retry->global.y / retry->local.y == groups.y);
+    POLYTEST_CHECK(ctx, retry->global.z / retry->local.z == groups.z);
+  }
 
   return ctx.failed ? 1 : 0;
 }

@@ -503,6 +503,50 @@ class AddressRefinementSuite extends munit.FunSuite {
     )
   }
 
+  test("pointer arithmetic on an aggregate field uses the stored pointer address space") {
+    val holderSym = sym("Holder")
+    val holderTpe = p.Type.Struct(holderSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, capPtr)
+    val holder    = named("holder", holderTpe)
+    val pointer   = named("pointer", ptrTpe)
+    val field =
+      p.Term.Select(holder, List(p.PathStep.Field("pointer")), ptrTpe).asInstanceOf[p.Term.Select]
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(holder, None, isMutable = true),
+        p.Stmt.Mut(field, p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("data")), ptrTpe))),
+        p.Stmt.Var(
+          pointer,
+          Some(
+            p.Expr.RefTo(
+              field,
+              Some(p.Term.IntS64Const(1)),
+              p.Type.IntS32,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          ),
+          false
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val analysis = AddressRefinement.solve(
+      program(
+        e,
+        defs = List(
+          p.StructDef(capSym, Nil, List(named("data", ptrTpe)), Nil),
+          p.StructDef(holderSym, Nil, List(named("pointer", ptrTpe)), Nil)
+        )
+      ),
+      e
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+    assertEquals(analysis.bindings(pointer.symbol).spaces, Set(p.Type.Space.Global))
+  }
+
   test("dynamic array indices share their aggregate pointer-slot encoding") {
     val holderSym = sym("DynamicHolder")
     val holderTpe = p.Type.Struct(holderSym, Nil)
