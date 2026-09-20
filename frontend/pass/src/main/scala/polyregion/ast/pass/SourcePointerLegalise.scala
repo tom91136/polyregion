@@ -589,11 +589,19 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
+    def respace(function: p.Function): (p.Function, Int) =
+      RegionRespace.run(
+        program,
+        function,
+        requireSolved = false,
+        adaptPointerStores = requiresConcreteSpaces
+      )
+
     val (entry0, entryCount) = program.entry
-      .map(RegionRespace.run(program, _, requireSolved = false))
+      .map(respace)
       .map((function, count) => Some(function) -> count)
       .getOrElse(None -> 0)
-    val (functions0, counts) = program.functions.map(RegionRespace.run(program, _, requireSolved = false)).unzip
+    val (functions0, counts) = program.functions.map(respace).unzip
     val respaced             = program.copy(entry = entry0, functions = functions0)
     val total                = entryCount + counts.sum
     if (total > 0) log.info(s"respaced $total rooted pointer(s) during source legalisation")

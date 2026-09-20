@@ -13,7 +13,12 @@ object RegionRespace extends ProgramPass {
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
-  private[pass] def run(program: p.Program, f: p.Function, requireSolved: Boolean = true): (p.Function, Int) = {
+  private[pass] def run(
+      program: p.Program,
+      f: p.Function,
+      requireSolved: Boolean = true,
+      adaptPointerStores: Boolean = true
+  ): (p.Function, Int) = {
     val solved   = AddressRefinement.solve(program, f)
     val analysis = if (requireSolved) solved.requireSolved else solved
     val declared = (
@@ -64,7 +69,7 @@ object RegionRespace extends ProgramPass {
       // Generic C++ aggregate fields and control-flow pointer merges retain their declared pointer space, while
       // individual writes may have proven Local/Constant provenance. Keep each assignment internally well-typed;
       // the backend converts to the storage slot's representation and later loads use the tracked provenance.
-      case p.Stmt.Mut(lhs @ p.Term.Select(_, _, t), e) =>
+      case p.Stmt.Mut(lhs @ p.Term.Select(_, _, t), e) if adaptPointerStores =>
         (AddressRefinement.spaceOf(t), AddressRefinement.spaceOf(e.tpe)) match {
           case (Some(lhsSpace), Some(rhsSpace)) if lhsSpace != rhsSpace =>
             p.Stmt.Mut(lhs.copy(tpe = AddressRefinement.withSpace(t, rhsSpace)), e)

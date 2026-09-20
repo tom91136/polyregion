@@ -89,6 +89,37 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     assertEquals(privateType, Some(p.Type.Struct(privateClone.name, Nil)))
   }
 
+  test("non-strict source pointers retain declared aggregate field views") {
+    val boxSym                = sym("Box")
+    val box                   = p.Type.Struct(boxSym, Nil)
+    val boxDef                = p.StructDef(boxSym, Nil, List(named("ptr", globalPtr)), Nil)
+    val value                 = named("value")
+    val privateBox            = named("privateBox", box)
+    val member: p.Term.Select = p.Term.Select(privateBox, List(p.PathStep.Field("ptr")), globalPtr)
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(value, None, isMutable = true),
+        p.Stmt.Var(privateBox, Some(p.Expr.Alias(p.Term.Poison(box))), isMutable = true),
+        p.Stmt.Mut(
+          member,
+          p.Expr.RefTo(selectT(value), None, p.Type.IntS32, p.Type.Space.Private, p.Region.Opaque)
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val pointerLegal = SourcePointerLegalise(requiresConcreteSpaces = false)(
+      program(kernel, defs = List(boxDef)),
+      NoopLog
+    )
+    val selected = SourceSelectionLegalise(pointerLegal, NoopLog)
+
+    assertEquals(
+      selected.entry.required.collectAll[p.Stmt].collectFirst { case p.Stmt.Mut(lhs, _) => lhs.tpe },
+      Some[p.Type](globalPtr)
+    )
+  }
+
   test("aggregate pointer fields use refined provenance through stale casts") {
     val boxSym                 = sym("Box")
     val box                    = p.Type.Struct(boxSym, Nil)
