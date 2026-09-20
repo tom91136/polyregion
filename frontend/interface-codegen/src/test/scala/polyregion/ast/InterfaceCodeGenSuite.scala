@@ -64,9 +64,16 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assertEquals(f90, golden("example.f90"))
     assertEquals(sc, golden("ExampleInterface.scala"))
 
-    assert(cpp.contains("template <class T, class U, class Op>"))
-    assert(cpp.contains("clang::annotate(\"polyregion_interface:example:example.transform\")"))
+    assert(cpp.contains("template <class T, class U, class Op> //"))
+    assert(cpp.contains("POLYREGION_EXAMPLE_ANNOTATE(\"polyregion_interface:example:example.transform\") //"))
     assert(cpp.contains("inline void transform(const T *in, U *out, std::int32_t n, Op op)"))
+    assert(cpp.contains("POLYREGION_EXAMPLE_IMPLEMENT(count, in, n);"))
+    assert(cpp.contains("POLYREGION_EXAMPLE_IMPLEMENT(transform, in, out, n, op);"))
+    assert(cpp.contains("}\n\ntemplate <"))
+    assert(!cpp.contains("}\ntemplate <"))
+    assert(cpp.contains("#pragma push_macro(\"POLYREGION_EXAMPLE_IMPLEMENT\")"))
+    assert(cpp.contains("#pragma pop_macro(\"POLYREGION_EXAMPLE_IMPLEMENT\")"))
+    assert(!cpp.contains("IMPLEMENT_WAS_UNDEFINED"))
 
     assert(f90.contains("module example_ffi"))
     assert(f90.contains("polyregion_interface:example:example.transform"))

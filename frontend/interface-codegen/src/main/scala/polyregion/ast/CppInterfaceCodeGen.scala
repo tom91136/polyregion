@@ -1,5 +1,7 @@
 package polyregion.ast
 
+import java.util.Locale
+
 import polyregion.ast.PolyAST as p
 
 private[ast] object CppInterfaceCodeGen {
@@ -149,7 +151,12 @@ private[ast] object CppInterfaceCodeGen {
     case _ => Nil
   }
 
-  private def declaration(interfaceDef: p.Interface, decl: p.FunctionDecl): String = {
+  private def declaration(
+      interfaceDef: p.Interface,
+      annotationMacro: String,
+      implementationMacro: String,
+      decl: p.FunctionDecl
+  ): String = {
     decl.rtn match {
       case p.Type.Ptr(_, _) | p.Type.Arr(_, _, _) => fail(s"interface return type is not supported yet: ${decl.rtn}")
       case _                                      => ()
@@ -160,9 +167,13 @@ private[ast] object CppInterfaceCodeGen {
     val templates = decl.tpeVars.map(variable => s"class ${variable.name}") ++ callableTemplates
     if (templates.distinct.size != templates.size)
       fail(s"declaration `${decl.name.fqn.mkString(".")}` has colliding C++ template parameters")
-    val template = if (templates.nonEmpty) s"template <${templates.mkString(", ")}>\n" else ""
-    val body     = (decl.args.flatMap(callableCheck) :+ "__builtin_trap();").map(s => s"  $s").mkString("\n")
-    s"""$template[[clang::annotate("${marker(interfaceDef, decl)}")]] inline ${tpe(
+    val template  = if (templates.nonEmpty) s"template <${templates.mkString(", ")}> //\n" else ""
+    val forwarded = (decl.name.last :: decl.args.map(_.named.symbol)).mkString(", ")
+    val body = (decl.args.flatMap(callableCheck) :+ s"$implementationMacro($forwarded);")
+      .map(s => s"  $s")
+      .mkString("\n")
+    s"""$template$annotationMacro("${marker(interfaceDef, decl)}") //
+       |inline ${tpe(
         decl.rtn
       )} ${decl.name.last}(${decl.args
         .map(parameter)
@@ -183,17 +194,35 @@ private[ast] object CppInterfaceCodeGen {
         .collect { case arg if arg.named.tpe.isInstanceOf[p.Type.Exec] => pascalCase(arg.named.symbol) }
         .foreach(identifier(_, "callable template"))
     }
-    val body = decls.map(declaration(interfaceDef, _)).mkString("\n\n")
+    val macroPrefix         = s"POLYREGION_${interfaceDef.name.fqn.mkString("_").toUpperCase(Locale.ROOT)}"
+    val annotationMacro     = s"${macroPrefix}_ANNOTATE"
+    val implementationMacro = s"${macroPrefix}_IMPLEMENT"
+    val body = decls.map(declaration(interfaceDef, annotationMacro, implementationMacro, _)).mkString("\n\n")
     s"""#pragma once
        |
        |#include <cstdint>
        |#include <type_traits>
+       |
+       |#if defined(__clang__)
+       |#define $annotationMacro(value) [[clang::annotate(value)]]
+       |#else
+       |#define $annotationMacro(value)
+       |#endif
+       |
+       |#pragma push_macro("$implementationMacro")
+       |#ifndef $implementationMacro
+       |#define $implementationMacro(function, ...) __builtin_trap()
+       |#endif
        |
        |namespace ${interfaceDef.name.fqn.mkString("::")} {
        |
        |$body
        |
        |} // namespace ${interfaceDef.name.fqn.mkString("::")}
+       |
+       |#undef $annotationMacro
+       |
+       |#pragma pop_macro("$implementationMacro")
        |""".stripMargin
   }
 }
