@@ -508,7 +508,71 @@ private[pass] object AddressRefinement {
     val localAggregates = statements.iterator.collect {
       case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
     }.toSet
-    val members = program.defs.iterator.map(d => d.name -> d.members.map(m => m.symbol -> m.tpe).toMap).toMap
+    val definitions = program.defs.iterator.map(d => d.name -> d).toMap
+    val members     = definitions.view.mapValues(_.members.map(m => m.symbol -> m.tpe).toMap).toMap
+    val baseByField = definitions.keysIterator.map { symbol =>
+      s"${p.Conventions.BaseFieldPrefix}_${symbol.fqcn}" -> symbol
+    }.toMap
+
+    def structPointee(tpe: p.Type): Option[p.Sym] = tpe match {
+      case p.Type.Ptr(p.Type.Struct(symbol, _), _) => Some(symbol)
+      case _                                       => None
+    }
+
+    def inheritancePaths(derived: p.Sym, base: p.Sym): List[List[p.PathStep]] = {
+      def directBases(owner: p.StructDef): List[(p.PathStep.Field, p.Sym)] =
+        owner.members.flatMap {
+          case p.Named(symbol, tpe, _) if symbol.startsWith(p.Conventions.BaseFieldPrefix) =>
+            baseByField
+              .get(symbol)
+              .orElse(tpe match {
+                case p.Type.Struct(parent, _) => Some(parent)
+                case _                        => None
+              })
+              .map(p.PathStep.Field(symbol) -> _)
+          case _ => None
+        }
+
+      def loop(current: p.Sym, seen: Set[p.Sym]): List[List[p.PathStep]] =
+        if (current == base) List(Nil)
+        else if (seen(current)) Nil
+        else
+          definitions.get(current).toList.flatMap { definition =>
+            directBases(definition).flatMap { (step, parent) =>
+              loop(parent, seen + current).map(step :: _)
+            }
+          }
+
+      loop(derived, Set.empty)
+    }
+
+    def adjustStructCast(source: p.Term, target: p.Type, fact: AddressValue): AddressValue =
+      (structPointee(source.tpe), structPointee(target)) match {
+        case (Some(from), Some(to)) if from != to =>
+          val upcasts = inheritancePaths(from, to)
+          if (upcasts.nonEmpty)
+            fact.copy(alternatives = fact.alternatives.flatMap {
+              case AbstractAddress.Absolute(Some(Provenance.Local(symbol, path)), space) =>
+                upcasts.map(candidate =>
+                  AbstractAddress.Absolute(Some(Provenance.Local(symbol, path ++ candidate)), space)
+                )
+              case other => Set(other)
+            })
+          else {
+            val downcasts = inheritancePaths(to, from)
+            fact.copy(alternatives = fact.alternatives.flatMap {
+              case original @ AbstractAddress.Absolute(Some(Provenance.Local(symbol, path)), space) =>
+                val matching = downcasts.filter(path.endsWith)
+                if (matching.isEmpty) Set(original)
+                else
+                  matching.map(candidate =>
+                    AbstractAddress.Absolute(Some(Provenance.Local(symbol, path.dropRight(candidate.size))), space)
+                  )
+              case other => Set(other)
+            })
+          }
+        case _ => fact
+      }
     def pointerSlotDepth(tpe: p.Type, seen: Set[p.Sym] = Set.empty): Int = tpe match {
       case _: p.Type.Ptr => 0
       case p.Type.Struct(symbol, _) if !seen(symbol) =>
@@ -695,6 +759,66 @@ private[pass] object AddressRefinement {
         root: p.Named,
         steps: List[p.PathStep]
     ): Query.Slot = {
+      def structOf(tpe: p.Type): Option[p.Sym] = tpe match {
+        case p.Type.Struct(symbol, _)    => Some(symbol)
+        case p.Type.Ptr(component, _)    => structOf(component)
+        case p.Type.Arr(component, _, _) => structOf(component)
+        case _                           => None
+      }
+      def member(tpe: p.Type, name: String): Option[p.Type] =
+        structOf(tpe).flatMap(members.get).flatMap(_.get(name))
+      def advance(tpe: p.Type, step: p.PathStep): p.Type = step match {
+        case p.PathStep.Field(name) =>
+          baseByField
+            .get(name)
+            .map(p.Type.Struct(_, Nil))
+            .orElse(member(tpe, name))
+            .getOrElse(p.Type.Nothing)
+        case p.PathStep.Deref | _: p.PathStep.Index | _: p.PathStep.IndexDyn =>
+          tpe match {
+            case p.Type.Ptr(component, _)    => component
+            case p.Type.Arr(component, _, _) => component
+            case _                           => p.Type.Nothing
+          }
+      }
+      def normaliseBaseProjections(rootType: p.Type, path: List[p.PathStep]): List[p.PathStep] = {
+        def collapseDuplicateBases(steps: List[p.PathStep]): List[p.PathStep] =
+          steps.foldRight(List.empty[p.PathStep]) {
+            case (step @ p.PathStep.Field(name), next :: tail)
+                if name.startsWith(p.Conventions.BaseFieldPrefix) && step == next =>
+              next :: tail
+            case (step, suffix) => step :: suffix
+          }
+
+        @annotation.tailrec
+        def loop(current: p.Type, rest: List[p.PathStep], result: List[p.PathStep]): List[p.PathStep] = rest match {
+          case p.PathStep.Field(baseName) :: (next @ p.PathStep.Field(memberName)) :: tail
+              if baseName.startsWith(p.Conventions.BaseFieldPrefix) &&
+                (baseName == memberName ||
+                  (member(current, memberName).nonEmpty &&
+                    baseByField.get(baseName).flatMap(members.get).forall(!_.contains(memberName)))) =>
+            loop(current, next :: tail, result)
+          case step :: tail => loop(advance(current, step), tail, step :: result)
+          case Nil          => result.reverse
+        }
+        loop(rootType, collapseDuplicateBases(path), Nil)
+      }
+      def evidencedBaseAlias(root: String, path: List[p.PathStep]): List[p.PathStep] =
+        if (state.contains(Query.Slot(root, path))) path
+        else {
+          val candidates = path.indices.iterator
+            .flatMap { index =>
+              path(index) match {
+                case p.PathStep.Field(name) if name.startsWith(p.Conventions.BaseFieldPrefix) =>
+                  Some(path.patch(index, Nil, 1))
+                case _ => None
+              }
+            }
+            .filter(candidate => state.contains(Query.Slot(root, candidate)))
+            .toSet
+          if (candidates.size == 1) candidates.head else path
+        }
+
       val locals = state
         .getOrElse(Query.Binding(root.symbol), AddressValue())
         .provenances
@@ -705,7 +829,11 @@ private[pass] object AddressRefinement {
           if (!declarations.get(storage).exists(n => isPtr(n.tpe)) && steps.headOption.contains(p.PathStep.Deref))
             steps.tail
           else steps
-        Query.Slot(storage, prefix ++ suffix)
+        val path = declarations
+          .get(storage)
+          .map(n => normaliseBaseProjections(n.tpe, prefix ++ suffix))
+          .getOrElse(prefix ++ suffix)
+        Query.Slot(storage, evidencedBaseAlias(storage, path))
       } else Query.Slot(root.symbol, steps)
     }
 
@@ -832,7 +960,7 @@ private[pass] object AddressRefinement {
           case _             => false
         }
         addressFact(state, term, pointsToBinding = false, materialisesStorageAddress, space)
-      case p.Expr.Cast(term, _) => termFact(state, term)
+      case p.Expr.Cast(term, target) => adjustStructCast(term, target, termFact(state, term))
       case p.Expr.RefTo(
             p.Term.Select(root, Nil, p.Type.Ptr(component, _)),
             None,

@@ -42,6 +42,40 @@ class RegionRespaceSuite extends munit.FunSuite {
     assertEquals(ptrSpacesOf(out.entry, "s"), Set[p.Type.Space](p.Type.Space.Global))
   }
 
+  test("a pointer merge keeps each assignment internally typed across address spaces") {
+    val global    = named("global", ptr(p.Type.Space.Global))
+    val local     = named("local", ptr(p.Type.Space.Private))
+    val condition = named("condition", p.Type.Bool1)
+    val merged    = named("merged", ptr(p.Type.Space.Global))
+    val value     = named("value", p.Type.IntS32)
+    val e = entry(
+      args = List(p.Arg(global), p.Arg(condition)),
+      body = List(
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(4), p.Type.Space.Private, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Var(merged, None, isMutable = true),
+        p.Stmt.Cond(
+          selectT(condition),
+          List(p.Stmt.Mut(selectT(merged), p.Expr.Alias(selectT(global)))),
+          List(p.Stmt.Mut(selectT(merged), p.Expr.Alias(selectT(local))))
+        ),
+        p.Stmt.Var(value, Some(p.Expr.Index(selectT(merged), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = RegionRespace(program(e), NoopLog).entry.required
+    val assignments = out.collectAll[p.Stmt].collect {
+      case p.Stmt.Mut(lhs, rhs) if lhs.root.symbol == merged.symbol =>
+        lhs.tpe -> rhs.tpe
+    }
+
+    assert(assignments.nonEmpty)
+    assert(assignments.forall((lhs, rhs) => lhs == rhs), assignments.mkString(", "))
+  }
+
   test("a stale term type still resolves the declaration's local provenance by symbol") {
     val local = named("local", ptr(p.Type.Space.Local))
     val stale = named("local", ptr(p.Type.Space.Global))

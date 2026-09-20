@@ -71,6 +71,9 @@ object SourceSelectionLegalise extends ProgramPass {
         else throw IllegalArgumentException(s"source selection cannot view ${from.repr} as ${to.repr}")
 
       def lowerTerm(term: p.Term, prefix: ListBuffer[p.Stmt]): p.Term = term.modifyAll[p.Term] {
+        // SourceStorageLegalise reserves a byte for callable members in physical aggregates, while calls retain the
+        // logical FnRef solely to select their statically known callee. The byte is never read as a runtime value.
+        case select: p.Term.Select if select.tpe.isInstanceOf[p.Type.FnRef] => select
         case select: p.Term.Select =>
           val storage = storageType(select)
           if (storage == select.tpe) select
@@ -105,6 +108,10 @@ object SourceSelectionLegalise extends ProgramPass {
           val prefix  = ListBuffer.empty[p.Stmt]
           val lowered = expression.map(lowerExpr(_, prefix))
           prefix.toList :+ variable.copy(expr = lowered)
+        case mutation @ p.Stmt.Mut(name, expression) if name.tpe.isInstanceOf[p.Type.FnRef] =>
+          val prefix  = ListBuffer.empty[p.Stmt]
+          val lowered = lowerExpr(expression, prefix)
+          prefix.toList :+ mutation.copy(expr = lowered)
         case mutation @ p.Stmt.Mut(name, expression) =>
           val prefix  = ListBuffer.empty[p.Stmt]
           val storage = storageType(name)

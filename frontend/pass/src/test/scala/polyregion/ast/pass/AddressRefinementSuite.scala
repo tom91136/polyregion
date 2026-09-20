@@ -1003,6 +1003,205 @@ class AddressRefinementSuite extends munit.FunSuite {
     assert(analysis.diagnostics.exists(_.code == "unresolved-pointer-use"), analysis.diagnostics.mkString("\n"))
   }
 
+  test("a downcast from a local base subobject recovers the derived aggregate slots") {
+    val baseSym                   = sym("Base")
+    val derivedSym                = sym("Derived")
+    val baseTpe: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedTpe: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val emptyTpe                  = p.Type.Struct(sym("EmptyBaseStorage"), Nil)
+    val baseField                 = s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}"
+    val localPtr                  = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+    val basePtr                   = p.Type.Ptr(baseTpe, p.Type.Space.Private)
+    val derivedPtr                = p.Type.Ptr(derivedTpe, p.Type.Space.Private)
+    val storage                   = named("storage", derivedTpe)
+    val local                     = named("local", localPtr)
+    val base                      = named("base", basePtr)
+    val derived                   = named("derived", derivedPtr)
+    val loaded                    = named("loaded", ptrTpe)
+    val value                     = named("value", p.Type.IntS32)
+    val dataPath                  = List(p.PathStep.Field(baseField), p.PathStep.Field("data"))
+    val e = entry(
+      body = List(
+        p.Stmt.Var(storage, None, isMutable = true),
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(4), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Mut(p.Term.Select(storage, dataPath, ptrTpe), p.Expr.Alias(selectT(local))),
+        p.Stmt.Var(
+          base,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(storage, List(p.PathStep.Field(baseField)), baseTpe),
+              None,
+              baseTpe,
+              p.Type.Space.Private,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Var(derived, Some(p.Expr.Cast(selectT(base), derivedPtr))),
+        p.Stmt.Var(
+          loaded,
+          Some(
+            p.Expr.Alias(
+              p.Term.Select(
+                derived,
+                p.PathStep.Deref :: dataPath,
+                ptrTpe
+              )
+            )
+          )
+        ),
+        p.Stmt.Var(value, Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val analysis = AddressRefinement.solve(
+      program(
+        e,
+        defs = List(
+          p.StructDef(baseSym, Nil, List(named("data", ptrTpe)), Nil),
+          p.StructDef(derivedSym, Nil, List(named(baseField, emptyTpe)), List(baseTpe))
+        )
+      ),
+      e
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+    assertEquals(analysis.refinedSpace(loaded), Some(p.Type.Space.Local))
+  }
+
+  test("an inherited pointer projection does not duplicate its base-subobject path") {
+    val baseSym                   = sym("ProjectionBase")
+    val derivedSym                = sym("ProjectionDerived")
+    val baseTpe: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedTpe: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val emptyTpe                  = p.Type.Struct(sym("ProjectionBaseStorage"), Nil)
+    val baseField                 = s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}"
+    val basePtr                   = p.Type.Ptr(baseTpe, p.Type.Space.Private)
+    val localPtr                  = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+    val storage                   = named("storage", derivedTpe)
+    val local                     = named("local", localPtr)
+    val base                      = named("base", basePtr)
+    val loaded                    = named("loaded", ptrTpe)
+    val value                     = named("value", p.Type.IntS32)
+    val slotPath                  = List(p.PathStep.Field(baseField), p.PathStep.Field("data"))
+    val projected =
+      p.Term.Select(base, p.PathStep.Deref :: slotPath, ptrTpe)
+    val e = entry(
+      body = List(
+        p.Stmt.Var(storage, None, isMutable = true),
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(4), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Mut(p.Term.Select(storage, slotPath, ptrTpe), p.Expr.Alias(selectT(local))),
+        p.Stmt.Var(
+          base,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(storage, List(p.PathStep.Field(baseField)), baseTpe),
+              None,
+              baseTpe,
+              p.Type.Space.Private,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Var(
+          loaded,
+          Some(
+            p.Expr.Alias(
+              projected
+            )
+          )
+        ),
+        p.Stmt.Var(value, Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val analysis = AddressRefinement.solve(
+      program(
+        e,
+        defs = List(
+          p.StructDef(baseSym, Nil, List(named("data", ptrTpe)), Nil),
+          p.StructDef(derivedSym, Nil, List(named(baseField, emptyTpe)), List(baseTpe))
+        )
+      ),
+      e
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+    assertEquals(analysis.refinedSpace(loaded), Some(p.Type.Space.Local))
+  }
+
+  test("a base-subobject alias can project a direct member of its derived storage") {
+    val baseSym                   = sym("Adaptor")
+    val derivedSym                = sym("Permutation")
+    val baseTpe: p.Type.Struct    = p.Type.Struct(baseSym, Nil)
+    val derivedTpe: p.Type.Struct = p.Type.Struct(derivedSym, Nil)
+    val emptyTpe                  = p.Type.Struct(sym("AdaptorStorage"), Nil)
+    val baseField                 = s"${p.Conventions.BaseFieldPrefix}_${baseSym.fqcn}"
+    val basePtr                   = p.Type.Ptr(baseTpe, p.Type.Space.Private)
+    val localPtr                  = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+    val storage                   = named("storage", derivedTpe)
+    val local                     = named("local", localPtr)
+    val base                      = named("base", basePtr)
+    val loaded                    = named("loaded", ptrTpe)
+    val value                     = named("value", p.Type.IntS32)
+    val projected                 = p.Term.Select(base, List(p.PathStep.Deref, p.PathStep.Field("element")), ptrTpe)
+    val e = entry(
+      body = List(
+        p.Stmt.Var(storage, None, isMutable = true),
+        p.Stmt.Var(
+          local,
+          Some(p.Expr.Alloc(p.Type.IntS32, p.Term.IntS64Const(4), p.Type.Space.Local, p.Region.Rooted(local)))
+        ),
+        p.Stmt.Mut(
+          p.Term.Select(storage, List(p.PathStep.Field("element")), ptrTpe),
+          p.Expr.Alias(selectT(local))
+        ),
+        p.Stmt.Var(
+          base,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(storage, List(p.PathStep.Field(baseField)), baseTpe),
+              None,
+              baseTpe,
+              p.Type.Space.Private,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Var(
+          loaded,
+          Some(p.Expr.Alias(projected))
+        ),
+        p.Stmt.Var(value, Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val analysis = AddressRefinement.solve(
+      program(
+        e,
+        defs = List(
+          p.StructDef(baseSym, Nil, List(named("iterator", ptrTpe)), Nil),
+          p.StructDef(
+            derivedSym,
+            Nil,
+            List(named(baseField, emptyTpe), named("element", ptrTpe)),
+            List(baseTpe)
+          )
+        )
+      ),
+      e
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+    assertEquals(analysis.refinedSpace(loaded), Some(p.Type.Space.Local))
+  }
+
   test("logical address model rejects a local binding that joins arena-relative and absolute addresses") {
     val cap       = named(p.Conventions.CaptureArg, capPtr)
     val external  = named("external", ptrTpe)
