@@ -249,6 +249,8 @@ namespace Spec {
 [[nodiscard]] POLYREGION_EXPORT json remotelaunch_to_json(const Spec::RemoteLaunch &);
 [[nodiscard]] POLYREGION_EXPORT Spec::RemoteAlloc remotealloc_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json remotealloc_to_json(const Spec::RemoteAlloc &);
+[[nodiscard]] POLYREGION_EXPORT Spec::RemoteTempAlloc remotetempalloc_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json remotetempalloc_to_json(const Spec::RemoteTempAlloc &);
 [[nodiscard]] POLYREGION_EXPORT Spec::RemoteFree remotefree_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json remotefree_to_json(const Spec::RemoteFree &);
 [[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy remotememcpy_from_json(const json &);
@@ -362,6 +364,8 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json programtypesize_to_json(const ProgramTypeSize &);
 [[nodiscard]] POLYREGION_EXPORT ProgramLinkRequest programlinkrequest_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json programlinkrequest_to_json(const ProgramLinkRequest &);
+[[nodiscard]] POLYREGION_EXPORT PackageFragment packagefragment_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json packagefragment_to_json(const PackageFragment &);
 [[nodiscard]] POLYREGION_EXPORT PackageLinkRequest packagelinkrequest_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json packagelinkrequest_to_json(const PackageLinkRequest &);
 [[nodiscard]] POLYREGION_EXPORT CompileModule compilemodule_from_json(const json &);

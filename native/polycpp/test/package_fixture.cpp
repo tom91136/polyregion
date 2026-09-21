@@ -232,6 +232,7 @@ int main(int argc, char **argv) {
     const auto program =
         hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
     const auto allocations = program.collect_all<Spec::RemoteAlloc>().size();
+    const auto temporaryAllocations = program.collect_all<Spec::RemoteTempAlloc>().size();
     const auto frees = program.collect_all<Spec::RemoteFree>().size();
     const auto launches = program.collect_all<Spec::RemoteLaunch>().size();
     const auto functionsByName =
@@ -279,22 +280,22 @@ int main(int argc, char **argv) {
                                           || call.name == "polyrt_device_global_memory_bytes" || call.name == "polyrt_device_compute_units";
                                  });
     const auto deviceLimitCaps = program.collect_all<Intr::Min>().size();
-    const bool valid = allocations == 6 && frees == 5 && launches == 2 && genericLaunches == 1 && completedGenericLaunches == 1
-                       && entries == 2 && reductions == 3 && inclusiveScans == 2 && exclusiveScans == 1 && bitwiseReductions == 1
-                       && logicalReductions == 1 && bitwiseInclusiveScans == 1 && copies.size() == 9 && localToRemote == 1
-                       && remoteToLocal == 3 && remoteToRemote == 5 && barriers == 0 && allBarriers == 2 && subgroupBarriers == 1
-                       && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4 && globalIndices >= 5 && localIndices >= 5
-                       && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4 && deviceLimitCaps >= 1;
+    const bool valid = allocations == 5 && temporaryAllocations == 1 && frees == 5 && launches == 2 && genericLaunches == 1
+                       && completedGenericLaunches == 1 && entries == 2 && reductions == 3 && inclusiveScans == 2 && exclusiveScans == 1
+                       && bitwiseReductions == 1 && logicalReductions == 1 && bitwiseInclusiveScans == 1 && copies.size() == 9
+                       && localToRemote == 1 && remoteToLocal == 3 && remoteToRemote == 5 && barriers == 0 && allBarriers == 2
+                       && subgroupBarriers == 1 && shuffleUps == 2 && shuffleIndices == 2 && subgroupSizes == 4 && globalIndices >= 5
+                       && localIndices >= 5 && program.collect_all<Intr::Mul>().size() >= 6 && deviceInfoCalls == 4 && deviceLimitCaps >= 1;
     if (!valid)
-      llvm::errs() << "Unexpected SYCL prism counts: alloc=" << allocations << " free=" << frees << " launch=" << launches
-                   << " generic-launch=" << genericLaunches << " completed-generic-launch=" << completedGenericLaunches
-                   << " entries=" << entries << " reduce=" << reductions << " copies=" << copies.size() << " inclusive=" << inclusiveScans
-                   << " exclusive=" << exclusiveScans << " local-to-remote=" << localToRemote << " remote-to-local=" << remoteToLocal
-                   << " remote-to-remote=" << remoteToRemote << " bitwise-reduce=" << bitwiseReductions
-                   << " logical-reduce=" << logicalReductions << " local-barriers=" << barriers << " all-barriers=" << allBarriers
-                   << " subgroup-barriers=" << subgroupBarriers << " shuffle-up=" << shuffleUps << " shuffle-index=" << shuffleIndices
-                   << " subgroup-size=" << subgroupSizes << " global-index=" << globalIndices << " local-index=" << localIndices
-                   << " multiply=" << program.collect_all<Intr::Mul>().size() << '\n'
+      llvm::errs() << "Unexpected SYCL prism counts: alloc=" << allocations << " temporary-alloc=" << temporaryAllocations
+                   << " free=" << frees << " launch=" << launches << " generic-launch=" << genericLaunches
+                   << " completed-generic-launch=" << completedGenericLaunches << " entries=" << entries << " reduce=" << reductions
+                   << " copies=" << copies.size() << " inclusive=" << inclusiveScans << " exclusive=" << exclusiveScans
+                   << " local-to-remote=" << localToRemote << " remote-to-local=" << remoteToLocal << " remote-to-remote=" << remoteToRemote
+                   << " bitwise-reduce=" << bitwiseReductions << " logical-reduce=" << logicalReductions << " local-barriers=" << barriers
+                   << " all-barriers=" << allBarriers << " subgroup-barriers=" << subgroupBarriers << " shuffle-up=" << shuffleUps
+                   << " shuffle-index=" << shuffleIndices << " subgroup-size=" << subgroupSizes << " global-index=" << globalIndices
+                   << " local-index=" << localIndices << " multiply=" << program.collect_all<Intr::Mul>().size() << '\n'
                    << repr(program) << '\n';
     return valid ? 0 : 16;
   }

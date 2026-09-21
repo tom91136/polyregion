@@ -222,9 +222,6 @@ struct CodeGen {
   [[nodiscard]] ValPtr mkVolatileLoad(const polyast::Spec::GpuVolatileLoad &op);
   [[nodiscard]] ValPtr mkVolatileStore(const polyast::Spec::GpuVolatileStore &op);
 
-  // on-device lowering of a host-orchestration memcpy: a plain llvm.memcpy (no host/device split in a kernel).
-  // alloc/free/sync/launch cannot be host-orchestrated from a kernel, so the target handlers lower them to no-ops
-  // rather than failing compilation
   // per-word i32 staging shared by the warp/wave shuffle lowerings: stage `srcVal` (or a pointer to it) into
   // `words` i32 words backed by `bufTy`, transform each word via `perWord`, reload the result as `valTy`
   [[nodiscard]] ValPtr shuffleStage(llvm::Type *valTy, llvm::Type *bufTy, uint64_t words, ValPtr srcVal, const std::string &tag,

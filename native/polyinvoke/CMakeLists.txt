@@ -103,6 +103,8 @@ set(POLYINVOKE_PUBLIC_LIBS
 set(POLYINVOKE_PRIVATE_LIBS
         unofficial::libffi::libffi
         fmt::fmt
+        ZLIB::ZLIB
+        zstd::libzstd_static
         CACHE INTERNAL "")
 set(POLYINVOKE_LIBS ${POLYINVOKE_PUBLIC_LIBS} ${POLYINVOKE_PRIVATE_LIBS} CACHE INTERNAL "")
 

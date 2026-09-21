@@ -1,13 +1,8 @@
 #include "driver_polyc.h"
 
 #include <fstream>
-#include <set>
 #include <string>
-#include <string_view>
 #include <vector>
-
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include "aspartame/optional.hpp"
 #include "aspartame/string.hpp"
@@ -16,155 +11,18 @@
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
 
-#include "polyfront/package_emit.hpp"
 #include "polyregion/io.hpp"
 #include "polyregion/polypass.h"
 
 #include "ast.h"
 #include "compiler.h"
+#include "driver_package.h"
 #include "fire.hpp"
 #include "generated/polypass_symbols.h"
-#include "package_compiler.hpp"
 #include "polyast_codec.h"
 
 using namespace polyregion;
 using namespace aspartame;
-
-namespace {
-
-std::optional<std::vector<uint8_t>> readBytes(const std::string &path) {
-  const auto buffer = llvm::MemoryBuffer::getFile(path);
-  if (!buffer) {
-    llvm::errs() << "cannot read `" << path << "`\n";
-    return {};
-  }
-  const auto bytes = (*buffer)->getBuffer();
-  return std::vector<uint8_t>(bytes.begin(), bytes.end());
-}
-
-int packageLinkMain(int argc, const char *argv[]) {
-  std::set<std::string> capabilities;
-  int first = 3;
-  while (first < argc && std::string_view(argv[first]).starts_with("--capability=")) {
-    capabilities.emplace(std::string_view(argv[first]).substr(std::string_view("--capability=").size()));
-    ++first;
-  }
-  if (argc - first < 3) {
-    llvm::errs() << "usage: polyc package link [--capability=<name>]... <interface.polyast> <output-root> "
-                    "<program.polyast>...\n";
-    return 2;
-  }
-  try {
-    const auto interfaceBytes = readBytes(argv[first]);
-    if (!interfaceBytes) return 3;
-    const std::vector<std::string> paths(argv + first + 2, argv + argc);
-    const auto programs = traverse(paths, [&](const auto &path) -> std::optional<polyast::Program> {
-      const auto bytes = readBytes(path);
-      return bytes ^ map([](const auto &value) { return polyast::hashed_program_from_msgpack(value); });
-    });
-    if (!programs) return 3;
-    const auto interface = polyast::interface_from_msgpack(*interfaceBytes);
-    const auto linked = compiler::package::link(
-        polyast::PackageLinkRequest(interface, *programs, std::vector<std::string>(capabilities.begin(), capabilities.end())));
-    if (!linked) {
-      llvm::errs() << (linked.errors | mk_string("\n")) << '\n';
-      return 4;
-    }
-    const auto published = polyfront::package::publishPackage(*linked.value, argv[first + 1]);
-    if (!published) {
-      llvm::errs() << (published.errors | mk_string("\n")) << '\n';
-      return 4;
-    }
-    return 0;
-  } catch (const std::exception &error) {
-    llvm::errs() << error.what() << '\n';
-    return 5;
-  }
-}
-
-int packageCompileMain(int argc, const char *argv[]) {
-  if (argc < 4) {
-    llvm::errs() << "usage: polyc package compile <request.msgpack> --out=<result.msgpack> --target=<host-target> "
-                    "--arch=<host-arch> [--device=<target>@<arch>]... [--stack-depth=<n>]\n";
-    return 2;
-  }
-  std::string output;
-  std::string hostTargetName;
-  std::string hostArch = "native";
-  std::vector<std::pair<compiletime::Target, std::string>> devices;
-  std::optional<int> stackDepth;
-  for (int i = 4; i < argc; ++i) {
-    const std::string_view arg(argv[i]);
-    const auto value = [&](const std::string_view prefix) -> std::optional<std::string_view> {
-      return arg.starts_with(prefix) ? std::optional(arg.substr(prefix.size())) : std::nullopt;
-    };
-    if (const auto raw = value("--out=")) output = *raw;
-    else if (const auto raw = value("--target=")) hostTargetName = *raw;
-    else if (const auto raw = value("--arch=")) hostArch = *raw;
-    else if (const auto raw = value("--stack-depth=")) {
-      try {
-        const auto parsed = std::stoi(std::string(*raw));
-        if (parsed <= 0) throw std::invalid_argument("non-positive");
-        stackDepth = parsed;
-      } catch (const std::exception &) {
-        llvm::errs() << "invalid stack depth: " << *raw << '\n';
-        return 2;
-      }
-    } else if (const auto raw = value("--device=")) {
-      const auto separator = raw->find('@');
-      if (separator == std::string_view::npos) {
-        llvm::errs() << "device target must be <target>@<arch>: " << *raw << '\n';
-        return 2;
-      }
-      const auto target = compiletime::TargetSpec::findByName(raw->substr(0, separator));
-      if (!target) {
-        llvm::errs() << "unknown device target: " << raw->substr(0, separator) << '\n';
-        return 2;
-      }
-      devices.emplace_back(target->codegen, raw->substr(separator + 1));
-    } else {
-      llvm::errs() << "unknown program compile argument: " << arg << '\n';
-      return 2;
-    }
-  }
-  const auto hostTarget = compiletime::TargetSpec::findByName(hostTargetName);
-  if (output.empty() || !hostTarget) {
-    llvm::errs() << "program compile requires a valid --out and --target\n";
-    return 2;
-  }
-  try {
-    const auto requestBytes = readBytes(argv[3]);
-    if (!requestBytes) return 3;
-    const auto request = polyast::programlinkrequest_from_msgpack(*requestBytes);
-    const auto compiled = compiler::package::compile(request, hostTarget->codegen, hostArch, devices, stackDepth);
-    if (!compiled) {
-      llvm::errs() << (compiled.errors | mk_string("\n")) << '\n';
-      return 4;
-    }
-    const auto bytes = polyast::compilebundle_to_msgpack(*compiled.value);
-    std::ofstream stream(output, std::ios::binary | std::ios::trunc);
-    stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    stream.close();
-    if (!stream) {
-      llvm::errs() << "cannot write `" << output << "`\n";
-      return 3;
-    }
-    return 0;
-  } catch (const std::exception &error) {
-    llvm::errs() << error.what() << '\n';
-    return 5;
-  }
-}
-
-std::optional<int> packageMain(int argc, const char *argv[]) {
-  if (argc < 2 || std::string_view(argv[1]) != "package") return {};
-  if (argc >= 3 && std::string_view(argv[2]) == "link") return packageLinkMain(argc, argv);
-  if (argc >= 3 && std::string_view(argv[2]) == "compile") return packageCompileMain(argc, argv);
-  llvm::errs() << "usage: polyc package <link|compile> ...\n";
-  return 2;
-}
-
-} // namespace
 
 // See https://stackoverflow.com/a/39758021/896997
 template <typename T = std::byte> std::vector<T> readFromStdIn() {
@@ -209,6 +67,8 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                           "PolyPass pipeline spec: `;`-separated `Name(k=v,k=v)` steps. "
                           "Empty selects the default."},
                          ""),
+               int rawWorkgroupMemoryBytes = //
+               fire::arg({"--workgroup-memory-bytes", "Workgroup-local storage capacity in bytes; zero selects the target default"}, 0),
                bool hostMirroring = //
                fire::arg({"--host-mirroring", "Compile only the generated Host-affinity functions and emit LLVM bitcode"}),
                bool emitAst = //
@@ -296,7 +156,13 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  compiler::initialise();
                  if (verbose) fmt::print(stderr, "[POLYC] Compiling program:\n=================\n{}\n=================\n", repr(program));
 
-                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch, passes, hostMirroring}, opt);
+                 if (rawWorkgroupMemoryBytes < 0) {
+                   fmt::print(stderr, "Workgroup-local storage capacity must not be negative: {}\n", rawWorkgroupMemoryBytes);
+                   return EXIT_FAILURE;
+                 }
+                 auto options = compiler::Options{target, rawArch, passes, hostMirroring};
+                 if (rawWorkgroupMemoryBytes != 0) options.workgroupMemoryBytes = static_cast<uint32_t>(rawWorkgroupMemoryBytes);
+                 auto compilation = compiler::compile(program, options, opt);
                  if (verbose) fmt::print(stderr, "{}\n", repr(compilation));
                  if (!compilation.messages.empty()) fmt::print(stderr, "{}\n", compilation.messages);
                  writeOut(compileresult_to_msgpack(compilation), std::ios_base::app);
@@ -313,7 +179,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
 }
 
 int polyregion::polyc(int argc, const char *argv[]) {
-  if (const auto result = packageMain(argc, argv)) return *result;
+  if (const auto result = packageDriver(argc, argv)) return *result;
   PREPARE_FIRE_(argc, argv, false, fired_main, targetDescription);
   fire::_::logger.set_program_descr(FIRE_EXTRACT_2_PAD_(fired_main, targetDescription));
   return FIRE_EXTRACT_1_PAD_(fired_main, targetDescription)();

@@ -31,6 +31,7 @@ namespace {
 
 ImageGroups openClOffsetImages() {
   const std::string source = R"CLC(
+#define POLYREGION_OPENCL_NULL_POINTER_OFFSET ((ulong)-1)
 kernel void offset_alias(global uchar *a_base, ulong a_offset,
                          global uchar *b_base, ulong b_offset,
                          global uchar *out_base, ulong out_offset,
@@ -38,7 +39,7 @@ kernel void offset_alias(global uchar *a_base, ulong a_offset,
   global int *a = (global int *)(a_base + a_offset);
   global int *b = (global int *)(b_base + b_offset);
   global int *out = (global int *)(out_base + out_offset);
-  global uchar *nullable = nullable_offset == (ulong)-1 ? (global uchar *)0 : nullable_base + nullable_offset;
+  global uchar *nullable = nullable_offset == POLYREGION_OPENCL_NULL_POINTER_OFFSET ? (global uchar *)0 : nullable_base + nullable_offset;
   out[0] = nullable == 0 ? a[0] + b[0] : 1000;
 }
 kernel void compare_alias(global int *a_base, ulong a_offset,
@@ -50,7 +51,7 @@ kernel void compare_alias(global int *a_base, ulong a_offset,
   uint i = get_global_id(0);
   if (i < n) out[i] = (a + i) != (b + i);
 }
-kernel void legacy_pointer(global int *out) {
+kernel void logical_pointer(global int *out) {
   out[0] = 73;
 }
 )CLC";
@@ -85,12 +86,12 @@ void runOpenClOffsetArgs(Context &ctx, Backend, Platform &, Device &device, cons
   waitAll([&](auto &h) { q->enqueueDeviceToHostAsync(base, 8192, compared.data(), compared.size() * sizeof(uint32_t), h); });
   POLYTEST_CHECK_S(ctx, compared ^ forall([](uint32_t x) { return x == 0; }), "same-buffer pointer arguments compared unequal");
 
-  uintptr_t legacyOut = base + 12288;
-  ArgBuffer legacyArgs{{Type::Ptr, &legacyOut}, {Type::Void, nullptr}};
-  waitAll([&](auto &h) { q->enqueueInvokeAsync("offset-module", "legacy_pointer", legacyArgs, {}, h); });
-  int legacyActual = 0;
-  waitAll([&](auto &h) { q->enqueueDeviceToHostAsync(base, 12288, &legacyActual, sizeof(legacyActual), h); });
-  POLYTEST_CHECK_S(ctx, legacyActual == 73, "legacy pointer ABI produced {}, expected 73", legacyActual);
+  uintptr_t logicalOut = base + 12288;
+  ArgBuffer logicalArgs{{Type::Ptr, &logicalOut}, {Type::Void, nullptr}};
+  waitAll([&](auto &h) { q->enqueueInvokeAsync("offset-module", "logical_pointer", logicalArgs, {}, h); });
+  int logicalActual = 0;
+  waitAll([&](auto &h) { q->enqueueDeviceToHostAsync(base, 12288, &logicalActual, sizeof(logicalActual), h); });
+  POLYTEST_CHECK_S(ctx, logicalActual == 73, "logical pointer ABI produced {}, expected 73", logicalActual);
 
   std::atomic_bool callbackRan = false;
   q->enqueueInvokeAsync("offset-module", "offset_alias", args, {}, [&]() { callbackRan = true; });

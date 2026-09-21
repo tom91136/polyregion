@@ -2379,6 +2379,28 @@ POLYREGION_EXPORT bool Spec::RemoteAlloc::operator==(const Base &rhs_) const {
 Spec::RemoteAlloc::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteAlloc>(*this)); }
 Spec::Any Spec::RemoteAlloc::widen() const { return Any(*this); };
 
+Spec::RemoteTempAlloc::RemoteTempAlloc(Term::Any context, Term::Any bytes) noexcept
+    : Spec::Base({}, {context, bytes}, Type::Ptr(Type::IntU8(), TypeSpace::Global())), context(std::move(context)),
+      bytes(std::move(bytes)) {}
+uint32_t Spec::RemoteTempAlloc::id() const { return variant_id; };
+size_t Spec::RemoteTempAlloc::hash_code() const {
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(context)>()(context) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(bytes)>()(bytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+Spec::RemoteTempAlloc Spec::RemoteTempAlloc::withContext(const Term::Any &v_) const { return Spec::RemoteTempAlloc(v_, bytes); }
+Spec::RemoteTempAlloc Spec::RemoteTempAlloc::withBytes(const Term::Any &v_) const { return Spec::RemoteTempAlloc(context, v_); }
+POLYREGION_EXPORT bool Spec::RemoteTempAlloc::operator==(const Spec::RemoteTempAlloc &rhs) const {
+  return (this->context == rhs.context) && (this->bytes == rhs.bytes);
+}
+POLYREGION_EXPORT bool Spec::RemoteTempAlloc::operator==(const Base &rhs_) const {
+  if (rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Spec::RemoteTempAlloc &>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Spec::RemoteTempAlloc::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RemoteTempAlloc>(*this)); }
+Spec::Any Spec::RemoteTempAlloc::widen() const { return Any(*this); };
+
 Spec::RemoteFree::RemoteFree(Term::Any context, Term::Any ptr) noexcept
     : Spec::Base({}, {context, ptr}, Type::Unit0()), context(std::move(context)), ptr(std::move(ptr)) {}
 uint32_t Spec::RemoteFree::id() const { return variant_id; };
@@ -4959,28 +4981,49 @@ POLYREGION_EXPORT bool ProgramLinkRequest::operator==(const ProgramLinkRequest &
   return (packages == rhs.packages) && (consumer == rhs.consumer) && (capabilities == rhs.capabilities) && (typeSizes == rhs.typeSizes);
 }
 
-PackageLinkRequest::PackageLinkRequest(Interface interface, std::vector<Program> programFragments,
-                                       std::vector<std::string> capabilities) noexcept
-    : interface(std::move(interface)), programFragments(std::move(programFragments)), capabilities(std::move(capabilities)) {}
+PackageFragment::PackageFragment(std::string identity, Program program) noexcept
+    : identity(std::move(identity)), program(std::move(program)) {}
+size_t PackageFragment::hash_code() const {
+  size_t seed = 0;
+  seed ^= std::hash<decltype(identity)>()(identity) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(program)>()(program) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+PackageFragment PackageFragment::withIdentity(const std::string &v_) const { return PackageFragment(v_, program); }
+PackageFragment PackageFragment::withProgram(const Program &v_) const { return PackageFragment(identity, v_); }
+POLYREGION_EXPORT bool PackageFragment::operator!=(const PackageFragment &rhs) const { return !(*this == rhs); }
+POLYREGION_EXPORT bool PackageFragment::operator==(const PackageFragment &rhs) const {
+  return (identity == rhs.identity) && (program == rhs.program);
+}
+
+PackageLinkRequest::PackageLinkRequest(Interface interface, std::vector<PackageFragment> fragments, std::vector<std::string> capabilities,
+                                       bool pruneUnimplementedDeclarations) noexcept
+    : interface(std::move(interface)), fragments(std::move(fragments)), capabilities(std::move(capabilities)),
+      pruneUnimplementedDeclarations(pruneUnimplementedDeclarations) {}
 size_t PackageLinkRequest::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(interface)>()(interface) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(programFragments)>()(programFragments) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(fragments)>()(fragments) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(pruneUnimplementedDeclarations)>()(pruneUnimplementedDeclarations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 PackageLinkRequest PackageLinkRequest::withInterface(const Interface &v_) const {
-  return PackageLinkRequest(v_, programFragments, capabilities);
+  return PackageLinkRequest(v_, fragments, capabilities, pruneUnimplementedDeclarations);
 }
-PackageLinkRequest PackageLinkRequest::withProgramFragments(const std::vector<Program> &v_) const {
-  return PackageLinkRequest(interface, v_, capabilities);
+PackageLinkRequest PackageLinkRequest::withFragments(const std::vector<PackageFragment> &v_) const {
+  return PackageLinkRequest(interface, v_, capabilities, pruneUnimplementedDeclarations);
 }
 PackageLinkRequest PackageLinkRequest::withCapabilities(const std::vector<std::string> &v_) const {
-  return PackageLinkRequest(interface, programFragments, v_);
+  return PackageLinkRequest(interface, fragments, v_, pruneUnimplementedDeclarations);
+}
+PackageLinkRequest PackageLinkRequest::withPruneUnimplementedDeclarations(const bool &v_) const {
+  return PackageLinkRequest(interface, fragments, capabilities, v_);
 }
 POLYREGION_EXPORT bool PackageLinkRequest::operator!=(const PackageLinkRequest &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool PackageLinkRequest::operator==(const PackageLinkRequest &rhs) const {
-  return (interface == rhs.interface) && (programFragments == rhs.programFragments) && (capabilities == rhs.capabilities);
+  return (interface == rhs.interface) && (fragments == rhs.fragments) && (capabilities == rhs.capabilities)
+         && (pruneUnimplementedDeclarations == rhs.pruneUnimplementedDeclarations);
 }
 
 CompileModule::CompileModule(std::string moduleName, int32_t format, int32_t kind, std::vector<std::string> features,
@@ -5462,6 +5505,10 @@ std::hash<polyregion::polyast::Spec::RemoteLaunch>::operator()(const polyregion:
 std::size_t std::hash<polyregion::polyast::Spec::RemoteAlloc>::operator()(const polyregion::polyast::Spec::RemoteAlloc &x) const noexcept {
   return x.hash_code();
 }
+std::size_t
+std::hash<polyregion::polyast::Spec::RemoteTempAlloc>::operator()(const polyregion::polyast::Spec::RemoteTempAlloc &x) const noexcept {
+  return x.hash_code();
+}
 std::size_t std::hash<polyregion::polyast::Spec::RemoteFree>::operator()(const polyregion::polyast::Spec::RemoteFree &x) const noexcept {
   return x.hash_code();
 }
@@ -5842,6 +5889,9 @@ std::size_t std::hash<polyregion::polyast::ProgramTypeSize>::operator()(const po
 }
 std::size_t
 std::hash<polyregion::polyast::ProgramLinkRequest>::operator()(const polyregion::polyast::ProgramLinkRequest &x) const noexcept {
+  return x.hash_code();
+}
+std::size_t std::hash<polyregion::polyast::PackageFragment>::operator()(const polyregion::polyast::PackageFragment &x) const noexcept {
   return x.hash_code();
 }
 std::size_t

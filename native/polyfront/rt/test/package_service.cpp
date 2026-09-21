@@ -34,7 +34,7 @@ polyast::Function variant(polyast::FunctionDecl decl, const polyast::Sym &public
 
 } // namespace
 
-TEST_CASE("program fragments merge host orchestration with device entries") {
+TEST_CASE("program fragments merge host functions with device entries") {
   using namespace polyast;
   const auto i32 = Type::IntS32().widen();
   const auto hostDecl = FunctionDecl(Sym({"dispatch"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
@@ -60,6 +60,18 @@ TEST_CASE("program fragments merge host orchestration with device entries") {
   REQUIRE(kernel);
   CHECK(kernel->convention.is<CallConvention::OffloadEntry>());
   CHECK(kernel->collect_all<Term::IntS32Const>() == std::vector{Term::IntS32Const(7)});
+}
+
+TEST_CASE("program fragment merging rejects host entries missing device definitions") {
+  using namespace polyast;
+  const auto declaration = FunctionDecl(Sym({"portable_kernel"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload());
+  const auto entry = Function(
+      declaration,
+      {Stmt::Var(Named("host", Type::IntS32()), Expr::Alias(Term::IntS32Const(7)), false), Stmt::Return(Expr::Alias(Term::Unit0Const()))},
+      FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const auto merged = polyfront::package::mergeProgramFragments(polyfront::packageProgram({entry}, {}), polyfront::packageProgram({}, {}));
+  CHECK_FALSE(merged);
+  CHECK(merged.errors ^ aspartame::exists([](const auto &error) { return error.find("missing offload entry") != std::string::npos; }));
 }
 
 TEST_CASE("program fragment merging keeps same-named host helpers distinct from device entries") {
@@ -147,6 +159,27 @@ TEST_CASE("program fragment merging renames body-local entry types outside the e
   CHECK(merged.value->defs ^ aspartame::exists([](const auto &definition) { return definition.name == Sym({"#device", "LocalState"}); }));
 }
 
+TEST_CASE("program fragment merging uses device layouts for host launch sizes") {
+  using namespace polyast;
+  const auto name = Sym({"LaunchStorage"});
+  const auto type = Type::Struct(name, {}).widen();
+  const auto host =
+      Function(FunctionDecl(Sym({"launch"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host()),
+               {Stmt::Var(Named("bytes", Type::IntU64()), Expr::SizeOf(type), false), Stmt::Return(Expr::Alias(Term::Unit0Const()))},
+               FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto device =
+      Function(FunctionDecl(Sym({"kernel_body"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
+               {Stmt::Var(Named("storage", type), std::optional<Expr::Any>{}, true), Stmt::Return(Expr::Alias(Term::Unit0Const()))},
+               FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto hostDefinition = StructDef(name, {}, {Named("value", Type::IntS32())}, {}, false);
+  const auto deviceDefinition = StructDef(name, {}, {Named("value", Type::IntS64())}, {}, false);
+  const auto merged = polyfront::package::mergeProgramFragments(polyfront::packageProgram({host}, {hostDefinition}),
+                                                                polyfront::packageProgram({device}, {deviceDefinition}));
+  REQUIRE(merged);
+  REQUIRE(merged.value->defs.size() == 1);
+  CHECK(merged.value->defs.front() == deviceDefinition);
+}
+
 TEST_CASE("linked package programs follow the consumer architecture") {
   using polyregion::compiletime::Target;
   const llvm::Triple x86("x86_64-unknown-linux-gnu"), riscv("riscv64-unknown-linux-gnu"), ppc("powerpc64le-unknown-linux-gnu");
@@ -214,11 +247,33 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   CHECK_FALSE(compiled.value->hostObject.empty());
   REQUIRE(compiled.value->remoteModules.size() == 1);
   CHECK_FALSE(compiled.value->remoteModules.front().image.empty());
+  CHECK(std::string(compiled.value->remoteModules.front().image.begin(), compiled.value->remoteModules.front().image.end())
+            .find(compiled.value->remoteModules.front().moduleName)
+        != std::string::npos);
+
+  const auto distinctKernel = remoteKernel.withBody({let("distinct") = Term::IntS32Const(7), ret()});
+  const auto distinctPackage = pkg.withProgram(polyfront::packageProgram({remoteImplementation, distinctKernel}, {}));
+  const auto distinctRequest =
+      ProgramLinkRequest({distinctPackage}, polyfront::packageProgram({root}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)});
+  const auto distinct = polyfront::package::compileProgram(distinctRequest, {}, compiletime::Target::Object_LLVM_HOST, "native",
+                                                           {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
+  REQUIRE(distinct);
+  REQUIRE(distinct.value->remoteModules.size() == 1);
+  CHECK(distinct.value->remoteModules.front().moduleName != compiled.value->remoteModules.front().moduleName);
+
+  const auto distinctProfile = polyfront::package::compileProgram(request, {}, compiletime::Target::Object_LLVM_HOST, "native",
+                                                                  {{compiletime::Target::Source_C_Metal1_0, "host"}}, 9);
+  REQUIRE(distinctProfile);
+  REQUIRE(distinctProfile.value->remoteModules.size() == 1);
+  CHECK(distinctProfile.value->remoteModules.front().moduleName != compiled.value->remoteModules.front().moduleName);
+
+  CHECK(polyast::offloadEntrySymbol(polyast::Sym({"a", "b"})) != polyast::offloadEntrySymbol(polyast::Sym({"a_b"})));
+  CHECK(polyast::offloadEntrySymbol(polyast::Sym({"-_3f"})) != polyast::offloadEntrySymbol(polyast::Sym({"_2d?"})));
 }
 
 TEST_CASE("package-service wire envelopes reject a stale fingerprint") {
   using namespace polyast;
-  const auto request = PackageLinkRequest(Interface(Sym({"foo"}), {}, {}), {}, {});
+  const auto request = PackageLinkRequest(Interface(Sym({"foo"}), {}, {}), {}, {}, false);
   auto bytes = packagelinkrequest_to_msgpack(request);
   auto hash = bytes.end();
   for (size_t i = 0; i + 32 <= bytes.size(); ++i) {

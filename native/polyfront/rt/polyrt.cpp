@@ -11,6 +11,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -175,21 +176,22 @@ static void selectDevice(Platform &p, const std::vector<std::string_view> &requi
   const auto names = [](const auto &xs) { return xs | map([](const auto &rw) { return rw.get()->name(); }) | mk_string(", "); };
 
   if (matched.empty()) {
-    if (strict || !eligible.empty()) {
+    if (strict)
+      polyregion::polyrt::skipExit(
+          fmt::format("Selector '{}' matched none of the {} eligible device(s): [{}] (strict)", pattern, eligible.size(), names(eligible))
+              .c_str());
+    if (!eligible.empty()) {
       log(DebugLevel::None, "Selector '%s' matched none of the %zu eligible device(s): [%s]%s", pattern.c_str(), eligible.size(),
-          names(eligible).c_str(), strict ? " (strict)" : "; refusing to run on a different device");
+          names(eligible).c_str(), "; refusing to run on a different device");
       std::fflush(stderr);
       std::abort();
     }
     return;
   }
   if (matched.size() > 1) {
-    if (strict) {
-      log(DebugLevel::None, "Selector '%s' is ambiguous (strict): matched %zu device(s): [%s]; tighten the glob", pattern.c_str(),
-          matched.size(), names(matched).c_str());
-      std::fflush(stderr);
-      std::abort();
-    }
+    if (strict)
+      polyregion::polyrt::skipExit(
+          fmt::format("Selector '{}' is ambiguous: matched {} device(s): [{}] (strict)", pattern, matched.size(), names(matched)).c_str());
     log(DebugLevel::Info, "Selector '%s' matched %zu device(s): [%s]; using the first", pattern.c_str(), matched.size(),
         names(matched).c_str());
   }
@@ -269,7 +271,7 @@ void polyregion::polyrt::initialise() {
 
 polyregion::polyrt::ExecutionContext *polyregion::polyrt::currentContext() {
   initialise();
-  static ExecutionContext context{currentPlatform.get(), currentDevice.get(), currentQueue.get(), {}, {}};
+  static ExecutionContext context{currentPlatform.get(), currentDevice.get(), currentQueue.get()};
   return context.platform && context.device && context.queue ? &context : nullptr;
 }
 
@@ -280,10 +282,112 @@ polyregion::polyrt::ExecutionContext &requireContext(void *context, const char *
   if (auto *value = static_cast<polyregion::polyrt::ExecutionContext *>(context)) return *value;
   polyregion::polyrt::skipExit(fmt::format("{}: no execution context", site).c_str());
 }
+
+void forgetTemporaryAllocation(polyregion::polyrt::ExecutionContext &execution, const uintptr_t pointer) {
+  for (auto &scope : execution.temporaryAllocationScopes)
+    std::erase(scope, pointer);
+}
+
+void retryPendingCleanups(polyregion::polyrt::ExecutionContext &execution) {
+  std::exception_ptr failure;
+  for (auto allocation = execution.remoteAllocations.begin(); allocation != execution.remoteAllocations.end();) {
+    if (!allocation->second.cleanupPending) {
+      ++allocation;
+      continue;
+    }
+    const auto pointer = allocation->first;
+    try {
+      execution.device->freeDevice(pointer);
+      forgetTemporaryAllocation(execution, pointer);
+      allocation = execution.remoteAllocations.erase(allocation);
+    } catch (...) {
+      if (!failure) failure = std::current_exception();
+      ++allocation;
+    }
+  }
+  if (failure) std::rethrow_exception(failure);
+}
+
+thread_local char runtimeErrorMessage[512]{};
+
+template <class Fn> bool runtimeStatus(const char *operation, Fn &&fn) noexcept {
+  runtimeErrorMessage[0] = '\0';
+  try {
+    fn();
+    return true;
+  } catch (const std::exception &error) {
+    std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s: %s", operation, error.what());
+  } catch (...) {
+    std::snprintf(runtimeErrorMessage, sizeof(runtimeErrorMessage), "%s: unknown failure", operation);
+  }
+  return false;
+}
+
 } // namespace
 
-POLYREGION_EXPORT extern "C" void polyrt_context_acquire(void *context) { requireContext(context, __func__).transaction.lock(); }
-POLYREGION_EXPORT extern "C" void polyrt_context_release(void *context) { requireContext(context, __func__).transaction.unlock(); }
+polyregion::polyrt::ExecutionContext::~ExecutionContext() {
+  const std::lock_guard lock(transaction);
+  try {
+    retryPendingCleanups(*this);
+  } catch (...) {
+  }
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_context_acquire(void *context) noexcept {
+  return runtimeStatus(__func__, [&] {
+    auto &execution = requireContext(context, __func__);
+    execution.transaction.lock();
+    try {
+      retryPendingCleanups(execution);
+      execution.temporaryAllocationScopes.emplace_back();
+    } catch (...) {
+      execution.transaction.unlock();
+      throw;
+    }
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_context_release(void *context) noexcept {
+  return runtimeStatus(__func__, [&] {
+    auto &execution = requireContext(context, __func__);
+    if (execution.temporaryAllocationScopes.empty()) {
+      throw std::logic_error("polyrt_context_release: no matching acquire");
+    }
+    const std::unique_lock transaction(execution.transaction, std::adopt_lock);
+    auto temporaries = std::move(execution.temporaryAllocationScopes.back());
+    execution.temporaryAllocationScopes.pop_back();
+    std::exception_ptr failure;
+    for (const auto pointer : temporaries) {
+      const auto allocation = execution.remoteAllocations.find(pointer);
+      if (allocation == execution.remoteAllocations.end()) continue;
+      allocation->second.cleanupPending = true;
+      try {
+        execution.device->freeDevice(pointer);
+        execution.remoteAllocations.erase(allocation);
+        forgetTemporaryAllocation(execution, pointer);
+      } catch (...) {
+        if (!failure) failure = std::current_exception();
+      }
+    }
+    if (failure) std::rethrow_exception(failure);
+  });
+}
+
+POLYREGION_EXPORT extern "C" const char *polyrt_error_message() noexcept { return runtimeErrorMessage; }
+
+POLYREGION_EXPORT extern "C" void polyrt_abort() noexcept {
+  std::fprintf(stderr, "[PolyRT] %s\n", runtimeErrorMessage[0] ? runtimeErrorMessage : "unknown runtime failure");
+  std::fflush(stderr);
+  std::abort();
+}
+
+POLYREGION_EXPORT void polyrt_context_acquire_or_throw(void *context) {
+  if (!polyrt_context_acquire(context)) throw std::runtime_error(polyrt_error_message());
+}
+
+POLYREGION_EXPORT void polyrt_context_release_or_throw(void *context) {
+  if (!polyrt_context_release(context)) throw std::runtime_error(polyrt_error_message());
+}
 POLYREGION_EXPORT extern "C" size_t polyrt_device_max_threads_per_block(void *context) {
   return requireContext(context, __func__).device->maxThreadsPerBlock();
 }
@@ -340,13 +444,13 @@ POLYREGION_EXPORT extern "C" void *polyrt_host_new(const uint64_t bytes) {
 }
 POLYREGION_EXPORT extern "C" void polyrt_host_free(void *pointer) { std::free(pointer); }
 
-POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const size_t bytes) noexcept(false) {
+static uintptr_t remoteMalloc(void *context, const size_t bytes) {
   if (bytes == 0) return 0;
   auto &execution = requireContext(context, __func__);
   const std::lock_guard lock(execution.transaction);
   const auto pointer = execution.device->mallocDevice(bytes, Access::RW);
   try {
-    execution.remoteAllocations.insert_or_assign(pointer, bytes);
+    execution.remoteAllocations.insert_or_assign(pointer, polyregion::polyrt::ExecutionContext::RemoteAllocation{bytes});
   } catch (...) {
     const auto failure = std::current_exception();
     try {
@@ -358,16 +462,28 @@ POLYREGION_EXPORT extern "C" uintptr_t polyrt_remote_malloc(void *context, const
   return pointer;
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_free(void *context, const uintptr_t ptr) noexcept(false) {
+static uintptr_t remoteTempMalloc(void *context, const size_t bytes) {
+  auto &execution = requireContext(context, __func__);
+  const std::lock_guard lock(execution.transaction);
+  if (execution.temporaryAllocationScopes.empty()) throw std::logic_error("polyrt_remote_temp_malloc: no active context transaction");
+  for (auto &scope : execution.temporaryAllocationScopes)
+    scope.reserve(scope.size() + 1);
+  const auto pointer = remoteMalloc(context, bytes);
+  for (auto &scope : execution.temporaryAllocationScopes)
+    scope.emplace_back(pointer);
+  return pointer;
+}
+
+static void remoteFree(void *context, const uintptr_t ptr) {
   if (ptr == 0) return;
   auto &execution = requireContext(context, __func__);
   const std::lock_guard lock(execution.transaction);
   execution.device->freeDevice(ptr);
   execution.remoteAllocations.erase(ptr);
+  forgetTemporaryAllocation(execution, ptr);
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_memcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
-                                                       const int32_t direction) noexcept(false) {
+static void remoteMemcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes, const int32_t direction) {
   if (bytes == 0 || src == 0 || dst == 0) return;
   auto &queue = *requireContext(context, __func__).queue;
   switch (direction) {
@@ -385,7 +501,7 @@ POLYREGION_EXPORT extern "C" void *polyrt_device_usm_host_acquire(void *context,
   auto *local = std::malloc(size);
   if (!local) POLYREGION_FATAL("PolyRT", "Cannot allocate %zu-byte host accessor staging buffer", size);
   try {
-    if ((mode & 1) != 0) polyrt_remote_memcpy(context, reinterpret_cast<uintptr_t>(local), reinterpret_cast<uintptr_t>(remote), size, 1);
+    if ((mode & 1) != 0) remoteMemcpy(context, reinterpret_cast<uintptr_t>(local), reinterpret_cast<uintptr_t>(remote), size, 1);
   } catch (...) {
     std::free(local);
     throw;
@@ -403,7 +519,7 @@ POLYREGION_EXPORT extern "C" void polyrt_device_usm_host_release(void *context, 
   const auto size = static_cast<size_t>(bytes);
   try {
     if ((mode & 2) != 0 && bytes != 0)
-      polyrt_remote_memcpy(context, reinterpret_cast<uintptr_t>(remote), reinterpret_cast<uintptr_t>(local), size, 0);
+      remoteMemcpy(context, reinterpret_cast<uintptr_t>(remote), reinterpret_cast<uintptr_t>(local), size, 0);
   } catch (...) {
     std::free(local);
     throw;
@@ -447,10 +563,9 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, co
   if (!loaded) polyregion::polyrt::noCompatibleKernelExit(moduleName);
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName, const size_t gridX,
-                                                       const size_t gridY, const size_t gridZ, const size_t blockX, const size_t blockY,
-                                                       const size_t blockZ, const size_t localMemBytes, const size_t argCount,
-                                                       const uint8_t *argTypes, void *const *argPtrs) noexcept(false) {
+static void remoteLaunch(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
+                         const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ, const size_t localMemBytes,
+                         const size_t argCount, const uint8_t *argTypes, void *const *argPtrs) {
   auto &value = requireContext(context, __func__);
   ArgBuffer buffer{};
   if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
@@ -464,12 +579,10 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_launch(void *context, const char
   value.queue->enqueueWaitBlocking();
 }
 
-POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName,
-                                                                    const size_t gridX, const size_t gridY, const size_t gridZ,
-                                                                    const size_t blockX, const size_t blockY, const size_t blockZ,
-                                                                    const size_t localMemBytes, const size_t argCount,
-                                                                    const uint8_t *argTypes, void *const *argPtrs,
-                                                                    const size_t *mirrorSizes, const uint8_t *mirrorKinds) noexcept(false) {
+static void remoteLaunchWithMirrors(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
+                                    const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ,
+                                    const size_t localMemBytes, const size_t argCount, const uint8_t *argTypes, void *const *argPtrs,
+                                    const size_t *mirrorSizes, const uint8_t *mirrorKinds) {
   auto &execution = requireContext(context, __func__);
   struct Mirror {
     uintptr_t remote = 0;
@@ -482,7 +595,7 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_mirrors(void *contex
     for (auto &mirror : mirrors) {
       if (mirror.remote == 0) continue;
       try {
-        polyrt_remote_free(context, mirror.remote);
+        remoteFree(context, mirror.remote);
       } catch (...) {
         if (!failure) failure = std::current_exception();
       }
@@ -501,29 +614,77 @@ POLYREGION_EXPORT extern "C" void polyrt_remote_launch_with_mirrors(void *contex
         const std::lock_guard lock(execution.transaction);
         const auto upper = execution.remoteAllocations.upper_bound(source);
         const auto remote = upper != execution.remoteAllocations.begin() && [&] {
-          const auto &[base, size] = *std::prev(upper);
-          return source - base < size;
+          const auto &[base, allocation] = *std::prev(upper);
+          return source - base < allocation.bytes;
         }();
         if (remote) continue;
       } else {
         source = reinterpret_cast<uintptr_t>(argPtrs[i]);
       }
-      mirrors[i] = {polyrt_remote_malloc(context, mirrorSizes[i]), source};
-      polyrt_remote_memcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
+      mirrors[i] = {remoteMalloc(context, mirrorSizes[i]), source};
+      {
+        const std::lock_guard lock(execution.transaction);
+        execution.remoteAllocations.at(mirrors[i].remote).cleanupPending = true;
+      }
+      remoteMemcpy(context, mirrors[i].remote, source, mirrorSizes[i], 0);
       launchArgPtrs[i] = &mirrors[i].remote;
     }
-    polyrt_remote_launch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
-                         launchArgPtrs.data());
+    remoteLaunch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
+                 launchArgPtrs.data());
     for (size_t i = 0; i < argCount; ++i)
-      if (mirrorKinds[i] == 2 && mirrors[i].remote != 0) {
-        polyrt_remote_memcpy(context, mirrors[i].source, mirrors[i].remote, mirrorSizes[i], 1);
-      }
+      if (mirrorKinds[i] == 2 && mirrors[i].remote != 0) remoteMemcpy(context, mirrors[i].source, mirrors[i].remote, mirrorSizes[i], 1);
   } catch (...) {
     const auto failure = std::current_exception();
     (void)release();
     std::rethrow_exception(failure);
   }
   if (const auto failure = release()) std::rethrow_exception(failure);
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_malloc(void *context, const size_t bytes, uintptr_t *result) noexcept {
+  if (result) *result = 0;
+  return runtimeStatus(__func__, [&] {
+    if (!result) throw std::invalid_argument("null result pointer");
+    *result = remoteMalloc(context, bytes);
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_temp_malloc(void *context, const size_t bytes, uintptr_t *result) noexcept {
+  if (result) *result = 0;
+  return runtimeStatus(__func__, [&] {
+    if (!result) throw std::invalid_argument("null result pointer");
+    *result = remoteTempMalloc(context, bytes);
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_free(void *context, const uintptr_t ptr) noexcept {
+  return runtimeStatus(__func__, [&] { remoteFree(context, ptr); });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_memcpy(void *context, const uintptr_t dst, const uintptr_t src, const size_t bytes,
+                                                       const int32_t direction) noexcept {
+  return runtimeStatus(__func__, [&] { remoteMemcpy(context, dst, src, bytes, direction); });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName, const size_t gridX,
+                                                       const size_t gridY, const size_t gridZ, const size_t blockX, const size_t blockY,
+                                                       const size_t blockZ, const size_t localMemBytes, const size_t argCount,
+                                                       const uint8_t *argTypes, void *const *argPtrs) noexcept {
+  return runtimeStatus(__func__, [&] {
+    remoteLaunch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes, argPtrs);
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName,
+                                                                    const size_t gridX, const size_t gridY, const size_t gridZ,
+                                                                    const size_t blockX, const size_t blockY, const size_t blockZ,
+                                                                    const size_t localMemBytes, const size_t argCount,
+                                                                    const uint8_t *argTypes, void *const *argPtrs,
+                                                                    const size_t *mirrorSizes, const uint8_t *mirrorKinds) noexcept {
+  return runtimeStatus(__func__, [&] {
+    remoteLaunchWithMirrors(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
+                            argPtrs, mirrorSizes, mirrorKinds);
+  });
 }
 
 void polyregion::polyrt::noCompatibleKernelExit(const char *site) {
@@ -921,7 +1082,7 @@ POLYREGION_EXPORT extern "C" void *polyrt_record_aligned_alloc(const size_t alig
   return p;
 }
 
-POLYREGION_EXPORT extern "C" void *polyrt_record_operator_new(const size_t size) noexcept(false) {
+POLYREGION_EXPORT void *polyrt_record_operator_new(const size_t size) {
   void *p = __RT_ALTERNATIVE(malloc)(size);
   if (!p) {
 #if __cpp_exceptions == 199711

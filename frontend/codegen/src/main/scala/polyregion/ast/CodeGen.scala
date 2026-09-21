@@ -214,6 +214,7 @@ private[polyregion] object CodeGen {
   private def packageWireStructs: List[StructNode] =
     deriveStruct[Program.TypeSize]()
       :: deriveStruct[Program.LinkRequest]()
+      :: deriveStruct[Package.Fragment]()
       :: deriveStruct[Package.LinkRequest]()
       :: Nil
 

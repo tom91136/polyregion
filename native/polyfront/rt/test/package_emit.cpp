@@ -1,6 +1,7 @@
 #include "polyfront/package_emit.hpp"
 
 #include <atomic>
+#include <charconv>
 #include <string>
 #include <thread>
 
@@ -33,7 +34,7 @@ Package fixture(int32_t increment) {
   const auto implementation =
       Function(implementationDecl, {ret(call(Intr::Add(x, Term::IntS32Const(increment).widen(), i32)))}, FunctionVisibility::Exported(),
                FunctionFpMode::Relaxed(), CallConvention::RegularCall(), publicName);
-  return {Interface(Sym({"foo"}), {publicDecl}, {}), packageProgram({implementation}, {})};
+  return {Interface(Sym({"foo"}), {publicDecl}, {MetaEntry("increment", std::to_string(increment))}), packageProgram({implementation}, {})};
 }
 
 class TemporaryDirectory {
@@ -59,7 +60,7 @@ std::string polycExecutable() {
   return POLYC_TEST_EXECUTABLE;
 }
 
-Checked<Package> linkPackage(const PackageLinkRequest &request, const std::string &root) {
+Checked<Archive> linkPackage(const PackageLinkRequest &request, const std::string &root) {
   TemporaryDirectory inputs;
   llvm::SmallString<128> interfacePath(inputs.path), errorPath(inputs.path);
   llvm::sys::path::append(interfacePath, "interface.polyast");
@@ -68,14 +69,13 @@ Checked<Package> linkPackage(const PackageLinkRequest &request, const std::strin
 
   const auto executable = polycExecutable();
   std::vector<std::string> ownedArgs{executable, "package", "link"};
-  for (const auto &capability : request.capabilities)
-    ownedArgs.emplace_back("--capability=" + capability);
+  if (!request.capabilities.empty()) ownedArgs.emplace_back("--capabilities=" + (request.capabilities | mk_string(",")));
   ownedArgs.emplace_back(interfacePath.str());
   ownedArgs.emplace_back(root);
-  for (size_t index = 0; index < request.programFragments.size(); ++index) {
+  for (size_t index = 0; index < request.fragments.size(); ++index) {
     llvm::SmallString<128> programPath(inputs.path);
     llvm::sys::path::append(programPath, "program-" + std::to_string(index) + ".polyast");
-    if (!writeBytes(programPath, hashed_program_to_msgpack(request.programFragments[index])))
+    if (!writeBytes(programPath, hashed_program_to_msgpack(request.fragments[index].program)))
       return {{}, {"cannot write package program input"}};
     ownedArgs.emplace_back(programPath.str());
   }
@@ -103,11 +103,51 @@ Checked<Package> linkPackage(const PackageLinkRequest &request, const std::strin
     if (errors.empty()) errors.emplace_back("polyc package link exited with code " + std::to_string(code));
     return {{}, std::move(errors)};
   }
-  return loadPackage(symbol(request.interface.name), {root});
+  return loadPackage(polyregion::polyast::fqcn(request.interface.name), {root});
 }
 
-Checked<Package> emitPackage(const Package &package, const std::string &root) {
-  return linkPackage(PackageLinkRequest(package.interface, {package.program}, {}), root);
+Checked<Archive> emitPackage(const Package &package, const std::string &root) {
+  return linkPackage(PackageLinkRequest(package.interface, {PackageFragment("package", package.program)}, {}, false), root);
+}
+
+struct PackResult {
+  int code;
+  std::string errors;
+};
+
+PackResult packFragment(const Interface &interface, const Program &program) {
+  TemporaryDirectory inputs;
+  TemporaryDirectory output;
+  REQUIRE(program.functions.size() == 1);
+  const auto &root = program.functions.front();
+  REQUIRE(root.implements);
+  const auto raw = hashed_program_to_msgpack(program);
+  const auto compressed = detail::compress(raw);
+  REQUIRE(compressed);
+  const detail::EncodedImplementation implementation{polyregion::polyast::fqcn(*root.implements), polyregion::polyast::fqcn(root.decl.name),
+                                                     raw.size(), *compressed.value};
+  const auto archive = detail::encodeArchive(interface, {implementation});
+  REQUIRE(archive);
+  llvm::SmallString<128> interfacePath(inputs.path), fragmentPath(inputs.path), errorPath(inputs.path);
+  llvm::sys::path::append(interfacePath, "interface.polyast");
+  llvm::sys::path::append(fragmentPath, "fragment.polyast");
+  llvm::sys::path::append(errorPath, "stderr.txt");
+  REQUIRE(writeBytes(interfacePath, interface_to_msgpack(interface)));
+  REQUIRE(writeBytes(fragmentPath, *archive.value));
+
+  const auto executable = polycExecutable();
+  const std::vector<std::string> ownedArgs{
+      executable, "package", "pack", interfacePath.str().str(), output.path.str().str(), fragmentPath.str().str()};
+  std::vector<llvm::StringRef> args;
+  args.reserve(ownedArgs.size());
+  for (const auto &arg : ownedArgs)
+    args.emplace_back(arg);
+  std::string executionError;
+  const auto code =
+      llvm::sys::ExecuteAndWait(executable, args, std::nullopt, {std::nullopt, std::nullopt, errorPath.str()}, 0, 0, &executionError);
+  std::string errors = executionError;
+  if (const auto buffer = llvm::MemoryBuffer::getFile(errorPath)) errors += (*buffer)->getBuffer().str();
+  return {code, std::move(errors)};
 }
 
 } // namespace
@@ -117,7 +157,10 @@ TEST_CASE("packages emit as one file") {
   const auto first = fixture(1);
   const auto emittedFirst = emitPackage(first, root.path.str().str());
   REQUIRE(emittedFirst);
-  CHECK(*emittedFirst.value == first);
+  CHECK(emittedFirst.value->interface == first.interface);
+  const auto selectedFirst = loadPackageSelection(*emittedFirst.value, "foo.bar.apply");
+  REQUIRE(selectedFirst);
+  CHECK(*selectedFirst.value == first);
   llvm::SmallString<128> path(root.path);
   llvm::sys::path::append(path, "foo", "lib.polyast");
   CHECK(llvm::sys::fs::is_regular_file(path));
@@ -127,13 +170,224 @@ TEST_CASE("packages emit as one file") {
   REQUIRE(emittedSecond);
   const auto loaded = loadPackage("foo", {root.path.str().str()});
   REQUIRE(loaded);
-  CHECK(*loaded.value == second);
+  const auto selectedSecond = loadPackageSelection(*loaded.value, "foo.bar.apply");
+  REQUIRE(selectedSecond);
+  CHECK(*selectedSecond.value == second);
+}
+
+TEST_CASE("package packing reuses precompressed fragment archives") {
+  TemporaryDirectory fragments;
+  TemporaryDirectory root;
+  const auto value = fixture(7);
+  ArchiveBuilder fragmentBuilder(value.interface);
+  REQUIRE(fragmentBuilder.addPackage(value));
+  llvm::SmallString<128> fragmentPath(fragments.path);
+  llvm::sys::path::append(fragmentPath, "fragment.polyast");
+  const auto fragment = fragmentBuilder.publishFile(fragmentPath.str().str());
+  REQUIRE(fragment);
+
+  ArchiveBuilder packageBuilder(value.interface);
+  const auto validated = validateArchiveFragment(std::move(*fragment.value));
+  REQUIRE(validated);
+  REQUIRE(packageBuilder.addArchive(*validated.value));
+  const auto packed = packageBuilder.publish(root.path.str().str());
+  REQUIRE(packed);
+  const auto selected = loadPackageSelection(*packed.value, "foo.bar.apply");
+  REQUIRE(selected);
+  CHECK(*selected.value == value);
+}
+
+TEST_CASE("package packing tracks overloaded declarations by signature") {
+  TemporaryDirectory fragments;
+  const auto name = Sym({"foo", "apply"});
+  const auto declaration = [&](const Type::Any &type) {
+    return FunctionDecl(name, {}, {}, {Arg(Named("value", type), {})}, {}, {}, type, FunctionAffinity::Host());
+  };
+  const auto implementation = [&](const FunctionDecl &publicDecl, const std::string &suffix) {
+    const auto decl = publicDecl.withName(Sym({"foo", "implementation", suffix}));
+    return Function(decl, {ret(Term::Select(decl.args.front().named, {}, decl.rtn))}, FunctionVisibility::Exported(),
+                    FunctionFpMode::Relaxed(), CallConvention::RegularCall(), name);
+  };
+  const auto i32 = declaration(Type::IntS32());
+  const auto f32 = declaration(Type::Float32());
+  const auto interface = Interface(Sym({"foo"}), {i32, f32}, {});
+  const auto i32Package = Package(interface.withDeclarations({i32}), packageProgram({implementation(i32, "i32")}, {}));
+  ArchiveBuilder fragmentBuilder(i32Package.interface);
+  REQUIRE(fragmentBuilder.addPackage(i32Package));
+  llvm::SmallString<128> fragmentPath(fragments.path);
+  llvm::sys::path::append(fragmentPath, "i32.polyast");
+  const auto fragment = fragmentBuilder.publishFile(fragmentPath.str().str());
+  REQUIRE(fragment);
+
+  ArchiveBuilder packageBuilder(interface);
+  const auto validated = validateArchiveFragment(std::move(*fragment.value));
+  REQUIRE(validated);
+  REQUIRE(packageBuilder.addArchive(*validated.value));
+  llvm::SmallString<128> incompletePath(fragments.path);
+  llvm::sys::path::append(incompletePath, "incomplete.polyast");
+  const auto incomplete = packageBuilder.publishFile(incompletePath.str().str());
+  REQUIRE_FALSE(incomplete);
+  CHECK(incomplete.errors == std::vector<std::string>{"public declaration `foo.apply` has no compatible implementation"});
+}
+
+TEST_CASE("package linking preserves overloads split across fragments") {
+  TemporaryDirectory root;
+  const auto name = Sym({"foo", "apply"});
+  const auto declaration = [&](const Type::Any &type) {
+    return FunctionDecl(name, {}, {}, {Arg(Named("value", type), {})}, {}, {}, type, FunctionAffinity::Host());
+  };
+  const auto implementation = [&](const FunctionDecl &publicDecl, const std::string &suffix) {
+    const auto decl = publicDecl.withName(Sym({"foo", "implementation", suffix}));
+    return Function(decl, {ret(Term::Select(decl.args.front().named, {}, decl.rtn))}, FunctionVisibility::Exported(),
+                    FunctionFpMode::Relaxed(), CallConvention::RegularCall(), name);
+  };
+  const auto i32 = declaration(Type::IntS32());
+  const auto f32 = declaration(Type::Float32());
+  const auto interface = Interface(Sym({"foo"}), {i32, f32}, {});
+  const auto linked = linkPackage(PackageLinkRequest(interface,
+                                                     {PackageFragment("i32", packageProgram({implementation(i32, "i32")}, {})),
+                                                      PackageFragment("f32", packageProgram({implementation(f32, "f32")}, {}))},
+                                                     {}, false),
+                                  root.path.str().str());
+  REQUIRE(linked);
+  const auto selected = loadPackageSelection(*linked.value, "foo.apply");
+  REQUIRE(selected);
+  CHECK(selected.value->interface == interface);
+  CHECK((selected.value->program.functions | count([&](const auto &function) {
+           return function.implements == name && function.decl.args.front().named.tpe == Type::IntS32();
+         }))
+        == 1);
+  CHECK((selected.value->program.functions | count([&](const auto &function) {
+           return function.implements == name && function.decl.args.front().named.tpe == Type::Float32();
+         }))
+        == 1);
+}
+
+TEST_CASE("package packing validates precompressed implementation roots") {
+  const auto value = fixture(1);
+  const auto root = value.program.functions.front();
+
+  SECTION("visibility") {
+    const auto result = packFragment(value.interface, packageProgram({root.withVisibility(FunctionVisibility::Internal())}, {}));
+    CHECK(result.code == 4);
+    CHECK(result.errors ^ contains_slice("non-exported implementation root"));
+  }
+
+  SECTION("signature") {
+    const auto mismatched = root.withDecl(root.decl.withRtn(Type::Float32()));
+    const auto result = packFragment(value.interface, packageProgram({mismatched}, {}));
+    CHECK(result.code == 4);
+    CHECK(result.errors ^ contains_slice("matches 0 public declarations"));
+  }
+}
+
+TEST_CASE("package selection and packing reject a malformed implementation payload") {
+  TemporaryDirectory root;
+  const auto value = fixture(7);
+  const std::vector<uint8_t> malformed{0x81, 0xa3, 'b', 'a', 'd'};
+  const auto compressed = detail::compress(malformed);
+  REQUIRE(compressed);
+  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply", malformed.size(), *compressed.value};
+  const auto encoded = detail::encodeArchive(value.interface, {implementation});
+  REQUIRE(encoded);
+  llvm::SmallString<128> path(root.path);
+  llvm::sys::path::append(path, "malformed.polyast");
+  REQUIRE(writeBytes(path, *encoded.value));
+
+  const auto archive = loadPackageFile(path.str().str());
+  REQUIRE(archive);
+  const auto selected = loadPackageSelection(*archive.value, "foo.bar.apply");
+  REQUIRE_FALSE(selected);
+  CHECK(selected.errors ^ exists([](const auto &error) { return error ^ contains_slice("cannot decode package implementation"); }));
+  ArchiveBuilder builder(value.interface);
+  const auto validated = validateArchiveFragment(std::move(*archive.value));
+  REQUIRE_FALSE(validated);
+  CHECK(validated.errors ^ exists([](const auto &error) { return error ^ contains_slice("cannot decode package implementation"); }));
+}
+
+TEST_CASE("package archive decoding rejects inconsistent indexes") {
+  TemporaryDirectory root;
+  const auto value = fixture(7);
+  const auto raw = hashed_program_to_msgpack(value.program);
+  const auto compressed = detail::compress(raw);
+  REQUIRE(compressed);
+  const detail::EncodedImplementation implementation{"foo.bar.apply", "foo.implementation.apply", raw.size(), *compressed.value};
+  const auto writeArchive = [&](const std::string &name, const std::vector<detail::EncodedImplementation> &implementations) {
+    const auto encoded = detail::encodeArchive(value.interface, implementations);
+    REQUIRE(encoded);
+    llvm::SmallString<128> path(root.path);
+    llvm::sys::path::append(path, name);
+    REQUIRE(writeBytes(path, *encoded.value));
+    return path.str().str();
+  };
+
+  const auto duplicate = loadPackageFile(writeArchive("duplicate.polyast", {implementation, implementation}));
+  REQUIRE_FALSE(duplicate);
+  CHECK(duplicate.errors
+        ^ exists([](const auto &error) { return error ^ contains_slice("duplicate implementation `foo.implementation.apply`"); }));
+
+  auto undeclared = implementation;
+  undeclared.declaration = "foo.missing";
+  const auto unknown = loadPackageFile(writeArchive("undeclared.polyast", {undeclared}));
+  REQUIRE_FALSE(unknown);
+  CHECK(unknown.errors ^ exists([](const auto &error) { return error ^ contains_slice("implements undeclared symbol `foo.missing`"); }));
+
+  auto trailingBytes = detail::encodeArchive(value.interface, {implementation});
+  REQUIRE(trailingBytes);
+  trailingBytes.value->emplace_back(0);
+  llvm::SmallString<128> trailingPath(root.path);
+  llvm::sys::path::append(trailingPath, "trailing.polyast");
+  REQUIRE(writeBytes(trailingPath, *trailingBytes.value));
+  const auto trailing = loadPackageFile(trailingPath.str().str());
+  REQUIRE_FALSE(trailing);
+  CHECK(trailing.errors ^ exists([](const auto &error) { return error ^ contains_slice("trailing bytes"); }));
+}
+
+TEST_CASE("package selection validates its indexed implementation root") {
+  TemporaryDirectory root;
+  const auto value = fixture(7);
+  const auto raw = hashed_program_to_msgpack(value.program);
+  const auto compressed = detail::compress(raw);
+  REQUIRE(compressed);
+  const detail::EncodedImplementation mismatched{"foo.bar.apply", "foo.implementation.other", raw.size(), *compressed.value};
+  const auto encoded = detail::encodeArchive(value.interface, {mismatched});
+  REQUIRE(encoded);
+  llvm::SmallString<128> path(root.path);
+  llvm::sys::path::append(path, "mismatched-root.polyast");
+  REQUIRE(writeBytes(path, *encoded.value));
+  const auto archive = loadPackageFile(path.str().str());
+  REQUIRE(archive);
+  const auto selected = loadPackageSelection(*archive.value, "foo.bar.apply");
+  REQUIRE_FALSE(selected);
+  CHECK(selected.errors
+        ^ exists([](const auto &error) { return error ^ contains_slice("does not contain its declared implementation root"); }));
+}
+
+TEST_CASE("package loading reports a malformed compressed interface") {
+  TemporaryDirectory root;
+  const std::vector<uint8_t> malformed{0x81, 0xa3, 'b', 'a', 'd'};
+  const auto compressed = detail::compress(malformed);
+  REQUIRE(compressed);
+  std::vector<uint8_t> archive;
+  archive.insert(archive.end(), std::begin(detail::ArchiveMagic), std::end(detail::ArchiveMagic));
+  detail::appendU32(archive, detail::ArchiveVersion);
+  detail::appendU64(archive, compressed.value->size());
+  detail::appendU64(archive, malformed.size());
+  detail::appendU32(archive, 0);
+  archive.insert(archive.end(), compressed.value->begin(), compressed.value->end());
+  llvm::SmallString<128> path(root.path);
+  llvm::sys::path::append(path, "malformed-interface.polyast");
+  REQUIRE(writeBytes(path, archive));
+
+  const auto loaded = loadPackageFile(path.str().str());
+  REQUIRE_FALSE(loaded);
+  CHECK(loaded.errors ^ exists([](const auto &error) { return error ^ contains_slice("cannot decode package archive interface"); }));
 }
 
 TEST_CASE("concurrent package emitters return their own staged package") {
   TemporaryDirectory root;
-  std::optional<Checked<Package>> first;
-  std::optional<Checked<Package>> second;
+  std::optional<Checked<Archive>> first;
+  std::optional<Checked<Archive>> second;
   const auto firstFixture = fixture(1);
   const auto secondFixture = fixture(2);
   std::thread firstThread([&] { first = publishPackage(firstFixture, root.path.str().str()); });
@@ -142,10 +396,14 @@ TEST_CASE("concurrent package emitters return their own staged package") {
   secondThread.join();
   REQUIRE(first);
   REQUIRE(*first);
-  CHECK(*first->value == firstFixture);
+  const auto firstSelected = loadPackageSelection(*first->value, "foo.bar.apply");
+  REQUIRE(firstSelected);
+  CHECK(*firstSelected.value == firstFixture);
   REQUIRE(second);
   REQUIRE(*second);
-  CHECK(*second->value == secondFixture);
+  const auto secondSelected = loadPackageSelection(*second->value, "foo.bar.apply");
+  REQUIRE(secondSelected);
+  CHECK(*secondSelected.value == secondFixture);
 }
 
 TEST_CASE("package readers tolerate concurrent replacement") {
@@ -161,7 +419,27 @@ TEST_CASE("package readers tolerate concurrent replacement") {
   });
   std::thread reader([&] {
     do {
-      if (const auto result = loadPackage("foo", {root.path.str().str()}); !result) readerErrors ^= concat(result.errors);
+      const auto archive = loadPackage("foo", {root.path.str().str()});
+      if (!archive) {
+        readerErrors ^= concat(archive.errors);
+        continue;
+      }
+      const auto selected = loadPackageSelection(*archive.value, "foo.bar.apply");
+      if (!selected) {
+        readerErrors ^= concat(selected.errors);
+        continue;
+      }
+      const auto &metadata = archive.value->interface.metadata;
+      if (metadata.size() != 1 || metadata.front().key != "increment") {
+        readerErrors.emplace_back("loaded archive snapshot has invalid fixture metadata");
+        continue;
+      }
+      int32_t increment = 0;
+      const auto parsed =
+          std::from_chars(metadata.front().value.data(), metadata.front().value.data() + metadata.front().value.size(), increment);
+      if (parsed.ec != std::errc{} || parsed.ptr != metadata.front().value.data() + metadata.front().value.size()
+          || *selected.value != fixture(increment))
+        readerErrors.emplace_back("selected implementation does not belong to the loaded archive snapshot");
     } while (!done);
   });
   emitter.join();
@@ -170,7 +448,7 @@ TEST_CASE("package readers tolerate concurrent replacement") {
   CHECK(readerErrors.empty());
 }
 
-TEST_CASE("polyc transports a large linked package without truncation") {
+TEST_CASE("package archive drops functions outside every implementation closure") {
   TemporaryDirectory root;
   const auto publicName = Sym({"bar", "large"});
   const auto publicDecl = FunctionDecl(publicName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
@@ -184,12 +462,14 @@ TEST_CASE("polyc transports a large linked package without truncation") {
     functions.emplace_back(decl, std::vector<Stmt::Any>{}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(),
                            CallConvention::RegularCall());
   }
-  const auto request = PackageLinkRequest(Interface(Sym({"large"}), {publicDecl}, {}), {packageProgram(std::move(functions), {})}, {});
+  const auto request = PackageLinkRequest(Interface(Sym({"large"}), {publicDecl}, {}),
+                                          {PackageFragment("large", packageProgram(std::move(functions), {}))}, {}, false);
   const auto result = linkPackage(request, root.path.str().str());
   REQUIRE(result);
-  CHECK(result.value->program.functions.size() == 4097);
-  CHECK(std::any_of(result.value->program.functions.begin(), result.value->program.functions.end(),
-                    [](const auto &function) { return function.decl.name == Sym({"helper", "4095"}); }));
+  const auto selected = loadPackageSelection(*result.value, "bar.large");
+  REQUIRE(selected);
+  CHECK(selected.value->program.functions.size() == 1);
+  CHECK(selected.value->program.functions.front().decl.name == Sym({"implementation", "large"}));
 }
 
 TEST_CASE("package emission rejects incomplete implementations without replacing the emitted package") {
@@ -205,29 +485,51 @@ TEST_CASE("package emission rejects incomplete implementations without replacing
 
   const auto loaded = loadPackage("foo", {root.path.str().str()});
   REQUIRE(loaded);
-  CHECK(*loaded.value == current);
+  const auto selected = loadPackageSelection(*loaded.value, "foo.bar.apply");
+  REQUIRE(selected);
+  CHECK(*selected.value == current);
 }
 
 TEST_CASE("package emission rejects unsafe identities") {
   TemporaryDirectory root;
   CHECK(safePathComponent("foo$bar"));
   auto unsafe = fixture(1);
-  unsafe.interface = unsafe.interface.withName(Sym({".."}));
+  unsafe.interface = unsafe.interface.withName(Sym({""}));
   const auto unsafeResult = emitPackage(unsafe, root.path.str().str());
   REQUIRE_FALSE(unsafeResult);
-  CHECK(unsafeResult.errors == std::vector<std::string>{"invalid package identity `..`"});
+  CHECK(unsafeResult.errors == std::vector<std::string>{"package identity contains an empty component"});
 
   auto reserved = fixture(1);
-  reserved.interface = reserved.interface.withName(Sym({"CON.txt"}));
+  reserved.interface = reserved.interface.withName(Sym({"CON"}));
   const auto reservedResult = emitPackage(reserved, root.path.str().str());
   REQUIRE_FALSE(reservedResult);
-  CHECK(reservedResult.errors == std::vector<std::string>{"invalid package identity `CON.txt`"});
+  CHECK(reservedResult.errors == std::vector<std::string>{"invalid package identity `CON`"});
 
   auto trailing = fixture(1);
-  trailing.interface = trailing.interface.withName(Sym({"foo."}));
+  trailing.interface = trailing.interface.withName(Sym({"foo "}));
   const auto trailingResult = emitPackage(trailing, root.path.str().str());
   REQUIRE_FALSE(trailingResult);
-  CHECK(trailingResult.errors == std::vector<std::string>{"invalid package identity `foo.`"});
+  CHECK(trailingResult.errors == std::vector<std::string>{"invalid package identity `foo `"});
+
+  auto dottedComponent = fixture(1);
+  dottedComponent.interface = dottedComponent.interface.withName(Sym({"foo.bar"}));
+  const auto dottedComponentResult = emitPackage(dottedComponent, root.path.str().str());
+  REQUIRE_FALSE(dottedComponentResult);
+  CHECK(dottedComponentResult.errors
+        ^ exists([](const auto &error) { return error == "package identity contains `.` within a component"; }));
+}
+
+TEST_CASE("package archive decoding rejects ambiguous dotted symbol components") {
+  TemporaryDirectory root;
+  const auto interface = Interface(Sym({"foo.bar"}), {}, {});
+  auto encoded = detail::encodeArchive(interface, {});
+  REQUIRE(encoded);
+  llvm::SmallString<128> path(root.path);
+  llvm::sys::path::append(path, "ambiguous.polyast");
+  REQUIRE(writeBytes(path, *encoded.value));
+  const auto decoded = loadPackageFile(path.str().str());
+  REQUIRE_FALSE(decoded);
+  CHECK(decoded.errors == std::vector<std::string>{"package identity contains `.` within a component"});
 }
 
 TEST_CASE("package emission rejects invalid type-size constraints") {
@@ -238,8 +540,7 @@ TEST_CASE("package emission rejects invalid type-size constraints") {
   const auto result = emitPackage(invalid, root.path.str().str());
   REQUIRE_FALSE(result);
   CHECK(result.errors ^ exists([](const auto &error) { return error ^ contains_slice("type variable `Missing` is not bound"); }));
-  CHECK(result.errors
-        ^ exists([](const auto &error) { return error ^ contains_slice("public declaration `foo.bar.apply` has no compatible"); }));
+  CHECK(result.errors ^ exists([](const auto &error) { return error ^ contains_slice("matches 0 public declarations"); }));
 }
 
 TEST_CASE("package emission rejects malformed complete struct binders and applications") {
@@ -308,7 +609,9 @@ TEST_CASE("package emission deduplicates identical implementation helpers") {
   ambiguous.program = packageProgram({implementation, helper, helper}, {});
   const auto result = emitPackage(ambiguous, root.path.str().str());
   REQUIRE(result);
-  CHECK(result.value->program.functions.size() == 2);
+  const auto selected = loadPackageSelection(*result.value, "foo.bar.apply");
+  REQUIRE(selected);
+  CHECK(selected.value->program.functions.size() == 2);
 }
 
 TEST_CASE("package emission validates helper declarations") {
@@ -373,7 +676,9 @@ TEST_CASE("package emission deduplicates identical struct definitions") {
   ambiguous.interface = ambiguous.interface.withDeclarations({publicDecl});
   const auto result = emitPackage(ambiguous, root.path.str().str());
   REQUIRE(result);
-  CHECK(result.value->program.defs.size() == 1);
+  const auto selected = loadPackageSelection(*result.value, polyregion::polyast::fqcn(publicDecl.name));
+  REQUIRE(selected);
+  CHECK(selected.value->program.defs.size() == 1);
 }
 
 #ifndef _WIN32

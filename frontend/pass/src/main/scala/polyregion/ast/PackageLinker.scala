@@ -44,7 +44,10 @@ private[polyregion] object PackageLinker {
     }
   }
 
-  private def implementationClosure(root: p.Sym, program: p.Program): Either[List[String], List[p.Function]] = {
+  private def implementationClosure(
+      roots: List[p.Sym],
+      functionsByName: Map[p.Sym, List[p.Function]]
+  ): Either[List[String], List[p.Function]] = {
     val errors = List.newBuilder[String]
     val out    = List.newBuilder[p.Function]
     @annotation.tailrec
@@ -52,7 +55,7 @@ private[polyregion] object PackageLinker {
       case Nil                           => ()
       case name :: rest if reached(name) => loop(rest, reached)
       case name :: rest =>
-        val matches = program.functions.filter(_.name == name)
+        val matches = functionsByName.getOrElse(name, Nil)
         if (matches.size != 1) {
           errors +=
             s"implementation closure references ${if (matches.isEmpty) "absent" else "ambiguous"} function `${symbol(name)}`"
@@ -67,18 +70,21 @@ private[polyregion] object PackageLinker {
           loop(next ::: rest, reached + name)
         }
     }
-    loop(List(root), Set.empty)
+    loop(roots, Set.empty)
     val distinct = errors.result().distinct
     Either.cond(distinct.isEmpty, out.result(), distinct)
   }
 
-  private def validateStructClosure(functions: List[p.Function], program: p.Program): List[String] = {
+  private def validateStructClosure(
+      functions: List[p.Function],
+      definitionsByName: Map[p.Sym, List[p.StructDef]]
+  ): List[String] = {
     val errors = List.newBuilder[String]
     @annotation.tailrec
     def loop(frontier: List[p.Type.Struct], reached: Set[p.Sym]): Unit = frontier match {
       case Nil => ()
       case applied :: rest =>
-        val matches = program.defs.filter(_.name == applied.name)
+        val matches = definitionsByName.getOrElse(applied.name, Nil)
         if (matches.size != 1) {
           errors += s"struct definition `${symbol(applied.name)}` is ${if (matches.isEmpty) "absent" else "ambiguous"}"
           loop(rest, reached + applied.name)
@@ -101,25 +107,30 @@ private[polyregion] object PackageLinker {
   }
 
   private def validate(pkg: p.Package): List[String] = {
-    val errors = List.newBuilder[String]
-    if (pkg.interface.name.fqn.exists(_.trim.isEmpty)) errors += "package identity contains an empty component"
+    val errors            = List.newBuilder[String]
+    val functionsByName   = pkg.program.functions.groupBy(_.name)
+    val definitionsByName = pkg.program.defs.groupBy(_.name)
+    def validateArchiveSymbol(kind: String, name: p.Sym): Unit = {
+      if (name.fqn.isEmpty || name.fqn.exists(_.isEmpty)) errors += s"$kind contains an empty component"
+      if (name.fqn.exists(_.contains('.'))) errors += s"$kind contains `.` within a component"
+    }
+    validateArchiveSymbol("package identity", pkg.interface.name)
     if (pkg.program.entry.nonEmpty) errors += "package program must be entryless"
     pkg.program.defs.foreach { definition =>
       definition.validate.foreach(error => errors += s"struct definition `${symbol(definition.name)}`: $error")
     }
     pkg.interface.declarations.foreach { declaration =>
+      validateArchiveSymbol(s"public declaration `${symbol(declaration.name)}`", declaration.name)
       declaration.validate.foreach(error => errors += s"public declaration `${symbol(declaration.name)}`: $error")
     }
-    pkg.program.functions.filter(_.implements.nonEmpty).foreach { implementation =>
+    val implementations = pkg.program.functions.filter(_.implements.nonEmpty)
+    implementations.foreach { implementation =>
       val name = symbol(implementation.name)
+      validateArchiveSymbol(s"implementation `$name`", implementation.name)
       if (implementation.visibility != p.Function.Visibility.Exported)
         errors += s"implementation `$name` is not exported"
       if (implementation.requiredCapabilities.distinct.size != implementation.requiredCapabilities.size)
         errors += s"implementation `$name` has duplicate capabilities"
-      implementationClosure(implementation.name, pkg.program) match {
-        case Left(messages)   => errors ++= messages
-        case Right(functions) => errors ++= validateStructClosure(functions, pkg.program)
-      }
       val declarations = pkg.interface.declarations.filter(decl => implementation.implements.contains(decl.name))
       val compatible =
         declarations.flatMap(decl => ProgramLinker.matchImplementation(implementation.decl, decl).toOption)
@@ -135,6 +146,10 @@ private[polyregion] object PackageLinker {
           errors += s"implementation `$name` type-size constraints must cover all type variables"
       }
     }
+    implementationClosure(implementations.map(_.name), functionsByName) match {
+      case Left(messages)   => errors ++= messages
+      case Right(functions) => errors ++= validateStructClosure(functions, definitionsByName)
+    }
     pkg.interface.declarations.foreach { declaration =>
       val covered = pkg.program.functions.exists { implementation =>
         implementation.implements.contains(declaration.name) &&
@@ -145,31 +160,35 @@ private[polyregion] object PackageLinker {
     errors.result().distinct
   }
 
-  private def localName(fragment: Int, name: p.Sym): p.Sym = p.Sym("#fragment" :: fragment.toString :: name.fqn)
+  private def localName(identity: String, name: p.Sym): p.Sym = p.Sym("#fragment" :: identity :: name.fqn)
 
   def link(request: p.Package.LinkRequest): Either[List[String], p.Package] = {
+    val identities = request.fragments.map(_.identity)
+    val identityErrors =
+      Option.when(identities.exists(_.isEmpty))("package fragment identity must not be empty").toList :::
+        Option
+          .when(identities.distinct.size != identities.size)("package fragment identities must be unique")
+          .toList
     val capabilities = request.capabilities.toSet
-    val selected = request.programFragments.map { fragment =>
+    val publicDefinitions = request.interface.declarations
+      .flatMap(_.collectAll[p.Type].collect { case value: p.Type.Struct => value.name })
+      .toSet
+    val selected = request.fragments.map { fragment =>
       if (capabilities.isEmpty) fragment
       else
-        fragment.copy(functions = fragment.functions.filter { function =>
+        fragment.copy(program = fragment.program.copy(functions = fragment.program.functions.filter { function =>
           function.implements.isEmpty || function.requiredCapabilities.forall(capabilities)
-        })
+        }))
     }
-    val implementationNames = selected.flatMap(_.functions).filter(_.implements.nonEmpty).map(_.name).toSet
-    val functionGroups      = selected.flatMap(_.functions).groupBy(_.name)
-    val definitionGroups    = selected.flatMap(_.defs).groupBy(_.name)
-    val (localFunctions, localDefinitions) =
-      ProgramLinker.collisionClosure(functionGroups, definitionGroups, stableFunctions = implementationNames)
-
-    val isolated = selected.zipWithIndex.map { case (fragment, index) =>
-      val functionNames = fragment.functions.collect {
-        case function if localFunctions(function.name) => function.name -> localName(index, function.name)
+    val isolated = selected.map { fragment =>
+      val functionNames = fragment.program.functions.collect {
+        case function if function.implements.isEmpty => function.name -> localName(fragment.identity, function.name)
       }.toMap
-      val definitionNames = fragment.defs.collect {
-        case definition if localDefinitions(definition.name) => definition.name -> localName(index, definition.name)
+      val definitionNames = fragment.program.defs.collect {
+        case definition if !publicDefinitions(definition.name) =>
+          definition.name -> localName(fragment.identity, definition.name)
       }.toMap
-      val functions = fragment.functions.map { function =>
+      val functions = fragment.program.functions.map { function =>
         val rewritten = function
           .modifyAll[p.Type] {
             case value @ p.Type.FnRef(name)        => functionNames.get(name).fold(value)(p.Type.FnRef(_))
@@ -180,7 +199,7 @@ private[polyregion] object PackageLinker {
           .get(rewritten.name)
           .fold(rewritten)(name => rewritten.copy(decl = rewritten.decl.copy(name = name)))
       }
-      val definitions = fragment.defs.map { definition =>
+      val definitions = fragment.program.defs.map { definition =>
         val rewritten = definition.modifyAll[p.Type] {
           case value @ p.Type.Struct(name, args) => definitionNames.get(name).fold(value)(p.Type.Struct(_, args))
           case value                             => value
@@ -223,8 +242,17 @@ private[polyregion] object PackageLinker {
       mergedFunctions.values.map(_.head).toList.sortBy(_.name.fqn.mkString(".")),
       mergedDefinitions.values.map(_.head).toList.sortBy(_.name.fqn.mkString("."))
     )
-    val pkg       = p.Package(request.interface, program)
-    val allErrors = (errors.result() ::: validate(pkg)).distinct
+    val linkedInterface =
+      if (!request.pruneUnimplementedDeclarations) request.interface
+      else
+        request.interface.copy(declarations = request.interface.declarations.filter { declaration =>
+          program.functions.exists { implementation =>
+            implementation.implements.contains(declaration.name) &&
+            ProgramLinker.matchImplementation(implementation.decl, declaration).isRight
+          }
+        })
+    val pkg       = p.Package(linkedInterface, program)
+    val allErrors = (identityErrors ::: errors.result() ::: validate(pkg)).distinct
     Either.cond(allErrors.isEmpty, pkg, allErrors)
   }
 }

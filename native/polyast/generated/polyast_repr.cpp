@@ -323,6 +323,9 @@ std::string repr(const Expr::Any &e) {
         if (auto _z = _x->op.get<Spec::RemoteAlloc>()) {
           return fmt::format("'remoteAlloc({}, {})", repr(_z->context), repr(_z->bytes));
         }
+        if (auto _z = _x->op.get<Spec::RemoteTempAlloc>()) {
+          return fmt::format("'remoteTempAlloc({}, {})", repr(_z->context), repr(_z->bytes));
+        }
         if (auto _z = _x->op.get<Spec::RemoteFree>()) {
           return fmt::format("'remoteFree({}, {})", repr(_z->context), repr(_z->ptr));
         }

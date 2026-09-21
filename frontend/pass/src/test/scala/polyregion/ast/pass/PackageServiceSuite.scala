@@ -8,6 +8,9 @@ class PackageServiceSuite extends munit.FunSuite {
 
   private val unitReturn = List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))
 
+  private def fragment(identity: String, functions: List[p.Function]): p.Package.Fragment =
+    p.Package.Fragment(identity, p.Program(None, functions, Nil))
+
   private def function(
       decl: p.FunctionDecl,
       body: List[p.Stmt] = unitReturn,
@@ -174,7 +177,7 @@ class PackageServiceSuite extends munit.FunSuite {
     )
     val request = p.Package.LinkRequest(
       p.Interface(p.Sym("library"), List(public)),
-      List(p.Program(None, List(function(harvested, implements = Some(name), capabilities = List("gpu"))), Nil)),
+      List(fragment("copy", List(function(harvested, implements = Some(name), capabilities = List("gpu"))))),
       List("gpu")
     )
 
@@ -231,7 +234,7 @@ class PackageServiceSuite extends munit.FunSuite {
     )
     val interface = p.Interface(p.Sym("library"), List(public))
     val missing = PackageLinker.link(
-      p.Package.LinkRequest(interface, List(p.Program(None, List(implementation, helper(1)), Nil)), List("cpu"))
+      p.Package.LinkRequest(interface, List(fragment("first", List(implementation, helper(1)))), List("cpu"))
     )
     assert(missing.left.exists(_.exists(_.contains("no compatible implementation"))))
 
@@ -239,8 +242,8 @@ class PackageServiceSuite extends munit.FunSuite {
       p.Package.LinkRequest(
         interface,
         List(
-          p.Program(None, List(implementation, helper(1)), Nil),
-          p.Program(None, List(helper(2)), Nil)
+          fragment("first", List(implementation, helper(1))),
+          fragment("second", List(helper(2)))
         ),
         List("gpu")
       )
@@ -249,8 +252,96 @@ class PackageServiceSuite extends munit.FunSuite {
     val helperNames = linked.toOption.get.program.functions.map(_.name).filter(_.fqn.contains("helper"))
     assertEquals(
       helperNames.toSet,
-      Set(p.Sym(List("#fragment", "0", "vendor", "helper")), p.Sym(List("#fragment", "1", "vendor", "helper")))
+      Set(
+        p.Sym(List("#fragment", "first", "vendor", "helper")),
+        p.Sym(List("#fragment", "second", "vendor", "helper"))
+      )
     )
+  }
+
+  test("independent package links use their explicit fragment identity") {
+    val publicName = p.Sym("library.apply")
+    val public = p.FunctionDecl(
+      publicName,
+      Nil,
+      None,
+      Nil,
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val helperName = p.Sym("vendor.helper")
+    val helper     = function(public.copy(name = helperName))
+    val implementation = function(
+      public.copy(name = p.Sym("implementation.apply")),
+      List(
+        p.Stmt.Var(
+          p.Named("call", p.Type.Unit0),
+          Some(p.Expr.Invoke(p.Type.FnRef(helperName), Nil, None, Nil, p.Type.Unit0)),
+          false
+        ),
+        unitReturn.head
+      ),
+      Some(publicName)
+    )
+    val linked = PackageLinker.link(
+      p.Package.LinkRequest(
+        p.Interface(p.Sym("library"), List(public)),
+        List(fragment("harvest-17", List(implementation, helper)))
+      )
+    )
+    assert(linked.isRight, linked)
+    val names = linked.toOption.get.program.functions.map(_.name).toSet
+    assert(names(p.Sym(List("#fragment", "harvest-17", "vendor", "helper"))))
+  }
+
+  test("fragment identities are non-empty and unique") {
+    val interface = p.Interface(p.Sym("library"), Nil)
+    val empty     = p.Program(None, Nil, Nil)
+
+    val unnamed = PackageLinker.link(
+      p.Package.LinkRequest(interface, List(p.Package.Fragment("", empty)))
+    )
+    assert(unnamed.left.exists(_.contains("package fragment identity must not be empty")))
+
+    val duplicate = PackageLinker.link(
+      p.Package.LinkRequest(
+        interface,
+        List(p.Package.Fragment("same", empty), p.Package.Fragment("same", empty))
+      )
+    )
+    assert(duplicate.left.exists(_.contains("package fragment identities must be unique")))
+  }
+
+  test("fragment links retain only the overload implemented by that fragment") {
+    val name = p.Sym("library.apply")
+    def declaration(tpe: p.Type) = p.FunctionDecl(
+      name,
+      Nil,
+      None,
+      List(p.Arg(p.Named("value", tpe))),
+      Nil,
+      Nil,
+      tpe,
+      p.Function.Affinity.Host
+    )
+    val i32 = declaration(p.Type.IntS32)
+    val f32 = declaration(p.Type.Float32)
+    val implementation = function(
+      i32.copy(name = p.Sym("implementation.apply")),
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(p.Named("value", p.Type.IntS32), Nil, p.Type.IntS32)))),
+      Some(name)
+    )
+    val linked = PackageLinker.link(
+      p.Package.LinkRequest(
+        p.Interface(p.Sym("library"), List(i32, f32)),
+        List(fragment("i32", List(implementation))),
+        pruneUnimplementedDeclarations = true
+      )
+    )
+
+    assertEquals(linked.map(_.interface.declarations), Right(List(i32)))
   }
 
   test("program linking materializes a canonical consumer entry without an ABI recipe") {
@@ -293,6 +384,74 @@ class PackageServiceSuite extends munit.FunSuite {
     val entry   = (program.entry.toList ::: program.functions).find(_.name == root.name).get
     assertEquals(entry.args.map(_.named.symbol), List("#context", "a0", "result"))
     assertEquals(entry.rtn, p.Type.Unit0)
+  }
+
+  test("materialized consumer entries use transaction-scoped boundary allocations") {
+    val name    = p.Sym("library.copy")
+    val pointer = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val public = p.FunctionDecl(
+      name,
+      Nil,
+      None,
+      List(
+        p.Arg(
+          p.Named("in", pointer),
+          boundary = Some(p.Arg.Boundary(p.Arg.Access.Read, p.Arg.Extent.Elements(p.Arg.SizeExpr.Const(4))))
+        ),
+        p.Arg(
+          p.Named("out", pointer),
+          boundary = Some(p.Arg.Boundary(p.Arg.Access.Write, p.Arg.Extent.Elements(p.Arg.SizeExpr.Const(4))))
+        )
+      ),
+      Nil,
+      Nil,
+      p.Type.Unit0,
+      p.Function.Affinity.Host
+    )
+    val implementation = function(
+      public.copy(
+        name = p.Sym("implementation.copy"),
+        args = p.Arg(p.Named("#context", p.Spec.ContextType)) :: public.args
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val root = function(
+      public.copy(name = p.Sym("consumer.copy")),
+      body = Nil,
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val linked = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))),
+        p.Program(None, List(root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
+      )
+    )
+
+    assert(linked.isRight, linked)
+    val entry = (linked.toOption.get.entry.toList ::: linked.toOption.get.functions).find(_.name == root.name).get
+    val allocations = entry.body.flatMap(_.collectAll[p.Expr]).collect {
+      case p.Expr.SpecOp(p.Spec.RemoteTempAlloc(_, _)) => ()
+    }
+    assertEquals(allocations.size, 2)
+    assertEquals(
+      entry.body.flatMap(_.collectAll[p.Expr]).count {
+        case p.Expr.SpecOp(p.Spec.RemoteAlloc(_, _)) => true
+        case _                                       => false
+      },
+      0
+    )
+    val outer =
+      entry.body.collectFirst { case value: p.Stmt.Try => value }.getOrElse(fail("missing outer allocation guard"))
+    val inner =
+      outer.body.collectFirst { case value: p.Stmt.Try => value }.getOrElse(fail("missing inner allocation guard"))
+    def freedBy(value: p.Stmt.Try) = value.fin.flatMap(_.collectAll[p.Expr]).collect {
+      case p.Expr.SpecOp(p.Spec.RemoteFree(_, p.Term.Select(named, Nil, _))) => named.symbol
+    }
+    assertEquals(freedBy(outer), List("remote0"))
+    assertEquals(freedBy(inner), List("remote1"))
   }
 
   test("program linking uses the canonical result-address ABI for an erased frontend result") {
@@ -435,7 +594,7 @@ class PackageServiceSuite extends munit.FunSuite {
     val linked = PackageLinker.link(
       p.Package.LinkRequest(
         p.Interface(p.Sym("library"), List(public)),
-        List(p.Program(None, List(implementation), Nil))
+        List(fragment("increment", List(implementation)))
       )
     )
     assert(linked.isRight, linked)

@@ -23,7 +23,7 @@ using namespace polyregion::invoke::cl;
 namespace cl_details = polyregion::invoke::cl::details;
 
 static constexpr const char *PREFIX = "OpenCL";
-static constexpr cl_ulong NullPointerOffset = std::numeric_limits<cl_ulong>::max();
+static constexpr cl_ulong OpenCLNullPointerOffset = std::numeric_limits<cl_ulong>::max();
 
 auto cl_details::SVMTracker::owner(uintptr_t ptr) {
   const auto next = entries.upper_bound(ptr);
@@ -839,20 +839,21 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   const cl_uint pointerArgCount =
       static_cast<cl_uint>(types | aspartame::take(logicalArgCount) | aspartame::count([](const Type type) { return type == Type::Ptr; }));
   cl_uint physicalArgCount = logicalArgCount;
-  bool expandedPointerAbi = false;
+  bool ownerOffsetPointerAbi = false;
   if (format == ModuleFormat::Source) {
     CHECKED(clGetKernelInfo(kernel, CL_KERNEL_NUM_ARGS, sizeof(physicalArgCount), &physicalArgCount, nullptr));
     const cl_uint expandedArgCount = logicalArgCount + pointerArgCount;
-    if (physicalArgCount == expandedArgCount) expandedPointerAbi = true;
+    if (physicalArgCount == expandedArgCount) ownerOffsetPointerAbi = true;
     else if (physicalArgCount != logicalArgCount)
-      POLYINVOKE_FATAL(PREFIX, "OpenCL source kernel `%s` has %u physical args; expected %u legacy args or %u owner+offset ABI args",
+      POLYINVOKE_FATAL(PREFIX, "OpenCL source kernel `%s` has %u physical args; expected %u logical-pointer or %u owner+offset args",
                        symbol.c_str(), physicalArgCount, logicalArgCount, expandedArgCount);
   }
   if (trace)
     fmt::print(stderr,
-               "[OpenCL launch] {} device={} groups={}x{}x{} local={}x{}x{} shared={} logical_args={} physical_args={} expanded={}\n",
+               "[OpenCL launch] {} device={} groups={}x{}x{} local={}x{}x{} shared={} logical_args={} physical_args={} "
+               "owner_offset_pointer_abi={}\n",
                symbol, deviceName, policy.global.x, policy.global.y, policy.global.z, local.x, local.y, local.z, sharedMem, logicalArgCount,
-               physicalArgCount, expandedPointerAbi);
+               physicalArgCount, ownerOffsetPointerAbi);
 
   cl_uint physicalIdx = 0;
   for (cl_uint logicalIdx = 0; logicalIdx < logicalArgCount; ++logicalIdx) {
@@ -864,18 +865,18 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
         if (svm) {
           void *value = reinterpret_cast<void *>(ptr);
-          if (!value && expandedPointerAbi) value = ensureNullArgStub();
+          if (!value && ownerOffsetPointerAbi) value = ensureNullArgStub();
           CHECKED(clSetKernelArgSVMPointer(kernel, physicalIdx++, value));
-          if (expandedPointerAbi) {
+          if (ownerOffsetPointerAbi) {
             // Some OpenCL implementations reject a null physical pointer argument. Expanded source
             // kernels reconstruct logical null from this reserved offset and never observe the stub.
-            const cl_ulong byteOffset = ptr ? 0 : NullPointerOffset;
+            const cl_ulong byteOffset = ptr ? 0 : OpenCLNullPointerOffset;
             CHECKED(clSetKernelArg(kernel, physicalIdx++, sizeof(byteOffset), &byteOffset));
           }
         } else {
           cl_mem mem = {};
           size_t offset = 0, remaining = 0;
-          if (!ptr && expandedPointerAbi) mem = ensureNullArgBuffer();
+          if (!ptr && ownerOffsetPointerAbi) mem = ensureNullArgBuffer();
           else {
             if (ptr) {
               const auto resolved = queryMemObject(ptr);
@@ -886,8 +887,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
           }
           if (trace)
             fmt::print(stderr, "  ptr[{}] logical=0x{:x} owner={} offset={} remaining={} physical={}{}\n", logicalIdx, ptr,
-                       static_cast<const void *>(mem), offset, remaining, physicalIdx, expandedPointerAbi ? "+offset" : "");
-          if (!expandedPointerAbi && offset != 0) {
+                       static_cast<const void *>(mem), offset, remaining, physicalIdx, ownerOffsetPointerAbi ? "+offset" : "");
+          if (!ownerOffsetPointerAbi && offset != 0) {
             if (remaining == 0) POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is at the end of its allocation", ptr);
             if (memBaseAddrAlign != 0 && offset % memBaseAddrAlign != 0)
               POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is %zu bytes into its allocation, not aligned to %zu bytes on %s",
@@ -897,8 +898,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
             subBuffers.push_back(mem);
           }
           CHECKED(clSetKernelArg(kernel, physicalIdx++, toSize(tpe), &mem));
-          if (expandedPointerAbi) {
-            const cl_ulong byteOffset = ptr ? static_cast<cl_ulong>(offset) : NullPointerOffset;
+          if (ownerOffsetPointerAbi) {
+            const cl_ulong byteOffset = ptr ? static_cast<cl_ulong>(offset) : OpenCLNullPointerOffset;
             CHECKED(clSetKernelArg(kernel, physicalIdx++, sizeof(byteOffset), &byteOffset));
           }
         }
@@ -927,9 +928,9 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
       // NVIDIA OpenCL rejects null pointer args and null SVM declarations. Expanded source kernels recover
-      // logical null from NullPointerOffset, so declaring the physical stub does not alter program semantics.
+      // logical null from OpenCLNullPointerOffset, so declaring the physical stub does not alter program semantics.
       if (ptr) allSvmPtrs.push_back(reinterpret_cast<void *>(ptr));
-      else if (expandedPointerAbi)
+      else if (ownerOffsetPointerAbi)
         if (void *stub = ensureNullArgStub()) allSvmPtrs.push_back(stub);
     }
     allSvmPtrs.insert(allSvmPtrs.end(), tracked.begin(), tracked.end());

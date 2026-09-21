@@ -50,6 +50,8 @@ clang::VarDecl *mkStaticVarDecl(clang::ASTContext &C, clang::DeclContext *callee
                                 const std::vector<clang::Expr *> &initExprs);
 clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
                                  const std::vector<clang::QualType> &paramTys);
+clang::FunctionDecl *mkExternCppFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
+                                   const std::vector<clang::QualType> &paramTys);
 clang::CallExpr *mkCall(clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args);
 clang::Expr *mkLoad(clang::ASTContext &C, clang::VarDecl *var);
 

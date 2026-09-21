@@ -5,10 +5,13 @@
 #include <cstdlib>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/SHA256.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -153,6 +156,16 @@ std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &byte
 
 namespace {
 
+using FunctionIndex = std::unordered_map<polyast::Sym, std::vector<const polyast::Function *>>;
+
+FunctionIndex indexFunctions(const polyast::Program &program) {
+  FunctionIndex index;
+  if (program.entry) index[program.entry->decl.name].emplace_back(&*program.entry);
+  for (const auto &function : program.functions)
+    index[function.decl.name].emplace_back(&function);
+  return index;
+}
+
 struct PluginRegistry {
   std::vector<std::unique_ptr<polypass::PassRunner>> plugins;
   std::unordered_map<std::string, size_t> ownerByPass;
@@ -277,16 +290,14 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::op
 
 std::vector<std::string> validateImportedEntries(const polyast::ProgramLinkRequest &request, const polyast::Program &program) {
   std::vector<std::string> errors;
-  const auto linked = program.entry | to_vector() | concat(program.functions) | to_vector();
-  const auto roots = request.consumer.entry | to_vector() | concat(request.consumer.functions) | filter([](const auto &function) {
-                       return function.visibility.template is<polyast::FunctionVisibility::Exported>() && function.implements.has_value();
-                     })
-                     | to_vector();
-  for (const auto &root : roots) {
-    const auto matches = linked | filter([&](const auto &function) { return function.decl.name == root.decl.name; }) | to_vector();
-    if (matches.size() != 1) {
-      errors.emplace_back(fmt::format("linked consumer entry `{}` has {} definitions", polyast::fqcn(root.decl.name), matches.size()));
-      continue;
+  const auto linked = indexFunctions(program);
+  const auto validate = [&](const polyast::Function &root) {
+    if (!root.visibility.template is<polyast::FunctionVisibility::Exported>() || !root.implements) return;
+    const auto found = linked.find(root.decl.name);
+    const auto count = found == linked.end() ? 0 : found->second.size();
+    if (count != 1) {
+      errors.emplace_back(fmt::format("linked consumer entry `{}` has {} definitions", polyast::fqcn(root.decl.name), count));
+      return;
     }
     std::vector<polyast::Type::Any> expectedArgs{polyast::Type::Ptr(polyast::Type::IntU8(), polyast::TypeSpace::Global())};
     for (const auto &argument : root.decl.args) {
@@ -300,23 +311,81 @@ std::vector<std::string> validateImportedEntries(const polyast::ProgramLinkReque
     }
     const auto hasResult = !root.decl.rtn.is<polyast::Type::Unit0>();
     if (hasResult) expectedArgs.emplace_back(polyast::Type::Ptr(root.decl.rtn, polyast::TypeSpace::Global()));
-    const auto &actual = matches.front().decl;
-    const auto actualArgs = actual.args | map([](const auto &argument) { return argument.named.tpe; }) | to_vector();
+    const auto &actual = found->second.front()->decl;
     const auto argumentTypesMatch = [&] {
-      if (actualArgs.size() != expectedArgs.size()) return false;
+      if (actual.args.size() != expectedArgs.size()) return false;
       const auto valueArguments = expectedArgs.size() - (hasResult ? 1 : 0);
       for (size_t index = 0; index < valueArguments; ++index)
-        if (actualArgs[index] != expectedArgs[index]) return false;
+        if (actual.args[index].named.tpe != expectedArgs[index]) return false;
       if (!hasResult) return true;
-      if (!root.decl.rtn.is<polyast::Type::Nothing>()) return actualArgs.back() == expectedArgs.back();
-      const auto resolved = actualArgs.back().get<polyast::Type::Ptr>();
+      if (!root.decl.rtn.is<polyast::Type::Nothing>()) return actual.args.back().named.tpe == expectedArgs.back();
+      const auto resolved = actual.args.back().named.tpe.get<polyast::Type::Ptr>();
       return resolved && resolved->space == polyast::TypeSpace::Global() && !resolved->comp.is<polyast::Type::Nothing>();
     }();
     if (actual.tpeVars.size() || actual.receiver || actual.moduleCaptures.size() || actual.termCaptures.size()
         || actual.rtn != polyast::Type::Unit0() || actual.affinity != polyast::FunctionAffinity::Host() || !argumentTypesMatch)
       errors.emplace_back(fmt::format("linked consumer entry `{}` has an invalid physical ABI", polyast::fqcn(root.decl.name)));
+  };
+  if (request.consumer.entry) validate(*request.consumer.entry);
+  for (const auto &root : request.consumer.functions)
+    validate(root);
+  return errors;
+}
+
+std::vector<std::string> validateRemoteEntries(const polyast::Program &program) {
+  std::vector<std::string> errors;
+  const auto functions = indexFunctions(program);
+  const auto launchTargets = program.collect_all<polyast::Spec::RemoteLaunch>()
+                             | collect([](const auto &launch) { return launch.kernel.tpe().template get<polyast::Type::FnRef>(); })
+                             | map([](const auto &reference) { return reference.name; }) | distinct() | to_vector();
+  for (const auto &target : launchTargets) {
+    const auto found = functions.find(target);
+    const auto count = found == functions.end() ? 0 : found->second.size();
+    if (count != 1) {
+      errors.emplace_back(fmt::format("remote launch target `{}` has {} linked definitions", polyast::fqcn(target), count));
+      continue;
+    }
+    if (!found->second.front()->convention.is<polyast::CallConvention::OffloadEntry>())
+      errors.emplace_back(fmt::format("remote launch target `{}` is not an offload entry", polyast::fqcn(target)));
   }
   return errors;
+}
+
+polyast::Program namespaceRemoteEntries(polyast::Program program,
+                                        const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
+                                        const std::optional<int> stackDepth) {
+  const auto encoded = polyast::hashed_program_to_msgpack(program);
+  llvm::SHA256 hash;
+  hash.update(llvm::ArrayRef(encoded));
+  std::vector<std::string> profiles;
+  profiles.reserve(deviceTargets.size());
+  for (const auto &[target, arch] : deviceTargets) {
+    const auto pipeline = packageEntryPipeline(target, stackDepth);
+    profiles.emplace_back(fmt::format("{}:{}:{}:{}:{}", magic_enum::enum_integer(target), arch.size(), arch, pipeline.size(), pipeline));
+  }
+  std::ranges::sort(profiles);
+  hash.update(fmt::format("|compile-profiles:{}|", profiles.size()));
+  for (const auto &profile : profiles) {
+    hash.update(fmt::format("{}:", profile.size()));
+    hash.update(profile);
+  }
+  const auto identity = llvm::toHex(hash.final(), true);
+  std::unordered_map<polyast::Sym, polyast::Sym> names;
+  for (const auto &function : program.functions) {
+    if (!function.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
+    names.emplace(function.decl.name, polyast::Sym({polyast::offloadEntrySymbol(function.decl.name), "module", identity}));
+  }
+  program = program.modify_all<polyast::Type::FnRef>([&](const auto &reference) {
+    const auto found = names.find(reference.name);
+    return found == names.end() ? reference : reference.withName(found->second);
+  });
+  if (program.entry) {
+    if (const auto found = names.find(program.entry->decl.name); found != names.end()) program.entry->decl.name = found->second;
+  }
+  for (auto &function : program.functions) {
+    if (const auto found = names.find(function.decl.name); found != names.end()) function.decl.name = found->second;
+  }
+  return program;
 }
 
 } // namespace
@@ -328,29 +397,39 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
   auto linked = linkProgram(request);
   if (!linked) return {{}, std::move(linked.errors)};
   if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};
+  if (auto errors = validateRemoteEntries(*linked.value); !errors.empty()) return {{}, std::move(errors)};
   initialise();
-  auto program = std::move(*linked.value);
-  for (auto &function : program.functions)
-    if (function.convention.is<polyast::CallConvention::OffloadEntry>()) function.visibility = polyast::FunctionVisibility::Exported();
+  std::unordered_set<polyast::Sym> consumerEntries;
+  const auto retainConsumerEntry = [&](const polyast::Function &function) {
+    if (function.visibility.template is<polyast::FunctionVisibility::Exported>() && function.implements)
+      consumerEntries.emplace(function.decl.name);
+  };
+  if (request.consumer.entry) retainConsumerEntry(*request.consumer.entry);
+  for (const auto &function : request.consumer.functions)
+    retainConsumerEntry(function);
+  auto program = namespaceRemoteEntries(std::move(*linked.value), deviceTargets, stackDepth);
+  for (auto &function : program.functions) {
+    const auto exported = function.convention.is<polyast::CallConvention::OffloadEntry>() || consumerEntries.contains(function.decl.name);
+    if (exported) function.visibility = polyast::FunctionVisibility::Exported();
+    else function.visibility = polyast::FunctionVisibility::Internal();
+  }
 
-  const auto host = compile(program, Options{hostTarget, hostArch, "FullOpt(level=0)", true}, compiletime::OptLevel::O3);
+  const auto host = compile(program, Options{hostTarget, hostArch, "StructuredExit", true}, compiletime::OptLevel::O3);
   if (!host.binary) return {{}, {"linked consumer program compilation failed: " + host.messages}};
 
   std::vector<polyast::CompileModule> remoteModules;
   for (const auto &entry : program.functions) {
     if (!entry.convention.is<polyast::CallConvention::OffloadEntry>()) continue;
-    auto moduleName = polyast::fqcn(entry.decl.name);
-    for (auto &c : moduleName)
-      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
+    const auto moduleName = backend::normaliseSymbol(entry.decl.name);
     auto entryProgram = program.withEntry(entry);
     std::vector<polyast::Function> functions;
     functions.reserve(program.functions.size() - 1);
     for (const auto &function : program.functions) {
       if (function.decl.name == entry.decl.name) continue;
-      functions.emplace_back(
-          function.convention.is<polyast::CallConvention::OffloadEntry>()
-              ? function.withVisibility(polyast::FunctionVisibility::Internal()).withConvention(polyast::CallConvention::RegularCall())
-              : function);
+      auto internal = function.withVisibility(polyast::FunctionVisibility::Internal());
+      if (internal.convention.is<polyast::CallConvention::OffloadEntry>())
+        internal = internal.withConvention(polyast::CallConvention::RegularCall());
+      functions.emplace_back(std::move(internal));
     }
     entryProgram.functions = std::move(functions);
     for (const auto &[target, arch] : deviceTargets) {

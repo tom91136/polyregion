@@ -202,6 +202,8 @@ object Verify {
           dimensionsChecked
         case x: p.Spec.RemoteAlloc =>
           requireTpe(context(c0, x.context), x.bytes, u64, "allocation byte count must be U64")
+        case x: p.Spec.RemoteTempAlloc =>
+          requireTpe(context(c0, x.context), x.bytes, u64, "temporary allocation byte count must be U64")
         case x: p.Spec.RemoteFree =>
           requireTpe(context(c0, x.context), x.ptr, globalPointer, "free operand must be a global pointer")
         case x: p.Spec.RemoteMemcpy =>

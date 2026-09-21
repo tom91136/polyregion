@@ -85,17 +85,19 @@ bool linkProgramModule(llvm::Module &module, std::unique_ptr<llvm::Module> linke
 }
 
 class LinkProgramBitcodePass final : public llvm::PassInfoMixin<LinkProgramBitcodePass> {
-  std::shared_ptr<std::vector<int8_t>> bitcode;
+  std::shared_ptr<polystl::PackageProgramBitcodes> bitcode;
   clang::DiagnosticsEngine &diagnostics;
 
 public:
-  LinkProgramBitcodePass(std::shared_ptr<std::vector<int8_t>> bitcode, clang::DiagnosticsEngine &diagnostics)
+  LinkProgramBitcodePass(std::shared_ptr<polystl::PackageProgramBitcodes> bitcode, clang::DiagnosticsEngine &diagnostics)
       : bitcode(std::move(bitcode)), diagnostics(diagnostics) {}
 
   llvm::PreservedAnalyses run(llvm::Module &module, llvm::ModuleAnalysisManager &) {
-    if (!bitcode->empty()) {
-      const auto data = llvm::StringRef(reinterpret_cast<const char *>(bitcode->data()), bitcode->size());
-      auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, "polyregion-linked-program"), module.getContext());
+    for (size_t index = 0; index < bitcode->size(); ++index) {
+      const auto &image = (*bitcode)[index];
+      const auto data = llvm::StringRef(reinterpret_cast<const char *>(image.data()), image.size());
+      const auto identifier = "polyregion-linked-program-" + std::to_string(index);
+      auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(data, identifier), module.getContext());
       if (!parsed) {
         module.getContext().emitError(llvm::toString(parsed.takeError()));
         return llvm::PreservedAnalyses::none();
@@ -124,11 +126,11 @@ class PolyCppFrontendAction final : public clang::PluginASTAction {
 
 protected:
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef InFile) override {
-    auto packageProgramBitcode = std::make_shared<std::vector<int8_t>>();
+    auto packageProgramBitcodes = std::make_shared<polystl::PackageProgramBitcodes>();
     auto &diagnostics = CI.getDiagnostics();
-    CI.getCodeGenOpts().PassBuilderCallbacks.push_back([packageProgramBitcode, &diagnostics](llvm::PassBuilder &PB) {
-      PB.registerPipelineStartEPCallback([packageProgramBitcode, &diagnostics](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
-        MPM.addPass(LinkProgramBitcodePass(packageProgramBitcode, diagnostics));
+    CI.getCodeGenOpts().PassBuilderCallbacks.push_back([packageProgramBitcodes, &diagnostics](llvm::PassBuilder &PB) {
+      PB.registerPipelineStartEPCallback([packageProgramBitcodes, &diagnostics](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) {
+        MPM.addPass(LinkProgramBitcodePass(packageProgramBitcodes, diagnostics));
       });
     });
 #ifdef POLYREGION_FUSED_DRIVER
@@ -137,7 +139,7 @@ protected:
     CI.getCodeGenOpts().PassBuilderCallbacks.push_back([info](llvm::PassBuilder &PB) { info.RegisterPassBuilderCallbacks(PB); });
 #endif
     if (std::getenv(polyregion::env::PolycppNoRewrite)) return std::make_unique<clang::ASTConsumer>();
-    return polystl::makeOffloadRewriteConsumer(CI, opts, std::move(packageProgramBitcode));
+    return polystl::makeOffloadRewriteConsumer(CI, opts, std::move(packageProgramBitcodes));
   }
 
   bool ParseArgs(const clang::CompilerInstance &CI, const std::vector<std::string> &args) override {

@@ -888,6 +888,7 @@ struct Interface;
 struct Package;
 struct ProgramTypeSize;
 struct ProgramLinkRequest;
+struct PackageFragment;
 struct PackageLinkRequest;
 struct CompileModule;
 struct CompileBundle;
@@ -5765,10 +5766,50 @@ struct POLYREGION_EXPORT RemoteAlloc : Spec::Base {
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
 };
 
+struct POLYREGION_EXPORT RemoteTempAlloc : Spec::Base {
+  Term::Any context;
+  Term::Any bytes;
+  constexpr static uint32_t variant_id = 32;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteTempAlloc withContext(const Term::Any &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Spec::RemoteTempAlloc withBytes(const Term::Any &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, RemoteTempAlloc>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    context.collect_where<T, U>(results_, f);
+    bytes.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT RemoteTempAlloc modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, RemoteTempAlloc>) {
+      return f(*this);
+    }
+    return Spec::RemoteTempAlloc(context.modify_all<T>(f), bytes.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Spec::RemoteTempAlloc &) const;
+  RemoteTempAlloc(Term::Any context, Term::Any bytes) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+};
+
 struct POLYREGION_EXPORT RemoteFree : Spec::Base {
   Term::Any context;
   Term::Any ptr;
-  constexpr static uint32_t variant_id = 32;
+  constexpr static uint32_t variant_id = 33;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteFree withContext(const Term::Any &v_) const;
@@ -5811,7 +5852,7 @@ struct POLYREGION_EXPORT RemoteMemcpy : Spec::Base {
   Term::Any src;
   Term::Any bytes;
   Direction::Any direction;
-  constexpr static uint32_t variant_id = 33;
+  constexpr static uint32_t variant_id = 34;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteMemcpy withContext(const Term::Any &v_) const;
@@ -5857,7 +5898,7 @@ struct POLYREGION_EXPORT RemoteMemcpy : Spec::Base {
 
 struct POLYREGION_EXPORT RemoteSync : Spec::Base {
   Term::Any context;
-  constexpr static uint32_t variant_id = 34;
+  constexpr static uint32_t variant_id = 35;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT Spec::RemoteSync withContext(const Term::Any &v_) const;
@@ -10637,14 +10678,51 @@ struct POLYREGION_EXPORT ProgramLinkRequest {
                      std::vector<ProgramTypeSize> typeSizes = {}) noexcept;
 };
 
+struct POLYREGION_EXPORT PackageFragment {
+  std::string identity;
+  Program program;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT PackageFragment withIdentity(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageFragment withProgram(const Program &v_) const;
+  template <typename T, typename U>
+  POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PackageFragment>) {
+      if (auto x_ = f(*this)) {
+        results_.emplace_back(*x_);
+      }
+    }
+    program.collect_where<T, U>(results_, f);
+  }
+  template <typename T, typename U>
+  [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(const std::function<std::optional<U>(const T &)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT PackageFragment modify_all(const std::function<T(const T &)> &f) const {
+    if constexpr (std::is_same_v<T, PackageFragment>) {
+      return f(*this);
+    }
+    return PackageFragment(identity, program.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PackageFragment &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const PackageFragment &) const;
+  PackageFragment(std::string identity, Program program) noexcept;
+};
+
 struct POLYREGION_EXPORT PackageLinkRequest {
   Interface interface;
-  std::vector<Program> programFragments;
+  std::vector<PackageFragment> fragments;
   std::vector<std::string> capabilities;
+  bool pruneUnimplementedDeclarations;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT PackageLinkRequest withInterface(const Interface &v_) const;
-  [[nodiscard]] POLYREGION_EXPORT PackageLinkRequest withProgramFragments(const std::vector<Program> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageLinkRequest withFragments(const std::vector<PackageFragment> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT PackageLinkRequest withCapabilities(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT PackageLinkRequest withPruneUnimplementedDeclarations(const bool &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, PackageLinkRequest>) {
@@ -10653,7 +10731,7 @@ struct POLYREGION_EXPORT PackageLinkRequest {
       }
     }
     interface.collect_where<T, U>(results_, f);
-    for (auto it = programFragments.begin(); it != programFragments.end(); ++it) {
+    for (auto it = fragments.begin(); it != fragments.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
   }
@@ -10670,15 +10748,16 @@ struct POLYREGION_EXPORT PackageLinkRequest {
     if constexpr (std::is_same_v<T, PackageLinkRequest>) {
       return f(*this);
     }
-    std::vector<Program> programFragments__;
-    for (auto it = programFragments.begin(); it != programFragments.end(); ++it) {
-      programFragments__.emplace_back((*it).modify_all<T>(f));
+    std::vector<PackageFragment> fragments__;
+    for (auto it = fragments.begin(); it != fragments.end(); ++it) {
+      fragments__.emplace_back((*it).modify_all<T>(f));
     }
-    return PackageLinkRequest(interface.modify_all<T>(f), programFragments__, capabilities);
+    return PackageLinkRequest(interface.modify_all<T>(f), fragments__, capabilities, pruneUnimplementedDeclarations);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const PackageLinkRequest &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const PackageLinkRequest &) const;
-  PackageLinkRequest(Interface interface, std::vector<Program> programFragments = {}, std::vector<std::string> capabilities = {}) noexcept;
+  PackageLinkRequest(Interface interface, std::vector<PackageFragment> fragments, std::vector<std::string> capabilities,
+                     bool pruneUnimplementedDeclarations) noexcept;
 };
 
 struct POLYREGION_EXPORT CompileModule {
@@ -11736,7 +11815,7 @@ using All = alternatives<Assert, GpuBarrierGlobal, GpuBarrierLocal, GpuBarrierAl
                          GpuGlobalSize, GpuGroupIdx, GpuGroupSize, GpuLocalIdx, GpuLocalSize, GpuLaneIdx, GpuSubgroupSize, GpuShuffleDown,
                          GpuShuffleUp, GpuShuffleIdx, GpuShuffleXor, GpuSubgroupBarrier, GpuBallot, GpuVoteAny, GpuVoteAll, GpuAtomicRMW,
                          GpuAtomicCAS, GpuGroupReduce, GpuGroupInclusiveScan, GpuGroupExclusiveScan, GpuVolatileLoad, GpuVolatileStore,
-                         RemoteLaunch, RemoteAlloc, RemoteFree, RemoteMemcpy, RemoteSync>;
+                         RemoteLaunch, RemoteAlloc, RemoteTempAlloc, RemoteFree, RemoteMemcpy, RemoteSync>;
 }
 template <typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Spec::Any::is() const {
   static_assert((polyregion::polyast::Spec::All::contains<T>), "type not part of the variant");
@@ -13211,6 +13290,9 @@ template <> struct hash<polyregion::polyast::Spec::RemoteLaunch> {
 template <> struct hash<polyregion::polyast::Spec::RemoteAlloc> {
   std::size_t operator()(const polyregion::polyast::Spec::RemoteAlloc &) const noexcept;
 };
+template <> struct hash<polyregion::polyast::Spec::RemoteTempAlloc> {
+  std::size_t operator()(const polyregion::polyast::Spec::RemoteTempAlloc &) const noexcept;
+};
 template <> struct hash<polyregion::polyast::Spec::RemoteFree> {
   std::size_t operator()(const polyregion::polyast::Spec::RemoteFree &) const noexcept;
 };
@@ -13573,6 +13655,9 @@ template <> struct hash<polyregion::polyast::ProgramTypeSize> {
 };
 template <> struct hash<polyregion::polyast::ProgramLinkRequest> {
   std::size_t operator()(const polyregion::polyast::ProgramLinkRequest &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::PackageFragment> {
+  std::size_t operator()(const polyregion::polyast::PackageFragment &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::PackageLinkRequest> {
   std::size_t operator()(const polyregion::polyast::PackageLinkRequest &) const noexcept;

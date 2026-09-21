@@ -22,6 +22,7 @@ using polyregion::Vector;
 using Bytes = Vector<char>;
 
 std::string fqcn(const Sym &);
+std::string offloadEntrySymbol(const Sym &);
 std::string canonicalName(const TypeSpace::Any &);
 std::string canonicalName(const Type::Any &);
 std::string signatureKey(const Signature &);
@@ -40,6 +41,7 @@ Type::Struct typeOf(const StructDef &def);
 std::string repr(const CompileResult &);
 
 std::variant<std::string, Package> decodePackage(const uint8_t *begin, const uint8_t *end) noexcept;
+std::variant<std::string, Interface> decodeInterface(const uint8_t *begin, const uint8_t *end) noexcept;
 std::variant<std::string, Program> decodeHashedProgram(const uint8_t *begin, const uint8_t *end) noexcept;
 
 Opt<Type::Any> extractComponent(const Type::Any &t);

@@ -81,6 +81,12 @@ inline Checked<polyast::Program> mergeProgramFragments(const polyast::Program &h
     return reached;
   };
   const auto deviceDefinitionNames = definitionClosure(deviceFunctions, device.defs);
+  const auto hostFunctions =
+      functions | filter([](const auto &function) { return function.decl.affinity.template is<polyast::FunctionAffinity::Host>(); })
+      | to_vector();
+  const auto hostDefinitionNames = definitionClosure(hostFunctions, host.defs);
+  const auto sharedDefinitionNames =
+      deviceDefinitionNames | filter([&](const auto &name) { return hostDefinitionNames.contains(name); }) | to<std::unordered_set>();
   const auto entryDeclarations =
       deviceFunctions
       | filter([](const auto &function) { return function.convention.template is<polyast::CallConvention::OffloadEntry>(); })
@@ -99,6 +105,7 @@ inline Checked<polyast::Program> mergeProgramFragments(const polyast::Program &h
     const bool hostIncomplete = hostDefinition.members.empty() && hostDefinition.parents.empty();
     const bool deviceIncomplete = definition.members.empty() && definition.parents.empty();
     if (hostIncomplete || deviceIncomplete || hostDefinition == definition) continue;
+    if (sharedDefinitionNames.contains(definition.name)) continue;
     renameDefinition(definition);
   }
   for (bool changed = true; changed;) {
@@ -111,6 +118,7 @@ inline Checked<polyast::Program> mergeProgramFragments(const polyast::Program &h
       const bool hostIncomplete = hostDefinition.members.empty() && hostDefinition.parents.empty();
       const bool deviceIncomplete = definition.members.empty() && definition.parents.empty();
       if (hostIncomplete || deviceIncomplete) continue;
+      if (sharedDefinitionNames.contains(definition.name)) continue;
       const auto rewritten = definition.template modify_all<polyast::Type::Struct>([&](const auto &type) {
         return renamedDefinitions ^ get_maybe(type.name) ^ map([&](const auto &name) { return type.withName(name); }) ^ get_or_else(type);
       });
@@ -162,6 +170,7 @@ inline Checked<polyast::Program> mergeProgramFragments(const polyast::Program &h
       const bool hostIncomplete = hostDefinition.members.empty() && hostDefinition.parents.empty();
       const bool deviceIncomplete = rewritten.members.empty() && rewritten.parents.empty();
       if (hostIncomplete && !deviceIncomplete) hostDefinition = rewritten;
+      else if (sharedDefinitionNames.contains(definition.name) && !deviceIncomplete) hostDefinition = rewritten;
       else if (hostDefinition != rewritten && !deviceIncomplete)
         out.errors.emplace_back("host and device compilation fragments contain conflicting struct definition `" + fqcn(rewritten.name)
                                 + "`");

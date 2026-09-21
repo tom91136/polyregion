@@ -122,7 +122,7 @@ Checked<std::string> writeBitcode(const std::vector<int8_t> &bytes) {
 
 struct PreparedInterface {
   func::FuncOp function;
-  polyast::Package pkg;
+  polyfront::package::Archive archive;
   std::vector<polyast::Type::Any> argumentTypes;
   std::vector<polyast::ProgramTypeSize> typeSizes;
   bool erasedResult;
@@ -158,7 +158,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   });
 
   DataLayout layout(module);
-  std::map<std::string, polyast::Package> packagesByName;
+  std::map<std::string, Archive> packagesByName;
   std::vector<PreparedInterface> prepared;
   for (auto &[function, identity] : sites) {
     auto package = packagesByName.find(identity.packageName);
@@ -213,8 +213,13 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   std::vector<Package> packages;
   std::vector<Function> roots;
   std::vector<ProgramTypeSize> typeSizes;
-  for (const auto &item : prepared) {
-    if (std::find(packages.begin(), packages.end(), item.pkg) == packages.end()) packages.emplace_back(item.pkg);
+  for (auto &item : prepared) {
+    const auto selected = loadPackageSelection(item.archive, item.root.implements ? polyast::fqcn(*item.root.implements) : std::string{});
+    if (!selected) {
+      emitErrors(diag, item.function.getLoc(), selected.errors);
+      return;
+    }
+    if (std::find(packages.begin(), packages.end(), *selected.value) == packages.end()) packages.emplace_back(std::move(*selected.value));
     roots.emplace_back(item.root);
     for (const auto &size : item.typeSizes)
       if (std::find(typeSizes.begin(), typeSizes.end(), size) == typeSizes.end()) typeSizes.emplace_back(size);
@@ -291,13 +296,26 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       if (!operation) {
         OpBuilder::InsertionGuard guard(builder);
         builder.setInsertionPointToStart(module.getBody());
-        operation = func::FuncOp::create(builder, function.getLoc(), name, FunctionType::get(module.getContext(), {contextType}, {}));
+        operation = func::FuncOp::create(builder, function.getLoc(), name,
+                                         FunctionType::get(module.getContext(), {contextType}, {builder.getI1Type()}));
         operation.setPrivate();
       }
       return operation;
     };
     const auto contextAcquire = contextOperation("polyrt_context_acquire");
     const auto contextRelease = contextOperation("polyrt_context_release");
+    auto contextAbort = module.lookupSymbol<func::FuncOp>("polyrt_abort");
+    if (!contextAbort) {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(module.getBody());
+      contextAbort = func::FuncOp::create(builder, function.getLoc(), "polyrt_abort", FunctionType::get(module.getContext(), {}, {}));
+      contextAbort.setPrivate();
+    }
+    const auto checkContextStatus = [&](Value status) {
+      auto failed = arith::CmpIOp::create(builder, function.getLoc(), arith::CmpIPredicate::eq, status, polyfc::boolConst(builder, false));
+      auto body = fir::IfOp::create(builder, function.getLoc(), failed.getResult(), false).getThenBodyBuilder();
+      fir::CallOp::create(body, function.getLoc(), contextAbort, ValueRange{});
+    };
     auto entry = module.lookupSymbol<func::FuncOp>(entryName);
     if (!entry) {
       OpBuilder::InsertionGuard guard(builder);
@@ -305,7 +323,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       entry = func::FuncOp::create(builder, function.getLoc(), entryName, FunctionType::get(module.getContext(), entryTypes, {}));
       entry.setPrivate();
     }
-    fir::CallOp::create(builder, function.getLoc(), contextAcquire, ValueRange{context});
+    checkContextStatus(fir::CallOp::create(builder, function.getLoc(), contextAcquire, ValueRange{context}).getResult(0));
     if (!compiled.value->remoteModules.empty()) {
       const auto pointerType = LLVM::LLVMPointerType::get(module.getContext());
       const auto sizeType = builder.getI64Type();
@@ -363,7 +381,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       }
     }
     fir::CallOp::create(builder, function.getLoc(), entry, entryArgs);
-    fir::CallOp::create(builder, function.getLoc(), contextRelease, ValueRange{context});
+    checkContextStatus(fir::CallOp::create(builder, function.getLoc(), contextRelease, ValueRange{context}).getResult(0));
     if (resultSlot && !erasedResult) {
       const auto value = fir::LoadOp::create(builder, function.getLoc(), resultSlot).getResult();
       func::ReturnOp::create(builder, function.getLoc(), value);

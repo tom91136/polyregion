@@ -5,6 +5,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "polyinvoke/runtime.h"
 
@@ -23,11 +24,19 @@ using invoke::ModuleFormat;
 using invoke::PlatformKind;
 
 struct ExecutionContext {
+  ExecutionContext(Platform *platform, Device *device, DeviceQueue *queue) : platform(platform), device(device), queue(queue) {}
+  ~ExecutionContext();
+
   Platform *platform;
   Device *device;
   DeviceQueue *queue;
   std::recursive_mutex transaction;
-  std::map<uintptr_t, size_t> remoteAllocations;
+  struct RemoteAllocation {
+    size_t bytes;
+    bool cleanupPending = false;
+  };
+  std::map<uintptr_t, RemoteAllocation> remoteAllocations;
+  std::vector<std::vector<uintptr_t>> temporaryAllocationScopes;
 };
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT extern std::unique_ptr<Platform> currentPlatform;
@@ -62,10 +71,17 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool loadKernelObject(const char *module
 
 #undef POLYREGION_PRINTF_FORMAT
 
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_acquire_or_throw(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_release_or_throw(void *context);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_operator_new(size_t size);
+
 extern "C" {
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_acquire(void *context);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_context_release(void *context);
+// True means success. A failed status call leaves a thread-local diagnostic until the next status call on that thread.
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_acquire(void *context) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_release(void *context) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT const char *polyrt_error_message() noexcept;
+[[noreturn]] POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_abort() noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT size_t polyrt_device_max_threads_per_block(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_max_threads_per_block_u64(void *context);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT uint64_t polyrt_device_subgroup_size(void *context);
@@ -78,10 +94,12 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT polyregion::polyrt::DeviceKind polyrt_de
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_host_malloc(uint64_t bytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_host_new(uint64_t bytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_host_free(void *pointer);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT uintptr_t polyrt_remote_malloc(void *context, size_t bytes) noexcept(false);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_free(void *context, uintptr_t ptr) noexcept(false);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
-                                                                  int32_t direction) noexcept(false);
+// Remote operations return false on error; allocation outputs are zeroed before each attempt.
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_malloc(void *context, size_t bytes, uintptr_t *result) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_temp_malloc(void *context, size_t bytes, uintptr_t *result) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_free(void *context, uintptr_t ptr) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_memcpy(void *context, uintptr_t dst, uintptr_t src, size_t bytes,
+                                                                  int32_t direction) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_device_usm_host_acquire(void *context, void *remote, uint64_t bytes, int32_t mode);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_device_usm_host_release(void *context, void *remote, void *local, uint64_t bytes,
                                                                             int32_t mode);
@@ -91,15 +109,15 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_load(void *context, c
                                                                 size_t featureCount, const char **features, size_t imageLength,
                                                                 const uint8_t *image);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_require_loaded(void *context, const char *moduleName, bool loaded);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName,
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName,
                                                                   size_t gridX, size_t gridY, size_t gridZ, size_t blockX, size_t blockY,
                                                                   size_t blockZ, size_t localMemBytes, size_t argCount,
-                                                                  const uint8_t *argTypes, void *const *argPtrs) noexcept(false);
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void
+                                                                  const uint8_t *argTypes, void *const *argPtrs) noexcept;
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool
 polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName, size_t gridX, size_t gridY, size_t gridZ,
                                   size_t blockX, size_t blockY, size_t blockZ, size_t localMemBytes, size_t argCount,
                                   const uint8_t *argTypes, void *const *argPtrs, const size_t *mirrorSizes,
-                                  const uint8_t *mirrorKinds) noexcept(false);
+                                  const uint8_t *mirrorKinds) noexcept;
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_read(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_write(void *origin, ptrdiff_t sizeInBytes, size_t unitInBytes);
@@ -117,7 +135,6 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_malloc(size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_free(void *ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_aligned_alloc(size_t alignment, size_t size);
 
-POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_operator_new(size_t size) noexcept(false);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_operator_delete(void *ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_operator_delete_sized(void *ptr, size_t size);
 

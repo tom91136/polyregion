@@ -4,6 +4,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/ErrorHandling.h"
 
 #include "aspartame/all.hpp"
 
@@ -64,12 +65,25 @@ constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> ReplaceMap[]{
 
 bool runSplice(llvm::Module &M, const llvm::StringRef tag, const llvm::StringRef targetPrefix, const bool verbose) {
   llvm::SmallDenseMap<llvm::StringRef, llvm::StringRef> AllocReplacements(std::cbegin(ReplaceMap), std::cend(ReplaceMap));
+  std::string recordNewName;
+  if (targetPrefix == "polyrt_record_")
+    for (auto &F : M) {
+      if (!F.getName().contains("polyrt_record_operator_new")) continue;
+      const auto demangled = llvm::demangle(F.getName());
+      if (!llvm::StringRef(demangled).contains("polyrt_record_operator_new(")) continue;
+      recordNewName = F.getName().str();
+      break;
+    }
   bool modified = false;
   for (auto &F : M) {
     if (!F.hasName()) continue;
     if (!AllocReplacements.contains(F.getName())) continue;
 
-    const auto replacement = (targetPrefix + AllocReplacements[F.getName()]).str();
+    const auto operatorNew = AllocReplacements[F.getName()] == "operator_new";
+    if (operatorNew && targetPrefix == "polyrt_record_" && recordNewName.empty())
+      llvm::report_fatal_error("RecordAllocPass requires the C++ polyrt_record_operator_new declaration");
+    const auto replacement =
+        operatorNew && targetPrefix == "polyrt_record_" ? recordNewName : (targetPrefix + AllocReplacements[F.getName()]).str();
     if (verbose)
       llvm::errs() << "[" << tag << "] In " << F.getName() << " (demangled=" << llvm::demangle(F.getName()) << ") -> " << replacement
                    << "\n";

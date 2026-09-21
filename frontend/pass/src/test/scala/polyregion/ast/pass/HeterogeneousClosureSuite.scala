@@ -5,7 +5,7 @@ import PassTest.*
 
 class HeterogeneousClosureSuite extends munit.FunSuite {
 
-  test("heterogeneous orchestration operations round-trip with their complete operands") {
+  test("remote operations round-trip with their complete operands") {
     import p.repr
 
     val kernel = p.Term.Poison(p.Type.FnRef(p.Sym("example.kernel")))
@@ -70,7 +70,7 @@ class HeterogeneousClosureSuite extends munit.FunSuite {
     assertEquals(operations.map(_.terms), List(List(ptr, value, value), List(value), List(value), List(value)))
   }
 
-  test("heterogeneous orchestration operands are verified") {
+  test("remote operation operands are verified") {
     val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
     def launch(kernel: p.Term, args: List[p.Term] = Nil) = p.Spec.RemoteLaunch(
       context,

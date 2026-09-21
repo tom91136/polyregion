@@ -53,6 +53,8 @@ constexpr std::string_view LegacySycl = "cl::sycl::";
 
 [[nodiscard]] bool genericUsmAllocate(const std::string_view name) { return syclNameIs(name, "sycl::malloc"); }
 
+[[nodiscard]] bool temporaryUsmAllocate(const std::string_view name) { return syclNameIs(name, "sycl::malloc_temporary"); }
+
 [[nodiscard]] bool usmAlignedAllocate(const std::string_view name) { return syclNameIs(name, "sycl::aligned_alloc_device"); }
 
 [[nodiscard]] bool unsupportedUsmAllocate(const std::string_view name) {
@@ -317,10 +319,13 @@ static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::Functi
   // boundary as the underlying SYCL allocation and let the runtime own allocation failure.
   const bool oneDplDeviceAllocate = name.starts_with("oneapi::dpl::") && name.ends_with("::__sycl_usm_alloc") && call.getNumArgs() == 2
                                     && call.getType()->isPointerType();
+  const bool temporary = temporaryUsmAllocate(name) || oneDplDeviceAllocate;
   if (usmAlignedAllocate(name)) raise("SYCL aligned device allocation is not supported");
   if (unsupportedUsmAllocate(name)) raise("SYCL host and shared USM allocation is not supported");
-  if ((!usmAllocate(name) && !genericUsmAllocate(name) && !usmFree(name) && !oneDplDeviceAllocate) || call.getNumArgs() < 1) return {};
-  const auto allocate = usmAllocate(name) || genericUsmAllocate(name) || oneDplDeviceAllocate;
+  if ((!usmAllocate(name) && !genericUsmAllocate(name) && !temporaryUsmAllocate(name) && !usmFree(name) && !oneDplDeviceAllocate)
+      || call.getNumArgs() < 1)
+    return {};
+  const auto allocate = usmAllocate(name) || genericUsmAllocate(name) || temporary;
   const auto generic = genericUsmAllocate(name);
   const size_t semanticArguments = semanticArgumentCount(call);
   if (oneDplDeviceAllocate && semanticArguments != 2) raise("Unsupported oneDPL device allocation wrapper");
@@ -337,7 +342,7 @@ static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::Functi
   const auto untypedGeneric = generic && call.getType()->isPointerType() && call.getType()->getPointeeType()->isVoidType();
   if (generic && untypedGeneric != (semanticArguments == 4)) raise("Unsupported generic SYCL allocation overload");
   const auto *expression = &call;
-  return MatchedCall{Lowering{[expression, allocate, generic, untypedGeneric, oneDplDeviceAllocate,
+  return MatchedCall{Lowering{[expression, allocate, generic, untypedGeneric, oneDplDeviceAllocate, temporary,
                                semanticArguments](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
                        Vector<Term::Any> arguments;
                        arguments.reserve(semanticArguments);
@@ -357,7 +362,9 @@ static Opt<MatchedCall> syclUsm(const clang::CallExpr &call, const clang::Functi
                          const auto width = self.context.getTypeSizeInChars(pointee).getQuantity();
                          bytes = r.newVar(Expr::IntrOp(Intr::Mul(bytes, Term::IntU64Const(width), u64)));
                        }
-                       const auto allocation = r.newVar(Expr::SpecOp(Spec::RemoteAlloc(packageContext(), bytes)));
+                       const auto operation = temporary ? Spec::RemoteTempAlloc(packageContext(), bytes).widen()
+                                                        : Spec::RemoteAlloc(packageContext(), bytes).widen();
+                       const auto allocation = r.newVar(Expr::SpecOp(operation));
                        return Expr::Cast(allocation, self.handleType(expression->getType(), r));
                      }},
                      false};

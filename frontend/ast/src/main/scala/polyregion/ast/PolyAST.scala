@@ -258,6 +258,8 @@ object PolyAST {
         )
     case RemoteAlloc(context: Term, bytes: Term)
         extends Spec(Spec.Unchecked, List(context, bytes), Type.Ptr(Type.IntU8, Type.Space.Global))
+    case RemoteTempAlloc(context: Term, bytes: Term)
+        extends Spec(Spec.Unchecked, List(context, bytes), Type.Ptr(Type.IntU8, Type.Space.Global))
     case RemoteFree(context: Term, ptr: Term) extends Spec(Spec.Unchecked, List(context, ptr), Type.Unit0)
     case RemoteMemcpy(context: Term, dst: Term, src: Term, bytes: Term, direction: Direction)
         extends Spec(Spec.Unchecked, List(context, dst, src, bytes), Type.Unit0)
@@ -513,10 +515,13 @@ object PolyAST {
 
   case class Package(interface: Interface, program: Program) derives MsgPack.Codec
   object Package {
+    case class Fragment(identity: String, program: Program) derives MsgPack.Codec
+
     case class LinkRequest(
         interface: Interface,
-        programFragments: List[Program],
-        capabilities: List[String] = Nil
+        fragments: List[Fragment],
+        capabilities: List[String] = Nil,
+        pruneUnimplementedDeclarations: Boolean = false
     ) derives MsgPack.Codec
   }
 
@@ -1055,8 +1060,9 @@ object PolyAST {
             s"'remoteLaunch(${c.repr}, ${k.repr}[${ts
                 .map(_.repr)
                 .mkString(", ")}], <${gx.repr}, ${gy.repr}, ${gz.repr}>, <${bx.repr}, ${by.repr}, ${bz.repr}>, ${sh.repr}, [${as.map(_.repr).mkString(", ")}])"
-          case Spec.RemoteAlloc(c, b) => s"'remoteAlloc(${c.repr}, ${b.repr})"
-          case Spec.RemoteFree(c, p)  => s"'remoteFree(${c.repr}, ${p.repr})"
+          case Spec.RemoteAlloc(c, b)     => s"'remoteAlloc(${c.repr}, ${b.repr})"
+          case Spec.RemoteTempAlloc(c, b) => s"'remoteTempAlloc(${c.repr}, ${b.repr})"
+          case Spec.RemoteFree(c, p)      => s"'remoteFree(${c.repr}, ${p.repr})"
           case Spec.RemoteMemcpy(c, d, s, b, k) =>
             s"'remoteMemcpy(${c.repr}, ${d.repr}, ${s.repr}, ${b.repr}, ${k.repr})"
           case Spec.RemoteSync(c)          => s"'remoteSync(${c.repr})"

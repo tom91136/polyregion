@@ -32,6 +32,9 @@
     },
     {
       "name": "zlib"
+    },
+    {
+      "name": "zstd"
     }
   ],
   "features": {
@@ -98,6 +101,10 @@
     {
       "name": "zlib",
       "version": "1.3.2"
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7"
     }
   ]
 }

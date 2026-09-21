@@ -46,7 +46,7 @@ inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target
     case compiletime::Target::Object_LLVM_SPIRV64_Kernel: return {"--passes", deviceArenaLogical(stackDepth)};
     case compiletime::Target::Source_C_OpenCL1_1:
     case compiletime::Target::Source_C_Metal1_0: return {"--passes", deviceArena(stackDepth)};
-    default: return stackDepth ? std::vector<std::string>{"--passes", fullOpt(stackDepth) + ";StructuredExit"} : std::vector<std::string>{};
+    default: return {"--passes", fullOpt(stackDepth) + ";StructuredExit;RegionRespace"};
   }
 }
 

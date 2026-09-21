@@ -427,8 +427,12 @@ build-vcpkg: _vcpkg-sync-baseline
     fi
     echo "vcpkg ready at $PWD/vcpkg"
 
-# Install vcpkg manifest deps to $VCPKG_INSTALLED_DIR for the current host/arch.
-build-vcpkg-deps:
+# Install the complete native dependency manifest.
+build-vcpkg-deps: (_build-vcpkg-deps "")
+
+# Install vcpkg deps to $VCPKG_INSTALLED_DIR for the current host/arch. An
+# explicit port list lets LLVM bootstrap only its compression dependencies.
+_build-vcpkg-deps ports:
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{ os() }}-{{ arch }}" in
@@ -464,13 +468,27 @@ build-vcpkg-deps:
     if [ -d "{{ sysroot_path }}" ]; then export CMAKE_SYSROOT="{{ sysroot_path }}"; fi
     # XXX vcpkg has no prebuilt binaries for these archs; force system cmake/ninja
     case "{{ arch }}" in riscv64|arm|ppc64le|s390x|loongarch64) export VCPKG_FORCE_SYSTEM_BINARIES=1 ;; esac
-    echo "Installing vcpkg deps (triplet=$TRIPLET, feature=$JS_ENGINE, sysroot=${CMAKE_SYSROOT:-none}) -> $VCPKG_INSTALLED_DIR" >&2
+    if [ -n "{{ ports }}" ]; then
+        SELECTION="ports={{ ports }}"
+    else
+        SELECTION="feature=$JS_ENGINE"
+    fi
+    echo "Installing vcpkg deps (triplet=$TRIPLET, $SELECTION, sysroot=${CMAKE_SYSROOT:-none}) -> $VCPKG_INSTALLED_DIR" >&2
     mkdir -p "$VCPKG_INSTALLED_DIR"
-    "$VCPKG_BIN" install \
-        --x-manifest-root=native \
-        --x-install-root="$VCPKG_INSTALLED_DIR" \
-        --x-feature="$JS_ENGINE" \
-        --triplet="$TRIPLET"
+    if [ -n "{{ ports }}" ]; then
+        read -ra PORTS <<< "{{ ports }}"
+        QUALIFIED=()
+        for PORT in "${PORTS[@]}"; do QUALIFIED+=("$PORT:$TRIPLET"); done
+        "$VCPKG_BIN" install "${QUALIFIED[@]}" \
+            --x-install-root="$VCPKG_INSTALLED_DIR" \
+            --overlay-triplets=native/toolchains
+    else
+        "$VCPKG_BIN" install \
+            --x-manifest-root=native \
+            --x-install-root="$VCPKG_INSTALLED_DIR" \
+            --x-feature="$JS_ENGINE" \
+            --triplet="$TRIPLET"
+    fi
 
 # Rewrite native/vcpkg.json's `builtin-baseline` from $VCPKG_COMMIT. Cheap; safe to depend on.
 _vcpkg-sync-baseline:
@@ -489,11 +507,11 @@ build-sysroot:
     set -euo pipefail
     cd {{ justfile_directory() }}/sysroot
     case "{{ arch }}" in
-      x86_64)  base=al8;      dockerfile=Dockerfile;        plat=linux/amd64;   args=(--build-arg RHEL_TRIPLE=x86_64-redhat-linux  --build-arg GNU_TRIPLE=x86_64-linux-gnu       --build-arg EXTRA_PKGS=libquadmath) ;;
-      aarch64) base=al8;      dockerfile=Dockerfile;        plat=linux/arm64;   args=(--build-arg RHEL_TRIPLE=aarch64-redhat-linux --build-arg GNU_TRIPLE=aarch64-linux-gnu) ;;
-      ppc64le) base=al8;      dockerfile=Dockerfile;        plat=linux/ppc64le; args=(--build-arg RHEL_TRIPLE=ppc64le-redhat-linux  --build-arg GNU_TRIPLE=powerpc64le-linux-gnu) ;;
-      riscv64) base=ubuntu20; dockerfile=Dockerfile.ubuntu; plat=linux/riscv64; args=(--build-arg SYSBASE=docker.io/riscv64/ubuntu:20.04 --build-arg GCC_MAJOR=10) ;;
-      arm)     base=ubuntu20; dockerfile=Dockerfile.ubuntu; plat=linux/arm/v7;  args=(--build-arg SYSBASE=docker.io/arm32v7/ubuntu:20.04 --build-arg GCC_MAJOR=10) ;;
+      x86_64)  base=al8;      dockerfile=Dockerfile;        plat=linux/amd64;   args=(--build-arg RHEL_TRIPLE=x86_64-redhat-linux  --build-arg GNU_TRIPLE=x86_64-linux-gnu       --build-arg "EXTRA_PKGS=libquadmath zlib-devel zlib-static") ;;
+      aarch64) base=al8;      dockerfile=Dockerfile;        plat=linux/arm64;   args=(--build-arg RHEL_TRIPLE=aarch64-redhat-linux --build-arg GNU_TRIPLE=aarch64-linux-gnu       --build-arg "EXTRA_PKGS=zlib-devel zlib-static") ;;
+      ppc64le) base=al8;      dockerfile=Dockerfile;        plat=linux/ppc64le; args=(--build-arg RHEL_TRIPLE=ppc64le-redhat-linux  --build-arg GNU_TRIPLE=powerpc64le-linux-gnu --build-arg "EXTRA_PKGS=zlib-devel zlib-static") ;;
+      riscv64) base=ubuntu20; dockerfile=Dockerfile.ubuntu; plat=linux/riscv64; args=(--build-arg SYSBASE=docker.io/riscv64/ubuntu:20.04 --build-arg GCC_MAJOR=10 --build-arg EXTRA_PKGS=zlib1g-dev) ;;
+      arm)     base=ubuntu20; dockerfile=Dockerfile.ubuntu; plat=linux/arm/v7;  args=(--build-arg SYSBASE=docker.io/arm32v7/ubuntu:20.04 --build-arg GCC_MAJOR=10 --build-arg EXTRA_PKGS=zlib1g-dev) ;;
       *) echo "unsupported arch: {{ arch }} (x86_64/aarch64/ppc64le/riscv64/arm)" >&2; exit 1 ;;
     esac
     flags=()  # cross-arch flag only when target != host
@@ -509,7 +527,27 @@ build-sysroot:
     just prepare-sysroot
 
 # Build the bundled LLVM/Clang/LLD/Flang/MLIR dist; cached on rerun.
-build-llvm        extra='': (_native "LLVM"        extra)
+build-llvm        extra='': _build-llvm-deps (_native "LLVM" extra)
+
+# Native LLVM links its compression support statically. Darwin cross builds
+# also stage target-architecture archives because they have no target sysroot;
+# other cross builds use what is available in their sysroot.
+_build-llvm-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TARGET="{{ arch }}"
+    HOST=$(uname -m)
+    # Git Bash runs as x64 under Windows-on-ARM and reports AMD64 even on an ARM64 host.
+    if [ "{{ os() }}" = windows ]; then HOST="${VSCMD_ARG_HOST_ARCH:-${PROCESSOR_ARCHITECTURE:-$HOST}}"; fi
+    TARGET=$(printf '%s' "$TARGET" | tr '[:upper:]' '[:lower:]')
+    HOST=$(printf '%s' "$HOST" | tr '[:upper:]' '[:lower:]')
+    case "$TARGET" in x86_64|amd64|x64) TARGET=x86_64 ;; aarch64|arm64) TARGET=arm64 ;; esac
+    case "$HOST" in x86_64|amd64|x64) HOST=x86_64 ;; aarch64|arm64) HOST=arm64 ;; esac
+    if [ "$TARGET" != "$HOST" ] && [ "{{ os() }}" != macos ]; then
+        echo "Skipping native LLVM compression dependencies for cross target {{ arch }}"
+        exit 0
+    fi
+    just _build-vcpkg-deps "zlib zstd"
 
 # Build the AMDGPU/NVPTX device bitcode libs.
 build-device-libs extra='': (_native "DEVICE_LIBS" extra)

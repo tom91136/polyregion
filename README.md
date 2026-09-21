@@ -29,7 +29,7 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk  # any JDK 17+ install root
 just build-vcpkg               # clone + bootstrap vcpkg at the pinned commit
 just build-sysroot             # AL8 sysroot for portable binaries (optional; podman or docker required)
                                # skip for host-native; absence is detected as "no sysroot"
-just build-llvm                # bundled LLVM/Clang/LLD/Flang/MLIR (matches sysroot if present)
+just build-llvm                # bundled LLVM/Clang/LLD/Flang/MLIR; installs its small compression deps
 just build-vcpkg-deps          # manifest deps (Catch2, fmt, libffi, JS engine, ...) into native/.vcpkg
 just build-pass-native         # Scala-Native pass DSO (libpolypass) that polyc embeds (needs sbt)
 just configure                 # CMake-configure the native build

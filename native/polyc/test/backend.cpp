@@ -84,6 +84,42 @@ TEST_CASE("compiler options use target workgroup storage defaults", "[backend]")
   CHECK(cuda.workgroupMemoryBytes == polyregion::compiler::DefaultWorkgroupMemoryBytes);
 }
 
+TEST_CASE("LLVM compares pointers with distinct proven address spaces", "[backend][pointer]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named global("global", Type::Ptr(Type::IntS32(), TypeSpace::Global()));
+  const Named local("local", Type::Ptr(Type::IntS32(), TypeSpace::Private()));
+  const Named equal("equal", Type::Bool1());
+  const Named unequal("unequal", Type::Bool1());
+  const Function entry = mkFn("kernel", {Arg(global, {}), Arg(local, {})}, Type::Unit0(),
+                              {Var(equal, IntrOp(LogicEq(selectNamed(global), selectNamed(local))).widen(), false).widen(),
+                               Var(unequal, IntrOp(LogicNeq(selectNamed(global), selectNamed(local))).widen(), false).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "Mirror";
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+}
+
+TEST_CASE("LLVM stores a proven private pointer in a generic pointer binding", "[backend][pointer]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Named local("local", Type::Ptr(Type::IntS32(), TypeSpace::Private()));
+  const Named generic("generic", Type::Ptr(Type::IntS32(), TypeSpace::Global()));
+  const Function entry = mkFn("kernel", {Arg(local, {})}, Type::Unit0(),
+                              {Var(generic, Alias(selectNamed(local)).widen(), true).widen(),
+                               Mut(selectNamed(generic), Alias(selectNamed(local)).widen()).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  polyregion::compiler::Options opts{Target::Object_LLVM_HOST, "native"};
+  opts.pipelineSpec = "Mirror";
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), opts, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+}
+
 TEST_CASE("LLVM lowers aggregate atomic exchange through an integer of the same width", "[backend][atomic]") {
   polyregion::compiler::initialise();
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
@@ -394,7 +430,7 @@ TEST_CASE("SPIR-V normalises narrowed integer operands", "[backend][spirv]") {
   CHECK(normalisedExtendedWords[extendedWords.size() + 4] == ((4u << 16) | spv::OpNot));
 }
 
-TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]") {
+TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
@@ -408,7 +444,7 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
   const Named freed("freed", Type::Unit0());
   const auto kernel = Term::Poison(Type::FnRef(Sym({"kernel"}))).widen();
   const Function entry = mkFn(
-      "orchestrate", {Arg(context, {}), Arg(bytes, {}), Arg(extent, {})}, Type::Unit0(),
+      "invoke", {Arg(context, {}), Arg(bytes, {}), Arg(extent, {})}, Type::Unit0(),
       {Var(remote, Expr::SpecOp(Spec::RemoteAlloc(selectNamed(context).widen(), selectNamed(bytes).widen())).widen(), false).widen(),
        Var(copied,
            Expr::SpecOp(Spec::RemoteMemcpy(selectNamed(context).widen(), selectNamed(remote).widen(), selectNamed(remote).widen(),
@@ -439,12 +475,13 @@ TEST_CASE("CPU orchestration ABI follows the target pointer width", "[backend]")
   const auto checkAbi = [&](const auto &result, const std::string &sizeType) {
     REQUIRE(result.binary);
     const auto &ir = llvmIrOf(result);
-    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare {} @polyrt_remote_malloc(ptr, {})", sizeType, sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare i1 @polyrt_remote_malloc(ptr, {}, ptr)", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
-                       fmt::format("declare void @polyrt_remote_memcpy(ptr, {}, {}, {}, i32)", sizeType, sizeType, sizeType)));
+                       fmt::format("declare i1 @polyrt_remote_memcpy(ptr, {}, {}, {}, i32)", sizeType, sizeType, sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format(
-                       "declare void @polyrt_remote_launch_with_mirrors(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
-    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare void @polyrt_remote_free(ptr, {})", sizeType)));
+                       "declare i1 @polyrt_remote_launch_with_mirrors(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare i1 @polyrt_remote_free(ptr, {})", sizeType)));
+    CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call void @polyrt_abort()"));
     if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
   };
 
@@ -2318,7 +2355,7 @@ TEST_CASE("HostThreaded topology uses the task id and launch size", "[backend]")
   CHECK(ir ^ contains_slice("define i32 @kernel(i64"));
 }
 
-TEST_CASE("host orchestration lowers remote launches through the context ABI", "[backend]") {
+TEST_CASE("host lowering emits remote launches through the context ABI", "[backend]") {
   polyregion::compiler::initialise();
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;
@@ -2422,7 +2459,7 @@ TEST_CASE("host orchestration lowers remote launches through the context ABI", "
   CHECK(mirrorKindTwoStores == 1);
 }
 
-TEST_CASE("host orchestration transports stateless callable kernel slots as one byte", "[backend]") {
+TEST_CASE("host lowering transports stateless callable kernel slots as one byte", "[backend]") {
   polyregion::compiler::initialise();
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
   using namespace polyregion::polyast::dsl;

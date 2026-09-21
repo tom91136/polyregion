@@ -104,12 +104,10 @@ clang::VarDecl *mkStaticVarDecl(clang::ASTContext &C, clang::DeclContext *callee
   return decl;
 }
 
-clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
-                                 const std::vector<clang::QualType> &paramTys) {
-  auto *tu = C.getTranslationUnitDecl();
-  auto *linkage = clang::LinkageSpecDecl::Create(C, tu, {}, {}, clang::LinkageSpecLanguageIDs::C, false);
+static clang::FunctionDecl *mkExternFn(clang::ASTContext &C, clang::DeclContext *context, const std::string &name, clang::QualType retTy,
+                                       const std::vector<clang::QualType> &paramTys) {
   const auto fnTy = C.getFunctionType(retTy, paramTys, clang::FunctionProtoType::ExtProtoInfo());
-  auto *fn = clang::FunctionDecl::Create(C, linkage, {}, {}, clang::DeclarationName(&C.Idents.get(name)), fnTy,
+  auto *fn = clang::FunctionDecl::Create(C, context, {}, {}, clang::DeclarationName(&C.Idents.get(name)), fnTy,
                                          C.getTrivialTypeSourceInfo(fnTy), clang::SC_Extern);
   const auto params =
       paramTys | map([&](const auto &paramTy) {
@@ -117,9 +115,22 @@ clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, 
       })
       | to_vector();
   fn->setParams(params);
-  linkage->addDecl(fn);
+  context->addDecl(fn);
+  return fn;
+}
+
+clang::FunctionDecl *mkExternCFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
+                                 const std::vector<clang::QualType> &paramTys) {
+  auto *tu = C.getTranslationUnitDecl();
+  auto *linkage = clang::LinkageSpecDecl::Create(C, tu, {}, {}, clang::LinkageSpecLanguageIDs::C, false);
+  auto *fn = mkExternFn(C, linkage, name, retTy, paramTys);
   tu->addDecl(linkage);
   return fn;
+}
+
+clang::FunctionDecl *mkExternCppFn(clang::ASTContext &C, const std::string &name, clang::QualType retTy,
+                                   const std::vector<clang::QualType> &paramTys) {
+  return mkExternFn(C, C.getTranslationUnitDecl(), name, retTy, paramTys);
 }
 
 clang::CallExpr *mkCall(clang::ASTContext &C, clang::FunctionDecl *fn, const std::vector<clang::Expr *> &args) {

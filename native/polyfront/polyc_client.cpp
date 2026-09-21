@@ -117,11 +117,14 @@ Checked<polyast::CompileBundle> compileProgram(const polyast::ProgramLinkRequest
   const auto host = compiletime::TargetSpec::findByCodegen(hostTarget);
   if (!host) return {{}, {fmt::format("unknown program host target {}", static_cast<int>(hostTarget))}};
   std::vector<std::string> args{"--target=" + std::string(host->canonical), "--arch=" + hostArch};
+  std::string devices;
   for (const auto &[target, arch] : deviceTargets) {
     const auto device = compiletime::TargetSpec::findByCodegen(target);
     if (!device) return {{}, {fmt::format("unknown program device target {}", static_cast<int>(target))}};
-    args.emplace_back("--device=" + std::string(device->canonical) + "@" + arch);
+    if (!devices.empty()) devices += ',';
+    devices += std::string(device->canonical) + "@" + arch;
   }
+  if (!devices.empty()) args.emplace_back("--devices=" + devices);
   if (stackDepth) args.emplace_back("--stack-depth=" + std::to_string(*stackDepth));
   return invokeCompiler(polyast::programlinkrequest_to_msgpack(request), executable, args);
 }

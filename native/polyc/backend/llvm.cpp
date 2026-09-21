@@ -138,9 +138,16 @@ ValPtr physicalIndexVal(CodeGen &gen, const Expr::Index &x, const std::string &k
   } else throw BackendException::semantic("LHS of " + to_string(x) + " (index) is not a select");
 }
 
+bool samePointerPointee(const Type::Any &lhs, const Type::Any &rhs) {
+  const auto lhsPtr = lhs.template get<Type::Ptr>();
+  const auto rhsPtr = rhs.template get<Type::Ptr>();
+  return lhsPtr && rhsPtr && lhsPtr->comp == rhsPtr->comp;
+}
+
 static bool isPointerSlotReference(const Expr::RefTo &x) {
   const auto lhs = x.lhs.template get<Term::Select>();
-  return lhs && !x.idx && lhs->tpe.template is<Type::Ptr>() && x.comp == lhs->tpe;
+  // RegionRespace can refine a pointer's storage space without changing the identity of its slot.
+  return lhs && !x.idx && samePointerPointee(lhs->tpe, x.comp);
 }
 
 static ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, bool oneGep, const Opt<TypeSpace::Any> &preferredSpace = {});
@@ -739,6 +746,14 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, x); },
       [&](const Expr::IntrOp &x) -> ValPtr {
         auto intr = x.op;
+        const auto comparePointers = [&](const AnyTerm &lhs, const AnyTerm &rhs, bool equal) -> ValPtr {
+          if (!samePointerPointee(lhs.tpe(), rhs.tpe()))
+            throw BackendException::semantic("incompatible pointer operands in " + to_string(expr));
+          auto *l = mkTermVal(lhs);
+          auto *r = mkTermVal(rhs);
+          if (l->getType() != r->getType()) r = B.CreateAddrSpaceCast(r, l->getType());
+          return equal ? B.CreateICmpEQ(l, r) : B.CreateICmpNE(l, r);
+        };
         return intr.match_total( //
             [&](const Intr::BNot &v) -> ValPtr { return unaryExpr(expr, v.x, v.tpe, [&](const auto &x) { return B.CreateNot(x); }); },
             [&](const Intr::LogicNot &v) -> ValPtr { return B.CreateNot(mkTermVal(v.x)); },
@@ -821,16 +836,14 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const Intr::LogicAnd &v) -> ValPtr { return B.CreateLogicalAnd(mkTermVal(v.x), mkTermVal(v.y)); }, //
             [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkTermVal(v.x), mkTermVal(v.y)); },   //
             [&](const Intr::LogicEq &v) -> ValPtr {
-              if (v.x.tpe().is<Type::Ptr>())
-                return binaryExpr(expr, v.x, v.y, v.x.tpe(), [&](const auto &l, const auto &r) { return B.CreateICmpEQ(l, r); });
+              if (v.x.tpe().is<Type::Ptr>()) return comparePointers(v.x, v.y, true);
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
                   [&](const auto &l, const auto &r) { return B.CreateICmpEQ(l, r); },
                   [&](const auto &l, const auto &r) { return B.CreateFCmpOEQ(l, r); });
             },
             [&](const Intr::LogicNeq &v) -> ValPtr {
-              if (v.x.tpe().is<Type::Ptr>())
-                return binaryExpr(expr, v.x, v.y, v.x.tpe(), [&](const auto &l, const auto &r) { return B.CreateICmpNE(l, r); });
+              if (v.x.tpe().is<Type::Ptr>()) return comparePointers(v.x, v.y, false);
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
                   [&](const auto &l, const auto &r) { return B.CreateICmpNE(l, r); },
@@ -1123,6 +1136,10 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
 }
 
 CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx) {
+  const auto compatibleBindingTypes = [](const AnyType &declared, const AnyType &value) {
+    // A proven address space can refine a pointer value without changing its binding's declared type.
+    return declared == value || samePointerPointee(declared, value);
+  };
   return stmt.match_total(
       [&](const Stmt::Var &x) -> BlockKind {
         // [T : ref] =>> t:T  = _        ; lut += &t
@@ -1133,7 +1150,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           const auto pointer = x.name.tpe.template get<Type::Ptr>();
           return pointer && pointer->comp.is<Type::Nothing>();
         }();
-        if (x.expr && x.expr->tpe() != x.name.tpe && !erasedFnRef) {
+        if (x.expr && !compatibleBindingTypes(x.name.tpe, x.expr->tpe()) && !erasedFnRef) {
           throw BackendException::semantic("name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe())
                                            + " mismatch (" + repr(x) + ")");
         }
@@ -1293,7 +1310,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         // [T : ref {u: U}] =>> t.u := &(rhs:U)
         // [T : val]        =>> t   :=   rhs:T
         const auto &lhs = x.name;
-        if (x.expr.tpe() != lhs.tpe) {
+        if (!compatibleBindingTypes(lhs.tpe, x.expr.tpe())) {
           throw BackendException::semantic("name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs.tpe)
                                            + ") mismatch (" + repr(x) + ")");
         }

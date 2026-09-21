@@ -111,6 +111,18 @@ if (USE_LINKER)
     list(APPEND BUILD_OPTIONS -DLLVM_USE_LINKER=${USE_LINKER})
 endif ()
 
+foreach (_compression_var IN ITEMS
+        zstd_INCLUDE_DIR
+        zstd_LIBRARY
+        zstd_STATIC_LIBRARY
+        ZLIB_INCLUDE_DIR
+        ZLIB_LIBRARY
+        ZLIB_LIBRARY_RELEASE)
+    if (DEFINED ${_compression_var} AND NOT "${${_compression_var}}" STREQUAL "")
+        list(APPEND BUILD_OPTIONS "-D${_compression_var}=${${_compression_var}}")
+    endif ()
+endforeach ()
+
 file(GLOB_RECURSE CMAKE_CACHE_FILES
         "${LLVM_BUILD_DIR}/**/CMakeFiles/*"
         "${LLVM_BUILD_DIR}/**/CMakeCache.txt"
@@ -358,4 +370,3 @@ file(COPY "${LLVM_BUILD_DIR}/${LLVM_SRC_DIRNAME}/flang/tools/flang-driver/fc1_ma
         DESTINATION "${FUSED_DRIVER_STAGE}/flang-tools-flang-driver")
 
 message(STATUS "LLVM build complete!")
-

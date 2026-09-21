@@ -461,11 +461,12 @@ ValPtr SPIRVOpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       },
       [&](const Spec::GpuGroupInclusiveScan &v) -> ValPtr { return emitGroupCollective(cg, "work_group_scan_inclusive", v.op, v.value); },
       [&](const Spec::GpuGroupExclusiveScan &v) -> ValPtr { return emitGroupCollective(cg, "work_group_scan_exclusive", v.op, v.value); },
-      [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
-      [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
-      [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
-      [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a local orchestration operation"); },
-      [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
+      [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a host-only operation"); },
+      [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a host-only operation"); },
+      [&](const Spec::RemoteTempAlloc &) -> ValPtr { throw BackendException("Spec::RemoteTempAlloc is a host-only operation"); },
+      [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a host-only operation"); },
+      [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a host-only operation"); },
+      [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a host-only operation"); },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
       [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }
@@ -628,11 +629,12 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuGroupExclusiveScan &) -> ValPtr {
         throw BackendException("Spec::GpuGroupExclusiveScan requires SubgroupLower for SPIRV-Vulkan");
       },
-      [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a local orchestration operation"); },
-      [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a local orchestration operation"); },
-      [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a local orchestration operation"); },
-      [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a local orchestration operation"); },
-      [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a local orchestration operation"); },
+      [&](const Spec::RemoteLaunch &) -> ValPtr { throw BackendException("Spec::RemoteLaunch is a host-only operation"); },
+      [&](const Spec::RemoteAlloc &) -> ValPtr { throw BackendException("Spec::RemoteAlloc is a host-only operation"); },
+      [&](const Spec::RemoteTempAlloc &) -> ValPtr { throw BackendException("Spec::RemoteTempAlloc is a host-only operation"); },
+      [&](const Spec::RemoteFree &) -> ValPtr { throw BackendException("Spec::RemoteFree is a host-only operation"); },
+      [&](const Spec::RemoteMemcpy &) -> ValPtr { throw BackendException("Spec::RemoteMemcpy is a host-only operation"); },
+      [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a host-only operation"); },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
       [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
 }

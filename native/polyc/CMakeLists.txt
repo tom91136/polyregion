@@ -26,7 +26,7 @@ set(LIB_SOURCES
 )
 
 add_library(polyc ${LIB_SOURCES})
-add_library(polyc-driver driver_polyc.cpp)
+add_library(polyc-driver driver_package.cpp driver_polyc.cpp)
 
 add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/jit.cpp test/js_runner.cpp test/vendor_bitcode.cpp
         test/treeshake.cpp)
@@ -136,7 +136,7 @@ add_test(NAME polyc-tests COMMAND polyc-tests)
 polyregion_test_dist_record(NAME polyc-tests COMMAND :bin:polyc-tests)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyinvoke-static polytest Aspartame::Aspartame)
 polyregion_test_profile_dir(polyc-benchmarks)
-target_link_libraries(polyc-driver PRIVATE polyc Aspartame::Aspartame)
+target_link_libraries(polyc-driver PRIVATE polyc Aspartame::Aspartame zstd::libzstd_static)
 target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)
 
 polyregion_apply_common_options(polyc-tests EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})

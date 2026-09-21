@@ -16,6 +16,20 @@ using namespace aspartame;
 
 string polyast::fqcn(const Sym &symbol) { return symbol.fqn ^ mk_string("."); }
 
+string polyast::offloadEntrySymbol(const Sym &symbol) {
+  static constexpr char Hex[] = "0123456789abcdef";
+  std::string out = "polyregion_entry";
+  for (const auto &component : symbol.fqn) {
+    fmt::format_to(std::back_inserter(out), "_{}_", component.size());
+    for (const auto byte : component) {
+      const auto c = static_cast<unsigned char>(byte);
+      out += Hex[c >> 4];
+      out += Hex[c & 0xf];
+    }
+  }
+  return out;
+}
+
 string polyast::canonicalName(const TypeSpace::Any &space) {
   return space.match_total([](const TypeSpace::Global &) { return ""s; }, [](const TypeSpace::Local &) { return "^Local"s; },
                            [](const TypeSpace::Private &) { return "^Private"s; },
@@ -55,6 +69,14 @@ string polyast::signatureKey(const Signature &signature) {
 std::variant<std::string, Package> polyregion::polyast::decodePackage(const uint8_t *begin, const uint8_t *end) noexcept {
   try {
     return package_from_msgpack(begin, end);
+  } catch (const std::exception &e) {
+    return std::string(e.what());
+  }
+}
+
+std::variant<std::string, Interface> polyregion::polyast::decodeInterface(const uint8_t *begin, const uint8_t *end) noexcept {
+  try {
+    return interface_from_msgpack(begin, end);
   } catch (const std::exception &e) {
     return std::string(e.what());
   }

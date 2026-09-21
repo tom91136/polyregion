@@ -10,8 +10,16 @@ object OffloadEntryInline extends ProgramPass {
     val all = program.entry.toList ::: program.functions
 
     def inlineEntry(entry: p.Function): p.Function = {
-      val dependencies = all.filterNot(_.decl == entry.decl)
-      FnInline(program.copy(entry = Some(entry), functions = dependencies), log.subLog(entry.name.repr)).entry
+      val entryLog = log.subLog(entry.name.repr)
+      // Each offload entry is independent.  Do not make FnInline build an overload table for, and repeatedly
+      // traverse, every other exported package root.  Internalising the candidates lets the ordinary reachability
+      // pass retain precisely this entry's transitive callees (including every overload of a reached name).
+      val candidates = all.filterNot(_.decl == entry.decl).map(_.copy(visibility = p.Function.Visibility.Internal))
+      val reachable = DeadFunctionElimination(
+        program.copy(entry = Some(entry), functions = candidates),
+        entryLog.subLog("reachable")
+      )
+      FnInline(reachable, entryLog).entry
         .getOrElse(entry)
     }
 

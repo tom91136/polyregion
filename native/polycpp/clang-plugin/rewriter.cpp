@@ -1,7 +1,11 @@
 #include "rewriter.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <deque>
+#include <future>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -18,8 +22,10 @@
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Sema.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/MD5.h"
+#include "llvm/Support/ThreadPool.h"
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
@@ -30,6 +36,7 @@
 #include "polyfront/package_program.hpp"
 #include "polyfront/polyc_client.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/env_keys.h"
 #include "polyregion/program_import.hpp"
 
 #include "ast.h"
@@ -285,7 +292,7 @@ static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::
 
 struct PreparedInterfaceCall {
   InterfaceSite site;
-  polyast::Package pkg;
+  const polyfront::package::Archive *archive;
   std::vector<Type::Any> argumentTypes;
   std::vector<ProgramTypeSize> typeSizes;
   std::vector<Function> consumerFunctions;
@@ -295,7 +302,7 @@ struct PreparedInterfaceCall {
 };
 
 static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::CompilerInstance &CI, clang::ASTContext &C,
-                                                                 const InterfaceSite &site, const polyast::Package &pkg) {
+                                                                 const InterfaceSite &site, const polyfront::package::Archive &archive) {
   auto &D = CI.getDiagnostics();
   Remapper remapper(C);
   Remapper::RemapContext context;
@@ -371,7 +378,7 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::Compiler
   auto callerFns = context.functions | values() | map([](const auto &function) { return *function; }) | to_vector();
   const auto callerDefs = context.structs | values() | map([](const auto &definition) { return *definition; }) | to_vector();
   callerFns.emplace_back(program::importRoot(entryName, publicName, argumentTypes, returnType));
-  return PreparedInterfaceCall{site,   pkg,      std::move(argumentTypes), std::move(typeSizes), std::move(callerFns), callerDefs,
+  return PreparedInterfaceCall{site,   &archive, std::move(argumentTypes), std::move(typeSizes), std::move(callerFns), callerDefs,
                                suffix, entryName};
 }
 
@@ -431,8 +438,8 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
     entryArgs.emplace_back(S.CreateBuiltinUnaryOp({}, clang::UO_AddrOf, mkDeclRef(C, resultDecl)).get());
   }
   auto *entry = mkExternCFn(C, entryName, C.VoidTy, entryTypes);
-  auto *contextAcquire = mkExternCFn(C, "polyrt_context_acquire", C.VoidTy, {C.VoidPtrTy});
-  auto *contextRelease = mkExternCFn(C, "polyrt_context_release", C.VoidTy, {C.VoidPtrTy});
+  auto *contextAcquire = mkExternCppFn(C, "polyrt_context_acquire_or_throw", C.VoidTy, {C.VoidPtrTy});
+  auto *contextRelease = mkExternCppFn(C, "polyrt_context_release_or_throw", C.VoidTy, {C.VoidPtrTy});
   std::vector<clang::Stmt *> statements;
   if (resultDecl) statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(resultDecl), {}, {}));
   statements.emplace_back(mkCall(C, contextAcquire, {contextArg}));
@@ -491,7 +498,8 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
 }
 
 static void compileInterfaceCalls(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C,
-                                  const std::vector<PreparedInterfaceCall> &prepared, std::vector<int8_t> &packageProgramBitcode) {
+                                  const std::vector<PreparedInterfaceCall> &prepared,
+                                  polystl::PackageProgramBitcodes &packageProgramBitcodes) {
   if (prepared.empty()) return;
   auto &D = CI.getDiagnostics();
   const auto entryTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
@@ -501,57 +509,79 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
          CI.getTarget().getTriple().getArchName());
     return;
   }
-  std::vector<Package> packages;
-  std::vector<Function> functions;
-  std::vector<StructDef> definitions;
-  std::vector<ProgramTypeSize> typeSizes;
-  const auto appendDistinct = []<typename T>(std::vector<T> &target, const std::vector<T> &values) {
-    for (const auto &value : values)
-      if (std::find(target.begin(), target.end(), value) == target.end()) target.emplace_back(value);
-  };
-  for (const auto &item : prepared) {
-    if (std::find(packages.begin(), packages.end(), item.pkg) == packages.end()) packages.emplace_back(item.pkg);
-    appendDistinct(functions, item.consumerFunctions);
-    appendDistinct(definitions, item.consumerDefinitions);
-    appendDistinct(typeSizes, item.typeSizes);
-  }
   const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-  const auto request = ProgramLinkRequest(std::move(packages), polyfront::packageProgram(std::move(functions), std::move(definitions)),
-                                          capabilities, std::move(typeSizes));
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
-  auto compiled =
-      polyfront::package::compileProgram(request, opts.executable, *entryTarget,
-                                         polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets, opts.stackDepth);
-  if (!compiled) {
-    emit(D, prepared.front().site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
-         compiled.errors ^ mk_string("; "));
+  auto *translationUnit = C.getTranslationUnitDecl();
+  // Each interface call is an independent package root.  Keep it isolated through package linking and backend
+  // compilation: merging expanded roots first multiplies the AST retained and serialised for every device entry.
+  // Default to one child because a canonical vendor root can consume several GiB.  Callers that coordinate their
+  // outer compile fan-out may opt into a small bounded window; results are still consumed in source order.
+  size_t jobs = 1;
+  if (const char *value = std::getenv(env::PolycppPackageJobs); value && *value) {
+    char *end = nullptr;
+    const auto parsed = std::strtoul(value, &end, 10);
+    if (end != value && *end == '\0' && parsed > 0) jobs = std::min<size_t>(parsed, prepared.size());
+  }
+  const auto compile = [&](const PreparedInterfaceCall &item) {
+    auto selected = polyfront::package::loadPackageSelection(*item.archive, item.site.declaration);
+    if (!selected) return polyfront::package::Checked<CompileBundle>{{}, std::move(selected.errors)};
+    const auto request =
+        ProgramLinkRequest({std::move(*selected.value)}, polyfront::packageProgram(item.consumerFunctions, item.consumerDefinitions),
+                           capabilities, item.typeSizes);
+    return polyfront::package::compileProgram(request, opts.executable, *entryTarget,
+                                              polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets,
+                                              opts.stackDepth);
+  };
+  const auto consume = [&](const PreparedInterfaceCall &item, polyfront::package::Checked<CompileBundle> compiled) {
+    if (!compiled) {
+      emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
+           compiled.errors ^ mk_string("; "));
+      return;
+    }
+    packageProgramBitcodes.emplace_back(std::move(compiled.value->hostObject));
+    std::vector<InterfaceModuleResource> resources;
+    resources.reserve(compiled.value->remoteModules.size());
+    for (size_t index = 0; index < compiled.value->remoteModules.size(); ++index) {
+      const auto &object = compiled.value->remoteModules[index];
+      auto *image =
+          mkStaticByteArray(C, translationUnit, "__polyregion_package_image_" + item.suffix + "_" + std::to_string(index), object.image);
+      translationUnit->addDecl(image);
+      CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(image));
+      clang::VarDecl *features = nullptr;
+      if (!object.features.empty()) {
+        features = mkStaticVarDecl(C, translationUnit, "__polyregion_package_features_" + item.suffix + "_" + std::to_string(index),
+                                   mkConstArrTy(C, constCharStarTy(C), object.features.size()),
+                                   object.features | map([&](const auto &feature) -> clang::Expr * {
+                                     return mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, feature));
+                                   }) | to_vector());
+        translationUnit->addDecl(features);
+        CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(features));
+      }
+      resources.emplace_back(InterfaceModuleResource{image, features});
+    }
+    materializeInterfaceCall(CI, C, item, *compiled.value, resources);
+  };
+  if (jobs == 1) {
+    for (const auto &item : prepared)
+      consume(item, compile(item));
     return;
   }
-  packageProgramBitcode = compiled.value->hostObject;
-  std::vector<InterfaceModuleResource> resources;
-  resources.reserve(compiled.value->remoteModules.size());
-  auto *translationUnit = C.getTranslationUnitDecl();
-  const auto &batchSuffix = prepared.front().suffix;
-  for (size_t index = 0; index < compiled.value->remoteModules.size(); ++index) {
-    const auto &object = compiled.value->remoteModules[index];
-    auto *image =
-        mkStaticByteArray(C, translationUnit, "__polyregion_package_image_" + batchSuffix + "_" + std::to_string(index), object.image);
-    translationUnit->addDecl(image);
-    CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(image));
-    clang::VarDecl *features = nullptr;
-    if (!object.features.empty()) {
-      features = mkStaticVarDecl(C, translationUnit, "__polyregion_package_features_" + batchSuffix + "_" + std::to_string(index),
-                                 mkConstArrTy(C, constCharStarTy(C), object.features.size()),
-                                 object.features | map([&](const auto &feature) -> clang::Expr * {
-                                   return mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, feature));
-                                 }) | to_vector());
-      translationUnit->addDecl(features);
-      CI.getASTConsumer().HandleTopLevelDecl(clang::DeclGroupRef(features));
-    }
-    resources.emplace_back(InterfaceModuleResource{image, features});
+  llvm::StdThreadPool pool(llvm::hardware_concurrency(jobs));
+  using CompileResult = polyfront::package::Checked<CompileBundle>;
+  using Pending = std::pair<const PreparedInterfaceCall *, std::shared_future<std::unique_ptr<CompileResult>>>;
+  std::deque<Pending> pending;
+  const auto consumeOldest = [&] {
+    auto [item, result] = std::move(pending.front());
+    pending.pop_front();
+    consume(*item, std::move(*result.get()));
+  };
+  for (const auto &item : prepared) {
+    const auto *itemPtr = &item;
+    pending.emplace_back(itemPtr, pool.async([&compile, itemPtr] { return std::make_unique<CompileResult>(compile(*itemPtr)); }));
+    if (pending.size() >= jobs) consumeOldest();
   }
-  for (const auto &item : prepared)
-    materializeInterfaceCall(CI, C, item, *compiled.value, resources);
+  while (!pending.empty())
+    consumeOldest();
 }
 
 static Vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
@@ -862,18 +892,18 @@ namespace polyregion::polystl {
 class OffloadRewriteConsumer final : public clang::ASTConsumer {
   clang::CompilerInstance &CI;
   polyfront::Options opts;
-  std::shared_ptr<std::vector<int8_t>> packageProgramBitcode;
+  std::shared_ptr<PackageProgramBitcodes> packageProgramBitcodes;
 
 public:
   OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
-                         std::shared_ptr<std::vector<int8_t>> packageProgramBitcode);
+                         std::shared_ptr<PackageProgramBitcodes> packageProgramBitcodes);
   void HandleTranslationUnit(clang::ASTContext &C) override;
 };
 } // namespace polyregion::polystl
 
 OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
-                                               std::shared_ptr<std::vector<int8_t>> packageProgramBitcode)
-    : clang::ASTConsumer(), CI(CI), opts(opts), packageProgramBitcode(std::move(packageProgramBitcode)) {}
+                                               std::shared_ptr<PackageProgramBitcodes> packageProgramBitcodes)
+    : clang::ASTConsumer(), CI(CI), opts(opts), packageProgramBitcodes(std::move(packageProgramBitcodes)) {}
 
 namespace {
 struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
@@ -1017,7 +1047,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                          || action == clang::frontend::EmitObj;
   if (!emitsCode) return;
   std::map<const clang::FunctionDecl *, Vector<const clang::FunctionDecl *>> interfaceCallables;
-  std::map<std::string, polyast::Package> interfacePackages;
+  std::map<std::string, polyfront::package::Archive> interfacePackages;
   std::vector<PreparedInterfaceCall> preparedInterfaces;
   for (const auto &site : interfaceSites(C)) {
     if (const auto error = interfaceCallableShapeError(site)) {
@@ -1051,11 +1081,11 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     }
     if (auto prepared = prepareInterfaceCall(CI, C, site, found->second)) preparedInterfaces.emplace_back(std::move(*prepared));
   }
-  compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcode);
+  compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcodes);
 }
 
 std::unique_ptr<clang::ASTConsumer>
 polyregion::polystl::makeOffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts,
-                                                std::shared_ptr<std::vector<int8_t>> packageProgramBitcode) {
-  return std::make_unique<OffloadRewriteConsumer>(CI, opts, std::move(packageProgramBitcode));
+                                                std::shared_ptr<PackageProgramBitcodes> packageProgramBitcodes) {
+  return std::make_unique<OffloadRewriteConsumer>(CI, opts, std::move(packageProgramBitcodes));
 }

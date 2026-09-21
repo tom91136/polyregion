@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "c94edbd87447a7e68bf9421ee351d917";
-constexpr auto ProgramHash = "792769dfaf6d9bfdf062cfee1ab403ea";
-constexpr auto PackageHash = "011b089db26b9ccb5c33ba7ecd65dc17";
-constexpr auto PackageWireHash = "261b8a315a3939a4197e316dc7e7c850";
+constexpr auto AdtHash = "82b4b7f74d3aa8a471ef53aa841e7212";
+constexpr auto ProgramHash = "de2de5f725108f6b01538c5ef974ec9a";
+constexpr auto PackageHash = "944c2b087ebac646c9d8a15c5fb76323";
+constexpr auto PackageWireHash = "ddf50b72239fc50bb6fddc26c62a5fec";
 constexpr auto CompileWireHash = "e6b6255e589708b2bd5b064b6b4fe04a";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -1441,6 +1441,18 @@ json Spec::remotealloc_to_json(const Spec::RemoteAlloc &x_) {
   return json::array({context, bytes});
 }
 
+Spec::RemoteTempAlloc Spec::remotetempalloc_from_json(const json &j_) {
+  auto context = Term::any_from_json(j_.at(0));
+  auto bytes = Term::any_from_json(j_.at(1));
+  return {context, bytes};
+}
+
+json Spec::remotetempalloc_to_json(const Spec::RemoteTempAlloc &x_) {
+  auto context = Term::any_to_json(x_.context);
+  auto bytes = Term::any_to_json(x_.bytes);
+  return json::array({context, bytes});
+}
+
 Spec::RemoteFree Spec::remotefree_from_json(const json &j_) {
   auto context = Term::any_from_json(j_.at(0));
   auto ptr = Term::any_from_json(j_.at(1));
@@ -1517,9 +1529,10 @@ Spec::Any Spec::any_from_json(const json &j_) {
     case 29: return Spec::gpuvolatilestore_from_json(t_);
     case 30: return Spec::remotelaunch_from_json(t_);
     case 31: return Spec::remotealloc_from_json(t_);
-    case 32: return Spec::remotefree_from_json(t_);
-    case 33: return Spec::remotememcpy_from_json(t_);
-    case 34: return Spec::remotesync_from_json(t_);
+    case 32: return Spec::remotetempalloc_from_json(t_);
+    case 33: return Spec::remotefree_from_json(t_);
+    case 34: return Spec::remotememcpy_from_json(t_);
+    case 35: return Spec::remotesync_from_json(t_);
     default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1557,9 +1570,10 @@ json Spec::any_to_json(const Spec::Any &x_) {
                         [](const Spec::GpuVolatileStore &y_) -> json { return {29, Spec::gpuvolatilestore_to_json(y_)}; },
                         [](const Spec::RemoteLaunch &y_) -> json { return {30, Spec::remotelaunch_to_json(y_)}; },
                         [](const Spec::RemoteAlloc &y_) -> json { return {31, Spec::remotealloc_to_json(y_)}; },
-                        [](const Spec::RemoteFree &y_) -> json { return {32, Spec::remotefree_to_json(y_)}; },
-                        [](const Spec::RemoteMemcpy &y_) -> json { return {33, Spec::remotememcpy_to_json(y_)}; },
-                        [](const Spec::RemoteSync &y_) -> json { return {34, Spec::remotesync_to_json(y_)}; });
+                        [](const Spec::RemoteTempAlloc &y_) -> json { return {32, Spec::remotetempalloc_to_json(y_)}; },
+                        [](const Spec::RemoteFree &y_) -> json { return {33, Spec::remotefree_to_json(y_)}; },
+                        [](const Spec::RemoteMemcpy &y_) -> json { return {34, Spec::remotememcpy_to_json(y_)}; },
+                        [](const Spec::RemoteSync &y_) -> json { return {35, Spec::remotesync_to_json(y_)}; });
 }
 
 Intr::BNot Intr::bnot_from_json(const json &j_) {
@@ -3351,24 +3365,38 @@ json programlinkrequest_to_json(const ProgramLinkRequest &x_) {
   return json::array({packages, consumer, capabilities, typeSizes});
 }
 
+PackageFragment packagefragment_from_json(const json &j_) {
+  auto identity = j_.at(0).get<std::string>();
+  auto program = program_from_json(j_.at(1));
+  return {identity, program};
+}
+
+json packagefragment_to_json(const PackageFragment &x_) {
+  auto identity = x_.identity;
+  auto program = program_to_json(x_.program);
+  return json::array({identity, program});
+}
+
 PackageLinkRequest packagelinkrequest_from_json(const json &j_) {
   auto interface = interface_from_json(j_.at(0));
-  std::vector<Program> programFragments;
+  std::vector<PackageFragment> fragments;
   for (const auto &v_ : j_.at(1)) {
-    programFragments.emplace_back(program_from_json(v_));
+    fragments.emplace_back(packagefragment_from_json(v_));
   }
   auto capabilities = j_.at(2).get<std::vector<std::string>>();
-  return {interface, programFragments, capabilities};
+  auto pruneUnimplementedDeclarations = j_.at(3).get<bool>();
+  return {interface, fragments, capabilities, pruneUnimplementedDeclarations};
 }
 
 json packagelinkrequest_to_json(const PackageLinkRequest &x_) {
   auto interface = interface_to_json(x_.interface);
-  std::vector<json> programFragments;
-  for (const auto &v_ : x_.programFragments) {
-    programFragments.emplace_back(program_to_json(v_));
+  std::vector<json> fragments;
+  for (const auto &v_ : x_.fragments) {
+    fragments.emplace_back(packagefragment_to_json(v_));
   }
   auto capabilities = x_.capabilities;
-  return json::array({interface, programFragments, capabilities});
+  auto pruneUnimplementedDeclarations = x_.pruneUnimplementedDeclarations;
+  return json::array({interface, fragments, capabilities, pruneUnimplementedDeclarations});
 }
 
 CompileModule compilemodule_from_json(const json &j_) {
@@ -3854,6 +3882,10 @@ Spec::RemoteAlloc remotealloc_fields_from_msgpack(MsgpackReader &, size_t);
 void remotealloc_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteAlloc &);
 Spec::RemoteAlloc remotealloc_from_msgpack(MsgpackReader &);
 void remotealloc_to_msgpack(MsgpackWriter &, const Spec::RemoteAlloc &);
+Spec::RemoteTempAlloc remotetempalloc_fields_from_msgpack(MsgpackReader &, size_t);
+void remotetempalloc_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteTempAlloc &);
+Spec::RemoteTempAlloc remotetempalloc_from_msgpack(MsgpackReader &);
+void remotetempalloc_to_msgpack(MsgpackWriter &, const Spec::RemoteTempAlloc &);
 Spec::RemoteFree remotefree_fields_from_msgpack(MsgpackReader &, size_t);
 void remotefree_fields_to_msgpack(MsgpackWriter &, const Spec::RemoteFree &);
 Spec::RemoteFree remotefree_from_msgpack(MsgpackReader &);
@@ -4069,6 +4101,10 @@ ProgramLinkRequest programlinkrequest_fields_from_msgpack(MsgpackReader &, size_
 void programlinkrequest_fields_to_msgpack(MsgpackWriter &, const ProgramLinkRequest &);
 ProgramLinkRequest programlinkrequest_from_msgpack(MsgpackReader &);
 void programlinkrequest_to_msgpack(MsgpackWriter &, const ProgramLinkRequest &);
+PackageFragment packagefragment_fields_from_msgpack(MsgpackReader &, size_t);
+void packagefragment_fields_to_msgpack(MsgpackWriter &, const PackageFragment &);
+PackageFragment packagefragment_from_msgpack(MsgpackReader &);
+void packagefragment_to_msgpack(MsgpackWriter &, const PackageFragment &);
 PackageLinkRequest packagelinkrequest_fields_from_msgpack(MsgpackReader &, size_t);
 void packagelinkrequest_fields_to_msgpack(MsgpackWriter &, const PackageLinkRequest &);
 PackageLinkRequest packagelinkrequest_from_msgpack(MsgpackReader &);
@@ -7629,6 +7665,28 @@ void Spec::remotealloc_to_msgpack(MsgpackWriter &w_, const Spec::RemoteAlloc &x_
   Spec::remotealloc_fields_to_msgpack(w_, x_);
 }
 
+Spec::RemoteTempAlloc Spec::remotetempalloc_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected Spec::RemoteTempAlloc with 2 field(s)");
+  auto context = Term::any_from_msgpack(r_);
+  auto bytes = Term::any_from_msgpack(r_);
+  return {context, bytes};
+}
+
+void Spec::remotetempalloc_fields_to_msgpack(MsgpackWriter &w_, const Spec::RemoteTempAlloc &x_) {
+  Term::any_to_msgpack(w_, x_.context);
+  Term::any_to_msgpack(w_, x_.bytes);
+}
+
+Spec::RemoteTempAlloc Spec::remotetempalloc_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return Spec::remotetempalloc_fields_from_msgpack(r_, n_);
+}
+
+void Spec::remotetempalloc_to_msgpack(MsgpackWriter &w_, const Spec::RemoteTempAlloc &x_) {
+  w_.writeArrayHeader(2);
+  Spec::remotetempalloc_fields_to_msgpack(w_, x_);
+}
+
 Spec::RemoteFree Spec::remotefree_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
   if (n_ != 2) throw std::runtime_error("Expected Spec::RemoteFree with 2 field(s)");
   auto context = Term::any_from_msgpack(r_);
@@ -7735,9 +7793,10 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 29: return Spec::gpuvolatilestore_fields_from_msgpack(r_, n_ - 1);
       case 30: return Spec::remotelaunch_fields_from_msgpack(r_, n_ - 1);
       case 31: return Spec::remotealloc_fields_from_msgpack(r_, n_ - 1);
-      case 32: return Spec::remotefree_fields_from_msgpack(r_, n_ - 1);
-      case 33: return Spec::remotememcpy_fields_from_msgpack(r_, n_ - 1);
-      case 34: return Spec::remotesync_fields_from_msgpack(r_, n_ - 1);
+      case 32: return Spec::remotetempalloc_fields_from_msgpack(r_, n_ - 1);
+      case 33: return Spec::remotefree_fields_from_msgpack(r_, n_ - 1);
+      case 34: return Spec::remotememcpy_fields_from_msgpack(r_, n_ - 1);
+      case 35: return Spec::remotesync_fields_from_msgpack(r_, n_ - 1);
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   } else {
@@ -7778,6 +7837,7 @@ Spec::Any Spec::any_from_msgpack(MsgpackReader &r_) {
       case 32: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 33: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       case 34: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
+      case 35: throw std::runtime_error("Expected array payload for non-nullary sum ordinal");
       default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
     }
   }
@@ -7910,19 +7970,24 @@ void Spec::any_to_msgpack(MsgpackWriter &w_, const Spec::Any &x_) {
         w_.writeInt32(31);
         Spec::remotealloc_fields_to_msgpack(w_, y_);
       },
-      [&](const Spec::RemoteFree &y_) -> void {
+      [&](const Spec::RemoteTempAlloc &y_) -> void {
         w_.writeArrayHeader(3);
         w_.writeInt32(32);
+        Spec::remotetempalloc_fields_to_msgpack(w_, y_);
+      },
+      [&](const Spec::RemoteFree &y_) -> void {
+        w_.writeArrayHeader(3);
+        w_.writeInt32(33);
         Spec::remotefree_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteMemcpy &y_) -> void {
         w_.writeArrayHeader(6);
-        w_.writeInt32(33);
+        w_.writeInt32(34);
         Spec::remotememcpy_fields_to_msgpack(w_, y_);
       },
       [&](const Spec::RemoteSync &y_) -> void {
         w_.writeArrayHeader(2);
-        w_.writeInt32(34);
+        w_.writeInt32(35);
         Spec::remotesync_fields_to_msgpack(w_, y_);
       });
 }
@@ -11602,16 +11667,38 @@ void programlinkrequest_to_msgpack(MsgpackWriter &w_, const ProgramLinkRequest &
   programlinkrequest_fields_to_msgpack(w_, x_);
 }
 
+PackageFragment packagefragment_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
+  if (n_ != 2) throw std::runtime_error("Expected PackageFragment with 2 field(s)");
+  auto identity = r_.readString();
+  auto program = program_from_msgpack(r_);
+  return {identity, program};
+}
+
+void packagefragment_fields_to_msgpack(MsgpackWriter &w_, const PackageFragment &x_) {
+  w_.writeString(x_.identity);
+  program_to_msgpack(w_, x_.program);
+}
+
+PackageFragment packagefragment_from_msgpack(MsgpackReader &r_) {
+  auto n_ = r_.readArrayHeader();
+  return packagefragment_fields_from_msgpack(r_, n_);
+}
+
+void packagefragment_to_msgpack(MsgpackWriter &w_, const PackageFragment &x_) {
+  w_.writeArrayHeader(2);
+  packagefragment_fields_to_msgpack(w_, x_);
+}
+
 PackageLinkRequest packagelinkrequest_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 3) throw std::runtime_error("Expected PackageLinkRequest with 3 field(s)");
+  if (n_ != 4) throw std::runtime_error("Expected PackageLinkRequest with 4 field(s)");
   auto interface = interface_from_msgpack(r_);
-  std::vector<Program> programFragments;
+  std::vector<PackageFragment> fragments;
   {
-    auto programFragments_size = r_.readArrayHeader();
-    programFragments.reserve(programFragments_size);
-    for (size_t programFragments_idx = 0; programFragments_idx < programFragments_size; ++programFragments_idx) {
-      auto programFragments_elem = program_from_msgpack(r_);
-      programFragments.emplace_back(std::move(programFragments_elem));
+    auto fragments_size = r_.readArrayHeader();
+    fragments.reserve(fragments_size);
+    for (size_t fragments_idx = 0; fragments_idx < fragments_size; ++fragments_idx) {
+      auto fragments_elem = packagefragment_from_msgpack(r_);
+      fragments.emplace_back(std::move(fragments_elem));
     }
   }
   std::vector<std::string> capabilities;
@@ -11623,19 +11710,21 @@ PackageLinkRequest packagelinkrequest_fields_from_msgpack(MsgpackReader &r_, siz
       capabilities.emplace_back(std::move(capabilities_elem));
     }
   }
-  return {interface, programFragments, capabilities};
+  auto pruneUnimplementedDeclarations = r_.readBoolean();
+  return {interface, fragments, capabilities, pruneUnimplementedDeclarations};
 }
 
 void packagelinkrequest_fields_to_msgpack(MsgpackWriter &w_, const PackageLinkRequest &x_) {
   interface_to_msgpack(w_, x_.interface);
-  w_.writeArrayHeader(x_.programFragments.size());
-  for (const auto &v0_ : x_.programFragments) {
-    program_to_msgpack(w_, v0_);
+  w_.writeArrayHeader(x_.fragments.size());
+  for (const auto &v0_ : x_.fragments) {
+    packagefragment_to_msgpack(w_, v0_);
   }
   w_.writeArrayHeader(x_.capabilities.size());
   for (const auto &v0_ : x_.capabilities) {
     w_.writeString(v0_);
   }
+  w_.writeBoolean(x_.pruneUnimplementedDeclarations);
 }
 
 PackageLinkRequest packagelinkrequest_from_msgpack(MsgpackReader &r_) {
@@ -11644,7 +11733,7 @@ PackageLinkRequest packagelinkrequest_from_msgpack(MsgpackReader &r_) {
 }
 
 void packagelinkrequest_to_msgpack(MsgpackWriter &w_, const PackageLinkRequest &x_) {
-  w_.writeArrayHeader(3);
+  w_.writeArrayHeader(4);
   packagelinkrequest_fields_to_msgpack(w_, x_);
 }
 

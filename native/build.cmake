@@ -190,7 +190,73 @@ if (ACTION STREQUAL "LLVM")
     endif ()
     message(STATUS "LLVM native build = `${LLVM_NATIVE_BUILD}` (host=${LLVM_HOST_ARCH}, target=${ARCH})")
 
-    # Don't setup vcpkg here
+    # Do not configure LLVM through the vcpkg toolchain; reuse its already-staged static compression archives directly.
+    # Darwin has no target sysroot, so its cross build also consumes the
+    # target-architecture compression archives staged by vcpkg.
+    if ((LLVM_NATIVE_BUILD OR APPLE) AND DEFINED ENV{VCPKG_INSTALLED_DIR})
+        if (WIN32)
+            if (ARCH STREQUAL "amd64")
+                set(_llvm_vcpkg_triplet x64-windows-static)
+            elseif (ARCH STREQUAL "arm64")
+                set(_llvm_vcpkg_triplet arm64-windows-static)
+            endif ()
+        else ()
+            set(_llvm_vcpkg_triplet ${CMAKE_HOST_SYSTEM_NAME}-${COMPILER_NAME}-${OVERLAY_ARCH})
+        endif ()
+        file(TO_CMAKE_PATH "$ENV{VCPKG_INSTALLED_DIR}" _llvm_vcpkg_root)
+        set(_llvm_vcpkg_prefix "${_llvm_vcpkg_root}/${_llvm_vcpkg_triplet}")
+        foreach (_llvm_zstd_name libzstd.a zstd_static.lib zstd.lib)
+            if (EXISTS "${_llvm_vcpkg_prefix}/lib/${_llvm_zstd_name}")
+                set(_llvm_zstd_library "${_llvm_vcpkg_prefix}/lib/${_llvm_zstd_name}")
+                break()
+            endif ()
+        endforeach ()
+        # LLVM's Findzstd recognises MSVC static archives only by an `_static.lib`
+        # suffix, whereas vcpkg's static triplets install `zstd.lib`.
+        get_filename_component(_llvm_zstd_filename "${_llvm_zstd_library}" NAME)
+        if (WIN32 AND _llvm_zstd_filename STREQUAL "zstd.lib")
+            file(MAKE_DIRECTORY "${LLVM_BUILD_DIR}/compression")
+            set(_llvm_zstd_static_library "${LLVM_BUILD_DIR}/compression/zstd_static.lib")
+            configure_file("${_llvm_zstd_library}" "${_llvm_zstd_static_library}" COPYONLY)
+            set(_llvm_zstd_library "${_llvm_zstd_static_library}")
+        endif ()
+        if (EXISTS "${_llvm_vcpkg_prefix}/include/zstd.h" AND _llvm_zstd_library)
+            list(APPEND BUILD_OPTIONS
+                    -Dzstd_INCLUDE_DIR=${_llvm_vcpkg_prefix}/include
+                    -Dzstd_LIBRARY=${_llvm_zstd_library}
+                    -Dzstd_STATIC_LIBRARY=${_llvm_zstd_library})
+        endif ()
+        foreach (_llvm_zlib_name libz.a zs.lib zlibstatic.lib zlib.lib)
+            if (EXISTS "${_llvm_vcpkg_prefix}/lib/${_llvm_zlib_name}")
+                set(_llvm_zlib_library "${_llvm_vcpkg_prefix}/lib/${_llvm_zlib_name}")
+                break()
+            endif ()
+        endforeach ()
+        if (EXISTS "${_llvm_vcpkg_prefix}/include/zlib.h" AND _llvm_zlib_library)
+            list(APPEND BUILD_OPTIONS
+                    -DZLIB_INCLUDE_DIR=${_llvm_vcpkg_prefix}/include
+                    -DZLIB_LIBRARY=${_llvm_zlib_library}
+                    -DZLIB_LIBRARY_RELEASE=${_llvm_zlib_library})
+        endif ()
+    elseif (NOT LLVM_NATIVE_BUILD AND CMAKE_SYSROOT)
+        # FindZLIB does not reliably add lib64 or the target multiarch directory
+        # while cross-configuring. The sysroots contain a static target archive;
+        # pass it explicitly so FORCE_ON cannot fall back to a host library.
+        file(GLOB _llvm_sysroot_zlib LIST_DIRECTORIES FALSE
+                "${CMAKE_SYSROOT}/usr/lib/libz.a"
+                "${CMAKE_SYSROOT}/usr/lib64/libz.a"
+                "${CMAKE_SYSROOT}/usr/lib/*/libz.a"
+                "${CMAKE_SYSROOT}/lib/libz.a"
+                "${CMAKE_SYSROOT}/lib64/libz.a"
+                "${CMAKE_SYSROOT}/lib/*/libz.a")
+        if (EXISTS "${CMAKE_SYSROOT}/usr/include/zlib.h" AND _llvm_sysroot_zlib)
+            list(GET _llvm_sysroot_zlib 0 _llvm_zlib_library)
+            list(APPEND BUILD_OPTIONS
+                    -DZLIB_INCLUDE_DIR=${CMAKE_SYSROOT}/usr/include
+                    -DZLIB_LIBRARY=${_llvm_zlib_library}
+                    -DZLIB_LIBRARY_RELEASE=${_llvm_zlib_library})
+        endif ()
+    endif ()
     if (CMAKE_TOOLCHAIN_FILE AND NOT LLVM_NATIVE_BUILD)
         list(APPEND BUILD_OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
     endif ()

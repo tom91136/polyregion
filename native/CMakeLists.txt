@@ -122,6 +122,15 @@ find_package(SPIRV-Headers CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(zstd CONFIG REQUIRED)
+
+set(POLYREGION_VCPKG_SHARE_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share")
+if (NOT IS_DIRECTORY "${POLYREGION_VCPKG_SHARE_DIR}")
+    message(FATAL_ERROR "vcpkg package metadata not found at `${POLYREGION_VCPKG_SHARE_DIR}`")
+endif ()
+install(DIRECTORY "${POLYREGION_VCPKG_SHARE_DIR}/"
+        DESTINATION share/licenses/polyregion/vcpkg
+        FILES_MATCHING PATTERN "copyright")
 
 if (POLYC_JS_ENGINE STREQUAL "qjs")
     find_package(qjs CONFIG REQUIRED)

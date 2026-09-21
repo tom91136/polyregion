@@ -699,7 +699,7 @@ private[polyregion] object ProgramLinker {
     val entryArgs      = mutable.ListBuffer.empty[p.Arg]
     val body           = mutable.ListBuffer.empty[p.Stmt]
     val downloads      = mutable.ListBuffer.empty[p.Stmt]
-    val frees          = mutable.ListBuffer.empty[p.Stmt]
+    val allocations    = mutable.ListBuffer.empty[(p.Stmt, List[p.Stmt], p.Stmt)]
     val invokeArgs     = mutable.ListBuffer.empty[p.Term]
     val sourceArgs     = mutable.Map.empty[Int, p.Named]
     val scalarValues   = mutable.Map.empty[Int, p.Named]
@@ -792,12 +792,14 @@ private[polyregion] object ProgramLinker {
                     }
                 }
                 val remote = p.Named(s"remote$index", p.Type.Ptr(p.Type.IntU8, p.Type.Space.Global))
-                body += p.Stmt.Var(remote, Some(spec(p.Spec.RemoteAlloc(select(context), count))), isMutable = true)
-                val typed = p.Named(s"p$index", pointer)
-                immutable(typed, p.Expr.Cast(select(remote), pointer))
+                val typed  = p.Named(s"p$index", pointer)
+                val acquire =
+                  p.Stmt.Var(remote, Some(spec(p.Spec.RemoteTempAlloc(select(context), count))), isMutable = true)
+                val setup = List.newBuilder[p.Stmt]
+                setup += p.Stmt.Var(typed, Some(p.Expr.Cast(select(remote), pointer)), isMutable = false)
                 invokeArgs += select(typed)
                 if (boundary.access == p.Arg.Access.Read || boundary.access == p.Arg.Access.ReadWrite)
-                  body += p.Stmt.Var(
+                  setup += p.Stmt.Var(
                     p.Named(s"upload$index", p.Type.Unit0),
                     Some(
                       spec(
@@ -828,11 +830,12 @@ private[polyregion] object ProgramLinker {
                     ),
                     isMutable = true
                   )
-                frees += p.Stmt.Var(
+                val cleanup = p.Stmt.Var(
                   p.Named(s"free$index", p.Type.Unit0),
                   Some(spec(p.Spec.RemoteFree(select(context), select(remote)))),
                   isMutable = true
                 )
+                allocations += ((acquire, setup.result(), cleanup))
             }
           case _ => invokeArgs += select(scalarValues(index))
         }
@@ -874,16 +877,20 @@ private[polyregion] object ProgramLinker {
       case ImplementationResult.TrailingOutput(_) => p.Type.Unit0
       case ImplementationResult.Direct            => concreteResult
     }
-    val invoke = p.Expr.Invoke(p.Type.FnRef(implementation.name), tpeArgs, None, invokeArgs.toList, invokeResult)
+    val invoke     = p.Expr.Invoke(p.Type.FnRef(implementation.name), tpeArgs, None, invokeArgs.toList, invokeResult)
+    val invokeBody = List.newBuilder[p.Stmt]
     (returnsValue, resolution.abi.result) match {
       case (true, ImplementationResult.Direct) =>
         val callResult = p.Named("callResult", concreteResult)
-        immutable(callResult, invoke)
-        body += p.Stmt.Update(select(result.get), p.Term.IntS32Const(0), select(callResult))
-      case _ => body += p.Stmt.Var(p.Named("invoke", invokeResult), Some(invoke), isMutable = true)
+        invokeBody += p.Stmt.Var(callResult, Some(invoke), isMutable = false)
+        invokeBody += p.Stmt.Update(select(result.get), p.Term.IntS32Const(0), select(callResult))
+      case _ => invokeBody += p.Stmt.Var(p.Named("invoke", invokeResult), Some(invoke), isMutable = true)
     }
-    body ++= downloads
-    body ++= frees
+    val guarded = allocations.foldRight(invokeBody.result() ::: downloads.toList) {
+      case ((acquire, setup, cleanup), nested) =>
+        List(acquire, p.Stmt.Try(setup ::: nested, Nil, List(cleanup)))
+    }
+    body ++= guarded
     body += p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
 
     val distinct = errors.result().distinct
@@ -1089,7 +1096,8 @@ private[polyregion] object ProgramLinker {
     val closed = closeRemoteTargets(monomorphic, Set.empty)
     closed
       .map { program =>
-        val flattened = KernelCaptureFlatten(program, PluginEntry.defaultLog)
+        val inlined   = OffloadEntryInline(program, PluginEntry.defaultLog)
+        val flattened = KernelCaptureFlatten(inlined, PluginEntry.defaultLog)
         val functions = DeadFunctionElimination(flattened, PluginEntry.defaultLog)
         val structs   = DeadStructElimination(functions, PluginEntry.defaultLog)
         propagateHostAffinity(structs)

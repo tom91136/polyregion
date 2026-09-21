@@ -10,8 +10,10 @@
 
 namespace polyregion::polystl {
 
-[[nodiscard]] std::unique_ptr<clang::ASTConsumer> makeOffloadRewriteConsumer(clang::CompilerInstance &CI,
-                                                                             const polyregion::polyfront::Options &opts,
-                                                                             std::shared_ptr<std::vector<int8_t>> packageProgramBitcode);
+using PackageProgramBitcodes = std::vector<std::vector<int8_t>>;
+
+[[nodiscard]] std::unique_ptr<clang::ASTConsumer>
+makeOffloadRewriteConsumer(clang::CompilerInstance &CI, const polyregion::polyfront::Options &opts,
+                           std::shared_ptr<PackageProgramBitcodes> packageProgramBitcodes);
 
 } // namespace polyregion::polystl
