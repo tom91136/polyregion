@@ -837,16 +837,53 @@ private[pass] object AddressRefinement {
       } else Query.Slot(root.symbol, steps)
     }
 
+    // Closure repeatedly queries one immutable approximation; flow updates carry its index forward.
+    // Retain only the current state so branch merges cannot accumulate old approximations.
+    type SlotIndex = Map[String, List[(List[p.PathStep], AddressValue)]]
+    var cachedSlots = Option.empty[(Map[Query[AddressValue], AddressValue], SlotIndex)]
+    def slotsByRoot(state: Map[Query[AddressValue], AddressValue]): SlotIndex =
+      cachedSlots match {
+        case Some((cached, index)) if cached eq state => index
+        case _ =>
+          val index = state.iterator
+            .collect { case (Query.Slot(root, path), fact) =>
+              root -> (path -> fact)
+            }
+            .toList
+            .groupMap(_._1)(_._2)
+          cachedSlots = Some(state -> index)
+          index
+      }
+
+    def rememberSlots(
+        before: Map[Query[AddressValue], AddressValue],
+        after: Map[Query[AddressValue], AddressValue],
+        updates: Iterable[(Query.Slot, AddressValue)]
+    ): Map[Query[AddressValue], AddressValue] = {
+      val index = updates.foldLeft(slotsByRoot(before)) { case (current, (slot, fact)) =>
+        current.updated(
+          slot.root,
+          (slot.path -> fact) :: current.getOrElse(slot.root, Nil).filterNot(_._1 == slot.path)
+        )
+      }
+      cachedSlots = Some(after -> index)
+      after
+    }
+
     def slotFact(
         state: Map[Query[AddressValue], AddressValue],
         root: p.Named,
         steps: List[p.PathStep]
     ): Option[(Int, AddressValue)] = {
       val slot = canonicalSlot(state, root, steps)
-      val matching = state.iterator.collect {
-        case (Query.Slot(slotRoot, path), fact) if slotRoot == slot.root && slotPrefix(path, slot.path) =>
-          path.size -> fact.read
-      }.toList
+      val matching = slotsByRoot(state)
+        .getOrElse(slot.root, Nil)
+        .iterator
+        .collect {
+          case (path, fact) if slotPrefix(path, slot.path) =>
+            path.size -> fact.read
+        }
+        .toList
       matching
         .map(_._1)
         .maxOption
@@ -868,10 +905,10 @@ private[pass] object AddressRefinement {
           case Some((depth, fact)) if depth == slot.path.size => fact
           case Some((_, fact)) => pointerFromMemory(fact, tpe, s"pointer field ${slot.label}")
           case None if localAggregates(slot.root) =>
-            val known = state.keysIterator
-              .collect {
-                case candidate: Query.Slot if candidate.root == slot.root => candidate.label
-              }
+            val known = slotsByRoot(state)
+              .getOrElse(slot.root, Nil)
+              .iterator
+              .map { case (path, _) => Query.Slot(slot.root, path).label }
               .toList
               .sorted
             AddressValue(obligations =
@@ -1079,9 +1116,11 @@ private[pass] object AddressRefinement {
       val nextRaw = slotCopies.foldLeft(assigned) { (facts, copy) =>
         val source = canonicalSlot(current, copy.source, copy.sourcePrefix)
         val target = canonicalSlot(current, copy.target, copy.targetPrefix)
-        current.iterator
+        slotsByRoot(current)
+          .getOrElse(source.root, Nil)
+          .iterator
           .collect {
-            case (Query.Slot(root, path), fact) if root == source.root && slotPrefix(source.path, path) =>
+            case (path, fact) if slotPrefix(source.path, path) =>
               Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact.copy(obligations = Set.empty)
           }
           .filter { case (slot, _) => slot.path.size <= maxSlotDepth }
@@ -1191,15 +1230,9 @@ private[pass] object AddressRefinement {
         left: Map[String, AddressValue],
         right: Map[String, AddressValue]
     ): Map[String, AddressValue] =
-      (left.keySet ++ right.keySet).iterator.map { symbol =>
-        val fact = (left.get(symbol), right.get(symbol)) match {
-          case (Some(x), Some(y)) => mergeFacts(x, y)
-          case (Some(x), None)    => x
-          case (None, Some(y))    => y
-          case _                  => AddressValue()
-        }
-        symbol -> fact
-      }.toMap
+      right.foldLeft(left) { case (current, (symbol, fact)) =>
+        current.updated(symbol, current.get(symbol).fold(fact)(mergeFacts(_, fact)))
+      }
 
     def copySlots(
         state: Map[Query[AddressValue], AddressValue],
@@ -1210,13 +1243,17 @@ private[pass] object AddressRefinement {
     ): Map[Query[AddressValue], AddressValue] = {
       val source = canonicalSlot(state, sourceRoot, sourcePrefix)
       val target = canonicalSlot(state, targetRoot, targetPrefix)
-      val copied = state.iterator.collect {
-        case (Query.Slot(root, path), fact)
-            if root == source.root && slotPrefix(source.path, path) &&
-              target.path.size + path.size - source.path.size <= maxSlotDepth =>
-          Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact
-      }.toMap
-      state ++ copied
+      val copied = slotsByRoot(state)
+        .getOrElse(source.root, Nil)
+        .iterator
+        .collect {
+          case (path, fact)
+              if slotPrefix(source.path, path) &&
+                target.path.size + path.size - source.path.size <= maxSlotDepth =>
+            Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact
+        }
+        .toMap
+      rememberSlots(state, state ++ copied, copied)
     }
 
     type FlowState = Map[Query[AddressValue], AddressValue]
@@ -1327,14 +1364,17 @@ private[pass] object AddressRefinement {
       case p.Stmt.Var(name, Some(expr), _) if isCarrier(name.tpe) =>
         val target = Query.Binding(name.symbol)
         val value  = storedFact(target, selectValue(exprFact(state, expr)))
-        state.updated(target, value) -> Option.when(isPtr(name.tpe))(name.symbol -> value).toMap
+        rememberSlots(state, state.updated(target, value), Nil) -> Option
+          .when(isPtr(name.tpe))(name.symbol -> value)
+          .toMap
       case p.Stmt.Mut(p.Term.Select(name, Nil, tpe), expr) if isCarrier(tpe) =>
         val target = Query.Binding(name.symbol)
         val value  = storedFact(target, selectValue(exprFact(state, expr)))
-        state.updated(target, value) -> Option.when(isPtr(tpe))(name.symbol -> value).toMap
+        rememberSlots(state, state.updated(target, value), Nil) -> Option.when(isPtr(tpe))(name.symbol -> value).toMap
       case p.Stmt.Mut(p.Term.Select(root, steps, tpe), expr) if steps.nonEmpty && isPtr(tpe) =>
         val target = canonicalSlot(state, root, steps)
-        state.updated(target, storedFact(target, selectValue(exprFact(state, expr)))) -> Map.empty
+        val value  = storedFact(target, selectValue(exprFact(state, expr)))
+        rememberSlots(state, state.updated(target, value), List(target -> value)) -> Map.empty
       case p.Stmt.Var(target, Some(p.Expr.Alias(p.Term.Select(source, prefix, _))), _) if !isPtr(target.tpe) =>
         copySlots(state, target, Nil, source, prefix) -> Map.empty
       case p.Stmt.Mut(
@@ -1384,10 +1424,16 @@ private[pass] object AddressRefinement {
             case p.Stmt.Annotated(inner, _, _) => analyse(List(inner), state)
             case p.Stmt.Raise(_, _, cleanup)   => analyse(cleanup, state)
             case leaf =>
+              val found                    = diagnosticsIn(leaf, state)
               val (leafState, leafSummary) = transfer(leaf, state)
-              (leafState, leafSummary, true, diagnosticsIn(leaf, state))
+              (leafState, leafSummary, true, found)
           }
-          (next, mergeSummaries(summary, added), converged && stable, diagnostics ::: found)
+          (
+            next,
+            mergeSummaries(summary, added),
+            converged && stable,
+            if (found.isEmpty) diagnostics else diagnostics ::: found
+          )
       }
 
     def flowLoop(body: List[p.Stmt], entry: FlowState): (FlowState, Summary, Boolean, List[Diagnostic]) = {
