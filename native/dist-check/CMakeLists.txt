@@ -18,10 +18,12 @@ set(POLYREGION_TOOLCHAIN_TARGETS
         Polyregion::polycpp
         Polyregion::polyc
         Polyregion::clangxx
-        Polyregion::compiler-library
         Polyregion::LLVMSupport
         Polyregion::LLVMDemangle
         Polyregion::tool-support)
+if (Polyregion_LLVM_DYLIB)
+    list(APPEND POLYREGION_TOOLCHAIN_TARGETS Polyregion::compiler-library)
+endif ()
 if (Polyregion_PASS_BUNDLE STREQUAL "dso")
     find_package(Polyregion CONFIG REQUIRED COMPONENTS PackageCompiler ToolSupport
             PATHS "${POLYREGION_DIST}" NO_DEFAULT_PATH)

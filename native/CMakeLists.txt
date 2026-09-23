@@ -583,12 +583,17 @@ add_subdirectory(bindings)
 if (WIN32)
     set(POLYREGION_POLYPASS_FILENAME "libpolypass.dll")
     set(POLYREGION_POLYCPP_PLUGIN_FILENAME "polycpp-clang-plugin.dll")
-    set(POLYREGION_COMPILER_LIBRARY_RELATIVE "bin/LLVMpolyregion.dll")
 else ()
     set(POLYREGION_POLYPASS_FILENAME "libpolypass${CMAKE_SHARED_LIBRARY_SUFFIX}")
     set(POLYREGION_POLYCPP_PLUGIN_FILENAME "polycpp-clang-plugin${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(POLYREGION_COMPILER_LIBRARY_RELATIVE
-            "lib/${CMAKE_SHARED_LIBRARY_PREFIX}LLVMpolyregion${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif ()
+if (POLYREGION_LLVM_DYLIB)
+    if (WIN32)
+        set(POLYREGION_COMPILER_LIBRARY_RELATIVE "bin/LLVMpolyregion.dll")
+    else ()
+        set(POLYREGION_COMPILER_LIBRARY_RELATIVE
+                "lib/${CMAKE_SHARED_LIBRARY_PREFIX}LLVMpolyregion${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    endif ()
 endif ()
 configure_package_config_file(
         cmake/PolyregionConfig.cmake.in

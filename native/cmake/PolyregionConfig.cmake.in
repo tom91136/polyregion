@@ -3,6 +3,7 @@
 set(Polyregion_ROOT "${PACKAGE_PREFIX_DIR}")
 set(Polyregion_PASS_BUNDLE "@POLYC_PASS_BUNDLE@")
 set(Polyregion_FUSED_DRIVER "@POLYREGION_FUSED_DRIVER@")
+set(Polyregion_LLVM_DYLIB "@POLYREGION_LLVM_DYLIB@")
 set(Polyregion_RUNTIME_LIBRARY_DIRS
     "${PACKAGE_PREFIX_DIR}/lib"
     "${PACKAGE_PREFIX_DIR}/lib/polycpp/lib")
@@ -43,8 +44,10 @@ if(NOT Polyregion_FUSED_DRIVER)
 endif()
 
 if("ToolSupport" IN_LIST Polyregion_FIND_COMPONENTS)
-  _polyregion_import_file(
-      Polyregion::compiler-library UNKNOWN "@POLYREGION_COMPILER_LIBRARY_RELATIVE@")
+  if(Polyregion_LLVM_DYLIB)
+    _polyregion_import_file(
+        Polyregion::compiler-library UNKNOWN "@POLYREGION_COMPILER_LIBRARY_RELATIVE@")
+  endif()
   _polyregion_import_file(
       Polyregion::LLVMSupport STATIC "lib/@CMAKE_STATIC_LIBRARY_PREFIX@LLVMSupport@CMAKE_STATIC_LIBRARY_SUFFIX@")
   _polyregion_import_file(
