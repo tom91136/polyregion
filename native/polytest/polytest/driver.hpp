@@ -157,12 +157,14 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   // XXX rusticl loads Mesa's LLVM in-process; the ICD loader pulls it in for ANY OpenCL target, clashing
   // with polydco/polystl's LLVM (two libLLVMSPIRVLib) -> bad_alloc. expose it only when it's selected
   const bool rusticlTarget = archFor(t, cfg) ^ contains_slice("rusticl");
-  for (auto &kv : loadProfileEnv(cfg.profileDir)) {
-    if (!rusticlTarget && (kv ^ starts_with("RUSTICL_ENABLE="))) continue;
-    putKv(kv);
-  }
+  materialiseProfileEnvironment(loadProfileEnv(cfg.profileDir))                                         //
+      | filter([&](const auto &kv) { return rusticlTarget || !(kv ^ starts_with("RUSTICL_ENABLE=")); }) //
+      | for_each(putKv);
   const auto lockEnv = std::getenv(polyregion::env::PolyinvokeTestLock);
-  put(polyregion::env::PolyinvokeTestLock, lockEnv && !(archFor(t, cfg) ^ starts_with("metal")) ? lockEnv : "1");
+  const bool configuredLock = kvs | exists([&](const auto &entry) { return entry.first == polyregion::env::PolyinvokeTestLock; });
+  if (archFor(t, cfg) ^ starts_with("metal")) put(polyregion::env::PolyinvokeTestLock, "1");
+  else if (lockEnv) put(polyregion::env::PolyinvokeTestLock, lockEnv);
+  else if (!configuredLock) put(polyregion::env::PolyinvokeTestLock, "1");
   if (const auto v = std::getenv("ASAN_OPTIONS")) put("ASAN_OPTIONS", v);
   else
     put("ASAN_OPTIONS", "alloc_dealloc_mismatch=0,detect_leaks=0,protect_shadow_gap=0,verify_asan_link_order=0,strip_env=0"

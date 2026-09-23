@@ -24,6 +24,7 @@
 
 #include "aspartame/all.hpp"
 
+#include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/host.h"
 #include "polyregion/types.h"
@@ -31,6 +32,40 @@
 namespace polyregion::polytest {
 
 using namespace aspartame;
+
+struct ProfileEnvironment {
+  std::vector<std::string> assignments;
+  std::vector<std::string> forwardedNames;
+};
+
+inline ProfileEnvironment parseProfileEnvironment(const std::vector<std::string> &values) {
+  const auto isForwardingDirective = [](const auto &value) {
+    return value ^ split_once('=') ^ exists([](const auto &key, const auto &) { return key == env::PolytestForwardEnv; });
+  };
+  auto [directives, assignments] = values ^ partition(isForwardingDirective);
+  auto forwardedNames = directives                                                              //
+                        ^ flat_map([](const auto &directive) {                                  //
+                            return directive ^ split_once('=')                                  //
+                                   ^ map([](const auto &, const auto &value) { return value; }) //
+                                   ^ get_or_else(std::string{})                                 //
+                                   ^ split(';');                                                //
+                          })                                                                    //
+                        ^ map([](const auto &name) {                                            //
+                            const auto trimmed = name ^ trim();                                 //
+                            return trimmed ^ starts_with(":") ? trimmed ^ drop(1) : trimmed;    //
+                          })                                                                    //
+                        ^ filter([](const auto &name) { return !name.empty(); })                //
+                        ^ distinct();
+  return {std::move(assignments), std::move(forwardedNames)};
+}
+
+inline std::vector<std::string> materialiseProfileEnvironment(const std::vector<std::string> &values) {
+  const auto profile = parseProfileEnvironment(values);
+  return profile.assignments ^ concat(profile.forwardedNames ^ collect([](const auto &name) -> std::optional<std::string> {
+                                        if (const char *value = std::getenv(name.c_str())) return name + "=" + value;
+                                        return {};
+                                      }));
+}
 
 inline std::optional<std::string> hostname() {
 #ifdef _WIN32
@@ -121,6 +156,12 @@ inline const std::vector<std::string> &loadProfileEnv(const std::string &profile
            ^ get_or_else(std::vector<std::string>{});
   }();
   return cached;
+}
+
+inline void applyProfileEnvironment(const std::string &profileDir) {
+  parseProfileEnvironment(loadProfileEnv(profileDir)).assignments                    //
+      | collect([](const auto &assignment) { return assignment ^ split_once('='); }) //
+      | for_each([](const auto &key, const auto &value) { env::put(key.c_str(), value.c_str(), true); });
 }
 
 // A resolved `<backend>@<uarch>` test target: a TargetSpec from the canonical registry plus the

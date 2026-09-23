@@ -61,6 +61,7 @@ inline constexpr auto PolyrtStrictSelect = "POLYRT_STRICT_SELECT";
 inline constexpr auto PolyrtQueueTimeoutSec = "POLYRT_QUEUE_TIMEOUT_SEC";
 
 inline constexpr auto PolytestDebug = "POLYTEST_DEBUG";
+inline constexpr auto PolytestForwardEnv = "POLYTEST_FORWARD_ENV";
 inline constexpr auto PolytestProfileDir = "POLYTEST_PROFILE_DIR";
 inline constexpr auto PolytestWorkDir = "POLYTEST_WORK_DIR";
 inline constexpr auto PolytestBinaryDir = "POLYTEST_BINARY_DIR";

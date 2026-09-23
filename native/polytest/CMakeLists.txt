@@ -13,8 +13,9 @@ target_sources(polytest
 target_link_libraries(polytest INTERFACE Aspartame::Aspartame polycommon LLVMSupport fmt::fmt Catch2::Catch2)
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../polyinvoke/include)
 target_include_directories(polytest INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(polytest SYSTEM INTERFACE ${LLVM_INCLUDE_DIRS})
 
-add_executable(polytest-tests test/ctest_emit.cpp)
+add_executable(polytest-tests test/ctest_emit.cpp test/profile.cpp)
 target_link_libraries(polytest-tests PRIVATE polytest Catch2::Catch2WithMain)
 polyregion_apply_common_options(polytest-tests)
 add_test(NAME polytest-tests COMMAND polytest-tests)
