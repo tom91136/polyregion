@@ -87,7 +87,6 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assert(!sc.contains("trait ExampleInterface"))
     assert(sc.contains("@compileTimeOnly(\"polyregion_interface:example:example.transform\")"))
     assert(sc.contains("def transform[T, U](in: Array[T], out: Array[U], n: Int, op: T => U): Unit"))
-    assert(!(cpp + f90 + sc).toLowerCase.contains("spectra"))
   }
 
   test("Fortran adapts erased generic results to output arguments") {

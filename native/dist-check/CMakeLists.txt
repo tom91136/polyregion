@@ -11,6 +11,31 @@ set(BIN ${POLYREGION_DIST}/bin)
 if (WIN32)
     set(EXE_SUFFIX .exe)
 endif ()
+
+find_package(Polyregion CONFIG REQUIRED COMPONENTS ToolSupport
+        PATHS "${POLYREGION_DIST}" NO_DEFAULT_PATH)
+set(POLYREGION_TOOLCHAIN_TARGETS
+        Polyregion::polycpp
+        Polyregion::polyc
+        Polyregion::clangxx
+        Polyregion::compiler-library
+        Polyregion::LLVMSupport
+        Polyregion::LLVMDemangle
+        Polyregion::tool-support)
+if (Polyregion_PASS_BUNDLE STREQUAL "dso")
+    find_package(Polyregion CONFIG REQUIRED COMPONENTS PackageCompiler ToolSupport
+            PATHS "${POLYREGION_DIST}" NO_DEFAULT_PATH)
+    list(APPEND POLYREGION_TOOLCHAIN_TARGETS Polyregion::polypass)
+endif ()
+if (NOT Polyregion_FUSED_DRIVER)
+    list(APPEND POLYREGION_TOOLCHAIN_TARGETS Polyregion::polycpp-plugin)
+endif ()
+foreach (TARGET IN LISTS POLYREGION_TOOLCHAIN_TARGETS)
+    if (NOT TARGET "${TARGET}")
+        message(FATAL_ERROR "Polyregion toolchain target not found: ${TARGET}")
+    endif ()
+endforeach ()
+
 foreach (TOOL polyc polycpp polyfc clang++ flang-new)
     if (NOT EXISTS "${BIN}/${TOOL}${EXE_SUFFIX}")
         message(FATAL_ERROR "Missing ${BIN}/${TOOL}${EXE_SUFFIX}")

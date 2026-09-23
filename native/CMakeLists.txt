@@ -24,6 +24,7 @@ endif ()
 
 include(FetchContent)
 include(ProcessorCount)
+include(CMakePackageConfigHelpers)
 include(ProjectConfig.cmake)
 include(cmake/mergestaticlibs.cmake)
 include(cmake/deadstriparchive.cmake)
@@ -578,6 +579,24 @@ if (POLYREGION_HAS_FLANG)
     add_subdirectory(polyfc)
 endif ()
 add_subdirectory(bindings)
+
+if (WIN32)
+    set(POLYREGION_POLYPASS_FILENAME "libpolypass.dll")
+    set(POLYREGION_POLYCPP_PLUGIN_FILENAME "polycpp-clang-plugin.dll")
+    set(POLYREGION_COMPILER_LIBRARY_RELATIVE "bin/LLVMpolyregion.dll")
+else ()
+    set(POLYREGION_POLYPASS_FILENAME "libpolypass${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(POLYREGION_POLYCPP_PLUGIN_FILENAME "polycpp-clang-plugin${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(POLYREGION_COMPILER_LIBRARY_RELATIVE
+            "lib/${CMAKE_SHARED_LIBRARY_PREFIX}LLVMpolyregion${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif ()
+configure_package_config_file(
+        cmake/PolyregionConfig.cmake.in
+        "${CMAKE_CURRENT_BINARY_DIR}/PolyregionConfig.cmake"
+        INSTALL_DESTINATION lib/cmake/Polyregion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PolyregionConfig.cmake"
+        DESTINATION lib/cmake/Polyregion
+        COMPONENT polyregion-toolchain)
 
 set(POLYREGION_DIST_TARGETS
         polyc-bin

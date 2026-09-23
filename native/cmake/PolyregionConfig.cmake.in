@@ -1,0 +1,63 @@
+@PACKAGE_INIT@
+
+set(Polyregion_ROOT "${PACKAGE_PREFIX_DIR}")
+set(Polyregion_PASS_BUNDLE "@POLYC_PASS_BUNDLE@")
+set(Polyregion_FUSED_DRIVER "@POLYREGION_FUSED_DRIVER@")
+set(Polyregion_RUNTIME_LIBRARY_DIRS
+    "${PACKAGE_PREFIX_DIR}/lib"
+    "${PACKAGE_PREFIX_DIR}/lib/polycpp/lib")
+
+function(_polyregion_import_executable target relative_path)
+  if(TARGET "${target}")
+    return()
+  endif()
+  set_and_check(_location "${PACKAGE_PREFIX_DIR}/${relative_path}")
+  add_executable("${target}" IMPORTED)
+  set_property(TARGET "${target}" PROPERTY IMPORTED_LOCATION "${_location}")
+endfunction()
+
+function(_polyregion_import_file target type relative_path)
+  if(TARGET "${target}")
+    return()
+  endif()
+  set_and_check(_location "${PACKAGE_PREFIX_DIR}/${relative_path}")
+  add_library("${target}" ${type} IMPORTED)
+  set_property(TARGET "${target}" PROPERTY IMPORTED_LOCATION "${_location}")
+endfunction()
+
+_polyregion_import_executable(Polyregion::polycpp "bin/polycpp@CMAKE_EXECUTABLE_SUFFIX@")
+_polyregion_import_executable(Polyregion::polyc "bin/polyc@CMAKE_EXECUTABLE_SUFFIX@")
+_polyregion_import_executable(Polyregion::clangxx "bin/clang++@CMAKE_EXECUTABLE_SUFFIX@")
+
+set(Polyregion_PackageCompiler_FOUND TRUE)
+if(Polyregion_PASS_BUNDLE STREQUAL "dso")
+  _polyregion_import_file(
+      Polyregion::polypass UNKNOWN "lib/@POLYREGION_POLYPASS_FILENAME@")
+else()
+  set(Polyregion_PackageCompiler_FOUND FALSE)
+endif()
+
+if(NOT Polyregion_FUSED_DRIVER)
+  _polyregion_import_file(
+      Polyregion::polycpp-plugin UNKNOWN "lib/polycpp/lib/@POLYREGION_POLYCPP_PLUGIN_FILENAME@")
+endif()
+
+if("ToolSupport" IN_LIST Polyregion_FIND_COMPONENTS)
+  _polyregion_import_file(
+      Polyregion::compiler-library UNKNOWN "@POLYREGION_COMPILER_LIBRARY_RELATIVE@")
+  _polyregion_import_file(
+      Polyregion::LLVMSupport STATIC "lib/@CMAKE_STATIC_LIBRARY_PREFIX@LLVMSupport@CMAKE_STATIC_LIBRARY_SUFFIX@")
+  _polyregion_import_file(
+      Polyregion::LLVMDemangle STATIC "lib/@CMAKE_STATIC_LIBRARY_PREFIX@LLVMDemangle@CMAKE_STATIC_LIBRARY_SUFFIX@")
+
+  if(NOT TARGET Polyregion::tool-support)
+    add_library(Polyregion::tool-support INTERFACE IMPORTED)
+    set_property(TARGET Polyregion::tool-support PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include")
+    set_property(TARGET Polyregion::tool-support PROPERTY
+        INTERFACE_LINK_LIBRARIES "Polyregion::LLVMSupport;Polyregion::LLVMDemangle")
+  endif()
+  set(Polyregion_ToolSupport_FOUND TRUE)
+endif()
+
+check_required_components(Polyregion)

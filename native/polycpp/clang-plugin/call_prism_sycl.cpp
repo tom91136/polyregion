@@ -642,8 +642,8 @@ static Opt<MatchedCall> syclDevice(const clang::CallExpr &call, const clang::Fun
                                  ? (*arguments)[0].getAsType()->getAsCXXRecordDecl()
                                  : nullptr;
     const auto parameter = descriptor ? normaliseSyclName(descriptor->getQualifiedNameAsString()) : Opt<std::string>{};
-    // The Spectra SYCL shim deliberately returns an empty subgroup capability list so oneDPL selects its portable
-    // multipass implementations. Preserve that authored body instead of claiming this aggregate-valued query here.
+    // Aggregate-valued device information has no scalar PolyAST special operation. Preserve the authored body instead
+    // of claiming the query here, which also lets compatibility surfaces choose their own portable capability set.
     if (parameter && *parameter == "sycl::info::device::sub_group_sizes") return {};
   }
   const auto *expression = &call;
