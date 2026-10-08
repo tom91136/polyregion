@@ -11,7 +11,11 @@
 
 #pragma push_macro("POLYREGION_EXAMPLE_IMPLEMENT")
 #ifndef POLYREGION_EXAMPLE_IMPLEMENT
+#if defined(_MSC_VER) && !defined(__clang__)
+#define POLYREGION_EXAMPLE_IMPLEMENT(function, ...) (__debugbreak(), __assume(0))
+#else
 #define POLYREGION_EXAMPLE_IMPLEMENT(function, ...) __builtin_trap()
+#endif
 #endif
 
 namespace example {

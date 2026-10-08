@@ -48,6 +48,9 @@ clang_format_release := 'master-796e77c'
 # CI sets SYSROOT_PATH; locally defaults to sysroot/out/{arch}.
 sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "sysroot" / "out" / arch)
 
+# Top-level directories whose C/C++ sources are subject to clang-format and check-header.
+cxx_roots := 'native frontend emulators'
+
 # === Default ===
 
 # List all recipes.
@@ -96,9 +99,10 @@ _format mode sbt_task_a sbt_task_b:
         *) echo "unknown format mode: {{ mode }}" >&2; exit 2 ;;
     esac
     echo "Native:  clang-format {{ mode }} via $CF"
-    git ls-files -z --cached --others --exclude-standard -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' \
+    specs=(); for d in {{ cxx_roots }}; do for e in cpp cc cu h hpp; do specs+=("$d/*.$e"); done; done
+    git ls-files -z --cached --others --exclude-standard -- "${specs[@]}" \
         | while IFS= read -r -d '' path; do [ -f "$path" ] && printf '%s\0' "$path"; done \
-        | grep -zvE '^(native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)|spectra/generated/cpp/include/polyregion/spectra_api\.hpp$)' \
+        | grep -zvE '^native/(polyinvoke/thirdparty/|polyinvoke/test/kernels/generated_|polyc/generated/|polyc/include/polyregion/polypass\.h$)' \
         | xargs -0 -r -P "$(nproc 2>/dev/null || echo 4)" -n 32 "$CF" "${cf_args[@]}" &
     pid_n=$!
     if [ -f frontend/sbtx ]; then
@@ -109,20 +113,11 @@ _format mode sbt_task_a sbt_task_b:
         echo "frontend/sbtx not found - skipping Scala format" >&2
         pid_s=
     fi
-    if [ -f spectra/build.sbt ]; then
-        echo "Spectra: sbt {{ sbt_task_a }} ; {{ sbt_task_b }}"
-        (cd spectra && bash ../frontend/sbtx -no-colors '{{ sbt_task_a }} ; {{ sbt_task_b }}') &
-        pid_p=$!
-    else
-        pid_p=
-    fi
     wait $pid_n; rc_n=$?
     rc_s=0
-    rc_p=0
     [ -n "$pid_s" ] && { wait $pid_s; rc_s=$?; }
-    [ -n "$pid_p" ] && { wait $pid_p; rc_p=$?; }
-    if [ "$rc_n" -ne 0 ] || [ "$rc_s" -ne 0 ] || [ "$rc_p" -ne 0 ]; then
-        echo "{{ mode }} failed (native=$rc_n frontend=$rc_s spectra=$rc_p)" >&2
+    if [ "$rc_n" -ne 0 ] || [ "$rc_s" -ne 0 ]; then
+        echo "{{ mode }} failed (native=$rc_n frontend=$rc_s)" >&2
         exit 1
     fi
 
@@ -144,14 +139,10 @@ codegen-kernels:
 
 _codegen-sbt:
     cd frontend && {{ sbt }} -batch -J-Dsbt.server.autostart=false 'codegen/genCodegen'
-    cd spectra && bash ../frontend/sbtx -no-colors -batch -J-Dsbt.server.autostart=false 'genSpectra'
 
-# Validate Spectra's IDL and generated Scala, C++ and Fortran consumer surfaces.
-test-spectra:
-    cd frontend && {{ sbt }} 'interface-codegen / Test / testOnly polyregion.ast.InterfaceCodeGenSuite'
-    cd spectra && bash ../frontend/sbtx -no-colors 'testOnly polyregion.spectra.SpectraSuite; spectraApi/compile'
-    cmake -S spectra -B spectra/target/cmake -DCMAKE_BUILD_TYPE=Release
-    cmake --build spectra/target/cmake -j "$(nproc 2>/dev/null || echo 4)"
+# Validate the interface code generators for C++, Fortran and Scala.
+test-interface-codegen:
+    cd frontend && {{ sbt }} 'interface-codegen/testFull'
 
 _codegen-format:
     find native/polyast/generated native/bindings/jvm/generated native/common/generated \
@@ -162,9 +153,9 @@ _codegen-diff:
     #!/usr/bin/env bash
     set -euo pipefail
     # `git diff` does not report newly generated, untracked outputs.
-    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated)
+    untracked=$(git ls-files --others --exclude-standard -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm)
     [ -z "$untracked" ] || { echo "untracked generated files:" >&2; echo "$untracked" >&2; exit 1; }
-    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm spectra/generated
+    git diff --exit-code -- native/polyast/generated native/bindings/jvm/generated native/common/generated native/polyc/generated native/polyc/include/polyregion/polypass.h frontend/compiler/src/main/scala/polyregion/scalalang/generated/PolyASTWireSchema.scala frontend/binding-jvm/src/main/java/polyregion/jvm
 
 # === Pass bundles ===
 
@@ -192,6 +183,10 @@ build-pass-native:
     fi
     cd frontend && {{ sbt }} 'passNative/exportPassDso'
 
+# Publish the JVM SDK artefacts (ast, interface-codegen) as a Maven repository at native/out/maven.
+build-jvm-sdk:
+    cd frontend && {{ sbt }} exportMavenRepo
+
 # === Lint ===
 
 # Validate .github/workflows/*.yaml against actionlint; auto-fetches the binary on first run.
@@ -205,7 +200,8 @@ check-header:
     #!/usr/bin/env bash
     set -u
     pat='^[[:space:]]*#[[:space:]]*include[[:space:]]*<(filesystem|regex|codecvt|iostream|sstream|ostream|iomanip)>'
-    hits=$(git ls-files -z -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' '*.h.in' '*.hpp.in' \
+    specs=(); for d in {{ cxx_roots }}; do for e in cpp cc cu h hpp h.in hpp.in; do specs+=("$d/*.$e"); done; done
+    hits=$(git ls-files -z -- "${specs[@]}" \
         ':(exclude)native/polycpp/test/check_try_catch_std_exceptions.cpp' \
         ':(exclude)native/polycpp/test/check_try_catch_unsupported.cpp' | xargs -0 grep -nE "$pat" 2>/dev/null)
     [ -z "$hits" ] || { echo "banned headers (use fmt/LLVM alternatives):"; echo "$hits"; exit 1; }
@@ -741,7 +737,7 @@ clean-all: clean-llvm clean-dist clean-sysroot clean-vcpkg clean-build
 # === Aggregate ===
 
 # Local mirror of the CI checks.
-ci: check-codegen check-format check-ci test-spectra
+ci: check-codegen check-format check-ci test-interface-codegen
 
 # === Internal ===
 

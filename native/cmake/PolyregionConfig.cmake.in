@@ -7,6 +7,8 @@ set(Polyregion_LLVM_DYLIB "@POLYREGION_LLVM_DYLIB@")
 set(Polyregion_RUNTIME_LIBRARY_DIRS
     "${PACKAGE_PREFIX_DIR}/lib"
     "${PACKAGE_PREFIX_DIR}/lib/polycpp/lib")
+set(Polyregion_TEST_PROFILE_DIR "${PACKAGE_PREFIX_DIR}/share/polyregion/test-profiles")
+set(Polyregion_MAVEN_REPOSITORY "${PACKAGE_PREFIX_DIR}/share/polyregion/maven")
 
 function(_polyregion_import_executable target relative_path)
   if(TARGET "${target}")
@@ -29,6 +31,8 @@ endfunction()
 _polyregion_import_executable(Polyregion::polycpp "bin/polycpp@CMAKE_EXECUTABLE_SUFFIX@")
 _polyregion_import_executable(Polyregion::polyc "bin/polyc@CMAKE_EXECUTABLE_SUFFIX@")
 _polyregion_import_executable(Polyregion::clangxx "bin/clang++@CMAKE_EXECUTABLE_SUFFIX@")
+_polyregion_import_executable(Polyregion::polytest "bin/polytest@CMAKE_EXECUTABLE_SUFFIX@")
+include("${CMAKE_CURRENT_LIST_DIR}/PolyregionPolytest.cmake")
 
 set(Polyregion_PackageCompiler_FOUND TRUE)
 if(Polyregion_PASS_BUNDLE STREQUAL "dso")

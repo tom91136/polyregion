@@ -52,6 +52,17 @@ jobs:
           path: native/polyc/polypass.js
           if-no-files-found: error
 
+      - name: Build JVM SDK
+        run: just build-jvm-sdk
+
+      - name: Upload JVM SDK
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-jvm-sdk
+          path: native/out/maven
+          if-no-files-found: error
+
   build-llvm:
     strategy:
       fail-fast: false
@@ -309,6 +320,13 @@ jobs:
         with:
           name: polyregion-pass-js
           path: native/polyc
+
+      - name: Download JVM SDK
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-jvm-sdk
+          path: native/out/maven
 
       - name: Dotenv
         id: dotenv

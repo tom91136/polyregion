@@ -419,7 +419,8 @@ private[polyregion] object CodeGen {
            |
            |@Generated(Array("polyregion.ast.CodeGen"))
            |private[polyregion] object PolyPackageWireSchema {
-           |  inline val Hash = "$packageWireHash"
+           |  inline val Hash        = "$packageWireHash"
+           |  inline val PackageHash = "$packageHash"
            |}
            |""".stripMargin
       )
@@ -431,7 +432,6 @@ private[polyregion] object CodeGen {
 
   def programVersioned(x: Program)            = MsgPack.Versioned(programHash, x)
   def structDefsVersioned(x: List[StructDef]) = MsgPack.Versioned(programHash, x)
-  def interfaceVersioned(x: Interface)        = MsgPack.Versioned(packageHash, x)
   def packageVersioned(x: Package)            = MsgPack.Versioned(packageHash, x)
 
   private def writeConventions(): Unit = {

@@ -211,7 +211,11 @@ private[ast] object CppInterfaceCodeGen {
        |
        |#pragma push_macro("$implementationMacro")
        |#ifndef $implementationMacro
+       |#if defined(_MSC_VER) && !defined(__clang__)
+       |#define $implementationMacro(function, ...) (__debugbreak(), __assume(0))
+       |#else
        |#define $implementationMacro(function, ...) __builtin_trap()
+       |#endif
        |#endif
        |
        |namespace ${interfaceDef.name.fqn.mkString("::")} {

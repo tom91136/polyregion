@@ -71,6 +71,9 @@ struct DriverConfig {
   std::string tempPrefix;
   std::string directive;
   bool cleanupOnSuccess;
+  // binds targetVar to the value keyed by the compile target's canonical backend; unmapped targets are not tested
+  std::string targetVar = {};
+  std::vector<std::pair<std::string, std::string>> targetValues = {};
 };
 
 enum class Mode : std::uint8_t { Offload, Passthrough };
@@ -466,16 +469,32 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
   if (offload) modes.emplace_back(Mode::Offload);
   if (passthrough) modes.emplace_back(Mode::Passthrough);
   const auto targets = loadTestTargets(cfg.profileDir);
+  const auto targetValueFor = [&](const std::string &arch) -> std::optional<std::string> {
+    const auto spec = compiletime::TargetSpec::findByName(arch.substr(0, arch.find('@')));
+    if (!spec) return {};
+    return cfg.targetValues ^ collect_first([&](const auto &backend, const auto &value) -> std::optional<std::string> {
+             const auto mapped = compiletime::TargetSpec::findByName(backend);
+             return mapped && mapped->canonical == spec->canonical ? std::optional{value} : std::nullopt;
+           });
+  };
 
   // one Task per mode for a (case, matrix-row, defaults-variant) combination
   const auto tasksFor = [&](const std::string &file, const std::string &shortName, const auto &tc, const auto &vars,
                             const std::string &label, const std::string &value) {
     const auto varsWithLabel = vars ^ append(std::pair{cfg.defaultsLabelVar, label});
+    std::vector<std::pair<std::string, std::string>> targetVars;
+    if (!cfg.targetVar.empty()) {
+      const auto targetArch =
+          vars ^ collect_first([&](const auto &k, const auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; });
+      const auto targetValue = targetArch ^ flat_map(targetValueFor);
+      if (!targetValue) return std::vector<Task>{};
+      targetVars.emplace_back(cfg.targetVar, *targetValue);
+    }
     const auto augmented = varsWithLabel //
-                           ^ concat(cfg.extraVars)
+                           ^ concat(cfg.extraVars) ^ concat(targetVars)
                            ^ concat(std::vector<std::pair<std::string, std::string>>{
                                {cfg.defaultsVar, value},
-                               {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel))},
+                               {cfg.stdpar.first, fmt::vformat(cfg.stdpar.second, mkArgStore(varsWithLabel ^ concat(targetVars)))},
                                {"input", file},
                                {"libm", libmFlag}});
     const auto unevalStore = mkArgStore(augmented ^ append(std::pair{std::string("output"), std::string("<unevaluated>")}));
@@ -540,7 +559,9 @@ struct RunnerOptions {
   bool list = false;
   bool listIds = false;
   bool listShards = false;
+  bool listTargets = false;
   std::string emitFile = {};
+  std::string emitEnv = {};
   std::string emitPrefix = {};
   std::string emitBinary = {};
   std::string emitWorkdir = {};
@@ -578,6 +599,10 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   const rlimit noCore{0, 0};
   setrlimit(RLIMIT_CORE, &noCore);
 #endif
+  if (opts.listTargets) {
+    loadTestTargets(cfg.profileDir) | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.c_str()); });
+    return 0;
+  }
   if (opts.listShards) {
     loadTestTargets(cfg.profileDir)                           //
             ^ map([](const auto &t) { return ctestSafe(t); }) //
@@ -642,7 +667,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     return dups.empty() ? 0 : 1;
   }
   if (!opts.emitFile.empty()) {
-    emitCtest(tasks, cfg, opts.emitFile, opts.emitPrefix, opts.emitBinary, opts.emitWorkdir, {});
+    emitCtest(tasks, cfg, opts.emitFile, opts.emitPrefix, opts.emitBinary, opts.emitWorkdir, opts.emitEnv);
     if (!opts.emitDistFile.empty()) emitCtest(tasks, cfg, opts.emitDistFile, opts.emitPrefix, opts.emitDistBinary, {}, opts.emitDistEnv);
     return 0;
   }
@@ -750,10 +775,12 @@ inline int fired_main( //
     bool list = fire::arg({"-l", "--list", "Enumerate tasks (human-readable) and exit"}),
     bool listIds = fire::arg({"--list-ids", "Enumerate task ids (one per line) and exit"}),
     bool listShards = fire::arg({"--list-shards", "Enumerate unique shard labels (one per line) and exit"}),
+    bool listTargets = fire::arg({"--list-targets", "Enumerate the profile's test targets (one per line) and exit"}),
     fire::optional<std::string> emitCtest = fire::arg({"--emit-ctest", "Write a CTestTestfile fragment to this path and exit"}),
     fire::optional<std::string> emitPrefix = fire::arg({"--emit-prefix", "ctest test-name prefix (with --emit-ctest)"}),
     fire::optional<std::string> emitBinary = fire::arg({"--emit-binary", "Binary ctest invokes (with --emit-ctest)"}),
     fire::optional<std::string> emitWorkdir = fire::arg({"--emit-workdir", "WORKING_DIRECTORY for emitted tests"}),
+    fire::optional<std::string> emitEnv = fire::arg({"--emit-env", "ENVIRONMENT for emitted tests (with --emit-ctest)"}),
     fire::optional<std::string> emitDistFile = fire::arg({"--emit-dist-ctest", "Also write a dist CTestTestfile fragment here"}),
     fire::optional<std::string> emitDistBinary = fire::arg({"--emit-dist-binary", "Binary for the dist fragment"}),
     fire::optional<std::string> emitDistSubdir = fire::arg({"--emit-dist-subdir", "Dist test-files subdir; builds the dist ENVIRONMENT"})) {
@@ -763,7 +790,8 @@ inline int fired_main( //
                      .passthrough = !offloadOnly,
                      .list = list,
                      .listIds = listIds,
-                     .listShards = listShards};
+                     .listShards = listShards,
+                     .listTargets = listTargets};
   if (caseFilter) opts.caseFilters.push_back(caseFilter.value());
   if (runTask) opts.runTask = runTask.value();
   if (compileTask) opts.compileTask = compileTask.value();
@@ -773,6 +801,7 @@ inline int fired_main( //
   if (emitPrefix) opts.emitPrefix = emitPrefix.value();
   if (emitBinary) opts.emitBinary = emitBinary.value();
   if (emitWorkdir) opts.emitWorkdir = emitWorkdir.value();
+  if (emitEnv) opts.emitEnv = emitEnv.value();
   if (emitDistFile) opts.emitDistFile = emitDistFile.value();
   if (emitDistBinary) opts.emitDistBinary = emitDistBinary.value();
   if (emitDistSubdir) opts.emitDistEnv = distEnv(emitDistSubdir.value());

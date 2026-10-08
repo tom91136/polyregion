@@ -266,6 +266,9 @@ jobs:
       - name: Build pass bundle (dso)
         run: just build-pass-native
 
+      - name: Build JVM SDK
+        run: just build-jvm-sdk
+
       - name: Configure release build
         run: just configure
 

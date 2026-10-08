@@ -17,7 +17,10 @@ inline std::string extractTestName(const std::string &path, const std::string &p
   const size_t extPos = path.find_last_of('.');
   if (prefixPos != std::string::npos && extPos != std::string::npos) {
     return path.substr(prefixPos + prefix.size(), extPos - (prefixPos + prefix.size()));
-  } else return "";
+  }
+  const size_t slashPos = path.find_last_of("/\\");
+  const size_t start = slashPos == std::string::npos ? 0 : slashPos + 1;
+  return path.substr(start, extPos == std::string::npos || extPos < start ? std::string::npos : extPos - start);
 }
 
 struct TestCase {

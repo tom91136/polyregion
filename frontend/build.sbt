@@ -14,12 +14,14 @@ Global / excludeLintKeys += assembly / artifact
 
 lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
 lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
+lazy val mavenDir    = (nativeDir / "out" / "maven").getAbsoluteFile
 
 lazy val passJsDest  = settingKey[File]("Destination of the JS PolyPass source in the native tree.")
 lazy val passDsoDest = settingKey[File]("Destination of the SN PolyPass DSO in the native tree.")
 
 lazy val exportPassBundle = taskKey[File]("Build pass.js (fullLinkJS) and copy it into the native tree.")
 lazy val exportPassDso    = taskKey[File]("Build the SN pass DSO (nativeLink) and copy it into the native tree.")
+lazy val exportMavenRepo  = taskKey[File]("Publish the JVM SDK artefacts as a Maven repository in the native tree.")
 lazy val genCodegen       = taskKey[Unit]("Run polyregion.ast.CodeGen to (re)generate native C++/JNI sources.")
 lazy val genEw            = taskKey[Unit]("Run ewgen.Main to (re)generate the polyinvoke wrangler sources.")
 
@@ -100,6 +102,11 @@ def nativeCompilerInputs(converter: xsbti.FileConverter): Seq[Attributed[xsbti.H
 lazy val nativeCompilerInputsTask =
   taskKey[Seq[Attributed[xsbti.HashedVirtualFileRef]]]("Native compiler libraries that participate in compile caching")
 
+lazy val sdkPublishSettings = Seq(
+  publishTo                              := Some(MavenCache("polyregion-sdk", mavenDir)),
+  Compile / packageDoc / publishArtifact := false
+)
+
 lazy val `binding-jvm` = project.settings(
   commonSettings,
   name             := "binding-jvm",
@@ -131,6 +138,7 @@ lazy val `runtime-scala` = project
 lazy val ast = (projectMatrix in file("ast"))
   .settings(
     commonSettings,
+    sdkPublishSettings,
     name                      := "ast",
     Compile / sourceDirectory := (ThisBuild / baseDirectory).value / "ast" / "src" / "main",
     scalacOptions ++=
@@ -172,6 +180,7 @@ lazy val `interface-codegen` = project
   .in(file("interface-codegen"))
   .settings(
     commonSettings,
+    sdkPublishSettings,
     name                                   := "interface-codegen",
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
   )
@@ -519,7 +528,15 @@ lazy val `benchmarks-scala` = project
 
 lazy val root = project
   .in(file("."))
-  .settings(commonSettings)
+  .settings(
+    commonSettings,
+    exportMavenRepo := Def.uncached {
+      Def.taskDyn {
+        IO.delete(mavenDir)
+        Def.sequential(ast.jvm(scala3Version) / publish, `interface-codegen` / publish, Def.task(mavenDir))
+      }.value
+    }
+  )
   .aggregate(
     `binding-jvm`,
     `interface-codegen`,

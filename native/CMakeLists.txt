@@ -599,13 +599,24 @@ configure_package_config_file(
         cmake/PolyregionConfig.cmake.in
         "${CMAKE_CURRENT_BINARY_DIR}/PolyregionConfig.cmake"
         INSTALL_DESTINATION lib/cmake/Polyregion)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PolyregionConfig.cmake"
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PolyregionConfig.cmake" cmake/PolyregionPolytest.cmake
         DESTINATION lib/cmake/Polyregion
+        COMPONENT polyregion-toolchain)
+
+set(POLYREGION_MAVEN_REPO "${CMAKE_CURRENT_SOURCE_DIR}/out/maven")
+if (NOT IS_DIRECTORY "${POLYREGION_MAVEN_REPO}/uk")
+    message(FATAL_ERROR
+            "JVM SDK Maven repository is missing at ${POLYREGION_MAVEN_REPO}.\n"
+            "Run: just build-jvm-sdk")
+endif ()
+install(DIRECTORY "${POLYREGION_MAVEN_REPO}/"
+        DESTINATION share/polyregion/maven
         COMPONENT polyregion-toolchain)
 
 set(POLYREGION_DIST_TARGETS
         polyc-bin
         polyinfo
+        polytest-bin
         polycpp
         polyc-JNI
         polyc-JNIshim
@@ -655,6 +666,7 @@ if (POLYREGION_HAS_FLANG)
             FILES_MATCHING PATTERN "check_*.f95")
 endif ()
 install(DIRECTORY test-profiles/ DESTINATION test/profiles COMPONENT test-dist EXCLUDE_FROM_ALL)
+install(DIRECTORY test-profiles/ DESTINATION share/polyregion/test-profiles COMPONENT polyregion-toolchain)
 install(FILES "${CMAKE_BINARY_DIR}/test-dist-CTestTestfile.cmake"
         DESTINATION . RENAME CTestTestfile.cmake COMPONENT test-dist EXCLUDE_FROM_ALL)
 get_property(_polyregion_test_discover_targets GLOBAL PROPERTY POLYREGION_TEST_DISCOVER_TARGETS)
