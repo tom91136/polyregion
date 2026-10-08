@@ -100,23 +100,26 @@ object ArenaLower extends ProgramPass {
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
-    val members = program.defs.iterator.map(d => d.name -> d.members).toMap
+    val members  = program.defs.iterator.map(d => d.name -> d.members).toMap
+    val analysis = AddressRefinement.session(program)
     program.copy(
-      entry = program.entry.map(run(program, members, _)),
-      functions = program.functions.map(run(program, members, _))
+      entry = program.entry.map(run(members, analysis.solve, _)),
+      functions = program.functions.map(run(members, analysis.solve, _))
     )
   }
 
-  private def run(program: p.Program, members: Map[p.Sym, List[p.Named]], f: p.Function): p.Function = captureRoot(
-    f
-  ) match {
+  private def run(
+      members: Map[p.Sym, List[p.Named]],
+      solve: p.Function => AddressRefinement.Solution,
+      f: p.Function
+  ): p.Function = captureRoot(f) match {
     case None => f
     case Some((capN, _)) =>
       val statements = f.collectAll[p.Stmt]
       val localAggregates = statements.iterator.collect {
         case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
       }.toSet
-      val state     = ArenaState(localAggregates, AddressRefinement.solve(program, f).requireSolved)
+      val state     = ArenaState(localAggregates, solve(f).requireSolved)
       val arena8    = p.Named("#arena_base", BytePtr)
       val rewritten = mapStmtsRec(f.body)(rwLeaf(members, state, arena8))
       val capDecl   = p.Stmt.Var(capN, Some(p.Expr.Cast(sel(arena8), capN.tpe)), isMutable = false)

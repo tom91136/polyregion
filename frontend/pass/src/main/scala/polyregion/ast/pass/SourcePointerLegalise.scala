@@ -155,8 +155,10 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         .map(name => name.symbol -> name)
         .toMap
 
-    private def requirements(function: p.Function): Map[String, Requirement] = {
-      val solution = AddressRefinement.solve(program, function)
+    private def requirements(
+        function: p.Function,
+        solution: AddressRefinement.Solution
+    ): Map[String, Requirement] = {
       val declared = declarations(function)
       val grouped = solution.slots.toList
         .flatMap { case (AddressRefinement.Query.Slot(root, steps), value) =>
@@ -314,8 +316,8 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
       }._2
     }
 
-    def rewrite(function: p.Function): p.Function = {
-      val types        = inferredTypes(function, requirements(function))
+    def rewrite(function: p.Function, solution: AddressRefinement.Solution): p.Function = {
+      val types        = inferredTypes(function, requirements(function, solution))
       val localStorage = function.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) => name.symbol }.toSet
       def retype(name: p.Named): p.Named = types.get(name.symbol).fold(name)(tpe => name.copy(tpe = tpe))
       def retypeArg(arg: p.Arg): p.Arg   = arg.copy(named = retype(arg.named))
@@ -560,23 +562,25 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
     }
   }
 
-  private def legalise(program: p.Program, function: p.Function): p.Function = {
-    val analysis  = AddressRefinement.solve(program, function)
+  private def legalise(
+      program: p.Program,
+      analysis: AddressRefinement.Solution,
+      function: p.Function
+  ): (p.Function, AddressRefinement.Solution) = {
     val conflicts = analysis.refinedSpaces.collect { case (symbol, spaces) if spaces.size > 1 => symbol }.toSet
-    val demoted   = demote(function, conflicts)
-    val remaining = AddressRefinement
-      .solve(
-        program.copy(
-          entry = Option.when(program.entry.contains(function))(demoted),
-          functions = program.functions.map {
-            case `function` => demoted
-            case other      => other
-          }
-        ),
-        demoted
-      )
-      .refinedSpaces
-      .collect { case (symbol, spaces) if spaces.size > 1 => symbol -> spaces }
+    if (conflicts.isEmpty) return function -> analysis
+    val demoted = demote(function, conflicts)
+    val demotedProgram = program.copy(
+      entry = Option.when(program.entry.contains(function))(demoted),
+      functions = program.functions.map {
+        case `function` => demoted
+        case other      => other
+      }
+    )
+    val demotedAnalysis = AddressRefinement.solve(demotedProgram, demoted)
+    val remaining = demotedAnalysis.refinedSpaces.collect {
+      case (symbol, spaces) if spaces.size > 1 => symbol -> spaces
+    }
     if (requiresConcreteSpaces && remaining.nonEmpty) {
       val details = remaining.toList.sortBy(_._1).map { case (symbol, spaces) =>
         s"$symbol=${spaces.toList.map(_.toString).sorted.mkString("|")}"
@@ -585,34 +589,47 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         s"cross-address-space pointer merge escapes read-only use in `${function.name.fqn.mkString(".")}`: ${details.mkString(", ")}"
       )
     }
-    demoted
+    demoted -> demotedAnalysis
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
-    def respace(function: p.Function): (p.Function, Int) =
-      RegionRespace.run(
-        program,
+    val initialAnalysis = AddressRefinement.session(program)
+    def respace(function: p.Function): (p.Function, Int, AddressRefinement.Solution) = {
+      val analysis = initialAnalysis.solve(function)
+      val (rewritten, count) = RegionRespace.run(
         function,
+        _ => analysis,
         requireSolved = false,
         adaptPointerStores = requiresConcreteSpaces
       )
+      (rewritten, count, analysis)
+    }
 
-    val (entry0, entryCount) = program.entry
+    val (entry0, entryCount, entryAnalysis) = program.entry
       .map(respace)
-      .map((function, count) => Some(function) -> count)
-      .getOrElse(None -> 0)
-    val (functions0, counts) = program.functions.map(respace).unzip
-    val respaced             = program.copy(entry = entry0, functions = functions0)
-    val total                = entryCount + counts.sum
+      .map((function, count, analysis) => (Some(function), count, Some(analysis)))
+      .getOrElse((None, 0, None))
+    val functionResults  = program.functions.map(respace)
+    val functions0       = functionResults.map(_._1)
+    val counts           = functionResults.map(_._2)
+    val functionAnalyses = functionResults.map(_._3)
+    val respaced         = program.copy(entry = entry0, functions = functions0)
+    val total            = entryCount + counts.sum
     if (total > 0) log.info(s"respaced $total rooted pointer(s) during source legalisation")
-    val entry        = respaced.entry.map(legalise(respaced, _))
-    val functions    = respaced.functions.map(legalise(respaced, _))
+    val entryResult = respaced.entry.zip(entryAnalysis).map { (function, analysis) =>
+      legalise(respaced, analysis, function)
+    }
+    val functionLegal = respaced.functions.zip(functionAnalyses).map { (function, analysis) =>
+      legalise(respaced, analysis, function)
+    }
+    val entry        = entryResult.map(_._1)
+    val functions    = functionLegal.map(_._1)
     val pointerLegal = respaced.copy(entry = entry, functions = functions)
     if (!requiresConcreteSpaces) pointerLegal
     else {
       val aggregates     = AggregateSpecialiser(pointerLegal)
-      val finalEntry     = pointerLegal.entry.map(aggregates.rewrite)
-      val finalFunctions = pointerLegal.functions.map(aggregates.rewrite)
+      val finalEntry     = pointerLegal.entry.zip(entryResult.map(_._2)).map(aggregates.rewrite)
+      val finalFunctions = pointerLegal.functions.zip(functionLegal.map(_._2)).map(aggregates.rewrite)
       aggregates.result(finalEntry, finalFunctions)
     }
   }

@@ -41,6 +41,13 @@ class AddressRefinementSuite extends munit.FunSuite {
     assert(AddressValue.arenaRoot("capture").hasArenaRoot)
   }
 
+  test("an analysis session reuses an immutable root solution") {
+    val e        = entry(body = List(p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))))
+    val analysis = AddressRefinement.session(program(e))
+
+    assert(analysis.solve(e) eq analysis.solve(e))
+  }
+
   test("taking a local scalar address refines a stale global pointer to private") {
     val value   = named("value", p.Type.IntS32)
     val pointer = named("pointer", ptrTpe)

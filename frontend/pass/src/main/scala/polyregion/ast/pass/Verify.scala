@@ -77,25 +77,31 @@ object Verify {
     }
 
   def validateRegions(program: p.Program): List[String] =
-    (program.entry.toList ::: program.functions).flatMap { f =>
-      AddressRefinement.solve(program, f).diagnostics.map(diagnostic => s"${f.name.repr}: $diagnostic")
+    locally {
+      val analysis = AddressRefinement.session(program)
+      (program.entry.toList ::: program.functions).flatMap { f =>
+        analysis.solve(f).diagnostics.map(diagnostic => s"${f.name.repr}: $diagnostic")
+      }
     }
 
   def validateRegionSpaces(program: p.Program): List[String] =
-    (program.entry.toList ::: program.functions).flatMap { f =>
-      val analysis = AddressRefinement.solve(program, f)
-      val declared = (
-        f.receiver.iterator.map(_.named) ++ f.args.iterator.map(_.named) ++
-          f.moduleCaptures.iterator.map(_.named) ++ f.termCaptures.iterator.map(_.named) ++
-          f.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(n, _, _) => n }
-      ).map(n => n.symbol -> n).toMap
-      declared.valuesIterator.flatMap { name =>
-        for {
-          declaredSpace <- AddressRefinement.spaceOf(name.tpe)
-          refinedSpace  <- analysis.refinedSpace(name)
-          if declaredSpace != refinedSpace
-        } yield s"${f.name.repr}: ${name.symbol} declared $declaredSpace but inferred $refinedSpace"
-      }.toList
+    locally {
+      val refinement = AddressRefinement.session(program)
+      (program.entry.toList ::: program.functions).flatMap { f =>
+        val analysis = refinement.solve(f)
+        val declared = (
+          f.receiver.iterator.map(_.named) ++ f.args.iterator.map(_.named) ++
+            f.moduleCaptures.iterator.map(_.named) ++ f.termCaptures.iterator.map(_.named) ++
+            f.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(n, _, _) => n }
+        ).map(n => n.symbol -> n).toMap
+        declared.valuesIterator.flatMap { name =>
+          for {
+            declaredSpace <- AddressRefinement.spaceOf(name.tpe)
+            refinedSpace  <- analysis.refinedSpace(name)
+            if declaredSpace != refinedSpace
+          } yield s"${f.name.repr}: ${name.symbol} declared $declaredSpace but inferred $refinedSpace"
+        }.toList
+      }
     }
 
   def validateSingle(

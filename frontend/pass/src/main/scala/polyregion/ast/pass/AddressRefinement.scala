@@ -99,12 +99,20 @@ private[pass] object AddressRefinement {
       case _                                                          => false
     }
 
-    private[pass] def join(that: AddressValue): AddressValue =
-      AddressValue(
-        alternatives ++ that.alternatives,
-        references ++ that.references,
-        obligations ++ that.obligations
-      )
+    private[pass] def join(that: AddressValue): AddressValue = {
+      val joinedAlternatives = alternatives ++ that.alternatives
+      val joinedReferences   = references ++ that.references
+      val joinedObligations  = obligations ++ that.obligations
+      if (
+        encoding.isEmpty && joinedAlternatives == alternatives && joinedReferences == references &&
+        joinedObligations == obligations
+      ) this
+      else if (
+        that.encoding.isEmpty && joinedAlternatives == that.alternatives && joinedReferences == that.references &&
+        joinedObligations == that.obligations
+      ) that
+      else AddressValue(joinedAlternatives, joinedReferences, joinedObligations)
+    }
 
     private[AddressRefinement] def inEncoding(encoding: Encoding): AddressValue = copy(
       alternatives = alternatives.map {
@@ -223,9 +231,30 @@ private[pass] object AddressRefinement {
       sourcePrefix: List[p.PathStep]
   )
   private final case class CallKey(function: String, boundary: List[(String, AddressValue)], model: AddressModel)
-  private final class InferenceContext {
+  private final class InferenceContext(program: p.Program) {
     val calls = scala.collection.mutable.Map.empty[CallKey, AddressValue]
+    val roots = scala.collection.mutable.Map.empty[(String, AddressModel), Solution]
+    val functionsByName: Map[p.Sym, List[p.Function]] =
+      (program.entry.iterator ++ program.functions.iterator).toList.groupMap(_.name)(identity)
+    val definitions: Map[p.Sym, p.StructDef] = program.defs.iterator.map(d => d.name -> d).toMap
+    val members: Map[p.Sym, Map[String, p.Type]] =
+      definitions.view.mapValues(_.members.map(m => m.symbol -> m.tpe).toMap).toMap
+    val baseByField: Map[String, p.Sym] = definitions.keysIterator.map { symbol =>
+      s"${p.Conventions.BaseFieldPrefix}_${symbol.fqcn}" -> symbol
+    }.toMap
   }
+
+  final class Session private[AddressRefinement] (program: p.Program, model: AddressModel) {
+    private val context = InferenceContext(program)
+
+    def solve(function: p.Function): Solution =
+      context.roots.getOrElseUpdate(
+        function.signatureKey -> model,
+        AddressRefinement.solve(program, function, model, Map.empty, Nil, context)
+      )
+  }
+
+  def session(program: p.Program, model: AddressModel = AddressModel.Physical): Session = Session(program, model)
 
   def isPtr(t: p.Type): Boolean = t match {
     case _: p.Type.Ptr => true
@@ -486,7 +515,7 @@ private[pass] object AddressRefinement {
   private def tokenOf(root: p.Named): Query.Binding = Query.Binding(root.symbol)
 
   def solve(program: p.Program, function: p.Function, model: AddressModel = AddressModel.Physical): Solution =
-    solve(program, function, model, Map.empty, Nil, InferenceContext())
+    session(program, model).solve(function)
 
   private def solve(
       program: p.Program,
@@ -496,8 +525,10 @@ private[pass] object AddressRefinement {
       activeCalls: List[String],
       context: InferenceContext
   ): Solution = {
-    val capture    = captureRoot(function).map(_._1)
-    val statements = function.collectAll[p.Stmt]
+    val capture     = captureRoot(function).map(_._1)
+    val statements  = function.collectAll[p.Stmt]
+    val terms       = function.collectAll[p.Term]
+    val expressions = function.collectAll[p.Expr]
     val declarations = (
       function.receiver.iterator.map(_.named) ++
         function.args.iterator.map(_.named) ++
@@ -508,11 +539,9 @@ private[pass] object AddressRefinement {
     val localAggregates = statements.iterator.collect {
       case p.Stmt.Var(n, _, _) if !isPtr(n.tpe) => n.symbol
     }.toSet
-    val definitions = program.defs.iterator.map(d => d.name -> d).toMap
-    val members     = definitions.view.mapValues(_.members.map(m => m.symbol -> m.tpe).toMap).toMap
-    val baseByField = definitions.keysIterator.map { symbol =>
-      s"${p.Conventions.BaseFieldPrefix}_${symbol.fqcn}" -> symbol
-    }.toMap
+    val definitions = context.definitions
+    val members     = context.members
+    val baseByField = context.baseByField
 
     def structPointee(tpe: p.Type): Option[p.Sym] = tpe match {
       case p.Type.Ptr(p.Type.Struct(symbol, _), _) => Some(symbol)
@@ -592,14 +621,13 @@ private[pass] object AddressRefinement {
         if (nested > 0) nested + 1 else 0
       case _ => 0
     }
-    val syntacticSlotDepth = function
-      .collectAll[p.Term]
-      .iterator
+    val syntacticSlotDepth = terms.iterator
       .collect { case p.Term.Select(_, steps, _) => steps.size }
       .maxOption
       .getOrElse(0)
-    val maxSlotDepth =
-      math.max(syntacticSlotDepth, declarations.valuesIterator.map(n => pointerSlotDepth(n.tpe)).maxOption.getOrElse(0))
+    val declaredSlotDepth =
+      declarations.valuesIterator.map(_.tpe).toSet.iterator.map(pointerSlotDepth(_)).maxOption.getOrElse(0)
+    val maxSlotDepth             = math.max(syntacticSlotDepth, declaredSlotDepth)
     val bound                    = (function.receiver.iterator ++ function.args.iterator).map(_.named).toList
     val logicalArenaAddressViews = LogicalArenaViewAbi.arenaAddressBindings(bound)
 
@@ -890,7 +918,16 @@ private[pass] object AddressRefinement {
         .map(depth => depth -> matching.iterator.collect { case (`depth`, fact) => fact }.reduce(_.join(_)))
     }
 
-    def termFact(state: Map[Query[AddressValue], AddressValue], term: p.Term): AddressValue = term match {
+    var materialisedState: Option[Map[Query[AddressValue], AddressValue]] = None
+    val materialisedTerms       = scala.collection.mutable.HashMap.empty[p.Term, AddressValue]
+    val materialisedExpressions = scala.collection.mutable.HashMap.empty[p.Expr, AddressValue]
+
+    def termFact(state: Map[Query[AddressValue], AddressValue], term: p.Term): AddressValue =
+      if (materialisedState.exists(_ eq state))
+        materialisedTerms.getOrElseUpdate(term, termFactUncached(state, term))
+      else termFactUncached(state, term)
+
+    def termFactUncached(state: Map[Query[AddressValue], AddressValue], term: p.Term): AddressValue = term match {
       case p.Term.NullPtrConst(_, _, _) => AddressValue.nullValue
       case _: p.Term.StringConst =>
         AddressValue.absolute(Some(Provenance.StaticStorage), Some(p.Type.Space.Constant))
@@ -989,7 +1026,12 @@ private[pass] object AddressRefinement {
           AddressValue.absolute(Some(Provenance.Local(s"materialised ${term.repr}")), Some(space))
       }
 
-    def exprFact(state: Map[Query[AddressValue], AddressValue], expr: p.Expr): AddressValue = expr match {
+    def exprFact(state: Map[Query[AddressValue], AddressValue], expr: p.Expr): AddressValue =
+      if (materialisedState.exists(_ eq state))
+        materialisedExpressions.getOrElseUpdate(expr, exprFactUncached(state, expr))
+      else exprFactUncached(state, expr)
+
+    def exprFactUncached(state: Map[Query[AddressValue], AddressValue], expr: p.Expr): AddressValue = expr match {
       case p.Expr.Alias(term) => termFact(state, term)
       case p.Expr.Cast(term: p.Term.Select, p.Type.Ptr(_, space)) if !isCarrier(term.tpe) =>
         val materialisesStorageAddress = term.tpe match {
@@ -1043,10 +1085,8 @@ private[pass] object AddressRefinement {
       case _: p.Expr.ForeignCall if carrierResult(expr) =>
         AddressValue.unresolved(s"foreign call ${expr.repr} has no pointer summary")
       case invoke: p.Expr.Invoke if carrierResult(expr) =>
-        val candidates = invoke.calleeSym.toList.flatMap { name =>
-          (program.entry.toList ::: program.functions).filter(_.name == name)
-        }
-        val actuals = invoke.receiver.toList ::: invoke.args
+        val candidates = invoke.calleeSym.toList.flatMap(context.functionsByName.getOrElse(_, Nil))
+        val actuals    = invoke.receiver.toList ::: invoke.args
         val callee = candidates
           .find { candidate =>
             val formals = candidate.receiver.toList.map(_.named) ::: candidate.args.map(_.named)
@@ -1138,6 +1178,7 @@ private[pass] object AddressRefinement {
       else close(next, remaining - 1)
     }
     val (solved, unstable) = close(initial, limit)
+    materialisedState = Some(solved)
 
     def coercion(target: Query[AddressValue], source: AddressValue): Either[Diagnostic, Coercion] = {
       val targetFact = solved.getOrElse(target, AddressValue())
@@ -1204,34 +1245,32 @@ private[pass] object AddressRefinement {
       encoding.fold(source)(source.inEncoding)
     }
 
-    def mergeFacts(left: AddressValue, right: AddressValue): AddressValue = {
-      val joined = left.join(right)
-      joined.copy(encoding =
-        if (left.encoding == right.encoding) left.encoding
-        else selectValue(joined).encoding
-      )
-    }
+    def mergeFacts(left: AddressValue, right: AddressValue): AddressValue =
+      if (left == right) left
+      else {
+        val joined = left.join(right)
+        joined.copy(encoding =
+          if (left.encoding == right.encoding) left.encoding
+          else selectValue(joined).encoding
+        )
+      }
 
     def mergeStates(
         left: Map[Query[AddressValue], AddressValue],
         right: Map[Query[AddressValue], AddressValue]
     ): Map[Query[AddressValue], AddressValue] =
-      (left.keySet ++ right.keySet).iterator.map { token =>
-        val fact = (left.get(token), right.get(token)) match {
-          case (Some(x), Some(y)) => mergeFacts(x, y)
-          case (Some(x), None)    => x
-          case (None, Some(y))    => y
-          case _                  => AddressValue()
-        }
-        token -> fact
-      }.toMap
+      right.foldLeft(left) { case (current, (token, rightFact)) =>
+        val fact = current.get(token).fold(rightFact)(mergeFacts(_, rightFact))
+        if (current.get(token).contains(fact)) current else current.updated(token, fact)
+      }
 
     def mergeSummaries(
         left: Map[String, AddressValue],
         right: Map[String, AddressValue]
     ): Map[String, AddressValue] =
-      right.foldLeft(left) { case (current, (symbol, fact)) =>
-        current.updated(symbol, current.get(symbol).fold(fact)(mergeFacts(_, fact)))
+      right.foldLeft(left) { case (current, (symbol, rightFact)) =>
+        val fact = current.get(symbol).fold(rightFact)(mergeFacts(_, rightFact))
+        if (current.get(symbol).contains(fact)) current else current.updated(symbol, fact)
       }
 
     def copySlots(
@@ -1518,13 +1557,13 @@ private[pass] object AddressRefinement {
       convergenceDiagnostics ++ conversionDiagnostics ++ carrierDiagnostics ++ logicalDiagnostics ++
         flowDiagnostics
     ).distinct
-    val valueEntries = function.collectAll[p.Term].iterator.map { term =>
+    val valueEntries = terms.iterator.map { term =>
       (Query.TermValue(term): Query[?]) -> selectValue(termFact(solved, term))
     }
-    val producerEntries = function.collectAll[p.Expr].iterator.map { expr =>
+    val producerEntries = expressions.iterator.map { expr =>
       (Query.ExprResult(expr): Query[?]) -> selectValue(exprFact(solved, expr))
     }
-    val addressEntries = function.collectAll[p.Term].iterator.map { term =>
+    val addressEntries = terms.iterator.map { term =>
       val origins = term match {
         case p.Term.Select(root, steps, _) if localAggregates(root.symbol) =>
           Set[Provenance](Provenance.Local(root.symbol, steps))
@@ -1540,8 +1579,7 @@ private[pass] object AddressRefinement {
     ).toMap
     val bindings = solved.iterator.collect { case (Query.Binding(symbol), fact) => symbol -> fact }.toMap
     val slots    = solved.iterator.collect { case (slot: Query.Slot, fact) => slot -> fact }.toMap
-    val returned = function
-      .collectAll[p.Stmt]
+    val returned = statements
       .collect { case stmt: p.Stmt.Return => stmt }
       .iterator
       .map(stmt => selectValue(exprFact(solved, stmt.value)))

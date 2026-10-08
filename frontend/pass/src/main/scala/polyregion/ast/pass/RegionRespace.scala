@@ -14,12 +14,12 @@ object RegionRespace extends ProgramPass {
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   private[pass] def run(
-      program: p.Program,
       f: p.Function,
+      solve: p.Function => AddressRefinement.Solution,
       requireSolved: Boolean = true,
       adaptPointerStores: Boolean = true
   ): (p.Function, Int) = {
-    val solved   = AddressRefinement.solve(program, f)
+    val solved   = solve(f)
     val analysis = if (requireSolved) solved.requireSolved else solved
     val declared = (
       f.receiver.iterator.map(_.named) ++ f.args.iterator.map(_.named) ++
@@ -90,11 +90,12 @@ object RegionRespace extends ProgramPass {
   }
 
   override def apply(program: p.Program, log: Log): p.Program = {
+    val analysis = AddressRefinement.session(program)
     val (entry, ec) = program.entry
-      .map(run(program, _))
+      .map(run(_, analysis.solve))
       .map((function, count) => Some(function) -> count)
       .getOrElse(None -> 0)
-    val (functions, fcs) = program.functions.map(run(program, _)).unzip
+    val (functions, fcs) = program.functions.map(run(_, analysis.solve)).unzip
     val total            = ec + fcs.sum
     if (total > 0) log.info(s"respaced $total rooted pointer(s) to their resource's address space")
     program.copy(entry = entry, functions = functions)
