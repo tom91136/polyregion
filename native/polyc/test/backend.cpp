@@ -2140,6 +2140,31 @@ TEST_CASE("Vulkan takes the address of a scalar argument", "[backend][vulkan]") 
   REQUIRE(compiled.binary);
 }
 
+TEST_CASE("SPIR-V records where the arena views start among the bound arguments", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto i32Ptr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named out("out", i32Ptr);
+  const auto views = std::vector<Type::Any>{Type::IntS8(),   Type::IntS16(),  Type::IntS32(), Type::IntS64(),
+                                            Type::Float32(), Type::Float64(), Type::Float16()}
+                     ^ zip_with_index() ^ map([](const auto &tpe, const auto index) {
+                         return Named(fmt::format("#av{}", index), Type::Ptr(tpe, TypeSpace::Global()).widen());
+                       });
+  const auto args = std::vector{Arg(out, {})} ^ concat(views ^ map([](const auto &view) { return Arg(view, {}); }));
+  const Function entry =
+      mkFn("kernel", args, Type::Unit0(),
+           {Update(Term::Select(views[2], {}, i32Ptr), Term::IntS64Const(0).widen(), Term::IntS32Const(7).widen()).widen(), ret()},
+           FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  for (const auto target : {Target::Object_LLVM_SPIRV64_Kernel, Target::Object_LLVM_SPIRV_GLCompute}) {
+    const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {target, ""}, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    const std::string spv(compiled.binary->begin(), compiled.binary->end());
+    CHECK_THAT(spv, Catch::Matchers::ContainsSubstring("polyregion.arena-view-start=1"));
+  }
+}
+
 TEST_CASE("Vulkan folds a null check of a buffer pointer", "[backend][vulkan]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
@@ -2442,6 +2467,28 @@ TEST_CASE("an entry's by-value struct argument is private to each work-item", "[
     REQUIRE(compiled.binary);
     CHECK_THAT(llvmIrOf(compiled), Catch::Matchers::ContainsSubstring("llvm.memcpy"));
   }
+}
+
+TEST_CASE("an entry's struct capture stays the launch's shared object", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const Sym counterSym({"Counter"});
+  const auto counter = Type::Struct(counterSym, {}).widen();
+  const StructDef counterDef(counterSym, {}, {Named("value", Type::IntS32())}, {}, false);
+  const Named captured("captured", counter);
+  const Function entry(
+      FunctionDecl(Sym({"kernel"}), {}, std::optional<Arg>{}, {}, {}, {Arg(captured, {})}, Type::Unit0(), FunctionAffinity::Offload()),
+      {Mut(Term::Select(captured, {PathStep::Field("value").widen()}, Type::IntS32()), Expr::Alias(Term::IntS32Const(1).widen()).widen())
+           .widen(),
+       ret()},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {counterDef}, PassPhase::Initial(), {}),
+                                                      {Target::Object_LLVM_NVPTX64, "sm_70"}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("llvm.memcpy"));
 }
 
 TEST_CASE("OpenCL C binds a by-value struct argument through its mirrored buffer", "[backend]") {

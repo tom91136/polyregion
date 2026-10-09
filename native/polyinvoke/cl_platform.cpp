@@ -12,6 +12,7 @@
 #include "spirv/unified1/spirv.hpp"
 
 #include "polyinvoke/module_cache.h"
+#include "polyinvoke/spirv.h"
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 
@@ -597,6 +598,14 @@ std::vector<std::string> ClDevice::features() {
 void ClDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
   store.loadModule(name, image);
+  if (format != ModuleFormat::SPIRV_Kernel) return;
+  std::vector<uint32_t> words(image.size() / sizeof(uint32_t));
+  std::memcpy(words.data(), image.data(), words.size() * sizeof(uint32_t));
+  if (const auto start = spirv::arenaViewStart(words)) arenaViewStarts.emplace(name, *start);
+}
+std::optional<size_t> ClDevice::arenaViewStart(const std::string &name) {
+  POLYINVOKE_TRACE();
+  return arenaViewStarts ^ aspartame::get_maybe(name);
 }
 bool ClDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();

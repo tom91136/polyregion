@@ -13,11 +13,11 @@
 #include "aspartame/all.hpp"
 #include "spirv/unified1/spirv.hpp"
 
-namespace polyregion::invoke::vulkan {
+namespace polyregion::invoke::spirv {
 
 inline constexpr std::string_view ArenaViewStartMarker = "polyregion.arena-view-start=";
 
-inline std::optional<size_t> spirvArenaViewStart(const std::vector<uint32_t> &words) {
+inline std::optional<size_t> arenaViewStart(const std::vector<uint32_t> &words) {
   using namespace aspartame;
   constexpr std::string_view prefix = "#av";
   std::unordered_map<uint32_t, uint32_t> viewIndex, binding;
@@ -46,4 +46,4 @@ inline std::optional<size_t> spirvArenaViewStart(const std::vector<uint32_t> &wo
          | head_maybe();
 }
 
-} // namespace polyregion::invoke::vulkan
+} // namespace polyregion::invoke::spirv

@@ -11,7 +11,7 @@
 #include "magic_enum/magic_enum.hpp"
 #include "spirv/unified1/spirv.hpp"
 
-#include "polyinvoke/vulkan_spirv.h"
+#include "polyinvoke/spirv.h"
 
 #ifndef _MSC_VER
   #pragma clang diagnostic push
@@ -286,7 +286,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
             uint32_t maxWgX = UINT32_MAX;
             if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = deviceSubgroupSize;
-            return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX, spirvArenaViewStart(data)};
+            return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX, spirv::arenaViewStart(data)};
           },
           [this](const auto &m, const auto &name, const auto &types) {
             POLYINVOKE_TRACE();

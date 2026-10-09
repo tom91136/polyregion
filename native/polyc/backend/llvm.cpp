@@ -1517,6 +1517,20 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
 // to sret form (leading out-pointer, void return) so no struct crosses a function boundary.
 static bool shouldUseSret(const CodeGen &cg, const Function &fn) { return fn.decl.rtn.is<Type::Struct>() && cg.C.isSpirv(); }
 
+// a dispatch binds the arena where the first view sits among the bound arguments, since unread views leave no slot behind
+static void recordArenaViewStart(CodeGen &cg, const std::vector<Arg> &args) {
+  const auto bound = [](const Arg &arg) {
+    const auto ptr = arg.named.tpe.template get<Type::Ptr>();
+    return (ptr && !ptr->space.template is<TypeSpace::Local>()) || arg.named.tpe.template is<Type::Struct>();
+  };
+  const auto start = args ^ filter(bound) ^ zip_with_index<uint32_t>() ^ collect_first([](const Arg &arg, const uint32_t index) {
+                       return arg.named.symbol == "#av0" ? std::optional{index} : std::nullopt;
+                     });
+  if (start)
+    cg.M.getOrInsertNamedMetadata(llvmc::ArenaViewStartMetadata)
+        ->addOperand(llvm::MDNode::get(cg.C.actual, llvm::ConstantAsMetadata::get(cg.B.getInt32(*start))));
+}
+
 static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) {
   // CPU HostThreaded kernels receive `tid` as a leading arg from the runtime; GPU launches
   // provide it via intrinsics, so adding `__tid` there would off-by-one the kernel ABI.
@@ -1776,6 +1790,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
     currentSretParam = useSret ? llvmFn->getArg(0) : nullptr;
     const size_t argOffset = useSret ? 1 : 0;
     ptrModel->reset();
+    if (fn.convention.is<CallConvention::OffloadEntry>()) recordArenaViewStart(*this, argsNoUnit);
     // Vulkan entry: the model binds args as descriptor resources; helpers flow through the generic path below
     if (fn.convention.is<CallConvention::OffloadEntry>() && ptrModel->bindEntryArgs(*llvmFn, argsNoUnit, fn)) {
       stackVarPtrs.clear();
@@ -1791,8 +1806,10 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
 
                        // XXX Structs arrive at the boundary as pointers; use directly without a slot.
                        if (arg.named.tpe.template is<Type::Struct>()) {
-                         if (!fn.convention.is<CallConvention::OffloadEntry>()) return {arg.named.symbol, {arg.named.tpe, llvmArg}};
-                         // every work-item shares the launch's single copy, while a by-value parameter is its own
+                         // captures are the launch's shared objects, while a declared by-value parameter is each work-item's own
+                         const auto declared = fn.decl.args ^ exists([&](const Arg &param) { return param.named == arg.named; });
+                         if (!fn.convention.is<CallConvention::OffloadEntry>() || !declared)
+                           return {arg.named.symbol, {arg.named.tpe, llvmArg}};
                          auto *structTy = resolveType(arg.named.tpe);
                          auto *copy = C.allocaAS(B, structTy, C.AllocaAS, arg.named.symbol + "_copy");
                          const auto size = M.getDataLayout().getTypeAllocSize(structTy).getFixedValue();

@@ -11,8 +11,6 @@
 
 #include "polyregion/types.h"
 
-#include "llvmc.h"
-
 using namespace aspartame;
 using namespace polyregion;
 using namespace polyregion::polyast;
@@ -348,13 +346,6 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
                          return std::tuple{arg.named.symbol, arg.named.tpe, handle, slot};
                        }) //
                      | to_vector();
-  // the arena views' first binding is recorded for the dispatch, since unread views leave no binding behind
-  bound | zip_with_index<uint32_t>() | collect_first([](const auto &entry, const auto binding) {
-    return std::get<0>(entry) == "#av0" ? std::optional{binding} : std::nullopt;
-  }) | for_each([&](const uint32_t binding) {
-    cg.M.getOrInsertNamedMetadata(llvmc::ArenaViewStartMetadata)
-        ->addOperand(llvm::MDNode::get(cg.C.actual, llvm::ConstantAsMetadata::get(cg.B.getInt32(binding))));
-  });
   bufferHandles ^= concat(bound ^ map([](const auto &symbol, const auto &tpe, const auto &handle, const auto &slot) {
                             return std::pair{symbol, std::pair{tpe, handle}};
                           }));

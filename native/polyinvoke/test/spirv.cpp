@@ -1,4 +1,4 @@
-#include "polyinvoke/vulkan_spirv.h"
+#include "polyinvoke/spirv.h"
 
 #include <string>
 #include <vector>
@@ -8,7 +8,7 @@
 #include "polytest/test_case.hpp"
 
 using namespace aspartame;
-using namespace polyregion::invoke::vulkan;
+using namespace polyregion::invoke::spirv;
 using polyregion::polytest::cases::Context;
 using polyregion::polytest::cases::Task;
 
@@ -46,7 +46,7 @@ int runArenaViewStart() {
   appendBinding(words, 10, 0);
   appendBinding(words, 12, 3);
   appendBinding(words, 13, 4);
-  const auto start = spirvArenaViewStart(words);
+  const auto start = arenaViewStart(words);
   POLYTEST_REQUIRE(ctx, start.has_value());
   POLYTEST_CHECK_S(ctx, *start == 1, "view start was {}, expected 1", *start);
 
@@ -54,18 +54,18 @@ int runArenaViewStart() {
   appendName(marked, 10, "#capture_ptr_0");
   appendBinding(marked, 10, 7);
   appendModuleProcessed(marked, "polyregion.arena-view-start=0");
-  const auto markedStart = spirvArenaViewStart(marked);
+  const auto markedStart = arenaViewStart(marked);
   POLYTEST_REQUIRE(ctx, markedStart.has_value());
   POLYTEST_CHECK_S(ctx, *markedStart == 0, "marked view start was {}, expected 0", *markedStart);
 
   auto plain = header();
   appendName(plain, 10, "#capture_ptr_0");
   appendBinding(plain, 10, 0);
-  POLYTEST_CHECK(ctx, !spirvArenaViewStart(plain).has_value());
+  POLYTEST_CHECK(ctx, !arenaViewStart(plain).has_value());
   return ctx.failed ? 1 : 0;
 }
 
-std::vector<Task> discoverAll() { return {Task{"vulkan-arena-view-start", "", &runArenaViewStart}}; }
+std::vector<Task> discoverAll() { return {Task{"spirv-arena-view-start", "", &runArenaViewStart}}; }
 
 } // namespace
 

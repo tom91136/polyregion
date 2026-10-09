@@ -1256,9 +1256,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) {
           spvBlob = patchSpirvAliased(std::move(spvBlob));
           spvBlob = llvmc::patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
-          if (arenaViewStart)
-            spvBlob = appendSpirvModuleProcessed(std::move(spvBlob), "polyregion.arena-view-start=" + std::to_string(*arenaViewStart));
         }
+        if (arenaViewStart)
+          spvBlob = appendSpirvModuleProcessed(std::move(spvBlob), "polyregion.arena-view-start=" + std::to_string(*arenaViewStart));
         objBuffer.append(spvBlob.begin(), spvBlob.end());
       } else {
         llvm::legacy::PassManager PM;

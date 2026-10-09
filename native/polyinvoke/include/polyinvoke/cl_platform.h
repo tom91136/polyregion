@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <unordered_map>
 
 #include "polyregion/compat.h"
 
@@ -92,6 +93,7 @@ class POLYREGION_EXPORT ClDevice final : public Device {
   details::ClModuleStore store; // must be dropped before the device
   detail::MemoryObjects<cl_mem> memoryObjects;
   std::optional<std::vector<std::string>> cachedFeatures; // XXX features() probes via clBuildProgram; cache so we pay once.
+  std::unordered_map<std::string, size_t> arenaViewStarts;
 
   void trackSvm(void *p, size_t size);
   void untrackSvm(void *p);
@@ -115,6 +117,7 @@ public:
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
+  POLYREGION_EXPORT std::optional<size_t> arenaViewStart(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
   POLYREGION_EXPORT void freeShared(void *ptr) override;
