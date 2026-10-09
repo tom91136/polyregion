@@ -523,10 +523,12 @@ jobs:
           name: polyregion-darwin-${{ matrix.arch }}-Release
           path: ./dist-regular
 
-      - name: Stage pass bundle
+      - name: Stage pass bundle and JVM SDK
         run: |
           if [ -f dist-regular/lib/libpolypass.dylib ]; then install -m755 dist-regular/lib/libpolypass.dylib native/polyc/libpolypass.dylib; fi
           test -s native/polyc/libpolypass.dylib
+          mkdir -p native/out/maven && cp -R dist-regular/share/polyregion/maven/. native/out/maven/
+          test -d native/out/maven/uk
 
       - name: Seed asan dist from LLVM dist
         run: |
