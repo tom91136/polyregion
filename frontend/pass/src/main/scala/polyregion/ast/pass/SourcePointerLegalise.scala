@@ -217,14 +217,28 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         .filterNot(structure => originalDefs.contains(structure.name))
         .fold(fallback)(retypeStruct(fallback, _))
 
+    // the space of the last pointer an lvalue path reads through, if it reads through one past its root
+    private def storedPointerSpace(rootTpe: p.Type, select: p.Term.Select): Option[p.Type.Space] =
+      select.steps
+        .foldLeft((rootTpe, Option.empty[p.Type.Space], true)) { case ((current, through, first), step) =>
+          val crossed = current match {
+            case p.Type.Ptr(_, space) if !first => Some(space)
+            case _                              => through
+          }
+          (typeAt(current, List(step)), crossed, false)
+        }
+        ._2
+
     private def referenceSpace(
         localStorage: Set[String],
+        rootTpe: p.Type,
         select: p.Term.Select,
         index: Option[p.Term],
         selected: p.Type,
         fallback: p.Type.Space
     ): p.Type.Space =
       if (select.steps.isEmpty && index.isEmpty) p.Type.Space.Private
+      else if (storedPointerSpace(rootTpe, select).nonEmpty) storedPointerSpace(rootTpe, select).get
       else if (localStorage(select.root.symbol) && !AddressRefinement.isPtr(select.root.tpe))
         select.root.tpe match {
           case p.Type.Arr(_, _, p.Type.Space.Global) => p.Type.Space.Private
@@ -297,7 +311,17 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
               else structOf(selected).fold(ref.comp)(_ => selected)
             types.updated(
               name.symbol,
-              p.Type.Ptr(component, referenceSpace(localStorage, select, index, selected, space))
+              p.Type.Ptr(
+                component,
+                referenceSpace(
+                  localStorage,
+                  types.getOrElse(select.root.symbol, select.root.tpe),
+                  select,
+                  index,
+                  selected,
+                  space
+                )
+              )
             )
           case (types, p.Stmt.Var(name, Some(p.Expr.Alias(select: p.Term.Select)), _)) if structOf(name.tpe).nonEmpty =>
             val source = selectedType(select, types)
@@ -350,7 +374,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
             ref.copy(
               lhs = select,
               comp = component,
-              space = referenceSpace(localStorage, select, ref.idx, select.root.tpe, ref.space)
+              space = referenceSpace(localStorage, select.root.tpe, select, ref.idx, select.root.tpe, ref.space)
             )
           case expression => expression
         }

@@ -982,7 +982,18 @@ private[pass] object AddressRefinement {
           }
         case p.Term.Select(root, steps, _) =>
           slotFact(state, root, steps).map(_._2.copy(references = Set.empty)).getOrElse {
-            if (localAggregates(root.symbol) || !isPtr(root.tpe))
+            // an address beyond a stored pointer lies in that pointer's storage, known once its slot is
+            val crossesStoredPointer = !isPtr(root.tpe) && steps
+              .dropRight(1)
+              .scanLeft(root.tpe) {
+                case (p.Type.Struct(symbol, _), p.PathStep.Field(name)) =>
+                  members.get(symbol).flatMap(_.get(name)).getOrElse(p.Type.Nothing)
+                case (p.Type.Arr(component, _, _), _: p.PathStep.Index | _: p.PathStep.IndexDyn) => component
+                case _                                                                           => p.Type.Nothing
+              }
+              .exists(isPtr)
+            if (crossesStoredPointer) AddressValue()
+            else if (localAggregates(root.symbol) || !isPtr(root.tpe))
               AddressValue.absolute(
                 Some(Provenance.Local(root.symbol, steps)),
                 Some(

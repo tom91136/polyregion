@@ -493,4 +493,134 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     }
     assert(pointerTypes.forall(_.contains(p.Type.Space.Private)), clues(pointerTypes))
   }
+
+  test("a pointer field written through a private self pointer keeps the stored pointer's space") {
+    val holderSym = sym("Holder")
+    val holder    = p.Type.Struct(holderSym, Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("storage", globalPtr)), Nil)
+    val shared    = named("shared", p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Local))
+    val local     = named("local", holder)
+    val self      = named("self", p.Type.Ptr(holder, p.Type.Space.Private))
+    val element   = named("element", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local))
+    val loaded    = named("loaded", globalPtr)
+    val value     = named("value")
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(shared, None, isMutable = true),
+        p.Stmt.Var(local, None, isMutable = true),
+        p.Stmt
+          .Var(self, Some(p.Expr.RefTo(selectT(local), None, holder, p.Type.Space.Private, p.Region.Rooted(local)))),
+        p.Stmt.Var(
+          element,
+          Some(
+            p.Expr.RefTo(
+              selectT(shared),
+              Some(p.Term.IntS64Const(0)),
+              p.Type.IntS32,
+              p.Type.Space.Local,
+              p.Region.Rooted(shared)
+            )
+          )
+        ),
+        p.Stmt.Mut(
+          p.Term.Select(self, List(p.PathStep.Field("storage")), globalPtr).asInstanceOf[p.Term.Select],
+          p.Expr.Alias(selectT(element))
+        ),
+        p.Stmt.Var(loaded, Some(p.Expr.Alias(p.Term.Select(local, List(p.PathStep.Field("storage")), globalPtr)))),
+        p.Stmt.Var(value, Some(p.Expr.Index(selectT(loaded), p.Term.IntS64Const(1), p.Type.IntS32))),
+        p.Stmt.Var(
+          named("through", globalPtr),
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(local, List(p.PathStep.Field("storage")), globalPtr),
+              Some(p.Term.IntS64Const(2)),
+              p.Type.IntS32,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourcePointerLegalise()(program(kernel, Nil, List(holderDef)), NoopLog).entry.required
+    assert(out.collectAll[p.Stmt].exists {
+      case p.Stmt.Var(name, _, _) if name.symbol == loaded.symbol =>
+        name.tpe == p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local)
+      case _ => false
+    })
+  }
+
+  test("an address through a stored pointer field takes the stored pointer's space") {
+    val innerSym  = sym("Inner")
+    val inner     = p.Type.Struct(innerSym, Nil)
+    val innerDef  = p.StructDef(innerSym, Nil, List(named("value", p.Type.IntS32)), Nil)
+    val innerPtr  = p.Type.Ptr(inner, p.Type.Space.Global)
+    val holderSym = sym("Holder")
+    val holder    = p.Type.Struct(holderSym, Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("storage", innerPtr)), Nil)
+    val viewSym   = sym("View")
+    val view      = p.Type.Struct(viewSym, Nil)
+    val viewDef   = p.StructDef(viewSym, Nil, List(named("data", globalPtr)), Nil)
+    val sharedArr = named("shared", p.Type.Arr(inner, 1, p.Type.Space.Local))
+    val local     = named("local", holder)
+    val other     = named("other", view)
+    val element   = named("element", p.Type.Ptr(inner, p.Type.Space.Local))
+    val through   = named("through", globalPtr)
+    val looping   = named("looping", p.Type.Bool1)
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(sharedArr, None, isMutable = true),
+        p.Stmt.Var(local, None, isMutable = true),
+        p.Stmt.Var(other, None, isMutable = true),
+        p.Stmt.Var(
+          element,
+          Some(
+            p.Expr.RefTo(
+              selectT(sharedArr),
+              Some(p.Term.IntS64Const(0)),
+              inner,
+              p.Type.Space.Local,
+              p.Region.Rooted(sharedArr)
+            )
+          )
+        ),
+        p.Stmt.Var(looping, Some(p.Expr.Alias(p.Term.Bool1Const(true))), isMutable = true),
+        p.Stmt.While(
+          selectT(looping),
+          List(
+            p.Stmt.Var(
+              through,
+              Some(
+                p.Expr.RefTo(
+                  p.Term.Select(local, List(p.PathStep.Field("storage"), p.PathStep.Field("value")), p.Type.IntS32),
+                  None,
+                  p.Type.IntS32,
+                  p.Type.Space.Global,
+                  p.Region.Opaque
+                )
+              )
+            ),
+            p.Stmt.Mut(
+              p.Term.Select(other, List(p.PathStep.Field("data")), globalPtr).asInstanceOf[p.Term.Select],
+              p.Expr.Alias(selectT(through))
+            ),
+            p.Stmt.Mut(
+              p.Term.Select(local, List(p.PathStep.Field("storage")), innerPtr).asInstanceOf[p.Term.Select],
+              p.Expr.Alias(selectT(element))
+            ),
+            p.Stmt.Mut(selectT(looping).asInstanceOf[p.Term.Select], p.Expr.Alias(p.Term.Bool1Const(false)))
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourcePointerLegalise()(program(kernel, Nil, List(innerDef, holderDef, viewDef)), NoopLog).entry.required
+    assertEquals(
+      out.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) if name.symbol == through.symbol => name.tpe },
+      List[p.Type](p.Type.Ptr(p.Type.IntS32, p.Type.Space.Local))
+    )
+  }
 }

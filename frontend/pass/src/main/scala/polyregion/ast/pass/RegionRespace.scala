@@ -26,10 +26,20 @@ object RegionRespace extends ProgramPass {
         f.moduleCaptures.iterator.map(_.named) ++ f.termCaptures.iterator.map(_.named) ++
         f.collectAll[p.Stmt].iterator.collect { case p.Stmt.Var(n, _, _) => n }
     ).map(n => n.symbol -> n).toMap
+    // a reference to the pointer itself reads the slot back at its declared type
+    val addressTaken = f
+      .collectAll[p.Expr]
+      .collect {
+        case p.Expr.RefTo(p.Term.Select(n, Nil, p.Type.Ptr(component, _)), _, p.Type.Ptr(pointee, _), _, _)
+            if pointee == component =>
+          n.symbol
+      }
+      .toSet
     val respace: Map[String, p.Type.Space] = declared.iterator.flatMap { case (symbol, named) =>
       for {
         declaredSpace <- AddressRefinement.spaceOf(named.tpe)
-        refinedSpace  <- analysis.refinedSpace(named)
+        if !addressTaken(symbol)
+        refinedSpace <- analysis.refinedSpace(named)
         if declaredSpace != refinedSpace
       } yield symbol -> refinedSpace
     }.toMap

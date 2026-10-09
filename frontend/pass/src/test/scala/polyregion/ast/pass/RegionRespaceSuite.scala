@@ -32,6 +32,26 @@ class RegionRespaceSuite extends munit.FunSuite {
     assertEquals(refToSpaces(out.entry), Set[p.Type.Space](p.Type.Space.Local))
   }
 
+  test("a Local-rooted pointer whose own address is taken keeps its declared slot type") {
+    val local  = named("local", ptr(p.Type.Space.Local))
+    val s      = named("s", ptr(p.Type.Space.Global))
+    val slot   = named("slot", p.Type.Ptr(ptr(p.Type.Space.Global), p.Type.Space.Private))
+    val loaded = named("loaded", ptr(p.Type.Space.Global))
+    val refTo =
+      p.Expr.RefTo(selectT(local), Some(p.Term.IntS64Const(1)), p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque)
+    val addressOf = p.Expr.RefTo(selectT(s), None, ptr(p.Type.Space.Global), p.Type.Space.Private, p.Region.Opaque)
+    val e = entry(body =
+      List(
+        p.Stmt.Var(s, Some(refTo)),
+        p.Stmt.Var(slot, Some(addressOf)),
+        p.Stmt.Var(loaded, Some(p.Expr.Index(selectT(slot), p.Term.IntS64Const(0), ptr(p.Type.Space.Global)))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val out = RegionRespace(program(e), NoopLog)
+    assertEquals(ptrSpacesOf(out.entry, "s"), Set[p.Type.Space](p.Type.Space.Global))
+  }
+
   test("a pointer already in its root's space is left untouched") {
     val g = named("g", ptr(p.Type.Space.Global))
     val s = named("s", ptr(p.Type.Space.Global))

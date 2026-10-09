@@ -90,4 +90,104 @@ class SourceStorageLegaliseSuite extends munit.FunSuite {
       case _ => false
     })
   }
+
+  test("an address reached through a local's pointer field is not rooted at the local") {
+    val holderSym = sym("Holder")
+    val holder    = p.Type.Struct(holderSym, Nil)
+    val holderDef =
+      p.StructDef(holderSym, Nil, List(named("storage", p.Type.Ptr(p.Type.IntU32, p.Type.Space.Local))), Nil)
+    val local   = named("local", holder)
+    val element = named("element", p.Type.Ptr(p.Type.IntU32, p.Type.Space.Local))
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(local, None, isMutable = true),
+        p.Stmt.Var(
+          element,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(local, List(p.PathStep.Field("storage")), p.Type.Ptr(p.Type.IntU32, p.Type.Space.Local)),
+              Some(p.Term.IntS64Const(1)),
+              p.Type.IntU32,
+              p.Type.Space.Local,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourceStorageLegalise()(program(kernel, Nil, List(holderDef)), NoopLog)
+    assert(out.entry.required.body.exists {
+      case p.Stmt.Var(`element`, Some(p.Expr.RefTo(_, _, _, space, region)), _) =>
+        space == p.Type.Space.Local && region == p.Region.Opaque
+      case _ => false
+    })
+  }
+
+  test("an address through a root pointer stays rooted at that pointer") {
+    val holderSym = sym("Holder")
+    val holder    = p.Type.Struct(holderSym, Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("value", p.Type.IntU32)), Nil)
+    val self      = named("self", p.Type.Ptr(holder, p.Type.Space.Private))
+    val field     = named("field", p.Type.Ptr(p.Type.IntU32, p.Type.Space.Private))
+    val kernel = entry(
+      args = List(p.Arg(self)),
+      body = List(
+        p.Stmt.Var(
+          field,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(self, List(p.PathStep.Field("value")), p.Type.IntU32),
+              None,
+              p.Type.IntU32,
+              p.Type.Space.Private,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourceStorageLegalise()(program(kernel, Nil, List(holderDef)), NoopLog)
+    assert(out.entry.required.body.exists {
+      case p.Stmt.Var(`field`, Some(p.Expr.RefTo(_, _, _, _, region)), _) => region == p.Region.Rooted(self)
+      case _                                                              => false
+    })
+  }
+
+  test("an indexed array member lives in its container's storage") {
+    val holderSym = sym("Holder")
+    val holder    = p.Type.Struct(holderSym, Nil)
+    val holderDef =
+      p.StructDef(holderSym, Nil, List(named("data", p.Type.Arr(p.Type.IntU32, 4, p.Type.Space.Global))), Nil)
+    val local   = named("local", holder)
+    val element = named("element", p.Type.Ptr(p.Type.IntU32, p.Type.Space.Global))
+    val kernel = entry(
+      body = List(
+        p.Stmt.Var(local, None, isMutable = true),
+        p.Stmt.Var(
+          element,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(local, List(p.PathStep.Field("data")), p.Type.Arr(p.Type.IntU32, 4, p.Type.Space.Global)),
+              Some(p.Term.IntS64Const(1)),
+              p.Type.IntU32,
+              p.Type.Space.Global,
+              p.Region.Opaque
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourceStorageLegalise()(program(kernel, Nil, List(holderDef)), NoopLog)
+    assert(out.entry.required.body.exists {
+      case p.Stmt.Var(`element`, Some(p.Expr.RefTo(_, _, _, space, region)), _) =>
+        space == p.Type.Space.Private && region == p.Region.Rooted(local)
+      case _ => false
+    })
+  }
 }

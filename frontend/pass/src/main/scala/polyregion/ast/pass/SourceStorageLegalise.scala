@@ -79,16 +79,8 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
     }
 
     def lvalueSpace(select: p.Term.Select, indexed: Boolean): p.Type.Space = {
-      val initialSpace =
-        if (indexed && select.steps.isEmpty)
-          select.root.tpe match {
-            case p.Type.Ptr(_, space)    => space
-            case p.Type.Arr(_, _, space) => space
-            case _                       => p.Type.Space.Private
-          }
-        else p.Type.Space.Private
-      select.steps
-        .foldLeft(select.root.tpe -> initialSpace) {
+      val (selected, space) = select.steps
+        .foldLeft(select.root.tpe -> (p.Type.Space.Private: p.Type.Space)) {
           case ((current, space), p.PathStep.Field(field)) =>
             val (owner, ownerSpace) = current match {
               case p.Type.Ptr(component, value) => component -> value
@@ -102,8 +94,21 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
               case _                               => current   -> space
             }
         }
-        ._2
+      if (!indexed) space
+      else
+        selected match {
+          case p.Type.Ptr(_, value)                            => value
+          case p.Type.Arr(_, _, value) if select.steps.isEmpty => value
+          case _                                               => space
+        }
     }
+
+    // an lvalue behind a pointer stored past the root lives in that pointer's storage, never in the root's own
+    def throughPointer(select: p.Term.Select, indexed: Boolean): Boolean =
+      select.steps.nonEmpty && {
+        val prefixes = (1 to select.steps.size).map(i => selectedType(select.root.tpe, select.steps.take(i)))
+        prefixes.init.exists(_.isInstanceOf[p.Type.Ptr]) || (indexed && prefixes.last.isInstanceOf[p.Type.Ptr])
+      }
 
     def legalise(function: p.Function): p.Function = {
       val occupied = scala.collection.mutable.Set.from(
@@ -132,7 +137,11 @@ final case class SourceStorageLegalise(elideRecursivelyEmptyAggregates: Boolean 
               val temporary = fresh(pointer)
               prefix += p.Stmt.Var(temporary, Some(p.Expr.RefTo(parent, None, parentType, space, region)))
               p.Expr.Cast(select(temporary), p.Type.Ptr(comp, space))
-            case None => ref.copy(space = space, region = p.Region.Rooted(lhs.root))
+            case None =>
+              ref.copy(
+                space = space,
+                region = if (throughPointer(lhs, index.nonEmpty)) region else p.Region.Rooted(lhs.root)
+              )
           }
         case ref @ p.Expr.RefTo(lhs, _, comp, _, _)
             if !lhs.isInstanceOf[p.Term.Select] &&
