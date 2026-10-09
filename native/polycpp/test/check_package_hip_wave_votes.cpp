@@ -11,6 +11,8 @@ struct dim3 {
 };
 extern "C" int cudaLaunchKernel(const void *, dim3, dim3, void **, unsigned long, void *);
 extern "C" int __cudaPushCallConfiguration(dim3, dim3, unsigned long = 0, void * = nullptr);
+extern "C" int cudaConfigureCall(dim3, dim3, unsigned long = 0, void * = nullptr);
+extern "C" int cudaSetupArgument(const void *, unsigned long, unsigned long);
 
 struct __attribute__((device_builtin)) uint3 {
   unsigned x, y, z;
