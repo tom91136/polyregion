@@ -1,5 +1,6 @@
 #include "llvmc.h"
 
+#include <array>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -30,6 +31,7 @@ extern "C" bool SPIRVTranslate(Module *M, std::string &SpirvObj, std::string &Er
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IntrinsicsSPIRV.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -394,15 +396,19 @@ static std::string patchSpirvAliased(std::string spv) {
 // spec-constant composite (SpecId 0/1/2, defaults from the LocalSize literal) decorated WorkgroupSize, redirect
 // each load to it via OpCopyObject (same word count, no id substitution), and drop the variable + LocalSize. the
 // runtime already supplies spec constants 0/1/2, so the host sets the group size at pipeline creation
-static std::string patchSpirvWorkgroupSpecConstant(std::string spv) {
+std::string llvmc::patchSpirvWorkgroupSpecConstant(std::string spv) {
   if (spv.size() < 5 * sizeof(uint32_t)) return spv;
   auto *src = reinterpret_cast<const uint32_t *>(spv.data());
   const size_t nWords = spv.size() / sizeof(uint32_t);
   auto opcode = [](uint32_t x) { return static_cast<uint16_t>(x & 0xFFFF); };
   auto wcount = [](uint32_t x) { return static_cast<uint16_t>(x >> 16); };
+  auto declaration = [](uint16_t op) {
+    return (op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer) || (op >= spv::OpConstantTrue && op <= spv::OpSpecConstantOp)
+           || op == spv::OpVariable || op == spv::OpUndef;
+  };
 
   uint32_t wgVar = 0, uintTy = 0, v3uintTy = 0, defaults[3] = {0, 0, 0};
-  size_t execModeIdx = 0, lastDecorEnd = 0, funcStart = 0;
+  size_t execModeIdx = 0, lastDecorEnd = 0, firstDeclaration = 0, funcStart = 0;
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
     if (wc == 0 || i + wc > nWords) return spv;
@@ -413,40 +419,51 @@ static std::string patchSpirvWorkgroupSpecConstant(std::string spv) {
     else if (op == spv::OpExecutionMode && wc == 6 && src[i + 2] == spv::ExecutionModeLocalSize)
       execModeIdx = i, defaults[0] = src[i + 3], defaults[1] = src[i + 4], defaults[2] = src[i + 5];
     if (op >= spv::OpDecorate && op <= spv::OpGroupMemberDecorate) lastDecorEnd = i + wc;
+    if (declaration(op) && !firstDeclaration && !funcStart) firstDeclaration = i;
     if (op == spv::OpFunction && !funcStart) funcStart = i;
     i += wc;
   }
-  if (!wgVar || !uintTy || !v3uintTy || !execModeIdx || !lastDecorEnd || !funcStart) return spv;
+  if (!execModeIdx || !funcStart) return spv;
 
-  const uint32_t bound = src[3], sc0 = bound, sc1 = bound + 1, sc2 = bound + 2, comp = bound + 3;
+  uint32_t next = src[3];
+  const bool declareUint = !uintTy, declareV3uint = !v3uintTy;
+  if (declareUint) uintTy = next++;
+  if (declareV3uint) v3uintTy = next++;
+  const uint32_t sc0 = next, sc1 = next + 1, sc2 = next + 2, comp = next + 3;
   std::vector<uint32_t> out;
-  out.reserve(nWords + 32);
+  out.reserve(nWords + 40);
   out.insert(out.end(), src, src + 5);
-  out[3] = bound + 4;
+  out[3] = next + 4;
+  const auto decorations =
+      iota(0u, 3u) //
+      | flat_map(
+          [&](const uint32_t d) { return std::vector<uint32_t>{(4u << 16) | spv::OpDecorate, sc0 + d, spv::DecorationSpecId, d}; }) //
+      | concat(std::vector<uint32_t>{(4u << 16) | spv::OpDecorate, comp, spv::DecorationBuiltIn, spv::BuiltInWorkgroupSize})        //
+      | to_vector();
+  const auto specConstants =
+      iota(0u, 3u)                                                                                                                        //
+      | flat_map([&](const uint32_t d) { return std::vector<uint32_t>{(4u << 16) | spv::OpSpecConstant, uintTy, sc0 + d, defaults[d]}; }) //
+      | concat(std::vector<uint32_t>{(6u << 16) | spv::OpSpecConstantComposite, v3uintTy, comp, sc0, sc1, sc2})                           //
+      | to_vector();
   for (size_t i = 5; i < nWords;) {
     const uint16_t wc = wcount(src[i]), op = opcode(src[i]);
+    if (!lastDecorEnd && i == (firstDeclaration ? firstDeclaration : funcStart)) out ^= concat(decorations);
     if (i == funcStart) { // emit the spec constants + composite just before the first function
-      for (uint32_t d = 0; d < 3; ++d) {
-        out.push_back((4u << 16) | spv::OpSpecConstant);
-        out.push_back(uintTy);
-        out.push_back(bound + d);
-        out.push_back(defaults[d]);
-      }
-      out.push_back((6u << 16) | spv::OpSpecConstantComposite);
-      out.push_back(v3uintTy);
-      out.push_back(comp);
-      out.push_back(sc0), out.push_back(sc1), out.push_back(sc2);
+      if (declareUint) out.insert(out.end(), {(4u << 16) | spv::OpTypeInt, uintTy, 32u, 0u});
+      if (declareV3uint) out.insert(out.end(), {(4u << 16) | spv::OpTypeVector, v3uintTy, uintTy, 3u});
+      out ^= concat(specConstants);
     }
     if (i == execModeIdx) { /* drop the literal LocalSize execution mode */
-    } else if ((op == spv::OpDecorate || op == spv::OpName) && wc >= 2 && src[i + 1] == wgVar) { /* drop the var's name/decoration */
-    } else if (op == spv::OpVariable && wc >= 3 && src[i + 2] == wgVar) {                        /* drop the WorkgroupSize Input variable */
-    } else if (op == spv::OpLoad && wc == 4 && src[i + 3] == wgVar) { // OpLoad %ty %res %wgVar -> OpCopyObject %ty %res %comp
+    } else if (wgVar && (op == spv::OpDecorate || op == spv::OpName) && wc >= 2
+               && src[i + 1] == wgVar) {                                           /* drop the var's name/decoration */
+    } else if (wgVar && op == spv::OpVariable && wc >= 3 && src[i + 2] == wgVar) { /* drop the WorkgroupSize Input variable */
+    } else if (wgVar && op == spv::OpLoad && wc == 4 && src[i + 3] == wgVar) {     // OpLoad %ty %res %wgVar -> OpCopyObject %ty %res %comp
       out.push_back((4u << 16) | spv::OpCopyObject);
       out.push_back(src[i + 1]);
       out.push_back(src[i + 2]);
       out.push_back(comp);
-    } else if (op == spv::OpEntryPoint) { // drop wgVar from the interface list
-      size_t w = i + 3;                   // skip ExecutionModel + entry id, then the name string
+    } else if (wgVar && op == spv::OpEntryPoint) { // drop wgVar from the interface list
+      size_t w = i + 3;                            // skip ExecutionModel + entry id, then the name string
       while (w < i + wc) {
         const uint32_t word = src[w++];
         if (!(word & 0xFFu) || !(word & 0xFF00u) || !(word & 0xFF0000u) || !(word & 0xFF000000u)) break;
@@ -458,21 +475,39 @@ static std::string patchSpirvWorkgroupSpecConstant(std::string spv) {
       ep[0] = (static_cast<uint32_t>(ep.size()) << 16) | spv::OpEntryPoint;
       out.insert(out.end(), ep.begin(), ep.end());
     } else out.insert(out.end(), src + i, src + i + wc);
-    if (i + wc == lastDecorEnd) {
-      for (uint32_t d = 0; d < 3; ++d) {
-        out.push_back((4u << 16) | spv::OpDecorate);
-        out.push_back(bound + d);
-        out.push_back(spv::DecorationSpecId);
-        out.push_back(d);
-      }
-      out.push_back((4u << 16) | spv::OpDecorate);
-      out.push_back(comp);
-      out.push_back(spv::DecorationBuiltIn);
-      out.push_back(spv::BuiltInWorkgroupSize);
-    }
+    if (lastDecorEnd && i + wc == lastDecorEnd) out ^= concat(decorations);
     i += wc;
   }
   return {reinterpret_cast<const char *>(out.data()), out.size() * sizeof(uint32_t)};
+}
+
+std::string llvmc::appendSpirvModuleProcessed(std::string spv, std::string_view text) {
+  if (spv.size() % sizeof(uint32_t) != 0 || spv.size() < 5 * sizeof(uint32_t)) return spv;
+  std::vector<uint32_t> words(spv.size() / sizeof(uint32_t));
+  std::memcpy(words.data(), spv.data(), spv.size());
+  constexpr std::array debugOps{spv::OpString, spv::OpSourceExtension, spv::OpSource,         spv::OpSourceContinued,
+                                spv::OpName,   spv::OpMemberName,      spv::OpModuleProcessed};
+  constexpr std::array annotationOps{spv::OpDecorate,       spv::OpMemberDecorate,       spv::OpDecorateId,
+                                     spv::OpDecorateString, spv::OpMemberDecorateString, spv::OpDecorationGroup};
+  // the marker joins the debug section: after its last instruction, else before the first annotation or type
+  size_t at = words.size(), lastDebugEnd = 0;
+  for (size_t i = 5; i < words.size();) {
+    const uint32_t count = words[i] >> 16;
+    const auto op = static_cast<spv::Op>(words[i] & 0xFFFFu);
+    if (count == 0 || i + count > words.size()) return spv;
+    if (debugOps ^ contains(op)) lastDebugEnd = i + count;
+    else if ((annotationOps ^ contains(op)) || (op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer)) {
+      at = lastDebugEnd ? lastDebugEnd : i;
+      break;
+    }
+    i += count;
+  }
+  std::vector<uint32_t> literal(text.size() / sizeof(uint32_t) + 1, 0);
+  std::memcpy(literal.data(), text.data(), text.size());
+  const auto instruction =
+      std::vector<uint32_t>{static_cast<uint32_t>((literal.size() + 1) << 16 | spv::OpModuleProcessed)} ^ concat(literal);
+  words.insert(words.begin() + static_cast<long>(at), instruction.begin(), instruction.end());
+  return {reinterpret_cast<const char *>(words.data()), words.size() * sizeof(uint32_t)};
 }
 
 static std::string module2Ir(const llvm::Module &m) {
@@ -610,7 +645,7 @@ static void verifyKernelSymbols(const llvm::Module &M, const llvm::Triple &tripl
     if (triple.isSPIRV() && name.starts_with("_Z")) return true;
     // NVPTX dynamic shared memory: postProcessModule emits an `extern addrspace(3) global` whose
     // storage is supplied by `cuLaunchKernel`'s sharedMemBytes at runtime, so the decl is correct.
-    if (triple.isNVPTX() && name == polyregion::backend::details::PolycDynSharedGlobal) return true;
+    if ((triple.isNVPTX() || triple.isAMDGPU()) && name == polyregion::backend::details::PolycDynSharedGlobal) return true;
     return false;
   };
   llvm::SmallVector<std::string> missing;
@@ -647,37 +682,59 @@ static bool isStackDereferenceable(llvm::Value *v, unsigned depth = 0) {
 }
 
 static void sinkLoadsThroughPointerPhis(llvm::Function &F) {
+  using Access = std::pair<llvm::GetElementPtrInst *, llvm::LoadInst *>;
+  const auto loadOf = [](llvm::User *u, llvm::Value *ptr) -> llvm::LoadInst * {
+    auto *ld = llvm::dyn_cast<llvm::LoadInst>(u);
+    return ld && ld->getPointerOperand() == ptr && !ld->isVolatile() ? ld : nullptr;
+  };
+  // the loads one user of the phi performs: the user itself, or every user of a constant-index GEP of the phi
+  const auto accessesVia = [&](llvm::PHINode &phi, llvm::User *u) -> std::optional<llvm::SmallVector<Access>> {
+    if (auto *ld = loadOf(u, &phi)) return llvm::SmallVector<Access>{{nullptr, ld}};
+    auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(u);
+    if (!gep || gep->getPointerOperand() != &phi || !gep->hasAllConstantIndices() || gep->use_empty()) return std::nullopt;
+    const auto loads = gep->users() ^ map([&](llvm::User *g) { return loadOf(g, gep); });
+    if (loads ^ exists([](const auto *ld) { return !ld; })) return std::nullopt;
+    return loads ^ map([&](auto *ld) { return Access{gep, ld}; });
+  };
+  // every use loads through the phi, directly or through a constant-index GEP of it; a phi feeding another pointer
+  // phi (nested std::max) waits until that outer phi is sunk and its users become loads
+  const auto accessesOf = [&](llvm::PHINode &phi) -> std::optional<llvm::SmallVector<Access>> {
+    const auto perUser = phi.users() ^ map([&](llvm::User *u) { return accessesVia(phi, u); });
+    if (perUser.empty() || (perUser ^ exists([](const auto &accesses) { return !accesses; }))) return std::nullopt;
+    return perUser ^ flat_map([](const auto &accesses) { return *accesses; });
+  };
+  const auto sinkable = [](llvm::PHINode &phi) {
+    return phi.incoming_values() ^ forall([&](const llvm::Use &in) {
+             return isStackDereferenceable(in.get()) || phi.getIncomingBlock(in)->getSingleSuccessor() == phi.getParent();
+           });
+  };
   for (bool changed = true; changed;) {
     changed = false;
-    llvm::SmallVector<llvm::PHINode *> targets;
-    for (llvm::BasicBlock &BB : F)
-      for (llvm::PHINode &phi : BB.phis()) {
-        if (!phi.getType()->isPointerTy() || phi.use_empty()) continue;
-        llvm::Type *loadTy = nullptr;
-        // sink only when every user is a load; a phi feeding another pointer phi (nested std::max) waits
-        // until that outer phi is sunk and its users become loads
-        const bool allLoads = phi.users() ^ forall([&](const auto &u) {
-                                auto *ld = llvm::dyn_cast<llvm::LoadInst>(u);
-                                if (!ld || ld->getPointerOperand() != &phi || ld->isVolatile() || (loadTy && loadTy != ld->getType()))
-                                  return false;
-                                loadTy = ld->getType();
-                                return true;
-                              });
-        if (!allLoads || !loadTy) continue;
-        if (phi.incoming_values() ^ forall([](const auto &in) { return isStackDereferenceable(in); })) targets.push_back(&phi);
-      }
-    for (llvm::PHINode *phi : targets) {
-      auto *loadTy = llvm::cast<llvm::LoadInst>(*phi->user_begin())->getType();
-      auto *vphi = llvm::PHINode::Create(loadTy, phi->getNumIncomingValues(), "", phi->getIterator());
-      for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
-        auto *ld = new llvm::LoadInst(loadTy, phi->getIncomingValue(i), "", phi->getIncomingBlock(i)->getTerminator()->getIterator());
-        vphi->addIncoming(ld, phi->getIncomingBlock(i));
-      }
-      for (llvm::User *u : llvm::make_early_inc_range(phi->users())) {
-        auto *ld = llvm::cast<llvm::LoadInst>(u);
+    const auto targets =
+        llvm::instructions(F) ^ collect([&](llvm::Instruction &I) -> std::optional<std::pair<llvm::PHINode *, llvm::SmallVector<Access>>> {
+          auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
+          if (!phi || !phi->getType()->isPointerTy() || phi->use_empty() || !sinkable(*phi)) return std::nullopt;
+          return accessesOf(*phi) ^ map([&](const auto &accesses) { return std::pair{phi, accesses}; });
+        });
+    for (const auto &[phi, accesses] : targets) {
+      for (const auto &[gep, ld] : accesses) {
+        auto *vphi = llvm::PHINode::Create(ld->getType(), phi->getNumIncomingValues(), "", phi->getIterator());
+        for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+          const auto at = phi->getIncomingBlock(i)->getTerminator()->getIterator();
+          llvm::Value *ptr = phi->getIncomingValue(i);
+          if (gep) {
+            const llvm::SmallVector<llvm::Value *> indices(gep->indices());
+            auto *sunk = llvm::GetElementPtrInst::Create(gep->getSourceElementType(), ptr, indices, "", at);
+            sunk->setNoWrapFlags(gep->getNoWrapFlags());
+            ptr = sunk;
+          }
+          vphi->addIncoming(new llvm::LoadInst(ld->getType(), ptr, "", at), phi->getIncomingBlock(i));
+        }
         ld->replaceAllUsesWith(vphi);
         ld->eraseFromParent();
       }
+      accesses ^ collect([](auto *gep, auto *) { return gep ? std::optional{gep} : std::nullopt; }) ^ distinct()
+          | for_each([](auto *gep) { gep->eraseFromParent(); });
       phi->eraseFromParent();
       changed = true;
     }
@@ -760,6 +817,210 @@ static void specialisePointersByBooleanPhi(llvm::Function &F) {
   }
 }
 
+// Logical SPIR-V reaches an array element only through an access chain from the array itself, so pointer
+// arithmetic on an element pointer, and pointer phis or selects, have no form there. Track each such pointer as an
+// element index into one array and rebuild every access from that array.
+static void indexPointerArithmetic(llvm::Function &F) {
+  struct Origin {
+    llvm::Value *base;
+    llvm::Type *arrayTy;
+    llvm::Type *elemTy;
+  };
+  enum class State { Unknown, Known, Bottom };
+  auto *i64 = llvm::Type::getInt64Ty(F.getContext());
+
+  const auto arrayRoot = [](llvm::Value *v) -> std::optional<Origin> {
+    llvm::Type *ty = nullptr;
+    if (auto *g = llvm::dyn_cast<llvm::GlobalVariable>(v)) ty = g->getValueType();
+    else if (auto *a = llvm::dyn_cast<llvm::AllocaInst>(v)) ty = a->getAllocatedType();
+    if (auto *arr = llvm::dyn_cast_or_null<llvm::ArrayType>(ty)) return Origin{v, arr, arr->getElementType()};
+    return std::nullopt;
+  };
+  // gep [N x T], array, 0, i: the access chain every rebuilt pointer takes
+  const auto elementOf = [&](llvm::Value *v) -> std::optional<std::pair<Origin, llvm::Value *>> {
+    auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v);
+    if (!gep || gep->getNumIndices() != 2) return std::nullopt;
+    auto *first = llvm::dyn_cast<llvm::ConstantInt>(gep->getOperand(1));
+    const auto root = arrayRoot(gep->getPointerOperand());
+    if (!first || !first->isZero() || !root || gep->getSourceElementType() != root->arrayTy) return std::nullopt;
+    return std::pair{*root, gep->getOperand(2)};
+  };
+  const auto arithmetic = [](llvm::Value *v) {
+    auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(v);
+    return gep && gep->getNumIndices() == 1 ? gep : nullptr;
+  };
+
+  llvm::DenseMap<llvm::Value *, std::pair<State, std::optional<Origin>>> states;
+  const auto stateOf = [&](llvm::Value *v) -> std::pair<State, std::optional<Origin>> {
+    if (auto element = elementOf(v)) return {State::Known, element->first};
+    if (auto root = arrayRoot(v)) return {State::Known, root};
+    if (auto it = states.find(v); it != states.end()) return it->second;
+    return {State::Bottom, std::nullopt};
+  };
+  const auto meet = [](std::pair<State, std::optional<Origin>> lhs, std::pair<State, std::optional<Origin>> rhs) {
+    if (lhs.first == State::Unknown) return rhs;
+    if (rhs.first == State::Unknown) return lhs;
+    if (lhs.first == State::Bottom || rhs.first == State::Bottom || lhs.second->base != rhs.second->base
+        || lhs.second->elemTy != rhs.second->elemTy)
+      return std::pair{State::Bottom, std::optional<Origin>{}};
+    return lhs;
+  };
+  const auto derived = llvm::instructions(F) ^ collect([&](llvm::Instruction &I) -> std::optional<llvm::Instruction *> {
+                         if (!I.getType()->isPointerTy() || !(arithmetic(&I) || llvm::isa<llvm::PHINode, llvm::SelectInst>(I)))
+                           return std::nullopt;
+                         return &I;
+                       });
+  derived | for_each([&](auto *I) { states[I] = {State::Unknown, std::nullopt}; });
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (llvm::Instruction *I : derived) {
+      auto next = std::pair{State::Unknown, std::optional<Origin>{}};
+      if (auto *gep = arithmetic(I)) {
+        next = stateOf(gep->getPointerOperand());
+        if (next.first == State::Known && next.second->elemTy != gep->getSourceElementType()) next = {State::Bottom, std::nullopt};
+      } else if (auto *phi = llvm::dyn_cast<llvm::PHINode>(I)) {
+        next = phi->incoming_values() ^ fold_left(next, [&](const auto &acc, const llvm::Use &in) {
+                 return meet(acc, in.get() == phi ? std::pair{State::Unknown, std::optional<Origin>{}} : stateOf(in.get()));
+               });
+      } else {
+        auto *select = llvm::cast<llvm::SelectInst>(I);
+        next = meet(stateOf(select->getTrueValue()), stateOf(select->getFalseValue()));
+      }
+      if (states[I].first == State::Bottom) continue;
+      if (next.first != states[I].first) {
+        states[I] = next;
+        changed = true;
+      }
+    }
+  }
+
+  llvm::DenseMap<llvm::Value *, llvm::Value *> indices;
+  std::function<llvm::Value *(llvm::Value *)> indexOf = [&](llvm::Value *v) -> llvm::Value * {
+    if (auto it = indices.find(v); it != indices.end()) return it->second;
+    if (auto element = elementOf(v)) {
+      if (auto *constant = llvm::dyn_cast<llvm::ConstantInt>(element->second))
+        return indices[v] = llvm::ConstantInt::get(i64, constant->getSExtValue());
+      auto *gep = llvm::cast<llvm::GetElementPtrInst>(v);
+      return indices[v] = llvm::CastInst::CreateIntegerCast(element->second, i64, true, "", gep->getIterator());
+    }
+    if (arrayRoot(v)) return indices[v] = llvm::ConstantInt::get(i64, 0);
+    if (auto *gep = arithmetic(v)) {
+      auto *base = indexOf(gep->getPointerOperand());
+      auto *step = llvm::CastInst::CreateIntegerCast(gep->getOperand(1), i64, true, "", gep->getIterator());
+      return indices[v] = llvm::BinaryOperator::CreateAdd(base, step, "", gep->getIterator());
+    }
+    if (auto *phi = llvm::dyn_cast<llvm::PHINode>(v)) {
+      auto *index = llvm::PHINode::Create(i64, phi->getNumIncomingValues(), "", phi->getIterator());
+      indices[v] = index;
+      for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i)
+        index->addIncoming(indexOf(phi->getIncomingValue(i)), phi->getIncomingBlock(i));
+      return index;
+    }
+    auto *select = llvm::cast<llvm::SelectInst>(v);
+    return indices[v] = llvm::SelectInst::Create(select->getCondition(), indexOf(select->getTrueValue()), indexOf(select->getFalseValue()),
+                                                 "", select->getIterator());
+  };
+
+  for (llvm::Instruction *I : derived) {
+    if (states[I].first != State::Known) continue;
+    const auto origin = *states[I].second;
+    for (llvm::Use &use : llvm::make_early_inc_range(I->uses())) {
+      auto *user = llvm::dyn_cast<llvm::Instruction>(use.getUser());
+      if (!user || llvm::isa<llvm::PHINode>(user) || (llvm::isa<llvm::SelectInst>(user) && states.contains(user))) continue;
+      if (auto *cmp = llvm::dyn_cast<llvm::ICmpInst>(user)) {
+        auto *other = cmp->getOperand(use.getOperandNo() == 0 ? 1 : 0);
+        const auto otherState = stateOf(other);
+        if (otherState.first != State::Known || otherState.second->base != origin.base) continue;
+        auto *lhs = indexOf(cmp->getOperand(0)), *rhs = indexOf(cmp->getOperand(1));
+        cmp->replaceAllUsesWith(new llvm::ICmpInst(cmp->getIterator(), cmp->getPredicate(), lhs, rhs));
+        cmp->eraseFromParent();
+        continue;
+      }
+      if (arithmetic(user) && states.contains(user)) continue;
+      const bool access = llvm::isa<llvm::LoadInst, llvm::GetElementPtrInst, llvm::AtomicRMWInst, llvm::AtomicCmpXchgInst>(user)
+                          || (llvm::isa<llvm::StoreInst>(user) && use.getOperandNo() == 1);
+      if (!access) continue;
+      auto *rebuilt = llvm::GetElementPtrInst::CreateInBounds(origin.arrayTy, origin.base, {llvm::ConstantInt::get(i64, 0), indexOf(I)}, "",
+                                                              user->getIterator());
+      use.set(rebuilt);
+    }
+  }
+  // rebuilt pointers leave the derived ones referenced only by each other (loop phis and their steps)
+  auto dead = derived ^ filter([&](auto *I) { return states[I].first == State::Known; }) ^ to<std::unordered_set>();
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (llvm::Instruction *I : derived)
+      if (dead.contains(I) && !(I->users() ^ forall([&](auto *u) { return dead.contains(llvm::dyn_cast<llvm::Instruction>(u)); }))) {
+        dead.erase(I);
+        changed = true;
+      }
+  }
+  for (llvm::Instruction *I : dead)
+    I->dropAllReferences();
+  for (llvm::Instruction *I : dead)
+    I->eraseFromParent();
+}
+
+// Logical SPIR-V types every pointer by what it points to, but LLVM folds a GEP to a leading subobject (all-zero
+// indices) into its base, leaving a GEP whose source type is that subobject applied to the enclosing aggregate's
+// pointer. Restore the access chain down to the subobject so the translator indexes the right type.
+static void restoreSubobjectGeps(llvm::Function &F) {
+  auto *i32 = llvm::Type::getInt32Ty(F.getContext());
+  const auto pointeeOf = [](llvm::Value *v) -> llvm::Type * {
+    if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v)) return gep->getResultElementType();
+    if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(v)) return alloca->getAllocatedType();
+    if (auto *global = llvm::dyn_cast<llvm::GlobalVariable>(v)) return global->getValueType();
+    if (auto *call = llvm::dyn_cast<llvm::CallInst>(v); call && call->getIntrinsicID() == llvm::Intrinsic::spv_resource_getpointer)
+      if (auto *handle = llvm::dyn_cast<llvm::TargetExtType>(call->getArgOperand(0)->getType());
+          handle && handle->getNumTypeParameters() > 0)
+        if (auto *runtime = llvm::dyn_cast<llvm::ArrayType>(handle->getTypeParameter(0))) return runtime->getElementType();
+    return nullptr;
+  };
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(&I);
+    if (!gep) continue;
+    auto *target = gep->getSourceElementType();
+    auto *enclosing = pointeeOf(gep->getPointerOperand());
+    if (!enclosing || enclosing == target || !target->isAggregateType()) continue;
+    llvm::SmallVector<llvm::Value *> path{llvm::ConstantInt::get(i32, 0)};
+    for (auto *current = enclosing; current != target;) {
+      if (auto *st = llvm::dyn_cast<llvm::StructType>(current); st && st->getNumElements() > 0) current = st->getElementType(0);
+      else if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(current)) current = arr->getElementType();
+      else {
+        path.clear();
+        break;
+      }
+      path.push_back(llvm::ConstantInt::get(i32, 0));
+    }
+    if (path.size() < 2) continue;
+    gep->setOperand(0, llvm::GetElementPtrInst::CreateInBounds(enclosing, gep->getPointerOperand(), path, "", gep->getIterator()));
+  }
+}
+
+// A logical SPIR-V pointer always addresses a resource, variable, or workgroup array, so comparing it against null
+// (C++ placement new guards its construction this way) has a known answer; folding it removes the null arm that
+// would otherwise reach a pointer phi.
+static void foldNonNullPointerChecks(llvm::Function &F) {
+  const auto nonNull = [](llvm::Value *v) {
+    auto *root = v->stripInBoundsOffsets();
+    if (llvm::isa<llvm::AllocaInst, llvm::GlobalVariable>(root)) return true;
+    auto *call = llvm::dyn_cast<llvm::CallInst>(root);
+    return call && call->getIntrinsicID() == llvm::Intrinsic::spv_resource_getpointer;
+  };
+  const auto isNull = [](llvm::Value *v) {
+    auto *constant = llvm::dyn_cast<llvm::Constant>(v->stripPointerCasts());
+    return constant && constant->isNullValue();
+  };
+  for (llvm::Instruction &I : llvm::make_early_inc_range(llvm::instructions(F))) {
+    auto *cmp = llvm::dyn_cast<llvm::ICmpInst>(&I);
+    if (!cmp || !cmp->isEquality() || !cmp->getOperand(0)->getType()->isPointerTy()) continue;
+    auto *lhs = cmp->getOperand(0), *rhs = cmp->getOperand(1);
+    if (!((isNull(rhs) && nonNull(lhs)) || (isNull(lhs) && nonNull(rhs)))) continue;
+    cmp->replaceAllUsesWith(llvm::ConstantInt::getBool(cmp->getType(), cmp->getPredicate() == llvm::CmpInst::ICMP_NE));
+    cmp->eraseFromParent();
+  }
+}
+
 static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bool logical) {
   llvm::PassBuilder PB(&TM);
   llvm::LoopAnalysisManager LAM;
@@ -799,11 +1060,13 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
     if (!F.isDeclaration() && !F.getEntryBlock().empty()) {
       FPM.run(F, FAM);
       if (logical) {
+        foldNonNullPointerChecks(F);
         specialisePointersByBooleanPhi(F);
         // Full SimplifyCFG drops SPIR-V merge structure from some lowered exits. Only fold constant
         // guards, which releases otherwise unreachable null edges that pin private pointer phis.
         foldConstantBranches(F);
         sinkLoadsThroughPointerPhis(F); // a pointer OpPhi is only invalid under Vulkan's logical model
+        indexPointerArithmetic(F);
         FAM.invalidate(F, llvm::PreservedAnalyses::none());
       }
       cleanup.run(F, FAM);
@@ -818,6 +1081,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         FAM.invalidate(F, llvm::PreservedAnalyses::none());
         cleanup.run(F, FAM);
         normaliseUnitSignSelects(F);
+        restoreSubobjectGeps(F);
       }
     }
 }
@@ -968,10 +1232,16 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // device driver to optimise, but rusticl's Mesa nir_opt_cse runs away (20GB+) on the load/store-heavy
         // std::string-capture blob; SROA shrinks the kernel ~10x and sidesteps that
         scalariseForSpirv(TM, *m, TM.getTargetTriple().getOS() == llvm::Triple::Vulkan);
+        if (emplaceEvent && captureModuleIr())
+          events.emplace_back(compiler::nowMs(), 0, "llvm_to_spirv_ir", module2Ir(*m), std::vector<polyast::CompileEvent>{});
         // Vulkan forces CodeGenOptLevel::None: at O1+ LoopStrengthReduce rewrites the array GEP into a
         // pointer induction var with no logical SPIR-V form; physical SPIR-V keeps genOpt
         const auto spvOpt = TM.getTargetTriple().getOS() == llvm::Triple::Vulkan ? llvm::CodeGenOptLevel::None : genOpt;
         std::string spvBlob, errMsg;
+        std::optional<uint64_t> arenaViewStart;
+        if (const auto *views = m->getNamedMetadata(ArenaViewStartMetadata); views && views->getNumOperands() > 0)
+          if (const auto *value = llvm::mdconst::dyn_extract<llvm::ConstantInt>(views->getOperand(0)->getOperand(0)))
+            arenaViewStart = value->getZExtValue();
         const bool ok = llvm::SPIRVTranslate(m.get(), spvBlob, errMsg, /*AllowExtNames*/ {}, spvOpt, TM.getTargetTriple());
         if (!ok) throw std::logic_error("SPIRVTranslate failed: " + errMsg);
         // XXX LLVM SPIRVTranslate emits OpConstantNull for u32 zero constants. SPIR-V's
@@ -985,7 +1255,9 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         // only Vulkan's logical memory model assumes no-alias by default; OpenCL is C-like (may-alias), already sound
         if (TM.getTargetTriple().getOS() == llvm::Triple::Vulkan) {
           spvBlob = patchSpirvAliased(std::move(spvBlob));
-          spvBlob = patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
+          spvBlob = llvmc::patchSpirvWorkgroupSpecConstant(std::move(spvBlob));
+          if (arenaViewStart)
+            spvBlob = appendSpirvModuleProcessed(std::move(spvBlob), "polyregion.arena-view-start=" + std::to_string(*arenaViewStart));
         }
         objBuffer.append(spvBlob.begin(), spvBlob.end());
       } else {

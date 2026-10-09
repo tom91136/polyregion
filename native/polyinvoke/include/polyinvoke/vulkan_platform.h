@@ -83,6 +83,7 @@ struct Enqueued {
 struct LoadedModule {
   std::shared_ptr<vk::raii::ShaderModule> module;
   uint32_t maxWorkGroupX;
+  std::optional<size_t> arenaViewStart;
 };
 using VulkanModuleStore = detail::ModuleStore<LoadedModule, Resolved>;
 using VkMemObject = std::shared_ptr<MemObject>;
@@ -135,6 +136,7 @@ public:
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
+  POLYREGION_EXPORT std::optional<size_t> arenaViewStart(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
@@ -155,6 +157,7 @@ class POLYREGION_EXPORT VulkanDeviceQueue final : public DeviceQueue {
   detail::CountedStore<size_t, std::shared_ptr<details::Enqueued>> enqueuedStore;
   detail::BlockingQueue<std::function<void()>> callbackQueue;
   std::thread callbackThread;
+  std::shared_ptr<details::MemObject> nullObject;
 
   void enqueueCallback(const MaybeCallback &cb);
 

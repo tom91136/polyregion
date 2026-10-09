@@ -351,6 +351,11 @@ public:
 
   bool moduleLoaded(const std::string &name) { return modules.find(name) != modules.end(); }
 
+  const M *find(const std::string &name) const {
+    const auto it = modules.find(name);
+    return it == modules.end() ? nullptr : &it->second.first;
+  }
+
   F &resolveFunction(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types) {
     auto moduleIt = modules.find(moduleName);
     if (moduleIt == modules.end()) POLYINVOKE_FATAL(errorPrefix, "No module named `%s` was loaded", moduleName.c_str());
@@ -446,6 +451,8 @@ struct POLYREGION_EXPORT Device {
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<std::string> features() = 0;
   virtual POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool moduleLoaded(const std::string &name) = 0;
+  // first argument slot of a logical-SPIR-V kernel's arena views, which stand where its capture was passed
+  [[nodiscard]] virtual POLYREGION_EXPORT std::optional<size_t> arenaViewStart(const std::string &) { return std::nullopt; }
 
   [[nodiscard]] virtual POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) = 0;
   virtual POLYREGION_EXPORT void freeDevice(uintptr_t ptr) = 0;

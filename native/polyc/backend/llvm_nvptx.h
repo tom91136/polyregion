@@ -10,6 +10,8 @@ class NVPTXTargetSpecificHandler final : public TargetSpecificHandler {
   void witnessFn(CodeGen &, llvm::Function &, const Function &source) override;
   ValPtr mkSpecVal(CodeGen &, const Expr::SpecOp &) override;
   ValPtr mkMathVal(CodeGen &, const Expr::MathOp &) override;
+  llvm::Value *loopLanes(CodeGen &) override;
+  void reconvergeLoopExit(CodeGen &, llvm::Value *lanes) override;
   void postProcessModule(CodeGen &) override;
 };
 

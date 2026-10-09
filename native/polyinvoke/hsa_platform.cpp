@@ -327,6 +327,21 @@ size_t HsaDevice::localMemoryBytes() {
                 return HSA_STATUS_SUCCESS;
               },
               &maximum));
+  if (maximum == 0)
+    CHECKED("Enumerate HSA group memory pools",
+            hsa_amd_agent_iterate_memory_pools(
+                agent,
+                [](const hsa_amd_memory_pool_t pool, void *data) {
+                  hsa_amd_segment_t segment;
+                  CHECKED("Get HSA memory pool segment", hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment));
+                  if (segment != HSA_AMD_SEGMENT_GROUP) return HSA_STATUS_SUCCESS;
+                  size_t size = 0;
+                  CHECKED("Get HSA group memory pool size", hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size));
+                  auto &maximum = *static_cast<size_t *>(data);
+                  maximum = std::max(maximum, size);
+                  return HSA_STATUS_SUCCESS;
+                },
+                &maximum));
   return maximum;
 }
 size_t HsaDevice::globalMemoryBytes() {
@@ -586,7 +601,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   dispatch->kernel_object = kernelObject;
   dispatch->kernarg_address = kernargAddress;
   dispatch->private_segment_size = privateSegmentSize;
-  dispatch->group_segment_size = std::max(groupSegmentSize, static_cast<uint32_t>(sharedMem));
+  dispatch->group_segment_size = groupSegmentSize + static_cast<uint32_t>(sharedMem);
 
   uint16_t header = 0;
   header |= 1 << HSA_PACKET_HEADER_BARRIER;

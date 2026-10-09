@@ -143,6 +143,24 @@ void runArgs(Context &ctx, Backend backend, Platform &platform, Device &device, 
   device.freeDevice(out_d);
 }
 
+void runNullPointerArg(Context &, Backend, Platform &platform, Device &device, const ImageGroup &imageGroup) {
+  for (auto &[module_, data] : imageGroup)
+    device.loadModule(module_, data);
+  auto q = device.createQueue(std::chrono::seconds(10));
+  uintptr_t null = 0;
+  ArgBuffer buffer;
+  prependTidArg(platform, buffer);
+  buffer.append(Type::Ptr, &null);
+  buffer.append(Type::Void, {});
+  waitAll([&](auto &h) { q->enqueueInvokeAsync("arg1", "main", buffer, {}, h); });
+}
+
+void runDeviceLimits(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &) {
+  POLYTEST_CHECK_S(ctx, device.maxThreadsPerBlock() > 0, "{} reports no work-group size", magic_enum::enum_name(backend));
+  POLYTEST_CHECK_S(ctx, device.localMemoryBytes() > 0, "{} reports no local memory", magic_enum::enum_name(backend));
+  POLYTEST_CHECK_S(ctx, device.globalMemoryBytes() > 0, "{} reports no global memory", magic_enum::enum_name(backend));
+}
+
 std::vector<Task> discoverAll() {
   return discoverMatrix({
 #ifndef __APPLE__
@@ -152,6 +170,11 @@ std::vector<Task> discoverAll() {
       {"args-opencl-source", generated::opencl_source::args, {Backend::OpenCL}, &runArgs, skipHasSpirv},
       {"args-opencl-spirv", generated::opencl_spirv::args, {Backend::OpenCL}, &runArgs, skipNoSpirv},
       {"args-vulkan", generated::vulkan::args, {Backend::Vulkan}, &runArgs},
+      {"args-vulkan-null-pointer", generated::vulkan::args, {Backend::Vulkan}, &runNullPointerArg},
+      {"device-limits-cuda", generated::cuda::args, {Backend::CUDA}, &runDeviceLimits},
+      {"device-limits-hsa", generated::hsa::args, {Backend::HSA}, &runDeviceLimits},
+      {"device-limits-hip", generated::hsa::args, {Backend::HIP}, &runDeviceLimits},
+      {"device-limits-vulkan", generated::vulkan::args, {Backend::Vulkan}, &runDeviceLimits},
       {"args-levelzero", generated::opencl_spirv::args, {Backend::LevelZero}, &runArgs},
       {"args-opencl-source-offset", openClOffsetImages(), {Backend::OpenCL}, &runOpenClOffsetArgs, skipHasSpirv},
 #endif

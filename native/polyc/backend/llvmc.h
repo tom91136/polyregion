@@ -33,6 +33,11 @@ POLYREGION_EXPORT Pair<Opt<std::string>, std::string> verifyModule(llvm::Module 
 POLYREGION_EXPORT bool captureModuleIr();
 // Internal translation seam kept visible for focused static-library tests; this is not part of the shared ABI.
 [[nodiscard]] std::string normaliseSpirvNarrowIntegerOperands(std::string spv);
+// appends an OpModuleProcessed after the debug instructions, which no dead-code elimination can drop
+[[nodiscard]] std::string patchSpirvWorkgroupSpecConstant(std::string spv);
+[[nodiscard]] std::string appendSpirvModuleProcessed(std::string spv, std::string_view text);
+// module metadata naming the first binding of a logical kernel's arena views
+inline constexpr auto ArenaViewStartMetadata = "polyregion.arena_view_start";
 POLYREGION_EXPORT polyast::CompileResult compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
                                                        llvm::Module &M, bool emitBitcode = false);
 

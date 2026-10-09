@@ -56,6 +56,26 @@ static std::string atomicMinMaxHelperName(const bool minimum, const std::string 
   return fmt::format("_pr_atomic_{}_{}", minimum ? "min" : "max", element);
 }
 
+static std::string atomicCasHelperName(const std::string &space, const std::string &element) {
+  return fmt::format("_pr_atomic_cas{}{}_{}", space.empty() ? "" : "_", space, element);
+}
+
+static bool wideInteger(const Type::Any &t) { return t.template is<Type::IntS64>() || t.template is<Type::IntU64>(); }
+
+static bool narrowInteger(const Type::Any &t) { return t.template is<Type::IntS32>() || t.template is<Type::IntU32>(); }
+
+static std::string openclPtrSpace(const Term::Any &ptr, const std::string &operation) {
+  const auto tpe = ptr.tpe().template get<Type::Ptr>();
+  if (!tpe) throw backend::BackendException(fmt::format("{} requires a pointer operand", operation));
+  return tpe->space.match_total([](const TypeSpace::Global &) { return "global"s; },
+                                [](const TypeSpace::Constant &) { return "constant"s; }, [](const TypeSpace::Local &) { return "local"s; },
+                                [](const TypeSpace::Private &) { return "private"s; });
+}
+
+static std::pair<std::string, std::string> mslAtomicInt(const Type::Any &t) {
+  return t.template is<Type::IntU32>() ? std::pair{"metal::atomic_uint"s, "uint32_t"s} : std::pair{"metal::atomic_int"s, "int32_t"s};
+}
+
 static std::optional<uint64_t> scalarBytes(const Type::Any &t) {
   if (t.template is<Type::Bool1>() || t.template is<Type::IntU8>() || t.template is<Type::IntS8>()) return 1;
   if (t.template is<Type::Float16>() || t.template is<Type::IntU16>() || t.template is<Type::IntS16>()) return 2;
@@ -212,7 +232,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
                              [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
-                             [&](const Type::FnRef &x) -> std::string { throw std::logic_error("Type::FnRef should be erased"); });
+                             [&](const Type::FnRef &) { return "uint8_t"s; });
     case Dialect::OpenCL1_1:
       return tpe.match_total([&](const Type::Float16 &) { return "half"s; },   //
                              [&](const Type::Float32 &) { return "float"s; },  //
@@ -252,7 +272,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
                              [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
                              [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
-                             [&](const Type::FnRef &x) -> std::string { throw std::logic_error("Type::FnRef should be erased"); });
+                             [&](const Type::FnRef &) { return "uchar"s; });
   }
 }
 
@@ -551,23 +571,20 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                     });
               }
               if (dialect == Dialect::OpenCL1_1) {
-                if (!v.rtn.template is<Type::IntS32>() && !v.rtn.template is<Type::IntU32>())
-                  throw BackendException("OpenCL 1.1 supports only 32-bit integer atomic RMW");
+                if (!narrowInteger(v.rtn) && !wideInteger(v.rtn))
+                  throw BackendException("OpenCL 1.1 supports only 32-bit and 64-bit integer atomic RMW");
                 if (!v.order.template is<MemOrder::Relaxed>())
                   throw BackendException("OpenCL 1.1 atomic RMW supports only relaxed ordering");
-                const auto p = v.ptr.tpe().template get<Type::Ptr>();
-                if (!p) throw BackendException("OpenCL atomic RMW requires a pointer operand");
-                const auto space = p->space.match_total(
-                    [](const TypeSpace::Global &) { return "global"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
-                    [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
+                const auto space = openclPtrSpace(v.ptr, "OpenCL atomic RMW");
                 if (space != "global" && space != "local") throw BackendException("OpenCL atomic RMW requires global or local storage");
-                const auto function = v.op.match_total(
-                    [](const AtomicOp::Xchg &) { return "atomic_xchg"s; }, [](const AtomicOp::Add &) { return "atomic_add"s; },
-                    [](const AtomicOp::Sub &) { return "atomic_sub"s; }, [](const AtomicOp::And &) { return "atomic_and"s; },
-                    [](const AtomicOp::Or &) { return "atomic_or"s; }, [](const AtomicOp::Xor &) { return "atomic_xor"s; },
-                    [](const AtomicOp::Min &) { return "atomic_min"s; }, [](const AtomicOp::Max &) { return "atomic_max"s; });
+                const auto operation =
+                    v.op.match_total([](const AtomicOp::Xchg &) { return "xchg"s; }, [](const AtomicOp::Add &) { return "add"s; },
+                                     [](const AtomicOp::Sub &) { return "sub"s; }, [](const AtomicOp::And &) { return "and"s; },
+                                     [](const AtomicOp::Or &) { return "or"s; }, [](const AtomicOp::Xor &) { return "xor"s; },
+                                     [](const AtomicOp::Min &) { return "min"s; }, [](const AtomicOp::Max &) { return "max"s; });
                 const auto type = mkTpe(v.rtn);
-                return fmt::format("{}((volatile {} {}*){}, ({}){})", function, space, type, mkTerm(v.ptr), type, mkTerm(v.value));
+                return fmt::format("{}_{}((volatile {} {}*){}, ({}){})", wideInteger(v.rtn) ? "atom" : "atomic", operation, space, type,
+                                   mkTerm(v.ptr), type, mkTerm(v.value));
               }
               if (!v.rtn.template is<Type::IntS32>() && !v.rtn.template is<Type::IntU32>())
                 throw BackendException("MSL supports only 32-bit integer atomic RMW");
@@ -583,13 +600,36 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                                      [](const AtomicOp::Min &) { return "atomic_fetch_min_explicit"s; },
                                                      [](const AtomicOp::Max &) { return "atomic_fetch_max_explicit"s; });
               if (!v.order.template is<MemOrder::Relaxed>()) throw BackendException("MSL atomic RMW supports only relaxed ordering");
-              const auto atomic = v.rtn.template is<Type::IntU32>() ? "metal::atomic_uint" : "metal::atomic_int";
-              const auto value = v.rtn.template is<Type::IntU32>() ? "uint32_t" : "int32_t";
+              const auto [atomic, value] = mslAtomicInt(v.rtn);
               return fmt::format("metal::{}(({} {}*){}, ({}){}, metal::memory_order_relaxed)", function, space, atomic, mkTerm(v.ptr),
                                  value, mkTerm(v.value));
             },
-            [&](const Spec::GpuAtomicCAS &) -> std::string {
-              throw BackendException("Spec::GpuAtomicCAS lowering is not available for this C source dialect");
+            [&](const Spec::GpuAtomicCAS &v) -> std::string {
+              const auto type = mkTpe(v.rtn), ptr = mkTerm(v.ptr), expected = mkTerm(v.expected), desired = mkTerm(v.desired);
+              if (!v.order.template is<MemOrder::Relaxed>())
+                throw BackendException("C source atomic compare-exchange supports only relaxed ordering");
+              if (dialect == Dialect::C11) {
+                if (!narrowInteger(v.rtn) && !wideInteger(v.rtn))
+                  throw BackendException("C11 supports only integer atomic compare-exchange");
+                return fmt::format("{}((volatile _Atomic({})*){}, ({}){}, ({}){})", atomicCasHelperName("", type), type, ptr, type,
+                                   expected, type, desired);
+              }
+              if (dialect == Dialect::OpenCL1_1) {
+                if (!narrowInteger(v.rtn) && !wideInteger(v.rtn))
+                  throw BackendException("OpenCL 1.1 supports only 32-bit and 64-bit integer atomic compare-exchange");
+                const auto space = openclPtrSpace(v.ptr, "OpenCL atomic compare-exchange");
+                if (space != "global" && space != "local")
+                  throw BackendException("OpenCL atomic compare-exchange requires global or local storage");
+                return fmt::format("{}((volatile {} {}*){}, ({}){}, ({}){})", wideInteger(v.rtn) ? "atom_cmpxchg" : "atomic_cmpxchg", space,
+                                   type, ptr, type, expected, type, desired);
+              }
+              if (!narrowInteger(v.rtn)) throw BackendException("MSL supports only 32-bit integer atomic compare-exchange");
+              const auto space = mslPtrSpace(v.ptr);
+              if (space != "device" && space != "threadgroup")
+                throw BackendException("MSL atomic compare-exchange requires device or threadgroup storage");
+              const auto [atomic, value] = mslAtomicInt(v.rtn);
+              return fmt::format("{}(({} {}*){}, ({}){}, ({}){})", atomicCasHelperName(space, value), space, atomic, ptr, value, expected,
+                                 value, desired);
             },
             [&](const Spec::GpuGroupReduce &) -> std::string {
               throw BackendException("Spec::GpuGroupReduce lowering is not available for this C source dialect");
@@ -615,12 +655,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                 return fmt::format("(*((volatile {} {}*){}))", space, type, ptr);
               }
               if (dialect == Dialect::OpenCL1_1) {
-                const auto p = v.ptr.tpe().template get<Type::Ptr>();
-                if (!p) throw BackendException("volatile load requires a pointer operand");
-                const auto space = p->space.match_total(
-                    [](const TypeSpace::Global &) { return "global"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
-                    [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
-                return fmt::format("(*((volatile {} {}*){}))", space, type, ptr);
+                return fmt::format("(*((volatile {} {}*){}))", openclPtrSpace(v.ptr, "volatile load"), type, ptr);
               }
               return fmt::format("(*((volatile {}*){}))", type, ptr);
             },
@@ -634,13 +669,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                 return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
               }
               if (dialect == Dialect::OpenCL1_1) {
-                const auto p = v.ptr.tpe().template get<Type::Ptr>();
-                if (!p) throw BackendException("volatile store requires a pointer operand");
-                if (p->space.template is<TypeSpace::Constant>())
-                  throw BackendException("volatile store to constant storage is unsupported for OpenCL");
-                const auto space = p->space.match_total(
-                    [](const TypeSpace::Global &) { return "global"s; }, [](const TypeSpace::Constant &) { return "constant"s; },
-                    [](const TypeSpace::Local &) { return "local"s; }, [](const TypeSpace::Private &) { return "private"s; });
+                const auto space = openclPtrSpace(v.ptr, "volatile store");
+                if (space == "constant") throw BackendException("volatile store to constant storage is unsupported for OpenCL");
                 return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
               }
               return fmt::format("(*((volatile {}*){}) = {})", type, ptr, value);
@@ -833,7 +863,8 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   };
   return stmt.match_total( //
       [&](const Stmt::Var &x) {
-        if (x.name.tpe.is<Type::FnRef>()) return ""s;
+        // a stateless callable is a placeholder byte; calls through it resolve statically
+        if (x.name.tpe.is<Type::FnRef>()) return fmt::format("{};", mkDecl(x.name.tpe, localName(x.name.symbol)));
         if (x.name.tpe.is<Type::Unit0>()) return x.expr ? fmt::format("{};", mkExpr(*x.expr)) : ""s;
         if (isLocalArr(x.name.tpe)) {
           if (!x.expr || isPoisonInit(*x.expr)) return ""s;
@@ -903,10 +934,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
 
   const auto entry = fnTree.convention.is<CallConvention::OffloadEntry>();
 
-  std::vector<std::string> argExprs;
-  argExprs.reserve(fnTree.decl.args.size() * 2);
-  for (size_t idx = 0; idx < fnTree.decl.args.size(); ++idx) {
-    const auto &arg = fnTree.decl.args[idx];
+  const auto argDecls = [&](const Arg &arg, const size_t idx) -> std::vector<std::string> {
     const auto tpe = mkTpe(arg.named.tpe);
     const auto name = localName(arg.named.symbol);
     switch (dialect) {
@@ -916,25 +944,25 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
         const auto ptr = arg.named.tpe.template get<Type::Ptr>();
         const bool offsetAbi =
             entry && ptr && (ptr->space.template is<TypeSpace::Global>() || ptr->space.template is<TypeSpace::Constant>());
-        if (offsetAbi) {
-          argExprs.push_back(mkDecl(arg.named.tpe, fmt::format("_polyregion_arg_base_{}", idx)));
-          argExprs.push_back(fmt::format("ulong _polyregion_arg_byte_offset_{}", idx));
-        } else argExprs.push_back(mkDecl(arg.named.tpe, name));
-        break;
+        // the host mirrors a by-value struct into a buffer like any other pointer argument
+        const bool mirroredStruct = entry && arg.named.tpe.template is<Type::Struct>();
+        const auto offset = fmt::format("ulong _polyregion_arg_byte_offset_{}", idx);
+        if (offsetAbi) return {mkDecl(arg.named.tpe, fmt::format("_polyregion_arg_base_{}", idx)), offset};
+        if (mirroredStruct) return {fmt::format("global {}* _polyregion_arg_base_{}", tpe, idx), offset};
+        return {mkDecl(arg.named.tpe, name)};
       }
       case Dialect::MSL1_0: {
-        if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
-          argExprs.push_back(
-              arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
-                                     [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
-                                     [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
-                                     [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); }));
-        } else argExprs.push_back(fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx));
-        break;
+        if (auto arr = arg.named.tpe.template get<Type::Ptr>())
+          return {arr->space.match_total([&](TypeSpace::Global) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); }, //
+                                         [&](TypeSpace::Constant) { return fmt::format("{} {} [[buffer({})]]", tpe, name, idx); },
+                                         [&](TypeSpace::Local) { return fmt::format("{} {} [[threadgroup({})]]", tpe, name, idx); }, //
+                                         [&](TypeSpace::Private) { return fmt::format("{} &{} [[buffer({})]]", tpe, name, idx); })};
+        return {fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx)};
       }
-      default: break;
+      default: return {};
     }
-  }
+  };
+  auto argExprs = fnTree.decl.args | zip_with_index<size_t>() | flat_map(argDecls) | to_vector();
 
   if (dialect == Dialect::MSL1_0) {
 
@@ -1025,20 +1053,23 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
   std::vector<std::string> regionDecls;
   if (usage.dynamic && !inPlace) regionDecls.push_back(regionDecl(Type::IntS8(), TypeSpace::Local(), regionName));
 
-  std::vector<std::string> entryAbiDecls;
-  if (dialect == Dialect::OpenCL1_1 && fnTree.convention.is<CallConvention::OffloadEntry>()) {
-    for (size_t idx = 0; idx < fnTree.decl.args.size(); ++idx) {
-      const auto &arg = fnTree.decl.args[idx];
-      const auto ptr = arg.named.tpe.template get<Type::Ptr>();
-      if (!ptr || (!ptr->space.template is<TypeSpace::Global>() && !ptr->space.template is<TypeSpace::Constant>())) continue;
-      const auto bytePtr = ptr->space.template is<TypeSpace::Global>() ? "global uchar*" : "constant uchar*";
-      const auto base = fmt::format("_polyregion_arg_base_{}", idx);
-      const auto offset = fmt::format("_polyregion_arg_byte_offset_{}", idx);
-      entryAbiDecls.push_back(fmt::format("{} = {} == POLYREGION_OPENCL_NULL_POINTER_OFFSET ? (({}) 0) : (({}) ((({}) {}) + {}));",
-                                          mkDecl(arg.named.tpe, localName(arg.named.symbol)), offset, mkTpe(arg.named.tpe),
-                                          mkTpe(arg.named.tpe), bytePtr, base, offset));
+  const auto entryAbiDecl = [&](const Arg &arg, const size_t idx) -> std::optional<std::string> {
+    const auto base = fmt::format("_polyregion_arg_base_{}", idx);
+    const auto offset = fmt::format("_polyregion_arg_byte_offset_{}", idx);
+    if (arg.named.tpe.template is<Type::Struct>()) {
+      const auto tpe = mkTpe(arg.named.tpe);
+      return fmt::format("{} {} = *((global {}*) (((global uchar*) {}) + {}));", tpe, localName(arg.named.symbol), tpe, base, offset);
     }
-  }
+    const auto ptr = arg.named.tpe.template get<Type::Ptr>();
+    if (!ptr || (!ptr->space.template is<TypeSpace::Global>() && !ptr->space.template is<TypeSpace::Constant>())) return std::nullopt;
+    const auto bytePtr = ptr->space.template is<TypeSpace::Global>() ? "global uchar*" : "constant uchar*";
+    return fmt::format("{} = {} == POLYREGION_OPENCL_NULL_POINTER_OFFSET ? (({}) 0) : (({}) ((({}) {}) + {}));",
+                       mkDecl(arg.named.tpe, localName(arg.named.symbol)), offset, mkTpe(arg.named.tpe), mkTpe(arg.named.tpe), bytePtr,
+                       base, offset);
+  };
+  const auto entryAbiDecls = dialect == Dialect::OpenCL1_1 && fnTree.convention.is<CallConvention::OffloadEntry>()
+                                 ? fnTree.decl.args | zip_with_index<size_t>() | collect(entryAbiDecl) | to_vector()
+                                 : std::vector<std::string>{};
 
   const auto localDecls = localVars ^ map([&](const auto &v) {
                             const auto a = v.name.tpe.template get<Type::Arr>();
@@ -1157,6 +1188,32 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     }
   }
 
+  const auto casHelpers =
+      allFns                                                                                   //
+      | flat_map([](const auto &fn) { return fn.template collect_all<Spec::GpuAtomicCAS>(); }) //
+      | collect([&](const auto &cas) -> std::optional<std::string> {
+          if (dialect == Dialect::C11) {
+            const auto type = mkTpe(cas.rtn);
+            return fmt::format("static {} {}(volatile _Atomic({}) *p, {} e, {} v) {{\n"
+                               "  atomic_compare_exchange_strong_explicit(p, &e, v, memory_order_relaxed, memory_order_relaxed);\n"
+                               "  return e;\n"
+                               "}}",
+                               type, atomicCasHelperName("", type), type, type, type);
+          }
+          if (dialect != Dialect::MSL1_0 || !narrowInteger(cas.rtn)) return std::nullopt;
+          const auto space = mslPtrSpace(cas.ptr);
+          const auto [atomic, value] = mslAtomicInt(cas.rtn);
+          return fmt::format("static {} {}({} {} *p, {} e, {} v) {{\n"
+                             "  {} observed = e;\n"
+                             "  while (!metal::atomic_compare_exchange_weak_explicit(p, &observed, v, metal::memory_order_relaxed, "
+                             "metal::memory_order_relaxed) && observed == e) {{}}\n"
+                             "  return observed;\n"
+                             "}}",
+                             value, atomicCasHelperName(space, value), space, atomic, value, value, value);
+        })         //
+      | distinct() //
+      | to_vector();
+
   const auto atomicHelpers = dialect == Dialect::C11
                                  ? allFns                                                                                       //
                                        | flat_map([](const auto &fn) { return fn.template collect_all<Spec::GpuAtomicRMW>(); }) //
@@ -1224,6 +1281,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
               | concat(stringDecls)                                          //
               | concat(volatileHelpers)                                      //
               | concat(atomicHelpers)                                        //
+              | concat(casHelpers)                                           //
               | concat(popCountHelpers)                                      //
               | append(protos)                                               //
               | append(std::string("\n"))                                    //
@@ -1245,6 +1303,19 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     }
     // do NOT key "int64" off `long`: it maps to cl_khr_int64_base_atomics, which plain long arithmetic
     // does not need, so it would wrongly SKIP on Rusticl
+    const auto wideRmw = allFns ^ flat_map([](const auto &fn) { return fn.template collect_all<Spec::GpuAtomicRMW>(); })
+                         ^ filter([](const auto &op) { return wideInteger(op.rtn); });
+    const bool wideCas = allFns ^ flat_map([](const auto &fn) { return fn.template collect_all<Spec::GpuAtomicCAS>(); })
+                         ^ exists([](const auto &op) { return wideInteger(op.rtn); });
+    if (!wideRmw.empty() || wideCas) {
+      pragmas += "#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable\n";
+      features.emplace_back("int64");
+    }
+    if (wideRmw ^ exists([](const auto &op) {
+          return op.op.template is<AtomicOp::Min>() || op.op.template is<AtomicOp::Max>() || op.op.template is<AtomicOp::And>()
+                 || op.op.template is<AtomicOp::Or>() || op.op.template is<AtomicOp::Xor>();
+        }))
+      pragmas += "#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable\n";
     // POLY_NATIVE_TRIG routes the precise trig builtins to native_* on llvmpipe
     pragmas += "#ifdef POLY_NATIVE_TRIG\n"
                "#define POLY_SIN native_sin\n#define POLY_COS native_cos\n#define POLY_TAN native_tan\n"

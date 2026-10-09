@@ -37,6 +37,7 @@
 #include "polyregion/polyc_jit_symbols.h"
 #include "polyregion/types.h"
 #include "polyrt/rt.h"
+#include "polyrt/sma_runtime.hpp"
 
 #include "jit_policy.hpp"
 
@@ -569,8 +570,15 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
   auto &value = requireContext(context, __func__);
   ArgBuffer buffer{};
   if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
+  // a logical SPIR-V kernel reads its capture through the typed arena views bound where the capture was passed
+  const auto pointerArgs =
+      iota(size_t{0}, argCount) | filter([&](const size_t i) { return static_cast<Type>(argTypes[i]) == Type::Ptr; }) | to_vector();
+  const auto capture = value.device->arenaViewStart(moduleName) ^ flat_map([&](const size_t view) {
+                         return view < pointerArgs.size() ? std::optional{pointerArgs[view]} : std::nullopt;
+                       });
   for (size_t i = 0; i < argCount; ++i)
-    buffer.append(static_cast<Type>(argTypes[i]), argPtrs[i]);
+    for (int copy = 0; copy < (capture == i ? polyregion::polyrt::sma::arenaViewCount : 1); ++copy)
+      buffer.append(static_cast<Type>(argTypes[i]), argPtrs[i]);
   buffer.append(Type::Void, nullptr);
   value.queue->enqueueInvokeAsync(
       moduleName, kernelName, buffer,

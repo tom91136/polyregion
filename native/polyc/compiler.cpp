@@ -283,7 +283,7 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::op
     case compiletime::Target::Source_C_OpenCL1_1:
       return opt + ";SubgroupLower(width=1,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower";
     case compiletime::Target::Object_LLVM_NVPTX64: return opt + ";StructuredExit;RegionRespace";
-    case compiletime::Target::Object_LLVM_AMDGCN: return opt + ";StructuredExit";
+    case compiletime::Target::Object_LLVM_AMDGCN: return opt + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit";
     default: return opt + ";StructuredExit";
   }
 }

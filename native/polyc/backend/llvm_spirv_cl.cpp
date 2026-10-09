@@ -610,9 +610,7 @@ ValPtr SPIRVVulkanTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::Spec
       [&](const Spec::GpuShuffleUp &v) -> ValPtr { return shuffle('u', v.value, v.delta, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleIdx &v) -> ValPtr { return shuffle('i', v.value, v.srcLane, v.width, v.mask, v.rtn); },
       [&](const Spec::GpuShuffleXor &v) -> ValPtr { return shuffle('x', v.value, v.laneMask, v.width, v.mask, v.rtn); },
-      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr {
-        throw BackendException("Spec::GpuSubgroupBarrier is unsupported for SPIRV-Vulkan");
-      },
+      [&](const Spec::GpuSubgroupBarrier &) -> ValPtr { return groupBarrier(); },
       [&](const Spec::GpuBallot &v) -> ValPtr {
         return B.CreateAnd(ballotWord(cg.mkTermVal(v.pred)), B.CreateIntCast(cg.mkTermVal(v.mask), i32t, false));
       },

@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000010 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Tue, 06 Oct 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] deduce cmpxchg pointee from the compared value
+
+The cmpxchg result is the { T, i1 } pair, so using it as the known element
+type of the pointer operand records an aggregate pointee and makes the
+pointer-cast legaliser insert a ptrcast that it cannot rewrite for
+spv_cmpxchg. Use the compared value's type, as atomicrmw already does with
+its value operand.
+
+Not upstream as of llvm/llvm-project main (2026-10-09); the open
+llvm/llvm-project#202098 fixes the same crash on the legaliser side by
+rewriting atomic users of a ptrcast.
+---
+--- a/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp
+@@ -1242,9 +1242,10 @@
+     Ops.push_back(std::make_pair(Ref->getPointerOperand(),
+                                  StoreInst::getPointerOperandIndex()));
+   } else if (auto *Ref = dyn_cast<AtomicCmpXchgInst>(I)) {
+-    KnownElemTy = isPointerTy(I->getType())
++    Type *ValueTy = Ref->getCompareOperand()->getType();
++    KnownElemTy = isPointerTy(ValueTy)
+                       ? getAtomicElemTy(GR, I, Ref->getPointerOperand())
+-                      : I->getType();
++                      : ValueTy;
+     if (!KnownElemTy)
+       return;
+     Incomplete = isTodoType(Ref->getPointerOperand());

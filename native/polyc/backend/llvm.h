@@ -136,6 +136,9 @@ struct TargetSpecificHandler {
   virtual ValPtr mkSpecVal(CodeGen &gen, const Expr::SpecOp &op) = 0;
   virtual ValPtr mkMathVal(CodeGen &gen, const Expr::MathOp &op) = 0;
   virtual ValPtr isNaN(CodeGen &gen, llvm::Value *from);
+  // Lanes entering a loop together that the target must explicitly reconverge at its exit, or null.
+  virtual llvm::Value *loopLanes(CodeGen &gen) { return nullptr; }
+  virtual void reconvergeLoopExit(CodeGen &gen, llvm::Value *lanes) {}
   // Called after all kernel/function bodies have been generated. Default is a no-op.
   virtual void postProcessModule(CodeGen &gen) {}
   virtual ~TargetSpecificHandler();
@@ -167,6 +170,8 @@ struct CodeGen {
   // SPIR-V kernels share one module workgroup arena; size it before emitting any body from the maximum
   // fixed Local storage reachable by an entry point, so helper/emission order cannot change the ABI.
   uint64_t sharedDynamicLocalBytes = 0;
+  // logical SPIR-V cannot reinterpret one byte arena, so each element type gets its own share of it
+  Set<Type::Any> sharedDynamicLocalTypes{};
 
   // XXX SPIR-V Kernel only: byte arithmetic + memcpy works around Intel IGC's mis-routing of
   // `OpInBoundsPtrAccessChain` with `OpConstantNull` element. Logical SPIR-V (GLCompute) runs

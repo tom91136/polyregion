@@ -87,7 +87,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
                     {negOne, callIntr(llvm::Intrinsic::amdgcn_mbcnt_lo, {negOne, llvm::ConstantInt::get(cg.C.i32Ty(), 0)})});
   };
   auto activeMask = [&]() -> ValPtr {
-    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i32Ty()}),
+    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i64Ty()}),
                            llvm::ConstantInt::getTrue(cg.C.actual));
   };
   // ds_bpermute shuffle: out-of-range source lane selects the own word to match shfl clamp semantics
@@ -165,7 +165,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
     return b;
   };
   auto ballot = [&](llvm::Value *pred) {
-    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i32Ty()}), pred);
+    return cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::amdgcn_ballot, {cg.C.i64Ty()}), pred);
   };
   auto logicalWarpMask = [&](llvm::Value *wide) -> llvm::Value * {
     auto *segment = cg.B.CreateAnd(laneId(), llvm::ConstantInt::get(cg.C.i32Ty(), ~31u));
@@ -240,16 +240,16 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
         return cg.intr0(llvm::Intrinsic::amdgcn_wave_barrier);
       },
       [&](const Spec::GpuBallot &v) -> ValPtr {
-        auto *votes = logicalWarpMask(ballot(cg.mkTermVal(v.pred)));
+        auto *votes = logicalWarpMask(ballot(cg.toI1(v.pred)));
         return cg.B.CreateAnd(votes, memberMask(v.mask));
       },
       [&](const Spec::GpuVoteAny &v) -> ValPtr {
-        auto *votes = logicalWarpMask(ballot(cg.mkTermVal(v.pred)));
+        auto *votes = logicalWarpMask(ballot(cg.toI1(v.pred)));
         auto *mask = memberMask(v.mask);
         return cg.B.CreateICmpNE(cg.B.CreateAnd(votes, mask), llvm::ConstantInt::get(mask->getType(), 0));
       },
       [&](const Spec::GpuVoteAll &v) -> ValPtr {
-        auto *votes = logicalWarpMask(ballot(cg.mkTermVal(v.pred)));
+        auto *votes = logicalWarpMask(ballot(cg.toI1(v.pred)));
         auto *mask = memberMask(v.mask);
         return cg.B.CreateICmpEQ(cg.B.CreateAnd(votes, mask), mask);
       },

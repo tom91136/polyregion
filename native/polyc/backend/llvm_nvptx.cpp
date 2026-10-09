@@ -39,9 +39,14 @@ void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, cons
     fn.setDSOLocal(true);
   }
 }
-ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
+// before Volta a warp executes in lockstep and has no warp-synchronous instructions
+static bool lockstepWarps(const CodeGen &cg) {
   const auto archNumber = (cg.C.options.arch ^ starts_with("sm_")) ? std::stoi(cg.C.options.arch ^ drop(3)) : 0;
-  const bool legacySubgroup = archNumber != 0 && archNumber < 70;
+  return archNumber != 0 && archNumber < 70;
+}
+
+ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
+  const bool legacySubgroup = lockstepWarps(cg);
 
   // threadId =  @llvm.nvvm.read.ptx.sreg.tid.*
   // blockIdx =  @llvm.nvvm.read.ptx.sreg.ctaid.*
@@ -397,6 +402,18 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       [&](const Spec::RemoteSync &) -> ValPtr { throw BackendException("Spec::RemoteSync is a host-only operation"); },
       [&](const Spec::GpuVolatileLoad &v) -> ValPtr { return cg.mkVolatileLoad(v); },
       [&](const Spec::GpuVolatileStore &v) -> ValPtr { return cg.mkVolatileStore(v); });
+}
+
+llvm::Value *NVPTXTargetSpecificHandler::loopLanes(CodeGen &cg) {
+  if (lockstepWarps(cg)) return nullptr;
+  auto *fnTy = llvm::FunctionType::get(cg.C.i32Ty(), {}, false);
+  auto *active = cg.B.CreateCall(llvm::InlineAsm::get(fnTy, "activemask.b32 $0;", "=r", false));
+  active->addFnAttr(llvm::Attribute::Convergent);
+  return active;
+}
+
+void NVPTXTargetSpecificHandler::reconvergeLoopExit(CodeGen &cg, llvm::Value *lanes) {
+  cg.B.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_bar_warp_sync, {}), lanes);
 }
 
 void NVPTXTargetSpecificHandler::postProcessModule(CodeGen &cg) {

@@ -26,7 +26,11 @@ inline constexpr auto DefaultPipelineSpec = "FullOpt;StructuredExit";
 inline constexpr uint32_t DefaultWorkgroupMemoryBytes = 32768;
 
 [[nodiscard]] constexpr uint32_t defaultWorkgroupMemoryBytes(const compiletime::Target target) {
-  return target == compiletime::Target::Object_LLVM_AMDGCN ? 65536 : DefaultWorkgroupMemoryBytes;
+  switch (target) {
+    case compiletime::Target::Object_LLVM_AMDGCN: return 65536;
+    case compiletime::Target::Object_LLVM_NVPTX64: return 49152;
+    default: return DefaultWorkgroupMemoryBytes;
+  }
 }
 
 struct POLYREGION_EXPORT Options {

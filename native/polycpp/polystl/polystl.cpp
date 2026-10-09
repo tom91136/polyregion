@@ -134,9 +134,9 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     allocations.genArenaObjectSlack = invoke::overReadPadBytes(polyrt::currentDevice->features());
     allocations.genArenaMirror(static_cast<const char *>(functorData), 1, 1, *layout, layout->sizeInBytes);
     auto arenaBase = reinterpret_cast<void *>(allocations.genArenaFinish());
-    // SPIR-V reads the arena through a fixed roster of typed views, so bind the one buffer to every view
-    // slot; flat backends take it once
-    const int arenaViews = polyrt::sma::arenaViewForm(polyrt::currentDevice->moduleFormat()) ? polyrt::sma::arenaViewCount : 1;
+    // logical SPIR-V reads the arena through a fixed roster of typed views, so a module that declares them binds the one
+    // buffer to every view slot; flat backends, and kernels that never read their capture, take it once
+    const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;
     ArgBuffer buffer;
     if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     bindError(buffer);

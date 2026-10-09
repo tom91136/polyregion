@@ -268,21 +268,15 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
     allocations.genArenaObjectSlack = invoke::overReadPadBytes(polyrt::currentDevice->features());
     allocations.genArenaMirror(captures, 1, 1, *layout, layout->sizeInBytes);
     auto arenaBase = reinterpret_cast<void *>(allocations.genArenaFinish());
-    // logical SPIR-V (ArenaView) drops the capture arg and reads via the typed views, so partials shifts to
-    // binding 0; the flat byte form (ArenaLower) keeps the capture as binding 0 (the arena base)
-    const bool logical = polyrt::sma::arenaViewForm(polyrt::currentDevice->moduleFormat());
+    // the arena binds where the capture was passed: once per typed view when the module declares them (logical
+    // SPIR-V), otherwise once
+    const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;
     ArgBuffer buffer;
     polyrt::bindAssertError(buffer, asserts, errDev);
-    if (logical) {
-      buffer.append(Type::Ptr, &mpr.devicePartials);
-      if (isReduction) buffer.append(Type::Scratch, nullptr);
-      for (int i = 0; i < polyrt::sma::arenaViewCount; ++i)
-        buffer.append(Type::Ptr, &arenaBase);
-    } else {
+    for (int i = 0; i < arenaViews; ++i)
       buffer.append(Type::Ptr, &arenaBase);
-      buffer.append(Type::Ptr, &mpr.devicePartials);
-      if (isReduction) buffer.append(Type::Scratch, nullptr);
-    }
+    buffer.append(Type::Ptr, &mpr.devicePartials);
+    if (isReduction) buffer.append(Type::Scratch, nullptr);
     launch(buffer);
     allocations.genArenaReadback();
     mpr.releaseAndReduce();

@@ -341,7 +341,10 @@ ValPtr selectPtrImpl(CodeGen &gen, const Term::Select &select, const bool oneGep
   }
   const auto loadPointer = [&](llvm::Value *slot, const Type::Ptr &pointer, const size_t step) {
     const auto prefer = preferredPointerStep == step;
-    if (!C.isNVPTX()) {
+    const auto &layout = gen.M.getDataLayout();
+    const auto sameWidth =
+        !prefer || layout.getPointerSize(gen.C.addressSpace(pointer.space)) == layout.getPointerSize(gen.C.addressSpace(*preferredSpace));
+    if (!C.isNVPTX() && sameWidth) {
       const auto space = prefer ? *preferredSpace : pointer.space;
       return C.load(B, slot, C.loadedPtrTy(B, space));
     }
@@ -882,7 +885,9 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           if (const auto rhsPtr = x.from.tpe().get<Type::Ptr>()) {
             if (const auto lhsPtr = x.as.get<Type::Ptr>()) {
               if (const auto select = x.from.template get<Term::Select>(); select && !select->steps.empty()) {
-                if (C.isNVPTX()) {
+                const auto &layout = M.getDataLayout();
+                if (C.isNVPTX()
+                    || layout.getPointerSize(C.addressSpace(rhsPtr->space)) != layout.getPointerSize(C.addressSpace(lhsPtr->space))) {
                   const auto slot = selectPtrImpl(*this, *select, /*oneGep*/ false);
                   auto *value = C.load(B, slot, B.getPtrTy(C.addressSpace(rhsPtr->space)));
                   auto *wanted = B.getPtrTy(C.addressSpace(lhsPtr->space));
@@ -1135,6 +1140,13 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       });
 }
 
+static bool leavesFunction(const std::vector<Stmt::Any> &body) {
+  return body ^ exists([](const auto &stmt) {
+           return !stmt.template collect_all<Stmt::Return>().empty() || !stmt.template collect_all<Stmt::Raise>().empty()
+                  || !stmt.template collect_all<Stmt::Rethrow>().empty();
+         });
+}
+
 CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx) {
   const auto compatibleBindingTypes = [](const AnyType &declared, const AnyType &value) {
     // A proven address space can refine a pointer value without changing its binding's declared type.
@@ -1196,7 +1208,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           // physical/SPIR-V-kernel back a workgroup array with an addrspace(3) global; Vulkan logical SPIR-V excluded
           if (logicalLocal) {
             stackPtr = *logicalLocal;
-          } else if (dynShared && C.isNVPTX()) {
+          } else if (dynShared && (C.isNVPTX() || C.isAMDGPU())) {
             // NVPTX dynamic shared memory is a single module-level external `[0 x i8]` addrspace(3) global; the
             // launch-configured shared bytes back it, and align 16 keeps reinterpreted block-exchange scratch
             // naturally aligned. reuse-by-name so every extern __shared__ decl (and postProcessModule) refers to
@@ -1362,6 +1374,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
         const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         WhileCtx ctx{.exit = loopExit, .test = loopTest};
+        // lanes that enter a loop together leave it together, as on lockstep and structured-convergence targets;
+        // a subgroup collective after a lane-divergent exit otherwise sees only the lanes that left first
+        auto *lanes = leavesFunction(x.body) ? nullptr : targetHandler->loopLanes(*this);
         B.CreateBr(loopTest);
         {
           B.SetInsertPoint(loopTest);
@@ -1382,6 +1397,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         // enclosing Cond branch with `kind == Terminal` and skip emitting a branch into the
         // surrounding cond_exit, leaving loopExit dangling without a terminator.
         B.SetInsertPoint(loopExit);
+        if (lanes) targetHandler->reconvergeLoopExit(*this, lanes);
         return BlockKind::Normal;
       },
       [&](const Stmt::ForRange &x) -> BlockKind {
@@ -1393,6 +1409,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         static_cast<void>(mkStmt(Stmt::Var(x.induction, std::optional<Expr::Any>{}, /*isMutable*/ true), fn, whileCtx));
         static_cast<void>(mkStmt(Stmt::Mut(inductionSelect, Expr::Alias(x.lbIncl)), fn, whileCtx));
         WhileCtx ctx{.exit = loopExit, .test = loopTest};
+        auto *lanes = leavesFunction(x.body) ? nullptr : targetHandler->loopLanes(*this);
         B.CreateBr(loopTest);
         {
           B.SetInsertPoint(loopTest);
@@ -1412,6 +1429,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           }
         }
         B.SetInsertPoint(loopExit);
+        if (lanes) targetHandler->reconvergeLoopExit(*this, lanes);
         return BlockKind::Normal;
       },
       [&](const Stmt::Break &) -> BlockKind {
@@ -1682,6 +1700,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
   if (program.entry) allFns ^= prepend(*program.entry);
 
   sharedDynamicLocalBytes = 0;
+  sharedDynamicLocalTypes.clear();
   if (!LLVMBackend::isCpuTarget(C.options.target)) {
     std::vector<uint64_t> ownStaticBytes(allFns.size(), 0);
     Map<Signature, size_t> functionBySignature;
@@ -1701,6 +1720,7 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
         if (!arr || !arr->space.template is<TypeSpace::Local>()) continue;
         if (arr->length == 0) {
           hasAnyDynamicLocal = true;
+          sharedDynamicLocalTypes.emplace(arr->comp);
           continue;
         }
         const auto bytes = M.getDataLayout().getTypeAllocSize(resolveType(local.name.tpe)).getFixedValue();
@@ -1771,7 +1791,13 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program, c
 
                        // XXX Structs arrive at the boundary as pointers; use directly without a slot.
                        if (arg.named.tpe.template is<Type::Struct>()) {
-                         return {arg.named.symbol, {arg.named.tpe, llvmArg}};
+                         if (!fn.convention.is<CallConvention::OffloadEntry>()) return {arg.named.symbol, {arg.named.tpe, llvmArg}};
+                         // every work-item shares the launch's single copy, while a by-value parameter is its own
+                         auto *structTy = resolveType(arg.named.tpe);
+                         auto *copy = C.allocaAS(B, structTy, C.AllocaAS, arg.named.symbol + "_copy");
+                         const auto size = M.getDataLayout().getTypeAllocSize(structTy).getFixedValue();
+                         B.CreateMemCpy(copy, llvm::MaybeAlign(), llvmArg, llvm::MaybeAlign(), size);
+                         return {arg.named.symbol, {arg.named.tpe, copy}};
                        }
 
                        auto llvmArgValue = arg.named.tpe.template is<Type::Bool1>() || arg.named.tpe.template is<Type::Unit0>()

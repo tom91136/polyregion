@@ -7,8 +7,11 @@
 #include "llvm/IR/IntrinsicsSPIRV.h"
 
 #include "aspartame/all.hpp"
+#include "fmt/format.h"
 
 #include "polyregion/types.h"
+
+#include "llvmc.h"
 
 using namespace aspartame;
 using namespace polyregion;
@@ -174,6 +177,7 @@ void VulkanLowering::physicalFieldZero(llvm::Value *dst, llvm::Type *rootTy, llv
 
 void VulkanLowering::structFieldCopy(llvm::Value *dst, llvm::Value *src, llvm::Type *rootTy, const AnyType &tpe,
                                      std::vector<llvm::Value *> idxs) {
+  if (llvm::isa<llvm::UndefValue>(src)) return;
   if (auto s = tpe.template get<Type::Struct>()) {
     const auto &info = cg.structTypes.at(fqcn(s->name));
     if (info.def.isUnion) {
@@ -270,7 +274,24 @@ llvm::Type *VulkanLowering::localAllocType(CodeGen &gen, const Type::Any &nameTp
 std::optional<ValPtr> VulkanLowering::allocateLocalArray(CodeGen &, const std::string &symbol, const AnyType &nameTpe,
                                                          llvm::Type *allocTy) {
   const auto arr = nameTpe.template get<Type::Arr>();
-  if (!arr || !arr->space.template is<TypeSpace::Local>() || arr->length == 0) return std::nullopt;
+  if (!arr || !arr->space.template is<TypeSpace::Local>()) return std::nullopt;
+  if (arr->length == 0) {
+    auto *elemTy = physicalLocalType(cg, arr->comp);
+    const auto name = fmt::format("polyc_dyn_shared.{}", repr(arr->comp));
+    auto *base = cg.M.getNamedGlobal(name);
+    if (!base) {
+      const auto share = cg.sharedDynamicLocalBytes / std::max<size_t>(cg.sharedDynamicLocalTypes.size(), 1);
+      const auto length = share / cg.M.getDataLayout().getTypeAllocSize(elemTy).getFixedValue();
+      if (length == 0)
+        throw BackendException(fmt::format("workgroup storage exceeds configured capacity of {} bytes", cg.C.options.workgroupMemoryBytes));
+      auto *arrTy = llvm::ArrayType::get(elemTy, length);
+      base = new llvm::GlobalVariable(cg.M, arrTy, /*isConstant*/ false, llvm::GlobalValue::InternalLinkage,
+                                      llvm::Constant::getNullValue(arrTy), name, nullptr, llvm::GlobalValue::NotThreadLocal,
+                                      AddrSpace::Workgroup);
+    }
+    localBases.insert_or_assign(symbol, std::tuple{arr->comp, base->getValueType(), static_cast<llvm::Value *>(base)});
+    return base;
+  }
   auto *base = new llvm::GlobalVariable(cg.M, allocTy, /*isConstant*/ false, llvm::GlobalValue::InternalLinkage,
                                         llvm::Constant::getNullValue(allocTy), symbol + "_wg", nullptr, llvm::GlobalValue::NotThreadLocal,
                                         AddrSpace::Workgroup);
@@ -312,19 +333,28 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
                          return std::pair{arg.named.symbol, std::tuple{p.comp, arrTy, static_cast<llvm::Value *>(gv)}};
                        }) //
                        | to_vector());
-  // global pointers bind to sequential storage-buffer descriptors; accumulate once, derive both maps
-  const auto bound = argsNoUnit                                                                                          //
-                     | filter([&](const auto &arg) { return arg.named.tpe.template is<Type::Ptr>() && !localPtr(arg); }) //
-                     | zip_with_index<unsigned>()                                                                        //
+  // global pointers and by-value structs (mirrored by the host) bind to sequential storage-buffer descriptors
+  const auto byValue = [](const auto &arg) { return arg.named.tpe.template is<Type::Struct>(); };
+  const auto bound = argsNoUnit //
+                     | filter([&](const auto &arg) { return (arg.named.tpe.template is<Type::Ptr>() && !localPtr(arg)) || byValue(arg); })
+                     | zip_with_index<unsigned>() //
                      | map([&](const auto &arg, const auto &binding) {
-                         const auto p = *arg.named.tpe.template get<Type::Ptr>();
-                         auto *handle = bufferHandle(physicalLocalType(cg, p.comp), binding, arg.named.symbol);
+                         const auto comp = byValue(arg) ? arg.named.tpe : arg.named.tpe.template get<Type::Ptr>()->comp;
+                         auto *handle = bufferHandle(physicalLocalType(cg, comp), binding, arg.named.symbol);
                          auto *base = bufferElementPtr(arg.named.tpe, handle, i64Zero());
+                         if (byValue(arg)) return std::tuple{arg.named.symbol, arg.named.tpe, handle, base};
                          auto *slot = cg.C.allocaAS(B, base->getType(), cg.C.AllocaAS, arg.named.symbol + "_base");
                          auto _ = cg.C.store(B, base, slot);
                          return std::tuple{arg.named.symbol, arg.named.tpe, handle, slot};
                        }) //
                      | to_vector();
+  // the arena views' first binding is recorded for the dispatch, since unread views leave no binding behind
+  bound | zip_with_index<uint32_t>() | collect_first([](const auto &entry, const auto binding) {
+    return std::get<0>(entry) == "#av0" ? std::optional{binding} : std::nullopt;
+  }) | for_each([&](const uint32_t binding) {
+    cg.M.getOrInsertNamedMetadata(llvmc::ArenaViewStartMetadata)
+        ->addOperand(llvm::MDNode::get(cg.C.actual, llvm::ConstantAsMetadata::get(cg.B.getInt32(binding))));
+  });
   bufferHandles ^= concat(bound ^ map([](const auto &symbol, const auto &tpe, const auto &handle, const auto &slot) {
                             return std::pair{symbol, std::pair{tpe, handle}};
                           }));
@@ -332,7 +362,7 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
                               return std::pair{symbol, std::pair{tpe, slot}};
                             }));
   const auto scalars = argsNoUnit ^ collect([](const auto &arg) -> std::optional<std::pair<std::string, Type::Any>> {
-                         if (arg.named.tpe.template is<Type::Ptr>()) return std::nullopt;
+                         if (arg.named.tpe.template is<Type::Ptr>() || arg.named.tpe.template is<Type::Struct>()) return std::nullopt;
                          return std::pair{arg.named.symbol, arg.named.tpe};
                        });
   if (!scalars.empty()) {
@@ -352,6 +382,18 @@ bool VulkanLowering::bindEntryArgs(llvm::Function &llvmFn, const std::vector<Arg
     }
     auto *blockTy = llvm::StructType::get(cg.C.actual, blockMembers);
     scalarBlock = uniformBlockHandle(blockTy, static_cast<unsigned>(bound.size()), "_scalars");
+    // a uniform member has no address of its own, so a scalar whose address is taken reads from a private copy
+    const auto addressed = fn.template collect_all<Expr::RefTo>() ^ collect([](const auto &ref) -> std::optional<std::string> {
+                             return ref.lhs.template get<Term::Select>() ^ map([](const auto &select) { return select.root.symbol; });
+                           });
+    const auto copied = scalars ^ filter([&](const auto &symbol, const auto &) { return addressed ^ contains(symbol); });
+    cg.stackVarPtrs ^= concat(copied ^ map([&](const auto &symbol, const auto &tpe) {
+                                auto *value = scalarValueOf(Term::Select(Named(symbol, tpe), {}, tpe));
+                                auto *slot = cg.C.allocaAS(B, value->getType(), cg.C.AllocaAS, symbol + "_stack_ptr");
+                                auto _ = cg.C.store(B, value, slot);
+                                return std::pair{symbol, std::pair{tpe, static_cast<llvm::Value *>(slot)}};
+                              }));
+    copied | for_each([&](const auto &symbol, const auto &) { scalarSlots.erase(symbol); });
   }
   for (auto &stmt : fn.body)
     auto _ = cg.mkStmt(stmt, llvmFn);

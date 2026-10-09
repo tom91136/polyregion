@@ -11,6 +11,8 @@
 #include "magic_enum/magic_enum.hpp"
 #include "spirv/unified1/spirv.hpp"
 
+#include "polyinvoke/vulkan_spirv.h"
+
 #ifndef _MSC_VER
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wcast-align"
@@ -284,7 +286,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
             uint32_t maxWgX = UINT32_MAX;
             if (lavapipe && spirvFunctionPrivateBytes(data) > lavapipeMaxFunctionPrivateBytes) maxWgX = deviceSubgroupSize;
-            return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX};
+            return polyregion::invoke::vulkan::details::LoadedModule{module, maxWgX, spirvArenaViewStart(data)};
           },
           [this](const auto &m, const auto &name, const auto &types) {
             POLYINVOKE_TRACE();
@@ -407,6 +409,11 @@ bool VulkanDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();
   return store.moduleLoaded(name);
 }
+std::optional<size_t> VulkanDevice::arenaViewStart(const std::string &name) {
+  POLYINVOKE_TRACE();
+  const auto *module = store.find(name);
+  return module ? module->arenaViewStart : std::nullopt;
+}
 
 static polyregion::invoke::vulkan::details::MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
   VkBufferCreateInfo bufferInfo = {};
@@ -497,6 +504,7 @@ VulkanDeviceQueue::~VulkanDeviceQueue() {
   POLYINVOKE_TRACE();
   callbackQueue.terminate();
   if (callbackThread.joinable()) callbackThread.join();
+  if (nullObject) vmaDestroyBuffer(allocator, VkBuffer(nullObject->buffer), nullObject->allocation);
 }
 void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   callbackQueue.push([cb]() {
@@ -554,6 +562,11 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     else if (tpe == Type::Ptr) {
       uintptr_t ptr = {};
       std::memcpy(&ptr, args[i], byteOfType(Type::Ptr));
+      if (ptr == 0) {
+        if (!nullObject) nullObject = std::make_shared<polyregion::invoke::vulkan::details::MemObject>(allocate(allocator, 256, false));
+        infos.emplace_back(vk::DescriptorBufferInfo{nullObject->buffer, 0, nullObject->size}, vk::DescriptorType::eStorageBuffer);
+        continue;
+      }
       const auto obj = queryMemObject(ptr);
       if (obj.remaining == 0) POLYINVOKE_FATAL(PREFIX, "Interior pointer %" PRIuPTR " is at the end of its allocation", ptr);
       infos.emplace_back(vk::DescriptorBufferInfo{obj.value->buffer, obj.offset, obj.remaining}, vk::DescriptorType::eStorageBuffer);
