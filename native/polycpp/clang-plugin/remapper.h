@@ -20,6 +20,7 @@ using polyregion::raise;
 struct Remapper {
   clang::ASTContext &context;
   bool emitPackageProgramMode = false;
+  Opt<uint64_t> cudaProducerArch{};
   mutable Map<std::string, Set<std::string>> readOnlyMembers{};
   struct BitFieldInfo {
     Named storage;

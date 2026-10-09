@@ -190,6 +190,23 @@ static Opt<MatchedCall> hipBallot(const clang::CallExpr &call, const clang::Func
                      false};
 }
 
+static Opt<MatchedCall> hipWaveVote(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
+  const auto name = decl.getQualifiedNameAsString();
+  if ((name != "__ockl_wfall_i32" && name != "__ockl_wfany_i32") || call.getNumArgs() != 1) return {};
+  const auto *expression = &call;
+  const bool all = name == "__ockl_wfall_i32";
+  return MatchedCall{Lowering{[expression, all](Remapper &self, Remapper::RemapContext &r) -> Expr::Any {
+                       const auto value = r.newVar(self.handleExpr(expression->getArg(0), r));
+                       const auto zero = r.newVar(self.integralConstOfType(value.tpe(), 0));
+                       const auto predicate = r.newVar(Expr::IntrOp(Intr::LogicNeq(value, zero)));
+                       const auto mask = Term::IntU32Const(0xffffffffu);
+                       const auto vote =
+                           all ? Expr::SpecOp(Spec::GpuVoteAll(mask, predicate)) : Expr::SpecOp(Spec::GpuVoteAny(mask, predicate));
+                       return self.conform(r, vote, self.handleType(expression->getType(), r));
+                     }},
+                     false};
+}
+
 static Opt<MatchedCall> hipRuntime(const clang::CallExpr &call, const clang::FunctionDecl &decl) {
   return remoteRuntimePrism(call, decl, "hip");
 }
@@ -237,7 +254,8 @@ static Opt<MatchedCall> hipHostQuery(const clang::CallExpr &call, const clang::F
 }
 
 Vector<CallPrism> hipPrisms() {
-  return {hipSleepScanState, hipShuffle, hipBuiltin, hipOcklIndex, hipBallot, hipRuntime, hipErrorState, hipHostQuery, hipIgnoredHelper};
+  return {hipSleepScanState, hipShuffle, hipBuiltin,    hipOcklIndex, hipBallot,
+          hipWaveVote,       hipRuntime, hipErrorState, hipHostQuery, hipIgnoredHelper};
 }
 
 } // namespace polyregion::polystl::call_prism

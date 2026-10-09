@@ -673,12 +673,14 @@ static Opt<MatchedCall> cudaHostQuery(const clang::CallExpr &call, const clang::
                                                                                               Remapper::RemapContext &r) -> Expr::Any {
         const auto arguments = lowerArguments(*expression, self, r);
         const auto pointer = arguments.front().tpe().get<Type::Ptr>();
-        const auto outputType = pointer      ? Opt<Type::Any>{pointer->comp}
-                                : ptxVersion ? Opt<Type::Any>{arguments.front().tpe()}
-                                             : std::nullopt;
+        const auto outputType = pointer                   ? Opt<Type::Any>{pointer->comp}
+                                : ptxVersion || occupancy ? Opt<Type::Any>{arguments.front().tpe()}
+                                                          : std::nullopt;
         if (outputType) {
           Expr::Any queried = Expr::Alias(Term::Poison(*outputType));
-          if (ptxVersion) {
+          if (ptxVersion && self.cudaProducerArch) {
+            queried = self.integralConstOfType(*outputType, *self.cudaProducerArch);
+          } else if (ptxVersion) {
             const auto major = r.newVar(Expr::ForeignCall("polyrt_device_cuda_architecture_major", {packageContext()}, Type::IntU64()));
             const auto minor = r.newVar(Expr::ForeignCall("polyrt_device_cuda_architecture_minor", {packageContext()}, Type::IntU64()));
             const auto hundreds = r.newVar(Expr::IntrOp(Intr::Mul(major, Term::IntU64Const(100), Type::IntU64())));

@@ -20,6 +20,8 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
+#include "clang/Lex/MacroInfo.h"
+#include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -982,6 +984,15 @@ struct ExportCollector final : clang::RecursiveASTVisitor<ExportCollector> {
 };
 } // namespace
 
+// the single architecture a CUDA translation unit's device code is built for, visible to both phases
+static std::optional<uint64_t> cudaArchList(clang::Preprocessor &pp) {
+  const auto *macro = pp.getMacroInfo(pp.getIdentifierInfo("__CUDA_ARCH_LIST__"));
+  if (!macro || macro->getNumTokens() != 1 || !macro->getReplacementToken(0).is(clang::tok::numeric_constant)) return {};
+  uint64_t arch = 0;
+  if (llvm::StringRef(pp.getSpelling(macro->getReplacementToken(0))).getAsInteger(10, arch)) return {};
+  return arch;
+}
+
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   auto &D = CI.getDiagnostics();
   if (!opts.emitLibraryPath.empty()) {
@@ -992,7 +1003,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
       emit(D, clang::DiagnosticsEngine::Warning,
            POLYREGION_DIAG_POLYSTL
            "-fstdpar-emit-library set but no [[clang::annotate(\"polyregion_export:<identity>\")]] functions found");
-    compilePackageProgram(opts, C, D, collector.exports, collector.deviceKernels, opts.emitLibraryPath);
+    compilePackageProgram(opts, C, D, collector.exports, collector.deviceKernels, cudaArchList(CI.getPreprocessor()), opts.emitLibraryPath);
     return;
   }
   for (auto r : outlinePolyregionOffload(C))

@@ -33,5 +33,6 @@ void compilePackageProgram(const polyfront::Options &opts,                      
                            clang::DiagnosticsEngine &diag,                                //
                            const std::vector<PackageExport> &exports,                     //
                            const std::vector<const clang::FunctionDecl *> &deviceKernels, //
+                           const std::optional<uint64_t> &cudaProducerArch,               //
                            const std::string &outPath);
 } // namespace polyregion::polystl

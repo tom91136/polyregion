@@ -141,6 +141,45 @@ int main(int argc, char **argv) {
     const auto found = program.collect_all<Term::IntS32Const>() ^ exists([&](const auto &constant) { return constant.value == expected; });
     return found ? 0 : 18;
   }
+  if (argc == 4 && std::string(argv[1]) == "--assert-field-stored") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 25;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const std::string field = argv[3];
+    const auto found = program.collect_all<Stmt::Mut>() ^ exists([&](const auto &store) {
+                         return !store.name.steps.empty()
+                                && store.name.steps.back().template get<PathStep::Field>()
+                                       ^ exists([&](const auto &step) { return step.name.find(field) != std::string::npos; });
+                       });
+    return found ? 0 : 25;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-no-null-compare") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 26;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto null = [](const Term::Any &term) { return term.template is<Term::NullPtrConst>(); };
+    const auto nullOperand = [&](const auto &x) { return null(x.x) || null(x.y); };
+    const auto found =
+        (program.collect_all<Intr::LogicNeq>() ^ exists(nullOperand)) || (program.collect_all<Intr::LogicEq>() ^ exists(nullOperand));
+    return found ? 26 : 0;
+  }
+  if (argc == 3 && std::string(argv[1]) == "--assert-wave-votes") {
+    const auto source = llvm::MemoryBuffer::getFile(argv[2]);
+    if (!source) return 27;
+    const auto bytes = (*source)->getBuffer();
+    const auto program =
+        hashed_program_from_msgpack(reinterpret_cast<const uint8_t *>(bytes.begin()), reinterpret_cast<const uint8_t *>(bytes.end()));
+    const auto integralPoison = program.collect_all<Term::Poison>() ^ exists([](const auto &poison) {
+                                  return poison.t.template is<Type::IntS32>() || poison.t.template is<Type::Bool1>();
+                                });
+    const auto valid =
+        !program.collect_all<Spec::GpuVoteAll>().empty() && !program.collect_all<Spec::GpuVoteAny>().empty() && !integralPoison;
+    return valid ? 0 : 27;
+  }
   if (argc == 3 && std::string(argv[1]) == "--assert-zero-type-variable") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
     if (!source) return 22;

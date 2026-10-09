@@ -703,10 +703,12 @@ static Expr::Any adjustBasePointer(const Remapper &self, Remapper::RemapContext 
     }
     return current.tpe() == targetTpe ? current : r_.newVar(Expr::Cast(current, targetTpe));
   };
-  // Taking a reference already proves the source non-null. Keep that common path as a direct,
-  // stable local pointer so ArenaView can retain its identity; nullable pointer casts use the
-  // conditional below because C++ requires a null derived pointer to remain null.
-  if (sourceExpr.is<Expr::RefTo>() || cast.isGLValue()) return Expr::Alias(adjust(r));
+  // Taking a reference already proves the source non-null, as does `this` or an unchecked cast. Keep that
+  // common path as a direct, stable local pointer so ArenaView can retain its identity; nullable pointer
+  // casts use the conditional below because C++ requires a null derived pointer to remain null.
+  if (sourceExpr.is<Expr::RefTo>() || cast.isGLValue() || cast.getCastKind() == clang::CK_UncheckedDerivedToBase
+      || llvm::isa<clang::CXXThisExpr>(cast.getSubExpr()->IgnoreParenImpCasts()))
+    return Expr::Alias(adjust(r));
   const auto result = r.newName(targetTpe);
   r.push(Stmt::Var(result, Expr::Alias(Term::NullPtrConst(targetPtr->comp, targetPtr->space, Region::Opaque())), /*isMutable*/ true));
   const auto nonNull =
@@ -4137,28 +4139,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               return integralConstOfType(type, evaluated.Val.getInt().getLimitedValue());
             if (variable->getInit()->EvaluateAsRValue(evaluated, context) && !evaluated.HasSideEffects && evaluated.Val.isFloat())
               return floatConstOfType(type, evaluated.Val.getFloat().convertToDouble());
-          }
-          if (const auto *field = llvm::dyn_cast<clang::FieldDecl>(expr->getMemberDecl());
-              field && field->getParent() && field->getParent()->getName() == "kernel_config_params") {
-            const auto functionName = r.function ? diagnosticName(r.function, context) : std::string{};
-            const bool runtimeReduce = functionName.find("rocprim::detail::reduce_impl") != std::string::npos;
-            const bool runtimeCopy = functionName.find("kernel_config_params::kernel_config_params") != std::string::npos;
-            const bool runtimePartition = functionName.find("rocprim::detail::partition_impl") != std::string::npos;
-            bool tupleValue = false;
-            bool adjacentDifference = false;
-            for (const clang::Expr *base = expr->getBase() ? expr->getBase()->IgnoreParenImpCasts() : nullptr; base;) {
-              const auto baseType = base->getType().getAsString(context.getPrintingPolicy());
-              if (baseType.find("thrust::tuple") != std::string::npos) tupleValue = true;
-              if (baseType.find("adjacent_difference") != std::string::npos) adjacentDifference = true;
-              const auto *member = llvm::dyn_cast<clang::MemberExpr>(base);
-              if (!member) break;
-              base = member->getBase() ? member->getBase()->IgnoreParenImpCasts() : nullptr;
-            }
-            if (!runtimeReduce && !runtimeCopy && !runtimePartition && !adjacentDifference) {
-              if (field->getName() == "block_size") return integralConstOfType(type, tupleValue ? 128 : 256);
-              if (field->getName() == "items_per_thread") return integralConstOfType(type, tupleValue ? 2 : 4);
-              if (field->getName() == "size_limit") return integralConstOfType(type, 0xffffffffu);
-            }
           }
         }
         const auto baseExpr = handleExpr(expr->getBase(), r);
