@@ -16,6 +16,7 @@
 #include "llvm/TargetParser/Triple.h"
 
 #include "aspartame/all.hpp"
+#include "aspartame/ext/llvm.hpp"
 #include "catch2/catch_all.hpp"
 #include "fmt/format.h"
 #include "spirv/unified1/spirv.hpp"
@@ -359,6 +360,40 @@ TEST_CASE("module-processed markers follow the debug names and precede the annot
       }
       ^ flatten();
   CHECK(spirvWords(polyregion::backend::llvmc::appendSpirvModuleProcessed(spirvBytes(words), "k=7")) == expected);
+}
+
+TEST_CASE("SPIR-V addresses an aggregate local's leading scalar through a GEP", "[backend][spirv]") {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  const auto module = llvm::parseAssemblyString(R"(
+%inner = type { ptr addrspace(4), i64 }
+%outer = type { %inner }
+declare void @llvm.memcpy.p0.p1.i64(ptr, ptr addrspace(1), i64, i1)
+define spir_kernel void @kernel(ptr addrspace(1) %src, ptr addrspace(4) %p) {
+  %local = alloca %outer, align 8
+  call void @llvm.memcpy.p0.p1.i64(ptr %local, ptr addrspace(1) %src, i64 16, i1 false)
+  %leaf = load ptr addrspace(4), ptr %local, align 8
+  store ptr addrspace(4) %p, ptr %local, align 8
+  ret void
+}
+)",
+                                                diagnostic, context);
+  REQUIRE(module);
+  auto &kernel = *module->getFunction("kernel");
+  polyregion::backend::llvmc::restoreLeafGeps(kernel);
+  const auto accesses = llvm::instructions(kernel) ^ collect([](llvm::Instruction &I) -> std::optional<llvm::Value *> {
+                          if (auto *load = llvm::dyn_cast<llvm::LoadInst>(&I)) return load->getPointerOperand();
+                          if (auto *store = llvm::dyn_cast<llvm::StoreInst>(&I)) return store->getPointerOperand();
+                          return std::nullopt;
+                        });
+  REQUIRE(accesses.size() == 2);
+  for (auto *pointer : accesses) {
+    auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(pointer);
+    REQUIRE(gep);
+    CHECK(gep->getSourceElementType()->isStructTy());
+    CHECK(gep->getResultElementType()->isPointerTy());
+    CHECK(gep->hasAllZeroIndices());
+  }
 }
 
 TEST_CASE("a workgroup size the kernel never reads still follows the launch", "[backend][spirv][vulkan]") {

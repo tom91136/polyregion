@@ -36,6 +36,7 @@ POLYREGION_EXPORT bool captureModuleIr();
 // appends an OpModuleProcessed after the debug instructions, which no dead-code elimination can drop
 [[nodiscard]] std::string patchSpirvWorkgroupSpecConstant(std::string spv);
 [[nodiscard]] std::string appendSpirvModuleProcessed(std::string spv, std::string_view text);
+void restoreLeafGeps(llvm::Function &F);
 // module metadata naming the first binding of a logical kernel's arena views
 inline constexpr auto ArenaViewStartMetadata = "polyregion.arena_view_start";
 POLYREGION_EXPORT polyast::CompileResult compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,

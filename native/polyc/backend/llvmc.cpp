@@ -964,8 +964,19 @@ static void indexPointerArithmetic(llvm::Function &F) {
 // Logical SPIR-V types every pointer by what it points to, but LLVM folds a GEP to a leading subobject (all-zero
 // indices) into its base, leaving a GEP whose source type is that subobject applied to the enclosing aggregate's
 // pointer. Restore the access chain down to the subobject so the translator indexes the right type.
+// the all-zero GEP path from an aggregate down its leading members to `target`, empty when `target` is not one of them
+static llvm::SmallVector<llvm::Value *> zeroPathTo(llvm::Type *enclosing, llvm::Type *target) {
+  auto *zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(target->getContext()), 0);
+  llvm::SmallVector<llvm::Value *> path{zero};
+  for (auto *current = enclosing; current != target; path.push_back(zero)) {
+    if (auto *st = llvm::dyn_cast<llvm::StructType>(current); st && st->getNumElements() > 0) current = st->getElementType(0);
+    else if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(current)) current = arr->getElementType();
+    else return {};
+  }
+  return path.size() < 2 ? llvm::SmallVector<llvm::Value *>{} : path;
+}
+
 static void restoreSubobjectGeps(llvm::Function &F) {
-  auto *i32 = llvm::Type::getInt32Ty(F.getContext());
   const auto pointeeOf = [](llvm::Value *v) -> llvm::Type * {
     if (auto *gep = llvm::dyn_cast<llvm::GEPOperator>(v)) return gep->getResultElementType();
     if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(v)) return alloca->getAllocatedType();
@@ -982,18 +993,22 @@ static void restoreSubobjectGeps(llvm::Function &F) {
     auto *target = gep->getSourceElementType();
     auto *enclosing = pointeeOf(gep->getPointerOperand());
     if (!enclosing || enclosing == target || !target->isAggregateType()) continue;
-    llvm::SmallVector<llvm::Value *> path{llvm::ConstantInt::get(i32, 0)};
-    for (auto *current = enclosing; current != target;) {
-      if (auto *st = llvm::dyn_cast<llvm::StructType>(current); st && st->getNumElements() > 0) current = st->getElementType(0);
-      else if (auto *arr = llvm::dyn_cast<llvm::ArrayType>(current)) current = arr->getElementType();
-      else {
-        path.clear();
-        break;
-      }
-      path.push_back(llvm::ConstantInt::get(i32, 0));
-    }
-    if (path.size() < 2) continue;
+    const auto path = zeroPathTo(enclosing, target);
+    if (path.empty()) continue;
     gep->setOperand(0, llvm::GetElementPtrInst::CreateInBounds(enclosing, gep->getPointerOperand(), path, "", gep->getIterator()));
+  }
+}
+
+// LLVM's SPIR-V backend retypes an aggregate alloca as its leading scalar when that scalar is loaded or stored without a
+// GEP, shrinking the variable below the aggregate copies that fill it
+void llvmc::restoreLeafGeps(llvm::Function &F) {
+  for (llvm::Instruction &I : llvm::instructions(F)) {
+    auto *alloca = llvm::dyn_cast_or_null<llvm::AllocaInst>(llvm::getLoadStorePointerOperand(&I));
+    if (!alloca || !alloca->getAllocatedType()->isAggregateType()) continue;
+    const auto path = zeroPathTo(alloca->getAllocatedType(), llvm::getLoadStoreType(&I));
+    if (path.empty()) continue;
+    auto *leaf = llvm::GetElementPtrInst::CreateInBounds(alloca->getAllocatedType(), alloca, path, "", I.getIterator());
+    I.setOperand(llvm::isa<llvm::LoadInst>(I) ? llvm::LoadInst::getPointerOperandIndex() : llvm::StoreInst::getPointerOperandIndex(), leaf);
   }
 }
 
@@ -1083,6 +1098,7 @@ static void scalariseForSpirv(llvm::TargetMachine &TM, llvm::Module &M, const bo
         normaliseUnitSignSelects(F);
         restoreSubobjectGeps(F);
       }
+      llvmc::restoreLeafGeps(F);
     }
 }
 
