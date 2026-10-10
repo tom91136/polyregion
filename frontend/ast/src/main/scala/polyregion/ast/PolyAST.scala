@@ -849,6 +849,7 @@ object PolyAST {
       case Source_C_C11                extends Target(30, Some("C_C11"))
       case Source_C_OpenCL1_1          extends Target(31, Some("C_OpenCL1_1"))
       case Source_C_Metal1_0           extends Target(32, Some("C_Metal1_0"))
+      case Source_C_OpenCL2_0          extends Target(33, Some("C_OpenCL2_0"))
     }
 
     enum OptLevel(val value: Int, override val java: Option[String]) extends Variant {

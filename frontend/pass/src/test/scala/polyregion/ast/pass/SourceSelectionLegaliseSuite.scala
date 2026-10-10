@@ -78,4 +78,49 @@ class SourceSelectionLegaliseSuite extends munit.FunSuite {
     val selected = out.collectAll[p.Term].collect { case select: p.Term.Select if select.steps.nonEmpty => select.tpe }
     assert(selected.forall(_ == p.Type.IntS32), clues(selected))
   }
+
+  test("pointer views that differ only in address space become explicit pointer casts") {
+    val symbol                = sym("Holder")
+    val tpe                   = p.Type.Struct(symbol, Nil)
+    val stored                = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private)
+    val viewedTpe             = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val definition            = p.StructDef(symbol, Nil, List(named("pointer", stored)), Nil)
+    val holder                = named("holder", tpe)
+    val viewed: p.Term.Select = p.Term.Select(holder, List(p.PathStep.Field("pointer")), viewedTpe)
+    val kernel = entry(
+      args = List(p.Arg(holder)),
+      body = List(
+        p.Stmt.Var(named("result", viewedTpe), Some(p.Expr.Alias(viewed))),
+        p.Stmt.Mut(viewed, p.Expr.Alias(p.Term.NullPtrConst(p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out   = SourceSelectionLegalise(program(kernel, defs = List(definition)), NoopLog).entry.required
+    val casts = out.collectAll[p.Expr].collect { case p.Expr.Cast(_, to: p.Type.Ptr) => to }
+    assertEquals(casts.toSet, Set(viewedTpe, stored), clues(out.body))
+  }
+
+  test("array views that differ only in address space read the same storage") {
+    val symbol                = sym("Holder")
+    val tpe                   = p.Type.Struct(symbol, Nil)
+    val stored                = p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Global)
+    val viewedTpe             = p.Type.Arr(p.Type.IntS32, 4, p.Type.Space.Private)
+    val definition            = p.StructDef(symbol, Nil, List(named("values", stored)), Nil)
+    val holder                = named("holder", tpe)
+    val viewed: p.Term.Select = p.Term.Select(holder, List(p.PathStep.Field("values")), viewedTpe)
+    val kernel = entry(
+      args = List(p.Arg(holder)),
+      body = List(
+        p.Stmt.Var(named("result", viewedTpe), Some(p.Expr.Alias(viewed))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val out = SourceSelectionLegalise(program(kernel, defs = List(definition)), NoopLog).entry.required
+    assert(
+      !out.collectAll[p.Expr].exists(e => e.isInstanceOf[p.Expr.Cast] || e.isInstanceOf[p.Expr.BitCast]),
+      clues(out.body)
+    )
+  }
 }

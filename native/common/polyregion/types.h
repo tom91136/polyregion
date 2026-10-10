@@ -115,6 +115,7 @@ struct POLYREGION_EXPORT TargetSpec {
       {"level_zero",      {"ze", "levelzero"},              T::Object_LLVM_SPIRV64_Kernel,   B::LevelZero,         false, {}},
       {"spirv_glcompute", {"vulkan", "vulkan_spirv"},       T::Object_LLVM_SPIRV_GLCompute,  B::Vulkan,            false, {"spirv_glcompute"}},
       {"opencl1_1",       {"opencl"},                       T::Source_C_OpenCL1_1,           B::OpenCL,            false, {"source"}},
+      {"opencl2_0",       {},                               T::Source_C_OpenCL2_0,           B::OpenCL,            false, {"source", "generic_address_space", "work_group_collectives"}},
       {"metal1_0",        {"metal"},                        T::Source_C_Metal1_0,            B::Metal,             true,  {}},
       {"c11",             {},                               T::Source_C_C11,                 B::SharedObject,      true,  {}},
     };
@@ -168,8 +169,8 @@ POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::pa
   return std::nullopt;
 }
 
-// a SPIR-V kernel's arch names its OpenCL feature level: 1_1 (the default) needs only core features, while 2_0 relies on
-// the generic address space and work-group collectives, so its images require both
+// a SPIR-V kernel's arch names its OpenCL feature level: 1_1 (the default) needs only core features, while 2_0, like
+// OpenCL C 2.0 source, relies on the generic address space and work-group collectives, so its images require both
 inline constexpr std::array<std::string_view, 2> SpirvKernelLevels{"1_1", "2_0"};
 inline constexpr std::array<std::string_view, 2> OpenCL2Features{"generic_address_space", "work_group_collectives"};
 POLYREGION_RT_PROTECT inline bool spirvKernelGeneric(std::string_view arch) { return arch == "2_0"; }
@@ -230,6 +231,7 @@ POLYREGION_RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(
     case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
     case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_OpenCL2_0:
     case compiletime::Target::Source_C_Metal1_0: //
       return runtime::PlatformKind::Managed;
   }
@@ -252,6 +254,7 @@ POLYREGION_RT_PROTECT static constexpr std::optional<runtime::ModuleFormat> modu
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute: //
       return runtime::ModuleFormat::SPIRV_GLCompute;
     case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_OpenCL2_0:
     case compiletime::Target::Source_C_Metal1_0:
     case compiletime::Target::Source_C_C11: //
       return runtime::ModuleFormat::Source;

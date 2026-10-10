@@ -16,7 +16,8 @@ public enum Target implements ByteEnum {
   LLVM_SPIRV_GLCOMPUTE((byte) 24),
   C_C11((byte) 30),
   C_OpenCL1_1((byte) 31),
-  C_Metal1_0((byte) 32);
+  C_Metal1_0((byte) 32),
+  C_OpenCL2_0((byte) 33);
 
   public static final Target[] VALUES = values();
 

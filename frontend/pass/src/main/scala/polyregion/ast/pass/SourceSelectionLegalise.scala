@@ -65,10 +65,15 @@ object SourceSelectionLegalise extends ProgramPass {
         p.Named(symbol, tpe)
       }
 
-      def conversion(value: p.Term, from: p.Type, to: p.Type): p.Expr =
-        if (from == p.Type.Bool1 || to == p.Type.Bool1) p.Expr.Cast(value, to)
-        else if (width(from).nonEmpty && width(from) == width(to)) p.Expr.BitCast(value, to)
-        else throw IllegalArgumentException(s"source selection cannot view ${from.repr} as ${to.repr}")
+      def conversion(value: p.Term, from: p.Type, to: p.Type): p.Expr = (from, to) match {
+        case _ if from == p.Type.Bool1 || to == p.Type.Bool1                    => p.Expr.Cast(value, to)
+        case (p.Type.Ptr(source, _), p.Type.Ptr(target, _)) if source == target => p.Expr.Cast(value, to)
+        // a C array carries no address-space qualifier of its own, so both views name the same storage
+        case (p.Type.Arr(source, length, _), p.Type.Arr(target, viewed, _)) if source == target && length == viewed =>
+          p.Expr.Alias(value)
+        case _ if width(from).nonEmpty && width(from) == width(to) => p.Expr.BitCast(value, to)
+        case _ => throw IllegalArgumentException(s"source selection cannot view ${from.repr} as ${to.repr}")
+      }
 
       def lowerTerm(term: p.Term, prefix: ListBuffer[p.Stmt]): p.Term = term.modifyAll[p.Term] {
         // SourceStorageLegalise reserves a byte for callable members in physical aggregates, while calls retain the

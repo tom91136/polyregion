@@ -120,6 +120,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
       case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
         return {.target = backend::LLVMBackend::Target::SPIRV_GLCompute, .arch = options.arch};
       case compiletime::Target::Source_C_OpenCL1_1: //
+      case compiletime::Target::Source_C_OpenCL2_0: //
       case compiletime::Target::Source_C_Metal1_0:  //
       case compiletime::Target::Source_C_C11:       //
         throw std::logic_error("Not an object target");
@@ -144,6 +145,7 @@ std::vector<polyast::StructLayout> compiler::layoutOf(const std::vector<polyast:
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute: return backend::LLVMBackend(toLLVMBackendOptions(options)).resolveLayouts(defs);
     case compiletime::Target::Source_C_C11: [[fallthrough]];
     case compiletime::Target::Source_C_OpenCL1_1: [[fallthrough]];
+    case compiletime::Target::Source_C_OpenCL2_0: [[fallthrough]];
     case compiletime::Target::Source_C_Metal1_0:
       throw std::logic_error(fmt::format("Not available for source target {}", magic_enum::enum_name(options.target)));
     default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
@@ -284,6 +286,7 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
     case compiletime::Target::Source_C_Metal1_0:
     case compiletime::Target::Source_C_OpenCL1_1:
       return opt + ";SubgroupLower(width=1,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower";
+    case compiletime::Target::Source_C_OpenCL2_0: return opt + ";SubgroupLower(width=1);StructuredExit;RegionRespace;ArenaLower";
     case compiletime::Target::Object_LLVM_NVPTX64: return opt + ";StructuredExit;RegionRespace";
     case compiletime::Target::Object_LLVM_AMDGCN: return opt + ";SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit";
     default: return opt + ";StructuredExit";
@@ -532,10 +535,12 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
         return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));                                  //
       case compiletime::Target::Source_C_OpenCL1_1:                                                                    //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1, options.workgroupMemoryBytes); //
-      case compiletime::Target::Source_C_Metal1_0:                                                                     //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0, options.workgroupMemoryBytes);    //
-      case compiletime::Target::Source_C_C11:                                                                          //
-        return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11, options.workgroupMemoryBytes);       //
+      case compiletime::Target::Source_C_OpenCL2_0:
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL2_0, options.workgroupMemoryBytes);
+      case compiletime::Target::Source_C_Metal1_0:                                                                  //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0, options.workgroupMemoryBytes); //
+      case compiletime::Target::Source_C_C11:                                                                       //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11, options.workgroupMemoryBytes);    //
       default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
     }
   };
@@ -556,8 +561,11 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   switch (options.target) {
     case compiletime::Target::Source_C_C11:
     case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_OpenCL2_0:
     case compiletime::Target::Source_C_Metal1_0: {
-      const auto strict = options.target == compiletime::Target::Source_C_C11 ? "false" : "true";
+      const auto strict = options.target == compiletime::Target::Source_C_C11 || options.target == compiletime::Target::Source_C_OpenCL2_0
+                              ? "false"
+                              : "true";
       const auto metal = options.target == compiletime::Target::Source_C_Metal1_0 ? "true" : "false";
       auto passRun = runPipelineChain(effective, fmt::format("SourceStorageLegalise(elideRecursivelyEmptyAggregates={});"
                                                              "SourcePointerLegalise(requiresConcreteSpaces={});"

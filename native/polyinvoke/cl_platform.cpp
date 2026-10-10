@@ -426,8 +426,16 @@ ClDevice::ClDevice(cl_device_id device, ModuleFormat format, cl_details::ClCreat
             POLYINVOKE_TRACE();
             // XXX Rusticl libclc fails to link precise sin/cos/tan range-reduction, while llvmpipe historically
             // crashed there; route POLY_* trig to native_ via this #ifdef or patchSpirvNativeTrig above.
+            // an OpenCL C 2.0 module builds at the device's own language version, as compilers otherwise default to 1.2
+            const bool openCL2 =
+                this->format == ModuleFormat::Source && image ^ aspartame::contains_slice("POLYREGION_OPENCL_C_VERSION 200");
+            const std::string languageVersion = !openCL2 ? ""
+                                                : queryDeviceInfo(*this->device, CL_DEVICE_VERSION) ^ aspartame::starts_with("OpenCL 2.")
+                                                    ? " -cl-std=CL2.0"
+                                                    : " -cl-std=CL3.0";
             const std::string compilerArgs =
-                (this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "";
+                std::string((this->format != ModuleFormat::SPIRV_Kernel && this->quirks.nativeTrig) ? "-DPOLY_NATIVE_TRIG" : "")
+                + languageVersion;
             const auto build = [&](cl_program p) { return clBuildProgram(p, 1, &*this->device, compilerArgs.c_str(), nullptr, nullptr); };
             const auto cachePath = detail::moduleCachePath("opencl", programIdentity(*this->device, this->deviceName, compilerArgs), image);
             cl_program program = {};

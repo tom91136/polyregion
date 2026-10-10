@@ -1793,6 +1793,56 @@ TEST_CASE("LLVM GPU workgroup collectives report target-specific support", "[bac
                       Catch::Matchers::ContainsSubstring("lowering not yet implemented"));
 }
 
+TEST_CASE("OpenCL C 2.0 names address spaces only at the kernel boundary", "[backend]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto globalPtr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named out("out", globalPtr), alias("alias", globalPtr);
+  const Function entry = mkFn("kernel", {Arg(out, {})}, Type::Unit0(),
+                              {Var(alias, Expr::Alias(selectNamed(out)).widen(), false).widen(),
+                               Update(selectNamed(alias), Term::IntS64Const(0).widen(), Term::IntS32Const(7).widen()).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto source = [&](Target target) {
+    const auto compiled = polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {target, ""}, OptLevel::O0);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    return std::string(compiled.binary->begin(), compiled.binary->end());
+  };
+  const auto generic = source(Target::Source_C_OpenCL2_0);
+  CHECK(generic ^ contains_slice("kernel void _kernel(global int* _polyregion_arg_base_0"));
+  CHECK(generic ^ contains_slice("  int* _v"));
+  CHECK_FALSE(generic ^ contains_slice("  global int* _v"));
+  CHECK(source(Target::Source_C_OpenCL1_1) ^ contains_slice("  global int* _v"));
+}
+
+TEST_CASE("OpenCL C 2.0 keeps work-group collectives native and requires generic devices", "[backend][group]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto tpe = Type::IntS32().widen();
+  const Named value("value", tpe), sum("sum", tpe), least("least", tpe), prefix("prefix", tpe), any("any", Type::Bool1());
+  const auto group = [&](const Named &name, const Spec::Any &op) { return Var(name, Expr::SpecOp(op).widen(), false).widen(); };
+  const Function entry = mkFn("kernel", {Arg(value, {})}, Type::Unit0(),
+                              {group(sum, Spec::GpuGroupReduce(AtomicOp::Add(), selectNamed(value), tpe)),
+                               group(least, Spec::GpuGroupReduce(AtomicOp::Min(), selectNamed(value), tpe)),
+                               group(prefix, Spec::GpuGroupInclusiveScan(AtomicOp::Add(), selectNamed(value), tpe)),
+                               group(any, Spec::GpuGroupReduce(AtomicOp::Or(), Term::Bool1Const(true).widen(), Type::Bool1())), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const auto compiled =
+      polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Source_C_OpenCL2_0, ""}, OptLevel::O0);
+  INFO(repr(compiled));
+  REQUIRE(compiled.binary);
+  const std::string code(compiled.binary->begin(), compiled.binary->end());
+  CHECK(code ^ contains_slice("work_group_reduce_add("));
+  CHECK(code ^ contains_slice("work_group_reduce_min("));
+  CHECK(code ^ contains_slice("work_group_scan_inclusive_add("));
+  CHECK(code ^ contains_slice("work_group_any("));
+  CHECK(code ^ contains_slice("POLYREGION_OPENCL_C_VERSION 200"));
+  CHECK(compiled.features ^ contains(std::string("generic_address_space")));
+  CHECK(compiled.features ^ contains(std::string("work_group_collectives")));
+}
+
 TEST_CASE("package entry pipelines lower workgroup collectives on non-native routes", "[backend][group]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;

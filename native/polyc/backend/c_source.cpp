@@ -234,6 +234,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
                              [&](const Type::FnRef &) { return "uint8_t"s; });
     case Dialect::OpenCL1_1:
+    case Dialect::OpenCL2_0:
       return tpe.match_total([&](const Type::Float16 &) { return "half"s; },   //
                              [&](const Type::Float32 &) { return "float"s; },  //
                              [&](const Type::Float64 &) { return "double"s; }, //
@@ -254,19 +255,21 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
                              [&](const Type::Struct &x) { return fqcn(x.name); }, //
                              [&](const Type::Ptr &x) {
-                               auto prefix = x.space.match_total([&](TypeSpace::Global) { return "global"; },     //
-                                                                 [&](TypeSpace::Constant) { return "constant"; }, //
-                                                                 [&](TypeSpace::Local) { return "local"; },       //
-                                                                 [&](TypeSpace::Private) { return "private"; }    //
-                               );
-                               if (x.comp.template is<Type::Nothing>()) return fmt::format("{} char*", prefix);
+                               const auto prefix = genericPointer(x.space)
+                                                       ? ""s
+                                                       : x.space.match_total([&](TypeSpace::Global) { return "global "s; },     //
+                                                                             [&](TypeSpace::Constant) { return "constant "s; }, //
+                                                                             [&](TypeSpace::Local) { return "local "s; },       //
+                                                                             [&](TypeSpace::Private) { return "private "s; }    //
+                                                         );
+                               if (x.comp.template is<Type::Nothing>()) return fmt::format("{}char*", prefix);
                                // a pointer to an array needs the `c(*)[n]` form; `c[n]*` is not valid C
                                if (auto arr = x.comp.template get<Type::Arr>(); arr)
-                                 return fmt::format("{} {} (*)[{}]", prefix, mkTpe(arr->comp), arr->length);
+                                 return fmt::format("{}{} (*)[{}]", prefix, mkTpe(arr->comp), arr->length);
                                // each pointer level carries its own space at its own `*`: `global T * global *`
                                // not `global global T**` (the latter leaves the outer `*` private, breaking an arena cast)
-                               if (x.comp.template is<Type::Ptr>()) return fmt::format("{} {} *", mkTpe(x.comp), prefix);
-                               return fmt::format("{} {}*", prefix, mkTpe(x.comp));
+                               if (x.comp.template is<Type::Ptr>()) return fmt::format("{} {}*", mkTpe(x.comp), prefix);
+                               return fmt::format("{}{}*", prefix, mkTpe(x.comp));
                              }, //
                              // an array carries no own address-space qualifier; it lives in its container's space
                              [&](const Type::Arr &x) { return fmt::format("{}[{}]", mkTpe(x.comp), x.length); }, //
@@ -311,7 +314,7 @@ std::string backend::CSource::mkDecl(const Type::Any &tpe, const std::string &na
                                         [&](TypeSpace::Constant) { return "constant "s; },                                          //
                                         [&](TypeSpace::Local) { return dialect == Dialect::MSL1_0 ? "threadgroup "s : "local "s; }, //
                                         [&](TypeSpace::Private) { return dialect == Dialect::MSL1_0 ? "thread "s : "private "s; });
-    return fmt::format("{}{} (*{}){}", q, mkTpe(base), name, dims);
+    return fmt::format("{}{} (*{}){}", genericPointer(p->space) ? ""s : q, mkTpe(base), name, dims);
   }
   return fmt::format("{} {}", mkTpe(tpe), name);
 }
@@ -321,7 +324,7 @@ std::optional<std::string> backend::CSource::mkArrayAliasDecl(const Type::Any &t
   // large field array in a private temporary is both unnecessary and, on PoCL, enough to exhaust
   // the worker stack.  Keep mutable aliases as value copies below because rebinding their storage
   // would change the language-level copy semantics.
-  if (dialect != Dialect::OpenCL1_1) return std::nullopt;
+  if (!openCL()) return std::nullopt;
   const auto array = tpe.template get<Type::Arr>();
   const auto select = source.template get<Term::Select>();
   // Keep ordinary local-array initialisation by value.  The optimisation is for a field reached
@@ -355,7 +358,8 @@ std::optional<std::string> backend::CSource::mkArrayAliasDecl(const Type::Any &t
 std::string backend::CSource::reinterpretScalar(const std::string &value, const Type::Any &from, const Type::Any &to) {
   switch (dialect) {
     case Dialect::C11: return fmt::format("((union {{ {} from; {} to; }}){{ .from = ({}) }}).to", mkTpe(from), mkTpe(to), value);
-    case Dialect::OpenCL1_1: return fmt::format("as_{}({})", mkTpe(to), value);
+    case Dialect::OpenCL1_1:
+    case Dialect::OpenCL2_0: return fmt::format("as_{}({})", mkTpe(to), value);
     case Dialect::MSL1_0: return fmt::format("metal::as_type<{}>({})", mkTpe(to), value);
   }
 }
@@ -422,6 +426,22 @@ std::string backend::CSource::mkTerm(const Term::Any &term) {
                           });
 }
 
+std::string backend::CSource::workGroupCollective(const std::string &spec, const std::string &kind, const AtomicOp::Any &op,
+                                                  const Term::Any &value, const Type::Any &rtn) {
+  if (dialect != Dialect::OpenCL2_0)
+    throw BackendException(fmt::format("Spec::{} lowering is not available for this C source dialect", spec));
+  if (kind == "reduce" && rtn.template is<Type::Bool1>()) {
+    if (op.template is<AtomicOp::Or>()) return fmt::format("work_group_any({})", mkTerm(value));
+    if (op.template is<AtomicOp::And>()) return fmt::format("work_group_all({})", mkTerm(value));
+  }
+  const auto operation = op.template is<AtomicOp::Add>()   ? "add"
+                         : op.template is<AtomicOp::Min>() ? "min"
+                         : op.template is<AtomicOp::Max>() ? "max"
+                                                           : nullptr;
+  if (!operation) throw BackendException(fmt::format("Spec::{} supports only add, min, and max in OpenCL C 2.0", spec));
+  return fmt::format("work_group_{}_{}({})", kind, operation, mkTerm(value));
+}
+
 std::string backend::CSource::mkExpr(const Expr::Any &expr) {
   return expr.match_total(
       [&](const Expr::Alias &x) { return mkTerm(x.ref); },
@@ -433,14 +453,16 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
           switch (dialect) {
             case Dialect::C11: return accessor.c11;
             case Dialect::MSL1_0: return accessor.msl;
-            case Dialect::OpenCL1_1: return accessor.cl;
+            case Dialect::OpenCL1_1:
+            case Dialect::OpenCL2_0: return accessor.cl;
           }
         };
         const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Term::Any &index) -> std::string {
           switch (dialect) {
             case Dialect::C11: return accessor.c11;
             case Dialect::MSL1_0: return fmt::format("{}[{}]", accessor.msl, mkTerm(index));
-            case Dialect::OpenCL1_1: return fmt::format("{}({})", accessor.cl, mkTerm(index));
+            case Dialect::OpenCL1_1:
+            case Dialect::OpenCL2_0: return fmt::format("{}({})", accessor.cl, mkTerm(index));
           }
         };
         return x.op.match_total(
@@ -515,7 +537,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             },
             [&](const Spec::GpuSubgroupBarrier &) -> std::string {
               if (dialect == Dialect::C11) return "((void)0)";
-              if (dialect == Dialect::OpenCL1_1) return "sub_group_barrier(CLK_LOCAL_MEM_FENCE)";
+              if (openCL()) return "sub_group_barrier(CLK_LOCAL_MEM_FENCE)";
               throw BackendException("Spec::GpuSubgroupBarrier is unsupported for this C source dialect");
             },
             [&](const Spec::GpuBallot &v) -> std::string {
@@ -570,7 +592,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                          value);
                     });
               }
-              if (dialect == Dialect::OpenCL1_1) {
+              if (openCL()) {
                 if (!narrowInteger(v.rtn) && !wideInteger(v.rtn))
                   throw BackendException("OpenCL 1.1 supports only 32-bit and 64-bit integer atomic RMW");
                 if (!v.order.template is<MemOrder::Relaxed>())
@@ -614,7 +636,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                 return fmt::format("{}((volatile _Atomic({})*){}, ({}){}, ({}){})", atomicCasHelperName("", type), type, ptr, type,
                                    expected, type, desired);
               }
-              if (dialect == Dialect::OpenCL1_1) {
+              if (openCL()) {
                 if (!narrowInteger(v.rtn) && !wideInteger(v.rtn))
                   throw BackendException("OpenCL 1.1 supports only 32-bit and 64-bit integer atomic compare-exchange");
                 const auto space = openclPtrSpace(v.ptr, "OpenCL atomic compare-exchange");
@@ -631,14 +653,14 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
               return fmt::format("{}(({} {}*){}, ({}){}, ({}){})", atomicCasHelperName(space, value), space, atomic, ptr, value, expected,
                                  value, desired);
             },
-            [&](const Spec::GpuGroupReduce &) -> std::string {
-              throw BackendException("Spec::GpuGroupReduce lowering is not available for this C source dialect");
+            [&](const Spec::GpuGroupReduce &v) -> std::string {
+              return workGroupCollective("GpuGroupReduce", "reduce", v.op, v.value, v.rtn);
             },
-            [&](const Spec::GpuGroupInclusiveScan &) -> std::string {
-              throw BackendException("Spec::GpuGroupInclusiveScan lowering is not available for this C source dialect");
+            [&](const Spec::GpuGroupInclusiveScan &v) -> std::string {
+              return workGroupCollective("GpuGroupInclusiveScan", "scan_inclusive", v.op, v.value, v.rtn);
             },
-            [&](const Spec::GpuGroupExclusiveScan &) -> std::string {
-              throw BackendException("Spec::GpuGroupExclusiveScan lowering is not available for this C source dialect");
+            [&](const Spec::GpuGroupExclusiveScan &v) -> std::string {
+              return workGroupCollective("GpuGroupExclusiveScan", "scan_exclusive", v.op, v.value, v.rtn);
             },
             [&](const Spec::RemoteLaunch &) -> std::string { throw BackendException("Spec::RemoteLaunch is a host-only operation"); },
             [&](const Spec::RemoteAlloc &) -> std::string { throw BackendException("Spec::RemoteAlloc is a host-only operation"); },
@@ -654,7 +676,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                   return fmt::format("{}((volatile {} {}*){})", volatileHelperName(true, space, type), space, type, ptr);
                 return fmt::format("(*((volatile {} {}*){}))", space, type, ptr);
               }
-              if (dialect == Dialect::OpenCL1_1) {
+              if (openCL()) {
                 return fmt::format("(*((volatile {} {}*){}))", openclPtrSpace(v.ptr, "volatile load"), type, ptr);
               }
               return fmt::format("(*((volatile {}*){}))", type, ptr);
@@ -668,7 +690,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                   return fmt::format("{}((volatile {} {}*){}, {})", volatileHelperName(false, space, type), space, type, ptr, value);
                 return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
               }
-              if (dialect == Dialect::OpenCL1_1) {
+              if (openCL()) {
                 const auto space = openclPtrSpace(v.ptr, "volatile store");
                 if (space == "constant") throw BackendException("volatile store to constant storage is unsupported for OpenCL");
                 return fmt::format("(*((volatile {} {}*){}) = {})", space, type, ptr, value);
@@ -732,15 +754,9 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
             // OpenCL/C `abs` is integer-only; floats need `fabs`
             [&](const Math::Abs &v) { return fmt::format("{}({})", mathFn(fp(v.tpe) ? "fabs" : "abs"), mkTerm(v.x)); },
             // POLY_* macro on OpenCL: llvmpipe libclc crashes on precise sin/cos/tan range-reduction
-            [&](const Math::Sin &v) {
-              return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_SIN" : mathFn("sin"), mkTerm(v.x));
-            },
-            [&](const Math::Cos &v) {
-              return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_COS" : mathFn("cos"), mkTerm(v.x));
-            },
-            [&](const Math::Tan &v) {
-              return fmt::format("{}({})", dialect == Dialect::OpenCL1_1 ? "POLY_TAN" : mathFn("tan"), mkTerm(v.x));
-            },
+            [&](const Math::Sin &v) { return fmt::format("{}({})", openCL() ? "POLY_SIN" : mathFn("sin"), mkTerm(v.x)); },
+            [&](const Math::Cos &v) { return fmt::format("{}({})", openCL() ? "POLY_COS" : mathFn("cos"), mkTerm(v.x)); },
+            [&](const Math::Tan &v) { return fmt::format("{}({})", openCL() ? "POLY_TAN" : mathFn("tan"), mkTerm(v.x)); },
             [&](const Math::Asin &v) { return fmt::format("{}({})", mathFn("asin"), mkTerm(v.x)); },
             [&](const Math::Acos &v) { return fmt::format("{}({})", mathFn("acos"), mkTerm(v.x)); },
             [&](const Math::Atan &v) { return fmt::format("{}({})", mathFn("atan"), mkTerm(v.x)); },
@@ -797,7 +813,7 @@ std::string backend::CSource::mkValueCopy(const std::string &lhs, const std::str
   }
   // XXX rusticl zeroes a whole-struct read of a private var in a loop, so copy scalar leaves:
   // XXX   S s; s.off = x; for (...) { S t = s; }  ->  t.off reads back 0
-  if (auto s = tpe.template get<Type::Struct>(); s && dialect == Dialect::OpenCL1_1) {
+  if (auto s = tpe.template get<Type::Struct>(); s && openCL()) {
     const auto name = fqcn(s->name);
     // a populated union stays whole; naming its members would not preserve the active one
     // a zero-size member has no storage in the emitted body, so it must not be named
@@ -859,7 +875,7 @@ std::optional<std::string> backend::CSource::mkZeroInit(const Type::Any &tpe) co
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   // member-wise reads repeat side effects, so a struct only decomposes for a plain lvalue source
   const auto memberwise = [&](const Type::Any &tpe, const bool lvalueSource) {
-    return tpe.is<Type::Arr>() || (dialect == Dialect::OpenCL1_1 && tpe.is<Type::Struct>() && lvalueSource);
+    return tpe.is<Type::Arr>() || (openCL() && tpe.is<Type::Struct>() && lvalueSource);
   };
   return stmt.match_total( //
       [&](const Stmt::Var &x) {
@@ -935,10 +951,12 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
   const auto entry = fnTree.convention.is<CallConvention::OffloadEntry>();
 
   const auto argDecls = [&](const Arg &arg, const size_t idx) -> std::vector<std::string> {
+    kernelBoundary = entry;
     const auto tpe = mkTpe(arg.named.tpe);
     const auto name = localName(arg.named.symbol);
     switch (dialect) {
-      case Dialect::OpenCL1_1: {
+      case Dialect::OpenCL1_1:
+      case Dialect::OpenCL2_0: {
         // clSetKernelArg binds an owning cl_mem, not an arbitrary interior pointer.  Source kernels receive
         // each Global/Constant pointer as owner+byte-offset and reconstruct the logical typed pointer in mkFn.
         const auto ptr = arg.named.tpe.template get<Type::Ptr>();
@@ -963,6 +981,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
     }
   };
   auto argExprs = fnTree.decl.args | zip_with_index<size_t>() | flat_map(argDecls) | to_vector();
+  kernelBoundary = false;
 
   if (dialect == Dialect::MSL1_0) {
 
@@ -986,6 +1005,7 @@ std::string backend::CSource::mkFnProto(const Function &fnTree) {
     case Dialect::C11: fnPrefix = ""; break;
     case Dialect::MSL1_0:
     case Dialect::OpenCL1_1:
+    case Dialect::OpenCL2_0:
       if (entry) {
         fnPrefix = "kernel ";
       }
@@ -1067,7 +1087,7 @@ std::string backend::CSource::mkFn(const Function &fnTree) {
                        mkDecl(arg.named.tpe, localName(arg.named.symbol)), offset, mkTpe(arg.named.tpe), mkTpe(arg.named.tpe), bytePtr,
                        base, offset);
   };
-  const auto entryAbiDecls = dialect == Dialect::OpenCL1_1 && fnTree.convention.is<CallConvention::OffloadEntry>()
+  const auto entryAbiDecls = openCL() && fnTree.convention.is<CallConvention::OffloadEntry>()
                                  ? fnTree.decl.args | zip_with_index<size_t>() | collect(entryAbiDecl) | to_vector()
                                  : std::vector<std::string>{};
 
@@ -1148,7 +1168,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
 
   // hoist string literals to named program-scope constant arrays (collection order is deterministic); an inline
   // OpenCL literal has no addressable storage so reading it through a pointer yields garbage
-  const char *constQual = dialect == Dialect::OpenCL1_1 ? "__constant " : dialect == Dialect::MSL1_0 ? "constant " : "static const ";
+  const char *constQual = openCL() ? "__constant " : dialect == Dialect::MSL1_0 ? "constant " : "static const ";
   stringConstNames.clear();
   const auto stringDecls =                                                                    //
       allFns                                                                                  //
@@ -1268,9 +1288,9 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
         native += "#define POLY_POPCOUNT64(x) popcount(x)\n";
         fallback += "#define POLY_POPCOUNT64(x) _polyregion_popcount_u64(x)\n";
       }
-      popCountHelpers.emplace_back(dialect == Dialect::OpenCL1_1 ? "#if defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ >= 120\n"
-                                                                       + native + "#else\n" + fallback + "#endif"
-                                                                 : fallback);
+      popCountHelpers.emplace_back(openCL() ? "#if defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ >= 120\n" + native + "#else\n"
+                                                  + fallback + "#endif"
+                                            : fallback);
     }
   }
 
@@ -1292,8 +1312,10 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   if (usesTpe<Type::Float64>(allFns, program.defs)) features.emplace_back("fp64");
 
   // OpenCL half/double is behind cl_khr_fp16/cl_khr_fp64.
-  if (dialect == Dialect::OpenCL1_1) {
-    std::string pragmas;
+  if (openCL()) {
+    // the runtime builds a 2.0 module at the device's -cl-std, which a 1.1 module never needs
+    std::string pragmas = dialect == Dialect::OpenCL2_0 ? "#define POLYREGION_OPENCL_C_VERSION 200\n" : "";
+    if (dialect == Dialect::OpenCL2_0) features ^= concat(compiletime::OpenCL2Features ^ map([](const auto &f) { return std::string(f); }));
     if (usesTpe<Type::Float64>(allFns, program.defs)) {
       pragmas += "#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n";
     }
@@ -1330,6 +1352,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   switch (dialect) {
     case Dialect::C11: dialectName = "c11"; break;
     case Dialect::OpenCL1_1: dialectName = "opencl1_1"; break;
+    case Dialect::OpenCL2_0: dialectName = "opencl2_0"; break;
     case Dialect::MSL1_0: dialectName = "msl1"; break;
     default: dialectName = "unknown";
   }

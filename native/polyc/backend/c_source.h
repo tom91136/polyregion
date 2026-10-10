@@ -16,11 +16,18 @@ public:
   enum class Dialect : uint8_t {
     C11,
     OpenCL1_1,
+    OpenCL2_0,
     MSL1_0,
   };
 
 private:
   Dialect dialect;
+  [[nodiscard]] bool openCL() const { return dialect == Dialect::OpenCL1_1 || dialect == Dialect::OpenCL2_0; }
+  // OpenCL C 2.0 keeps every pointer generic except where a named space is mandatory: kernel parameters and constant data
+  bool kernelBoundary = false;
+  [[nodiscard]] bool genericPointer(const TypeSpace::Any &space) const {
+    return dialect == Dialect::OpenCL2_0 && !kernelBoundary && !space.template is<TypeSpace::Constant>();
+  }
   uint32_t workgroupMemoryBytes;
   Map<std::string, std::vector<std::pair<std::string, Type::Any>>> structDefsByName;
   Set<std::string> unionDefNames;
@@ -42,6 +49,8 @@ private:
   std::optional<std::string> mkArrayAliasDecl(const Type::Any &tpe, const Term::Any &source, const std::string &name);
   std::string reinterpretScalar(const std::string &value, const Type::Any &from, const Type::Any &to);
   std::string mkTerm(const Term::Any &term);
+  std::string workGroupCollective(const std::string &spec, const std::string &kind, const AtomicOp::Any &op, const Term::Any &value,
+                                  const Type::Any &rtn);
   std::string mkExpr(const Expr::Any &expr);
   std::string mkStmt(const Stmt::Any &stmt);
   std::string mkFnProto(const Function &);

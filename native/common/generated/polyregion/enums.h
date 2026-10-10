@@ -49,6 +49,7 @@ enum class POLYREGION_EXPORT Target : uint8_t {
   Source_C_C11 = 30,
   Source_C_OpenCL1_1 = 31,
   Source_C_Metal1_0 = 32,
+  Source_C_OpenCL2_0 = 33,
 };
 
 enum class POLYREGION_EXPORT OptLevel : uint8_t {
