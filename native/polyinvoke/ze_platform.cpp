@@ -7,6 +7,7 @@
 #include "magic_enum/magic_enum.hpp"
 
 #include "polyinvoke/module_cache.h"
+#include "polyinvoke/spirv.h"
 
 #include "dl_util.h"
 
@@ -274,6 +275,13 @@ std::vector<std::string> ZeDevice::features() {
 void ZeDevice::loadModule(const std::string &name, const std::string &image) {
   POLYINVOKE_TRACE();
   store.loadModule(name, image);
+  std::vector<uint32_t> words(image.size() / sizeof(uint32_t));
+  std::memcpy(words.data(), image.data(), words.size() * sizeof(uint32_t));
+  if (const auto start = spirv::arenaViewStart(words)) arenaViewStarts.emplace(name, *start);
+}
+std::optional<size_t> ZeDevice::arenaViewStart(const std::string &name) {
+  POLYINVOKE_TRACE();
+  return arenaViewStarts ^ aspartame::get_maybe(name);
 }
 bool ZeDevice::moduleLoaded(const std::string &name) {
   POLYINVOKE_TRACE();

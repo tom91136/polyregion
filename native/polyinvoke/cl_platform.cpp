@@ -254,10 +254,8 @@ bool deviceSupportsIL(cl_device_id device) {
 }
 
 // memflags to OR into clSVMAlloc (0 = coarse-grain, FINE_GRAIN otherwise); nullopt = fall back to cl_mem
-std::optional<cl_bitfield> resolveSVM(cl_device_id device, const std::string &platformName) {
+std::optional<cl_bitfield> resolveSVM(cl_device_id device) {
   if (const char *off = std::getenv(polyregion::env::PolyinvokeDisableSvm); off && *off && *off != '0') return std::nullopt;
-  // XXX rusticl advertises SVM caps but indirect SVM access faults; force the buffer path
-  if (platformName ^ aspartame::contains_slice("rusticl")) return std::nullopt;
   // gfx1036 (Raphael) / gfx1037 (Mendocino) - the minimal 2-CU RDNA2 desktop/low-power iGPUs - silently
   // corrupt fine-grain SVM under concurrent oversubscription (validated: cl_mem clean, fine-grain SVM
   // ~12/30 stale-read mismatches; gfx1103/gfx1034 and matched oversubscription+clock are unaffected). The
@@ -337,7 +335,7 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
           clGetExtensionFunctionAddressForPlatform(platform, "clCreateProgramWithILKHR"));
     if (!ilFn) ilFn = reinterpret_cast<cl_details::ClCreateProgramWithIL_fn>(clCreateProgramWithIL);
     for (auto &device : devices) {
-      auto svm = resolveSVM(device, platformName);
+      auto svm = resolveSVM(device);
       clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::Source, nullptr, svm, platformName));
       if (ilFn && deviceSupportsIL(device))
         clDevices.push_back(std::make_unique<ClDevice>(device, ModuleFormat::SPIRV_Kernel, ilFn, svm, platformName));
