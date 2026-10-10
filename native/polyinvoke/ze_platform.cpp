@@ -262,6 +262,7 @@ std::vector<Property> ZeDevice::properties() {
 std::vector<std::string> ZeDevice::features() {
   POLYINVOKE_TRACE();
   std::vector<std::string> out{"levelzero", "spirv_kernel"};
+  out.insert(out.end(), compiletime::OpenCL2Features.begin(), compiletime::OpenCL2Features.end());
   ze_device_module_properties_t mod{};
   mod.stype = ZE_STRUCTURE_TYPE_DEVICE_MODULE_PROPERTIES;
   if (zeDeviceGetModuleProperties(device, &mod) == ZE_RESULT_SUCCESS) {

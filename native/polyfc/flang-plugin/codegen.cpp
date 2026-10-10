@@ -28,11 +28,11 @@ polyfront::KernelBundle polyfc::compileRegion( //
         | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
             auto format = runtime::moduleFormatOf(target);
             if (!format) return std::nullopt;
-            const auto pp = polyfront::passes::arenaPassesFor(target, opts.stackDepth);
+            const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
             polyfront::KernelObject ko;
             ko.format = *format;
             ko.kind = *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed;
-            ko.features = polyfront::passes::jitFeaturesFor(target);
+            ko.features = polyfront::passes::jitFeaturesFor(target, arch);
             ko.target = target;
             ko.arch = arch;
             ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
@@ -56,7 +56,7 @@ polyfront::KernelBundle polyfc::compileRegion( //
       | filter([&](const auto &target, const auto &) { return runtime::targetPlatformKind(target) == kind; }) //
       | collect([&](const auto &target, const auto &features) {                                               //
           return polyfront::compileProgram(opts, region.program, target, features,
-                                           polyfront::passes::arenaPassesFor(target, opts.stackDepth)) //
+                                           polyfront::passes::arenaPassesFor(target, features, opts.stackDepth)) //
                  ^ fold_total([&](const polyast::CompileResult &r) -> std::optional<polyast::CompileResult> { return r; },
                               [&](const std::string &err) -> std::optional<polyast::CompileResult> {
                                 emit(diag, Level::Warning, //

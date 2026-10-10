@@ -128,11 +128,11 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                       | collect([&](const auto &target, const auto &arch) -> std::optional<polyfront::KernelObject> {
                           auto format = runtime::moduleFormatOf(target);
                           if (!format) return std::nullopt;
-                          const auto pp = polyfront::passes::arenaPassesFor(target, opts.stackDepth);
+                          const auto pp = polyfront::passes::arenaPassesFor(target, arch, opts.stackDepth);
                           polyfront::KernelObject ko;
                           ko.format = *format;
                           ko.kind = runtime::targetPlatformKind(target);
-                          ko.features = polyfront::passes::jitFeaturesFor(target);
+                          ko.features = polyfront::passes::jitFeaturesFor(target, arch);
                           ko.target = target;
                           ko.arch = arch;
                           ko.pipelineSpec = pp.size() >= 2 ? pp[1] : std::string{};
@@ -161,7 +161,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
       opts.targets                                                                                            //
       | filter([&](const auto &target, const auto &) { return kind == runtime::targetPlatformKind(target); }) //
       | collect([&](const auto &target, const auto &features) {
-          return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target, opts.stackDepth)) //
+          return compileProgram(opts, program, target, features, polyfront::passes::arenaPassesFor(target, features, opts.stackDepth)) //
                  ^ fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                               [&](const std::string &err) -> std::optional<CompileResult> {
                                 emit(diag, clang::DiagnosticsEngine::Level::Warning,

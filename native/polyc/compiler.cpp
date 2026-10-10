@@ -265,7 +265,7 @@ static compiler::package::Result<polyast::Program> linkProgram(const polyast::Pr
 
 namespace {
 
-std::string packageEntryPipeline(const compiletime::Target target, const std::optional<int> stackDepth) {
+std::string packageEntryPipeline(const compiletime::Target target, const std::string &arch, const std::optional<int> stackDepth) {
   const auto opt = stackDepth ? fmt::format("DeadFunctionElimination;Intrinsify;RecursionLower(maxDepth={});FnInline;Intrinsify;"
                                             "KernelCaptureFlatten;FullOpt(level=1)",
                                             *stackDepth)
@@ -278,7 +278,9 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::op
                "RegionRespace;"
                "VerifyAnchors(strict=true)";
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: return opt + ";StructuredExit;RegionRespace;ArenaLower";
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      return opt + (compiletime::spirvKernelGeneric(arch) ? "" : ";SubgroupLower(lowerSubgroups=false,lowerGroups=true)")
+             + ";StructuredExit;RegionRespace;ArenaLower";
     case compiletime::Target::Source_C_Metal1_0:
     case compiletime::Target::Source_C_OpenCL1_1:
       return opt + ";SubgroupLower(width=1,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower";
@@ -360,7 +362,7 @@ polyast::Program namespaceRemoteEntries(polyast::Program program,
   std::vector<std::string> profiles;
   profiles.reserve(deviceTargets.size());
   for (const auto &[target, arch] : deviceTargets) {
-    const auto pipeline = packageEntryPipeline(target, stackDepth);
+    const auto pipeline = packageEntryPipeline(target, arch, stackDepth);
     profiles.emplace_back(fmt::format("{}:{}:{}:{}:{}", magic_enum::enum_integer(target), arch.size(), arch, pipeline.size(), pipeline));
   }
   std::ranges::sort(profiles);
@@ -433,7 +435,7 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
     }
     entryProgram.functions = std::move(functions);
     for (const auto &[target, arch] : deviceTargets) {
-      const auto pipeline = packageEntryPipeline(target, stackDepth);
+      const auto pipeline = packageEntryPipeline(target, arch, stackDepth);
       const auto device = compile(entryProgram, Options{target, arch, pipeline}, compiletime::OptLevel::O3);
       if (!device.binary) return {{}, {"linked consumer entry compilation failed for " + moduleName + ": " + device.messages}};
       const auto format = runtime::moduleFormatOf(target);
@@ -561,6 +563,14 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
                                                              "SourcePointerLegalise(requiresConcreteSpaces={});"
                                                              "SourceSelectionLegalise;SourceNameNormalise(metalKeywords={})",
                                                              metal, strict, metal));
+      effective = std::move(passRun.program);
+      preEvents.emplace_back(std::move(passRun.event));
+      break;
+    }
+    case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: {
+      if (compiletime::spirvKernelGeneric(options.arch)) break;
+      auto passRun = runPipelineChain(effective, "SourcePointerLegalise(requiresConcreteSpaces=true)");
       effective = std::move(passRun.program);
       preEvents.emplace_back(std::move(passRun.event));
       break;

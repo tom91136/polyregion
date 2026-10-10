@@ -30,31 +30,36 @@ inline std::string deviceArena(std::optional<int> stackDepth = {}) {
 // PartialEval(canonicaliseAddresses=true) is the address-canonicalisation-only mode (no fold/DCE) that
 // root-anchors derived-pointer temps; it runs after StructuredExit so the temps that lowering injects are
 // canonicalised too, without disturbing the assert/#error side-channel writes
-inline std::string deviceArenaLogical(std::optional<int> stackDepth = {}) {
-  return fullOpt(stackDepth)
-         + ";SubgroupLower;StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
+inline std::string deviceArenaLogical(std::optional<int> stackDepth = {}, bool lowerGroups = false) {
+  return fullOpt(stackDepth) + (lowerGroups ? ";SubgroupLower(lowerGroups=true)" : ";SubgroupLower")
+         + ";StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors(strict=true)";
 }
 
 inline std::string hostMirror(const std::string &mirrorId) { return fmt::format("Mirror(id={})", mirrorId); }
 
 // binding-slot targets use the arena (byte addressing on flat c_source, typed views on SPIR-V);
 // physical backends (PTX/HSACO) and host get no arena pass and marshal via the compile-time mirror
-inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target, std::optional<int> stackDepth = {}) {
+inline std::vector<std::string> arenaPassesFor(const compiletime::Target &target, const std::string &arch,
+                                               std::optional<int> stackDepth = {}) {
   switch (target) {
-    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute: return {"--passes", deviceArenaLogical(stackDepth)};
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: return {"--passes", deviceArenaLogical(stackDepth)};
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      return {"--passes", deviceArenaLogical(stackDepth, !compiletime::spirvKernelGeneric(arch))};
     case compiletime::Target::Source_C_OpenCL1_1:
     case compiletime::Target::Source_C_Metal1_0: return {"--passes", deviceArena(stackDepth)};
     default: return {"--passes", fullOpt(stackDepth) + ";StructuredExit;RegionRespace"};
   }
 }
 
-inline std::vector<std::string> jitFeaturesFor(const compiletime::Target &target) {
+inline std::vector<std::string> jitFeaturesFor(const compiletime::Target &target, const std::string &arch) {
   switch (target) {
-    case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
+    case compiletime::Target::Object_LLVM_SPIRV_GLCompute: return {"int64"};
     case compiletime::Target::Object_LLVM_SPIRV32_Kernel:
-    case compiletime::Target::Object_LLVM_SPIRV64_Kernel: return {"int64"};
+    case compiletime::Target::Object_LLVM_SPIRV64_Kernel:
+      return compiletime::spirvKernelGeneric(arch) ? std::vector<std::string>{"int64", std::string(compiletime::OpenCL2Features[0]),
+                                                                              std::string(compiletime::OpenCL2Features[1])}
+                                                   : std::vector<std::string>{"int64"};
     default: return {};
   }
 }

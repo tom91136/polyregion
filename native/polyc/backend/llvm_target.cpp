@@ -52,7 +52,7 @@ TargetedContext::TargetedContext(const LLVMBackend::Options &options)
       GlobalAS = AddrSpace::CrossWorkgroup;
       LocalAS = AddrSpace::Workgroup;
       AllocaAS = AddrSpace::Default; // Function/private
-      GenericAS = AddrSpace::Generic;
+      GenericAS = compiletime::spirvKernelGeneric(options.arch) ? AddrSpace::Generic : 0;
       break;
     case LLVMBackend::Target::SPIRV_GLCompute:
       // logical SPIR-V can't cast Function <-> StorageBuffer; emit the body in the flat AS and let
@@ -429,7 +429,7 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
         .triple = triple,
         .layout = {},
         .target = llvmc::targetFromTriple(triple),
-        .cpu = {.uArch = arch, .features = {}},
+        .cpu = {.uArch = compiletime::SpirvKernelLevels ^ contains(std::string_view(arch)) ? std::string{} : arch, .features = {}},
     };
   };
 

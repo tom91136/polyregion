@@ -1816,6 +1816,8 @@ TEST_CASE("package entry pipelines lower workgroup collectives on non-native rou
       {Target::Object_LLVM_SPIRV_GLCompute, "",
        "SubgroupLower(lowerGroups=true);StructuredExit;PartialEval(canonicaliseAddresses=true);ArenaView;RegionRespace;VerifyAnchors("
        "strict=true)"},
+      {Target::Object_LLVM_SPIRV64_Kernel, "",
+       "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit;RegionRespace;ArenaLower"},
       {Target::Object_LLVM_NVPTX64, "sm_70", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
       {Target::Object_LLVM_AMDGCN, "gfx906", "SubgroupLower(lowerSubgroups=false,lowerGroups=true);StructuredExit"},
   };
@@ -2173,6 +2175,39 @@ TEST_CASE("Vulkan takes the address of a scalar argument", "[backend][vulkan]") 
                                                       {Target::Object_LLVM_SPIRV_GLCompute, "", "ArenaView;RegionRespace"}, OptLevel::O0);
   INFO(repr(compiled));
   REQUIRE(compiled.binary);
+}
+
+TEST_CASE("SPIR-V kernel feature levels choose between concrete and generic address spaces", "[backend][spirv]") {
+  polyregion::compiler::initialise();
+  using namespace polyregion::polyast::dsl;
+
+  const auto i32Ptr = Type::Ptr(Type::IntS32(), TypeSpace::Global()).widen();
+  const Named out("out", i32Ptr), alias("alias", i32Ptr);
+  const Function entry = mkFn("kernel", {Arg(out, {})}, Type::Unit0(),
+                              {Var(alias, Expr::Alias(selectNamed(out)).widen(), false).widen(),
+                               Update(selectNamed(alias), Term::IntS64Const(0).widen(), Term::IntS32Const(7).widen()).widen(), ret()},
+                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
+  const auto compileAt = [&](const std::string &level) {
+    return polyregion::compiler::compile(Program(entry, {}, {}, PassPhase::Initial(), {}), {Target::Object_LLVM_SPIRV64_Kernel, level},
+                                         OptLevel::O0);
+  };
+  for (const auto &level : {"", "1_1"}) {
+    INFO(level);
+    const auto compiled = compileAt(level);
+    INFO(repr(compiled));
+    REQUIRE(compiled.binary);
+    CHECK_THAT(llvmIrOf(compiled), !Catch::Matchers::ContainsSubstring("addrspace(4)"));
+    CHECK_FALSE(compiled.features ^ contains(std::string("generic_address_space")));
+    CHECK_FALSE(compiled.features ^ contains(std::string("1_1")));
+  }
+  const auto generic = compileAt("2_0");
+  INFO(repr(generic));
+  REQUIRE(generic.binary);
+  CHECK_THAT(llvmIrOf(generic), Catch::Matchers::ContainsSubstring("addrspace(4)"));
+  CHECK(generic.features ^ contains(std::string("generic_address_space")));
+  CHECK(generic.features ^ contains(std::string("work_group_collectives")));
+  CHECK_FALSE(generic.features ^ contains(std::string("2_0")));
 }
 
 TEST_CASE("SPIR-V records where the arena views start among the bound arguments", "[backend][spirv]") {

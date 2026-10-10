@@ -237,6 +237,8 @@ static std::string queryPlatformInfo(cl_platform_id platform, cl_platform_info i
 
 namespace {
 constexpr cl_uint CL_DEVICE_SVM_CAPABILITIES_ = 0x1053;
+constexpr cl_uint CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT_ = 0x1068;
+constexpr cl_uint CL_DEVICE_GENERIC_ADDRESS_SPACE_SUPPORT_ = 0x1069;
 constexpr cl_bitfield CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ = 1 << 0;
 constexpr cl_bitfield CL_DEVICE_SVM_FINE_GRAIN_BUFFER_ = 1 << 1;
 constexpr cl_bitfield CL_MEM_SVM_FINE_GRAIN_BUFFER_ = 1 << 10;
@@ -582,6 +584,14 @@ std::vector<std::string> ClDevice::features() {
   std::vector<std::string> out{"opencl"};
   out.push_back(normaliseVendor(queryDeviceInfo(*device, CL_DEVICE_VENDOR)));
   out.emplace_back(format == ModuleFormat::SPIRV_Kernel ? "spirv_kernel" : "source");
+  // OpenCL 2.x mandates both, 3.0 makes them optional and queryable
+  const bool openCL2 = queryDeviceInfo(*device, CL_DEVICE_VERSION) ^ aspartame::starts_with("OpenCL 2.");
+  const auto supports = [&](cl_uint query) {
+    cl_bool value = CL_FALSE;
+    return openCL2 || (clGetDeviceInfo(*device, query, sizeof(value), &value, nullptr) == CL_SUCCESS && value);
+  };
+  if (supports(CL_DEVICE_GENERIC_ADDRESS_SPACE_SUPPORT_)) out.emplace_back(compiletime::OpenCL2Features[0]);
+  if (supports(CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT_)) out.emplace_back(compiletime::OpenCL2Features[1]);
   const auto exts = queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS);
   const auto hasExt = [&](std::string_view e) { return exts ^ aspartame::contains_slice(e); };
   if (hasExt("cl_khr_fp64")) out.emplace_back("fp64");

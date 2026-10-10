@@ -168,6 +168,12 @@ POLYREGION_RT_PROTECT inline std::optional<TargetSpec::ParsedRef> TargetSpec::pa
   return std::nullopt;
 }
 
+// a SPIR-V kernel's arch names its OpenCL feature level: 1_1 (the default) needs only core features, while 2_0 relies on
+// the generic address space and work-group collectives, so its images require both
+inline constexpr std::array<std::string_view, 2> SpirvKernelLevels{"1_1", "2_0"};
+inline constexpr std::array<std::string_view, 2> OpenCL2Features{"generic_address_space", "work_group_collectives"};
+POLYREGION_RT_PROTECT inline bool spirvKernelGeneric(std::string_view arch) { return arch == "2_0"; }
+
 } // namespace polyregion::compiletime
 
 namespace polyregion::runtime {

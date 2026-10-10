@@ -2172,6 +2172,8 @@ CompileResult LLVMBackend::compileProgram(const Program &program, const compilet
 
   auto c = compileModule(compileOptions.targetInfo(), effectiveOpt, /*emitDisassembly*/ true, cg.M, compileOptions.emitBitcode);
   c.layouts = cg.structTypes | values() | map([&](auto &i) { return i.layout; }) | to_vector();
+  if (cg.C.isSpirvKernel() && compiletime::spirvKernelGeneric(options.arch))
+    c.features ^= concat(compiletime::OpenCL2Features ^ map([](const auto &f) { return std::string(f); }));
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);
 

@@ -1041,6 +1041,7 @@ TEST_CASE("math ops compile across targets", "[compiler][math]") {
       const auto cpu = GENERATE(values<std::string>({"gfx906", "gfx908", "gfx90a", "gfx942", "gfx1030", "gfx1100", "gfx1200"}));
       DYNAMIC_SECTION(cpu) { assertCompileTarget(p, {Target::Object_LLVM_AMDGCN, cpu}); }
     }
-    SECTION("SPIRV64 Kernel") { assertCompileTarget(p, {Target::Object_LLVM_SPIRV64_Kernel, "intel"}); }
+    SECTION("SPIRV64 Kernel 1_1") { assertCompileTarget(p, {Target::Object_LLVM_SPIRV64_Kernel, "1_1"}); }
+    SECTION("SPIRV64 Kernel 2_0") { assertCompileTarget(p, {Target::Object_LLVM_SPIRV64_Kernel, "2_0"}); }
   }
 }
