@@ -65,12 +65,19 @@ object SourceSelectionLegalise extends ProgramPass {
         p.Named(symbol, tpe)
       }
 
+      def sameStorage(storage: p.Type, view: p.Type): Boolean = {
+        def erase(t: p.Type): p.Type = t match {
+          case p.Type.Ptr(component, _)    => p.Type.Ptr(erase(component), p.Type.Space.Private)
+          case p.Type.Arr(component, n, _) => p.Type.Arr(erase(component), n, p.Type.Space.Private)
+          case other                       => other
+        }
+        erase(storage) == erase(view)
+      }
+
       def conversion(value: p.Term, from: p.Type, to: p.Type): p.Expr = (from, to) match {
-        case _ if from == p.Type.Bool1 || to == p.Type.Bool1                    => p.Expr.Cast(value, to)
-        case (p.Type.Ptr(source, _), p.Type.Ptr(target, _)) if source == target => p.Expr.Cast(value, to)
-        // a C array carries no address-space qualifier of its own, so both views name the same storage
-        case (p.Type.Arr(source, length, _), p.Type.Arr(target, viewed, _)) if source == target && length == viewed =>
-          p.Expr.Alias(value)
+        case _ if from == p.Type.Bool1 || to == p.Type.Bool1       => p.Expr.Cast(value, to)
+        case (_: p.Type.Ptr, _) if sameStorage(from, to)           => p.Expr.Cast(value, to)
+        case (_: p.Type.Arr, _) if sameStorage(from, to)           => p.Expr.Alias(value)
         case _ if width(from).nonEmpty && width(from) == width(to) => p.Expr.BitCast(value, to)
         case _ => throw IllegalArgumentException(s"source selection cannot view ${from.repr} as ${to.repr}")
       }
@@ -82,6 +89,7 @@ object SourceSelectionLegalise extends ProgramPass {
         case select: p.Term.Select =>
           val storage = storageType(select)
           if (storage == select.tpe) select
+          else if (sameStorage(storage, select.tpe)) select.copy(tpe = storage)
           else {
             val result = fresh(select.tpe)
             prefix += p.Stmt.Var(result, Some(conversion(select.copy(tpe = storage), storage, select.tpe)))

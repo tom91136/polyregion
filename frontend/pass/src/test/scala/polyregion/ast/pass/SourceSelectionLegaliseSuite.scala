@@ -79,7 +79,7 @@ class SourceSelectionLegaliseSuite extends munit.FunSuite {
     assert(selected.forall(_ == p.Type.IntS32), clues(selected))
   }
 
-  test("pointer views that differ only in address space become explicit pointer casts") {
+  test("pointer views that differ only in address space read in place and cast on store") {
     val symbol                = sym("Holder")
     val tpe                   = p.Type.Struct(symbol, Nil)
     val stored                = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Private)
@@ -98,7 +98,10 @@ class SourceSelectionLegaliseSuite extends munit.FunSuite {
 
     val out   = SourceSelectionLegalise(program(kernel, defs = List(definition)), NoopLog).entry.required
     val casts = out.collectAll[p.Expr].collect { case p.Expr.Cast(_, to: p.Type.Ptr) => to }
-    assertEquals(casts.toSet, Set(viewedTpe, stored), clues(out.body))
+    assertEquals(casts, List(stored), clues(out.body))
+    val temporaries =
+      out.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) if name.symbol != "result" => name.symbol }
+    assert(temporaries.isEmpty, clues(out.body))
   }
 
   test("array views that differ only in address space read the same storage") {
@@ -122,5 +125,8 @@ class SourceSelectionLegaliseSuite extends munit.FunSuite {
       !out.collectAll[p.Expr].exists(e => e.isInstanceOf[p.Expr.Cast] || e.isInstanceOf[p.Expr.BitCast]),
       clues(out.body)
     )
+    val arrays =
+      out.collectAll[p.Stmt].collect { case p.Stmt.Var(name, _, _) if name.tpe.isInstanceOf[p.Type.Arr] => name.symbol }
+    assertEquals(arrays, List("result"), clues(out.body))
   }
 }
