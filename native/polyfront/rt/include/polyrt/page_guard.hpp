@@ -9,10 +9,6 @@
 #include <optional>
 #include <thread>
 
-#if defined(_MSC_VER)
-  #include <intrin.h>
-#endif
-
 #ifdef _WIN32
   #ifndef NOMINMAX
     #define NOMINMAX
@@ -131,8 +127,8 @@ static_assert(std::atomic<uintptr_t>::is_always_lock_free && std::atomic<uint8_t
               && std::atomic<uint64_t>::is_always_lock_free && std::atomic<FaultHandler>::is_always_lock_free);
 
 inline void relax() {
-#if defined(_MSC_VER)
-  _mm_pause();
+#if defined(_WIN32)
+  YieldProcessor();
 #elif defined(__x86_64__) || defined(__i386__)
   __builtin_ia32_pause();
 #elif defined(__aarch64__) || defined(__arm__)
