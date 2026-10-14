@@ -298,6 +298,34 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
     )
   }
 
+  test("a concrete call binds a closure by its call operator and keeps its environment") {
+    val decl    = transformDecl
+    val f32Ptr  = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)
+    val closure = p.Type.Struct(p.Sym(List("caller", "Scale")), Nil)
+    val call = p.FunctionDecl(
+      p.Sym(List("caller", "Scale", "operator()")),
+      Nil,
+      Some(p.Arg(p.Named("#this", p.Type.Ptr(closure, p.Type.Space.Private)))),
+      List(p.Arg(p.Named("x", p.Type.Float32))),
+      Nil,
+      Nil,
+      p.Type.Float32,
+      p.Function.Affinity.Host
+    )
+    val signature = ProgramLinker.CallSignature(
+      decl.name,
+      List(p.Type.Float32),
+      None,
+      List(f32Ptr, f32Ptr, p.Type.IntS32, closure),
+      p.Type.Unit0
+    )
+
+    assertEquals(
+      decl.matches(signature, List(call)),
+      Right(ProgramLinker.CallMatch(Map("T" -> p.Type.Float32), Map(3 -> call.name), Map(3 -> closure)))
+    )
+  }
+
   test("call matching selects a callable overload by structure") {
     val decl   = transformDecl
     val f32Ptr = p.Type.Ptr(p.Type.Float32, p.Type.Space.Global)

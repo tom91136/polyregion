@@ -724,6 +724,334 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(resolvedImplementation.collectAll[p.Type].contains(p.Type.FnRef(callable)))
   }
 
+  private def callableImplementation(name: p.Sym, publicName: p.Sym) = {
+    val element: p.Type   = p.Type.Var("Element")
+    val operation: p.Type = p.Type.Var("Operation")
+    val decl = p.FunctionDecl(
+      name,
+      List(p.Type.Var("Element"), p.Type.Var("Operation")),
+      None,
+      List(p.Arg(p.Named("value", element)), p.Arg(p.Named("operation", operation))),
+      Nil,
+      Nil,
+      element,
+      p.Function.Affinity.Host
+    )
+    val self = p.Named("operation_ref", p.Type.Ptr(operation, p.Type.Space.Private))
+    function(
+      decl,
+      List(
+        p.Stmt.Var(
+          self,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(decl.args(1).named, Nil, operation),
+              None,
+              operation,
+              p.Type.Space.Private,
+              p.Region.Rooted(decl.args(1).named)
+            )
+          )
+        ),
+        p.Stmt.Return(
+          p.Expr.Invoke(
+            operation,
+            Nil,
+            Some(p.Term.Select(self, Nil, self.tpe)),
+            List(p.Term.Select(decl.args.head.named, Nil, element)),
+            element
+          )
+        )
+      ),
+      Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+  }
+
+  private def applyPublic(name: p.Sym) = p.FunctionDecl(
+    name,
+    Nil,
+    None,
+    List(
+      p.Arg(p.Named("value", p.Type.IntS32)),
+      p.Arg(p.Named("operation", p.Type.Exec(Nil, List(p.Type.IntS32), p.Type.IntS32)))
+    ),
+    Nil,
+    Nil,
+    p.Type.IntS32,
+    p.Function.Affinity.Host
+  )
+
+  test("program linking passes a closure environment to its call operator") {
+    val name           = p.Sym("library.apply")
+    val public         = applyPublic(name)
+    val implementation = callableImplementation(p.Sym("implementation.apply"), name)
+    val offset         = p.Sym("caller.Offset")
+    val offsetTpe      = p.Type.Struct(offset, Nil)
+    val self           = p.Named("#this", p.Type.Ptr(offsetTpe, p.Type.Space.Private))
+    val callDecl = p.FunctionDecl(
+      p.Sym("caller.Offset.call"),
+      Nil,
+      Some(p.Arg(self)),
+      List(p.Arg(p.Named("value", p.Type.IntS32))),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val call = function(
+      callDecl,
+      List(
+        p.Stmt.Return(
+          p.Expr.IntrOp(
+            p.Intr.Add(
+              p.Term.Select(self, List(p.PathStep.Deref, p.PathStep.Field("k")), p.Type.IntS32),
+              p.Term.Select(callDecl.args.head.named, Nil, p.Type.IntS32),
+              p.Type.IntS32
+            )
+          )
+        )
+      )
+    )
+    val pkg = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
+    val root = function(
+      public.copy(
+        name = p.Sym("consumer.apply"),
+        args = List(p.Arg(p.Named("value", p.Type.IntS32)), p.Arg(p.Named("operation", offsetTpe)))
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val resolved = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(pkg),
+        p.Program(None, List(call, root), List(p.StructDef(offset, Nil, List(p.Named("k", p.Type.IntS32)), Nil))),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4), p.Program.TypeSize(offsetTpe, 4))
+      )
+    )
+    assert(resolved.isRight, resolved)
+    val functions = resolved.toOption.get.entry.toList ::: resolved.toOption.get.functions
+    val entry     = functions.find(_.name == root.name).get
+    assertEquals(entry.args.map(_.named.symbol), List("#context", "a0", "a1", "result"))
+    val resolvedImplementation = functions.find(_.collectAll[p.Type].contains(p.Type.FnRef(callDecl.name))).get
+    assertEquals(resolvedImplementation.args.map(_.named.tpe), List(p.Type.IntS32, offsetTpe))
+    val invokes = resolvedImplementation.collectAll[p.Expr].collect { case invoke: p.Expr.Invoke => invoke }
+    assertEquals(invokes.map(_.callee), List(p.Type.FnRef(callDecl.name)))
+    assertEquals(invokes.flatMap(_.receiver).map(_.tpe), List(self.tpe))
+    assert(functions.exists(_.name == callDecl.name))
+  }
+
+  test("program linking mirrors pointers captured by a closure environment") {
+    val name           = p.Sym("library.apply")
+    val public         = applyPublic(name)
+    val implementation = callableImplementation(p.Sym("implementation.apply"), name)
+    val lookup         = p.Sym("caller.Lookup")
+    val lookupTpe      = p.Type.Struct(lookup, Nil)
+    val table          = p.Named("table", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global))
+    val self           = p.Named("#this", p.Type.Ptr(lookupTpe, p.Type.Space.Private))
+    val callDecl = p.FunctionDecl(
+      p.Sym("caller.Lookup.call"),
+      Nil,
+      Some(p.Arg(self)),
+      List(p.Arg(p.Named("value", p.Type.IntS32))),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val call = function(callDecl, List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(0)))))
+    val pkg  = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
+    val root = function(
+      public.copy(
+        name = p.Sym("consumer.apply"),
+        args = List(p.Arg(p.Named("value", p.Type.IntS32)), p.Arg(p.Named("operation", lookupTpe)))
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val resolved = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(pkg),
+        p.Program(None, List(call, root), List(p.StructDef(lookup, Nil, List(table), Nil))),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4), p.Program.TypeSize(lookupTpe, 8))
+      )
+    )
+    assert(resolved.isRight, resolved)
+    val functions = resolved.toOption.get.entry.toList ::: resolved.toOption.get.functions
+    val entry     = functions.find(_.name == root.name).get
+    val foreign   = entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }
+    assertEquals(
+      foreign,
+      List(
+        p.Conventions.RuntimeAbi.SmaEnsureMin,
+        p.Conventions.RuntimeAbi.SmaVisitClear,
+        p.Conventions.RuntimeAbi.SmaReadAlloc
+      )
+    )
+    val patched = entry.collectAll[p.Stmt].collect { case p.Stmt.Cond(_, List(p.Stmt.Mut(target, _)), Nil) =>
+      target.root.symbol -> target.steps
+    }
+    assertEquals(patched, List("v1" -> List(p.PathStep.Field("table"))))
+  }
+
+  test("program linking binds a closure invoked by a package helper") {
+    val name              = p.Sym("library.apply")
+    val public            = applyPublic(name)
+    val element: p.Type   = p.Type.Var("Element")
+    val operation: p.Type = p.Type.Var("Operation")
+    val helperName        = p.Sym("implementation.invoke")
+    val helperOperation   = p.Named("operation", operation)
+    val helperValue       = p.Named("value", element)
+    val helperReceiver    = p.Named("operation_ref", p.Type.Ptr(operation, p.Type.Space.Global))
+    val helper = function(
+      p.FunctionDecl(
+        helperName,
+        Nil,
+        None,
+        List(p.Arg(helperValue), p.Arg(helperOperation)),
+        Nil,
+        Nil,
+        element,
+        p.Function.Affinity.Host
+      ),
+      List(
+        p.Stmt.Var(
+          helperReceiver,
+          Some(
+            p.Expr.RefTo(
+              p.Term.Select(helperOperation, Nil, operation),
+              None,
+              operation,
+              p.Type.Space.Global,
+              p.Region.Rooted(helperOperation)
+            )
+          )
+        ),
+        p.Stmt.Return(
+          p.Expr.Invoke(
+            operation,
+            Nil,
+            Some(p.Term.Select(helperReceiver, Nil, helperReceiver.tpe)),
+            List(p.Term.Select(helperValue, Nil, element)),
+            element
+          )
+        )
+      )
+    )
+    val implementationDecl = p.FunctionDecl(
+      p.Sym("implementation.apply"),
+      List(p.Type.Var("Element"), p.Type.Var("Operation")),
+      None,
+      List(p.Arg(p.Named("value", element)), p.Arg(p.Named("operation", operation))),
+      Nil,
+      Nil,
+      element,
+      p.Function.Affinity.Host
+    )
+    val implementation = function(
+      implementationDecl,
+      List(
+        p.Stmt.Return(
+          p.Expr.Invoke(
+            p.Type.FnRef(helperName),
+            Nil,
+            None,
+            implementationDecl.args.map(argument => p.Term.Select(argument.named, Nil, argument.named.tpe)),
+            element
+          )
+        )
+      ),
+      Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val offset    = p.Sym("caller.Offset")
+    val offsetTpe = p.Type.Struct(offset, Nil)
+    val self      = p.Named("#this", p.Type.Ptr(offsetTpe, p.Type.Space.Global))
+    val callDecl = p.FunctionDecl(
+      p.Sym("caller.Offset.call"),
+      Nil,
+      Some(p.Arg(self)),
+      List(p.Arg(p.Named("value", p.Type.IntS32))),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val call = function(
+      callDecl,
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(callDecl.args.head.named, Nil, p.Type.IntS32))))
+    )
+    val pkg = p.Package(
+      p.Interface(p.Sym("library"), List(public)),
+      p.Program(None, List(implementation, helper), Nil)
+    )
+    val root = function(
+      public.copy(
+        name = p.Sym("consumer.apply"),
+        args = List(p.Arg(p.Named("value", p.Type.IntS32)), p.Arg(p.Named("operation", offsetTpe)))
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val resolved = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(pkg),
+        p.Program(None, List(call, root), List(p.StructDef(offset, Nil, List(p.Named("k", p.Type.IntS32)), Nil))),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4), p.Program.TypeSize(offsetTpe, 4))
+      )
+    )
+    assert(resolved.isRight, resolved)
+    val functions = resolved.toOption.get.entry.toList ::: resolved.toOption.get.functions
+    val callees   = functions.flatMap(_.collectAll[p.Expr].collect { case invoke: p.Expr.Invoke => invoke.callee })
+    assert(callees.contains(p.Type.FnRef(callDecl.name)), callees)
+    assert(!callees.exists(_.isInstanceOf[p.Type.Struct]), callees)
+  }
+
+  test("program linking drops a package receiver for a stateless callable") {
+    val name           = p.Sym("library.apply")
+    val public         = applyPublic(name)
+    val implementation = callableImplementation(p.Sym("implementation.apply"), name)
+    val callableDecl = p.FunctionDecl(
+      p.Sym("caller.increment"),
+      Nil,
+      None,
+      List(p.Arg(p.Named("value", p.Type.IntS32))),
+      Nil,
+      Nil,
+      p.Type.IntS32,
+      p.Function.Affinity.Host
+    )
+    val callable = function(
+      callableDecl,
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(callableDecl.args.head.named, Nil, p.Type.IntS32))))
+    )
+    val pkg = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
+    val root = function(
+      public.copy(
+        name = p.Sym("consumer.apply"),
+        args = List(
+          p.Arg(p.Named("value", p.Type.IntS32)),
+          p.Arg(p.Named("operation", p.Type.FnRef(callableDecl.name)))
+        )
+      ),
+      implements = Some(name),
+      visibility = p.Function.Visibility.Exported
+    )
+    val resolved = ProgramLinker.link(
+      p.Program.LinkRequest(
+        List(pkg),
+        p.Program(None, List(callable, root), Nil),
+        typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4))
+      )
+    )
+    assert(resolved.isRight, resolved)
+    val functions              = resolved.toOption.get.entry.toList ::: resolved.toOption.get.functions
+    val resolvedImplementation = functions.find(_.collectAll[p.Type].contains(p.Type.FnRef(callableDecl.name))).get
+    assertEquals(resolvedImplementation.args.map(_.named.symbol), List("value"))
+    val invokes = resolvedImplementation.collectAll[p.Expr].collect { case invoke: p.Expr.Invoke => invoke }
+    assertEquals(invokes.map(_.receiver), List(None))
+  }
+
   test("callable return types participate in public type inference") {
     val name     = p.Sym("library.make")
     val callable = p.Sym("caller.makeInt")

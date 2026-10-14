@@ -10,7 +10,10 @@
 #endif
 
 #pragma push_macro("POLYREGION_EXAMPLE_IMPLEMENT")
-#ifndef POLYREGION_EXAMPLE_IMPLEMENT
+#ifdef POLYREGION_EXAMPLE_IMPLEMENT
+#define POLYREGION_EXAMPLE_FALLBACK POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface_fallback")
+#else
+#define POLYREGION_EXAMPLE_FALLBACK
 #if defined(_MSC_VER) && !defined(__clang__)
 #define POLYREGION_EXAMPLE_IMPLEMENT(function, ...) (__debugbreak(), __assume(0))
 #else
@@ -20,13 +23,14 @@
 
 namespace example {
 
-POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface:example:example.array") //
+POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface:example:example.array") POLYREGION_EXAMPLE_FALLBACK //
 inline void array(std::int32_t (&values)[4]) {
   POLYREGION_EXAMPLE_IMPLEMENT(array, values);
 }
 
 } // namespace example
 
+#undef POLYREGION_EXAMPLE_FALLBACK
 #undef POLYREGION_EXAMPLE_ANNOTATE
 
 #pragma pop_macro("POLYREGION_EXAMPLE_IMPLEMENT")

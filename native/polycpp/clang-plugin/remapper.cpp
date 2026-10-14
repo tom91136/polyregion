@@ -3746,7 +3746,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 operatorFunction->decl.args.erase(operatorFunction->decl.args.begin());
               return Expr::Any(Expr::Alias(Term::Poison(Type::FnRef(Sym({operatorName})))));
             }
-            if (!(r.callableVariables ^ contains(variable->name))) return conform(r, handleExpr(expr->getArg(0), r), ctorTpe);
+            if (!(r.callableVariables ^ contains(variable->name)) || constructor->isCopyConstructor() || constructor->isMoveConstructor())
+              return conform(r, handleExpr(expr->getArg(0), r), ctorTpe);
           }
           if (expr->getNumArgs() == 0 && constructor->isDefaultConstructor()) return zeroInitialise(r, ctorTpe);
           return Expr::Any(Expr::Alias(Term::Poison(ctorTpe)));
@@ -3929,11 +3930,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           }
           if (!(r.callableVariables ^ contains(receiverType->name)))
             raise(fmt::format("Unexpected operator on package element variable: {}", pretty_string(expr, context)));
+          const auto callable = r.newVar(handleExpr(expr->getArg(0), r));
+          const auto receiver = r.newVar(ref(callable));
           Vector<Term::Any> arguments;
           arguments.reserve(expr->getNumArgs() - 1);
           for (size_t i = 1; i < expr->getNumArgs(); ++i)
             arguments.emplace_back(r.newVar(handleExpr(expr->getArg(i), r)));
-          return Expr::Invoke(receiverType->widen(), {}, {}, arguments, handleType(expr->getCallReturnType(context), r));
+          return Expr::Invoke(receiverType->widen(), {}, receiver, arguments, handleType(expr->getCallReturnType(context), r));
         }
         if (!calleeFn) raise(fmt::format("Operator call with no resolvable callee: {}", pretty_string(expr, context)));
         const auto operatorMethod = llvm::dyn_cast<clang::CXXMethodDecl>(calleeFn);

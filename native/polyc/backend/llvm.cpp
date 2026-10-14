@@ -1299,8 +1299,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             // alias used to store poison at byte zero of polyc_dyn_shared; every work-item then raced with the
             // reduction's legitimate local[0] accesses.  Keep any RHS effects, but never write a zero-length view.
             if (x.expr) auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
-          } else if (x.expr && x.expr->tpe().is<Type::FnRef>() && tpe->isPointerTy()) {
-            storeStubbedHandle(*this, tpe, stackPtr);
+          } else if (x.expr && x.expr->tpe().is<Type::FnRef>()) {
+            if (tpe->isPointerTy()) storeStubbedHandle(*this, tpe, stackPtr);
+            else auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
           } else if (x.expr) {
             auto rhs = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
             if (structByPtr() && (x.name.tpe.template is<Type::Struct>() || x.name.tpe.template is<Type::Arr>())) {
@@ -1328,6 +1329,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         }
         if (lhs.tpe.is<Type::Unit0>()) return BlockKind::Normal;
         auto rhs = mkExprVal(x.expr, qualified(lhs) + "_mut");
+        if (lhs.tpe.is<Type::FnRef>()) return BlockKind::Normal;
         const auto dst = lhs.steps.empty() ? findStackVar(lhs.root) : mkSelectPtr(lhs);
         // by-value aggregate: rhs is a pointer to the source, so copy contents rather than store the pointer.
         // an Arr behind a select path is inline [N x T] storage, so it copies on every target; only a step-less

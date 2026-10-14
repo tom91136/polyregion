@@ -154,6 +154,7 @@ private[ast] object CppInterfaceCodeGen {
   private def declaration(
       interfaceDef: p.Interface,
       annotationMacro: String,
+      fallbackMacro: String,
       implementationMacro: String,
       decl: p.FunctionDecl
   ): String = {
@@ -172,7 +173,7 @@ private[ast] object CppInterfaceCodeGen {
     val body = (decl.args.flatMap(callableCheck) :+ s"$implementationMacro($forwarded);")
       .map(s => s"  $s")
       .mkString("\n")
-    s"""$template$annotationMacro("${marker(interfaceDef, decl)}") //
+    s"""$template$annotationMacro("${marker(interfaceDef, decl)}") $fallbackMacro //
        |inline ${tpe(
         decl.rtn
       )} ${decl.name.last}(${decl.args
@@ -197,7 +198,9 @@ private[ast] object CppInterfaceCodeGen {
     val macroPrefix         = s"POLYREGION_${interfaceDef.name.fqn.mkString("_").toUpperCase(Locale.ROOT)}"
     val annotationMacro     = s"${macroPrefix}_ANNOTATE"
     val implementationMacro = s"${macroPrefix}_IMPLEMENT"
-    val body = decls.map(declaration(interfaceDef, annotationMacro, implementationMacro, _)).mkString("\n\n")
+    val fallbackMacro       = s"${macroPrefix}_FALLBACK"
+    val body =
+      decls.map(declaration(interfaceDef, annotationMacro, fallbackMacro, implementationMacro, _)).mkString("\n\n")
     s"""#pragma once
        |
        |#include <cstdint>
@@ -210,7 +213,10 @@ private[ast] object CppInterfaceCodeGen {
        |#endif
        |
        |#pragma push_macro("$implementationMacro")
-       |#ifndef $implementationMacro
+       |#ifdef $implementationMacro
+       |#define $fallbackMacro $annotationMacro("$FallbackMarker")
+       |#else
+       |#define $fallbackMacro
        |#if defined(_MSC_VER) && !defined(__clang__)
        |#define $implementationMacro(function, ...) (__debugbreak(), __assume(0))
        |#else
@@ -224,6 +230,7 @@ private[ast] object CppInterfaceCodeGen {
        |
        |} // namespace ${interfaceDef.name.fqn.mkString("::")}
        |
+       |#undef $fallbackMacro
        |#undef $annotationMacro
        |
        |#pragma pop_macro("$implementationMacro")

@@ -3008,27 +3008,36 @@ TEST_CASE("LLVM gives stored callable references addressable bytes", "[backend][
   CHECK(iteratorLayout->get().members[1].offsetInBytes == pointerBytes);
 }
 
-TEST_CASE("LLVM stores stateless callable fields at their storage width", "[backend][callable]") {
+TEST_CASE("LLVM stores no bytes for stateless callable fields", "[backend][callable]") {
   polyregion::compiler::initialise();
   using namespace polyregion::polyast::dsl;
 
   const auto callableType = Type::FnRef(Sym({"predicate"})).widen();
   const auto boxSym = Sym({"CallableBox"});
   const auto boxType = Type::Struct(boxSym, {}).widen();
-  const StructDef box(boxSym, {}, {Named("callable", callableType)}, {}, false);
-  const Named count("count", Type::IntS32()), value("value", boxType);
+  const StructDef box(boxSym, {}, {Named("callable", callableType), Named("tail", Type::IntS32())}, {}, false);
+  const Named count("count", Type::IntS32()), value("value", boxType), callable("callable", callableType);
+  const Function predicate = mkFn("predicate", {}, Type::Unit0(), {ret()}, FunctionVisibility::Internal());
   const auto field = Term::Select(value, {PathStep::Field("callable").widen()}, callableType);
-  const Function entry = mkFn("entry", {Arg(count, {})}, Type::IntS32(),
-                              {Var(value, std::optional<Expr::Any>{}, true).widen(),
-                               Mut(field, Expr::Alias(Term::Poison(callableType).widen()).widen()).widen(), ret(selectNamed(count))},
-                              FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
+  const Function forward =
+      mkFn("forward", {Arg(callable, {})}, Type::Unit0(),
+           {Var(value, std::optional<Expr::Any>{}, true).widen(), Mut(field, Expr::Alias(selectNamed(callable)).widen()).widen(), ret()},
+           FunctionVisibility::Internal());
+  const Function entry = mkFn(
+      "entry", {Arg(count, {})}, Type::IntS32(),
+      {Var(value, std::optional<Expr::Any>{}, true).widen(), Mut(field, Expr::Alias(Term::Poison(callableType).widen()).widen()).widen(),
+       Var(Named("forwarded", Type::Unit0()),
+           Expr::Invoke(Type::FnRef(forward.decl.name), {}, {}, {Term::Poison(callableType)}, Type::Unit0()).widen(), false)
+           .widen(),
+       ret(selectNamed(count))},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), true);
   const ScopedEnv debug(polyregion::env::PolyregionDebug, std::string("1"));
-  const auto compiled = polyregion::compiler::compile(Program(entry, {}, {box}, PassPhase::Initial(), {}),
+  const auto compiled = polyregion::compiler::compile(Program(entry, {forward, predicate}, {box}, PassPhase::Initial(), {}),
                                                       {Target::Object_LLVM_HOST, "native"}, OptLevel::O0);
   REQUIRE(compiled.binary);
   const auto &ir = llvmIrOf(compiled);
-  CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("store i8 poison"));
-  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store ptr null"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("getelementptr"));
+  CHECK_THAT(ir, !Catch::Matchers::ContainsSubstring("store ptr"));
 }
 
 TEST_CASE("LLVM stops emitting a function body after terminal branches", "[backend][control-flow]") {

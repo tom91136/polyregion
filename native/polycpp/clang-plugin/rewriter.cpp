@@ -196,6 +196,7 @@ struct Failure {
 
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
 constexpr static llvm::StringLiteral interfaceAnnotation = "polyregion_interface:";
+constexpr static llvm::StringLiteral interfaceFallbackAnnotation = "polyregion_interface_fallback";
 
 struct InterfaceSite {
   clang::CallExpr *call;
@@ -213,6 +214,13 @@ static std::optional<std::pair<std::string, std::string>> interfaceIdentity(cons
            if (!packageName.empty() && !declaration.empty() && !declaration.contains(':'))
              return std::pair(packageName.str(), declaration.str());
            return {};
+         });
+}
+
+static bool hasInterfaceFallback(const clang::FunctionDecl *decl) {
+  return decl->attrs() | exists([](const auto *attr) {
+           const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+           return annotation && annotation->getAnnotation() == interfaceFallbackAnnotation;
          });
 }
 
@@ -258,26 +266,6 @@ static Vector<const clang::FunctionDecl *> interfaceCallableIdentities(const Int
     identities.emplace_back(callable ? callable->getCanonicalDecl() : nullptr);
   }
   return identities;
-}
-
-static Opt<std::string> interfaceCallableShapeError(const InterfaceSite &site) {
-  for (size_t i = 0; i < site.call->getNumArgs(); ++i) {
-    const auto *argument = site.call->getArg(i)->IgnoreUnlessSpelledInSource();
-    const auto *record = argument->getType()->getAsCXXRecordDecl();
-    if (!record) continue;
-    if (record->isLambda()) {
-      if (record->capture_size() != 0) return std::string("capturing library callables are not supported");
-      continue;
-    }
-    bool callable = false;
-    for (const auto *method : record->methods())
-      if (method->getOverloadedOperator() == clang::OO_Call && method->doesThisDeclarationHaveABody()) {
-        callable = true;
-        break;
-      }
-    if (callable && !record->isEmpty()) return std::string("stateful library callables are not supported");
-  }
-  return {};
 }
 
 static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::ASTContext &C, const InterfaceSite &site) {
@@ -343,33 +331,21 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::Compiler
       if (const auto *ref = llvm::dyn_cast<clang::DeclRefExpr>(referenced)) callable = llvm::dyn_cast<clang::FunctionDecl>(ref->getDecl());
     }
     if (!callable) continue;
-    if (record && record->isLambda() && record->capture_size() != 0) {
-      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
-           POLYREGION_DIAG_POLYSTL "capturing library callables are not supported");
-      return {};
-    }
-    if (record && !record->isLambda() && !record->isEmpty()) {
-      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
-           POLYREGION_DIAG_POLYSTL "stateful library callables are not supported");
-      return {};
-    }
     if (callable->isTemplated()) {
       emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
            POLYREGION_DIAG_POLYSTL "generic library callables require a concrete operator() specialization");
       return {};
     }
     auto [name, function] = remapper.handleCall(callable, context);
-    if (record && (function->collect_all<Term::Select>() ^ exists([](const auto &select) {
-                     return select.root.symbol == conventions::ThisReceiver;
-                   }))) {
-      emit(D, argument->getExprLoc(), clang::DiagnosticsEngine::Error,
-           POLYREGION_DIAG_POLYSTL "library callable operator() depends on its receiver");
-      return {};
-    }
     auto args = function->decl.args;
-    if (!args.empty() && args.front().named.symbol == conventions::ThisReceiver) args.erase(args.begin());
-    function->decl = function->decl.withArgs(args).withAffinity(FunctionAffinity::Host());
-    argumentTypes[i] = Type::FnRef(function->decl.name);
+    const auto leadingReceiver = !args.empty() && args.front().named.symbol == conventions::ThisReceiver;
+    const auto receiver = leadingReceiver ? Opt<Arg>{args.front()} : function->decl.receiver;
+    if (leadingReceiver) args.erase(args.begin());
+    const bool stateful = record && (!record->isEmpty() || (function->collect_all<Term::Select>() ^ exists([](const auto &select) {
+                                                              return select.root.symbol == conventions::ThisReceiver;
+                                                            })));
+    function->decl = function->decl.withArgs(args).withReceiver(stateful ? receiver : Opt<Arg>{}).withAffinity(FunctionAffinity::Host());
+    argumentTypes[i] = stateful ? remapper.handleType(argument->getType(), context) : Type::FnRef(function->decl.name).widen();
   }
   const auto returnType = remapper.handleType(site.callee->getReturnType(), context);
   if (!site.callee->getReturnType()->isVoidType())
@@ -1060,11 +1036,12 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   std::map<const clang::FunctionDecl *, Vector<const clang::FunctionDecl *>> interfaceCallables;
   std::map<std::string, polyfront::package::Archive> interfacePackages;
   std::vector<PreparedInterfaceCall> preparedInterfaces;
+  const auto packageRoots =
+      opts.libraryPath.empty() ? polyfront::package::packageRoots() : polyfront::package::splitPackageRoots(opts.libraryPath);
   for (const auto &site : interfaceSites(C)) {
-    if (const auto error = interfaceCallableShapeError(site)) {
-      emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", *error);
+    if (hasInterfaceFallback(site.callee)
+        && (!C.getLangOpts().CXXExceptions || polyfront::package::packageFiles(site.packageName, packageRoots).empty()))
       continue;
-    }
     const auto callableIdentities = interfaceCallableIdentities(site);
     const auto [existing, inserted] = interfaceCallables.emplace(site.callee->getCanonicalDecl(), callableIdentities);
     if (!inserted) {
@@ -1080,9 +1057,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     }
     auto found = interfacePackages.find(site.packageName);
     if (found == interfacePackages.end()) {
-      const auto package = polyfront::package::loadPackage(site.packageName, opts.libraryPath.empty()
-                                                                                 ? polyfront::package::packageRoots()
-                                                                                 : polyfront::package::splitPackageRoots(opts.libraryPath));
+      const auto package = polyfront::package::loadPackage(site.packageName, packageRoots);
       if (!package) {
         for (const auto &error : package.errors)
           emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", error);

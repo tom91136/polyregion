@@ -173,9 +173,14 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
   struct ReleaseHookRegistrar {                                                                                                            \
     ReleaseHookRegistrar() {                                                                                                               \
       ::polyregion::rt_reflect::_rt_set_release_cb(                                                                                        \
-          +[](void *p) { (allocations).disassociateExact(p, ::polyregion::polyrt::currentDevice != nullptr); });                           \
+          +[](void *p) { (allocations).forget(p, ::polyregion::polyrt::currentDevice != nullptr); });                                      \
+      ::polyregion::rt_reflect::_rt_set_reclaim_cb(                                                                                        \
+          +[](const void *p, const size_t n, const bool forWrite) { (allocations).reclaimRange(p, n, forWrite); });                        \
     }                                                                                                                                      \
-    ~ReleaseHookRegistrar() { ::polyregion::rt_reflect::_rt_set_release_cb(nullptr); }                                                     \
+    ~ReleaseHookRegistrar() {                                                                                                              \
+      ::polyregion::rt_reflect::_rt_set_release_cb(nullptr);                                                                               \
+      ::polyregion::rt_reflect::_rt_set_reclaim_cb(nullptr);                                                                               \
+    }                                                                                                                                      \
   } releaseHookRegistrar;                                                                                                                  \
   }                                                                                                                                        \
   POLYREGION_RUNTIME_ABI(POLYREGION_SMA_ABI_SYMBOL_CHECK)                                                                                  \

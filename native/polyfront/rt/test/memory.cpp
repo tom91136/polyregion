@@ -1,8 +1,18 @@
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <numeric>
+#include <thread>
+#include <unordered_set>
+#include <vector>
+
+#ifndef _WIN32
+  #include <unistd.h>
+#endif
 
 #include "fmt/args.h"
 #include <catch2/catch_test_macros.hpp>
@@ -13,6 +23,7 @@
 #include "polyrt/rt.h"
 
 #include "jit_policy.hpp"
+#include "reflect-rt/rt_reflect.hpp"
 
 using namespace polyregion::invoke;
 using namespace polyregion::runtime;
@@ -514,7 +525,10 @@ const static TypeLayout int64Type = NamedType(int64_t);
 
 struct Fixture {
   std::unordered_map<uintptr_t, size_t> localAllocations, remoteAllocations;
-  size_t remoteWrites = 0;
+  std::unordered_set<uintptr_t> heapAllocations;
+  size_t remoteWrites = 0, remoteReads = 0;
+  // stretches device-to-host copies the way a real transfer does, page by page
+  std::chrono::microseconds remoteReadPause{0};
 
   using QueryPtr = std::function<polyregion::polyrt::PtrQuery(const void *)>;
   using AllocateRemote = std::function<uintptr_t(size_t)>;
@@ -528,11 +542,13 @@ struct Fixture {
             [&](const void *ptr) -> polyregion::polyrt::PtrQuery {
               const uintptr_t localPtr = reinterpret_cast<uintptr_t>(ptr);
               if (const auto it = localAllocations.find(localPtr); it != localAllocations.end()) {
-                return polyregion::polyrt::PtrQuery{it->second, 0};
+                return polyregion::polyrt::PtrQuery{
+                    .sizeInBytes = it->second, .offsetInBytes = 0, .heap = heapAllocations.count(localPtr) != 0};
               }
               for (auto [p, size] : localAllocations) {
                 if (localPtr >= static_cast<uintptr_t>(p) && localPtr < static_cast<uintptr_t>(p) + size) {
-                  return polyregion::polyrt::PtrQuery{size, localPtr - static_cast<uintptr_t>(p)};
+                  return polyregion::polyrt::PtrQuery{
+                      .sizeInBytes = size, .offsetInBytes = localPtr - static_cast<uintptr_t>(p), .heap = heapAllocations.count(p) != 0};
                 }
               }
               return polyregion::polyrt::PtrQuery{0, 0};
@@ -542,8 +558,14 @@ struct Fixture {
               remoteAllocations.emplace(reinterpret_cast<uintptr_t>(p), size);
               return reinterpret_cast<uintptr_t>(p);
             }, //
-            [](void *dst, uintptr_t src, size_t srcOffset, size_t size) {
-              return std::memcpy(dst, reinterpret_cast<char *>(src) + srcOffset, size);
+            [&](void *dst, uintptr_t src, size_t srcOffset, size_t size) {
+              remoteReads++;
+              const size_t chunk = remoteReadPause.count() ? 4096 : size;
+              for (size_t done = 0; done < size; done += chunk) {
+                std::memcpy(static_cast<char *>(dst) + done, reinterpret_cast<char *>(src) + srcOffset + done,
+                            std::min(chunk, size - done));
+                if (remoteReadPause.count()) std::this_thread::sleep_for(remoteReadPause);
+              }
             }, //
             [&](const void *src, uintptr_t dst, size_t dstOffset, size_t size) {
               remoteWrites++;
@@ -555,6 +577,12 @@ struct Fixture {
     auto p = std::malloc(sizeof(T) * count);
     localAllocations.emplace(reinterpret_cast<uintptr_t>(p), sizeof(T) * count);
     return static_cast<T *>(p);
+  };
+
+  template <typename T> T *mallocLocalHeap(size_t count) {
+    auto p = mallocLocal<T>(count);
+    heapAllocations.emplace(reinterpret_cast<uintptr_t>(p));
+    return p;
   };
 
   template <typename T> std::enable_if_t<!std::is_pointer_v<T>, T> localToRemote(const T &t, const TypeLayout &s) {
@@ -603,6 +631,185 @@ TEST_CASE("generated mirror refreshes cached allocations between launches") {
   CHECK(fixture.remoteWrites == 4);
 }
 
+TEST_CASE("resident heap blocks fault their device copy back and upload again only after a host write") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  Fixture fixture;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto xs = fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  struct Capture {
+    int32_t *xs;
+  } capture{xs};
+
+  const auto launch = [&](const auto &kernel) {
+    fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+    auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(xs));
+    kernel(remote);
+    fixture.allocation.unmirrorVisitClear();
+    fixture.allocation.unmirrorReadAlloc(xs);
+    fixture.allocation.disassociate(&capture, false);
+    return remote;
+  };
+
+  auto remote = launch([&](int32_t *r) { std::fill(r, r + count, 2); });
+  const auto readsAfterLaunch = fixture.remoteReads;
+  CHECK(xs[0] == 2);
+  CHECK(fixture.remoteReads == readsAfterLaunch);
+  CHECK(xs[count - 1] == 2);
+  CHECK(xs[count / 2] == 2);
+  CHECK(fixture.remoteReads == readsAfterLaunch + 1);
+
+  const auto writesBeforeRelaunch = fixture.remoteWrites;
+  CHECK(launch([&](int32_t *r) { r[count / 2] = 3; }) == remote);
+  CHECK(fixture.remoteWrites - writesBeforeRelaunch <= 3);
+  CHECK(xs[count / 2] == 3);
+
+  xs[count / 2 + 1] = 7;
+  launch([&](int32_t *r) { CHECK(r[count / 2 + 1] == 7); });
+  CHECK(xs[count / 2 + 1] == 7);
+
+  fixture.allocation.disassociate(xs, false);
+  xs[count / 2] = 9;
+  CHECK(xs[count / 2] == 9);
+}
+
+TEST_CASE("resident heap blocks reclaim before code that bypasses the fault path") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  Fixture fixture;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto xs = fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  struct Capture {
+    int32_t *xs;
+  } capture{xs};
+
+  fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+  auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(xs));
+  std::fill(remote, remote + count, 4);
+  fixture.allocation.unmirrorVisitClear();
+  fixture.allocation.unmirrorReadAlloc(xs);
+  fixture.allocation.disassociate(&capture, false);
+
+  fixture.allocation.reclaimRange(xs + count / 2, sizeof(int32_t) * 4, /*forWrite*/ true);
+  std::vector<int32_t> copied(xs, xs + count);
+  CHECK(std::all_of(copied.begin(), copied.end(), [](const int32_t x) { return x == 4; }));
+  fixture.allocation.disassociate(xs, false);
+}
+
+TEST_CASE("resident heap blocks resolve concurrent host reads from many threads") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  Fixture fixture;
+  fixture.remoteReadPause = std::chrono::microseconds(50);
+  constexpr size_t blocks = 8, threads = 8;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  struct Capture {
+    int32_t *xs[blocks];
+  } capture{};
+  for (auto &xs : capture.xs) {
+    xs = fixture.mallocLocalHeap<int32_t>(count);
+    std::fill(xs, xs + count, 0);
+  }
+
+  fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+  for (size_t b = 0; b < blocks; ++b) {
+    auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(capture.xs[b]));
+    std::fill(remote, remote + count, static_cast<int32_t>(b + 1));
+  }
+  fixture.allocation.unmirrorVisitClear();
+  for (auto xs : capture.xs)
+    fixture.allocation.unmirrorReadAlloc(xs);
+  fixture.allocation.disassociate(&capture, false);
+
+  const auto readsAfterLaunch = fixture.remoteReads;
+  std::atomic<size_t> wrong{0};
+  std::vector<std::thread> readers;
+  for (size_t t = 0; t < threads; ++t)
+    readers.emplace_back([&, t] {
+      for (size_t k = 0; k < blocks; ++k) {
+        const size_t b = (k + t) % blocks;
+        const int32_t *xs = capture.xs[b];
+        for (size_t i = 0; i < count; ++i)
+          if (xs[i] != static_cast<int32_t>(b + 1)) wrong.fetch_add(1);
+      }
+    });
+  for (auto &reader : readers)
+    reader.join();
+  CHECK(wrong.load() == 0);
+  CHECK(fixture.remoteReads - readsAfterLaunch <= blocks);
+  for (auto xs : capture.xs)
+    fixture.allocation.disassociate(xs, false);
+}
+
+#ifndef _WIN32
+TEST_CASE("record wrappers reclaim guarded blocks before libc or the kernel touches them") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  static Fixture *active = nullptr;
+  Fixture fixture;
+  active = &fixture;
+  polyregion::rt_reflect::_rt_set_reclaim_cb(
+      +[](const void *p, const size_t n, const bool forWrite) { active->allocation.reclaimRange(p, n, forWrite); });
+  polyregion::rt_reflect::_rt_set_release_cb(+[](void *p) { active->allocation.forget(p, false); });
+
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t), bytes = count * sizeof(int32_t);
+  auto xs = fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  struct Capture {
+    int32_t *xs;
+  } capture{xs};
+  const auto launch = [&](const auto &kernel) {
+    fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+    auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(capture.xs));
+    kernel(remote);
+    fixture.allocation.unmirrorVisitClear();
+    fixture.allocation.unmirrorReadAlloc(capture.xs);
+    fixture.allocation.disassociate(&capture, false);
+  };
+  const auto deviceFill = [&](const int32_t value) { launch([&](int32_t *r) { std::fill(r, r + count, value); }); };
+  const auto all = [&](const int32_t *ys, const int32_t value) {
+    return std::all_of(ys, ys + count, [&](const int32_t y) { return y == value; });
+  };
+  FILE *file = std::tmpfile();
+  REQUIRE(file);
+  const int fd = fileno(file);
+  std::vector<int32_t> onDisk(count);
+
+  deviceFill(5);
+  CHECK(polyrt_record_write(fd, xs, bytes) == static_cast<ssize_t>(bytes));
+  REQUIRE(::pread(fd, onDisk.data(), bytes, 0) == static_cast<ssize_t>(bytes));
+  CHECK(all(onDisk.data(), 5));
+
+  deviceFill(6);
+  CHECK(polyrt_record_pread(fd, xs, bytes, 0) == static_cast<ssize_t>(bytes));
+  CHECK(all(xs, 5));
+  launch([&](int32_t *r) { CHECK(all(r, 5)); });
+
+  deviceFill(7);
+  std::rewind(file);
+  CHECK(polyrt_record_fwrite(xs, sizeof(int32_t), count, file) == count);
+  std::fflush(file);
+  REQUIRE(::pread(fd, onDisk.data(), bytes, 0) == static_cast<ssize_t>(bytes));
+  CHECK(all(onDisk.data(), 7));
+
+  deviceFill(8);
+  std::rewind(file);
+  CHECK(polyrt_record_fread(xs, sizeof(int32_t), count, file) == count);
+  CHECK(all(xs, 7));
+
+  deviceFill(9);
+  auto grown = static_cast<int32_t *>(polyrt_record_realloc(xs, bytes * 2));
+  REQUIRE(grown);
+  fixture.localAllocations.erase(reinterpret_cast<uintptr_t>(xs));
+  fixture.heapAllocations.erase(reinterpret_cast<uintptr_t>(xs));
+  CHECK(all(grown, 9));
+
+  std::fclose(file);
+  std::free(grown);
+  polyregion::rt_reflect::_rt_set_reclaim_cb(nullptr);
+  polyregion::rt_reflect::_rt_set_release_cb(nullptr);
+  active = nullptr;
+}
+#endif
+
 TEST_CASE("runtime mirror refreshes cached allocations between launches") {
   struct Capture {
     int32_t *x;
@@ -625,6 +832,28 @@ TEST_CASE("runtime mirror refreshes cached allocations between launches") {
   remoteCapture = fixture.localToRemote(&capture, *captureMeta);
   CHECK(remoteCapture->x == remote);
   CHECK(*remote == 6);
+}
+
+TEST_CASE("runtime mirror translates captured pointer slots back after a launch") {
+  struct Capture {
+    int32_t **slot;
+  };
+  auto captureMeta = Struct_(Capture, StructMember_(Capture, slot, &int32Type));
+
+  Fixture fixture;
+  auto xs = fixture.mallocLocal<int32_t>(4);
+  std::fill(xs, xs + 4, 1);
+  auto slot = fixture.mallocLocal<int32_t *>();
+  *slot = xs;
+  Capture capture{slot};
+
+  auto remoteCapture = fixture.localToRemote(&capture, *captureMeta);
+  int32_t *remoteXs = *remoteCapture->slot;
+  CHECK(remoteXs != xs);
+  std::fill(remoteXs, remoteXs + 4, 2);
+  fixture.allocation.syncRemoteToLocalAfterLaunch(&capture);
+  CHECK(*slot == xs);
+  CHECK(xs[3] == 2);
 }
 
 TEST_CASE("runtime mirror preserves an interior offset when refreshing a reused allocation") {
@@ -1046,8 +1275,52 @@ TEST_CASE("ptr-offset-internal") {
   CHECK(expected.b[0] == 43);
 }
 
+TEST_CASE("resident arena leaves keep kernel output on the device until the host touches it") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  Fixture f;
+  struct Rec {
+    int32_t *xs;
+    uint64_t n;
+  };
+  auto recLayout = Struct_(Rec, StructMember_(Rec, xs, &int32Type), StructMember_(Rec, n, &int64Type));
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto xs = f.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  auto rec = f.mallocLocal<Rec>(1);
+  rec->xs = xs, rec->n = count;
+
+  const auto launch = [&](const auto &kernel) {
+    f.allocation.genArenaReset();
+    f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
+    auto *base = reinterpret_cast<char *>(f.allocation.genArenaFinish());
+    const uint64_t off = *reinterpret_cast<const uint64_t *>(base + offsetof(Rec, xs));
+    kernel(reinterpret_cast<int32_t *>(base + off));
+    f.allocation.genArenaReadback();
+  };
+
+  launch([&](int32_t *d) { std::fill(d, d + count, 2); });
+  const auto reads = f.remoteReads;
+  CHECK(xs[0] == 2);
+  CHECK(xs[count / 2] == 2);
+  CHECK(f.remoteReads == reads + 1);
+
+  launch([&](int32_t *d) {
+    CHECK(d[count / 2] == 2);
+    d[count / 2] = 3;
+  });
+  CHECK(xs[count / 2] == 3);
+
+  xs[count / 2 + 1] = 7;
+  launch([&](int32_t *d) { CHECK(d[count / 2 + 1] == 7); });
+
+  f.allocation.forget(xs, false);
+  xs[count / 2] = 9;
+  CHECK(xs[count / 2] == 9);
+}
+
 TEST_CASE("gen-arena-mirror") {
   Fixture f;
+  f.allocation.genArenaPersist = false;
   struct Rec {
     int8_t *p;
     uint64_t len;

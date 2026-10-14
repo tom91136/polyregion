@@ -17,7 +17,11 @@ private[polyregion] object ProgramLinker {
       rtn: p.Type
   )
 
-  final case class CallMatch(types: Map[String, p.Type], callables: Map[Int, p.Sym])
+  final case class CallMatch(
+      types: Map[String, p.Type],
+      callables: Map[Int, p.Sym],
+      environments: Map[Int, p.Type] = Map.empty
+  )
 
   enum ImplementationResult {
     case Direct
@@ -265,15 +269,22 @@ private[polyregion] object ProgramLinker {
     errors ++= validateCallableBinders(signature.rtn, "signature return")
 
     val matcher       = TypeMatcher(decl.tpeVars.map(_.name).toSet, reconcileAliases = true)
-    val deferred      = List.newBuilder[(p.Type.Exec, p.Type.FnRef, String, Option[Int])]
+    val deferred      = List.newBuilder[(p.Type.Exec, p.Type.FnRef | p.Type.Struct, String, Option[Int])]
     var callableBinds = Map.empty[Int, p.Sym]
+    var environments  = Map.empty[Int, p.Type]
 
     def matchType(expected: p.Type, actual: p.Type, path: String, callableIndex: Option[Int] = None): Unit =
       (expected, actual) match {
-        case (expected: p.Type.Exec, actual: p.Type.FnRef) =>
-          deferred += ((expected, actual, path, callableIndex))
-        case _ => matcher.unify(expected, actual, path)
+        case (expected: p.Type.Exec, actual: p.Type.FnRef)  => deferred += ((expected, actual, path, callableIndex))
+        case (expected: p.Type.Exec, actual: p.Type.Struct) => deferred += ((expected, actual, path, callableIndex))
+        case _                                              => matcher.unify(expected, actual, path)
       }
+
+    def receivesEnvironment(candidate: p.FunctionDecl, environment: p.Type.Struct) =
+      candidate.receiver.exists(_.named.tpe match {
+        case p.Type.Ptr(component, _) => component == environment
+        case other                    => other == environment
+      })
 
     if (decl.name != signature.name)
       errors += s"symbol differs: expected ${decl.name.fqn.mkString(".")}, got ${signature.name.fqn.mkString(".")}"
@@ -296,8 +307,16 @@ private[polyregion] object ProgramLinker {
     }
     if (matchResult) matchType(decl.rtn, signature.rtn, "return")
     val callableIndex = callerDecls.groupBy(_.name).view.mapValues(_.sortBy(_.signatureKey)).toMap
-    deferred.result().foreach { case (expected, p.Type.FnRef(name), path, argumentIndex) =>
-      val candidates = callableIndex.getOrElse(name, Nil)
+    deferred.result().foreach { case (expected, actual, path, argumentIndex) =>
+      val environment = actual match {
+        case environment: p.Type.Struct => Some(environment)
+        case _: p.Type.FnRef            => None
+      }
+      val (name, candidates) = actual match {
+        case environment: p.Type.Struct =>
+          environment.name -> callerDecls.filter(receivesEnvironment(_, environment)).sortBy(_.signatureKey)
+        case p.Type.FnRef(name) => name -> callableIndex.getOrElse(name, Nil)
+      }
       if (candidates.isEmpty)
         errors += s"$path references callable `${name.fqn.mkString(".")}` without a declaration"
       else {
@@ -308,7 +327,10 @@ private[polyregion] object ProgramLinker {
             candidateErrors += s"$path generic callable declarations are not supported yet: ${expected.tpeVars.mkString(", ")}"
           if (candidate.tpeVars.nonEmpty)
             candidateErrors += s"$path callable `${name.fqn.mkString(".")}` is still generic"
-          if (candidate.receiver.nonEmpty || candidate.moduleCaptures.nonEmpty || candidate.termCaptures.nonEmpty)
+          if (
+            (environment.isEmpty && candidate.receiver.nonEmpty) ||
+            candidate.moduleCaptures.nonEmpty || candidate.termCaptures.nonEmpty
+          )
             candidateErrors += s"$path callable `${name.fqn.mkString(".")}` has an unsupported receiver or explicit captures"
           val candidateMatcher = TypeMatcher(decl.tpeVars.map(_.name).toSet, reconcileAliases = true)
           matcher.bindings.foreach { case (variable, value) =>
@@ -323,9 +345,12 @@ private[polyregion] object ProgramLinker {
           candidate -> (candidateMatcher.bindings, candidateErrors.result().distinct)
         }
         attempts.filter(_._2._2.isEmpty) match {
-          case List((_, (bindings, _))) =>
+          case List((candidate, (bindings, _))) =>
             bindings.foreach { case (variable, value) => matcher.bind(variable, value, path, errors += _) }
-            argumentIndex.foreach(index => callableBinds += index -> name)
+            argumentIndex.foreach { index =>
+              callableBinds += index -> candidate.name
+              environment.foreach(environments += index -> _)
+            }
           case Nil =>
             errors += s"$path has no matching declaration for callable `${name.fqn.mkString(".")}`"
             attempts.flatMap(_._2._2).distinct.foreach(errors += _)
@@ -350,7 +375,7 @@ private[polyregion] object ProgramLinker {
     }
     val publicTypes = resolvedTypes.result()
     val distinct    = errors.result().distinct
-    if (distinct.isEmpty) Right(CallMatch(publicTypes, callableBinds)) else Left(distinct)
+    if (distinct.isEmpty) Right(CallMatch(publicTypes, callableBinds, environments)) else Left(distinct)
   }
 
   def matchImplementation(
@@ -565,9 +590,25 @@ private[polyregion] object ProgramLinker {
     val callableVariables = resolution.abi.callables.flatMap { case (name, index) =>
       resolution.call.callables.get(index).map(name -> _)
     }
+    val environmentVariables = resolution.abi.callables.flatMap { case (name, index) =>
+      resolution.call.environments.get(index).map(name -> _)
+    }
     val implementationVariables = resolution.abi.types.map { case (name, tpe) =>
-      val bound = callableVariables.get(name).fold(substitute(tpe, resolution.call.types))(p.Type.FnRef(_))
+      val bound = environmentVariables
+        .get(name)
+        .orElse(callableVariables.get(name).map(p.Type.FnRef(_)))
+        .getOrElse(substitute(tpe, resolution.call.types))
       name -> bound
+    }
+    val statelessCallables = resolution.call.callables -- resolution.call.environments.keySet
+    def bindCallees(function: p.Function, shadowed: Set[String]) = function.modifyAll[p.Expr] {
+      case invoke @ p.Expr.Invoke(p.Type.Var(name, _), _, receiver, _, _)
+          if callableVariables.contains(name) && !shadowed(name) =>
+        invoke.copy(
+          callee = p.Type.FnRef(callableVariables(name)),
+          receiver = receiver.filter(_ => environmentVariables.contains(name))
+        )
+      case expression => expression
     }
     val candidates = pkg.program.functions ::: callerFns
     val byName     = candidates.groupBy(_.name)
@@ -594,26 +635,32 @@ private[polyregion] object ProgramLinker {
             loop(rest, reached + name, out)
           case Some(original) =>
             val isSelectedImplementation = original.decl == resolution.implementation.decl
+            val bound =
+              bindCallees(original, if (isSelectedImplementation) Set.empty else original.tpeVars.map(_.name).toSet)
             val withoutCallables =
-              if (!isSelectedImplementation || !omitCallableArguments) original
+              if (!isSelectedImplementation || !omitCallableArguments) bound
               else {
                 val replacements = original.args.zipWithIndex.flatMap {
                   case (argument, index)
                       if index >= resolution.abi.systemArguments &&
-                        resolution.call.callables.contains(
-                          index - resolution.abi.systemArguments
-                        ) =>
-                    resolution.call.callables
+                        statelessCallables.contains(index - resolution.abi.systemArguments) =>
+                    statelessCallables
                       .get(index - resolution.abi.systemArguments)
                       .map(argument.named.symbol -> p.Type.FnRef(_))
                   case _ => None
                 }.toMap
-                original.visitAll[p.Term] {
+                bound.visitAll[p.Term] {
                   case select @ p.Term.Select(root, steps, _) if replacements.contains(root.symbol) && steps.nonEmpty =>
                     errors += s"callable placeholder `${select.root.symbol}` is projected as a runtime value"
                   case _ => ()
                 }
-                original
+                bound
+                  .modifyAll[p.Expr] {
+                    case p.Expr.RefTo(p.Term.Select(root, Nil, _), None, _, space, _)
+                        if replacements.contains(root.symbol) =>
+                      p.Expr.Alias(p.Term.Poison(p.Type.Ptr(replacements(root.symbol), space)))
+                    case expression => expression
+                  }
                   .modifyAll[p.Term] {
                     case p.Term.Select(root, Nil, _) if replacements.contains(root.symbol) =>
                       p.Term.Poison(replacements(root.symbol))
@@ -623,8 +670,7 @@ private[polyregion] object ProgramLinker {
                     decl = original.decl.copy(args = original.args.zipWithIndex.collect {
                       case (argument, index)
                           if index < resolution.abi.systemArguments ||
-                            !resolution.call.callables
-                              .contains(index - resolution.abi.systemArguments) =>
+                            !statelessCallables.contains(index - resolution.abi.systemArguments) =>
                         argument
                     }),
                     implements = None,
@@ -690,19 +736,29 @@ private[polyregion] object ProgramLinker {
   private def materializeEntry(
       name: String,
       resolution: ImplementationResolution,
-      typeSizes: Map[p.Type, Int]
+      typeSizes: Map[p.Type, Int],
+      definitions: List[p.StructDef]
   ): Either[List[String], p.Function] = {
     val errors         = List.newBuilder[String]
     val publicDecl     = resolution.publicDeclaration
     val implementation = resolution.implementation.decl
-    val concreteTypes  = publicDecl.args.map(arg => substitute(arg.named.tpe, resolution.call.types))
-    val entryArgs      = mutable.ListBuffer.empty[p.Arg]
-    val body           = mutable.ListBuffer.empty[p.Stmt]
-    val downloads      = mutable.ListBuffer.empty[p.Stmt]
-    val allocations    = mutable.ListBuffer.empty[(p.Stmt, List[p.Stmt], p.Stmt)]
-    val invokeArgs     = mutable.ListBuffer.empty[p.Term]
-    val sourceArgs     = mutable.Map.empty[Int, p.Named]
-    val scalarValues   = mutable.Map.empty[Int, p.Named]
+    val concreteTypes = publicDecl.args.zipWithIndex.map { (arg, index) =>
+      resolution.call.environments.getOrElse(index, substitute(arg.named.tpe, resolution.call.types))
+    }
+    val omitted      = resolution.call.callables.keySet -- resolution.call.environments.keySet
+    val entryArgs    = mutable.ListBuffer.empty[p.Arg]
+    val body         = mutable.ListBuffer.empty[p.Stmt]
+    val downloads    = mutable.ListBuffer.empty[p.Stmt]
+    val allocations  = mutable.ListBuffer.empty[(p.Stmt, List[p.Stmt], p.Stmt)]
+    val invokeArgs   = mutable.ListBuffer.empty[p.Term]
+    val sourceArgs   = mutable.Map.empty[Int, p.Named]
+    val scalarValues = mutable.Map.empty[Int, p.Named]
+    val walk         = MirrorWalk(p.Program(None, Nil, definitions))
+    val mirrored = resolution.call.environments.toList.sortBy(_._1).flatMap {
+      case (index, environment: p.Type.Struct) if walk.hasPointers(environment.name, Set.empty) =>
+        walk.structDefOf(environment.name).map(index -> _)
+      case _ => None
+    }
 
     def select(named: p.Named): p.Term.Select           = p.Term.Select(named, Nil, named.tpe)
     def spec(op: p.Spec): p.Expr                        = p.Expr.SpecOp(op)
@@ -715,7 +771,7 @@ private[polyregion] object ProgramLinker {
     entryArgs += p.Arg(context)
     if (resolution.abi.systemArguments != 0) invokeArgs += select(context)
     publicDecl.args.indices.foreach { index =>
-      if (!resolution.call.callables.contains(index)) {
+      if (!omitted.contains(index)) {
         val concrete = concreteTypes(index)
         val abiType = concrete match {
           case _: p.Type.Ptr => concrete
@@ -727,10 +783,24 @@ private[polyregion] object ProgramLinker {
       }
     }
     publicDecl.args.indices.foreach { index =>
-      if (!resolution.call.callables.contains(index) && !concreteTypes(index).isInstanceOf[p.Type.Ptr]) {
+      if (!omitted.contains(index) && !concreteTypes(index).isInstanceOf[p.Type.Ptr]) {
         val concrete = concreteTypes(index)
         val named    = p.Named(s"v$index", concrete)
-        immutable(named, p.Expr.Index(select(sourceArgs(index)), p.Term.IntS32Const(0), concrete))
+        val load     = p.Expr.Index(select(sourceArgs(index)), p.Term.IntS32Const(0), concrete)
+        mirrored.toMap.get(index) match {
+          case Some(definition) =>
+            body += p.Stmt.Var(named, Some(load), isMutable = true)
+            body ++= walk.mirror(
+              MirrorTarget.Local(named, Nil),
+              sourceArgs(index),
+              Nil,
+              definition,
+              concrete,
+              s"e$index",
+              Set(definition.name)
+            )
+          case None => immutable(named, load)
+        }
         scalarValues(index) = named
       }
     }
@@ -768,7 +838,7 @@ private[polyregion] object ProgramLinker {
     }
 
     publicDecl.args.indices.foreach { index =>
-      if (!resolution.call.callables.contains(index)) {
+      if (!omitted.contains(index)) {
         concreteTypes(index) match {
           case pointer: p.Type.Ptr =>
             publicDecl.args(index).boundary match {
@@ -854,9 +924,9 @@ private[polyregion] object ProgramLinker {
               val callable = for {
                 index  <- resolution.abi.callables.get(variable.name)
                 symbol <- resolution.call.callables.get(index)
-              } yield symbol
+              } yield resolution.call.environments.getOrElse(index, p.Type.FnRef(symbol))
               callable match {
-                case Some(symbol) => List(p.Type.FnRef(symbol))
+                case Some(bound) => List(bound)
                 case None =>
                   errors += s"callable type variable `${variable.name}` has no resolved function"
                   Nil
@@ -885,6 +955,15 @@ private[polyregion] object ProgramLinker {
         invokeBody += p.Stmt.Var(callResult, Some(invoke), isMutable = false)
         invokeBody += p.Stmt.Update(select(result.get), p.Term.IntS32Const(0), select(callResult))
       case _ => invokeBody += p.Stmt.Var(p.Named("invoke", invokeResult), Some(invoke), isMutable = true)
+    }
+    if (mirrored.nonEmpty)
+      invokeBody += p.Stmt.Var(
+        p.Named("#visitClear", p.Type.Unit0),
+        Some(p.Expr.ForeignCall(p.Conventions.RuntimeAbi.SmaVisitClear, Nil, p.Type.Unit0)),
+        isMutable = true
+      )
+    mirrored.foreach { case (index, definition) =>
+      invokeBody ++= walk.readback(sourceArgs(index), Nil, definition, s"e$index", Set(definition.name))
     }
     val guarded = allocations.foldRight(invokeBody.result() ::: downloads.toList) {
       case ((acquire, setup, cleanup), nested) =>
@@ -942,7 +1021,7 @@ private[polyregion] object ProgramLinker {
         )
         closure     <- implementationClosure(pkg, resolution, callerFns)
         definitions <- resolvedStructClosure(pkg, closure, callerDefs)
-        entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
+        entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions)
       } yield p.Program(Some(entry), closure, definitions)
     }
   }

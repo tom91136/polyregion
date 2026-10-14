@@ -27,6 +27,7 @@ target_sources(polycommon-generated
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/generated
         FILES
         generated/polyregion/conventions.h
+        generated/polyregion/core.hpp
         generated/polyregion/enums.h
 )
 target_link_libraries(polycommon INTERFACE Aspartame::Aspartame polycommon-generated)

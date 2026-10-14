@@ -63,8 +63,15 @@ constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> ReplaceMap[]{
     {msvc_abi::OperatorDeleteArraySized, "operator_delete_sized"}, // operator delete[](void*, size_t)
 };
 
+// recorded allocations may be page-guarded; these touch them from libc or the kernel, where no fault reaches polyrt
+constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> RecordOnlyReplaceMap[]{
+    {"realloc", "realloc"}, {"read", "read"},   {"write", "write"},   {"pread", "pread"},
+    {"pwrite", "pwrite"},   {"fread", "fread"}, {"fwrite", "fwrite"},
+};
+
 bool runSplice(llvm::Module &M, const llvm::StringRef tag, const llvm::StringRef targetPrefix, const bool verbose) {
   llvm::SmallDenseMap<llvm::StringRef, llvm::StringRef> AllocReplacements(std::cbegin(ReplaceMap), std::cend(ReplaceMap));
+  if (targetPrefix == "polyrt_record_") AllocReplacements.insert(std::cbegin(RecordOnlyReplaceMap), std::cend(RecordOnlyReplaceMap));
   std::string recordNewName;
   if (targetPrefix == "polyrt_record_")
     for (auto &F : M) {

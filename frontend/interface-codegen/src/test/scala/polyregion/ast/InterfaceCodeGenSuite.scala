@@ -65,7 +65,11 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assertEquals(sc, golden("ExampleInterface.scala"))
 
     assert(cpp.contains("template <class T, class U, class Op> //"))
-    assert(cpp.contains("POLYREGION_EXAMPLE_ANNOTATE(\"polyregion_interface:example:example.transform\") //"))
+    assert(
+      cpp.contains(
+        "POLYREGION_EXAMPLE_ANNOTATE(\"polyregion_interface:example:example.transform\") POLYREGION_EXAMPLE_FALLBACK //"
+      )
+    )
     assert(cpp.contains("inline void transform(const T *in, U *out, std::int32_t n, Op op)"))
     assert(cpp.contains("POLYREGION_EXAMPLE_IMPLEMENT(count, in, n);"))
     assert(cpp.contains("POLYREGION_EXAMPLE_IMPLEMENT(transform, in, out, n, op);"))
@@ -243,6 +247,24 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
 
     assertEquals(cpp, golden("example-array.hpp"))
     assert(cpp.contains("inline void array(std::int32_t (&values)[4])"))
+  }
+
+  test("C++ declarations become fallbacks when the includer supplies an implementation") {
+    val cpp = InterfaceCodeGen.cppHeader(interfaceDef)
+
+    assert(
+      cpp.contains(
+        "#ifdef POLYREGION_EXAMPLE_IMPLEMENT\n#define POLYREGION_EXAMPLE_FALLBACK " +
+          "POLYREGION_EXAMPLE_ANNOTATE(\"polyregion_interface_fallback\")\n#else\n#define POLYREGION_EXAMPLE_FALLBACK\n"
+      ),
+      cpp
+    )
+    assert(
+      cpp.contains(
+        "POLYREGION_EXAMPLE_ANNOTATE(\"polyregion_interface:example:example.transform\") POLYREGION_EXAMPLE_FALLBACK //"
+      ),
+      cpp
+    )
   }
 
   test("C++ callables are checked against const lvalue arguments") {

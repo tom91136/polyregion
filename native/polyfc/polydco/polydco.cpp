@@ -28,6 +28,13 @@
 static auto &ptrRecords = *new std::unordered_map<uintptr_t, size_t>();
 static auto &recordsMutex = *new std::mutex();
 
+// only the ELF reflect link wraps the static flang runtime allocator; elsewhere it frees guarded blocks unseen
+#if !defined(_WIN32) && !defined(__APPLE__)
+static constexpr bool runtimeHeapTracked = true;
+#else
+static constexpr bool runtimeHeapTracked = false;
+#endif
+
 using namespace polyregion;
 using polyrt::DebugLevel;
 
@@ -46,12 +53,18 @@ POLYREGION_EXPORT extern "C" int __polyregion_fc_assert_raised() { return g_asse
 static polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto it = ptrRecords.find(reinterpret_cast<uintptr_t>(ptr)); it != ptrRecords.end()) {
-        return polyrt::PtrQuery{.sizeInBytes = it->second, .offsetInBytes = 0};
+        const auto meta = rt_reflect::_rt_reflect_p(ptr);
+        return polyrt::PtrQuery{.sizeInBytes = it->second,
+                                .offsetInBytes = 0,
+                                .heap = runtimeHeapTracked && rt_reflect::isHeap(meta.type) && meta.offset == 0 && meta.size >= it->second};
       }
       // XXX fall through to polyreflect-rt for captures we didn't record locally (libc calloc paths).
       if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{
-            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
+        return polyrt::PtrQuery{.sizeInBytes = meta.size,
+                                .offsetInBytes = meta.offset,
+                                .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata,
+                                .deviceAccessible = polyrt_usm_shared(static_cast<const char *>(ptr) - meta.offset),
+                                .heap = runtimeHeapTracked && rt_reflect::isHeap(meta.type)};
       }
       // XXX Fortran PARAMETER arrays land in .rdata; resolve via the lazy RO-segment scan
       polyrt::ensureRoSegmentsRecorded();
@@ -113,6 +126,31 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release_box(void *box
   ptrRecords.erase(reinterpret_cast<uintptr_t>(box->base_addr));
   allocations.disassociate(box->base_addr, /*releaseRemote*/ false);
 }
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+// --wrap targets: the precompiled flang runtime records, reclaims, and releases like the LTO module
+POLYREGION_EXPORT extern "C" void *__wrap_malloc(const size_t size) { return polyrt_record_malloc(size); }
+POLYREGION_EXPORT extern "C" void *__wrap_realloc(void *ptr, const size_t size) { return polyrt_record_realloc(ptr, size); }
+POLYREGION_EXPORT extern "C" void __wrap_free(void *ptr) { polyrt_record_free(ptr); }
+POLYREGION_EXPORT extern "C" ssize_t __wrap_read(const int fd, void *buffer, const size_t count) {
+  return polyrt_record_read(fd, buffer, count);
+}
+POLYREGION_EXPORT extern "C" ssize_t __wrap_write(const int fd, const void *buffer, const size_t count) {
+  return polyrt_record_write(fd, buffer, count);
+}
+POLYREGION_EXPORT extern "C" ssize_t __wrap_pread(const int fd, void *buffer, const size_t count, const off_t offset) {
+  return polyrt_record_pread(fd, buffer, count, offset);
+}
+POLYREGION_EXPORT extern "C" ssize_t __wrap_pwrite(const int fd, const void *buffer, const size_t count, const off_t offset) {
+  return polyrt_record_pwrite(fd, buffer, count, offset);
+}
+POLYREGION_EXPORT extern "C" size_t __wrap_fread(void *buffer, const size_t size, const size_t count, FILE *stream) {
+  return polyrt_record_fread(buffer, size, count, stream);
+}
+POLYREGION_EXPORT extern "C" size_t __wrap_fwrite(const void *buffer, const size_t size, const size_t count, FILE *stream) {
+  return polyrt_record_fwrite(buffer, size, count, stream);
+}
+#endif
 
 POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_typelayout(const runtime::TypeLayout *layout) {
   layout->print(stderr);
@@ -239,8 +277,8 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
     polyrt::currentQueue->enqueueInvokeAsync(
         moduleId, conventions::EntryName, buffer, //
         Policy{                                   //
-               Dim3{threadsPerBlock, 1, 1},       //
-               blocks > 0 ? std::optional{std::pair{Dim3{blocks, 1, 1}, localMemBytes}} : std::nullopt},
+               Dim3{blocks, 1, 1},                //
+               threadsPerBlock > 0 ? std::optional{std::pair{Dim3{threadsPerBlock, 1, 1}, localMemBytes}} : std::nullopt},
         {});
     polyrt::currentQueue->enqueueWaitBlocking();
     if (asserts) polyrt::reportAssert(polyrt::readAssertBuffer(errDev), g_assert, __func__, moduleId);
@@ -302,7 +340,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   launch(buffer);
 
   if (useGenerated && postlude) postlude(captures, layout->sizeInBytes);
-  else allocations.syncRemoteToLocal(captures);
+  else allocations.syncRemoteToLocalAfterLaunch(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 
   // XXX See polydco_release: keep SVM, drop only host tracking.

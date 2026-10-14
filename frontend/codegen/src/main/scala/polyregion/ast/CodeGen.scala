@@ -442,6 +442,14 @@ private[polyregion] object CodeGen {
     println("Done")
   }
 
+  private def writeCoreInterface(): Unit = {
+    val target = Paths.get("../native/common/generated/polyregion/core.hpp").toAbsolutePath.normalize
+    println(s"Writing the core interface to $target")
+    Files.createDirectories(target.getParent)
+    overwrite(target)(InterfaceCodeGen.cppHeader(Core.interfaceDef))
+    println("Done")
+  }
+
   private def writeEnums(): Unit = {
     val header   = Paths.get("../native/common/generated/polyregion/enums.h").toAbsolutePath.normalize
     val javaBase = Paths.get("binding-jvm/src/main/java/polyregion/jvm").toAbsolutePath.normalize
@@ -506,6 +514,7 @@ private[polyregion] object CodeGen {
       CAbiCodeGen.polyJitExportsList
     )
     writeConventions()
+    writeCoreInterface()
     writeEnums()
     generateJniBindings()
   }

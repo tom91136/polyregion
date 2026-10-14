@@ -449,12 +449,41 @@ object Specialisation extends ProgramPass {
     case other => other
   }
 
-  private def instantiate(fn: p.Function, tpeArgs: List[p.Type], newName: p.Sym): Option[p.Function] =
+  private def bindClosureCallees(fn: p.Function, overloads: Map[p.Sym, List[p.Function]]): p.Function = {
+    lazy val operators = overloads.values.flatten.toList
+      .flatMap { candidate =>
+        candidate.receiver.map(_.named.tpe).collect {
+          case p.Type.Ptr(closure: p.Type.Struct, _) => closure.name -> candidate
+          case closure: p.Type.Struct                => closure.name -> candidate
+        }
+      }
+      .groupMap(_._1)(_._2)
+    fn.modifyAll[p.Expr] {
+      case invoke @ p.Expr.Invoke(closure: p.Type.Struct, _, _, args, _) =>
+        operators.getOrElse(closure.name, Nil).filter(_.args.size == args.size).distinct match {
+          case operator :: Nil => invoke.copy(callee = p.Type.FnRef(operator.name))
+          case _               => invoke
+        }
+      case invoke @ p.Expr.Invoke(_: p.Type.FnRef, _, Some(receiver), _, _) =>
+        receiver.tpe match {
+          case _: p.Type.FnRef | p.Type.Ptr(_: p.Type.FnRef, _) => invoke.copy(receiver = None)
+          case _                                                => invoke
+        }
+      case expression => expression
+    }
+  }
+
+  private def instantiate(
+      fn: p.Function,
+      tpeArgs: List[p.Type],
+      newName: p.Sym,
+      overloads: Map[p.Sym, List[p.Function]]
+  ): Option[p.Function] =
     if (fn.tpeVars.isEmpty) Option.when(tpeArgs.isEmpty)(fn.copy(decl = fn.decl.copy(name = newName)))
     else
       Option.when(fn.tpeVars.size == tpeArgs.size) {
         val tpeLut = fn.tpeVars.map(_.name).zip(tpeArgs).toMap
-        fn
+        val substituted = fn
           .copy(decl = fn.decl.copy(name = newName, tpeVars = Nil))
           .modifyAll[p.Type](protectExecBinders)
           .modifyAll[p.Type] {
@@ -462,6 +491,7 @@ object Specialisation extends ProgramPass {
             case x                       => x
           }
           .modifyAll[p.Type](unprotectExecBinders)
+        bindClosureCallees(substituted, overloads)
       }
 
   private def erasedCallableBindings(callsite: Callsite, fn: p.Function): List[(p.Named, p.Type.FnRef)] =
@@ -553,7 +583,9 @@ object Specialisation extends ProgramPass {
             (fn.signatureKey :: args.map(_.canonicalName)) ::: callables.map(_._2.name.fqcn)
           Option
             .when(fn.tpeVars.nonEmpty || callables.nonEmpty)(())
-            .flatMap(_ => instantiate(fn, args, monomorphicName(fn, args, callables.map(_._2.name), overloads)))
+            .flatMap(_ =>
+              instantiate(fn, args, monomorphicName(fn, args, callables.map(_._2.name), overloads), overloads)
+            )
             .map(materialiseErasedCallables(callsite, _, overloads))
             .map(Candidate(args, fn.signatureKey, identity.mkString("\u0000"), _))
         }

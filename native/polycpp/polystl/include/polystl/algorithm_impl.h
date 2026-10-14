@@ -239,7 +239,17 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   return acc;
 }
 
+template <class Body> void core_for_each(int64_t n, Body body) { parallel_for(n, body); }
+
+template <class T, class Map, class Combine> T core_transform_reduce(int64_t n, T init, Map map, Combine combine) {
+  return parallel_reduce(n, init, map, combine);
+}
+
 } // namespace polyregion::polystl::details
+
+#define POLYREGION_POLYREGION_CORE_IMPLEMENT(function, ...) return ::polyregion::polystl::details::core_##function(__VA_ARGS__)
+#include "polyregion/core.hpp"
+#undef POLYREGION_POLYREGION_CORE_IMPLEMENT
 
 namespace std { // NOLINT(*-dcl58-cpp)
 
@@ -271,54 +281,54 @@ template <typename T> constexpr bool is_execution_policy_v = is_execution_policy
 
 template <class ForwardIt, class UnaryFunction>
 void for_each(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, UnaryFunction f) {
-  polyregion::polystl::details::parallel_for(last - first, [f, first](auto idx) { f(*(first + idx)); });
+  polyregion::core::for_each(last - first, [f, first](int64_t idx) { f(*(first + idx)); });
 }
 
 template <class ForwardIt, class T> void fill(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, const T &value) {
   // XXX `value = value` strips the T& so the capture is by value.
-  polyregion::polystl::details::parallel_for(last - first, [value = value, first](auto idx) { (*(first + idx)) = value; });
+  polyregion::core::for_each(last - first, [value = value, first](int64_t idx) { (*(first + idx)) = value; });
 }
 
 template <class ForwardIt, class Size, class UnaryFunction>
 ForwardIt for_each_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n, UnaryFunction f) {
-  polyregion::polystl::details::parallel_for(static_cast<int64_t>(n), [f, first](auto idx) { f(*(first + idx)); });
+  polyregion::core::for_each(static_cast<int64_t>(n), [f, first](int64_t idx) { f(*(first + idx)); });
   return first + n;
 }
 
 template <class ForwardIt, class Size, class T>
 ForwardIt fill_n(execution::parallel_unsequenced_policy, ForwardIt first, Size n, const T &value) {
   // XXX `value = value` strips the T& so the capture is by value.
-  polyregion::polystl::details::parallel_for(static_cast<int64_t>(n), [value = value, first](auto idx) { (*(first + idx)) = value; });
+  polyregion::core::for_each(static_cast<int64_t>(n), [value = value, first](int64_t idx) { (*(first + idx)) = value; });
   return first + n;
 }
 
 template <class ForwardIt1, class ForwardIt2>
 ForwardIt2 copy(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 d_first) {
-  polyregion::polystl::details::parallel_for(last - first, [d_first, first](auto idx) { (*(d_first + idx)) = (*(first + idx)); });
+  polyregion::core::for_each(last - first, [d_first, first](int64_t idx) { (*(d_first + idx)) = (*(first + idx)); });
   return d_first;
 }
 
 template <class ForwardIt1, class ForwardIt2, class UnaryOperation>
 ForwardIt2 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 d_first,
                      UnaryOperation unary_op) {
-  polyregion::polystl::details::parallel_for(last1 - first1,
-                                             [d_first, first1, unary_op](auto idx) { *(d_first + idx) = unary_op(*(first1 + idx)); });
+  polyregion::core::for_each(last1 - first1, [d_first, first1, unary_op](int64_t idx) { *(d_first + idx) = unary_op(*(first1 + idx)); });
   return d_first;
 }
 
 template <class ForwardIt1, class ForwardIt2, class ForwardIt3, class BinaryOperation>
 ForwardIt3 transform(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, ForwardIt3 d_first,
                      BinaryOperation binary_op) {
-  polyregion::polystl::details::parallel_for(
-      last1 - first1, [d_first, first1, first2, binary_op](auto idx) { (*(d_first + idx)) = binary_op(*(first1 + idx), *(first2 + idx)); });
+  polyregion::core::for_each(last1 - first1, [d_first, first1, first2, binary_op](int64_t idx) {
+    (*(d_first + idx)) = binary_op(*(first1 + idx), *(first2 + idx));
+  });
   return d_first;
 }
 
 template <class ForwardIt1, class ForwardIt2, class T>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
-  return polyregion::polystl::details::parallel_reduce(
+  return polyregion::core::transform_reduce<T>(
       last1 - first1, init, //
-      [first1, first2](auto idx) { return *(first1 + idx) * *(first2 + idx); }, [](auto l, auto r) { return l + r; });
+      [first1, first2](int64_t idx) -> T { return *(first1 + idx) * *(first2 + idx); }, [](T l, T r) -> T { return l + r; });
 }
 
 template <class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp, class BinaryTransformOp>
@@ -326,15 +336,17 @@ T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt1 first1, Fo
                    BinaryReductionOp reduce, BinaryTransformOp transform) {
   // XXX Wrap `reduce` in a by-value lambda; perfect-forwarded references confuse SPIR-V
   // storage-class tracking and IGC emits null pointers.
-  return polyregion::polystl::details::parallel_reduce(
-      last1 - first1, init, [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); },
-      [reduce](auto l, auto r) { return reduce(l, r); });
+  return polyregion::core::transform_reduce<T>(
+      last1 - first1, init, [transform, first1, first2](int64_t idx) -> T { return transform(*(first1 + idx), *(first2 + idx)); },
+      [reduce](T l, T r) -> T { return reduce(l, r); });
 }
 
 template <class ForwardIt, class T, class BinaryReductionOp, class UnaryTransformOp>
 T transform_reduce(execution::parallel_unsequenced_policy, ForwardIt first, ForwardIt last, T init, BinaryReductionOp reduce,
                    UnaryTransformOp transform) {
-  return polyregion::polystl::details::parallel_reduce(last - first, init, transform, [reduce](auto l, auto r) { return reduce(l, r); });
+  return polyregion::core::transform_reduce<T>(
+      last - first, init, [transform, first](int64_t idx) -> T { return transform(*(first + idx)); },
+      [reduce](T l, T r) -> T { return reduce(l, r); });
 }
 
 // Sequential fallbacks for par/seq/unseq when no stdlib <execution> is available.

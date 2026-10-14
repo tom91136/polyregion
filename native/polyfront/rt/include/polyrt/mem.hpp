@@ -7,14 +7,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <map>
+#include <mutex>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "polyregion/env_keys.h"
 #include "polyregion/types.h"
+#include "polyrt/page_guard.hpp"
 
 namespace polyregion::polyrt {
 
@@ -23,6 +28,10 @@ struct PtrQuery {
   size_t offsetInBytes;
   // XXX host page is mprotect'd RO (.rodata); SMA must skip device->host writeback or the copy faults.
   bool hostReadOnly = false;
+  // shared (USM) memory the device dereferences in place; mirroring it would copy what is already reachable
+  bool deviceAccessible = false;
+  // a heap block; only these are page-guarded, stack and static pages are shared with unrelated objects
+  bool heap = false;
 };
 
 template <typename LocalReflect,  //
@@ -40,6 +49,8 @@ class SynchronisedMemAllocation {
   bool debug;
   // Cached allocations are refreshed once per H2D traversal; aliases and cycles reuse that refresh.
   std::unordered_set<uintptr_t> localSyncVisited{};
+  // set while syncing back after a launch, so guardable pointees settle on the device instead of copying back
+  bool afterLaunch = false;
 
   template <typename T> static T readAt(const char *base) {
     T v{};
@@ -110,6 +121,8 @@ class SynchronisedMemAllocation {
     if (char *memberLocalPtr = readPtrValue(hostData + memberOffsetInBytes); !memberLocalPtr) {
       constexpr uintptr_t nullValue = 0;
       remoteWrite(&nullValue, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
+    } else if (localReflect(memberLocalPtr).deviceAccessible) {
+      remoteWrite(&memberLocalPtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else if (const size_t resolvedSizeInBytes = resolvePtrSizeInBytes ? resolvePtrSizeInBytes(hostData + memberOffsetInBytes) : 0;
                resolvedSizeInBytes != 0) {
       const size_t sizeInBytes = std::max(resolvedSizeInBytes, pointeeMinBytes);
@@ -211,6 +224,7 @@ class SynchronisedMemAllocation {
       const size_t requiredSize = staleFloor(l.sizeInBytes * count, hostAllocSizeInBytes);
       const bool stale = eligible && cachedSize < requiredSize;
       if (stale) {
+        reclaim(hostData, /*forWrite*/ true);
         disassociate(hostData);
         if (debug) std::fprintf(stderr, "[SMA]   stale base hit (cached %zu < required %zu), re-mirroring\n", cachedSize, requiredSize);
       } else if (!localSyncVisited.insert(alloc->remote.ptr).second && !alloc->localModified) {
@@ -224,6 +238,10 @@ class SynchronisedMemAllocation {
         // Optimisation can reuse an interior stack slot for a new object. Refresh the cached allocation from its
         // original base and preserve the interior offset returned to the capture, rather than shifting it to the base.
         const char *baseLocalPtr = hostData - offsetInBytes;
+        if (ptrIndirections == 1 && guardAt(reinterpret_cast<uintptr_t>(baseLocalPtr))) {
+          refresh(baseLocalPtr, *alloc);
+          return alloc->remote.ptr + offsetInBytes;
+        }
         const uintptr_t remoteBase =
             ptrIndirections > 1
                 ? writeIndirect(baseLocalPtr, alloc->remote.ptr, ptrIndirections, cachedSize / sizeof(uintptr_t), effLayout, ro)
@@ -312,6 +330,218 @@ public:
   std::unordered_map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
   std::unordered_map<uintptr_t, RangedAllocation> remoteToLocalPtr{};
 
+  // Resident heap blocks keep their device copy across launches. Whole pages of the block are guarded so the first
+  // host access after a launch faults and pulls the device copy back, and the first host write after that marks the
+  // block for upload. The partial pages at either end may share bytes with neighbouring blocks, so they still copy
+  // eagerly on every launch.
+  struct Guard {
+    uintptr_t local, remote, bodyBegin, bodyEnd;
+    size_t sizeInBytes;
+    // arena leaves sit at an offset into the arena, whose base moves when it grows
+    uint64_t remoteOffset = 0;
+    bool arena = false;
+    enum class State : uint8_t { Open, Clean, Stale } state = State::Open;
+    size_t slot = 0;
+  };
+  static constexpr size_t MinGuardPages = 16;
+
+  static bool residencyEnabled() {
+    static const bool enabled = [] {
+      const char *value = std::getenv(env::PolyrtResident);
+      return !(value && std::string_view(value) == "0");
+    }();
+    return enabled;
+  }
+
+  static bool pointerFree(const runtime::TypeLayout *tl) {
+    if (!tl) return true;
+    for (size_t m = 0; m < tl->memberCount; ++m) {
+      const auto &member = tl->members[m];
+      if (member.ptrIndirection > 0 || (member.type && !pointerFree(member.type))) return false;
+    }
+    return true;
+  }
+
+private:
+  std::map<uintptr_t, Guard> guards{};
+  std::recursive_mutex guardMutex{};
+  static inline std::atomic<SynchronisedMemAllocation *> guardOwner{nullptr};
+
+  static guard::Resolution onGuardFault(void *address) {
+    const auto owner = guardOwner.load(std::memory_order_acquire);
+    return owner ? owner->resolveFault(reinterpret_cast<uintptr_t>(address)) : guard::Resolution::Declined;
+  }
+
+  Guard *guardAt(const uintptr_t local) {
+    const auto it = guards.find(local);
+    return it == guards.end() ? nullptr : &it->second;
+  }
+
+  void protectBody(const Guard &g, const guard::Access access) {
+    guard::protect(reinterpret_cast<void *>(g.bodyBegin), g.bodyEnd - g.bodyBegin, access);
+    guard::bump(g.slot);
+  }
+
+  uintptr_t remoteOf(const Guard &g) const { return g.arena ? genArenaDevBase : g.remote; }
+
+  // pull the device copy home without any other thread seeing the body half-filled
+  void publishBody(const Guard &g, const guard::Access access) {
+    const size_t bytes = g.bodyEnd - g.bodyBegin;
+    const uint64_t offset = g.remoteOffset + (g.bodyBegin - g.local);
+    if (guard::publish(reinterpret_cast<void *>(g.bodyBegin), bytes, access,
+                       [&](void *staging) { remoteRead(staging, remoteOf(g), offset, bytes); })) {
+      guard::bump(g.slot);
+      return;
+    }
+    std::fprintf(stderr, "[SMA] cannot publish guarded body [0x%" PRIxPTR ", 0x%" PRIxPTR ")\n", g.bodyBegin, g.bodyEnd);
+    std::abort();
+  }
+
+  void writeBody(const Guard &g) {
+    remoteWrite(reinterpret_cast<const char *>(g.bodyBegin), remoteOf(g), g.remoteOffset + (g.bodyBegin - g.local),
+                g.bodyEnd - g.bodyBegin);
+  }
+
+  void copyEnds(const Guard &g, const bool toRemote) {
+    const size_t head = g.bodyBegin - g.local, tailOffset = g.bodyEnd - g.local, tail = g.sizeInBytes - tailOffset;
+    const auto copy = [&](const size_t offset, const size_t size) {
+      if (size == 0) return;
+      if (toRemote) remoteWrite(reinterpret_cast<const char *>(g.local) + offset, remoteOf(g), g.remoteOffset + offset, size);
+      else remoteRead(reinterpret_cast<char *>(g.local) + offset, remoteOf(g), g.remoteOffset + offset, size);
+    };
+    copy(0, head);
+    copy(tailOffset, tail);
+  }
+
+  // an existing guard on `local`, or a new one when the block spans enough whole heap pages to be worth it
+  Guard *guardFor(const char *local, const size_t sizeInBytes, const uintptr_t remote, const uint64_t remoteOffset, const bool arena) {
+    const auto base = reinterpret_cast<uintptr_t>(local);
+    if (Guard *g = guardAt(base)) return g;
+    if (!residencyEnabled()) return nullptr;
+    if (!guard::AtomicPublish) return nullptr;
+    const PtrQuery meta = localReflect(local);
+    const size_t page = guard::pageSize();
+    const size_t size = std::min(sizeInBytes, meta.sizeInBytes);
+    // the allocator writes its own links into the first bytes on free, so the first page is never guarded
+    const uintptr_t begin = (base + page) / page * page, end = (base + size) / page * page;
+    if (!meta.heap || meta.offsetInBytes != 0 || end <= begin || end - begin < MinGuardPages * page) return nullptr;
+    SynchronisedMemAllocation *expected = nullptr;
+    if (!guardOwner.compare_exchange_strong(expected, this, std::memory_order_acq_rel) && expected != this) return nullptr;
+    const auto slot = guard::track(begin, end);
+    if (!slot) return nullptr;
+    Guard &g = guards.emplace(base, Guard{base, remote, begin, end, size, remoteOffset, arena}).first->second;
+    g.slot = *slot;
+    return &g;
+  }
+
+  std::map<uintptr_t, Guard>::iterator dropGuard(const std::map<uintptr_t, Guard>::iterator it) {
+    protectBody(it->second, guard::Access::ReadWrite);
+    guard::untrack(it->second.slot);
+    return guards.erase(it);
+  }
+
+  // the device may have written the block: its copy is authoritative until the host touches it
+  void markStale(Guard &g) {
+    guard::install(&onGuardFault);
+    copyEnds(g, /*toRemote*/ false);
+    if (g.state != Guard::State::Stale) protectBody(g, guard::Access::None);
+    g.state = Guard::State::Stale;
+  }
+
+  // the device only read the block: host and device agree, so watch for the next host write
+  void markClean(Guard &g) {
+    guard::install(&onGuardFault);
+    if (g.state == Guard::State::Open) protectBody(g, guard::Access::Read);
+    if (g.state != Guard::State::Stale) g.state = Guard::State::Clean;
+  }
+
+  guard::Resolution resolveFault(const uintptr_t address) {
+    const std::lock_guard lock(guardMutex);
+    auto it = guards.upper_bound(address);
+    if (it == guards.begin()) return guard::Resolution::Gone;
+    auto &g = std::prev(it)->second;
+    if (address < g.bodyBegin || address >= g.bodyEnd) return guard::Resolution::Gone;
+    switch (g.state) {
+      case Guard::State::Stale:
+        publishBody(g, guard::Access::Read);
+        g.state = Guard::State::Clean;
+        return guard::Resolution::Resolved;
+      case Guard::State::Clean:
+        protectBody(g, guard::Access::ReadWrite);
+        g.state = Guard::State::Open;
+        return guard::Resolution::Resolved;
+      // only this registry changes the body's protection, and Open bodies are read-write
+      case Guard::State::Open: return guard::Resolution::Gone;
+    }
+    return guard::Resolution::Declined;
+  }
+
+  bool guardable(const RemoteAllocation &alloc) const {
+    return residencyEnabled() && !alloc.hostReadOnly && !alloc.hasDevicePtrs && pointerFree(alloc.layout);
+  }
+
+  // where a pointer-free block would copy back after a launch: leave the device copy authoritative instead
+  void settle(const char *local, RemoteAllocation &alloc) {
+    const std::lock_guard lock(guardMutex);
+    Guard *g = guardAt(reinterpret_cast<uintptr_t>(local));
+    if (!g && guardable(alloc)) g = guardFor(local, alloc.remote.sizeInBytes, alloc.remote.ptr, 0, /*arena*/ false);
+    if (!g) {
+      remoteRead(const_cast<char *>(local), alloc.remote.ptr, 0, alloc.remote.sizeInBytes);
+      return;
+    }
+    markStale(*g);
+  }
+
+  // where a cached block would upload before a launch: only the parts the host may have changed
+  void refresh(const char *local, RemoteAllocation &alloc) {
+    const std::lock_guard lock(guardMutex);
+    if (Guard *g = guardAt(reinterpret_cast<uintptr_t>(local))) {
+      copyEnds(*g, /*toRemote*/ true);
+      if (g->state == Guard::State::Open) writeBody(*g);
+      return;
+    }
+    remoteWrite(local, alloc.remote.ptr, 0, alloc.remote.sizeInBytes);
+  }
+
+  void unguard(const uintptr_t local) {
+    const std::lock_guard lock(guardMutex);
+    if (const auto it = guards.find(local); it != guards.end()) dropGuard(it);
+  }
+
+public:
+  // host code is about to touch the block outside the fault path (syscalls, realloc, instrumented accesses)
+  void reclaim(const void *p, const bool forWrite) {
+    const std::lock_guard lock(guardMutex);
+    auto it = guards.upper_bound(reinterpret_cast<uintptr_t>(p));
+    if (it == guards.begin()) return;
+    auto &g = std::prev(it)->second;
+    if (reinterpret_cast<uintptr_t>(p) >= g.local + g.sizeInBytes) return;
+    if (g.state == Guard::State::Stale) {
+      publishBody(g, forWrite ? guard::Access::ReadWrite : guard::Access::Read);
+      g.state = forWrite ? Guard::State::Open : Guard::State::Clean;
+    }
+    if (forWrite && g.state == Guard::State::Clean) {
+      protectBody(g, guard::Access::ReadWrite);
+      g.state = Guard::State::Open;
+    }
+  }
+
+  void reclaimRange(const void *p, const size_t sizeInBytes, const bool forWrite) {
+    const std::lock_guard lock(guardMutex);
+    const auto begin = reinterpret_cast<uintptr_t>(p), end = begin + sizeInBytes;
+    for (auto it = guards.begin(); it != guards.end(); ++it)
+      if (it->second.local < end && begin < it->second.local + it->second.sizeInBytes)
+        reclaim(reinterpret_cast<const void *>(it->second.local), forWrite);
+  }
+
+  ~SynchronisedMemAllocation() {
+    if (guardOwner.load(std::memory_order_acquire) != this) return;
+    const std::lock_guard lock(guardMutex);
+    for (auto it = guards.begin(); it != guards.end();)
+      it = dropGuard(it);
+    guardOwner.store(nullptr, std::memory_order_release);
+  }
+
   SynchronisedMemAllocation(LocalReflect localReflect, //
                             RemoteAlloc remoteAlloc,   //
                             RemoteRead remoteRead,     //
@@ -349,6 +579,7 @@ public:
     if (debug) std::fprintf(stderr, "[SMA] invalidateLocal(p=%p)\n", p);
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
+      reclaim(static_cast<const char *>(p) - offsetInBytes, /*forWrite*/ true);
       alloc->localModified = true;
       return alloc->remote.ptr + offsetInBytes;
     }
@@ -357,11 +588,29 @@ public:
 
   std::unordered_set<uintptr_t> syncVisited{};
 
+  void syncRemoteToLocalAfterLaunch(void *p) {
+    afterLaunch = true;
+    syncRemoteToLocal(p);
+    afterLaunch = false;
+  }
+
   std::optional<uintptr_t> syncRemoteToLocal(void *p, const std::optional<size_t> &sizeInByte = {}) {
     if (const auto query = queryLocal(p)) {
       const auto [alloc, offsetInBytes] = *query;
       // A mapped host write is authoritative until the next upload. Do not restore the older remote snapshot.
       if (alloc->localModified) return alloc->remote.ptr + offsetInBytes;
+      // a layout-less runtime mirror is an array of pointers, which must be translated back rather than copied
+      if (alloc->layout && pointerFree(alloc->layout) && !alloc->hasDevicePtrs && !alloc->hostReadOnly) {
+        const char *base = static_cast<const char *>(p) - offsetInBytes;
+        if (afterLaunch && !syncVisited.empty()) {
+          if (syncVisited.insert(alloc->remote.ptr).second) settle(base, *alloc);
+          return alloc->remote.ptr + offsetInBytes;
+        }
+        if (!afterLaunch && guardAt(reinterpret_cast<uintptr_t>(base))) {
+          reclaim(base, /*forWrite*/ false);
+          return alloc->remote.ptr + offsetInBytes;
+        }
+      }
       // cycle break for circular structures (a list node's `prev` -> the sentinel embedded in the kernel
       // struct we are already walking); the top-level call clears the set on exit so later calls start fresh
       const bool topLevel = syncVisited.empty();
@@ -424,10 +673,18 @@ public:
       if (debug)
         std::fprintf(stderr, "[SMA] disassociate(host=0x%" PRIxPTR ", remote=%" PRIxPTR ", size=%zu, releaseRemote=%d)\n", it->first,
                      it->second.remote.ptr, it->second.remote.sizeInBytes, releaseRemote);
+      unguard(it->first);
       if (releaseRemote) remoteRelease(it->second.remote.ptr);
       remoteToLocalPtr.erase(it->second.remote.ptr);
       localToRemoteAlloc.erase(it);
     }
+  }
+
+  // the host block at `p` is going away: drop whatever mirrors it
+  void forget(const void *p, const bool releaseRemote = true) {
+    unguard(reinterpret_cast<uintptr_t>(p));
+    genArenaForget(p);
+    disassociateExact(p, releaseRemote);
   }
 
   void disassociateExact(const void *p, const bool releaseRemote = true) {
@@ -436,6 +693,7 @@ public:
     if (debug)
       std::fprintf(stderr, "[SMA] disassociateExact(host=0x%" PRIxPTR ", remote=%" PRIxPTR ", size=%zu)\n", it->first,
                    it->second.remote.ptr, it->second.remote.sizeInBytes);
+    unguard(it->first);
     if (releaseRemote) remoteRelease(it->second.remote.ptr);
     remoteToLocalPtr.erase(it->second.remote.ptr);
     localToRemoteAlloc.erase(it);
@@ -475,6 +733,7 @@ public:
 
   std::optional<std::pair<uintptr_t, size_t>> ensureMirroredBase(const void *local, size_t minSize) {
     const PtrQuery meta = localReflect(local);
+    if (meta.deviceAccessible) return std::nullopt;
     const auto query = queryLocal(local, /*allowPastEnd*/ true);
     const bool cacheHit = query && !pastEndAliasOfDistinct(local, query);
     const size_t sz = meta.sizeInBytes == 0 ? 0 : staleFloor(meta.sizeInBytes, minSize);
@@ -483,11 +742,12 @@ public:
         auto *alloc = query->first;
         if (localSyncVisited.insert(alloc->remote.ptr).second || alloc->localModified) {
           const auto *base = static_cast<const char *>(local) - query->second;
-          remoteWrite(base, alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
+          refresh(base, *alloc);
           alloc->localModified = false;
         }
         return std::pair{alloc->remote.ptr, query->second};
       }
+      reclaim(local, /*forWrite*/ true);
       disassociate(local);
     }
     if (sz == 0) return std::nullopt;
@@ -546,7 +806,8 @@ public:
       // them. pure raw data has none - MSVC over-aligns big std::vector, so read its interior data pointer back
       if (offset != 0 && (alloc->layout || alloc->hasDevicePtrs)) return;
       const char *base = static_cast<const char *>(local) - offset;
-      remoteRead(const_cast<char *>(base), alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
+      if (pointerFree(alloc->layout) && !alloc->hasDevicePtrs) settle(base, *alloc);
+      else remoteRead(const_cast<char *>(base), alloc->remote.ptr, 0, alloc->remote.sizeInBytes);
     }
   }
 
@@ -621,31 +882,37 @@ public:
     uint64_t off;
     size_t count, indirection, size;
     const runtime::TypeLayout *l;
-    bool readOnly;            // a const input the device cannot have written; never copy it back (would corrupt it)
-    bool hostDirty = false;   // persist mode: host wrote this leaf since the last upload, so re-send it
-    bool deviceDirty = false; // persist mode: a kernel wrote this leaf; the host copy is stale until map_read
+    bool readOnly;         // a const input the device cannot have written; never copy it back (would corrupt it)
+    bool resident = false; // kept at a stable offset across launches, page-guarded; others are re-laid every launch
   };
   std::vector<GenArenaRec> genArenaRecs{};
 
-  // persist mode: captured leaves stay resident across launches at stable offsets so only the capture root
-  // (re-laid each launch) and host-dirtied/new leaves re-upload, and a kernel's output flows to the next
-  // kernel on-device. the capture sits in a reserved [0, CAP) prefix (so the kernel still reads root at 0 and
-  // leaf offsets never shift); a bigger root grows CAP and re-lays the union. correct for deep graphs too -
-  // a leaf's inner pointer holds the pointee's absolute (stable) offset
-  bool genArenaPersist = std::getenv(env::PolyrtArenaPersist) != nullptr;
+  // persist mode: page-guardable leaves stay resident across launches at stable offsets, so a kernel's output
+  // flows to the next kernel on-device and only what the host touched moves; everything else (the capture
+  // root, stack and pointer-bearing leaves) is re-laid and copied every launch. the capture sits in a reserved
+  // [0, CAP) prefix (so the kernel still reads root at 0 and leaf offsets never shift); a bigger root grows CAP
+  // and re-lays the union
+  bool genArenaPersist = residencyEnabled();
   bool genArenaSeenRoot = false;                              // first mirror call of the launch is the capture root
   size_t genArenaCaptureCap = 0;                              // reserved capture-region size; leaves bump-allocate above it
-  std::vector<std::pair<uint64_t, size_t>> genArenaUploads{}; // regions to H2D this launch (capture + dirty/new leaves)
-  std::vector<uint64_t> genArenaTouched{};                    // leaf offsets this kernel reached, marked device-dirty after the launch
+  size_t genArenaResidentEnd = 0;                             // staging is truncated back to here between launches
+  std::vector<std::pair<uint64_t, size_t>> genArenaUploads{}; // staging regions to H2D this launch (capture + new leaves)
+  // host regions of resident leaves to H2D this launch, applied after any arena growth
+  std::vector<std::tuple<const char *, uint64_t, size_t>> genArenaHostUploads{};
+  std::vector<uint64_t> genArenaTouched{}; // leaf offsets this kernel reached
 
   void genArenaReset() {
     genArenaUploads.clear();
+    genArenaHostUploads.clear();
     genArenaTouched.clear();
     genArenaSeenRoot = false;
     if (genArenaPersist && genArenaCaptureCap) {
-      // keep resident leaves; drop only the transient root rec (off 0)
-      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](const auto &r) { return r.off == 0; }),
+      // keep resident leaves; the root and transient leaves are re-laid next launch
+      for (const auto &r : genArenaRecs)
+        if (!r.resident && r.off != 0) genArenaOffsetOf.erase(reinterpret_cast<uintptr_t>(r.host));
+      genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(), [](const auto &r) { return r.off == 0 || !r.resident; }),
                          genArenaRecs.end());
+      genArenaStaging.resize(std::max(genArenaCaptureCap, genArenaResidentEnd));
       return;
     }
     genArenaStaging.clear();
@@ -653,16 +920,6 @@ public:
     genArenaRecs.clear();
   }
 
-  // find the resident leaf a host pointer falls in; drives map_read/map_write dirty tracking in persist mode
-  GenArenaRec *genArenaRecOf(const void *p) {
-    const auto a = reinterpret_cast<const char *>(p);
-    for (auto &r : genArenaRecs)
-      if (r.off != 0 && a >= r.host && a < r.host + r.size) return &r;
-    return nullptr;
-  }
-
-  // patch the pointer at host `hostBase+hostOff` (already copied into the arena at `arenaPtrOff`) to its
-  // pointee's arena offset, recursing the pointee
   void genArenaPatch(const char *hostBase, const size_t hostOff, const uint64_t arenaPtrOff, const size_t indirection,
                      const size_t componentSize, const size_t pointeeMinBytes, const runtime::TypeLayout &tl,
                      const runtime::AggregateMember::ResolvePtrSize resolve, const bool readOnly) {
@@ -670,9 +927,10 @@ public:
     if (const char *target = readPtrValue(hostBase + hostOff); target) {
       // interior pointer into an already-mirrored object (e.g. an SSO string's `_M_p` -> its own
       // `_M_local_buf`): point at that object's interior, don't re-mirror or fall to arenaNull
-      for (const auto &r : genArenaRecs)
+      for (auto &r : genArenaRecs)
         if (target >= r.host && target < r.host + r.size) {
           childOff = r.off + (target - r.host);
+          if (genArenaPersist && r.off != 0) touchArenaLeaf(r, readOnly);
           break;
         }
       if (childOff != arenaNull) {
@@ -738,10 +996,12 @@ public:
       if (!genArenaSeenRoot) { // the capture root: re-laid at offset 0 each launch, never persisted/deduped
         genArenaSeenRoot = true;
         if (allocSize > genArenaCaptureCap) { // grow the reserved prefix and re-lay the whole union below it
+          releaseArenaGuards();
           genArenaCaptureCap = (allocSize + 255) & ~size_t(255);
           genArenaStaging.assign(genArenaCaptureCap, 0);
           genArenaOffsetOf.clear();
           genArenaRecs.clear();
+          genArenaResidentEnd = 0;
           genArenaDevValid = 0; // layout changed: the resident device image is stale, force a full re-upload
         } else if (genArenaStaging.size() < genArenaCaptureCap) genArenaStaging.assign(genArenaCaptureCap, 0);
         std::memcpy(genArenaStaging.data(), hostData, allocSize);
@@ -755,17 +1015,11 @@ public:
         else genArenaWalk(hostData, 0, 0, count, l, readOnly);
         return 0;
       }
-      // a resident leaf: the device copy is current (kernel-to-kernel flow); re-send only if the host dirtied it
+      // seen before: a resident leaf from an earlier launch, or this launch's own copy of a transient one
       if (const auto it = genArenaOffsetOf.find(reinterpret_cast<uintptr_t>(hostData)); it != genArenaOffsetOf.end()) {
-        const uint64_t off = it->second;
-        genArenaTouched.push_back(off);
         for (auto &r : genArenaRecs)
-          if (r.off == off && r.hostDirty) {
-            std::memcpy(genArenaStaging.data() + off, hostData, r.size);
-            genArenaUploads.emplace_back(off, r.size);
-            r.hostDirty = false;
-          }
-        return off;
+          if (r.off == it->second) touchArenaLeaf(r, readOnly);
+        return it->second;
       }
       // new leaf: fall through to bump-allocate above the capture region, then schedule its upload + touch
     } else if (const auto it = genArenaOffsetOf.find(reinterpret_cast<uintptr_t>(hostData)); it != genArenaOffsetOf.end())
@@ -777,10 +1031,12 @@ public:
     if (const size_t pad = (align - genArenaStaging.size() % align) % align; pad) genArenaStaging.resize(genArenaStaging.size() + pad);
     const uint64_t off = genArenaStaging.size();
     genArenaOffsetOf[reinterpret_cast<uintptr_t>(hostData)] = off;
-    genArenaRecs.push_back({hostData, off, count, indirection, allocSize, &l, readOnly});
+    const bool resident = genArenaPersist && indirection == 1 && pointerFree(&l) && arenaGuardable(hostData, allocSize);
+    genArenaRecs.push_back({hostData, off, count, indirection, allocSize, &l, readOnly, resident});
     genArenaStaging.insert(genArenaStaging.end(), hostData, hostData + allocSize);
     // pad before any child object is appended, so this object's over-read lands in its own zeroed slack
     if (genArenaObjectSlack) genArenaStaging.resize(genArenaStaging.size() + genArenaObjectSlack);
+    if (resident) genArenaResidentEnd = genArenaStaging.size();
     if (genArenaPersist) {
       genArenaUploads.emplace_back(off, allocSize);
       genArenaTouched.push_back(off);
@@ -812,7 +1068,16 @@ public:
     }
     if (genArenaPersist && genArenaDevValid) {
       // resident leaves are already on-device (just restored if we grew); only the capture + dirty/new leaves
-      for (const auto &[off, sz] : genArenaUploads)
+      // merge regions separated by less than a page: a resident leaf spans whole pages, so no gap that small holds
+      // one whose staging bytes are stale
+      std::sort(genArenaUploads.begin(), genArenaUploads.end());
+      std::vector<std::pair<uint64_t, size_t>> merged;
+      for (const auto &[off, sz] : genArenaUploads) {
+        if (!merged.empty() && off <= merged.back().first + merged.back().second + guard::pageSize())
+          merged.back().second = std::max<size_t>(merged.back().second, off + sz - merged.back().first);
+        else merged.emplace_back(off, sz);
+      }
+      for (const auto &[off, sz] : merged)
         remoteWrite(genArenaStaging.data() + off, genArenaDevBase, off, sz);
       if (debug)
         std::fprintf(stderr, "[SMA] genArenaFinish(persist) -> %zu region(s), %zu bytes resident\n", genArenaUploads.size(),
@@ -822,8 +1087,65 @@ public:
       remoteWrite(genArenaStaging.data(), genArenaDevBase, 0, genArenaStaging.size());
       if (debug) std::fprintf(stderr, "[SMA] genArenaFinish -> %zu bytes\n", genArenaStaging.size());
     }
+    for (const auto &[host, off, sz] : genArenaHostUploads)
+      remoteWrite(host, genArenaDevBase, off, sz);
     genArenaDevValid = genArenaStaging.size();
     return genArenaDevBase;
+  }
+
+  bool arenaGuardable(const char *host, const size_t sizeInBytes) {
+    const PtrQuery meta = localReflect(host);
+    const size_t page = guard::pageSize();
+    const auto base = reinterpret_cast<uintptr_t>(host);
+    const uintptr_t begin = (base + page) / page * page, end = (base + std::min(sizeInBytes, meta.sizeInBytes)) / page * page;
+    return meta.heap && meta.offsetInBytes == 0 && end > begin && end - begin >= MinGuardPages * page;
+  }
+
+  // a leaf this launch reaches; a resident one (heap, so never read-only pages) is writable if any path to it is,
+  // and re-sends what the host changed since the last launch
+  void touchArenaLeaf(GenArenaRec &r, const bool readOnly) {
+    const bool firstTouch = std::find(genArenaTouched.begin(), genArenaTouched.end(), r.off) == genArenaTouched.end();
+    if (firstTouch) genArenaTouched.push_back(r.off);
+    if (!r.resident) return;
+    r.readOnly = firstTouch ? readOnly : r.readOnly && readOnly;
+    if (firstTouch) refreshArenaLeaf(r);
+  }
+
+  // re-send what the host may have changed in a resident leaf since the last launch
+  void refreshArenaLeaf(const GenArenaRec &r) {
+    const std::lock_guard lock(guardMutex);
+    const Guard *g = guardAt(reinterpret_cast<uintptr_t>(r.host));
+    if (!g) {
+      genArenaHostUploads.emplace_back(r.host, r.off, r.size);
+      return;
+    }
+    const size_t head = g->bodyBegin - g->local, tailOffset = g->bodyEnd - g->local;
+    if (head) genArenaHostUploads.emplace_back(r.host, r.off, head);
+    if (r.size > tailOffset) genArenaHostUploads.emplace_back(r.host + tailOffset, r.off + tailOffset, r.size - tailOffset);
+    if (g->state == Guard::State::Open)
+      genArenaHostUploads.emplace_back(reinterpret_cast<const char *>(g->bodyBegin), r.off + head, g->bodyEnd - g->bodyBegin);
+  }
+
+  // the arena is about to be re-laid from host copies: bring every stale resident leaf home and drop its guard
+  void releaseArenaGuards() {
+    const std::lock_guard lock(guardMutex);
+    for (auto it = guards.begin(); it != guards.end();) {
+      if (!it->second.arena) {
+        ++it;
+        continue;
+      }
+      if (it->second.state == Guard::State::Stale) publishBody(it->second, guard::Access::ReadWrite);
+      it = dropGuard(it);
+    }
+  }
+
+  // a resident leaf's host block was freed: forget it so a later block at the same address starts afresh
+  void genArenaForget(const void *p) {
+    const auto host = reinterpret_cast<uintptr_t>(p);
+    if (!genArenaOffsetOf.erase(host)) return;
+    genArenaRecs.erase(std::remove_if(genArenaRecs.begin(), genArenaRecs.end(),
+                                      [&](const auto &r) { return r.off != 0 && reinterpret_cast<uintptr_t>(r.host) == host; }),
+                       genArenaRecs.end());
   }
 
   // inverse of genArenaPatch's interior search: a device arena byte offset -> the host address it mirrors.
@@ -837,15 +1159,22 @@ public:
 
   // translate one device pointer slot (arena offset at `aOff`) back to the host pointer at `hostSlot`, but only
   // when the kernel changed it: a slot left as arenaNull (foreign/sentinel) keeps its valid host pointer
-  void genArenaReadbackPtr(const std::vector<char> &buf, char *hostSlot, const uint64_t aOff) {
-    const uint64_t devOff = readAt<uint64_t>(buf.data() + aOff), origOff = readAt<uint64_t>(genArenaStaging.data() + aOff);
+  // downloaded arena bytes starting at arena offset `base`, so a single record can be read back without the whole arena
+  struct ArenaView {
+    const char *data;
+    uint64_t base;
+    const char *at(const uint64_t off) const { return data + (off - base); }
+  };
+
+  void genArenaReadbackPtr(const ArenaView &buf, char *hostSlot, const uint64_t aOff) {
+    const uint64_t devOff = readAt<uint64_t>(buf.at(aOff)), origOff = readAt<uint64_t>(genArenaStaging.data() + aOff);
     if (devOff != origOff)
       if (const auto host = genArenaHostOf(devOff)) std::memcpy(hostSlot, &*host, sizeof(const char *));
   }
 
   // copy a typed prefix's mutated members from the downloaded arena back to the host, recursing embedded
   // structs; a pointer member holds an arena offset, translated back via genArenaReadbackPtr
-  void genArenaReadbackWalk(const std::vector<char> &buf, char *hostBase, const uint64_t arenaOff, const size_t hostOff, const size_t count,
+  void genArenaReadbackWalk(const ArenaView &buf, char *hostBase, const uint64_t arenaOff, const size_t hostOff, const size_t count,
                             const runtime::TypeLayout &l) {
     for (size_t idx = 0; idx < count; ++idx)
       for (size_t m = 0; m < l.memberCount; ++m) {
@@ -855,12 +1184,12 @@ public:
         const uint64_t aOff = arenaOff + idx * l.sizeInBytes + member.offsetInBytes;
         if (member.ptrIndirection > 0) genArenaReadbackPtr(buf, hostBase + hOff, aOff);
         else if (member.type && member.type->memberCount > 0) genArenaReadbackWalk(buf, hostBase, aOff, hOff, 1, *member.type);
-        else std::memcpy(hostBase + hOff, buf.data() + aOff, member.sizeInBytes);
+        else std::memcpy(hostBase + hOff, buf.at(aOff), member.sizeInBytes);
       }
   }
 
   // scatter one downloaded rec back to its host, translating pointer slots; `buf` must be indexable at r.off
-  void genArenaScatterRec(const std::vector<char> &buf, const GenArenaRec &r) {
+  void genArenaScatterRec(const ArenaView &buf, const GenArenaRec &r) {
     if (r.readOnly) return; // const input: never copy back
     char *host = const_cast<char *>(r.host);
     if (r.indirection > 1) {
@@ -869,67 +1198,63 @@ public:
         genArenaReadbackPtr(buf, host + i * sizeof(uintptr_t), r.off + i * sizeof(uintptr_t));
       return;
     }
-    if (r.l->memberCount == 0) std::memcpy(host, buf.data() + r.off, r.count * r.l->sizeInBytes);
+    if (r.l->memberCount == 0) std::memcpy(host, buf.at(r.off), r.count * r.l->sizeInBytes);
     else genArenaReadbackWalk(buf, host, r.off, 0, r.count, *r.l);
     // a downcast widens the object past its static pointee type (a `_List_node_base*` link reaches a
     // `_List_node<int>` tail beyond the prefix); copy the remainder wholesale, it holds no pointer slot
-    if (const size_t typed = r.count * r.l->sizeInBytes; r.size > typed)
-      std::memcpy(host + typed, buf.data() + r.off + typed, r.size - typed);
+    if (const size_t typed = r.count * r.l->sizeInBytes; r.size > typed) std::memcpy(host + typed, buf.at(r.off + typed), r.size - typed);
   }
 
   void genArenaReadback() {
     if (!genArenaActive || genArenaRecs.empty()) return;
     if (genArenaPersist) {
-      // POLYRT_ARENA_EAGER: diagnostic/conservative - copy this kernel's touched outputs straight back, so
-      // correctness does not depend on map_read coverage (isolates upload bugs from the lazy-readback path)
-      static const bool eager = std::getenv(env::PolyrtArenaEager) != nullptr;
-      if (eager) {
-        std::vector<char> buf(genArenaStaging.size());
-        remoteRead(buf.data(), genArenaDevBase, 0, buf.size());
-        for (const uint64_t off : genArenaTouched)
-          for (const auto &r : genArenaRecs)
-            if (r.off == off) genArenaScatterRec(buf, r);
-        return;
+      // resident leaves stay on-device and fault home on the next host access; the rest copy back now
+      std::vector<const GenArenaRec *> eager;
+      for (const auto &r : genArenaRecs) {
+        if (r.resident) {
+          if (std::find(genArenaTouched.begin(), genArenaTouched.end(), r.off) == genArenaTouched.end()) continue;
+          const std::lock_guard lock(guardMutex);
+          if (Guard *g = guardFor(r.host, r.size, 0, r.off, /*arena*/ true)) {
+            if (r.readOnly) markClean(*g);
+            else markStale(*g);
+            continue;
+          }
+        }
+        if (r.readOnly) continue;
+        eager.push_back(&r);
       }
-      // lazy: the kernel's outputs stay device-resident and flow to the next kernel on-device; just flag them
-      // so a later host read (map_read) pulls the touched leaf home. nothing is copied at the launch boundary
-      for (const uint64_t off : genArenaTouched)
-        for (auto &r : genArenaRecs)
-          if (r.off == off && !r.readOnly) r.deviceDirty = true;
+      // one read for the capture root and one for the span of transient leaves, rather than one per record
+      const auto readSpan = [&](const auto &recs) {
+        if (recs.empty()) return;
+        uint64_t lo = recs.front()->off, hi = 0;
+        for (const auto *r : recs) {
+          lo = std::min(lo, r->off);
+          hi = std::max<uint64_t>(hi, r->off + r->size);
+        }
+        std::vector<char> buf(hi - lo);
+        remoteRead(buf.data(), genArenaDevBase, lo, buf.size());
+        for (const auto *r : recs)
+          genArenaScatterRec(ArenaView{buf.data(), lo}, *r);
+      };
+      std::vector<const GenArenaRec *> root, transient;
+      for (const auto *r : eager)
+        (r->off == 0 ? root : transient).push_back(r);
+      readSpan(root);
+      readSpan(transient);
       return;
     }
     std::vector<char> buf(genArenaStaging.size());
     remoteRead(buf.data(), genArenaDevBase, 0, buf.size());
     for (const auto &r : genArenaRecs)
-      genArenaScatterRec(buf, r);
+      genArenaScatterRec(ArenaView{buf.data(), 0}, r);
   }
 
-  // the host is about to read `p`: pull the device-dirty leaf it falls in back home (the lazy half of persist)
-  void genArenaMapRead(const void *p) {
-    if (!genArenaPersist) return;
-    GenArenaRec *r = genArenaRecOf(p);
-    if (!r || !r->deviceDirty) return;
-    char *host = const_cast<char *>(r->host);
-    if (r->indirection == 1 && r->l->memberCount == 0) remoteRead(host, genArenaDevBase, r->off, r->size); // flat: straight copy
-    else { // deep: needs the arena-indexed buf for pointer-slot translation
-      std::vector<char> buf(r->off + r->size);
-      remoteRead(buf.data() + r->off, genArenaDevBase, r->off, r->size);
-      genArenaScatterRec(buf, *r);
-    }
-    r->deviceDirty = false;
-  }
-
-  // the host is about to write `p`: it becomes authoritative, so re-send its leaf before the next kernel reads it
-  void genArenaMapWrite(const void *p) {
-    if (!genArenaPersist) return;
-    if (GenArenaRec *r = genArenaRecOf(p)) {
-      r->hostDirty = true;
-      r->deviceDirty = false;
-    }
-  }
+  // an instrumented host access: settle it without taking the fault
+  void genArenaMapRead(const void *p) { reclaim(p, /*forWrite*/ false); }
+  void genArenaMapWrite(const void *p) { reclaim(p, /*forWrite*/ true); }
 
   uintptr_t mirrorGraph(const void *root, const size_t *ptrOffsets, const size_t nPtr) {
-    if (!root) return 0;
+    if (!root || localReflect(root).deviceAccessible) return 0;
     std::vector<size_t> offs(ptrOffsets, ptrOffsets + nPtr);
     std::sort(offs.begin(), offs.end()); // read-back aligns origPtrs with this order
     MirroredGraph g{offs, {}, {}, {}};

@@ -1231,4 +1231,113 @@ class SpecialisationSuite extends munit.FunSuite {
 
     assertEquals(selected.collectWhere[p.Term] { case value: p.Term.IntS32Const => value.value }, List(2))
   }
+
+  test("instantiating a callable type parameter with a closure binds its call operator") {
+    val closure      = p.Type.Struct(sym("Offset"), Nil)
+    val operation    = p.Type.Var("F")
+    val receiverType = p.Type.Ptr(operation, p.Type.Space.Global)
+    val self         = named("#this", p.Type.Ptr(closure, p.Type.Space.Global))
+    val call = p.Function(
+      p.FunctionDecl(
+        sym("Offset.call"),
+        Nil,
+        Some(p.Arg(self)),
+        List(arg("x")),
+        Nil,
+        Nil,
+        p.Type.IntS32,
+        p.Function.Affinity.Offload
+      ),
+      List(p.Stmt.Return(select("x"))),
+      p.Function.Visibility.Internal,
+      p.Function.FpMode.Relaxed,
+      p.CallConvention.RegularCall
+    )
+    val callable = named("op", operation)
+    val receiver = named("op_ref", receiverType)
+    val helper = fn(
+      "apply",
+      args = List(p.Arg(callable), arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(
+        p.Stmt.Var(
+          receiver,
+          Some(p.Expr.RefTo(selectT(callable), None, operation, p.Type.Space.Global, p.Region.Rooted(callable)))
+        ),
+        p.Stmt.Return(
+          p.Expr.Invoke(operation, Nil, Some(selectT(receiver)), List(selectT(named("x"))), p.Type.IntS32)
+        )
+      ),
+      tpeVars = List("F")
+    )
+    val environment = named("environment", closure)
+    val e = entry(
+      args = List(p.Arg(environment)),
+      body = List(
+        p.Stmt.Var(
+          named("r"),
+          Some(
+            p.Expr.Invoke(
+              p.Type.FnRef(helper.name),
+              List(closure),
+              None,
+              List(selectT(environment), p.Term.IntS32Const(1)),
+              p.Type.IntS32
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val out = Specialisation(
+      program(e, List(helper, call), List(p.StructDef(sym("Offset"), Nil, List(named("k")), Nil))),
+      NoopLog
+    )
+    val callees = out.functions.flatMap(_.collectAll[p.Expr].collect { case invoke: p.Expr.Invoke => invoke.callee })
+    assert(callees.contains(p.Type.FnRef(call.name)), callees)
+  }
+
+  test("instantiating a callable type parameter with a function drops its placeholder receiver") {
+    val operation = p.Type.Var("F")
+    val call      = fn("add_one", args = List(arg("x")), rtn = p.Type.IntS32, body = List(p.Stmt.Return(select("x"))))
+    val callable  = named("op", operation)
+    val receiver  = named("op_ref", p.Type.Ptr(operation, p.Type.Space.Global))
+    val helper = fn(
+      "apply",
+      args = List(p.Arg(callable), arg("x")),
+      rtn = p.Type.IntS32,
+      body = List(
+        p.Stmt.Var(
+          receiver,
+          Some(p.Expr.RefTo(selectT(callable), None, operation, p.Type.Space.Global, p.Region.Rooted(callable)))
+        ),
+        p.Stmt.Return(
+          p.Expr.Invoke(operation, Nil, Some(selectT(receiver)), List(selectT(named("x"))), p.Type.IntS32)
+        )
+      ),
+      tpeVars = List("F")
+    )
+    val e = entry(
+      body = List(
+        p.Stmt.Var(
+          named("r"),
+          Some(
+            p.Expr.Invoke(
+              p.Type.FnRef(helper.name),
+              List(p.Type.FnRef(call.name)),
+              None,
+              List(p.Term.Poison(p.Type.FnRef(call.name)), p.Term.IntS32Const(1)),
+              p.Type.IntS32
+            )
+          )
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val out = Specialisation(program(e, List(helper, call)), NoopLog)
+    val invokes = out.functions.flatMap(_.collectAll[p.Expr].collect {
+      case invoke @ p.Expr.Invoke(p.Type.FnRef(name), _, _, _, _) if name == call.name => invoke
+    })
+    assert(invokes.nonEmpty && invokes.forall(_.receiver.isEmpty), invokes)
+  }
 }

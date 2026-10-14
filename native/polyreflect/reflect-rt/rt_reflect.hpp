@@ -57,6 +57,11 @@ extern "C" struct PtrMeta {
 
 template <typename E> constexpr std::underlying_type_t<E> to_integral(E e) { return static_cast<std::underlying_type_t<E>>(e); }
 
+constexpr bool isHeap(const Type t) {
+  return t == Type::HeapMalloc || t == Type::HeapCalloc || t == Type::HeapRealloc || t == Type::HeapMemalign || t == Type::HeapAlignedAlloc
+         || t == Type::HeapCXXNew;
+}
+
 constexpr const char *to_string(const Type t) {
   switch (t) {
     case Type::Unknown: return "Unknown";
@@ -83,12 +88,16 @@ extern "C" __declspec(dllimport) PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" __declspec(dllimport) void _rt_record(const void *ptr, size_t size, Type type);
 extern "C" __declspec(dllimport) void _rt_release(void *ptr, Type type);
 extern "C" __declspec(dllimport) void _rt_set_release_cb(void (*cb)(void *));
+extern "C" __declspec(dllimport) void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool));
+extern "C" __declspec(dllimport) void _rt_reclaim(const void *ptr, size_t size, bool forWrite);
   #else
 extern "C" PtrMeta _rt_reflect_p(const void *ptr);
 extern "C" PtrMeta _rt_reflect_v(uintptr_t ptrValue);
 extern "C" void _rt_record(const void *ptr, size_t size, Type type);
 extern "C" void _rt_release(void *ptr, Type type);
 extern "C" void _rt_set_release_cb(void (*cb)(void *));
+extern "C" void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool));
+extern "C" void _rt_reclaim(const void *ptr, size_t size, bool forWrite);
   #endif
 #endif
 
@@ -283,9 +292,22 @@ __RT_ODR inline std::atomic<void (*)(void *)> &_rt_release_cb() {
   return cb;
 }
 
+__RT_ODR inline std::atomic<void (*)(const void *, size_t, bool)> &_rt_reclaim_cb() {
+  static std::atomic<void (*)(const void *, size_t, bool)> cb{nullptr};
+  return cb;
+}
+
 } // namespace details
 
 extern "C" __RT_ODR __RT_EXPORTED void _rt_set_release_cb(void (*cb)(void *)) { details::_rt_release_cb().store(cb); }
+
+extern "C" __RT_ODR __RT_EXPORTED void _rt_set_reclaim_cb(void (*cb)(const void *, size_t, bool)) { details::_rt_reclaim_cb().store(cb); }
+
+// host code outside the fault path (syscalls, realloc) is about to access [ptr, ptr + size)
+extern "C" __RT_ODR __RT_EXPORTED void _rt_reclaim(const void *ptr, const size_t size, const bool forWrite) {
+  if (!ptr || size == 0) return;
+  if (const auto cb = details::_rt_reclaim_cb().load(std::memory_order_relaxed)) cb(ptr, size, forWrite);
+}
 
 extern "C" __RT_ODR __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
   if (!details::serviceInit.load()) return;

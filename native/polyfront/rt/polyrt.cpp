@@ -1033,6 +1033,12 @@ static void sharedFreeTracked(void *p, const polyregion::rt_reflect::Type releas
   else if (owner == UsmOwner::Shared && polyregion::polyrt::currentDevice) polyregion::polyrt::currentDevice->freeShared(p);
 }
 
+POLYREGION_EXPORT extern "C" bool polyrt_usm_shared(const void *base) {
+  std::lock_guard<std::mutex> g(usmAllocMutex());
+  const auto it = usmAllocOwners().find(const_cast<void *>(base));
+  return it != usmAllocOwners().end() && it->second == UsmOwner::Shared;
+}
+
 POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {
   polyregion::polyrt::initialise();
   const auto p = sharedAllocTracked(size, polyregion::rt_reflect::Type::HeapMalloc);
@@ -1083,6 +1089,77 @@ POLYREGION_EXPORT extern "C" void polyrt_record_free(void *ptr) {
   polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapFree);
   __RT_ALTERNATIVE(free)(ptr);
 }
+
+POLYREGION_EXPORT extern "C" void *polyrt_record_realloc(void *ptr, const size_t size) {
+  if (ptr) {
+    polyregion::rt_reflect::_rt_reclaim(ptr, 1, /*forWrite*/ true);
+    polyregion::rt_reflect::_rt_release(ptr, polyregion::rt_reflect::Type::HeapFree);
+  }
+  void *p = __RT_ALTERNATIVE(realloc)(ptr, size);
+  if (p) polyregion::rt_reflect::_rt_record(p, size, polyregion::rt_reflect::Type::HeapRealloc);
+  return p;
+}
+
+// a page-guarded buffer passed to the kernel fails the syscall instead of faulting, so reclaim it first; the
+// libc entry points are looked up by name because the record pass renames every direct reference to them
+template <typename F> static F libcEntry(const char *name) {
+#ifdef _WIN32
+  static const HMODULE crt = GetModuleHandleA("ucrtbase.dll");
+  return reinterpret_cast<F>(GetProcAddress(crt, name));
+#else
+  return reinterpret_cast<F>(dlsym(RTLD_DEFAULT, name));
+#endif
+}
+
+POLYREGION_EXPORT extern "C" size_t polyrt_record_fread(void *buffer, const size_t size, const size_t count, FILE *stream) {
+  static const auto real = libcEntry<size_t (*)(void *, size_t, size_t, FILE *)>("fread");
+  polyregion::rt_reflect::_rt_reclaim(buffer, size * count, /*forWrite*/ true);
+  return real(buffer, size, count, stream);
+}
+
+POLYREGION_EXPORT extern "C" size_t polyrt_record_fwrite(const void *buffer, const size_t size, const size_t count, FILE *stream) {
+  static const auto real = libcEntry<size_t (*)(const void *, size_t, size_t, FILE *)>("fwrite");
+  polyregion::rt_reflect::_rt_reclaim(buffer, size * count, /*forWrite*/ false);
+  return real(buffer, size, count, stream);
+}
+
+#ifdef _WIN32
+POLYREGION_EXPORT extern "C" int polyrt_record_read(const int fd, void *buffer, const unsigned count) {
+  static const auto real = libcEntry<int (*)(int, void *, unsigned)>("_read");
+  polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ true);
+  return real(fd, buffer, count);
+}
+
+POLYREGION_EXPORT extern "C" int polyrt_record_write(const int fd, const void *buffer, const unsigned count) {
+  static const auto real = libcEntry<int (*)(int, const void *, unsigned)>("_write");
+  polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ false);
+  return real(fd, buffer, count);
+}
+#else
+POLYREGION_EXPORT extern "C" ssize_t polyrt_record_read(const int fd, void *buffer, const size_t count) {
+  static const auto real = libcEntry<ssize_t (*)(int, void *, size_t)>("read");
+  polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ true);
+  return real(fd, buffer, count);
+}
+
+POLYREGION_EXPORT extern "C" ssize_t polyrt_record_write(const int fd, const void *buffer, const size_t count) {
+  static const auto real = libcEntry<ssize_t (*)(int, const void *, size_t)>("write");
+  polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ false);
+  return real(fd, buffer, count);
+}
+
+POLYREGION_EXPORT extern "C" ssize_t polyrt_record_pread(const int fd, void *buffer, const size_t count, const off_t offset) {
+  static const auto real = libcEntry<ssize_t (*)(int, void *, size_t, off_t)>("pread");
+  polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ true);
+  return real(fd, buffer, count, offset);
+}
+
+POLYREGION_EXPORT extern "C" ssize_t polyrt_record_pwrite(const int fd, const void *buffer, const size_t count, const off_t offset) {
+  static const auto real = libcEntry<ssize_t (*)(int, const void *, size_t, off_t)>("pwrite");
+  polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ false);
+  return real(fd, buffer, count, offset);
+}
+#endif
 
 POLYREGION_EXPORT extern "C" void *polyrt_record_aligned_alloc(const size_t alignment, const size_t size) {
   void *p = __RT_ALTERNATIVE(memalign)(alignment, size);

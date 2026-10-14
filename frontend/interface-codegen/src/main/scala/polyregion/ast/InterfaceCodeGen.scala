@@ -73,6 +73,8 @@ object InterfaceCodeGen {
       sorted
     }
 
+    val FallbackMarker = "polyregion_interface_fallback"
+
     def marker(interfaceDef: p.Interface, decl: p.FunctionDecl, suffix: Option[String] = None): String =
       (List("polyregion_interface", interfaceDef.name.fqn.mkString("."), decl.name.fqn.mkString(".")) ::: suffix.toList)
         .mkString(":")

@@ -2,10 +2,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <string>
 #include <vector>
+
+#ifndef _WIN32
+  #include <sys/types.h>
+#endif
 
 #include "polyinvoke/runtime.h"
 
@@ -126,6 +131,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_map_readwrite(void *origin, 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_malloc(size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_aligned_alloc(size_t /*alignment*/, size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_free(void *ptr);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_usm_shared(const void *base);
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_usm_operator_new(size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_operator_delete(void *ptr);
@@ -134,6 +140,18 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_usm_operator_delete_sized(vo
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_malloc(size_t size);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_free(void *ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_aligned_alloc(size_t alignment, size_t size);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_realloc(void *ptr, size_t size);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT size_t polyrt_record_fread(void *buffer, size_t size, size_t count, FILE *stream);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT size_t polyrt_record_fwrite(const void *buffer, size_t size, size_t count, FILE *stream);
+#ifdef _WIN32
+POLYREGION_RT_PROTECT POLYREGION_EXPORT int polyrt_record_read(int fd, void *buffer, unsigned count);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT int polyrt_record_write(int fd, const void *buffer, unsigned count);
+#else
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ssize_t polyrt_record_read(int fd, void *buffer, size_t count);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ssize_t polyrt_record_write(int fd, const void *buffer, size_t count);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ssize_t polyrt_record_pread(int fd, void *buffer, size_t count, off_t offset);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT ssize_t polyrt_record_pwrite(int fd, const void *buffer, size_t count, off_t offset);
+#endif
 
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_operator_delete(void *ptr);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_record_operator_delete_sized(void *ptr, size_t size);

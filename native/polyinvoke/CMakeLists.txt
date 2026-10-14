@@ -133,7 +133,7 @@ foreach (TARGET polyinvoke polyinvoke-obj polyinvoke-static)
             ${POLYINVOKE_WRANGLER_INCLUDES}
             ${RUNTIME_INCLUDE_DIRS})
     target_include_directories(${TARGET} SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
-    target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS} _POSIX_C_SOURCE=200809L)
+    target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS} _POSIX_C_SOURCE=200809L $<$<PLATFORM_ID:Darwin>:_DARWIN_C_SOURCE>)
     # XXX vulkan-hpp operator <=> assumes 64-bit handles so force equality-only on aarch32
     if (CMAKE_SIZEOF_VOID_P LESS 8)
         target_compile_definitions(${TARGET} PRIVATE VULKAN_HPP_NO_SPACESHIP_OPERATOR)

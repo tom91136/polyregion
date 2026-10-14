@@ -131,7 +131,14 @@ int main(int argc, const char *argv[]) {
                    switch (opts->mem) {
                      case StdParOptions::MemKind::Direct: break;
                      case StdParOptions::MemKind::Interpose: lateLldFlags(PassInterpose); break;
-                     case StdParOptions::MemKind::Reflect: lateLldFlags(fmt::format("{}+{}", PassRecordAlloc, PassMem)); break;
+                     case StdParOptions::MemKind::Reflect:
+                       lateLldFlags(fmt::format("{}+{}", PassRecordAlloc, PassMem));
+#if !defined(_WIN32) && !defined(__APPLE__)
+                       // the static flang runtime frees and reallocates user arrays outside the LTO module
+                       append({"-Wl,--wrap=malloc,--wrap=realloc,--wrap=free",
+                               "-Wl,--wrap=read,--wrap=write,--wrap=pread,--wrap=pwrite,--wrap=fread,--wrap=fwrite"});
+#endif
+                       break;
                    }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {

@@ -301,20 +301,21 @@ inline Checked<Archive> loadPackageFile(const std::string &path) {
   return detail::decodeArchive(path, std::shared_ptr<const llvm::MemoryBuffer>(std::move(*buffer)));
 }
 
+inline std::vector<std::string> packageFiles(const std::string &packageName, const std::vector<std::string> &roots) {
+  return roots ^ collect([&](const auto &root) -> std::optional<std::string> {
+           llvm::SmallString<256> path(root);
+           llvm::sys::path::append(path, packageName, PackageName);
+           return llvm::sys::fs::is_regular_file(path) ? std::optional(path.str().str()) : std::nullopt;
+         });
+}
+
 inline Checked<Archive> loadPackage(const std::string &packageName, const std::vector<std::string> &roots = packageRoots()) {
   if (!safePathComponent(packageName)) return {{}, {"invalid package identity `" + packageName + "`"}};
-  const auto find = [&] {
-    return roots ^ collect([&](const auto &root) -> std::optional<std::string> {
-             llvm::SmallString<256> path(root);
-             llvm::sys::path::append(path, packageName, PackageName);
-             return llvm::sys::fs::is_regular_file(path) ? std::optional(path.str().str()) : std::nullopt;
-           });
-  };
-  auto found = find();
+  auto found = packageFiles(packageName, roots);
 #ifdef _WIN32
   for (size_t attempt = 1; found.empty() && attempt < 50; ++attempt) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    found = find();
+    found = packageFiles(packageName, roots);
   }
 #endif
   if (found.empty()) return {{}, {"no package is available for library `" + packageName + "`"}};

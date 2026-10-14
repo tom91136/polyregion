@@ -556,9 +556,21 @@ int main(int argc, char **argv) {
       FunctionDecl(applyImplementationName, {Type::Var("Element"), Type::Var("Op")}, {},
                    {Arg(Named("x", element), {}), Arg(Named("op", Type::Var("Op")), {})}, {}, {}, element, FunctionAffinity::Host());
   const auto applyX = NamedBuilder(Named("x", element));
-  const auto applyImplementation =
-      Function(applyImplementationDecl, {ret(Expr::Invoke(Type::Var("Op"), {}, {}, {applyX}, element).widen())},
-               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto callableReceiver = [](const std::string &parameter, const std::string &variable) {
+    const Named callable(parameter, Type::Var(variable));
+    const Named receiver(parameter + "_receiver", Type::Ptr(Type::Var(variable), TypeSpace::Global()));
+    return std::pair{Stmt::Var(receiver,
+                               Expr::RefTo(Term::Select(callable, {}, callable.tpe).widen(), {}, callable.tpe, TypeSpace::Global(),
+                                           Region::Rooted(callable))
+                                   .widen(),
+                               false)
+                         .widen(),
+                     Term::Select(receiver, {}, receiver.tpe).widen()};
+  };
+  const auto [applyReceiverDecl, applyReceiver] = callableReceiver("op", "Op");
+  const auto applyImplementation = Function(
+      applyImplementationDecl, {applyReceiverDecl, ret(Expr::Invoke(Type::Var("Op"), {}, applyReceiver, {applyX}, element).widen())},
+      FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   const auto combineName = Sym({"bar", "combine"});
   const auto combineImplementationName = Sym({"bar", "implementation", "combine"});
   const auto combineDecl =
@@ -569,9 +581,12 @@ int main(int argc, char **argv) {
                    {Arg(Named("x", element), {}), Arg(Named("left", Type::Var("Left")), {}), Arg(Named("right", Type::Var("Right")), {})},
                    {}, {}, element, FunctionAffinity::Host());
   const auto first = NamedBuilder(Named("first", element));
+  const auto [leftReceiverDecl, leftReceiver] = callableReceiver("left", "Left");
+  const auto [rightReceiverDecl, rightReceiver] = callableReceiver("right", "Right");
   const auto combineImplementation = Function(combineImplementationDecl,
-                                              {let("first") = Expr::Invoke(Type::Var("Left"), {}, {}, {applyX}, element).widen(),
-                                               ret(Expr::Invoke(Type::Var("Right"), {}, {}, {first}, element).widen())},
+                                              {leftReceiverDecl, rightReceiverDecl,
+                                               let("first") = Expr::Invoke(Type::Var("Left"), {}, leftReceiver, {applyX}, element).widen(),
+                                               ret(Expr::Invoke(Type::Var("Right"), {}, rightReceiver, {first}, element).widen())},
                                               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   const auto capableName = Sym({"bar", "capable_increment"});
   const auto capableImplementationDecl = implementationDecl.withName(Sym({"bar", "implementation", "capable_increment"}));

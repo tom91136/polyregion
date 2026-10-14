@@ -30,8 +30,11 @@ using polyrt::DebugLevel;
 POLYREGION_RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
-        return polyrt::PtrQuery{
-            .sizeInBytes = meta.size, .offsetInBytes = meta.offset, .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata};
+        return polyrt::PtrQuery{.sizeInBytes = meta.size,
+                                .offsetInBytes = meta.offset,
+                                .hostReadOnly = meta.type == rt_reflect::Type::StaticRodata,
+                                .deviceAccessible = polyrt_usm_shared(static_cast<const char *>(ptr) - meta.offset),
+                                .heap = rt_reflect::isHeap(meta.type)};
       }
       polyrt::ensureRoSegmentsRecorded();
       if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
@@ -161,7 +164,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
   launch(buffer);
   // sync device-side writes to captured pointer-targets back before the device alloc is freed
   if (useGenerated && postlude) postlude(functorData, layout->sizeInBytes);
-  else allocations.syncRemoteToLocal(functorData);
+  else allocations.syncRemoteToLocalAfterLaunch(functorData);
   allocations.disassociate(functorData);
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
 }

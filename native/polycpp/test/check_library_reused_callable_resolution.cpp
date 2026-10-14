@@ -1,7 +1,16 @@
-#pragma region case: stateful-callable-resolution-diagnostic
+#pragma region case: stateful-callable-package
 #pragma region offload-only
-#pragma region compile-fails: stateful library callables are not supported
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DSTATEFUL_CALLABLE -fstdpar-library-path={output}.packages -c -o {output}.o {input}
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DSTATEFUL_CALLABLE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 43
+
+#pragma region case: capturing-lambda-package
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCAPTURING_LAMBDA -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 91
 
 #pragma region case: conflicting-callable-package-diagnostic
 #pragma region offload-only
@@ -32,7 +41,13 @@ struct Add {
   int bias;
   int operator()(int value) const { return value + bias; }
 };
-int main() { return foo::combine(38, Add{2}, Add{2}); }
+int main() { std::printf("%d", foo::combine(38, Add{2}, Add{3})); }
+#elif defined(CAPTURING_LAMBDA)
+int main() {
+  int bias = 5;
+  int scale = 2;
+  std::printf("%d", foo::combine(38, [bias](int value) { return value + bias; }, [&scale](int value) { return value * scale + 5; }));
+}
 #elif defined(CONFLICTING_CALLABLES)
 int main() {
   const auto first = foo::combine(38, &foo::plusOne, &foo::plusOne);

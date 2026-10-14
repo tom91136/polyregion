@@ -10,7 +10,10 @@
 #endif
 
 #pragma push_macro("POLYREGION_EXAMPLE_IMPLEMENT")
-#ifndef POLYREGION_EXAMPLE_IMPLEMENT
+#ifdef POLYREGION_EXAMPLE_IMPLEMENT
+#define POLYREGION_EXAMPLE_FALLBACK POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface_fallback")
+#else
+#define POLYREGION_EXAMPLE_FALLBACK
 #if defined(_MSC_VER) && !defined(__clang__)
 #define POLYREGION_EXAMPLE_IMPLEMENT(function, ...) (__debugbreak(), __assume(0))
 #else
@@ -21,13 +24,13 @@
 namespace example {
 
 template <class T> //
-POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface:example:example.count") //
+POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface:example:example.count") POLYREGION_EXAMPLE_FALLBACK //
 inline std::int32_t count(const T *in, std::int32_t n) {
   POLYREGION_EXAMPLE_IMPLEMENT(count, in, n);
 }
 
 template <class T, class U, class Op> //
-POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface:example:example.transform") //
+POLYREGION_EXAMPLE_ANNOTATE("polyregion_interface:example:example.transform") POLYREGION_EXAMPLE_FALLBACK //
 inline void transform(const T *in, U *out, std::int32_t n, Op op) {
   static_assert(std::is_same_v<std::invoke_result_t<Op &, const T &>, U>, "callable signature mismatch");
   POLYREGION_EXAMPLE_IMPLEMENT(transform, in, out, n, op);
@@ -35,6 +38,7 @@ inline void transform(const T *in, U *out, std::int32_t n, Op op) {
 
 } // namespace example
 
+#undef POLYREGION_EXAMPLE_FALLBACK
 #undef POLYREGION_EXAMPLE_ANNOTATE
 
 #pragma pop_macro("POLYREGION_EXAMPLE_IMPLEMENT")
