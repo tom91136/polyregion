@@ -1,6 +1,7 @@
 #include "rewriter.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <optional>
 #include <unordered_map>
@@ -34,6 +35,7 @@
 
 #include "polyfront/options_backend.hpp"
 #include "polyregion/conventions.h"
+#include "polyregion/program_import.hpp"
 #include "polyregion/types.h"
 
 #include "codegen.h"
@@ -388,6 +390,59 @@ public:
     if (!(opts.targets ^ exists([&](const auto &t, const auto &) { return runtime::targetPlatformKind(t) == kind; }))) return;
     auto B0 = fir::IfOp::create(B, uLoc(B), dco.isPlatformKind(B, kind), false).getThenBodyBuilder();
     f(B0, kind);
+  }
+
+  // lowers the loop to `polyregion.core.for_each` over a closure of its body when the core package implements it
+  bool invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts,
+                  const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core,
+                  std::vector<std::string> &bitcodeFiles) {
+    if (doLoop.getNumResults() != 0 || !doLoop.getReduceOperands().empty()) return false;
+    DataLayout L(M);
+    auto symbol = moduleId;
+    std::replace_if(symbol.begin(), symbol.end(), [](const char c) { return !std::isalnum(static_cast<unsigned char>(c)); }, '_');
+    const auto region = Remapper::createRegion(diagLoc, /*gpu*/ true, M, L, doLoop, polyast::Sym({symbol + "_body"}));
+    const auto captureDef =
+        region.program.defs ^ find([&](const auto &def) { return polyast::fqcn(def.name) == region.captureLayout.name; });
+    if (!captureDef) raise(fmt::format("Capture struct missing for {}", diagLoc));
+    const auto captureType = polyast::Type::Struct(captureDef->name, {}).widen();
+    const auto entryName = fmt::format("__polyregion_package_program_{}", symbol);
+    const auto root = program::importRoot(entryName, polyast::Sym({"polyregion", "core", "for_each"}),
+                                          {polyast::Type::IntS64().widen(), captureType}, polyast::Type::Unit0().widen());
+    const std::vector<polyast::ProgramTypeSize> typeSizes{{polyast::Type::IntS64().widen(), 8},
+                                                          {captureType, static_cast<int32_t>(region.captureLayout.sizeInBytes)}};
+    const auto linked =
+        interface_resolution::linkPackageProgram(opts, core, root, region.program.functions, region.program.defs, typeSizes, bitcodeFiles);
+    if (!linked) {
+      linked.errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
+      return false;
+    }
+    if (!*linked.value) return false;
+
+    Binder binder(B, dco, FReduction, moduleId, region);
+    if (int64_t binderSize = L.getTypeSize(binder.structType()); binderSize != region.captureLayout.sizeInBytes)
+      raise(fmt::format("Capture and binder type size mismatch, expecting {} but binder gave {}", region.captureLayout.sizeInBytes,
+                        binderSize));
+    binder.recordTemporariesAndDependents(B);
+    const auto capture = binder.createCapture(B, M);
+    const auto i64 = i64Ty(B);
+    const auto lowerBound = fir::ConvertOp::create(B, uLoc(B), i64, doLoop.getLowerBound()).getResult();
+    const auto upperBound = fir::ConvertOp::create(B, uLoc(B), i64, doLoop.getUpperBound()).getResult();
+    const auto step = fir::ConvertOp::create(B, uLoc(B), i64, doLoop.getStep()).getResult();
+    const auto span = arith::AddIOp::create(B, uLoc(B), arith::SubIOp::create(B, uLoc(B), upperBound, lowerBound), step).getResult();
+    const auto tripCount =
+        arith::MaxSIOp::create(B, uLoc(B), arith::DivSIOp::create(B, uLoc(B), span, step), intConst(B, i64, 0)).getResult();
+    const std::vector<Value> prelude{lowerBound, upperBound, step, tripCount};
+    for (size_t index = 0; index < prelude.size(); ++index) {
+      const auto slot = LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), B.getI8Type(), capture,
+                                            ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(index * sizeof(int64_t))})
+                            .getRes();
+      LLVM::StoreOp::create(B, uLoc(B), prelude[index], slot);
+    }
+    const auto count = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, 1), B.getI64IntegerAttr(8), i64).getRes();
+    LLVM::StoreOp::create(B, uLoc(B), tripCount, count);
+    interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, **linked.value);
+    binder.releaseTemporaries(B);
+    return true;
   }
 
   void invokeDispatch(OpBuilder &B, Value executeOriginal, const runtime::PlatformKind kind, clang::DiagnosticsEngine &diag,
@@ -1120,6 +1175,15 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
   doRewrite(m);
   OpBuilder B(m);
   Rewriter rewriter(m);
+  const auto roots =
+      opts.libraryPath.empty() ? polyfront::package::packageRoots() : polyfront::package::splitPackageRoots(opts.libraryPath);
+  std::optional<polyfront::package::Archive> core;
+  if (!polyfront::package::packageFiles("polyregion.core", roots).empty()) {
+    auto loaded = polyfront::package::loadPackage("polyregion.core", roots);
+    if (loaded) core = std::move(*loaded.value);
+    else loaded.errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
+  }
+  std::vector<fir::DoLoopOp> lowered;
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
       if (!doLoop.getUnordered() || !doLoop->hasAttr(DoConcurrentAsWritten)) return;
@@ -1146,6 +1210,10 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       // still run the host doLoop instead of silently no-op'ing.
 
       B.setInsertionPoint(doLoop);
+      if (core && rewriter.invokeCore(B, diag, diagLoc, opts, moduleId, doLoop, *core, bitcodeFiles)) {
+        lowered.emplace_back(doLoop);
+        return;
+      }
       auto executeOriginal = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());
       LLVM::StoreOp::create(B, uLoc(B), boolConst(B, true), executeOriginal);
       const auto dispatchKind = [&](OpBuilder &B0, const runtime::PlatformKind kind) {
@@ -1160,4 +1228,6 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       doLoop->moveBefore(&then, then.begin());
     }
   });
+  for (auto doLoop : lowered)
+    doLoop.erase();
 }

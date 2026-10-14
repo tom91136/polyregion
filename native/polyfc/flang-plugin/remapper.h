@@ -90,7 +90,9 @@ struct Remapper {
     std::optional<polyast::StructLayout> reductionLayout;
   };
 
-  static DoConcurrentRegion createRegion(const std::string &name, bool gpu, mlir::ModuleOp &m, mlir::DataLayout &L, fir::DoLoopOp &op);
+  // with `bodyName`, the loop body becomes that closure function over the capture instead of an offload entry
+  static DoConcurrentRegion createRegion(const std::string &name, bool gpu, mlir::ModuleOp &m, mlir::DataLayout &L, fir::DoLoopOp &op,
+                                         const std::optional<polyast::Sym> &bodyName = {});
 };
 
 } // namespace polyregion::polyfc

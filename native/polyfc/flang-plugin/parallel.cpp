@@ -61,6 +61,14 @@ Stmts parallel_ops::SingleVarReduction::applyPartial(const Term::Any &lhs, const
 }
 Stmts parallel_ops::SingleVarReduction::applyPartial(const Term::Any &idx) const { return applyPartial(partialArray, idx); }
 
+Function parallel_ops::coreBody(const Sym &name, const Named &capture, const Named &induction, const Term::Any &lowerBound,
+                                const Term::Any &step, const Stmts &body) {
+  return Function(
+      FunctionDecl(name, {}, Arg(capture, {}), std::vector<Arg>{Arg(Named("#i", Long), {})}, {}, {}, Unit, FunctionAffinity::Host()),
+      splice(mappedInductionStmts(induction, lowerBound, step), body, Stmts{ret()}), FunctionVisibility::Internal(),
+      FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+}
+
 Function parallel_ops::forEach(const std::string &fnName, const Named &capture, const OpParams &params) {
   return params ^ //
          fold_total(

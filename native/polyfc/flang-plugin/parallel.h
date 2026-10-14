@@ -30,6 +30,10 @@ struct GPUParams {
 
 using OpParams = std::variant<CPUParams, GPUParams>;
 
+polyast::Function coreBody(const polyast::Sym &name, const polyast::Named &capture, const polyast::Named &induction,
+                           const polyast::Term::Any &lowerBound, const polyast::Term::Any &step,
+                           const std::vector<polyast::Stmt::Any> &body);
+
 polyast::Function forEach(const std::string &fnName,     //
                           const polyast::Named &capture, //
                           const OpParams &params);

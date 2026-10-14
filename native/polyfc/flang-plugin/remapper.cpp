@@ -1253,7 +1253,7 @@ static polydco::FReduction::Kind mapReductionKind(const fir::ReduceOperationEnum
 }
 
 polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
-    const std::string &name, bool gpu, mlir::ModuleOp &m, mlir::DataLayout &L, fir::DoLoopOp &op) {
+    const std::string &name, bool gpu, mlir::ModuleOp &m, mlir::DataLayout &L, fir::DoLoopOp &op, const std::optional<Sym> &bodyName) {
   using namespace dsl;
   using namespace parallel_ops;
 
@@ -1390,11 +1390,15 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                                                .ends = Select({Capture, Prelude}, Ends),             //
                                                .body = r.stmts}};
 
-  const Function entry = exprWithReductions.empty()             //
-                             ? forEach(fnName, Capture, params) //
-                             : reduce(fnName, Capture, Reduction, params, svrs);
+  if (bodyName && !exprWithReductions.empty()) raise("Reduction operands cannot lower to a polyregion.core body");
+  const auto entry = bodyName                     ? std::optional<Function>{}
+                     : exprWithReductions.empty() ? std::optional{forEach(fnName, Capture, params)}
+                                                  : std::optional{reduce(fnName, Capture, Reduction, params, svrs)};
 
-  const auto allFns = r.functions | concat(r.userFuncs | values()) | to_vector();
+  auto allFns = r.functions | concat(r.userFuncs | values()) | to_vector();
+  if (bodyName)
+    allFns.insert(allFns.begin(), coreBody(*bodyName, Capture, MappedInduction, Select({Capture, Prelude}, LowerBound),
+                                           Select({Capture, Prelude}, Step), r.stmts));
   const Program program(entry, allFns, r.defs | values() | concat(r.syntheticDefs) | to_vector(), PassPhase::Initial(), {});
 
   const auto defLayouts = program.defs ^ map([&](const auto &d) { return r.resolveLayout(d); });
