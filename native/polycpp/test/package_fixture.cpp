@@ -627,6 +627,58 @@ int main(int argc, char **argv) {
        remoteImplementation.withImplements(remoteName), remoteKernel},
       {});
 
+  const auto i64 = Type::IntS64().widen();
+  const auto unit = Type::Unit0().widen();
+  const auto n = NamedBuilder(Named("n", i64));
+  const auto index = Named("i", i64);
+  const auto indexTerm = Term::Select(index, {}, i64).widen();
+  const auto loop = [&](std::vector<Stmt::Any> body) {
+    return Stmt::ForRange(index, Term::IntS64Const(0).widen(), n, Term::IntS64Const(1).widen(), std::move(body)).widen();
+  };
+  const auto forEachName = Sym({"polyregion", "core", "for_each"});
+  const auto forEachDecl =
+      FunctionDecl(forEachName, {}, {}, {Arg(Named("n", i64), {}), Arg(Named("body", Type::Exec({}, {i64}, unit)), {})}, {}, {}, unit,
+                   FunctionAffinity::Host());
+  const auto [bodyReceiverDecl, bodyReceiver] = callableReceiver("body", "Body");
+  const auto forEachImplementation =
+      Function(FunctionDecl(Sym({"polyregion", "core", "host", "for_each"}), {Type::Var("Body")}, {},
+                            {Arg(Named("n", i64), {}), Arg(Named("body", Type::Var("Body")), {})}, {}, {}, unit, FunctionAffinity::Host()),
+               {bodyReceiverDecl,
+                loop({Stmt::Var(Named("applied", unit), Expr::Invoke(Type::Var("Body"), {}, bodyReceiver, {indexTerm}, unit).widen(), false)
+                          .widen()}),
+                ret()},
+               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto transformReduceName = Sym({"polyregion", "core", "transform_reduce"});
+  const auto transformReduceDecl =
+      FunctionDecl(transformReduceName, {Type::Var("T")}, {},
+                   {Arg(Named("n", i64), {}), Arg(Named("init", t), {}), Arg(Named("map", Type::Exec({}, {i64}, t)), {}),
+                    Arg(Named("combine", Type::Exec({}, {t, t}, t)), {})},
+                   {}, {}, t, FunctionAffinity::Host());
+  const auto value = Type::Var("Value").widen();
+  const auto accumulator = Named("accumulator", value);
+  const auto mapped = Named("mapped", value);
+  const auto [mapReceiverDecl, mapReceiver] = callableReceiver("map", "Map");
+  const auto [combineReceiverDecl, combineReceiver] = callableReceiver("combine", "Combine");
+  const auto transformReduceImplementation =
+      Function(FunctionDecl(Sym({"polyregion", "core", "host", "transform_reduce"}),
+                            {Type::Var("Value"), Type::Var("Map"), Type::Var("Combine")}, {},
+                            {Arg(Named("n", i64), {}), Arg(Named("init", value), {}), Arg(Named("map", Type::Var("Map")), {}),
+                             Arg(Named("combine", Type::Var("Combine")), {})},
+                            {}, {}, value, FunctionAffinity::Host()),
+               {mapReceiverDecl, combineReceiverDecl,
+                Stmt::Var(accumulator, Expr::Alias(Term::Select(Named("init", value), {}, value)).widen(), true).widen(),
+                loop({Stmt::Var(mapped, Expr::Invoke(Type::Var("Map"), {}, mapReceiver, {indexTerm}, value).widen(), false).widen(),
+                      Stmt::Mut(Term::Select(accumulator, {}, value),
+                                Expr::Invoke(Type::Var("Combine"), {}, combineReceiver,
+                                             {Term::Select(accumulator, {}, value).widen(), Term::Select(mapped, {}, value).widen()}, value)
+                                    .widen())
+                          .widen()}),
+                ret(Expr::Alias(Term::Select(accumulator, {}, value)).widen())},
+               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto coreInterface = Interface(Sym({"polyregion", "core"}), {forEachDecl, transformReduceDecl}, {});
+  const auto coreProgram = polyregion::polyfront::packageProgram(
+      {forEachImplementation.withImplements(forEachName), transformReduceImplementation.withImplements(transformReduceName)}, {});
+
   const auto writePackageInputs = [&](const llvm::StringRef path) {
     llvm::SmallString<256> directory(path);
     if (llvm::sys::fs::create_directories(directory)) return 3;
@@ -640,8 +692,11 @@ int main(int argc, char **argv) {
       out.close();
       return !out.has_error();
     };
-    return write("interface.polyast", interface_to_msgpack(interface)) && write("program.polyast", hashed_program_to_msgpack(program)) ? 0
-                                                                                                                                       : 5;
+    return write("interface.polyast", interface_to_msgpack(interface)) && write("program.polyast", hashed_program_to_msgpack(program))
+                   && write("core.interface.polyast", interface_to_msgpack(coreInterface))
+                   && write("core.program.polyast", hashed_program_to_msgpack(coreProgram))
+               ? 0
+               : 5;
   };
   if (writeInputs) return writePackageInputs(argv[2]);
 
@@ -660,13 +715,17 @@ int main(int argc, char **argv) {
     if (const auto path = llvm::sys::findProgramByName("polyc")) return *path;
     return std::string(POLYC_TEST_EXECUTABLE);
   }();
-  llvm::SmallString<256> interfacePath(inputs), programPath(inputs);
-  llvm::sys::path::append(interfacePath, "interface.polyast");
-  llvm::sys::path::append(programPath, "program.polyast");
-  const std::vector<std::string> ownedArgs{executable, "package", "link", interfacePath.str().str(), argv[1], programPath.str().str()};
-  std::vector<llvm::StringRef> args;
-  args.reserve(ownedArgs.size());
-  for (const auto &arg : ownedArgs)
-    args.emplace_back(arg);
-  return llvm::sys::ExecuteAndWait(executable, args);
+  const auto link = [&](const char *interfaceName, const char *programName) {
+    llvm::SmallString<256> interfacePath(inputs), programPath(inputs);
+    llvm::sys::path::append(interfacePath, interfaceName);
+    llvm::sys::path::append(programPath, programName);
+    const std::vector<std::string> ownedArgs{executable, "package", "link", interfacePath.str().str(), argv[1], programPath.str().str()};
+    std::vector<llvm::StringRef> args;
+    args.reserve(ownedArgs.size());
+    for (const auto &arg : ownedArgs)
+      args.emplace_back(arg);
+    return llvm::sys::ExecuteAndWait(executable, args);
+  };
+  if (const int result = link("interface.polyast", "program.polyast"); result != 0) return result;
+  return link("core.interface.polyast", "core.program.polyast");
 }
