@@ -1094,6 +1094,7 @@ public:
   }
 
   bool arenaGuardable(const char *host, const size_t sizeInBytes) {
+    if (!guard::AtomicPublish) return false;
     const PtrQuery meta = localReflect(host);
     const size_t page = guard::pageSize();
     const auto base = reinterpret_cast<uintptr_t>(host);
