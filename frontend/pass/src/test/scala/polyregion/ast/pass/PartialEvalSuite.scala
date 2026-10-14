@@ -491,6 +491,43 @@ class PartialEvalSuite extends munit.FunSuite {
     assertEquals(out.entry.body, List(p.Stmt.Return(p.Expr.Alias(selectT(x)))))
   }
 
+  test("canonicaliseAddresses mode offsets an element pointer instead of indexing the element") {
+    val bufTpe  = p.Type.Arr(p.Type.IntS8, 16, p.Type.Space.Private)
+    val elemPtr = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Private)
+    val buf     = named("buf", bufTpe)
+    val first   = named("first", elemPtr)
+    val fifth   = named("fifth", elemPtr)
+    val prog = program(
+      entry(
+        body = List(
+          p.Stmt.Var(buf, None),
+          p.Stmt.Var(
+            first,
+            Some(
+              p.Expr
+                .RefTo(selectT(buf), Some(p.Term.IntU64Const(0)), p.Type.IntS8, p.Type.Space.Private, p.Region.Opaque)
+            )
+          ),
+          p.Stmt.Var(
+            fifth,
+            Some(
+              p.Expr
+                .RefTo(selectT(first), Some(p.Term.IntS32Const(4)), p.Type.IntS8, p.Type.Space.Private, p.Region.Opaque)
+            )
+          ),
+          p.Stmt.Return(p.Expr.Index(selectT(fifth), p.Term.IntS64Const(0), p.Type.IntS8))
+        )
+      ).modifyDecl(_.copy(rtn = p.Type.IntS8))
+    )
+    val out   = PartialEval(canonicaliseAddresses = true)(prog, NoopLog).entry.body
+    val reads = out.flatMap(_.collectWhere[p.Expr] { case p.Expr.Index(base, idx, _) => base -> constIntValue(idx) })
+    assert(
+      reads.forall { case (base, _) => base.tpe.isInstanceOf[p.Type.Arr] || base.tpe.isInstanceOf[p.Type.Ptr] },
+      out.map(_.repr).mkString("\n")
+    )
+    assert(reads.contains(selectT(buf) -> Some(4L)), out.map(_.repr).mkString("\n"))
+  }
+
   test("canonicaliseAddresses mode preserves a mutable pointer slot behind T*&") {
     val pointer = named("pointer", ptrI32)
     val ref     = named("ref", p.Type.Ptr(ptrI32, p.Type.Space.Global))

@@ -122,9 +122,14 @@ object FnInline extends ProgramPass {
     def semantic(n: p.Named) =
       n.symbol == p.Conventions.ExceptionValue || n.symbol == p.Conventions.ExceptionWhat ||
         n.symbol == p.Conventions.ExceptionCode
+    def renameSymbol(symbol: String): String =
+      List(p.Conventions.ExceptionWhatSuffix, p.Conventions.ExceptionCodeSuffix).find(symbol.endsWith) match {
+        case Some(suffix) => renameSymbol(symbol.dropRight(suffix.length)) + suffix
+        case None         => renamed.getOrElseUpdate(symbol, s"_inline_${id}_${renamed.size}")
+      }
     def rename(n: p.Named) =
       if (semantic(n)) n
-      else n.copy(symbol = renamed.getOrElseUpdate(n.symbol, s"_inline_${id}_${renamed.size}"))
+      else n.copy(symbol = renameSymbol(n.symbol))
     val captureNames = f.moduleCaptures.map(_.named).toSet
     val body = f.body
       .modifyAll[p.Term] {

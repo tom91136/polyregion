@@ -146,6 +146,28 @@ class AddressRefinementSuite extends munit.FunSuite {
     assertEquals(analysis.diagnostics, Nil)
   }
 
+  test("a pointer field reaches an element of a local aggregate array stored by constant index") {
+    val source  = named("source", ptrTpe)
+    val element = named("element", capTpe)
+    val values  = named("values", p.Type.Arr(capTpe, 3, p.Type.Space.Private))
+    val analysis = analyse(
+      List(
+        p.Stmt.Var(element, None, isMutable = true),
+        p.Stmt.Mut(p.Term.Select(element, List(p.PathStep.Field("data")), ptrTpe), p.Expr.Alias(selectT(source))),
+        p.Stmt.Var(values, None, isMutable = true),
+        p.Stmt.Update(selectT(values), p.Term.IntU64Const(1), selectT(element)),
+        p.Stmt.Update(
+          p.Term.Select(values, List(p.PathStep.Index(1), p.PathStep.Field("data")), ptrTpe),
+          p.Term.IntS64Const(0),
+          p.Term.IntS32Const(42)
+        )
+      ),
+      List(p.Arg(source))
+    )
+
+    assertEquals(analysis.diagnostics, Nil)
+  }
+
   test("logical arena-view address loads survive lowered base adjustment") {
     val baseSym     = sym("Base")
     val derivedSym  = sym("Derived")

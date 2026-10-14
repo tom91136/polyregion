@@ -841,10 +841,37 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(functions.exists(_.name == callDecl.name))
   }
 
-  test("program linking mirrors pointers captured by a closure environment") {
-    val name           = p.Sym("library.apply")
-    val public         = applyPublic(name)
-    val implementation = callableImplementation(p.Sym("implementation.apply"), name)
+  private def closureEnvironmentLink(launching: Boolean) = {
+    val name       = p.Sym("library.apply")
+    val public     = applyPublic(name)
+    val kernelName = p.Sym("implementation.kernel")
+    val kernel = function(
+      p.FunctionDecl(kernelName, Nil, None, Nil, Nil, Nil, p.Type.Unit0, p.Function.Affinity.Offload),
+      unitReturn
+    )
+    val launch = p.Stmt.Var(
+      p.Named("launch", p.Type.Unit0),
+      Some(
+        p.Expr.SpecOp(
+          p.Spec.RemoteLaunch(
+            p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque),
+            p.Term.Poison(p.Type.FnRef(kernelName)),
+            Nil,
+            p.Term.IntU32Const(1),
+            p.Term.IntU32Const(1),
+            p.Term.IntU32Const(1),
+            p.Term.IntU32Const(1),
+            p.Term.IntU32Const(1),
+            p.Term.IntU32Const(1),
+            p.Term.IntU32Const(0),
+            Nil
+          )
+        )
+      ),
+      isMutable = false
+    )
+    val callable       = callableImplementation(p.Sym("implementation.apply"), name)
+    val implementation = if (launching) callable.copy(body = launch :: callable.body) else callable
     val lookup         = p.Sym("caller.Lookup")
     val lookupTpe      = p.Type.Struct(lookup, Nil)
     val table          = p.Named("table", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global))
@@ -860,7 +887,10 @@ class PackageServiceSuite extends munit.FunSuite {
       p.Function.Affinity.Host
     )
     val call = function(callDecl, List(p.Stmt.Return(p.Expr.Alias(p.Term.IntS32Const(0)))))
-    val pkg  = p.Package(p.Interface(p.Sym("library"), List(public)), p.Program(None, List(implementation), Nil))
+    val pkg = p.Package(
+      p.Interface(p.Sym("library"), List(public)),
+      p.Program(None, if (launching) List(implementation, kernel) else List(implementation), Nil)
+    )
     val root = function(
       public.copy(
         name = p.Sym("consumer.apply"),
@@ -878,8 +908,12 @@ class PackageServiceSuite extends munit.FunSuite {
     )
     assert(resolved.isRight, resolved)
     val functions = resolved.toOption.get.entry.toList ::: resolved.toOption.get.functions
-    val entry     = functions.find(_.name == root.name).get
-    val foreign   = entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }
+    functions.find(_.name == root.name).get
+  }
+
+  test("program linking mirrors pointers captured by a closure environment for device launches") {
+    val entry   = closureEnvironmentLink(launching = true)
+    val foreign = entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }
     assertEquals(
       foreign,
       List(
@@ -892,6 +926,11 @@ class PackageServiceSuite extends munit.FunSuite {
       target.root.symbol -> target.steps
     }
     assertEquals(patched, List("v1" -> List(p.PathStep.Field("table"))))
+  }
+
+  test("program linking keeps host closure environments for host-only implementations") {
+    val entry = closureEnvironmentLink(launching = false)
+    assertEquals(entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }, Nil)
   }
 
   test("program linking binds a closure invoked by a package helper") {

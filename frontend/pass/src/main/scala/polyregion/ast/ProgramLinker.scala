@@ -737,7 +737,8 @@ private[polyregion] object ProgramLinker {
       name: String,
       resolution: ImplementationResolution,
       typeSizes: Map[p.Type, Int],
-      definitions: List[p.StructDef]
+      definitions: List[p.StructDef],
+      closure: List[p.Function]
   ): Either[List[String], p.Function] = {
     val errors         = List.newBuilder[String]
     val publicDecl     = resolution.publicDeclaration
@@ -754,11 +755,18 @@ private[polyregion] object ProgramLinker {
     val sourceArgs   = mutable.Map.empty[Int, p.Named]
     val scalarValues = mutable.Map.empty[Int, p.Named]
     val walk         = MirrorWalk(p.Program(None, Nil, definitions))
-    val mirrored = resolution.call.environments.toList.sortBy(_._1).flatMap {
-      case (index, environment: p.Type.Struct) if walk.hasPointers(environment.name, Set.empty) =>
-        walk.structDefOf(environment.name).map(index -> _)
-      case _ => None
-    }
+    val launches = closure.exists(_.collectAll[p.Expr].exists {
+      case p.Expr.SpecOp(_: p.Spec.RemoteLaunch) => true
+      case _                                     => false
+    })
+    val mirrored =
+      if (!launches) Nil
+      else
+        resolution.call.environments.toList.sortBy(_._1).flatMap {
+          case (index, environment: p.Type.Struct) if walk.hasPointers(environment.name, Set.empty) =>
+            walk.structDefOf(environment.name).map(index -> _)
+          case _ => None
+        }
 
     def select(named: p.Named): p.Term.Select           = p.Term.Select(named, Nil, named.tpe)
     def spec(op: p.Spec): p.Expr                        = p.Expr.SpecOp(op)
@@ -1021,7 +1029,7 @@ private[polyregion] object ProgramLinker {
         )
         closure     <- implementationClosure(pkg, resolution, callerFns)
         definitions <- resolvedStructClosure(pkg, closure, callerDefs)
-        entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions)
+        entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions, closure)
       } yield p.Program(Some(entry), closure, definitions)
     }
   }

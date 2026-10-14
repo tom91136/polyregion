@@ -22,8 +22,9 @@
 
 #pragma region case: temporary-dtor-strict
 #pragma region offload-only
-#pragma region compile-fails: Unsupported temporary of type
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_KIND=2 -DCHECK_OFFLOAD -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 0
 
 #pragma region case: throw
 #pragma region offload-only

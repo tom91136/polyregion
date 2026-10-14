@@ -604,6 +604,9 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
     }
   }
 
+  private def offsetIndex(base: p.Term, offset: p.Term): Option[p.Term] =
+    constIntValue(base).zip(constIntValue(offset)).map((b, o) => if (b == 0) offset else p.Term.IntS64Const(b + o))
+
   private def isArr(t: p.Type): Boolean    = t match { case _: p.Type.Arr => true; case _ => false }
   private def isArrPtr(t: p.Type): Boolean = t match { case p.Type.Ptr(_: p.Type.Arr, _) => true; case _ => false }
   private def peelArr(t: p.Type, n: Int): p.Type =
@@ -636,7 +639,12 @@ final case class PartialEval(canonicaliseAddresses: Boolean = false) extends Pro
             if !reassigned(b.symbol) && !reassigned(n.symbol) =>
           bt match {
             case _: p.Type.Arr => m + (n.symbol -> (b, List(idx)))
-            case _             => m.get(b.symbol).fold(m) { case (root, idxs) => m + (n.symbol -> (root, idxs :+ idx)) }
+            case p.Type.Ptr(_: p.Type.Arr, _) =>
+              m.get(b.symbol).fold(m) { case (root, idxs) => m + (n.symbol -> (root, idxs :+ idx)) }
+            case _ =>
+              m.get(b.symbol)
+                .flatMap { case (root, idxs) => offsetIndex(idxs.last, idx).map(i => root -> (idxs.init :+ i)) }
+                .fold(m)(entry => m + (n.symbol -> entry))
           }
         case _ => m
       }

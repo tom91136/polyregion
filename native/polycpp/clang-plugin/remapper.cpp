@@ -1631,7 +1631,13 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                 }
                 case clang::LCK_ByRef: {
                   const auto varTpe = var->getType();
-                  const auto nested = r.entryCapture && !globalCapture;
+                  const auto capturedBy = [&](const clang::CXXRecordDecl *record) {
+                    return record && record->isLambda() && (record->captures() ^ exists([&](const clang::LambdaCapture &c) {
+                                                              return c.capturesVariable() && c.getCapturedVar() == var;
+                                                            }));
+                  };
+                  const auto globallyStored = capturedBy(r.entryCapture) || (r.globalCaptures ^ exists(capturedBy));
+                  const auto nested = r.entryCapture && !globalCapture && !globallyStored;
                   const auto space = nested ? TypeSpace::Private().widen() : TypeSpace::Global().widen();
                   const auto inferred = r.valueTypes ^ get_maybe(var);
                   const auto capturedTpe = inferred ? *inferred : handleType(varTpe, r);
@@ -2655,7 +2661,11 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto thrownTpe = handleType(thrown, r);
         const auto source = throwValue(sub);
         // The handler owns a directly-thrown prvalue. Bypass Clang's source-scope lifetime wrappers.
-        const auto value = r.newVar(conform(r, handleExpr(source, r), thrownTpe));
+        auto lowered = handleExpr(source, r);
+        if (const auto refTo = lowered.get<Expr::RefTo>();
+            refTo && thrownTpe.is<Type::Ptr>() && storageSpace(refTo->lhs).is<TypeSpace::Private>())
+          lowered = Expr::Cast(r.newVar(refTo->withSpace(TypeSpace::Private())), thrownTpe);
+        const auto value = r.newVar(conform(r, lowered, thrownTpe));
         const auto record = thrown->getAsCXXRecordDecl();
         if (derivesStdException(record)) {
           const auto stored = findExceptionMetadata(source, r.exceptionWhats);
@@ -4266,12 +4276,15 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
     };
     const auto rangeVar = singleVar(stmt->getRangeStmt()), beginVar = singleVar(stmt->getBeginStmt());
     if (!rangeVar || !beginVar || !context.getAsConstantArrayType(rangeVar->getType().getNonReferenceType())) return {};
-    const auto rangeName = Named(declName(rangeVar), handleType(rangeVar->getType(), rc));
-    const auto beginName = Named(declName(beginVar), handleType(beginVar->getType(), rc));
-    const auto rangePtr = rangeName.tpe.get<Type::Ptr>(), beginPtr = beginName.tpe.get<Type::Ptr>();
-    if (!rangePtr || !beginPtr || rangePtr->space != beginPtr->space) return {};
+    const auto rangeName = Named(declName(rangeVar), rc.valueTypes ^ get_maybe(rangeVar) ^ get_or_else(annotateLocalSpace(rangeVar, rc)));
+    const auto rangePtr = rangeName.tpe.get<Type::Ptr>();
+    const auto beginType = handleType(beginVar->getType(), rc);
+    const auto beginPtr = beginType.get<Type::Ptr>();
+    if (!rangePtr || !beginPtr) return {};
     const auto arr = rangePtr->comp.get<Type::Arr>();
     if (!arr || arr->comp != beginPtr->comp) return {};
+    const auto beginName = Named(declName(beginVar), Type::Ptr(beginPtr->comp, rangePtr->space));
+    rc.valueTypes.insert_or_assign(beginVar, beginName.tpe);
     return std::tuple{rangeName, beginName, static_cast<int64_t>(arr->length)};
   };
 

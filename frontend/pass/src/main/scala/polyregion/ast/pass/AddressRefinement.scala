@@ -525,8 +525,28 @@ private[pass] object AddressRefinement {
       activeCalls: List[String],
       context: InferenceContext
   ): Solution = {
-    val capture     = captureRoot(function).map(_._1)
-    val statements  = function.collectAll[p.Stmt]
+    val capture = captureRoot(function).map(_._1)
+    def indexedAssignment(stmt: p.Stmt): Option[p.Stmt.Mut] = stmt match {
+      case p.Stmt.Update(p.Term.Select(root, steps, tpe), index, value) =>
+        val element = tpe match {
+          case p.Type.Arr(component, _, _) => Some(component)
+          case p.Type.Ptr(component, _)    => Some(component)
+          case _                           => None
+        }
+        val constant = index match {
+          case p.Term.IntU64Const(v) if v >= 0 && v <= Int.MaxValue => Some(v.toInt)
+          case p.Term.IntS64Const(v) if v >= 0 && v <= Int.MaxValue => Some(v.toInt)
+          case p.Term.IntU32Const(v) if v >= 0                      => Some(v)
+          case p.Term.IntS32Const(v) if v >= 0                      => Some(v)
+          case _                                                    => None
+        }
+        element.zip(constant).map { case (component, offset) =>
+          p.Stmt.Mut(p.Term.Select(root, steps :+ p.PathStep.Index(offset), component), p.Expr.Alias(value))
+        }
+      case _ => None
+    }
+
+    val statements  = function.collectAll[p.Stmt].map(stmt => indexedAssignment(stmt).getOrElse(stmt))
     val terms       = function.collectAll[p.Term]
     val expressions = function.collectAll[p.Expr]
     val declarations = (
@@ -1411,6 +1431,8 @@ private[pass] object AddressRefinement {
     }
 
     def transfer(stmt: p.Stmt, state: FlowState): (FlowState, Summary) = stmt match {
+      case update: p.Stmt.Update if indexedAssignment(update).isDefined =>
+        transfer(indexedAssignment(update).get, state)
       case p.Stmt.Var(name, Some(expr), _) if isCarrier(name.tpe) =>
         val target = Query.Binding(name.symbol)
         val value  = storedFact(target, selectValue(exprFact(state, expr)))

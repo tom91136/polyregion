@@ -58,6 +58,49 @@ class FnInlineSuite extends munit.FunSuite {
     assert(inlineLocals.forall(!_.contains("vendor.template")))
   }
 
+  test("catch binder companions follow the renamed binder") {
+    val binder = named("e", p.Type.IntS32)
+    val what   = named(s"e${p.Conventions.ExceptionWhatSuffix}", p.Type.Ptr(p.Type.IntS8, p.Type.Space.Private))
+    val code   = named(s"e${p.Conventions.ExceptionCodeSuffix}", p.Type.IntS32)
+    val helper = fn(
+      "helper",
+      body = List(
+        p.Stmt.Try(
+          List(raise(p.Term.IntS32Const(7), "int")),
+          List(
+            handler(
+              Some(p.Type.IntS32),
+              Some(binder),
+              List(p.Stmt.Var(named("w", what.tpe), Some(select(what))), p.Stmt.Var(named("c"), Some(select(code)))),
+              Some("int")
+            )
+          ),
+          Nil
+        ),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val invoke = p.Expr.Invoke(p.Type.FnRef(helper.name), Nil, None, Nil, p.Type.Unit0)
+
+    val out = FnInline(
+      program(
+        entry(body =
+          List(p.Stmt.Var(named("r", p.Type.Unit0), Some(invoke)), p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const)))
+        ),
+        List(helper)
+      ),
+      NoopLog
+    )
+
+    val binders = out.entry
+      .collectWhere[p.Stmt] { case p.Stmt.Try(_, handlers, _) => handlers.flatMap(_.binder.map(_.symbol)) }
+      .flatten
+    val roots = out.entry.collectWhere[p.Term] { case p.Term.Select(root, _, _) => root.symbol }
+    assertEquals(binders.size, 1)
+    assert(roots.contains(binders.head + p.Conventions.ExceptionWhatSuffix), roots)
+    assert(roots.contains(binders.head + p.Conventions.ExceptionCodeSuffix), roots)
+  }
+
   test("generic member calls take inline type arguments from pointer receivers") {
     val boxName   = sym("Box")
     val boxT      = p.Type.Struct(boxName, List(p.Type.Var("T")))
