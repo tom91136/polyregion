@@ -44,15 +44,16 @@ struct TestCase {
     auto parseNormalised = [&]<typename F>(std::ifstream &s, F f) {
       auto pos = s.tellg();
       std::vector<typename std::invoke_result_t<F, std::string &>::value_type> xs;
-      for (const auto &[rawLine, nextPos] : istream_lines_with_position(s)) {
+      for (std::string rawLine; std::getline(s, rawLine);) {
         auto line = rawLine ^ trim();
         if (!(line ^ starts_with(directive))) continue;
         line = line ^ replace_all(directive, "");
         if (auto t = f(line)) {
           xs.emplace_back(*t);
-          pos = nextPos;
+          pos = s.tellg();
         } else break;
       }
+      s.clear();
       s.seekg(pos); // backtrack on failure
       return xs;
     };
