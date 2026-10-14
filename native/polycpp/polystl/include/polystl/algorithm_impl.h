@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstring>
+#include <memory>
+#include <numeric>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -266,6 +268,16 @@ class unsequenced_policy {};
 [[maybe_unused]] inline constexpr parallel_unsequenced_policy par_unseq{};
 [[maybe_unused]] inline constexpr unsequenced_policy unseq{};
 } // namespace execution
+} // namespace std
+
+namespace polyregion::polystl::details {
+template <typename T>
+constexpr bool is_policy_v =
+    std::is_same_v<T, std::execution::sequenced_policy> || std::is_same_v<T, std::execution::parallel_policy>
+    || std::is_same_v<T, std::execution::parallel_unsequenced_policy> || std::is_same_v<T, std::execution::unsequenced_policy>;
+} // namespace polyregion::polystl::details
+
+namespace std { // NOLINT(*-dcl58-cpp)
 
 #if !(defined(_HAS_CXX17) && _HAS_CXX17) && !defined(__cpp_lib_execution)
 template <typename> struct is_execution_policy : std::false_type {};
@@ -412,5 +424,92 @@ transform_reduce(ExecutionPolicy &&, ForwardIt first, ForwardIt last, T init, Bi
   return std::transform_reduce(first, last, init, reduce, transform);
 }
 #endif
+
+// every other parallel algorithm runs its sequential form on the host; the polycpp plugin reports each use
+#define POLYSTL_HOST_ALGORITHM(name)                                                                                                       \
+  template <class ExecutionPolicy, class... Args>                                                                                          \
+  [[clang::annotate("polystl_host_algorithm")]] auto name(ExecutionPolicy &&, Args &&...args)                                              \
+      -> std::enable_if_t<::polyregion::polystl::details::is_policy_v<std::decay_t<ExecutionPolicy>>,                                      \
+                          decltype(std::name(std::forward<Args>(args)...))> {                                                              \
+    return std::name(std::forward<Args>(args)...);                                                                                         \
+  }
+POLYSTL_HOST_ALGORITHM(adjacent_difference)
+POLYSTL_HOST_ALGORITHM(adjacent_find)
+POLYSTL_HOST_ALGORITHM(all_of)
+POLYSTL_HOST_ALGORITHM(any_of)
+POLYSTL_HOST_ALGORITHM(copy_if)
+POLYSTL_HOST_ALGORITHM(copy_n)
+POLYSTL_HOST_ALGORITHM(count)
+POLYSTL_HOST_ALGORITHM(count_if)
+POLYSTL_HOST_ALGORITHM(destroy)
+POLYSTL_HOST_ALGORITHM(destroy_n)
+POLYSTL_HOST_ALGORITHM(equal)
+POLYSTL_HOST_ALGORITHM(exclusive_scan)
+POLYSTL_HOST_ALGORITHM(find)
+POLYSTL_HOST_ALGORITHM(find_end)
+POLYSTL_HOST_ALGORITHM(find_first_of)
+POLYSTL_HOST_ALGORITHM(find_if)
+POLYSTL_HOST_ALGORITHM(find_if_not)
+POLYSTL_HOST_ALGORITHM(generate)
+POLYSTL_HOST_ALGORITHM(generate_n)
+POLYSTL_HOST_ALGORITHM(includes)
+POLYSTL_HOST_ALGORITHM(inclusive_scan)
+POLYSTL_HOST_ALGORITHM(inplace_merge)
+POLYSTL_HOST_ALGORITHM(is_heap)
+POLYSTL_HOST_ALGORITHM(is_heap_until)
+POLYSTL_HOST_ALGORITHM(is_partitioned)
+POLYSTL_HOST_ALGORITHM(is_sorted)
+POLYSTL_HOST_ALGORITHM(is_sorted_until)
+POLYSTL_HOST_ALGORITHM(lexicographical_compare)
+POLYSTL_HOST_ALGORITHM(max_element)
+POLYSTL_HOST_ALGORITHM(merge)
+POLYSTL_HOST_ALGORITHM(min_element)
+POLYSTL_HOST_ALGORITHM(minmax_element)
+POLYSTL_HOST_ALGORITHM(mismatch)
+POLYSTL_HOST_ALGORITHM(move)
+POLYSTL_HOST_ALGORITHM(none_of)
+POLYSTL_HOST_ALGORITHM(nth_element)
+POLYSTL_HOST_ALGORITHM(partial_sort)
+POLYSTL_HOST_ALGORITHM(partial_sort_copy)
+POLYSTL_HOST_ALGORITHM(partition)
+POLYSTL_HOST_ALGORITHM(partition_copy)
+POLYSTL_HOST_ALGORITHM(reduce)
+POLYSTL_HOST_ALGORITHM(remove)
+POLYSTL_HOST_ALGORITHM(remove_copy)
+POLYSTL_HOST_ALGORITHM(remove_copy_if)
+POLYSTL_HOST_ALGORITHM(remove_if)
+POLYSTL_HOST_ALGORITHM(replace)
+POLYSTL_HOST_ALGORITHM(replace_copy)
+POLYSTL_HOST_ALGORITHM(replace_copy_if)
+POLYSTL_HOST_ALGORITHM(replace_if)
+POLYSTL_HOST_ALGORITHM(reverse)
+POLYSTL_HOST_ALGORITHM(reverse_copy)
+POLYSTL_HOST_ALGORITHM(rotate)
+POLYSTL_HOST_ALGORITHM(rotate_copy)
+POLYSTL_HOST_ALGORITHM(search)
+POLYSTL_HOST_ALGORITHM(search_n)
+POLYSTL_HOST_ALGORITHM(set_difference)
+POLYSTL_HOST_ALGORITHM(set_intersection)
+POLYSTL_HOST_ALGORITHM(set_symmetric_difference)
+POLYSTL_HOST_ALGORITHM(set_union)
+POLYSTL_HOST_ALGORITHM(sort)
+POLYSTL_HOST_ALGORITHM(stable_partition)
+POLYSTL_HOST_ALGORITHM(stable_sort)
+POLYSTL_HOST_ALGORITHM(swap_ranges)
+POLYSTL_HOST_ALGORITHM(transform_exclusive_scan)
+POLYSTL_HOST_ALGORITHM(transform_inclusive_scan)
+POLYSTL_HOST_ALGORITHM(uninitialized_copy)
+POLYSTL_HOST_ALGORITHM(uninitialized_copy_n)
+POLYSTL_HOST_ALGORITHM(uninitialized_default_construct)
+POLYSTL_HOST_ALGORITHM(uninitialized_default_construct_n)
+POLYSTL_HOST_ALGORITHM(uninitialized_fill)
+POLYSTL_HOST_ALGORITHM(uninitialized_fill_n)
+POLYSTL_HOST_ALGORITHM(uninitialized_move)
+POLYSTL_HOST_ALGORITHM(uninitialized_move_n)
+POLYSTL_HOST_ALGORITHM(uninitialized_value_construct)
+POLYSTL_HOST_ALGORITHM(uninitialized_value_construct_n)
+POLYSTL_HOST_ALGORITHM(unique)
+POLYSTL_HOST_ALGORITHM(unique_copy)
+#undef POLYSTL_HOST_ALGORITHM
 
 } // namespace std

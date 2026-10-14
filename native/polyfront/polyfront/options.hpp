@@ -16,6 +16,7 @@ constexpr auto PolyfrontJit = env::PolyfrontJit;
 constexpr auto PolyfrontEmitLibrary = env::PolyfrontEmitLibrary;
 constexpr auto PolyfrontLibraryPath = env::PolyfrontLibraryPath;
 constexpr auto PolyfrontLibraryCapabilities = env::PolyfrontLibraryCapabilities;
+constexpr auto PolyfrontRequireOffload = env::PolyfrontRequireOffload;
 
 inline std::optional<int> parsePositiveInt(std::string_view s) {
   int n = 0;

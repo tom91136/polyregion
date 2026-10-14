@@ -165,6 +165,8 @@ int main(int argc, const char *argv[]) {
                    if (!opts->libraryCapabilities.empty())
                      append({"-Xclang", "-plugin-arg-polycpp", "-Xclang",
                              fmt::format("{}={}", PolyfrontLibraryCapabilities, opts->libraryCapabilities)});
+                   if (opts->requireOffload)
+                     append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}=1", PolyfrontRequireOffload)});
                  }
 
                  const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} //

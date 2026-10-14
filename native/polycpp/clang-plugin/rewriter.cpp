@@ -197,6 +197,7 @@ struct Failure {
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
 constexpr static llvm::StringLiteral interfaceAnnotation = "polyregion_interface:";
 constexpr static llvm::StringLiteral interfaceFallbackAnnotation = "polyregion_interface_fallback";
+constexpr static llvm::StringLiteral hostAlgorithmAnnotation = "polystl_host_algorithm";
 
 struct InterfaceSite {
   clang::CallExpr *call;
@@ -239,6 +240,34 @@ static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
       },
       callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("interfaceDecl"))).bind("interfaceCall"));
   return results;
+}
+
+static void reportHostAlgorithms(clang::ASTContext &context, clang::DiagnosticsEngine &D, const bool requireOffload) {
+  using namespace clang::ast_matchers;
+  runMatch(
+      context,
+      [&](const MatchFinder::MatchResult &result) {
+        const auto *call = result.Nodes.getNodeAs<clang::CallExpr>("hostAlgorithmCall");
+        const auto *callee = result.Nodes.getNodeAs<clang::FunctionDecl>("hostAlgorithmDecl");
+        if (!call || !callee || call->getNumArgs() == 0) return;
+        const auto host = callee->attrs() | exists([](const auto *attr) {
+                            const auto *annotation = llvm::dyn_cast<clang::AnnotateAttr>(attr);
+                            return annotation && annotation->getAnnotation() == hostAlgorithmAnnotation;
+                          });
+        if (!host) return;
+        const auto *policy = call->getArg(0)->getType()->getAsCXXRecordDecl();
+        if (policy && policy->getName() == "sequenced_policy") return;
+        if (requireOffload)
+          emit(D, call->getExprLoc(), clang::DiagnosticsEngine::Error,
+               POLYREGION_DIAG_POLYSTL "std::%0 with a parallel execution policy would run on the host, which -fstdpar-require-offload "
+                                       "rejects; link a Spectra package to offload it",
+               callee->getName());
+        else
+          emit(D, call->getExprLoc(), clang::DiagnosticsEngine::Remark,
+               POLYREGION_DIAG_POLYSTL "std::%0 with a parallel execution policy runs on the host; link a Spectra package to offload it",
+               callee->getName());
+      },
+      callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("hostAlgorithmDecl"))).bind("hostAlgorithmCall"));
 }
 
 static Vector<const clang::FunctionDecl *> interfaceCallableIdentities(const InterfaceSite &site) {
@@ -990,6 +1019,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     compilePackageProgram(opts, C, D, collector.exports, collector.deviceKernels, cudaArchList(CI.getPreprocessor()), opts.emitLibraryPath);
     return;
   }
+  reportHostAlgorithms(C, D, opts.requireOffload);
   for (auto r : outlinePolyregionOffload(C))
     r //
         ^ foreach_total(

@@ -235,6 +235,7 @@ struct StdParOptions {
   std::string emitLibrary{};
   std::string libraryPath{};
   std::string libraryCapabilities{};
+  bool requireOffload = false;
 
   static std::variant<std::vector<std::string>, std::optional<StdParOptions>> parse(CliArgs &args) {
     const std::string fStdParFlag = "-fstdpar";
@@ -248,6 +249,7 @@ struct StdParOptions {
     const std::string fStdParEmitLibraryFlag = "-fstdpar-emit-library";
     const std::string fStdParLibraryPathFlag = "-fstdpar-library-path";
     const std::string fStdParLibraryCapabilitiesFlag = "-fstdpar-library-capabilities";
+    const std::string fStdParRequireOffloadFlag = "-fstdpar-require-offload";
 
     auto fStdPar = false, fStdParDependents = false;
     StdParOptions options;
@@ -298,6 +300,10 @@ struct StdParOptions {
     if (auto capabilities = args.popValue(fStdParLibraryCapabilitiesFlag)) {
       fStdParDependents = true;
       options.libraryCapabilities = *capabilities;
+    }
+    if (args.popBool(fStdParRequireOffloadFlag)) {
+      fStdParDependents = true;
+      options.requireOffload = true;
     }
 
     if (!fStdPar && fStdParDependents)
