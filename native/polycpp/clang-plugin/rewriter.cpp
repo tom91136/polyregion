@@ -500,27 +500,36 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     const auto parsed = std::strtoul(value, &end, 10);
     if (end != value && *end == '\0' && parsed > 0) jobs = std::min<size_t>(parsed, prepared.size());
   }
-  const auto compile = [&](const PreparedInterfaceCall &item) {
+  // an empty bundle keeps the call, so the interface's inline fallback body runs
+  using CompileResult = polyfront::package::Checked<std::optional<CompileBundle>>;
+  const auto compile = [&](const PreparedInterfaceCall &item) -> CompileResult {
+    const bool fallback = hasInterfaceFallback(item.site.callee);
+    if (fallback && !item.archive->entriesByDeclaration.contains(item.site.declaration)) return {std::optional<CompileBundle>{}, {}};
     auto selected = polyfront::package::loadPackageSelection(*item.archive, item.site.declaration);
-    if (!selected) return polyfront::package::Checked<CompileBundle>{{}, std::move(selected.errors)};
+    if (!selected) return {{}, std::move(selected.errors)};
+    if (fallback && !polyfront::package::satisfiable(*selected.value, item.site.declaration, capabilities))
+      return {std::optional<CompileBundle>{}, {}};
     const auto request =
         ProgramLinkRequest({std::move(*selected.value)}, polyfront::packageProgram(item.consumerFunctions, item.consumerDefinitions),
                            capabilities, item.typeSizes);
-    return polyfront::package::compileProgram(request, opts.executable, *entryTarget,
-                                              polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets,
-                                              opts.stackDepth);
+    auto compiled =
+        polyfront::package::compileProgram(request, opts.executable, *entryTarget,
+                                           polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets, opts.stackDepth);
+    if (!compiled) return {{}, std::move(compiled.errors)};
+    return {std::move(compiled.value), {}};
   };
-  const auto consume = [&](const PreparedInterfaceCall &item, polyfront::package::Checked<CompileBundle> compiled) {
-    if (!compiled) {
-      emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
-           compiled.errors ^ mk_string("; "));
+  const auto consume = [&](const PreparedInterfaceCall &item, CompileResult result) {
+    if (!result) {
+      emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", result.errors ^ mk_string("; "));
       return;
     }
-    packageProgramBitcodes.emplace_back(std::move(compiled.value->hostObject));
+    if (!*result.value) return;
+    auto &compiled = *result.value;
+    packageProgramBitcodes.emplace_back(std::move(compiled->hostObject));
     std::vector<InterfaceModuleResource> resources;
-    resources.reserve(compiled.value->remoteModules.size());
-    for (size_t index = 0; index < compiled.value->remoteModules.size(); ++index) {
-      const auto &object = compiled.value->remoteModules[index];
+    resources.reserve(compiled->remoteModules.size());
+    for (size_t index = 0; index < compiled->remoteModules.size(); ++index) {
+      const auto &object = compiled->remoteModules[index];
       auto *image =
           mkStaticByteArray(C, translationUnit, "__polyregion_package_image_" + item.suffix + "_" + std::to_string(index), object.image);
       translationUnit->addDecl(image);
@@ -537,7 +546,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
       }
       resources.emplace_back(InterfaceModuleResource{image, features});
     }
-    materializeInterfaceCall(CI, C, item, *compiled.value, resources);
+    materializeInterfaceCall(CI, C, item, *compiled, resources);
   };
   if (jobs == 1) {
     for (const auto &item : prepared)
@@ -545,7 +554,6 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     return;
   }
   llvm::StdThreadPool pool(llvm::hardware_concurrency(jobs));
-  using CompileResult = polyfront::package::Checked<CompileBundle>;
   using Pending = std::pair<const PreparedInterfaceCall *, std::shared_future<std::unique_ptr<CompileResult>>>;
   std::deque<Pending> pending;
   const auto consumeOldest = [&] {

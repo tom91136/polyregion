@@ -350,4 +350,11 @@ inline Checked<polyast::Package> loadPackageSelection(const Archive &archive, co
       {}};
 }
 
+inline bool satisfiable(const polyast::Package &package, const std::string &declaration, const std::vector<std::string> &capabilities) {
+  return package.program.functions ^ exists([&](const polyast::Function &function) {
+           return function.implements && polyast::fqcn(*function.implements) == declaration
+                  && function.requiredCapabilities ^ forall([&](const auto &capability) { return capabilities ^ contains(capability); });
+         });
+}
+
 } // namespace polyregion::polyfront::package
