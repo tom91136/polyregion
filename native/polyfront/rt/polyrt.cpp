@@ -1149,13 +1149,13 @@ POLYREGION_EXPORT extern "C" ssize_t polyrt_record_write(const int fd, const voi
 }
 
 POLYREGION_EXPORT extern "C" ssize_t polyrt_record_pread(const int fd, void *buffer, const size_t count, const off_t offset) {
-  static const auto real = libcEntry<ssize_t (*)(int, void *, size_t, off_t)>("pread");
+  static const auto real = libcEntry<ssize_t (*)(int, void *, size_t, off_t)>(sizeof(off_t) > sizeof(long) ? "pread64" : "pread");
   polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ true);
   return real(fd, buffer, count, offset);
 }
 
 POLYREGION_EXPORT extern "C" ssize_t polyrt_record_pwrite(const int fd, const void *buffer, const size_t count, const off_t offset) {
-  static const auto real = libcEntry<ssize_t (*)(int, const void *, size_t, off_t)>("pwrite");
+  static const auto real = libcEntry<ssize_t (*)(int, const void *, size_t, off_t)>(sizeof(off_t) > sizeof(long) ? "pwrite64" : "pwrite");
   polyregion::rt_reflect::_rt_reclaim(buffer, count, /*forWrite*/ false);
   return real(fd, buffer, count, offset);
 }
