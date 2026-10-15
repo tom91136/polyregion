@@ -893,8 +893,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     const bool hasReduce = !loopOp.getReduceVars().empty();
     const bool coreReduce = hasReduce && coreReduceSupported();
     // XXX reduce lowers to a per-iteration scratch[N] (heap so polyreflect-rt tracks it for
-    // SMA mirroring); each thread writes its slot, host folds after. Requires lb == 1 (else
-    // we'd need to capture lb into the kernel). Supported ops: +, *, min, max.
+    // SMA mirroring); each thread writes its slot, host folds after. Supported ops: +, *, min, max.
     llvm::SmallVector<fir::ReduceOperationEnum> reduceOps;
     if (hasReduce) {
       if (auto attrs = loopOp.getReduceAttrsAttr()) {
@@ -916,14 +915,6 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
           reduceOps.push_back(op);
         }
       }
-      bool lbIsOne = false;
-      if (auto v = mlir::getConstantIntValue(lbV)) lbIsOne = *v == 1;
-      else if (auto cnv = lbV.getDefiningOp<fir::ConvertOp>())
-        if (auto v = mlir::getConstantIntValue(cnv.getValue())) lbIsOne = *v == 1;
-      if (!lbIsOne && !coreReduce) {
-        emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "`do concurrent ... reduce(...)` requires lower bound == 1");
-        return;
-      }
     }
     llvm::SmallVector<mlir::Value> reduceVarsSnapshot(loopOp.getReduceVars().begin(), loopOp.getReduceVars().end());
     llvm::SmallVector<mlir::Value> scratchBoxes;
@@ -937,9 +928,8 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     if (hasReduce) {
       idxOne = idxConst(B, 1);
       idxZero = idxConst(B, 0);
-      auto diff = mlir::arith::SubIOp::create(B, loc, ubV, lbV).getResult();
-      auto div = mlir::arith::DivSIOp::create(B, loc, diff, stepV).getResult();
-      numIters = mlir::arith::AddIOp::create(B, loc, div, idxOne).getResult();
+      auto span = mlir::arith::AddIOp::create(B, loc, mlir::arith::SubIOp::create(B, loc, ubV, lbV), stepV).getResult();
+      numIters = mlir::arith::MaxSIOp::create(B, loc, mlir::arith::DivSIOp::create(B, loc, span, stepV), idxZero).getResult();
       shapeVal = fir::ShapeOp::create(B, loc, mlir::ValueRange{numIters}).getResult();
       for (auto rv : reduceVarsSnapshot) {
         auto refTy = mlir::cast<fir::ReferenceType>(rv.getType());
@@ -1040,8 +1030,11 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
           fir::StoreOp::create(dr, loc, v, resultSlots[idx])->setAttr(CoreReduceResultAttr, dr.getI64IntegerAttr(idx));
           continue;
         }
+        auto offset = mlir::arith::SubIOp::create(dr, loc, unordered.getInductionVar(), lbV).getResult();
+        auto position =
+            mlir::arith::AddIOp::create(dr, loc, mlir::arith::DivSIOp::create(dr, loc, offset, stepV), idxConst(dr, 1)).getResult();
         auto scratchSlot = fir::ArrayCoorOp::create(dr, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
-                                                    /*slice=*/mlir::Value{}, mlir::ValueRange{unordered.getInductionVar()},
+                                                    /*slice=*/mlir::Value{}, mlir::ValueRange{position},
                                                     /*typeparams=*/mlir::ValueRange{})
                                .getResult();
         auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();

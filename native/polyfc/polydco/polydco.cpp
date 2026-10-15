@@ -363,6 +363,7 @@ static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_
   log(DebugLevel::Debug, "<%s:%s:%" PRId64 "> Dispatch host, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
   validatePrelude<polydco::FHostThreadedPrelude>(layout, moduleId);
+  if (tripCount == 0) return;
 
   const size_t N = std::thread::hardware_concurrency();
   auto [begins, ends] = concurrency_utils::splitStaticExclusive<int64_t>(0, tripCount, N);
