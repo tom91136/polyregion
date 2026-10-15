@@ -338,6 +338,64 @@ public:
   }
 };
 
+namespace {
+// Identity value for `op` on `ty` (init each scratch slot to this so the per-thread fold
+// is correct even for threads that take no work). For min/max we pick the most-extreme
+// finite/infinity value of the type so any actual data wins on first comparison.
+mlir::Value reduceIdentity(OpBuilder &bb, mlir::Type ty, fir::ReduceOperationEnum op) {
+  const auto loc1 = bb.getUnknownLoc();
+  if (auto ft = mlir::dyn_cast<mlir::FloatType>(ty)) {
+    switch (op) {
+      case fir::ReduceOperationEnum::Add: return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, 0.0));
+      case fir::ReduceOperationEnum::Multiply: return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, 1.0));
+      case fir::ReduceOperationEnum::MAX: {
+        llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/true);
+        return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, v));
+      }
+      case fir::ReduceOperationEnum::MIN: {
+        llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/false);
+        return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, v));
+      }
+      default: break;
+    }
+  }
+  auto it = mlir::cast<mlir::IntegerType>(ty);
+  const auto bits = it.getWidth();
+  switch (op) {
+    case fir::ReduceOperationEnum::Add: return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, 0));
+    case fir::ReduceOperationEnum::Multiply: return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, 1));
+    case fir::ReduceOperationEnum::MAX: {
+      auto v = llvm::APInt::getSignedMinValue(bits);
+      return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, v));
+    }
+    case fir::ReduceOperationEnum::MIN: {
+      auto v = llvm::APInt::getSignedMaxValue(bits);
+      return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, v));
+    }
+    default: break;
+  }
+  return zeroConst(bb, ty);
+}
+
+// Combine `lhs op rhs` on `ty`. Matches the per-rv reduction operator.
+mlir::Value reduceCombine(OpBuilder &bb, mlir::Location l, mlir::Type ty, fir::ReduceOperationEnum op, mlir::Value lhs, mlir::Value rhs) {
+  const bool isFloat = mlir::isa<mlir::FloatType>(ty);
+  switch (op) {
+    case fir::ReduceOperationEnum::Add:
+      return isFloat ? mlir::arith::AddFOp::create(bb, l, lhs, rhs).getResult() : mlir::arith::AddIOp::create(bb, l, lhs, rhs).getResult();
+    case fir::ReduceOperationEnum::Multiply:
+      return isFloat ? mlir::arith::MulFOp::create(bb, l, lhs, rhs).getResult() : mlir::arith::MulIOp::create(bb, l, lhs, rhs).getResult();
+    case fir::ReduceOperationEnum::MAX:
+      return isFloat ? mlir::arith::MaximumFOp::create(bb, l, lhs, rhs).getResult()
+                     : mlir::arith::MaxSIOp::create(bb, l, lhs, rhs).getResult();
+    case fir::ReduceOperationEnum::MIN:
+      return isFloat ? mlir::arith::MinimumFOp::create(bb, l, lhs, rhs).getResult()
+                     : mlir::arith::MinSIOp::create(bb, l, lhs, rhs).getResult();
+    default: return lhs;
+  }
+}
+} // namespace
+
 class Rewriter {
   ModuleOp &M;
   PolyDCOMirror dco;
@@ -392,7 +450,8 @@ public:
     f(B0, kind);
   }
 
-  // lowers the loop to `polyregion.core.for_each` over a closure of its body when the core package implements it
+  // lowers the loop to `polyregion.core.for_each`, or `polyregion.core.transform_reduce` for a core reduction, over a closure of
+  // its body when the core package implements it
   bool invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts,
                   const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core,
                   std::vector<std::string> &bitcodeFiles) {
@@ -406,10 +465,16 @@ public:
     if (!captureDef) raise(fmt::format("Capture struct missing for {}", diagLoc));
     const auto captureType = polyast::Type::Struct(captureDef->name, {}).widen();
     const auto entryName = fmt::format("__polyregion_package_program_{}", symbol);
-    const auto root = program::importRoot(entryName, polyast::Sym({"polyregion", "core", "for_each"}),
-                                          {polyast::Type::IntS64().widen(), captureType}, polyast::Type::Unit0().widen());
-    const std::vector<polyast::ProgramTypeSize> typeSizes{{polyast::Type::IntS64().widen(), 8},
-                                                          {captureType, static_cast<int32_t>(region.captureLayout.sizeInBytes)}};
+    const auto &reduction = region.coreReduce;
+    std::vector<polyast::ProgramTypeSize> typeSizes{{polyast::Type::IntS64().widen(), 8},
+                                                    {captureType, static_cast<int32_t>(region.captureLayout.sizeInBytes)}};
+    if (reduction) typeSizes.emplace_back(reduction->resultType, static_cast<int32_t>(reduction->resultLayout.sizeInBytes));
+    const auto root = reduction ? program::importRoot(entryName, polyast::Sym({"polyregion", "core", "transform_reduce"}),
+                                                      {polyast::Type::IntS64().widen(), reduction->resultType, captureType,
+                                                       polyast::Type::FnRef(reduction->combine).widen()},
+                                                      reduction->resultType)
+                                : program::importRoot(entryName, polyast::Sym({"polyregion", "core", "for_each"}),
+                                                      {polyast::Type::IntS64().widen(), captureType}, polyast::Type::Unit0().widen());
     const auto linked =
         interface_resolution::linkPackageProgram(opts, core, root, region.program.functions, region.program.defs, typeSizes, bitcodeFiles);
     if (!linked) {
@@ -440,7 +505,35 @@ public:
     }
     const auto count = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, 1), B.getI64IntegerAttr(8), i64).getRes();
     LLVM::StoreOp::create(B, uLoc(B), tripCount, count);
-    interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, **linked.value);
+    if (!reduction) {
+      interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, **linked.value);
+      binder.releaseTemporaries(B);
+      return true;
+    }
+    const auto resultBuffer = [&] {
+      return LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, static_cast<int64_t>(reduction->resultLayout.sizeInBytes)),
+                                    B.getI64IntegerAttr(static_cast<int64_t>(reduction->resultLayout.alignment)), B.getI8Type())
+          .getRes();
+    };
+    const auto field = [&](const Value buffer, const size_t index) {
+      const auto name = fmt::format("#r{}", index);
+      const auto member = reduction->resultLayout.members ^ find([&](const auto &m) { return m.name.symbol == name; });
+      if (!member) raise(fmt::format("Reduce result field {} missing for {}", name, diagLoc));
+      return LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), B.getI8Type(), buffer,
+                                 ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(member->offsetInBytes)})
+          .getRes();
+    };
+    const auto init = resultBuffer(), result = resultBuffer();
+    for (size_t index = 0; index < reduction->slots.size(); ++index) {
+      const auto type = llvm::cast<fir::ReferenceType>(reduction->slots[index].getType()).getEleTy();
+      LLVM::StoreOp::create(B, uLoc(B), reduceIdentity(B, type, reduction->operations[index]), field(init, index));
+    }
+    interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, init, capture, result}, **linked.value);
+    for (size_t index = 0; index < reduction->slots.size(); ++index) {
+      const auto slot = reduction->slots[index];
+      const auto type = llvm::cast<fir::ReferenceType>(slot.getType()).getEleTy();
+      fir::StoreOp::create(B, uLoc(B), LLVM::LoadOp::create(B, uLoc(B), type, field(result, index)).getResult(), slot);
+    }
     binder.releaseTemporaries(B);
     return true;
   }
@@ -712,6 +805,17 @@ void doRewrite(ModuleOp op) {
 } // namespace
 
 void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
+  polyfront::Options opts;
+  polyfront::Options::parseArgsFromEnv()
+      ^ foreach_total([&](const polyfront::Options &x) { opts = x; }, [](const std::vector<std::string> &) {});
+  std::optional<bool> coreTransformReduce;
+  const auto coreReduceSupported = [&] {
+    if (!coreTransformReduce) {
+      const auto core = interface_resolution::corePackage(diag, opts);
+      coreTransformReduce = core && interface_resolution::implements(*core, "polyregion.core.transform_reduce", opts);
+    }
+    return *coreTransformReduce;
+  };
   // XXX inline single-block callees inside do_concurrent before the rewrite. Surviving fir.call
   // becomes a no-op in the kernel since polypass can't lower function calls. MLIR's InlinerPass
   // needs SCC + symbol visibility that aren't available in-plugin; splice manually. Multi-block
@@ -787,6 +891,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     const auto ubV = loopOp.getUpperBound()[0];
     const auto stepV = loopOp.getStep()[0];
     const bool hasReduce = !loopOp.getReduceVars().empty();
+    const bool coreReduce = hasReduce && coreReduceSupported();
     // XXX reduce lowers to a per-iteration scratch[N] (heap so polyreflect-rt tracks it for
     // SMA mirroring); each thread writes its slot, host folds after. Requires lb == 1 (else
     // we'd need to capture lb into the kernel). Supported ops: +, *, min, max.
@@ -815,68 +920,11 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       if (auto v = mlir::getConstantIntValue(lbV)) lbIsOne = *v == 1;
       else if (auto cnv = lbV.getDefiningOp<fir::ConvertOp>())
         if (auto v = mlir::getConstantIntValue(cnv.getValue())) lbIsOne = *v == 1;
-      if (!lbIsOne) {
+      if (!lbIsOne && !coreReduce) {
         emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "`do concurrent ... reduce(...)` requires lower bound == 1");
         return;
       }
     }
-    // Identity value for `op` on `ty` (init each scratch slot to this so the per-thread fold
-    // is correct even for threads that take no work). For min/max we pick the most-extreme
-    // finite/infinity value of the type so any actual data wins on first comparison.
-    auto identityConstFor = [&](OpBuilder &bb, mlir::Type ty, fir::ReduceOperationEnum op) -> mlir::Value {
-      const auto loc1 = bb.getUnknownLoc();
-      if (auto ft = mlir::dyn_cast<mlir::FloatType>(ty)) {
-        switch (op) {
-          case fir::ReduceOperationEnum::Add: return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, 0.0));
-          case fir::ReduceOperationEnum::Multiply: return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, 1.0));
-          case fir::ReduceOperationEnum::MAX: {
-            llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/true);
-            return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, v));
-          }
-          case fir::ReduceOperationEnum::MIN: {
-            llvm::APFloat v = llvm::APFloat::getInf(ft.getFloatSemantics(), /*Negative=*/false);
-            return mlir::arith::ConstantOp::create(bb, loc1, bb.getFloatAttr(ft, v));
-          }
-          default: break;
-        }
-      }
-      auto it = mlir::cast<mlir::IntegerType>(ty);
-      const auto bits = it.getWidth();
-      switch (op) {
-        case fir::ReduceOperationEnum::Add: return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, 0));
-        case fir::ReduceOperationEnum::Multiply: return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, 1));
-        case fir::ReduceOperationEnum::MAX: {
-          auto v = llvm::APInt::getSignedMinValue(bits);
-          return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, v));
-        }
-        case fir::ReduceOperationEnum::MIN: {
-          auto v = llvm::APInt::getSignedMaxValue(bits);
-          return mlir::arith::ConstantOp::create(bb, loc1, bb.getIntegerAttr(it, v));
-        }
-        default: break;
-      }
-      return zeroConst(bb, ty);
-    };
-    // Combine `lhs op rhs` on `ty`. Matches the per-rv reduction operator.
-    auto combineFor = [](OpBuilder &bb, mlir::Location l, mlir::Type ty, fir::ReduceOperationEnum op, mlir::Value lhs,
-                         mlir::Value rhs) -> mlir::Value {
-      const bool isFloat = mlir::isa<mlir::FloatType>(ty);
-      switch (op) {
-        case fir::ReduceOperationEnum::Add:
-          return isFloat ? mlir::arith::AddFOp::create(bb, l, lhs, rhs).getResult()
-                         : mlir::arith::AddIOp::create(bb, l, lhs, rhs).getResult();
-        case fir::ReduceOperationEnum::Multiply:
-          return isFloat ? mlir::arith::MulFOp::create(bb, l, lhs, rhs).getResult()
-                         : mlir::arith::MulIOp::create(bb, l, lhs, rhs).getResult();
-        case fir::ReduceOperationEnum::MAX:
-          return isFloat ? mlir::arith::MaximumFOp::create(bb, l, lhs, rhs).getResult()
-                         : mlir::arith::MaxSIOp::create(bb, l, lhs, rhs).getResult();
-        case fir::ReduceOperationEnum::MIN:
-          return isFloat ? mlir::arith::MinimumFOp::create(bb, l, lhs, rhs).getResult()
-                         : mlir::arith::MinSIOp::create(bb, l, lhs, rhs).getResult();
-        default: return lhs;
-      }
-    };
     llvm::SmallVector<mlir::Value> reduceVarsSnapshot(loopOp.getReduceVars().begin(), loopOp.getReduceVars().end());
     llvm::SmallVector<mlir::Value> scratchBoxes;
     llvm::SmallVector<mlir::Value> scratchHeaps;
@@ -884,6 +932,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     // XXX per-rv flag for allocatable scalars; drives per-thread box synth + post-splice
     // assign rewrite (polypass can't lower `_FortranAAssign`).
     llvm::SmallVector<bool> rvIsAllocatable;
+    llvm::SmallVector<mlir::Value> resultSlots;
     mlir::Value numIters, idxZero, idxOne, shapeVal;
     if (hasReduce) {
       idxOne = idxConst(B, 1);
@@ -904,6 +953,12 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
             scalarTy = heapTy.getEleTy();
             isAllocatable = true;
           }
+        scratchElemTys.push_back(scalarTy);
+        rvIsAllocatable.push_back(isAllocatable);
+        if (coreReduce) {
+          resultSlots.push_back(fir::AllocaOp::create(B, loc, scalarTy).getResult());
+          continue;
+        }
         auto arrTy = fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, scalarTy);
         auto boxArrTy = fir::BoxType::get(arrTy);
         auto scratchHeap =
@@ -916,8 +971,6 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         // mirror cache when the scratch host address gets reused across outer iterations.
         scratchBoxes.push_back(scratchBox);
         scratchHeaps.push_back(scratchHeap);
-        scratchElemTys.push_back(scalarTy);
-        rvIsAllocatable.push_back(isAllocatable);
       }
     }
     llvm::SmallVector<mlir::Attribute> reduceAttrs;
@@ -928,6 +981,11 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
                               /*iterArgs=*/mlir::ValueRange{}, hasReduce ? mlir::ValueRange{} : mlir::ValueRange(reduceVarsSnapshot),
                               hasReduce ? llvm::ArrayRef<mlir::Attribute>{} : llvm::ArrayRef<mlir::Attribute>(reduceAttrs));
     unordered->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
+    if (coreReduce)
+      unordered->setAttr(CoreReduceAttr, B.getArrayAttr(reduceOps | map([&](const auto op) -> mlir::Attribute {
+                                                          return B.getI64IntegerAttr(static_cast<int64_t>(op));
+                                                        })
+                                                        | to_vector()));
     auto &loopBlock = loopOp.getRegion().front();
     loopBlock.getArgument(0).replaceAllUsesWith(unordered.getInductionVar());
     auto srcReduceArgs = loopBlock.getArguments().drop_front(loopOp.getNumInductionVars() + loopOp.getNumLocalOperands());
@@ -944,7 +1002,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
         const auto scalarTy = scratchElemTys[idx];
         const auto rop = idx < reduceOps.size() ? reduceOps[idx] : fir::ReduceOperationEnum::Add;
         auto localSlot = fir::AllocaOp::create(br, loc, scalarTy).getResult();
-        fir::StoreOp::create(br, loc, identityConstFor(br, scalarTy, rop), localSlot);
+        fir::StoreOp::create(br, loc, reduceIdentity(br, scalarTy, rop), localSlot);
         localAccumSlots.push_back(localSlot);
         if (rvIsAllocatable[idx]) {
           // XXX per-thread box<heap<T>> over the local accumulator; flang loads through the box,
@@ -977,6 +1035,11 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       OpBuilder dr(destBody->getTerminator());
       for (auto [idx, localSlot] : llvm::enumerate(localAccumSlots)) {
         const auto scalarTy = scratchElemTys[idx];
+        if (coreReduce) {
+          auto v = fir::LoadOp::create(dr, loc, localSlot).getResult();
+          fir::StoreOp::create(dr, loc, v, resultSlots[idx])->setAttr(CoreReduceResultAttr, dr.getI64IntegerAttr(idx));
+          continue;
+        }
         auto scratchSlot = fir::ArrayCoorOp::create(dr, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
                                                     /*slice=*/mlir::Value{}, mlir::ValueRange{unordered.getInductionVar()},
                                                     /*typeparams=*/mlir::ValueRange{})
@@ -1105,8 +1168,8 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
     }
     if (hasReduce) {
       B.setInsertionPointAfter(unordered);
-      for (auto [idx, t] : llvm::enumerate(llvm::zip(reduceVarsSnapshot, scratchBoxes, scratchElemTys))) {
-        auto [extRef, scratchBox, scalarTy] = t;
+      for (auto [idx, t] : llvm::enumerate(llvm::zip(reduceVarsSnapshot, scratchElemTys))) {
+        auto [extRef, scalarTy] = t;
         const auto op = idx < reduceOps.size() ? reduceOps[idx] : fir::ReduceOperationEnum::Add;
         mlir::Value effectiveRef = extRef;
         if (rvIsAllocatable[idx]) {
@@ -1116,15 +1179,21 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
           auto heapAddr = fir::BoxAddrOp::create(B, loc, heapTy, boxVal).getResult();
           effectiveRef = fir::ConvertOp::create(B, loc, fir::ReferenceType::get(scalarTy), heapAddr).getResult();
         }
+        if (coreReduce) {
+          auto cur = fir::LoadOp::create(B, loc, effectiveRef).getResult();
+          auto delta = fir::LoadOp::create(B, loc, resultSlots[idx]).getResult();
+          fir::StoreOp::create(B, loc, reduceCombine(B, loc, scalarTy, op, cur, delta), effectiveRef);
+          continue;
+        }
         auto combineLoop = fir::DoLoopOp::create(B, loc, idxOne, numIters, idxOne, /*unordered=*/false, /*finalCountValue=*/false);
         OpBuilder bc(combineLoop.getBody(), combineLoop.getBody()->begin());
-        auto slot = fir::ArrayCoorOp::create(bc, loc, fir::ReferenceType::get(scalarTy), scratchBox, shapeVal,
+        auto slot = fir::ArrayCoorOp::create(bc, loc, fir::ReferenceType::get(scalarTy), scratchBoxes[idx], shapeVal,
                                              /*slice=*/mlir::Value{}, mlir::ValueRange{combineLoop.getInductionVar()},
                                              /*typeparams=*/mlir::ValueRange{})
                         .getResult();
         auto delta = fir::LoadOp::create(bc, loc, slot).getResult();
         auto cur = fir::LoadOp::create(bc, loc, effectiveRef).getResult();
-        auto folded = combineFor(bc, loc, scalarTy, op, cur, delta);
+        auto folded = reduceCombine(bc, loc, scalarTy, op, cur, delta);
         fir::StoreOp::create(bc, loc, folded, effectiveRef);
       }
       // XXX disassociate from SMA before fir.freemem; libc recycles the host address and the
@@ -1175,14 +1244,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
   doRewrite(m);
   OpBuilder B(m);
   Rewriter rewriter(m);
-  const auto roots =
-      opts.libraryPath.empty() ? polyfront::package::packageRoots() : polyfront::package::splitPackageRoots(opts.libraryPath);
-  std::optional<polyfront::package::Archive> core;
-  if (!polyfront::package::packageFiles("polyregion.core", roots).empty()) {
-    auto loaded = polyfront::package::loadPackage("polyregion.core", roots);
-    if (loaded) core = std::move(*loaded.value);
-    else loaded.errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
-  }
+  const auto core = interface_resolution::corePackage(diag, opts);
   std::vector<fir::DoLoopOp> lowered;
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
@@ -1212,6 +1274,10 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       B.setInsertionPoint(doLoop);
       if (core && rewriter.invokeCore(B, diag, diagLoc, opts, moduleId, doLoop, *core, bitcodeFiles)) {
         lowered.emplace_back(doLoop);
+        return;
+      }
+      if (doLoop->hasAttr(CoreReduceAttr)) {
+        emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "%0: reduction did not lower through polyregion.core", diagLoc);
         return;
       }
       auto executeOriginal = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());

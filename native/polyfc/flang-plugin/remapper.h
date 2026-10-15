@@ -1,5 +1,6 @@
 #pragma once
 
+#include "flang/Optimizer/Dialect/FIRAttr.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -18,6 +19,11 @@
 namespace polyregion::polyfc {
 
 using namespace aspartame;
+
+// a `do concurrent ... reduce(...)` rewritten for polyregion.core.transform_reduce: the loop lists its reduce operators, and the
+// body's final store of each per-iteration accumulator into its host result slot names that accumulator's result field
+inline constexpr llvm::StringLiteral CoreReduceAttr = "polyfc.core_reduce";
+inline constexpr llvm::StringLiteral CoreReduceResultAttr = "polyfc.core_reduce_result";
 
 struct Remapper {
 
@@ -39,6 +45,7 @@ struct Remapper {
   llvm::DenseMap<mlir::Value, polyast::Term::Select> aggLoadCache;
 
   std::vector<polyast::Stmt::Any> stmts;
+  std::optional<polyast::Named> reduceResult;
   std::vector<polyast::Function> functions;
   // user procedures translated to polyast (recursive callees survive as fir.call -> Invoke); by mangled name
   std::unordered_map<std::string, polyast::Function> userFuncs;
@@ -88,6 +95,15 @@ struct Remapper {
     std::unordered_map<std::string, FBoxedMirror> boxes;
     polyast::StructLayout preludeLayout, captureLayout;
     std::optional<polyast::StructLayout> reductionLayout;
+
+    struct CoreReduce {
+      polyast::Type::Struct resultType;
+      polyast::StructLayout resultLayout;
+      polyast::Sym combine;
+      std::vector<fir::ReduceOperationEnum> operations;
+      std::vector<mlir::Value> slots;
+    };
+    std::optional<CoreReduce> coreReduce;
   };
 
   // with `bodyName`, the loop body becomes that closure function over the capture instead of an offload entry

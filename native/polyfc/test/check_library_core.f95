@@ -2,14 +2,14 @@
 !CHECK offload-only
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -o {output} {input}
 !CHECK do: {output}
-!CHECK requires: 200 10100 28 50 32
+!CHECK requires: 200 10100 28 50 32 2 5050.0
 
 !CHECK case: core-package
 !CHECK offload-only
 !CHECK do: {package_fixture} {output}.packages
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
 !CHECK do: {output}
-!CHECK requires: 200 10100 28 50 32
+!CHECK requires: 200 10100 28 50 32 2 5050.0
 
 program check_library_core
   implicit none
@@ -18,11 +18,14 @@ program check_library_core
     integer :: b
   end type
   integer, parameter :: n = 100
-  integer :: xs(n), i, s, m
+  integer :: xs(n), i, s, m, lo
+  real(8) :: r
   integer, allocatable :: ys(:)
   type(pair) :: p
   s = 0
   m = 0
+  lo = huge(lo)
+  r = 0d0
   p = pair(10, 3)
   allocate(ys(n))
   do concurrent (i = 1:n)
@@ -30,6 +33,10 @@ program check_library_core
   end do
   do concurrent (i = 1:n) reduce(+:s)
     s = s + xs(i)
+  end do
+  do concurrent (i = 1:n) reduce(min:lo) reduce(+:r)
+    lo = min(lo, xs(i))
+    r = r + 0.5d0 * xs(i)
   end do
   do concurrent (i = 1:n)
     ys(i) = p%a + p%b * mod(i, 7)
@@ -40,5 +47,5 @@ program check_library_core
   do concurrent (i = 2:n:2)
     ys(i) = 0
   end do
-  write (*, '(I0,1X,I0,1X,I0,1X,I0,1X,I0)', advance='no') xs(n), s, m, count(ys == 0), ys(7) + ys(11)
+  write (*, '(I0,1X,I0,1X,I0,1X,I0,1X,I0,1X,I0,1X,F0.1)', advance='no') xs(n), s, m, count(ys == 0), ys(7) + ys(11), lo, r
 end program

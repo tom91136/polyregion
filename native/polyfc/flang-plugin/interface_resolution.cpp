@@ -414,3 +414,25 @@ polyfront::package::Checked<std::optional<polyast::CompileBundle>> polyregion::p
   bitcodeFiles.emplace_back(*bitcode.value);
   return {std::optional{std::move(*compiled.value)}, {}};
 }
+
+std::optional<polyfront::package::Archive> polyregion::polyfc::interface_resolution::corePackage(clang::DiagnosticsEngine &diag,
+                                                                                                 const polyfront::Options &opts) {
+  const auto roots =
+      opts.libraryPath.empty() ? polyfront::package::packageRoots() : polyfront::package::splitPackageRoots(opts.libraryPath);
+  if (polyfront::package::packageFiles("polyregion.core", roots).empty()) return {};
+  auto loaded = polyfront::package::loadPackage("polyregion.core", roots);
+  if (!loaded) {
+    for (const auto &error : loaded.errors)
+      polyregion::polyfc::emit(diag, clang::DiagnosticsEngine::Error, "polyregion.core package: %0", error);
+    return {};
+  }
+  return std::move(*loaded.value);
+}
+
+bool polyregion::polyfc::interface_resolution::implements(const polyfront::package::Archive &archive, const std::string &declaration,
+                                                          const polyfront::Options &opts) {
+  if (archive.entriesByDeclaration.count(declaration) == 0) return false;
+  const auto selected = polyfront::package::loadPackageSelection(archive, declaration);
+  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+  return selected && polyfront::package::satisfiable(*selected.value, declaration, capabilities);
+}

@@ -1124,6 +1124,11 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
         } else poison0(fmt::format("LoadOp RHS value not an Expr|FBoxed|FArrayCoord, was {}", fRepr(expr)));
       },
       [&](fir::StoreOp s) {
+        if (const auto field = s->getAttrOfType<mlir::IntegerAttr>(CoreReduceResultAttr); field && reduceResult) {
+          const auto value = handleValueAs(s.getValue());
+          push(Stmt::Mut(dsl::Select({*reduceResult}, Named(fmt::format("#r{}", field.getInt()), value.tpe())), value).widen());
+          return;
+        }
         if (!aggLoadCache.empty()) {
           const auto storeRoot = rootOf(s.getMemref());
           const auto stale = aggLoadCache | collect([&](const auto &memref, const auto &) -> std::optional<mlir::Value> {
@@ -1281,6 +1286,25 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
 
   Remapper r(m, L, op, {Capture});
 
+  const auto coreReduceAttr = bodyName ? op->getAttrOfType<mlir::ArrayAttr>(CoreReduceAttr) : mlir::ArrayAttr{};
+  const auto reduceOperations = coreReduceAttr ? coreReduceAttr.getValue() ^ map([](const mlir::Attribute &a) {
+                                                   return static_cast<fir::ReduceOperationEnum>(llvm::cast<mlir::IntegerAttr>(a).getInt());
+                                                 }) | to_vector()
+                                               : std::vector<fir::ReduceOperationEnum>{};
+  std::vector<mlir::Value> reduceSlots(reduceOperations.size());
+  std::vector<Named> reduceFields(reduceOperations.size(), Named("", Type::Nothing()));
+  if (coreReduceAttr) {
+    op.getBody()->walk([&](fir::StoreOp store) {
+      if (const auto field = store->getAttrOfType<mlir::IntegerAttr>(CoreReduceResultAttr)) {
+        reduceSlots[field.getInt()] = store.getMemref();
+        reduceFields[field.getInt()] = Named(fmt::format("#r{}", field.getInt()), r.handleType(store.getValue().getType()));
+      }
+    });
+    if (reduceSlots ^ exists([](const auto &slot) { return !slot; })) raise("Reduce result store missing for a polyregion.core reduction");
+  }
+  const StructDef reduceResultDef(Sym({fmt::format("#ReduceResult<{}>", name)}), {}, reduceFields, std::vector<Type::Struct>{}, false);
+  if (coreReduceAttr) r.reduceResult = Named("#result", typeOf(reduceResultDef));
+
   // Work out the reduction vars first, setting an alternative root to mask captures
   const auto exprWithReductions =
       op.getReduceAttrs() //
@@ -1365,6 +1389,7 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
 
   r.syntheticDefs.emplace(preludeDef);
   r.syntheticDefs.emplace(capturesDef);
+  if (coreReduceAttr) r.syntheticDefs.emplace(reduceResultDef);
   if (!exprWithReductions.empty()) r.syntheticDefs.emplace(reductionsDef);
 
   const auto svrs = exprWithReductions ^ map([&](const auto &, const auto &rd) {
@@ -1398,7 +1423,22 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   auto allFns = r.functions | concat(r.userFuncs | values()) | to_vector();
   if (bodyName)
     allFns.insert(allFns.begin(), coreBody(*bodyName, Capture, MappedInduction, Select({Capture, Prelude}, LowerBound),
-                                           Select({Capture, Prelude}, Step), r.stmts));
+                                           Select({Capture, Prelude}, Step), r.stmts, r.reduceResult));
+  const auto combineName = bodyName ? Sym({fqcn(*bodyName) + "_combine"}) : Sym({});
+  if (coreReduceAttr) {
+    const auto resultType = typeOf(reduceResultDef);
+    const Named lhs("#lhs", resultType), rhs("#rhs", resultType), out("#out", resultType);
+    std::vector<Stmt::Any> combined{Stmt::Var(out, {}, /*isMutable*/ true)};
+    for (size_t index = 0; index < reduceFields.size(); ++index) {
+      const auto &field = reduceFields[index];
+      combined.emplace_back(Stmt::Mut(Select({out}, field), reductionOp(mapReductionKind(reduceOperations[index]),
+                                                                        field.tpe)(Select({lhs}, field), Select({rhs}, field))));
+    }
+    combined.emplace_back(Stmt::Return(Expr::Alias(Term::Select(out, {}, resultType))));
+    allFns.emplace_back(Function(
+        FunctionDecl(combineName, {}, {}, std::vector<Arg>{Arg(lhs, {}), Arg(rhs, {})}, {}, {}, resultType, FunctionAffinity::Host()),
+        combined, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::RegularCall()));
+  }
   const Program program(entry, allFns, r.defs | values() | concat(r.syntheticDefs) | to_vector(), PassPhase::Initial(), {});
 
   const auto defLayouts = program.defs ^ map([&](const auto &d) { return r.resolveLayout(d); });
@@ -1422,5 +1462,11 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
       .preludeLayout = findNamedLayout(preludeDef.name),
       .captureLayout = findNamedLayout(capturesDef.name),
       .reductionLayout = exprWithReductions.empty() ? std::optional<StructLayout>{} : findNamedLayout(reductionsDef.name),
+      .coreReduce = coreReduceAttr ? std::optional{DoConcurrentRegion::CoreReduce{.resultType = typeOf(reduceResultDef),
+                                                                                  .resultLayout = findNamedLayout(reduceResultDef.name),
+                                                                                  .combine = combineName,
+                                                                                  .operations = reduceOperations,
+                                                                                  .slots = reduceSlots}}
+                                   : std::optional<DoConcurrentRegion::CoreReduce>{},
   };
 }

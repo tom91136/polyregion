@@ -16,6 +16,12 @@ namespace polyregion::polyfc::interface_resolution {
 void resolveInterfaces(clang::DiagnosticsEngine &diag, mlir::ModuleOp &module, const polyfront::Options &opts,
                        std::vector<std::string> &bitcodeFiles);
 
+// the polyregion.core archive on the library path, if there is one
+std::optional<polyfront::package::Archive> corePackage(clang::DiagnosticsEngine &diag, const polyfront::Options &opts);
+
+// whether the archive has an implementation of `declaration` the capabilities allow
+bool implements(const polyfront::package::Archive &archive, const std::string &declaration, const polyfront::Options &opts);
+
 // links `root` against the archive's implementations of its declaration and keeps the host bitcode; an empty value means no
 // implementation the capabilities allow, so the caller keeps its own lowering
 polyfront::package::Checked<std::optional<polyast::CompileBundle>>
