@@ -62,13 +62,14 @@ class POLYREGION_EXPORT CudaDeviceQueue final : public DeviceQueue {
 
   detail::CountingLatch latch;
 
+  CUcontext context;
   details::CudaModuleStore &store;
   CUstream stream{};
 
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  POLYREGION_EXPORT explicit CudaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store);
+  POLYREGION_EXPORT CudaDeviceQueue(const std::chrono::duration<int64_t> &timeout, CUcontext context, decltype(store) store);
   POLYREGION_EXPORT ~CudaDeviceQueue() override;
   POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                     const MaybeCallback &cb) override;

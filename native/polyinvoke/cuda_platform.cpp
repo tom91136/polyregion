@@ -80,13 +80,28 @@ std::vector<std::unique_ptr<Device>> CudaPlatform::enumerate() {
 
 // ---
 
+namespace {
+void makeCurrent(CUcontext context) {
+  if (cuCtxGetCurrent && cuCtxSetCurrent) {
+    CUcontext current = nullptr;
+    CHECKED(cuCtxGetCurrent(&current));
+    if (current != context) CHECKED(cuCtxSetCurrent(context));
+    return;
+  }
+  thread_local CUcontext pushed = nullptr;
+  if (pushed == context) return;
+  CHECKED(cuCtxPushCurrent(context));
+  pushed = context;
+}
+} // namespace
+
 CudaDevice::CudaDevice(int ordinal)
     : context(
           [this]() {
             POLYINVOKE_TRACE();
             CUcontext c;
             CHECKED(cuDevicePrimaryCtxRetain(&c, device));
-            CHECKED(cuCtxPushCurrent(c));
+            makeCurrent(c);
             return c;
           },
           [this](auto) {
@@ -97,14 +112,14 @@ CudaDevice::CudaDevice(int ordinal)
           PREFIX,
           [this](auto &&s) {
             POLYINVOKE_TRACE();
-            context.touch();
+            makeCurrent(*context);
             CUmodule module;
             CHECKED(cuModuleLoadData(&module, s.data()));
             return module;
           },
           [this](auto &&m, auto &&name, auto) {
             POLYINVOKE_TRACE();
-            context.touch();
+            makeCurrent(*context);
             CUfunction fn;
             CHECKED_EXTRA(cuModuleGetFunction(&fn, m, name.c_str()), //
                           "cuModuleGetFunction(module=%p, name=%s)", static_cast<void *>(m), name.c_str());
@@ -215,7 +230,7 @@ bool CudaDevice::moduleLoaded(const std::string &name) {
 }
 uintptr_t CudaDevice::mallocDevice(size_t size, Access) {
   POLYINVOKE_TRACE();
-  context.touch();
+  makeCurrent(*context);
   if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
   CUdeviceptr ptr = {};
   CHECKED(cuMemAlloc(&ptr, size));
@@ -223,12 +238,12 @@ uintptr_t CudaDevice::mallocDevice(size_t size, Access) {
 }
 void CudaDevice::freeDevice(uintptr_t ptr) {
   POLYINVOKE_TRACE();
-  context.touch();
+  makeCurrent(*context);
   CHECKED(cuMemFree(ptr));
 }
 std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
   POLYINVOKE_TRACE();
-  context.touch();
+  makeCurrent(*context);
   if (size == 0) POLYINVOKE_FATAL(PREFIX, "Cannot malloc size of %zu", size);
 #ifdef _WIN32
   // XXX WDDM: cuMemAllocManaged + sync is not sufficient for safe CPU read-back (pages fault
@@ -245,7 +260,7 @@ std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
 }
 void CudaDevice::freeShared(void *ptr) {
   POLYINVOKE_TRACE();
-  context.touch();
+  makeCurrent(*context);
 #ifdef _WIN32
   CHECKED(cuMemFreeHost(ptr));
 #else
@@ -254,23 +269,27 @@ void CudaDevice::freeShared(void *ptr) {
 }
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYINVOKE_TRACE();
-  context.touch();
-  return std::make_unique<CudaDeviceQueue>(timeout, store);
+  makeCurrent(*context);
+  return std::make_unique<CudaDeviceQueue>(timeout, *context, store);
 }
 CudaDevice::~CudaDevice() { POLYINVOKE_TRACE(); }
 
 // ---
 
-CudaDeviceQueue::CudaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store) : latch(timeout), store(store) {
+CudaDeviceQueue::CudaDeviceQueue(const std::chrono::duration<int64_t> &timeout, CUcontext context, decltype(store) store)
+    : latch(timeout), context(context), store(store) {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   CHECKED(cuStreamCreate(&stream, CU_STREAM_DEFAULT));
 }
 CudaDeviceQueue::~CudaDeviceQueue() {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   CHECKED(cuStreamDestroy(stream));
 }
 void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (!cb) return;
+  makeCurrent(context);
   auto f = [cb, token = latch.acquire()]() {
     if (cb) (*cb)();
   };
@@ -287,22 +306,26 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
 void CudaDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                  const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   CHECKED(cuMemcpyDtoDAsync(dst + dstOffset, src + srcOffset, size, stream));
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   CHECKED(cuMemcpyHtoDAsync(dst + dstOffset, src, size, stream));
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   CHECKED(cuMemcpyDtoHAsync(dst, src + srcOffset, size, stream));
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                          std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   if (types.back() != Type::Void)
     POLYINVOKE_FATAL(PREFIX, "Non-void return type not supported: %s", magic_enum::enum_name(types.back()).data());
   auto fn = store.resolveFunction(moduleName, symbol, types);
@@ -327,6 +350,7 @@ void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const st
 }
 void CudaDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
+  makeCurrent(context);
   CHECKED(cuStreamSynchronize(stream));
 #ifdef _WIN32
   // XXX WDDM: host read-back of managed memory needs cuCtxSynchronize; stream sync alone
