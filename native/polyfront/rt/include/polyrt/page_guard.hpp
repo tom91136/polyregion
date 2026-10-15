@@ -318,6 +318,13 @@ inline std::optional<size_t> track(const uintptr_t begin, const uintptr_t end) {
   return std::nullopt;
 }
 
+inline bool tracking(const uintptr_t begin) {
+  const size_t n = details::rangeHighWater.load(std::memory_order_acquire);
+  for (size_t i = 0; i < n; ++i)
+    if (details::ranges[i].begin.load(std::memory_order_acquire) == begin) return true;
+  return false;
+}
+
 // the range's protection just changed: requests posted before now are retried instead of served
 inline void bump(const size_t slot) { details::ranges[slot].epoch.fetch_add(1, std::memory_order_acq_rel); }
 

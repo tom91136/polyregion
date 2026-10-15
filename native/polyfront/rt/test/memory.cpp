@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <numeric>
 #include <thread>
 #include <unordered_set>
@@ -529,6 +531,7 @@ struct Fixture {
   size_t remoteWrites = 0, remoteReads = 0;
   // stretches device-to-host copies the way a real transfer does, page by page
   std::chrono::microseconds remoteReadPause{0};
+  std::function<void(void *)> duringRemoteRead;
 
   using QueryPtr = std::function<polyregion::polyrt::PtrQuery(const void *)>;
   using AllocateRemote = std::function<uintptr_t(size_t)>;
@@ -560,6 +563,7 @@ struct Fixture {
             }, //
             [&](void *dst, uintptr_t src, size_t srcOffset, size_t size) {
               remoteReads++;
+              if (duringRemoteRead) duringRemoteRead(dst);
               const size_t chunk = remoteReadPause.count() ? 4096 : size;
               for (size_t done = 0; done < size; done += chunk) {
                 std::memcpy(static_cast<char *>(dst) + done, reinterpret_cast<char *>(src) + srcOffset + done,
@@ -693,6 +697,39 @@ TEST_CASE("resident heap blocks reclaim before code that bypasses the fault path
   fixture.allocation.reclaimRange(xs + count / 2, sizeof(int32_t) * 4, /*forWrite*/ true);
   std::vector<int32_t> copied(xs, xs + count);
   CHECK(std::all_of(copied.begin(), copied.end(), [](const int32_t x) { return x == 4; }));
+  fixture.allocation.disassociate(xs, false);
+}
+
+TEST_CASE("freeing an unguarded block never waits on a device read in flight") {
+  if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
+  Fixture fixture;
+  const size_t count = 64 * polyregion::polyrt::guard::pageSize() / sizeof(int32_t);
+  auto xs = fixture.mallocLocalHeap<int32_t>(count);
+  auto unrelated = fixture.mallocLocalHeap<int32_t>(count);
+  std::fill(xs, xs + count, 1);
+  struct Capture {
+    int32_t *xs;
+  } capture{xs};
+
+  std::future<void> freed;
+  bool freedDuringRead = false;
+  fixture.duringRemoteRead = [&](void *dst) {
+    if (freed.valid() || dst < xs || dst >= xs + count) return;
+    freed = std::async(std::launch::async, [&] { fixture.allocation.forget(unrelated, false); });
+    freedDuringRead = freed.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+  };
+  fixture.allocation.mirrorAlloc(&capture, sizeof(capture), false);
+  auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(xs));
+  std::fill(remote, remote + count, 2);
+  fixture.allocation.unmirrorVisitClear();
+  fixture.allocation.unmirrorReadAlloc(xs);
+  fixture.allocation.disassociate(&capture, false);
+  fixture.duringRemoteRead = {};
+
+  REQUIRE(freed.valid());
+  CHECK(freedDuringRead);
+  freed.wait();
+  CHECK(xs[count / 2] == 2);
   fixture.allocation.disassociate(xs, false);
 }
 

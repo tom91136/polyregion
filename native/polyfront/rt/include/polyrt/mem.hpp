@@ -504,6 +504,8 @@ private:
   }
 
   void unguard(const uintptr_t local) {
+    const size_t page = guard::pageSize();
+    if (!guard::tracking((local + page) / page * page)) return;
     const std::lock_guard lock(guardMutex);
     if (const auto it = guards.find(local); it != guards.end()) dropGuard(it);
   }
