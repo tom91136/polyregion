@@ -47,6 +47,13 @@ class SynchronisedMemAllocation {
   RemoteWrite remoteWrite;
   RemoteRelease remoteRelease;
   bool debug;
+  static inline thread_local size_t tableMutations = 0;
+
+  template <typename F> static void mutateTables(F &&f) {
+    ++tableMutations;
+    f();
+    --tableMutations;
+  }
   // Cached allocations are refreshed once per H2D traversal; aliases and cycles reuse that refresh.
   std::unordered_set<uintptr_t> localSyncVisited{};
   // set while syncing back after a launch, so guardable pointees settle on the device instead of copying back
@@ -100,12 +107,14 @@ class SynchronisedMemAllocation {
   uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s, bool hostReadOnly = false) {
     // XXX +1 guard so adjacent USM allocs aren't bit-touching; otherwise A's past-end pointer aliases B's base in offsetQuery.
     const uintptr_t remotePtr = remoteAlloc(sizeInBytes + 1);
-    localToRemoteAlloc.emplace(reinterpret_cast<uintptr_t>(local),
-                               RemoteAllocation{.layout = s, //
-                                                .localModified = false,
-                                                .hostReadOnly = hostReadOnly,
-                                                .remote = RangedAllocation{.ptr = remotePtr, .sizeInBytes = sizeInBytes}});
-    remoteToLocalPtr.emplace(remotePtr, RangedAllocation{.ptr = reinterpret_cast<uintptr_t>(local), .sizeInBytes = sizeInBytes});
+    mutateTables([&] {
+      localToRemoteAlloc.emplace(reinterpret_cast<uintptr_t>(local),
+                                 RemoteAllocation{.layout = s, //
+                                                  .localModified = false,
+                                                  .hostReadOnly = hostReadOnly,
+                                                  .remote = RangedAllocation{.ptr = remotePtr, .sizeInBytes = sizeInBytes}});
+      remoteToLocalPtr.emplace(remotePtr, RangedAllocation{.ptr = reinterpret_cast<uintptr_t>(local), .sizeInBytes = sizeInBytes});
+    });
     return remotePtr;
   }
 
@@ -684,6 +693,7 @@ public:
 
   // the host block at `p` is going away: drop whatever mirrors it
   void forget(const void *p, const bool releaseRemote = true) {
+    if (tableMutations) return;
     unguard(reinterpret_cast<uintptr_t>(p));
     genArenaForget(p);
     disassociateExact(p, releaseRemote);
@@ -918,7 +928,7 @@ public:
       return;
     }
     genArenaStaging.clear();
-    genArenaOffsetOf.clear();
+    mutateTables([&] { genArenaOffsetOf.clear(); });
     genArenaRecs.clear();
   }
 
@@ -1001,7 +1011,7 @@ public:
           releaseArenaGuards();
           genArenaCaptureCap = (allocSize + 255) & ~size_t(255);
           genArenaStaging.assign(genArenaCaptureCap, 0);
-          genArenaOffsetOf.clear();
+          mutateTables([&] { genArenaOffsetOf.clear(); });
           genArenaRecs.clear();
           genArenaResidentEnd = 0;
           genArenaDevValid = 0; // layout changed: the resident device image is stale, force a full re-upload
@@ -1032,7 +1042,7 @@ public:
     const size_t align = indirection > 1 ? sizeof(uintptr_t) : std::max<size_t>(1, l.alignmentInBytes);
     if (const size_t pad = (align - genArenaStaging.size() % align) % align; pad) genArenaStaging.resize(genArenaStaging.size() + pad);
     const uint64_t off = genArenaStaging.size();
-    genArenaOffsetOf[reinterpret_cast<uintptr_t>(hostData)] = off;
+    mutateTables([&] { genArenaOffsetOf[reinterpret_cast<uintptr_t>(hostData)] = off; });
     const bool resident = genArenaPersist && indirection == 1 && pointerFree(&l) && arenaGuardable(hostData, allocSize);
     genArenaRecs.push_back({hostData, off, count, indirection, allocSize, &l, readOnly, resident});
     genArenaStaging.insert(genArenaStaging.end(), hostData, hostData + allocSize);
