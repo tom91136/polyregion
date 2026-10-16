@@ -413,6 +413,7 @@ check-emulators bundle='':
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ repo }}/emulators"
+    b="{{ bundle }}"; bash check_inputs.sh "${b:-$PWD/out}"
     case "{{ os() }}" in
       macos)   exec bash macos.sh --check "${1:-$PWD/out}" ;;
       windows) exec cmd //c "windows.bat --check" ;;
