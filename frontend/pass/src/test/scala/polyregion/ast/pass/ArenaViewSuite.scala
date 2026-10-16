@@ -1455,6 +1455,39 @@ class ArenaViewSuite extends munit.FunSuite {
     }))
   }
 
+  test("a reference stored after its declaration and copied into an indexed local keeps its store") {
+    val pairSym   = sym("Pair")
+    val pairTpe   = p.Type.Struct(pairSym, Nil)
+    val pair      = named("pair", pairTpe)
+    val first     = p.Term.Select(pair, List(p.PathStep.Field("first")), p.Type.IntS32).asInstanceOf[p.Term.Select]
+    val field     = named("field", pointerTpe)
+    val reference = named("reference", pointerTpe)
+    val copy      = named("copy", pointerTpe)
+    val result = ArenaView(
+      PassTest.program(
+        entry(
+          args = List(arg(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))),
+          body = List(
+            p.Stmt.Var(pair, None, isMutable = true),
+            p.Stmt.Mut(first, p.Expr.Alias(p.Term.IntS32Const(1))),
+            p.Stmt.Var(reference, None, isMutable = true),
+            p.Stmt
+              .Var(field, Some(p.Expr.RefTo(first, None, p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque)), false),
+            p.Stmt.Mut(selectT(reference), p.Expr.Alias(selectT(field))),
+            p.Stmt.Var(copy, Some(p.Expr.Alias(selectT(reference))), isMutable = true)
+          ) ::: loadAndIndex(selectT(copy), named("loaded", pointerTpe))
+        ),
+        Nil,
+        List(p.StructDef(capSym, Nil, Nil, Nil), p.StructDef(pairSym, Nil, List(named("first", p.Type.IntS32)), Nil))
+      ),
+      NoopLog
+    )
+    assert(result.entry.exists(_.collectAll[p.Stmt].exists {
+      case p.Stmt.Mut(p.Term.Select(n, Nil, _), _) => n.symbol == "reference"
+      case _                                       => false
+    }))
+  }
+
   test("a struct copy merged from two different sources stays rejected") {
     val external = arg("external", pointerTpe)
     val other    = arg("other", pointerTpe)

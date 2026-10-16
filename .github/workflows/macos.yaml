@@ -72,6 +72,10 @@ jobs:
           brew install --quiet llvm lld cmake ninja zlib gcc
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
+      - &sdkroot
+        name: Pin the SDK to the selected Xcode
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
       - name: Dotenv
         id: dotenv
         uses: falti/dotenv-action@v1.2
@@ -143,6 +147,7 @@ jobs:
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet llvm lld cmake ninja zlib gcc sbt
           echo "$(brew --prefix llvm)/bin"          >> "$GITHUB_PATH"
+      - *sdkroot
 
       - name: Dotenv
         id: dotenv
@@ -301,6 +306,7 @@ jobs:
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet cmake
 
+      - *sdkroot
       - *setup-just
 
       - name: Download dist
@@ -354,6 +360,7 @@ jobs:
       - uses: *checkout
       - *setup-just
       - *brew-cmake
+      - *sdkroot
 
       - name: Download dist
         # v4: nektos/act#6022
@@ -430,6 +437,7 @@ jobs:
       - *setup-java
       - *setup-sbt
       - *setup-just
+      - *sdkroot
 
       - name: Download dist
         # v4: nektos/act#6022
@@ -483,6 +491,7 @@ jobs:
         run: |
           if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
           brew install --quiet cmake ninja zlib
+      - *sdkroot
 
       - name: Dotenv
         id: dotenv
@@ -576,6 +585,7 @@ jobs:
       - uses: *checkout
       - *setup-just
       - *brew-cmake
+      - *sdkroot
 
       - name: Download dist (asan)
         uses: *download
@@ -619,6 +629,7 @@ jobs:
     steps:
       - uses: *checkout
       - *setup-just
+      - *sdkroot
       - name: Restore emulators cache
         if: ${{ !env.ACT }}
         id: restore-emu
@@ -663,6 +674,7 @@ jobs:
       - uses: *checkout
       - *setup-just
       - *brew-cmake
+      - *sdkroot
 
       - name: Download dist
         uses: *download

@@ -645,7 +645,9 @@ object ArenaView extends ProgramPass {
       case _                         => false
     }) { (_, known) =>
       val demoted = flows.collect {
-        case (target @ (_, path), source) if path.nonEmpty && known.contains(source) && !known.contains(target) =>
+        case (target @ (_, path), source)
+            if known.get(source).exists(value => path.nonEmpty || value.isInstanceOf[Value.Reference]) &&
+              !known.contains(target) =>
           source
       }.toSet
       // a copied reference whose source keeps its address must keep its own
