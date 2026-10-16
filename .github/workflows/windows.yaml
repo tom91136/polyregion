@@ -127,7 +127,7 @@ jobs:
         with:
           path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-static-dist
           archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
-          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -229,7 +229,7 @@ jobs:
         uses: &cache-restore actions/cache/restore@v5
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
-          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -249,7 +249,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
-          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env', './native/ports/**') }}
 
       - name: Install vcpkg dependencies
         id: build-vcpkg
@@ -302,7 +302,6 @@ jobs:
         env:
           POLYREGION_TEST_PROFILE: emulators
         run: |
-          del /s /q native\out\*.ids 2>nul
           just build-test-dist
 
       - name: Upload test dist (emulators)
@@ -528,7 +527,7 @@ jobs:
         with:
           path: &emu-path emulators/out
           archive: &emu-archive emulators/out.tar.zst
-          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/windows.bat', './emulators/gpuocelot.patch', './emulators/gpuocelot.windows.patch') }}
+          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/windows.bat', './emulators/gpuocelot.patch', './emulators/gpuocelot.windows.patch') }}
       - name: Build emulators
         id: build-emulators
         if: steps.restore-emu.outputs.cache-hit != 'true'

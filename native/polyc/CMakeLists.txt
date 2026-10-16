@@ -149,6 +149,7 @@ polyregion_apply_common_options(polyc EXTRA_LINK ${POLYC_LINK_HERMES_OPTS})
 # JIT compiler DSO; reuse shared LLVM to avoid multiple LLVM instances.
 add_library(polyc-shared SHARED polyc_shared_stub.cpp)
 set_target_properties(polyc-shared PROPERTIES OUTPUT_NAME polyc LINKER_LANGUAGE CXX)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generated/polyc_jit-exports.txt")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/generated/polyc_jit-exports.txt" _polyc_jit_exports)
 if (WIN32)
     # Avoid colliding with polyc.lib.
@@ -221,6 +222,7 @@ if (EXISTS "${LLVM_TOOLS_BINARY_DIR}/llvm-strip")
     add_custom_command(TARGET polyc-jit-static POST_BUILD
             COMMAND "${LLVM_TOOLS_BINARY_DIR}/llvm-strip" -S "$<TARGET_FILE:polyc-jit-static>")
 endif ()
+polyregion_stage_post_build(polyc-shared polyc-jit-static)
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
 if (WIN32)

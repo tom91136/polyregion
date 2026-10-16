@@ -6,6 +6,16 @@ function(polytest_discover_tests target)
         message(FATAL_ERROR "polytest_discover_tests: NAME_PREFIX required")
     endif ()
 
+    file(GLOB _profile_files CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/test-profiles/*.env")
+    set(_profile_key "${CMAKE_BINARY_DIR}/polytest-profile.key")
+    if (NOT TARGET polytest-profile-key)
+        add_custom_target(polytest-profile-key ALL
+                COMMAND ${CMAKE_COMMAND} "-DPROFILE_DIR=${CMAKE_SOURCE_DIR}/test-profiles" "-DOUT=${_profile_key}"
+                        -P "${CMAKE_SOURCE_DIR}/cmake/polytest_profile_key.cmake"
+                BYPRODUCTS "${_profile_key}"
+                COMMENT "Resolving test profile key"
+                VERBATIM)
+    endif ()
     set(_stamp_dir "${CMAKE_CURRENT_BINARY_DIR}/polytest-discover")
     set(_ids_file "${_stamp_dir}/${target}.ids")
     set(_tests_file "${_stamp_dir}/${target}-tests.cmake")
@@ -35,11 +45,12 @@ function(polytest_discover_tests target)
                     --emit-binary "$<TARGET_FILE:${target}>"
                     ${_workdir_args}
                     ${_dist_args}
-            DEPENDS ${target} ${ARG_TEST_FILES}
+            DEPENDS ${target} ${ARG_TEST_FILES} "${_profile_key}"
             WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
             COMMENT "Discovering ${target} tasks"
             VERBATIM)
     add_custom_target(${target}-discover ALL DEPENDS "${_ids_file}" "${_tests_file}" ${_dist_outputs})
+    add_dependencies(${target}-discover polytest-profile-key)
 
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_tests_file}")
 

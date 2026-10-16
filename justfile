@@ -257,6 +257,9 @@ test-scala *args='':
     if [ -z "${POLYREGION_NATIVE_LIB_DIR:-}" ] && [ -n "$BUILD" ]; then
         export POLYREGION_NATIVE_LIB_DIR="$PWD/$BUILD/bindings/jvm"
     fi
+    for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
+        if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="${POLYPASS_PLUGINS:-$package_service}"; break; fi
+    done
     cd frontend && {{ sbt }} 'compiler-testsuite-scala/testFull' {{ args }}
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
@@ -270,11 +273,10 @@ test-native *args='': build-pass-native
     for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
     done
-    rm -f "$BUILD"/*/polytest-discover/*.ids
     rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
     find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
-        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests
+        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
     # force ctest colour on a terminal; auto (off) when piped to a log so it stays greppable
     rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }} || rc=$?
     skips=$(find "$BUILD" -name polytest-skips.log -exec cat {} + 2>/dev/null | wc -l || true)
@@ -296,35 +298,39 @@ build-emulators:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ repo }}/emulators"
+    stamp=$(bash inputs.sh)
     case "{{ os() }}" in
-      macos)   exec bash macos.sh "$PWD/out" ;;
-      windows) exec cmd //c "windows.bat $(cygpath -w "$PWD" 2>/dev/null || echo "$PWD")\\out" ;;
-      linux)   : ;;
+      macos)   bash macos.sh "$PWD/out" ;;
+      windows) cmd //c "windows.bat $(cygpath -w "$PWD" 2>/dev/null || echo "$PWD")\\out" ;;
+      linux)
+        TMP="${EMU_TMPDIR:-$HOME/.podman-tmp}"; mkdir -p "$TMP"
+        TMPDIR="$TMP" {{ container }} build -f Dockerfile --target check -t polyemu .
+        rm -rf out
+        cid=$({{ container }} create polyemu)
+        {{ container }} cp "$cid:/out" ./out
+        {{ container }} rm "$cid" >/dev/null ;;
       *) echo "build-emulators: unsupported OS {{ os() }}" >&2; exit 1 ;;
     esac
-    TMP="${EMU_TMPDIR:-$HOME/.podman-tmp}"; mkdir -p "$TMP"
-    TMPDIR="$TMP" {{ container }} build -f Dockerfile --target check -t polyemu .
-    rm -rf out
-    cid=$({{ container }} create polyemu)
-    {{ container }} cp "$cid:/out" ./out
-    {{ container }} rm "$cid" >/dev/null
+    echo "$stamp" > out/.inputs.sha256
 
 # Run the native ctest suite against the software emulators; extra ctest flags via *args.
-test-native-with-emulators *args='':
+test-native-with-emulators *args='': build-pass-native
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ justfile_directory() }}
+    for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
+        if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
+    done
     [ -f emulators/out/env.sh ] || { echo "no emulators/out -- run 'just build-emulators' first"; exit 1; }
+    bash emulators/check_inputs.sh emulators/out
     source emulators/out/env.sh
     ulimit -c 0
     BUILD=$(just _native-build)
     export POLYREGION_TEST_PROFILE=emulators
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
-    # XXX ctest bakes target names at discovery; re-list under this profile first.
-    rm -f "$BUILD"/*/polytest-discover/*.ids
     find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
-        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests
+        polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
 
 # Run ctest against a relocated dist under QEMU-user.
@@ -382,6 +388,7 @@ test-native-dist profile='' junit='native-test-results' *args='':
     export "${libvar}=${libpath}:${!libvar:-}"
     if [ "{{ profile }}" = emulators ]; then
       emu="{{ repo }}/emulators/out"
+      bash "{{ repo }}/emulators/check_inputs.sh" "$emu"
       if [ -f "$emu/env.sh" ]; then
         source "$emu/env.sh"
       else
@@ -557,7 +564,7 @@ build-device-libs extra='': (_native "DEVICE_LIBS" extra)
 configure         extra='': (_native "CONFIGURE"   extra)
 
 # Build + stage the relocatable polyregion dist (bin/ + lib/).
-build-dist        extra='': (_native "DIST"        extra)
+build-dist        extra='': build-pass-native (_native "DIST"        extra)
 
 # Build + stage the test-only dist (test binaries + check_* sources).
 build-test-dist   extra='': (_native "DIST_TEST"   extra)

@@ -143,7 +143,7 @@ jobs:
         uses: &cache-restore actions/cache/restore@v5
         with:
           path: &sysroot-path ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
-          key: &sysroot-key sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile') }}
+          key: &sysroot-key sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile', './justfile') }}
 
       - name: Build sysroot
         id: build-sysroot
@@ -171,7 +171,7 @@ jobs:
         with:
           path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           archive: &llvm-archive native/out/llvm-${{ matrix.arch }}-dist.tar.zst
-          key: &llvm-key llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &llvm-key llvm-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Enable zram
         if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}
@@ -336,7 +336,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
-          key: &devlibs-key device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &devlibs-key device-libs-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -356,7 +356,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
-          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env') }}
+          key: &vcpkg-key vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env', './native/ports/**') }}
 
       - name: Install vcpkg dependencies
         id: build-vcpkg
@@ -411,7 +411,6 @@ jobs:
         env:
           POLYREGION_TEST_PROFILE: emulators
         run: |
-          find native/out -path '*/polytest-discover/*.ids' -delete
           just build-test-dist
 
       - name: Upload test dist (emulators)
@@ -467,13 +466,13 @@ jobs:
         with:
           path: &emu-path emulators/out
           archive: &emu-archive emulators/out.tar.zst
-          key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+          key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
 
       - name: Detect existing emulators (act fast-path)
         if: ${{ env.ACT }}
         id: act-emu-probe
         run: |
-          [ -f emulators/out/env.sh ] && echo "found=true" >> "$GITHUB_OUTPUT" || true
+          bash emulators/check_inputs.sh emulators/out 2>/dev/null && echo "found=true" >> "$GITHUB_OUTPUT" || true
 
       - name: Build emulators
         id: build-emulators

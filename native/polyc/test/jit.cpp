@@ -3,6 +3,7 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 
 #include "catch2/catch_all.hpp"
 
@@ -14,6 +15,7 @@
 #include "ast.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
+#include "polyc_jit_cache.h"
 
 using namespace polyregion;
 using namespace polyregion::compiletime;
@@ -82,6 +84,43 @@ TEST_CASE("polyc JIT cache rebuilds from a damaged entry", "[jit]") {
   polyc_jit_free(recovered);
 
   CHECK(actual == expected);
+}
+
+TEST_CASE("polyc JIT cache key follows the compiler identity", "[jit]") {
+  const env::ScopedEnv cacheDir(env::PolyregionCacheDir, "polyc-jit-key-test");
+  const uint8_t program[] = {1, 2, 3};
+  const auto key = [&](const std::string &identity) {
+    return jit::cachePath(program, sizeof(program), 0, "native", nullptr, 0, nullptr, 0, identity);
+  };
+  CHECK(key("a") == key("a"));
+  CHECK(key("a") != key("b"));
+
+  struct TempPlugins {
+    llvm::SmallString<256> dir;
+    TempPlugins() { REQUIRE(!llvm::sys::fs::createUniqueDirectory("polyc-jit-identity-test", dir)); }
+    ~TempPlugins() { llvm::sys::fs::remove_directories(dir); }
+    std::string write(const std::string &name, const std::string &content) const {
+      llvm::SmallString<256> path(dir);
+      llvm::sys::path::append(path, name);
+      std::ofstream(path.c_str(), std::ios::binary) << content;
+      return path.str().str();
+    }
+  } plugins;
+#if defined(_WIN32)
+  constexpr auto suffix = ".dll";
+#elif defined(__APPLE__)
+  constexpr auto suffix = ".dylib";
+#else
+  constexpr auto suffix = ".so";
+#endif
+  const auto first = plugins.write(std::string("first") + suffix, "one");
+  const auto second = plugins.write(std::string("second") + suffix, "two plus");
+  const auto identityWith = [](const std::string &plugin) {
+    const env::ScopedEnv scoped(env::PolypassPlugins, plugin.c_str());
+    return jit::compilerIdentity();
+  };
+  CHECK(identityWith(first) == identityWith(first));
+  CHECK(identityWith(first) != identityWith(second));
 }
 
 TEST_CASE("polyc JIT C ABI reports malformed programs", "[jit]") {

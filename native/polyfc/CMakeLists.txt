@@ -2,11 +2,9 @@ add_subdirectory(polydco)
 add_subdirectory(flang-plugin)
 
 set(POLYFC_HEADER_SET_DIR "lib/polyfc/include")
-set(POLYFC_LIB_DIR "lib/polyfc/lib")
 
+polyregion_copy_lib_targets(polyfc-lib-resource polyfc ${POLYREGION_STAGE_DIR_polyfc} ${POLYREGION_STAGED_LIBS_polyfc})
 if (POLYREGION_FUSED_DRIVER)
-    polyregion_copy_lib_targets(polyfc-lib-resource polyfc ${POLYFC_LIB_DIR}
-            polyreflect-rt polydco-static polydco polyc-shared polyc-jit-static)
     if (WIN32)
         set(POLYFC_LLD_NAME "lld-link.exe")
     else ()
@@ -14,9 +12,6 @@ if (POLYREGION_FUSED_DRIVER)
     endif ()
     add_custom_target(polyfc-polyld-resource
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polyld-link>" "$<TARGET_FILE_DIR:polyfc>/${POLYFC_LLD_NAME}")
-else ()
-    polyregion_copy_lib_targets(polyfc-lib-resource polyfc ${POLYFC_LIB_DIR}
-            polyfc-flang-plugin polyreflect-plugin polyreflect-rt polydco-static polydco polyc-shared polyc-jit-static)
 endif ()
 
 

@@ -51,3 +51,4 @@ if (NOT POLYREGION_FUSED_DRIVER)
             magic_enum::magic_enum
             fmt::fmt-header-only)
 endif ()
+polyregion_stage_post_build(polyreflect-rt polyreflect-plugin)

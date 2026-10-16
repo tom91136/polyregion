@@ -28,16 +28,43 @@ function(polyregion_test_profile_dir target)
   target_compile_definitions(${target} PRIVATE POLYREGION_TEST_PROFILE_DIR="${CMAKE_SOURCE_DIR}/test-profiles")
 endfunction()
 
+function(polyregion_stage_post_build)
+  foreach (lib ${ARGN})
+    foreach (driver IN ITEMS polycpp polyfc)
+      if (lib IN_LIST POLYREGION_STAGED_LIBS_${driver})
+        set(_dest "$<TARGET_FILE_DIR:${driver}>/${POLYREGION_STAGE_DIR_${driver}}/")
+        add_custom_command(TARGET ${lib} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${_dest}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${lib}>" "${_dest}"
+                VERBATIM)
+        get_target_property(_t ${lib} TYPE)
+        if (WIN32 AND _t STREQUAL "SHARED_LIBRARY")
+          add_custom_command(TARGET ${lib} POST_BUILD
+                  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:${lib}>" "${_dest}"
+                  VERBATIM)
+        endif ()
+      endif ()
+    endforeach ()
+  endforeach ()
+endfunction()
+
 function(polyregion_copy_lib_targets out_target driver lib_dir)
+  set(keep "")
   set(commands "")
   foreach (lib ${ARGN})
-    list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${lib}>" "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/")
+    list(APPEND keep "$<TARGET_FILE_NAME:${lib}>")
+    list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${lib}>" "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/")
     get_target_property(_t ${lib} TYPE)
     if (WIN32 AND _t STREQUAL "SHARED_LIBRARY")
-      list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_LINKER_FILE:${lib}>" "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/")
+      list(APPEND keep "$<TARGET_LINKER_FILE_NAME:${lib}>")
+      list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:${lib}>" "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/")
     endif ()
   endforeach ()
   add_custom_target(${out_target}
           COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/"
-          ${commands})
+          ${commands}
+          COMMAND ${CMAKE_COMMAND} "-DDIR=$<TARGET_FILE_DIR:${driver}>/${lib_dir}" "-DKEEP=$<JOIN:${keep},$<SEMICOLON>>"
+                  -P "${CMAKE_SOURCE_DIR}/cmake/prune_staged.cmake"
+          VERBATIM)
+  add_dependencies(${out_target} ${ARGN})
 endfunction()

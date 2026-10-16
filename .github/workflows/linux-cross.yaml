@@ -170,7 +170,7 @@ jobs:
         with:
           path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           archive: &llvm-archive native/out/llvm-cross-${{ matrix.arch }}-dist.tar.zst
-          key: &llvm-key llvm-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &llvm-key llvm-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Enable zram
         if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}
@@ -300,7 +300,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
-          key: &devlibs-key device-libs-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &devlibs-key device-libs-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -345,7 +345,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &vcpkg-path ./native/.vcpkg/vcpkg_installed
-          key: &vcpkg-key vcpkg-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/.env') }}
+          key: &vcpkg-key vcpkg-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/.env', './native/ports/**', './native/cmake/linux-clang-cross-common.cmake') }}
 
       - name: Install vcpkg deps
         id: build-vcpkg

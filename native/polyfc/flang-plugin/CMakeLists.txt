@@ -77,3 +77,5 @@ target_precompile_headers(polyfc-flang-plugin PRIVATE
 
 
 )
+
+polyregion_stage_post_build(polyfc-flang-plugin)

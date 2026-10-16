@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "llvm/Support/FileSystem.h"
+
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
@@ -18,6 +20,8 @@
 #include "compiler.h"
 #include "polyast_codec.h"
 #include "polyast_jit.h"
+#include "polyc_jit_cache.h"
+#include "polypass_locate.h"
 
 using namespace polyregion;
 using namespace aspartame;
@@ -28,17 +32,12 @@ thread_local std::string lastError;
 
 template <typename T> auto ptrView(const T *p, const size_t n) { return view(p, n ? p + n : p); }
 
-std::string cachePath(const uint8_t *program, size_t programLen, uint8_t target, const char *arch, const char *pipelineSpec, uint8_t opt,
-                      const polyc_jit_spec_const_t *specs, size_t nSpecs) {
-  const auto meta = ptrView(specs, nSpecs) //
-                    | fold_left(fmt::format("polyc-jit-v{}|{}|{}|{}|{}", POLYC_JIT_ABI_VERSION, target, opt, arch ? arch : "",
-                                            pipelineSpec ? pipelineSpec : ""),
-                                [](std::string acc, const auto &spec) {
-                                  return std::move(acc)
-                                      .append(fmt::format("|{}={}:", spec.field, spec.typeName))
-                                      .append(reinterpret_cast<const char *>(spec.data), spec.dataLen);
-                                });
-  return cache::path("jit", {meta, std::string_view(reinterpret_cast<const char *>(program), programLen)}, ".o");
+const char identityAnchor = 0;
+
+std::string fileIdentity(const std::string &path) {
+  llvm::sys::fs::file_status status;
+  if (llvm::sys::fs::status(path, status)) return path + ":missing";
+  return fmt::format("{}:{}:{}", path, status.getSize(), status.getLastModificationTime().time_since_epoch().count());
 }
 
 unsigned char *mallocCopy(const void *data, const size_t size) {
@@ -81,6 +80,31 @@ polyast::Program applySpecialise(const polyast::Program &p, const std::unordered
 
 } // namespace
 
+namespace polyregion::jit {
+
+std::string compilerIdentity() {
+  static const std::string self = fileIdentity(llvm::sys::fs::getMainExecutable(nullptr, const_cast<char *>(&identityAnchor)));
+  std::string error;
+  return polypass::resolvePlugins(error) //
+         | fold_left(self,
+                     [](std::string acc, const auto &plugin) { return std::move(acc).append("|").append(fileIdentity(plugin.path)); });
+}
+
+std::string cachePath(const uint8_t *program, size_t programLen, uint8_t target, const char *arch, const char *pipelineSpec, uint8_t opt,
+                      const polyc_jit_spec_const_t *specs, size_t nSpecs, const std::string &identity) {
+  const auto meta = ptrView(specs, nSpecs) //
+                    | fold_left(fmt::format("polyc-jit-v{}|{}|{}|{}|{}|{}", POLYC_JIT_ABI_VERSION, identity, target, opt, arch ? arch : "",
+                                            pipelineSpec ? pipelineSpec : ""),
+                                [](std::string acc, const auto &spec) {
+                                  return std::move(acc)
+                                      .append(fmt::format("|{}={}:", spec.field, spec.typeName))
+                                      .append(reinterpret_cast<const char *>(spec.data), spec.dataLen);
+                                });
+  return cache::path("jit", {meta, std::string_view(reinterpret_cast<const char *>(program), programLen)}, ".o");
+}
+
+} // namespace polyregion::jit
+
 extern "C" uint32_t polyc_jit_abi_version(void) { return POLYC_JIT_ABI_VERSION; }
 
 extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t programLen, //
@@ -109,8 +133,8 @@ extern "C" polyc_jit_status_t polyc_jit_compile(const uint8_t *program, size_t p
     return POLYC_JIT_FAILED;
   }
   try {
-    const std::string path = cachePath(program, programLen, static_cast<uint8_t>(target), arch, pipelineSpec, static_cast<uint8_t>(opt),
-                                       specialise, specialiseLen);
+    const std::string path = jit::cachePath(program, programLen, static_cast<uint8_t>(target), arch, pipelineSpec,
+                                            static_cast<uint8_t>(opt), specialise, specialiseLen, jit::compilerIdentity());
     if (const auto cached = cache::read(path); !cached.empty())
       if (auto *o = mallocCopy(cached.data(), cached.size())) return deliver(o, cached.size(), out, outLen);
 

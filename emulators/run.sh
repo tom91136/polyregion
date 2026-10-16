@@ -4,6 +4,7 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE="$(cd "${1:-$DIR/out}" 2>/dev/null && pwd || true)"
 [ -n "$BUNDLE" ] && [ -f "$BUNDLE/env.sh" ] || { echo "no bundle env.sh (run 'just build-emulators' first)"; exit 2; }
+bash "$DIR/check_inputs.sh" "$BUNDLE" || exit 2
 # shellcheck source=/dev/null
 source "$BUNDLE/env.sh"
 B="$(mktemp -d)"; trap 'rm -rf "$B"' EXIT

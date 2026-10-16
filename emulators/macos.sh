@@ -16,6 +16,14 @@ export HOMEBREW_NO_AUTO_UPDATE=1
 # keg-only bison/flex/llvm + the venv python (>=3.10, carries mako for mesa codegen)
 export PATH="$PREFIX/bin:$PREFIX/opt/bison/bin:$PREFIX/opt/flex/bin:$PREFIX/opt/llvm/bin:$WORK/venv/bin:$PATH"
 
+clone_pinned() {
+  local dir="$1" ref="$2" url="$3"
+  [ "$(cat "$dir/.git/polyregion-ref" 2>/dev/null)" = "$ref" ] && return
+  rm -rf "$dir"
+  git clone -b "$ref" --depth 1 "$url" "$dir"
+  echo "$ref" > "$dir/.git/polyregion-ref"
+}
+
 deps() {
   if "$BREW" tap | grep -qx 'aws/tap'; then "$BREW" untap aws/tap; fi
   local dep missing=()
@@ -37,8 +45,7 @@ deps() {
 
 # llvm-spirv matching llvm@21, for pocl's SPIR-V
 xlat() {
-  [ -d "$WORK/spirv-xlat/.git" ] || git clone -b "$XLAT_REF" --depth 1 \
-    https://github.com/KhronosGroup/SPIRV-LLVM-Translator "$WORK/spirv-xlat"
+  clone_pinned "$WORK/spirv-xlat" "$XLAT_REF" https://github.com/KhronosGroup/SPIRV-LLVM-Translator
   rm -rf "$WORK/build-xlat" "$WORK/xlat-prefix"
   cmake -S "$WORK/spirv-xlat" -B "$WORK/build-xlat" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_DIR="$LLVM21/lib/cmake/llvm" -DCMAKE_INSTALL_PREFIX="$WORK/xlat-prefix"
@@ -46,8 +53,7 @@ xlat() {
 }
 
 pocl() {
-  [ -d "$WORK/pocl-src/.git" ] || git clone -b "$POCL_REF" --depth 1 \
-    https://github.com/pocl/pocl "$WORK/pocl-src"
+  clone_pinned "$WORK/pocl-src" "$POCL_REF" https://github.com/pocl/pocl
   rm -rf "$WORK/build-pocl" "$WORK/pocl-prefix"
   # LLC_HOST_CPU pinned: pocl can't auto-detect the CPU on some hosts (GHA runners). arm64 macOS is always
   # Apple Silicon so apple-m1 is the safe floor; x86_64 takes the generic x86-64 baseline
@@ -65,8 +71,7 @@ pocl() {
 }
 
 mesa() {
-  [ -d "$WORK/mesa/.git" ] || git clone -b "$MESA_REF" --depth 1 \
-    https://gitlab.freedesktop.org/mesa/mesa "$WORK/mesa"
+  clone_pinned "$WORK/mesa" "$MESA_REF" https://gitlab.freedesktop.org/mesa/mesa
   export LIBRARY_PATH="$PREFIX/lib"
   export PKG_CONFIG_PATH="$PREFIX/opt/expat/lib/pkgconfig:$PREFIX/opt/zlib/lib/pkgconfig"
   rm -rf "$WORK/build-mesa" "$WORK/mesa-prefix"

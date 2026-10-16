@@ -106,7 +106,7 @@ set(RUN_BabelStream   -s 134217728 -n 25)                  # ~1GB arrays (2^27 d
 set(RUN_BabelStream_vk-lavapipe -s 33554432 -n 25)
 set(RUN_BabelStream_cl-llvmpipe -s 33554432 -n 25)
 set(FAIL_BabelStream  "FAILED validation")                 # no PASS banner; fails loudly on bad results
-set(EXTRA_BabelStream "set(STDIMPL INDICES CACHE STRING \"\")")   # the std model needs an explicit impl strategy
+set(EXTRA_BabelStream "set(STDIMPL INDICES CACHE STRING \"\" FORCE)")   # the std model needs an explicit impl strategy
 
 # Cross: set specific on target arch, not host
 if (NOT MINIAPP_TARGET_ARCH)
@@ -117,8 +117,8 @@ if (NOT MINIAPP_TARGET_ARCH)
 endif ()
 # Cross: skip each app's -march=native
 if (NOT MINIAPP_TARGET_ARCH STREQUAL CMAKE_HOST_SYSTEM_PROCESSOR)
-  string(APPEND EXTRA_BabelStream "\nset(BUILD_NATIVE OFF CACHE BOOL \"\")")
-  set(EXTRA_TeaLeaf "set(RELEASE_CXX_FLAGS \"-O3;-Wall\" CACHE STRING \"\")")
+  string(APPEND EXTRA_BabelStream "\nset(BUILD_NATIVE OFF CACHE BOOL \"\" FORCE)")
+  set(EXTRA_TeaLeaf "set(RELEASE_CXX_FLAGS \"-O3;-Wall\" CACHE STRING \"\" FORCE)")
 endif ()
 if (MINIAPP_TARGET_ARCH STREQUAL riscv64 OR MINIAPP_TARGET_ARCH STREQUAL arm)
   set(RUN_BabelStream -s 16777216 -n 25) # aarch32 has 3GB user VA, so 128MB arrays
@@ -127,14 +127,26 @@ endif ()
 set(APPS "${CMAKE_CURRENT_SOURCE_DIR}/apps")
 foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
   set(src "${APPS}/${app}")
-  if (NOT EXISTS "${src}/.git")                            # fetch the pinned commit once (shallow), shared across backends
+  set(fetch_stamp "${SHA_${app}}")
+  if (DEFINED PATCH_${app})
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${PATCH_${app}}" patch_hash)
+    string(APPEND fetch_stamp ":${patch_hash}")
+  endif ()
+  set(fetched_stamp "")
+  if (EXISTS "${src}/.git/polyregion-stamp")
+    file(READ "${src}/.git/polyregion-stamp" fetched_stamp)
+    string(STRIP "${fetched_stamp}" fetched_stamp)
+  endif ()
+  if (NOT fetched_stamp STREQUAL fetch_stamp)              # fetch the pinned commit (shallow), shared across backends; refetch when the pin or patch changes
     message(STATUS "check_miniapps: fetching ${app} @ ${SHA_${app}}")
+    file(REMOVE_RECURSE "${src}")
     execute_process(COMMAND ${GIT_EXECUTABLE} init -q "${src}" COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND ${GIT_EXECUTABLE} -C "${src}" fetch -q --depth 1 ${REPO_${app}} ${SHA_${app}} COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND ${GIT_EXECUTABLE} -C "${src}" -c advice.detachedHead=false checkout -q FETCH_HEAD COMMAND_ERROR_IS_FATAL ANY)
     if (DEFINED PATCH_${app})                              # local source tweak (read the qa gold from a file)
       execute_process(COMMAND ${GIT_EXECUTABLE} -C "${src}" apply "${CMAKE_CURRENT_SOURCE_DIR}/${PATCH_${app}}" COMMAND_ERROR_IS_FATAL ANY)
     endif ()
+    file(WRITE "${src}/.git/polyregion-stamp" "${fetch_stamp}\n")
   endif ()
   if (DEFINED GOLD_${app})                                 # inject the deck's reference value for the app's built-in QA
     file(WRITE "${src}/${PROBLEMS_${app}}" "${GOLD_${app}}\n")
@@ -144,19 +156,19 @@ foreach (app miniBUDE CloverLeaf TeaLeaf BabelStream)
     set(init "${bdir}/polyregion-init.cmake")
     if (backend STREQUAL cpu-tbb)                           # reference: system compiler + system oneTBB
       file(WRITE "${init}"
-        "set(MODEL ${MODEL_${app}} CACHE STRING \"\")\n"
-        "set(CMAKE_CXX_COMPILER \"${SYSTEM_CXX}\" CACHE STRING \"\")\n"
-        "set(USE_TBB ON CACHE BOOL \"\")\n"
-        "set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES \"${TBB_SHIM}\" CACHE STRING \"\")\n")
+        "set(MODEL ${MODEL_${app}} CACHE STRING \"\" FORCE)\n"
+        "set(CMAKE_CXX_COMPILER \"${SYSTEM_CXX}\" CACHE STRING \"\" FORCE)\n"
+        "set(USE_TBB ON CACHE BOOL \"\" FORCE)\n"
+        "set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES \"${TBB_SHIM}\" CACHE STRING \"\" FORCE)\n")
     else ()                                                # polycpp offload backend
       set(JIT_FLAG "")                                     # -DMINIAPP_JIT=ON compiles kernels at runtime
       if (MINIAPP_JIT)
         set(JIT_FLAG ";-fstdpar-jit=dynamic")
       endif ()
       file(WRITE "${init}"
-        "set(MODEL ${MODEL_${app}} CACHE STRING \"\")\n"
-        "set(CMAKE_CXX_COMPILER \"${POLYCPP_DIST}/bin/polycpp\" CACHE STRING \"\")\n"
-        "set(CXX_EXTRA_FLAGS \"-fstdpar;-fstdpar-arch=${ARCH_${backend}};-fstdpar-mem=reflect;-fstdpar-rt=dynamic${JIT_FLAG}\" CACHE STRING \"\")\n")
+        "set(MODEL ${MODEL_${app}} CACHE STRING \"\" FORCE)\n"
+        "set(CMAKE_CXX_COMPILER \"${POLYCPP_DIST}/bin/polycpp\" CACHE STRING \"\" FORCE)\n"
+        "set(CXX_EXTRA_FLAGS \"-fstdpar;-fstdpar-arch=${ARCH_${backend}};-fstdpar-mem=reflect;-fstdpar-rt=dynamic${JIT_FLAG}\" CACHE STRING \"\" FORCE)\n")
     endif ()
     if (DEFINED EXTRA_${app})                              # per-app extra cache vars (e.g. BabelStream STDIMPL)
       file(APPEND "${init}" "${EXTRA_${app}}\n")

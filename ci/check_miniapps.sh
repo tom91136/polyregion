@@ -13,6 +13,7 @@ BUILD="$SRC/_ctest-${ARCH}"
 # emulator bundle: env, then in-repo (just build-emulators), else cpu-only.
 EMU="${POLYREGION_EMULATORS_HOME:-$ROOT/emulators/out}"
 [ -f "$EMU/env.sh" ] || EMU=""
+[ -z "$EMU" ] || bash "$ROOT/emulators/check_inputs.sh" "$EMU"
 [ -n "$EMU" ] && echo "emulators: $EMU" || echo "emulators: none (cpu-only)"
 
 # XXX cap both ctest -j and cmake --parallel; else nproc^2 compilers OOMs tight hosts
@@ -26,7 +27,8 @@ fi
 export CMAKE_BUILD_PARALLEL_LEVEL="$MINIAPP_JOBS"
 echo "concurrency: MINIAPP_JOBS=$MINIAPP_JOBS (override via env)"
 
-cmake -S "$SRC" -B "$BUILD" -DPOLYCPP_DIST="$DIST" -DMINIAPP_TARGET_ARCH="$ARCH" \
-  ${EMU:+"-DMINIAPP_EMULATORS=$EMU"} \
-  ${MINIAPP_BACKENDS:+"-DMINIAPP_BACKENDS=$MINIAPP_BACKENDS"}
+select=()
+if [ -n "$EMU" ]; then select+=("-DMINIAPP_EMULATORS=$EMU"); else select+=("-UMINIAPP_EMULATORS"); fi
+if [ -n "${MINIAPP_BACKENDS:-}" ]; then select+=("-DMINIAPP_BACKENDS=$MINIAPP_BACKENDS"); else select+=("-UMINIAPP_BACKENDS"); fi
+cmake -S "$SRC" -B "$BUILD" -DPOLYCPP_DIST="$DIST" -DMINIAPP_TARGET_ARCH="$ARCH" "${select[@]}"
 ctest --test-dir "$BUILD" --output-on-failure -j "$MINIAPP_JOBS"

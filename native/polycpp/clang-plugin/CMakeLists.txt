@@ -71,3 +71,5 @@ target_precompile_headers(polycpp-clang-plugin PRIVATE
         <utility>
         <vector>
 )
+
+polyregion_stage_post_build(polycpp-clang-plugin)

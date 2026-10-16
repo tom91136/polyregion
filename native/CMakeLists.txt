@@ -12,16 +12,6 @@ endif ()
 cmake_policy(SET CMP0069 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_C_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_C_FLAGS_RELEASE "-O3  -g1 -gz" CACHE STRING "")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3  -g1 -gz" CACHE STRING "")
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # TODO
-endif ()
-
 include(FetchContent)
 include(ProcessorCount)
 include(CMakePackageConfigHelpers)
@@ -565,6 +555,18 @@ set(CMAKE_CTEST_ARGUMENTS
         "--output-on-failure"
         "--output-junit;${CMAKE_BINARY_DIR}/test-results.xml"
         CACHE INTERNAL "")
+
+set(POLYREGION_STAGE_DIR_polycpp "lib/polycpp/lib")
+set(POLYREGION_STAGE_DIR_polyfc "lib/polyfc/lib")
+set(POLYREGION_STAGED_LIBS_polycpp polyreflect-rt polystl-static polystl polyc-shared polyc-jit-static)
+set(POLYREGION_STAGED_LIBS_polyfc polyreflect-rt polydco-static polydco polyc-shared polyc-jit-static)
+if (NOT POLYREGION_FUSED_DRIVER)
+    list(PREPEND POLYREGION_STAGED_LIBS_polycpp polycpp-clang-plugin polyreflect-plugin)
+    list(PREPEND POLYREGION_STAGED_LIBS_polyfc polyfc-flang-plugin polyreflect-plugin)
+endif ()
+if (NOT POLYREGION_HAS_FLANG)
+    set(POLYREGION_STAGED_LIBS_polyfc)
+endif ()
 
 add_subdirectory(common)
 add_subdirectory(polyast)
