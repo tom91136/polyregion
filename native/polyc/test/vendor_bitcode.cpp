@@ -7,7 +7,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/Process.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "catch2/catch_all.hpp"
@@ -18,15 +17,18 @@ using namespace polyregion::backend;
 
 namespace {
 
-std::string scratchDir(const std::string &suffix) {
-  llvm::SmallString<256> root;
-  llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, root);
-  const auto pid = std::to_string(llvm::sys::Process::getProcessId());
-  llvm::sys::path::append(root, "polyc-vendor-bitcode-" + pid + "-" + suffix);
-  llvm::sys::fs::remove_directories(root);
-  if (auto ec = llvm::sys::fs::create_directories(root)) FAIL("scratchDir create_directories failed: " << ec.message());
-  return root.str().str();
-}
+struct ScratchDir {
+  std::string path;
+  explicit ScratchDir(const std::string &suffix) {
+    llvm::SmallString<256> dir;
+    if (auto ec = llvm::sys::fs::createUniqueDirectory("polyc-vendor-bitcode-" + suffix, dir))
+      FAIL("ScratchDir createUniqueDirectory failed: " << ec.message());
+    path = dir.str().str();
+  }
+  ScratchDir(const ScratchDir &) = delete;
+  ScratchDir &operator=(const ScratchDir &) = delete;
+  ~ScratchDir() { llvm::sys::fs::remove_directories(path); }
+};
 
 std::string joined(const std::string &dir, llvm::StringRef name) {
   llvm::SmallString<256> p(dir);
@@ -37,27 +39,27 @@ std::string joined(const std::string &dir, llvm::StringRef name) {
 } // namespace
 
 TEST_CASE("findInDirs picks the first match", "[vendor-bitcode]") {
-  auto a = scratchDir("first-match-a");
-  auto b = scratchDir("first-match-b");
-  std::ofstream(joined(b, "libdevice.10.bc")) << "stub";
-  CHECK(llvmc::findInDirs("libdevice.10.bc", {a, b}) == joined(b, "libdevice.10.bc"));
+  const ScratchDir a("first-match-a");
+  const ScratchDir b("first-match-b");
+  std::ofstream(joined(b.path, "libdevice.10.bc")) << "stub";
+  CHECK(llvmc::findInDirs("libdevice.10.bc", {a.path, b.path}) == joined(b.path, "libdevice.10.bc"));
 }
 
 TEST_CASE("findInDirs returns empty when no dir contains the file", "[vendor-bitcode]") {
-  auto a = scratchDir("no-match");
-  CHECK(llvmc::findInDirs("missing.bc", {a}).empty());
+  const ScratchDir a("no-match");
+  CHECK(llvmc::findInDirs("missing.bc", {a.path}).empty());
 }
 
 TEST_CASE("findInDirs skips empty dir entries", "[vendor-bitcode]") {
-  auto a = scratchDir("skip-empty");
-  std::ofstream(joined(a, "libdevice.10.bc")) << "stub";
+  const ScratchDir a("skip-empty");
+  std::ofstream(joined(a.path, "libdevice.10.bc")) << "stub";
   const llvm::StringRef empty;
-  CHECK(llvmc::findInDirs("libdevice.10.bc", {empty, a}) == joined(a, "libdevice.10.bc"));
+  CHECK(llvmc::findInDirs("libdevice.10.bc", {empty, a.path}) == joined(a.path, "libdevice.10.bc"));
 }
 
 TEST_CASE("linkVendorBitcodeFile merges definitions into target module", "[vendor-bitcode]") {
-  auto dir = scratchDir("link");
-  const auto donorPath = joined(dir, "donor.bc");
+  const ScratchDir dir("link");
+  const auto donorPath = joined(dir.path, "donor.bc");
 
   {
     llvm::LLVMContext ctx;

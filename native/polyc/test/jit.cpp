@@ -39,9 +39,16 @@ TEST_CASE("polyc JIT C ABI compiles and owns its result", "[jit]") {
 }
 
 TEST_CASE("polyc JIT cache rebuilds from a damaged entry", "[jit]") {
-  llvm::SmallString<256> dir;
-  REQUIRE(!llvm::sys::fs::createUniqueDirectory("polyc-jit-cache-test", dir));
-  env::put(env::PolyregionCacheDir, dir.c_str(), true);
+  struct CacheDir {
+    llvm::SmallString<256> dir;
+    std::optional<env::ScopedEnv> scoped;
+    CacheDir() {
+      REQUIRE(!llvm::sys::fs::createUniqueDirectory("polyc-jit-cache-test", dir));
+      scoped.emplace(env::PolyregionCacheDir, dir.c_str());
+    }
+    ~CacheDir() { llvm::sys::fs::remove_directories(dir); }
+  } cacheDir;
+  const auto &dir = cacheDir.dir;
 
   const auto entry = function("jit_cached", {}, Type::Unit0(), FunctionVisibility::Exported(), FunctionFpMode::Relaxed(),
                               CallConvention::OffloadEntry())({ret(Term::Unit0Const())});
@@ -75,9 +82,6 @@ TEST_CASE("polyc JIT cache rebuilds from a damaged entry", "[jit]") {
   polyc_jit_free(recovered);
 
   CHECK(actual == expected);
-
-  env::put(env::PolyregionCacheDir, "", true);
-  llvm::sys::fs::remove_directories(dir);
 }
 
 TEST_CASE("polyc JIT C ABI reports malformed programs", "[jit]") {

@@ -167,6 +167,13 @@ public final class Loader {
         System.out.println("[Loader] Load native:" + libPath);
         System.load(libPath.toString());
         System.out.println("[Loader] Loaded native:" + libPath);
+        if (!libPath.equals(absolute)
+            && !System.getProperty("os.name", "").toLowerCase().startsWith("windows")) {
+          try {
+            Files.deleteIfExists(libPath);
+          } catch (IOException ignored) {
+          }
+        }
         return libPath;
       } catch (UnsatisfiedLinkError e) {
         if (!e.getMessage().endsWith("already loaded in another classloader")) throw e;

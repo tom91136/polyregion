@@ -11,6 +11,7 @@
   #include <dlfcn.h>
 #endif
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/Config/llvm-config.h"
@@ -26,6 +27,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -496,35 +498,41 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
   else {
 
     // TODO fileless load: Linux memfd_create, Windows MemoryModule; dlopen needs a real file for now
-    auto tmpPath = std::tmpnam(nullptr);
-    if (!tmpPath) {
-      POLYINVOKE_FATAL(SHOBJ_PREFIX, "Unable to buffer image to file for %s, tmpfile creation failed: cannot synthesise temp path",
-                       name.c_str());
-    }
-    std::FILE *objectFile = std::fopen(tmpPath, "wb");
-    if (!objectFile) {
+    llvm::SmallString<256> model;
+    llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, model);
+    llvm::sys::path::append(model, "polyinvoke-shobj-%%%%%%%%");
+    llvm::SmallString<256> tmpPath;
+    int objectFd = -1;
+    if (const auto ec = llvm::sys::fs::createUniqueFile(model, objectFd, tmpPath)) {
       POLYINVOKE_FATAL(SHOBJ_PREFIX, "Unable to buffer image to file for %s, tmpfile creation failed: %s", name.c_str(),
-                       std::strerror(errno));
+                       ec.message().c_str());
     }
-    std::fwrite(image.data(), image.size(), 1, objectFile);
-    std::fflush(objectFile);
-    std::fclose(objectFile);
-    static std::vector<std::string> tmpImagePaths;
-    tmpImagePaths.emplace_back(tmpPath);
-    static std::mutex cleanupMutex;
-    static auto cleanUp = []() {
-      std::unique_lock<std::mutex> lock(cleanupMutex);
-      for (auto &path : tmpImagePaths) {
-        if (std::remove(path.c_str()) != 0) {
-          fmt::print(stderr, "[{}] Warning: cannot remove temporary image file {}\n", SHOBJ_PREFIX, path);
-        }
-      }
-      tmpImagePaths.clear();
-    };
-    std::atexit(cleanUp);
-    std::set_terminate(cleanUp);
+    {
+      llvm::raw_fd_ostream objectFile(objectFd, /*shouldClose=*/true);
+      objectFile.write(image.data(), image.size());
+    }
 
-    if (auto dylib = polyregion_dl_open(tmpPath); !dylib) {
+    auto *dylib = polyregion_dl_open(tmpPath.c_str());
+#ifdef _WIN32
+    static std::vector<std::string> tmpImagePaths;
+    static std::mutex cleanupMutex;
+    {
+      std::unique_lock<std::mutex> lock(cleanupMutex);
+      if (tmpImagePaths.empty()) {
+        std::atexit([]() {
+          std::unique_lock<std::mutex> lock(cleanupMutex);
+          for (auto &path : tmpImagePaths)
+            if (std::remove(path.c_str()) != 0)
+              fmt::print(stderr, "[{}] Warning: cannot remove temporary image file {}\n", SHOBJ_PREFIX, path);
+        });
+      }
+      tmpImagePaths.emplace_back(tmpPath.str());
+    }
+#else
+    llvm::sys::fs::remove(tmpPath);
+#endif
+
+    if (!dylib) {
       POLYINVOKE_FATAL(SHOBJ_PREFIX, "Cannot load module: %s", polyregion_dl_error());
     } else modules.emplace_hint(it, name, details::LoadedModule{image, dylib, {}});
   }

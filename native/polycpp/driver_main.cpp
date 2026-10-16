@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -41,9 +42,14 @@ using polyregion::conventions::reflect::PassStack;
 namespace {
 
 int finishPackageCompilation(const int result, const std::string &path) {
-  if (path.empty() || result != 0) return result;
+  if (path.empty()) return result;
   const auto hostPath = path + ".host";
   const auto devicePath = path + ".device";
+  const llvm::scope_exit cleanup([&] {
+    llvm::sys::fs::remove(hostPath);
+    llvm::sys::fs::remove(devicePath);
+  });
+  if (result != 0) return result;
   const auto read = [](const std::string &input) -> std::optional<polyregion::polyast::Program> {
     const auto buffer = llvm::MemoryBuffer::getFile(input);
     if (!buffer) return {};
@@ -69,8 +75,6 @@ int finishPackageCompilation(const int result, const std::string &path) {
     fmt::print(stderr, "[PolyCpp] Cannot write package program {}: {}\n", path, error->message());
     return EXIT_FAILURE;
   }
-  llvm::sys::fs::remove(hostPath);
-  llvm::sys::fs::remove(devicePath);
   return result;
 }
 

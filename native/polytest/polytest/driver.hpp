@@ -17,7 +17,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
-#include "llvm/Support/Process.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 
 #include "aspartame/all.hpp"
@@ -25,17 +25,15 @@
 #include "fmt/format.h"
 
 #include "polyinvoke/device_lock.h"
+#include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 #include "polyregion/io.hpp"
+#include "polyregion/test_process.h"
 
 #include "fire.hpp"
 #include "polytest/ctest_emit.hpp"
 #include "polytest/lit.hpp"
 #include "polytest/profile.hpp"
-
-#ifndef _WIN32
-  #include <sys/resource.h>
-#endif
 
 // XXX on Apple, clang++/flang-new default to the triple they were themselves built with when no
 // --target= is given, which is wrong for a cross-built dist so we pin directly
@@ -68,7 +66,6 @@ struct DriverConfig {
   std::string driverEnvVar;
   std::vector<std::string> passthroughEnvs;
   std::string outputPrefix;
-  std::string tempPrefix;
   std::string directive;
   bool cleanupOnSuccess;
   // binds targetVar to the value keyed by the compile target's canonical backend; unmapped targets are not tested
@@ -157,6 +154,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   // XXX NVIDIA's shader disk cache (~/.cache/nvidia/GLCache) bloats to 100k+ files across a sweep and the
   // driver stat-scans it on every init (~20s spin); one-shot test kernels gain nothing, so disable it
   put("__GL_SHADER_DISK_CACHE", "0");
+  put("POCL_KERNEL_CACHE", "0");
   // XXX rusticl loads Mesa's LLVM in-process; the ICD loader pulls it in for ANY OpenCL target, clashing
   // with polydco/polystl's LLVM (two libLLVMSPIRVLib) -> bad_alloc. expose it only when it's selected
   const bool rusticlTarget = archFor(t, cfg) ^ contains_slice("rusticl");
@@ -184,8 +182,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            polyregion::env::PolyrtMirror, polyregion::env::PolyregionPassLog,                 //
                            polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
                            polyregion::env::PolyregionSysroot, polyregion::env::PolyregionBitcodeDir,         //
-                           polyregion::env::PolypassPlugins,                                                  //
-                           "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
+                           polyregion::env::PolypassPlugins, polyregion::env::PolyregionCacheDir,             //
+                           "XDG_CACHE_HOME", "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
   // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls
@@ -293,6 +291,18 @@ struct StepResult {
   std::string cmdline;
 };
 
+inline void removeArtifacts(const std::string &output) {
+  namespace fs = llvm::sys::fs;
+  const auto dir = llvm::sys::path::parent_path(output);
+  const auto stem = llvm::sys::path::filename(output).str() + ".";
+  std::vector<std::string> siblings;
+  std::error_code ec;
+  for (fs::directory_iterator it(dir.empty() ? "." : dir, ec), end; !ec && it != end; it.increment(ec))
+    if (llvm::sys::path::filename(it->path()).starts_with(stem)) siblings.emplace_back(it->path());
+  fs::remove(output);
+  siblings | for_each([](const auto &p) { fs::remove_directories(p); });
+}
+
 inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {
   auto fragments = command ^ words();
   auto [envBits, args] = fragments ^ span([](const auto &x) { return x ^ contains('='); });
@@ -308,17 +318,9 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   const std::vector<llvm::StringRef> envRefs = envs ^ map([](const auto &x) -> llvm::StringRef { return x; });
   const std::vector<llvm::StringRef> argRefs = args ^ map([](const auto &x) -> llvm::StringRef { return x; });
 
-  // XXX TempFile holds an exclusive Windows handle that blocks the child's redirect; use createUniqueFile + FileRemover
-  auto makeTempPath = [&](std::string_view suffix) -> std::optional<std::string> {
-    llvm::SmallString<256> p;
-    if (llvm::sys::fs::createUniqueFile(cfg.tempPrefix + std::string(suffix) + "-%%-%%-%%-%%-%%", p)) return std::nullopt;
-    return std::string(p);
-  };
-  auto outPath = makeTempPath("stdout");
-  if (!outPath) return {-1, {}, "Cannot create stdout temp", command};
-  auto errPath = makeTempPath("stderr");
-  if (!errPath) return {-1, {}, "Cannot create stderr temp", command};
-  llvm::FileRemover outRemover(*outPath), errRemover(*errPath);
+  const auto outPath = task.output + ".stdout";
+  const auto errPath = task.output + ".stderr";
+  llvm::FileRemover outRemover(outPath), errRemover(errPath);
 
   if (args.empty()) return {-1, {}, "empty command", command};
   auto resolved = resolveBin(args[0], cfg);
@@ -333,11 +335,10 @@ inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::
   };
   const unsigned secondsToWait = envUnsigned(polyregion::env::PolytestTimeout);
   const unsigned memLimitMb = envUnsigned(polyregion::env::PolytestMemLimitMb);
-  auto code =
-      llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, *outPath, *errPath}, secondsToWait, memLimitMb, &execErr);
+  auto code = llvm::sys::ExecuteAndWait(resolved, argRefs, envRefs, {std::nullopt, outPath, errPath}, secondsToWait, memLimitMb, &execErr);
 
-  auto stdoutText = polyregion::read_string(*outPath);
-  auto stderrText = polyregion::read_string(*errPath);
+  auto stdoutText = polyregion::read_string(outPath);
+  auto stderrText = polyregion::read_string(errPath);
 
   // XXX -2 is LLVM's signal-killed sentinel; surface WTERMSIG via the ErrMsg out-param.
   if (code == -2 && !execErr.empty()) stderrText += "\n[polytest] signal: " + execErr + "\n";
@@ -371,6 +372,7 @@ inline bool checkExpect(const TestCase::Run::Expect &e, const std::vector<std::s
 
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
+  removeArtifacts(task.output);
   const auto start = std::chrono::steady_clock::now();
   auto r = runStep(task, cfg, task.runs[0].command);
   const auto exit = r.exitCode;
@@ -500,15 +502,12 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
     const auto unevalStore = mkArgStore(augmented ^ append(std::pair{std::string("output"), std::string("<unevaluated>")}));
     const auto runsCmd = tc.runs ^ mk_string("", [&](const auto &r) { return fmt::vformat(r.command, unevalStore); });
     const auto varsKey = varsWithLabel ^ mk_string("|", [](const auto &k, const auto &v) { return k + "=" + v; });
-    const auto runsHash = std::hash<std::string>{}(runsCmd + "\0" + varsKey);
-    const auto pidTag = std::to_string(static_cast<long long>(llvm::sys::Process::getProcessId()));
-    const auto baseOutput = fmt::format("{}{}_{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, pidTag,
-                                        static_cast<std::uint32_t>(runsHash));
+    const auto runsHash = std::hash<std::string>{}(runsCmd + "\0" + varsKey + "\0" + tc.name);
     const auto arch = varsWithLabel                                                                                                     //
                       ^ collect_first([&](const auto &k, const auto &v) { return k == cfg.archVar ? std::optional{v} : std::nullopt; }) //
                       ^ get_or_else(std::string{});
     const bool physical = (arch ^ starts_with("cuda")) || (arch ^ starts_with("hsa")) || (arch ^ starts_with("hip"));
-    const auto detBase =
+    const auto baseOutput =
         fmt::format("{}{}_{:08x}", cfg.outputPrefix, shortName.empty() ? "anon" : shortName, static_cast<std::uint32_t>(runsHash));
     const auto caseModes = tc.offloadOnly ? (modes ^ filter([](const auto &m) { return m == Mode::Offload; })) : modes;
     return caseModes ^ map([&](const auto &mode) -> Task {
@@ -517,7 +516,7 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                variants = {RunVariant{"", {}},                                                   // compiletime (default)
                            RunVariant{"runtime", {{std::string(env::PolyrtMirror), "runtime"}}}, // generic SMA walk
                            RunVariant{"usm", {{std::string(env::PolyrtMirror), "off"}}}};        // USM; 77 if no USM
-             const auto output = fmt::format("{}_{}", variants.empty() ? baseOutput : detBase, modeName(mode));
+             const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
              auto runs = tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; });
              return {mode, file, tc.name, varsWithLabel, output, tc.compileFailure, std::move(runs), std::move(variants)};
@@ -594,11 +593,8 @@ inline const char *statusTag(TaskStatus s) {
 }
 
 inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
-#ifndef _WIN32
   // XXX ROCr writes a ~150 MB gpucore.<pid> per GPU VM fault (honours RLIMIT_CORE)
-  const rlimit noCore{0, 0};
-  setrlimit(RLIMIT_CORE, &noCore);
-#endif
+  disableCoreDumps();
   if (opts.listTargets) {
     loadTestTargets(cfg.profileDir) | for_each([](const auto &t) { std::fprintf(stdout, "%s\n", t.c_str()); });
     return 0;
@@ -620,9 +616,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     if (!it) return std::fprintf(stderr, "polytest: no task with id '%s'\n", single.c_str()), 1;
     const Task &t = *it;
     if (!opts.cleanupTask.empty()) {
-      llvm::sys::fs::remove(t.output);
-      for (auto ext : {".exe", ".pdb", ".ilk", ".lib", ".exp"})
-        llvm::sys::fs::remove(t.output + ext);
+      detail::removeArtifacts(t.output);
       return 0;
     }
     const bool isCompile = !opts.compileTask.empty();
@@ -732,10 +726,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
     dumpDetails(out, /*includeStdout*/ true);
     if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) {
-      llvm::sys::fs::remove(tasks[i].output);
-      // XXX Windows debug builds emit <output>.{exe,pdb,ilk,lib,exp} next to the bare name.
-      for (auto ext : {".exe", ".pdb", ".ilk", ".lib", ".exp"})
-        llvm::sys::fs::remove(tasks[i].output + ext);
+      detail::removeArtifacts(tasks[i].output);
     }
   }
   const auto runSecs = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStart).count();
@@ -820,6 +811,7 @@ inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
   if (const auto override = std::getenv(polyregion::env::PolytestWorkDir); override && *override)
     chdirTo(polyregion::env::PolytestWorkDir, override);
   else if (!cfg.workDir.empty()) chdirTo("workDir", cfg.workDir);
+  defaultCacheDirToCwd();
   detail::firedCfg = &cfg;
   constexpr const char *descr = "polytest runner: parallel compile, serial run";
   PREPARE_FIRE_(argc, argv, false, fired_main, descr);

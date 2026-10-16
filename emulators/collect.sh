@@ -78,6 +78,7 @@ export RUSTICL_ENABLE="\${RUSTICL_ENABLE:-llvmpipe}"
 export GALLIUM_DRIVER="\${GALLIUM_DRIVER:-llvmpipe}"
 # rusticl/pocl are CPU OpenCL devices; polyinvoke skips those unless this is set
 export POLYINVOKE_OPENCL_CPU="\${POLYINVOKE_OPENCL_CPU:-1}"
+export POCL_KERNEL_CACHE="\${POCL_KERNEL_CACHE:-0}"
 echo "emulators active: ocelot(CUDA) lavapipe+swiftshader(Vulkan) rusticl+pocl(OpenCL) via \$HERE"
 EOS
 

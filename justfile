@@ -265,6 +265,7 @@ test-native *args='': build-pass-native
     #!/usr/bin/env bash
     set -euo pipefail
     {{ msvc_reenter }}
+    ulimit -c 0
     BUILD=$(just _native-build)
     for package_service in "$PWD/native/polyc/libpolypass.so" "$PWD/native/polyc/libpolypass.dylib" "$PWD/native/polyc/libpolypass.dll"; do
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
@@ -315,11 +316,13 @@ test-native-with-emulators *args='':
     cd {{ justfile_directory() }}
     [ -f emulators/out/env.sh ] || { echo "no emulators/out -- run 'just build-emulators' first"; exit 1; }
     source emulators/out/env.sh
+    ulimit -c 0
     BUILD=$(just _native-build)
     export POLYREGION_TEST_PROFILE=emulators
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
     # XXX ctest bakes target names at discovery; re-list under this profile first.
     rm -f "$BUILD"/*/polytest-discover/*.ids
+    find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
         polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
@@ -394,6 +397,8 @@ test-native-dist profile='' junit='native-test-results' *args='':
     fi
     j=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")
     to=600; if [ "{{ profile }}" = emulators ]; then to=1500; fi
+    ulimit -c 0
+    find "$TESTS" -name polytest-skips.log -delete 2>/dev/null || true
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$TESTS/{{ junit }}.xml" {{ args }}
 
 # Smoke test of the emulator bundle (Vulkan on lavapipe, OpenCL on pocl[+rusticl], CUDA on gpuocelot/linux).
@@ -667,7 +672,9 @@ test-native-san *args='':
     #!/usr/bin/env bash
     set -euo pipefail
     export POLYREGION_ASAN=ON
+    ulimit -c 0
     BUILD=$(just _native-build)
+    find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" {{ args }}
 
 # Run `cmake -DACTION=<action> -P native/build.cmake`. Auto-passes -DCMAKE_SYSROOT if it exists.

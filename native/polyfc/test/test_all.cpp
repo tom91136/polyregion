@@ -45,7 +45,6 @@ int main(int argc, const char **argv) {
           .driverEnvVar = polyregion::env::PolyfcDriver,
           .passthroughEnvs = {std::string(polyregion::env::PolyfcNoRewrite) + "=1"},
           .outputPrefix = "polyfc_test_",
-          .tempPrefix = "polyfc_",
           .directive = "!CHECK",
           .cleanupOnSuccess = true,
       });

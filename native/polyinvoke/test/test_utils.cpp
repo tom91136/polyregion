@@ -14,6 +14,9 @@
   #include <sys/file.h>
 #endif
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Path.h"
+
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 #include "magic_enum/magic_enum.hpp"
@@ -129,7 +132,10 @@ int runOnTarget(invoke::Backend backend, std::string_view arch, const std::vecto
     const bool reader = gpuBackend && !writer;
     if (serialise && (writer || reader)) {
       [[maybe_unused]] static const int coarseLock = [&] {
-        int fd = ::open("/tmp/polyinvoke-gpu-coarse-amd.lock", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+        llvm::SmallString<256> lockPath;
+        llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, lockPath);
+        llvm::sys::path::append(lockPath, "polyinvoke-gpu-coarse-amd.lock");
+        int fd = ::open(lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
         if (fd < 0) return -1;
         if (::flock(fd, writer ? LOCK_EX : LOCK_SH) != 0) {
           ::close(fd);

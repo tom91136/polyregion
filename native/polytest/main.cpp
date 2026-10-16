@@ -106,7 +106,6 @@ int main(int argc, const char **argv) {
                      .driverEnvVar = suite.get("POLYTEST_DRIVER_ENV", polyregion::env::PolycppDriver),
                      .passthroughEnvs = {},
                      .outputPrefix = suite.get("POLYTEST_OUTPUT_PREFIX", "polytest_"),
-                     .tempPrefix = suite.get("POLYTEST_TEMP_PREFIX", "polytest_"),
                      .directive = suite.get("POLYTEST_DIRECTIVE", "#pragma region"),
                      .cleanupOnSuccess = true,
                      .targetVar = suite.get("POLYTEST_TARGET_VAR"),

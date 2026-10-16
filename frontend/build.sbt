@@ -449,6 +449,7 @@ lazy val `compiler-testsuite-scala` = project
     fork                      := true,
     Test / parallelExecution  := false,
     Test / testForkedParallel := false,
+    Test / javaOptions += Def.uncached(s"-XX:ErrorFile=${target.value}/hs_err_pid%p.log"),
     nativeCompilerInputsTask := Def.uncached {
       nativeCompilerInputs(fileConverter.value)
     },

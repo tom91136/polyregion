@@ -59,7 +59,6 @@ int main(int argc, const char **argv) {
           .driverEnvVar = polyregion::env::PolycppDriver,
           .passthroughEnvs = {std::string(polyregion::env::PolycppNoRewrite) + "=1", std::string(polyregion::env::PolystlNoOffload) + "=1"},
           .outputPrefix = "polycpp_test_",
-          .tempPrefix = "polycpp_",
           .directive = "#pragma region",
           .cleanupOnSuccess = true,
       });

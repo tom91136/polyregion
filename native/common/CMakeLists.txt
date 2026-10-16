@@ -12,6 +12,7 @@ target_sources(polycommon
         polyregion/dl.h
         polyregion/env.h
         polyregion/cache.hpp
+        polyregion/test_process.h
         polyregion/env_keys.h
         polyregion/error.h
         polyregion/llvm_utils.hpp

@@ -36,12 +36,18 @@ namespace {
 
 const std::vector<uint8_t> payload = {0x00, 0x01, 0x02, 0x03, 0x7f, 0x80, 0xfe, 0xff};
 
-std::string freshCacheDir(Context &ctx) {
+std::string createCacheDir(Context &ctx) {
   llvm::SmallString<128> dir;
   if (fs::createUniqueDirectory("polyinvoke-module-cache", dir)) POLYTEST_FAIL(ctx, "cannot create a temporary cache directory");
-  env::put(env::PolyregionCacheDir, dir.c_str(), true);
   return dir.str().str();
 }
+
+struct FreshCacheDir {
+  std::string path;
+  env::ScopedEnv scoped;
+  explicit FreshCacheDir(Context &ctx) : path(createCacheDir(ctx)), scoped(env::PolyregionCacheDir, path.c_str()) {}
+  ~FreshCacheDir() { fs::remove_directories(path); }
+};
 
 std::vector<std::pair<std::string, std::vector<uint8_t>>> entriesUnder(Context &ctx, const std::string &dir) {
   std::vector<std::pair<std::string, std::vector<uint8_t>>> out;
@@ -61,7 +67,8 @@ void writeFile(const std::string &path, const std::vector<uint8_t> &bytes) {
 }
 
 void runEntry(Context &ctx) {
-  const auto dir = freshCacheDir(ctx);
+  const FreshCacheDir cacheDir(ctx);
+  const auto &dir = cacheDir.path;
   const auto path = detail::moduleCachePath("test", "device-a", "image-1");
   POLYTEST_REQUIRE_S(ctx, !path.empty(), "no cache path under {}", dir);
   POLYTEST_CHECK_S(ctx, cache::read(path).empty(), "cold read of {} hit", path);
@@ -101,15 +108,14 @@ void runEntry(Context &ctx) {
   POLYTEST_CHECK(ctx, detail::moduleCachePath("test", "", "image-1").empty());
   POLYTEST_CHECK(ctx, cache::read({}).empty());
   cache::write({}, payload.data(), payload.size());
-
-  fs::remove_directories(dir);
 }
 
 void runModuleCache(Context &ctx, Backend backend, Platform &, Device &device, const ImageGroup &imageGroup) {
   if (imageGroup.size() != 1) {
     POLYTEST_FAIL(ctx, "expected exactly 1 image for fma kernel, got {} ({})", imageGroup.size(), magic_enum::enum_name(backend));
   }
-  const auto dir = freshCacheDir(ctx);
+  const FreshCacheDir cacheDir(ctx);
+  const auto &dir = cacheDir.path;
   const auto &image = imageGroup[0].second;
   const std::string function_ = device.singleEntryPerModule() ? "main" : "_fma";
 
@@ -142,7 +148,6 @@ void runModuleCache(Context &ctx, Backend backend, Platform &, Device &device, c
     POLYTEST_CHECK_S(ctx, read_struct<uint8_t>(entry) == bytes, "corrupt entry {} was not republished", entry);
 
   device.freeDevice(out_d);
-  fs::remove_directories(dir);
 }
 
 std::vector<Task> discoverAll() {

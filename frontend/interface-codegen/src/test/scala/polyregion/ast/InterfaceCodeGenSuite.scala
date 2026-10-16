@@ -203,11 +203,13 @@ class InterfaceCodeGenSuite extends munit.FunSuite {
     assertEquals(InterfaceCodeGen.scalaObject(reversed, scala), InterfaceCodeGen.scalaObject(interfaceDef, scala))
 
     val path = Files.createTempFile("polyregion-interface-codegen", ".hpp")
-    Files.writeString(path, "stale")
-    assert(InterfaceCodeGen.checkCurrent(path, cpp).isLeft)
-    Files.writeString(path, cpp)
-    assertEquals(InterfaceCodeGen.checkCurrent(path, cpp), Right(()))
-    assert(InterfaceCodeGen.checkCurrent(path.resolveSibling("missing-generated-output"), cpp).isLeft)
+    try {
+      Files.writeString(path, "stale")
+      assert(InterfaceCodeGen.checkCurrent(path, cpp).isLeft)
+      Files.writeString(path, cpp)
+      assertEquals(InterfaceCodeGen.checkCurrent(path, cpp), Right(()))
+      assert(InterfaceCodeGen.checkCurrent(path.resolveSibling("missing-generated-output"), cpp).isLeft)
+    } finally Files.deleteIfExists(path)
   }
 
   test("overloads retain distinct Fortran procedures") {

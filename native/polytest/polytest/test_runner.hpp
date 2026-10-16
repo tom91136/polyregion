@@ -8,6 +8,8 @@
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
 
+#include "polyregion/test_process.h"
+
 #include "polytest/ctest_emit.hpp"
 #include "polytest/test_case.hpp"
 
@@ -23,6 +25,8 @@ using namespace aspartame;
 //                            write CTestTestfile fragment(s) and exit
 //   (no args)                run all tasks in registration order
 inline int runMain(int argc, char **argv) {
+  disableCoreDumps();
+  defaultCacheDirToCwd();
   std::string_view mode = "all";
   std::string_view target;
   std::string emitFile, emitPrefix, emitBinary, emitWorkdir, emitDistFile, emitDistBinary, emitDistSubdir;
