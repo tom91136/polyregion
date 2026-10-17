@@ -49,22 +49,17 @@ function(polyregion_stage_post_build)
 endfunction()
 
 function(polyregion_copy_lib_targets out_target driver lib_dir)
-  set(keep "")
   set(commands "")
   foreach (lib ${ARGN})
-    list(APPEND keep "$<TARGET_FILE_NAME:${lib}>")
     list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${lib}>" "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/")
     get_target_property(_t ${lib} TYPE)
     if (WIN32 AND _t STREQUAL "SHARED_LIBRARY")
-      list(APPEND keep "$<TARGET_LINKER_FILE_NAME:${lib}>")
       list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:${lib}>" "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/")
     endif ()
   endforeach ()
   add_custom_target(${out_target}
           COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${driver}>/${lib_dir}/"
           ${commands}
-          COMMAND ${CMAKE_COMMAND} "-DDIR=$<TARGET_FILE_DIR:${driver}>/${lib_dir}" "-DKEEP=$<JOIN:${keep},$<SEMICOLON>>"
-                  -P "${CMAKE_SOURCE_DIR}/cmake/prune_staged.cmake"
           VERBATIM)
   add_dependencies(${out_target} ${ARGN})
 endfunction()

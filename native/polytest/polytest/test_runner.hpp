@@ -26,7 +26,7 @@ using namespace aspartame;
 //   (no args)                run all tasks in registration order
 inline int runMain(int argc, char **argv) {
   disableCoreDumps();
-  defaultCacheDirToCwd();
+  defaultCacheDirsToCwd();
   std::string_view mode = "all";
   std::string_view target;
   std::string emitFile, emitPrefix, emitBinary, emitWorkdir, emitDistFile, emitDistBinary, emitDistSubdir;

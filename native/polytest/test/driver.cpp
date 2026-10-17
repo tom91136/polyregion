@@ -110,11 +110,12 @@ TEST_CASE("Cache and library locations reach the child environment") {
   TempDir dir;
   polyregion::env::ScopedEnv cache(polyregion::env::PolyregionCacheDir, "/polytest/cache");
   polyregion::env::ScopedEnv xdg("XDG_CACHE_HOME", "/polytest/xdg");
+  polyregion::env::ScopedEnv pocl("POCL_CACHE_DIR", "/polytest/pocl");
   const auto cfg = testConfig(dir.path);
   const Task task{Mode::Offload, "check_x.cpp", "c", {}, "out", std::nullopt, {}, {}};
   const auto envs = detail::baseEnvs(task, cfg, false);
   const auto has = [&](const std::string &kv) { return std::find(envs.begin(), envs.end(), kv) != envs.end(); };
   CHECK(has("POLYREGION_CACHE_DIR=/polytest/cache"));
   CHECK(has("XDG_CACHE_HOME=/polytest/xdg"));
-  CHECK(has("POCL_KERNEL_CACHE=0"));
+  CHECK(has("POCL_CACHE_DIR=/polytest/pocl"));
 }

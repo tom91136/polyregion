@@ -163,7 +163,6 @@ export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
 export POLYINVOKE_OPENCL_LIB="$(ls "$HERE"/loader/libOpenCL*.dylib 2>/dev/null | head -1)"
 [ -d "$HERE/share/OpenCL/vendors" ] && export OCL_ICD_VENDORS="$HERE/share/OpenCL/vendors"
 export POLYINVOKE_OPENCL_CPU="${POLYINVOKE_OPENCL_CPU:-1}"
-export POCL_KERNEL_CACHE="${POCL_KERNEL_CACHE:-0}"
 export SDKROOT="${SDKROOT:-$(xcrun --show-sdk-path 2>/dev/null)}"  # pocl links kernels with clang -> needs the SDK
 export LIBRARY_PATH="$SDKROOT/usr/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"  # pocl kernel link (ld -lSystem) on x86_64 mac
 echo "emulators active: lavapipe+swiftshader(Vulkan) pocl(OpenCL+SPIR-V) via $HERE"

@@ -154,7 +154,6 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
   // XXX NVIDIA's shader disk cache (~/.cache/nvidia/GLCache) bloats to 100k+ files across a sweep and the
   // driver stat-scans it on every init (~20s spin); one-shot test kernels gain nothing, so disable it
   put("__GL_SHADER_DISK_CACHE", "0");
-  put("POCL_KERNEL_CACHE", "0");
   // XXX rusticl loads Mesa's LLVM in-process; the ICD loader pulls it in for ANY OpenCL target, clashing
   // with polydco/polystl's LLVM (two libLLVMSPIRVLib) -> bad_alloc. expose it only when it's selected
   const bool rusticlTarget = archFor(t, cfg) ^ contains_slice("rusticl");
@@ -183,7 +182,7 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            polyregion::env::PolyregionDebug, polyregion::env::PolyinvokeOpenclLib,            //
                            polyregion::env::PolyregionSysroot, polyregion::env::PolyregionBitcodeDir,         //
                            polyregion::env::PolypassPlugins, polyregion::env::PolyregionCacheDir,             //
-                           "XDG_CACHE_HOME", "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
+                           "XDG_CACHE_HOME", "POCL_CACHE_DIR", "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
   // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls
@@ -819,7 +818,7 @@ inline int runMain(int argc, const char **argv, const DriverConfig &cfg) {
   if (const auto override = std::getenv(polyregion::env::PolytestWorkDir); override && *override)
     chdirTo(polyregion::env::PolytestWorkDir, override);
   else if (!cfg.workDir.empty()) chdirTo("workDir", cfg.workDir);
-  defaultCacheDirToCwd();
+  defaultCacheDirsToCwd();
   detail::firedCfg = &cfg;
   constexpr const char *descr = "polytest runner: parallel compile, serial run";
   PREPARE_FIRE_(argc, argv, false, fired_main, descr);

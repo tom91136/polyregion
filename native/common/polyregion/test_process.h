@@ -20,11 +20,16 @@ inline void disableCoreDumps() {
 #endif
 }
 
-inline void defaultCacheDirToCwd() {
-  llvm::SmallString<256> dir;
-  if (llvm::sys::fs::current_path(dir)) return;
-  llvm::sys::path::append(dir, "module-cache");
-  env::put(env::PolyregionCacheDir, dir.c_str(), false);
+inline void defaultCacheDirsToCwd() {
+  llvm::SmallString<256> cwd;
+  if (llvm::sys::fs::current_path(cwd)) return;
+  const auto under = [&](const char *name) {
+    llvm::SmallString<256> dir(cwd);
+    llvm::sys::path::append(dir, name);
+    return dir;
+  };
+  env::put(env::PolyregionCacheDir, under("module-cache").c_str(), false);
+  env::put("POCL_CACHE_DIR", under("pocl-cache").c_str(), false);
 }
 
 } // namespace polyregion

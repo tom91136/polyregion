@@ -229,7 +229,6 @@ if defined SS "%PY%" -c "import json;p=r'%OUT%\share\vulkan\icd.d\vk_swiftshader
 if defined SS >>"%OUT%\env.bat" echo set "VK_DRIVER_FILES=%%VK_DRIVER_FILES%%;%%HERE%%share\vulkan\icd.d\vk_swiftshader_icd.json"
 >>"%OUT%\env.bat" echo set "VK_ICD_FILENAMES=%%VK_DRIVER_FILES%%"
 >>"%OUT%\env.bat" echo set "POLYINVOKE_OPENCL_CPU=1"
->>"%OUT%\env.bat" echo set "POCL_KERNEL_CACHE=0"
 echo === bundle staged at %OUT% ===
 dir /b "%OUT%\bin"
 
