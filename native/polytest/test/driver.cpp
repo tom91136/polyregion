@@ -69,6 +69,25 @@ TEST_CASE("Artifact removal clears the output and its dotted siblings only") {
   CHECK(llvm::sys::fs::exists(dir.file("module-cache")));
 }
 
+TEST_CASE("Artifact removal through a relative output name clears its siblings") {
+  using namespace polyregion::polytest;
+  TempDir dir;
+  dir.touch("out_b_offload");
+  dir.touch("out_b_offload.pdb");
+  llvm::sys::fs::create_directories(dir.file("out_b_offload.packages/nested"));
+  dir.touch("out_b_offload.packages/nested/blob");
+  llvm::SmallString<256> cwd;
+  REQUIRE_FALSE(llvm::sys::fs::current_path(cwd));
+  REQUIRE_FALSE(llvm::sys::fs::set_current_path(dir.path));
+
+  detail::removeArtifacts("out_b_offload");
+
+  REQUIRE_FALSE(llvm::sys::fs::set_current_path(cwd));
+  CHECK_FALSE(llvm::sys::fs::exists(dir.file("out_b_offload")));
+  CHECK_FALSE(llvm::sys::fs::exists(dir.file("out_b_offload.pdb")));
+  CHECK_FALSE(llvm::sys::fs::exists(dir.file("out_b_offload.packages")));
+}
+
 TEST_CASE("Task output names are stable across processes") {
   using namespace polyregion::polytest;
   TempDir dir;

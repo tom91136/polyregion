@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.21)
+
 set(_key "host=")
 cmake_host_system_information(RESULT _host QUERY HOSTNAME)
 string(APPEND _key "${_host}\n")

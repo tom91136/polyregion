@@ -300,7 +300,15 @@ inline void removeArtifacts(const std::string &output) {
   for (fs::directory_iterator it(dir.empty() ? "." : dir, ec), end; !ec && it != end; it.increment(ec))
     if (llvm::sys::path::filename(it->path()).starts_with(stem)) siblings.emplace_back(it->path());
   fs::remove(output);
-  siblings | for_each([](const auto &p) { fs::remove_directories(p); });
+  siblings | for_each([](const auto &p) {
+    if (!fs::is_directory(p)) {
+      fs::remove(p);
+      return;
+    }
+    llvm::SmallString<256> absolute(p);
+    fs::make_absolute(absolute);
+    fs::remove_directories(absolute);
+  });
 }
 
 inline StepResult runStep(const Task &task, const DriverConfig &cfg, const std::string &command) {

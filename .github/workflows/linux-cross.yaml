@@ -170,7 +170,7 @@ jobs:
         with:
           path: &llvm-path native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
           archive: &llvm-archive native/out/llvm-cross-${{ matrix.arch }}-dist.tar.zst
-          key: &llvm-key llvm-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &llvm-key llvm-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Enable zram
         if: ${{ !env.ACT && steps.restore-llvm.outputs.cache-hit != 'true' }}
@@ -273,6 +273,7 @@ jobs:
 
       - name: Prepare sysroot
         run: |
+          [ -n "$(ls sysroot/out/sysroot-*-${{ matrix.arch }}.tar.xz 2>/dev/null)" ] || CONTAINER=docker just build-sysroot
           just prepare-sysroot
           SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
           {
@@ -300,7 +301,7 @@ jobs:
         uses: *cache-restore
         with:
           path: &devlibs-path ./native/thirdparty/device_libs
-          key: &devlibs-key device-libs-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/.env', './justfile', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+          key: &devlibs-key device-libs-cross-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', format('./native/toolchains/linux-clang-{0}.cmake', matrix.arch), './native/cmake/linux-clang-cross-common.cmake', './native/cmake/sysroot_gcc_dir.cmake', format('./sysroot/{0}', matrix.sysroot_dockerfile), './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
 
       - name: Build device libs
         id: build-device-libs
@@ -433,6 +434,7 @@ jobs:
       - &prepare-sysroot-env
         name: Prepare sysroot
         run: |
+          [ -n "$(ls sysroot/out/sysroot-*-${{ matrix.arch }}.tar.xz 2>/dev/null)" ] || CONTAINER=docker just build-sysroot
           just prepare-sysroot
           SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
           {
