@@ -270,6 +270,12 @@ std::optional<cl_bitfield> resolveSVM(cl_device_id device) {
   }
   // NVIDIA's coarse-grain SVM keeps kernels near PCIe bandwidth even when the data never leaves the device
   if (queryDeviceInfo(device, CL_DEVICE_VENDOR) ^ aspartame::contains_slice("NVIDIA")) return std::nullopt;
+  cl_platform_id platform = {};
+  cl_device_type type = 0;
+  if (clGetDeviceInfo(device, CL_DEVICE_PLATFORM, sizeof(platform), &platform, nullptr) == CL_SUCCESS
+      && clGetDeviceInfo(device, CL_DEVICE_TYPE, sizeof(type), &type, nullptr) == CL_SUCCESS && (type & CL_DEVICE_TYPE_GPU)
+      && queryPlatformInfo(platform, CL_PLATFORM_NAME) == "rusticl")
+    return std::nullopt;
   cl_bitfield caps = 0;
   if (clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES_, sizeof(caps), &caps, nullptr) != CL_SUCCESS) return std::nullopt;
   if (!(caps & (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER_ | CL_DEVICE_SVM_FINE_GRAIN_BUFFER_))) return std::nullopt;
