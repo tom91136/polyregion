@@ -343,8 +343,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   else allocations.syncRemoteToLocalAfterLaunch(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 
-  // XXX See polydco_release: keep SVM, drop only host tracking.
-  allocations.disassociate(captures, /*releaseRemote*/ false);
+  allocations.disassociate(captures);
 
   mpr.releaseAndReduce();
 

@@ -25,6 +25,11 @@ polyregion_apply_common_options(polyrt-tests)
 if (APPLE)
     target_link_options(polyrt-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
 endif ()
+if (POLYREGION_HAS_FLANG)
+    target_sources(polyrt-tests PRIVATE ../../polyfc/polydco/polydco.cpp)
+    target_include_directories(polyrt-tests PRIVATE ../..)
+    target_compile_definitions(polyrt-tests PRIVATE POLYRT_TESTS_POLYDCO)
+endif ()
 
 if (WIN32)
     add_custom_command(TARGET polyrt-tests POST_BUILD

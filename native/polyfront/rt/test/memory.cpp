@@ -19,6 +19,9 @@
 #include "fmt/args.h"
 #include <catch2/catch_test_macros.hpp>
 
+#ifdef POLYRT_TESTS_POLYDCO
+  #include "polyfc/polydco/polydco.h"
+#endif
 #include "polyinvoke/object_platform.h"
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
@@ -1387,3 +1390,68 @@ TEST_CASE("gen-arena-mirror") {
   f.allocation.genArenaMirror(reinterpret_cast<const char *>(rec), 1, 1, *recLayout, sizeof(Rec));
   CHECK(*reinterpret_cast<const uint64_t *>(f.allocation.genArenaStaging.data() + offsetof(Rec, p)) == 0);
 }
+
+#ifdef POLYRT_TESTS_POLYDCO
+
+namespace {
+
+struct StubManagedPlatform final : Platform {
+  std::string name() override { return "stub"; }
+  std::vector<Property> properties() override { return {}; }
+  PlatformKind kind() override { return PlatformKind::Managed; }
+  std::vector<std::unique_ptr<Device>> enumerate() override { return {}; }
+};
+
+struct WithStubManagedPlatform {
+  std::unique_ptr<Platform> previousPlatform = std::move(polyregion::polyrt::currentPlatform);
+  std::unique_ptr<DeviceQueue> previousQueue = std::move(polyregion::polyrt::currentQueue);
+  WithStubManagedPlatform() {
+    polyregion::polyrt::currentPlatform = std::make_unique<StubManagedPlatform>();
+    polyregion::polyrt::currentQueue = std::make_unique<StubQueue>(std::chrono::seconds(1));
+  }
+  ~WithStubManagedPlatform() {
+    polyregion::polyrt::currentQueue = std::move(previousQueue);
+    polyregion::polyrt::currentPlatform = std::move(previousPlatform);
+  }
+};
+
+} // namespace
+
+TEST_CASE("polydco managed launches leave no device allocations behind") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+
+  struct Capture {
+    polyregion::polydco::FManagedPrelude bounds;
+    int64_t scale;
+    int64_t offset;
+  };
+  const auto boundsType = NamedType(polyregion::polydco::FManagedPrelude);
+  auto layout = Struct_(Capture,                                     //
+                        StructMember_(Capture, bounds, &boundsType), //
+                        StructMember_(Capture, scale, &int64Type),   //
+                        StructMember_(Capture, offset, &int64Type));
+
+  const unsigned char image = 0;
+  KernelObject object{};
+  object.kind = PlatformKind::Managed;
+  object.format = ModuleFormat::Object;
+  object.imageLength = sizeof(image);
+  object.image = &image;
+  KernelBundle bundle{};
+  bundle.moduleName = "polydco_capture_release";
+  bundle.objectCount = 1;
+  bundle.objects = &object;
+  bundle.structCount = 1;
+  bundle.structs = &*layout;
+
+  const auto live = [&] { return device.stub->remoteAllocs - device.stub->remoteFrees; };
+  for (size_t launch = 1; launch <= 8; ++launch) {
+    Capture capture{};
+    REQUIRE(polydco_dispatch(0, 9, 1, PlatformKind::Managed, &bundle, 0, nullptr, reinterpret_cast<char *>(&capture)));
+    CHECK(device.stub->remoteAllocs >= launch);
+    CHECK(live() == 0);
+  }
+}
+
+#endif
