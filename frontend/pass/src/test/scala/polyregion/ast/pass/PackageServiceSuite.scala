@@ -841,7 +841,7 @@ class PackageServiceSuite extends munit.FunSuite {
     assert(functions.exists(_.name == callDecl.name))
   }
 
-  private def closureEnvironmentLink(launching: Boolean) = {
+  private def linkClosureEnvironment(launching: Boolean, hostCall: Boolean) = {
     val name       = p.Sym("library.apply")
     val public     = applyPublic(name)
     val kernelName = p.Sym("implementation.kernel")
@@ -870,12 +870,16 @@ class PackageServiceSuite extends munit.FunSuite {
       ),
       isMutable = false
     )
-    val callable       = callableImplementation(p.Sym("implementation.apply"), name)
-    val implementation = if (launching) callable.copy(body = launch :: callable.body) else callable
-    val lookup         = p.Sym("caller.Lookup")
-    val lookupTpe      = p.Type.Struct(lookup, Nil)
-    val table          = p.Named("table", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global))
-    val self           = p.Named("#this", p.Type.Ptr(lookupTpe, p.Type.Space.Private))
+    val callable = callableImplementation(p.Sym("implementation.apply"), name)
+    val value    = callable.decl.args.head.named
+    val implementation =
+      if (!launching) callable
+      else if (hostCall) callable.copy(body = launch :: callable.body)
+      else callable.copy(body = List(launch, p.Stmt.Return(p.Expr.Alias(p.Term.Select(value, Nil, value.tpe)))))
+    val lookup    = p.Sym("caller.Lookup")
+    val lookupTpe = p.Type.Struct(lookup, Nil)
+    val table     = p.Named("table", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global))
+    val self      = p.Named("#this", p.Type.Ptr(lookupTpe, p.Type.Space.Private))
     val callDecl = p.FunctionDecl(
       p.Sym("caller.Lookup.call"),
       Nil,
@@ -899,20 +903,24 @@ class PackageServiceSuite extends munit.FunSuite {
       implements = Some(name),
       visibility = p.Function.Visibility.Exported
     )
-    val resolved = ProgramLinker.link(
+    ProgramLinker.link(
       p.Program.LinkRequest(
         List(pkg),
         p.Program(None, List(call, root), List(p.StructDef(lookup, Nil, List(table), Nil))),
         typeSizes = List(p.Program.TypeSize(p.Type.IntS32, 4), p.Program.TypeSize(lookupTpe, 8))
       )
-    )
+    ) -> root.name
+  }
+
+  private def closureEnvironmentLink(launching: Boolean, hostCall: Boolean) = {
+    val (resolved, rootName) = linkClosureEnvironment(launching, hostCall)
     assert(resolved.isRight, resolved)
     val functions = resolved.toOption.get.entry.toList ::: resolved.toOption.get.functions
-    functions.find(_.name == root.name).get
+    functions.find(_.name == rootName).get
   }
 
   test("program linking mirrors pointers captured by a closure environment for device launches") {
-    val entry   = closureEnvironmentLink(launching = true)
+    val entry   = closureEnvironmentLink(launching = true, hostCall = false)
     val foreign = entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }
     assertEquals(
       foreign,
@@ -929,8 +937,14 @@ class PackageServiceSuite extends munit.FunSuite {
   }
 
   test("program linking keeps host closure environments for host-only implementations") {
-    val entry = closureEnvironmentLink(launching = false)
+    val entry = closureEnvironmentLink(launching = false, hostCall = true)
     assertEquals(entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }, Nil)
+  }
+
+  test("program linking rejects an implementation that launches and calls a captured closure on the host") {
+    val (resolved, _) = linkClosureEnvironment(launching = true, hostCall = true)
+    assert(resolved.isLeft, resolved)
+    assert(resolved.left.toOption.get.exists(_.contains("on the host")), resolved)
   }
 
   test("program linking binds a closure invoked by a package helper") {

@@ -767,6 +767,19 @@ private[polyregion] object ProgramLinker {
             walk.structDefOf(environment.name).map(index -> _)
           case _ => None
         }
+    mirrored.foreach { case (index, _) =>
+      resolution.call.callables.get(index).foreach { callable =>
+        val hostCalled = closure.exists { function =>
+          function.decl.affinity == p.Function.Affinity.Host && function.collectAll[p.Expr].exists {
+            case p.Expr.Invoke(p.Type.FnRef(`callable`), _, Some(_), _, _) => true
+            case _                                                         => false
+          }
+        }
+        if (hostCalled)
+          errors += s"implementation `${implementation.name.repr}` launches device work with closure `${callable.repr}` and also " +
+            "calls it on the host; its captured pointers are mirrored for the device, so the host call would see device addresses"
+      }
+    }
 
     def select(named: p.Named): p.Term.Select           = p.Term.Select(named, Nil, named.tpe)
     def spec(op: p.Spec): p.Expr                        = p.Expr.SpecOp(op)
