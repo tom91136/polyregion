@@ -164,6 +164,11 @@ build-pass-js:
     cd frontend && {{ sbt }} 'passJS/exportPassBundle'
 
 # Build the Scala Native pass DSO -> native/polyc/libpolypass.{so,dylib,dll} (sysroot propagated to clang).
+_pass-bundle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ "${POLYC_PASS_BUNDLE:-dso}" = js ] || just build-pass-native
+
 build-pass-native:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -314,7 +319,7 @@ build-emulators:
     echo "$stamp" > out/.inputs.sha256
 
 # Run the native ctest suite against the software emulators; extra ctest flags via *args.
-test-native-with-emulators *args='': build-pass-native
+test-native-with-emulators *args='': _pass-bundle
     #!/usr/bin/env bash
     set -euo pipefail
     cd {{ justfile_directory() }}
@@ -565,7 +570,7 @@ build-device-libs extra='': (_native "DEVICE_LIBS" extra)
 configure         extra='': (_native "CONFIGURE"   extra)
 
 # Build + stage the relocatable polyregion dist (bin/ + lib/).
-build-dist        extra='': build-pass-native (_native "DIST"        extra)
+build-dist        extra='': _pass-bundle (_native "DIST"        extra)
 
 # Build + stage the test-only dist (test binaries + check_* sources).
 build-test-dist   extra='': (_native "DIST_TEST"   extra)
