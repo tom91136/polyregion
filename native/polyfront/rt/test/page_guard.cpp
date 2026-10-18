@@ -152,6 +152,28 @@ TEST_CASE("guard scenario: re-asserting install chains to a later handler", "[.]
   touchAndExit(mapPages(1, PROT_NONE), 0);
 }
 
+namespace {
+struct sigaction chainedPrior{};
+
+void chainingHandler(const int signal, siginfo_t *info, void *context) {
+  say("chained\n");
+  if (chainedPrior.sa_flags & SA_SIGINFO) chainedPrior.sa_sigaction(signal, info, context);
+}
+} // namespace
+
+TEST_CASE("guard scenario: a later handler that chains back is not looped through", "[.][guard-scenario]") {
+  alarm(10);
+  signal(ProtectionFault, SIG_DFL);
+  guard::install(countingResolver);
+  struct sigaction action{};
+  action.sa_sigaction = chainingHandler;
+  action.sa_flags = SA_SIGINFO;
+  sigemptyset(&action.sa_mask);
+  sigaction(ProtectionFault, &action, &chainedPrior);
+  guard::install(countingResolver);
+  touchAndExit(mapPages(1, PROT_NONE), 0);
+}
+
 TEST_CASE("guard scenario: untracked SIGBUS reaches the earlier handler", "[.][guard-scenario]") {
   alarm(10);
   installMarker(SIGBUS);
@@ -319,6 +341,16 @@ TEST_CASE("page guard re-asserts itself and chains to a later handler") {
   const auto outcome = runScenario("guard scenario: re-asserting install chains to a later handler");
   INFO(outcome.output);
   CHECK(outcome.exitCode == markerExit(ProtectionFault));
+}
+
+TEST_CASE("page guard does not loop through a later handler that chains back to it") {
+  const auto outcome = runScenario("guard scenario: a later handler that chains back is not looped through");
+  size_t chained = 0;
+  for (size_t at = outcome.output.find("chained"); at != std::string::npos; at = outcome.output.find("chained", at + 1))
+    ++chained;
+  INFO(outcome.output.substr(0, 512));
+  CHECK(chained == 1);
+  CHECK(outcome.signal == ProtectionFault);
 }
 
 TEST_CASE("page guard forwards untracked SIGBUS") {
