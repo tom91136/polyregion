@@ -20,7 +20,7 @@ add_llvm_library(polyfc-flang-plugin
         PARTIAL_SOURCES_INTENDED)
 set_property(TARGET polyfc-flang-plugin PROPERTY CXX_STANDARD 17)
 
-target_include_directories(polyfc-flang-plugin PRIVATE ../polydco)
+target_include_directories(polyfc-flang-plugin PRIVATE ${CMAKE_SOURCE_DIR}/../polydco)
 target_include_directories(polyfc-flang-plugin SYSTEM PRIVATE
         ${LLVM_INCLUDE_DIRS}
         ${CLANG_INCLUDE_DIRS}

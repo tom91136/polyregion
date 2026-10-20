@@ -20,7 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #ifdef POLYRT_TESTS_POLYDCO
-  #include "polyfc/polydco/polydco.h"
+  #include "polydco/polydco.h"
 #endif
 #include "polyinvoke/object_platform.h"
 #include "polyregion/show.hpp"

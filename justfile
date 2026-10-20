@@ -49,7 +49,7 @@ clang_format_release := 'master-796e77c'
 sysroot_path := env_var_or_default('SYSROOT_PATH', justfile_directory() / "sysroot" / "out" / arch)
 
 # Top-level directories whose C/C++ sources are subject to clang-format and check-header.
-cxx_roots := 'native frontend emulators'
+cxx_roots := 'native polystl polydco frontend emulators'
 
 # === Default ===
 

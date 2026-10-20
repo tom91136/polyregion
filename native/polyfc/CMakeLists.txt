@@ -1,4 +1,3 @@
-add_subdirectory(polydco)
 add_subdirectory(flang-plugin)
 
 set(POLYFC_HEADER_SET_DIR "lib/polyfc/include")
@@ -81,7 +80,7 @@ if (POLYREGION_FUSED_DRIVER)
     endif ()
     target_include_directories(polyfc PRIVATE
             flang-plugin
-            polydco)
+            ${CMAKE_SOURCE_DIR}/../polydco)
     target_include_directories(polyfc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS} ${FLANG_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS})
     target_compile_definitions(polyfc PRIVATE
             ${LLVM_DEFINITIONS}
@@ -135,7 +134,7 @@ add_executable(polyfc-tests test/test_all.cpp)
 add_dependencies(polyfc-tests polyfc polydco polycpp-package-fixture)
 target_include_directories(polyfc-tests PRIVATE
         ../include
-        polydco
+        ${CMAKE_SOURCE_DIR}/../polydco
         ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(polyfc-tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
@@ -162,7 +161,7 @@ polytest_configure_suite(polyfc-tests
         DRIVER "${LLVM_DIST_DIR}/bin/flang-new"
         LIB "$<TARGET_FILE:polydco>"
         LIBRARY_PATH "$<TARGET_FILE_DIR:polydco>"
-        INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyfc>/$<TARGET_NAME:polydco>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
+        INCLUDE "${CMAKE_SOURCE_DIR}/../$<TARGET_NAME:polydco>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
         GLOB "check_*.*"
         PACKAGE_FIXTURE "$<TARGET_FILE:polycpp-package-fixture>"
         TEST_FILES_OUT _polyfc_test_files)

@@ -1,4 +1,3 @@
-add_subdirectory(polystl)
 add_subdirectory(clang-plugin)
 
 set(POLYCPP_HEADER_SET_DIR "lib/polycpp/include")
@@ -161,7 +160,7 @@ add_executable(polycpp-tests test/test_all.cpp)
 add_dependencies(polycpp-tests polycpp polystl polycpp-package-fixture)
 target_include_directories(polycpp-tests PRIVATE
         ../include
-        polystl
+        ${CMAKE_SOURCE_DIR}/../polystl
         ${fire_SOURCE_DIR}
         "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(polycpp-tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
@@ -196,7 +195,7 @@ polytest_configure_suite(polycpp-tests
         DRIVER "${LLVM_DIST_DIR}/bin/clang++"
         LIB "$<TARGET_FILE:polystl>"
         LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>"
-        INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
+        INCLUDE "${CMAKE_SOURCE_DIR}/../$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include"
         GLOB "check_*.cpp"
         PACKAGE_FIXTURE "$<TARGET_FILE:polycpp-package-fixture>"
         RECURSIVE
