@@ -59,7 +59,7 @@ SHIM
   chmod +x "$dist/bin/$_drv"
 done
 
-# XXX flang self-invokes bin/flang -fc1; skip inject, rejects --gcc-install-dir / -B
+# XXX flang self-invokes bin/flang -fc1; skip inject, rejects -B (but accepts --gcc-install-dir)
 if [ "$has_flang" = 1 ]; then
   cat > "$dist/bin/flang-new" <<SHIM
 #!/usr/bin/env bash
@@ -67,7 +67,7 @@ DIR="\$(dirname "\$0")"
 inject=1
 for a in "\$@"; do [ "\$a" = "-fc1" ] && inject=0 && break; done
 if [ -n "\${POLYREGION_SYSROOT-}" ] && [ "\$inject" = 1 ]; then
-  set -- --sysroot="\$POLYREGION_SYSROOT" -fuse-ld=lld "\$@"
+  set -- --sysroot="\$POLYREGION_SYSROOT" --gcc-install-dir="$gcc_dir" -fuse-ld=lld "\$@"
 fi
 exec "\$DIR/.shim/flang-new" "\$@"
 SHIM

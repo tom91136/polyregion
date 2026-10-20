@@ -207,6 +207,7 @@ check-header:
     pat='^[[:space:]]*#[[:space:]]*include[[:space:]]*<(filesystem|regex|codecvt|iostream|sstream|ostream|iomanip)>'
     specs=(); for d in {{ cxx_roots }}; do for e in cpp cc cu h hpp h.in hpp.in; do specs+=("$d/*.$e"); done; done
     hits=$(git ls-files -z -- "${specs[@]}" \
+        ':(exclude)native/polycpp/test/check_host_iostream.cpp' \
         ':(exclude)native/polycpp/test/check_try_catch_std_exceptions.cpp' \
         ':(exclude)native/polycpp/test/check_try_catch_unsupported.cpp' | xargs -0 grep -nE "$pat" 2>/dev/null)
     [ -z "$hits" ] || { echo "banned headers (use fmt/LLVM alternatives):"; echo "$hits"; exit 1; }

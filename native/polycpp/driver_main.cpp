@@ -233,9 +233,12 @@ int main(int argc, const char *argv[]) {
 #endif
                        break;
                    }
+                   const auto compilerLibPath = clangPath.empty() ? joinPath(execParentPath, "..", "lib")
+                                                                  : joinPath(llvm::sys::path::parent_path(clangPath), "..", "lib");
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), joinPath(polycppLibPath, staticLibraryName("polystl-static")));
+                       append(staticRuntimeLinkFlags(compilerLibPath, /*needsCxxRuntime*/ false));
                        // XXX link libpolyreflect-rt so the per-TU malloc/free interposers resolve to
                        // its single `_rt_record` / `_rt_release` instance.
                        append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polyreflect-rt"));
@@ -256,8 +259,6 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
-                   const auto compilerLibPath = clangPath.empty() ? joinPath(execParentPath, "..", "lib")
-                                                                  : joinPath(llvm::sys::path::parent_path(clangPath), "..", "lib");
                    append(jitCompilerLinkFlags(opts->jit, polycppLibPath, compilerLibPath, /*needsCxxRuntime*/ false));
                    // XXX on macOS static libc++ so the interposer sees its internal allocations; last so it resolves
                    // against the user + polystl objects

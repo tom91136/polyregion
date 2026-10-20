@@ -67,7 +67,8 @@ inline std::vector<std::string> appleDistLibcxxRpath(const std::string &execPare
 // prebuilt dylib and there is no static system libc++ to relink
 inline std::vector<std::string> appleDistLibcxxStatic(const std::string &distLibDir) {
 #if defined(__APPLE__)
-  return {"-nostdlib++", joinPath(distLibDir, "libc++.a"), joinPath(distLibDir, "libc++abi.a")};
+  return {"-nostdlib++", fmt::format("-Wl,-load_hidden,{}", joinPath(distLibDir, "libc++.a")),
+          fmt::format("-Wl,-load_hidden,{}", joinPath(distLibDir, "libc++abi.a"))};
 #else
   (void)distLibDir;
   return {};
@@ -314,6 +315,71 @@ struct StdParOptions {
   }
 };
 
+// A merged archive cannot carry CMake's non-archive link dependencies, so its client link provides them.
+inline std::vector<std::string> staticArchiveLinkFlags([[maybe_unused]] const std::string &llvmLibPath,
+                                                       [[maybe_unused]] bool needsCxxRuntime) {
+  std::vector<std::string> out;
+#if defined(__APPLE__)
+  if (needsCxxRuntime) {
+    // The LLVM dist also contains its build-time libc++ dylib, whose ABI
+    // dependencies are not part of the PolyFC distribution. Prefer the SDK
+    // runtime before adding llvmLibPath to the linker search path below.
+    out ^= concat(std::vector<std::string>{"-L/usr/lib"});
+  }
+#endif
+#if defined(POLYREGION_JIT_LLVM_DYLIB)
+  out ^= concat(Driver::dynamicOriginLinkFlags(llvmLibPath, "LLVMpolyregion"));
+#endif
+#if defined(__APPLE__)
+  if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lc++"});
+#elif !defined(_WIN32)
+  if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lstdc++", "-lm"});
+#endif
+#if defined(__linux__)
+  // Older glibc/sysroots keep pthread, dl and rt separate.
+  out ^= concat(std::vector<std::string>{"-pthread", "-ldl", "-lrt"});
+#endif
+#if defined(POLYREGION_ASAN_BUILD) && !defined(_WIN32)
+  // The static archives are built from the sanitizer-instrumented native objects;
+  // their client link must therefore provide the same ASan/UBSan shared runtimes.
+  if (needsCxxRuntime) {
+    // Flang does not accept Clang's -fsanitize/-shared-libsan driver flags.
+    // Link the shipped shared runtime explicitly; the ASan test runner also
+    // preloads this same DSO so its interceptors are installed first.
+    std::error_code ec;
+    const auto root = joinPath(llvmLibPath, "clang");
+  #if defined(__APPLE__)
+    constexpr auto runtimeName = "libclang_rt.asan_osx_dynamic.dylib";
+  #else
+    constexpr auto runtimeName = "libclang_rt.asan.so";
+  #endif
+    for (llvm::sys::fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+      const auto runtime = it->path();
+      if (llvm::sys::path::filename(runtime) != runtimeName) continue;
+      const auto runtimeDir = llvm::sys::path::parent_path(runtime).str();
+  #if defined(__APPLE__)
+      out ^= concat(std::vector<std::string>{runtime, fmt::format("-Wl,-rpath,{}", runtimeDir)});
+  #else
+      out ^= concat(std::vector<std::string>{"-Wl,--push-state,--no-as-needed", runtime, "-Wl,--pop-state",
+                                             fmt::format("-Wl,-rpath,{}", runtimeDir)});
+  #endif
+      break;
+    }
+  } else {
+    out ^= concat(std::vector<std::string>{"-fsanitize=address,undefined", "-fno-sanitize=vptr", "-shared-libsan", "-frtlib-add-rpath"});
+  }
+#endif
+  return out;
+}
+
+inline std::vector<std::string> staticRuntimeLinkFlags(const std::string &llvmLibPath, bool needsCxxRuntime) {
+  auto out = staticArchiveLinkFlags(llvmLibPath, needsCxxRuntime);
+#if defined(__APPLE__)
+  out ^= append(std::string("-Wl,-framework,Metal,-framework,Foundation"));
+#endif
+  return out;
+}
+
 // Retain the JIT ABI and expose static symbols to runtime lookup.
 inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit, const std::string &libsPath,
                                                      const std::string &llvmLibPath, bool needsCxxRuntime) {
@@ -350,60 +416,7 @@ inline std::vector<std::string> jitCompilerLinkFlags(StdParOptions::LinkKind jit
                     ^ map([](const auto &s) { return fmt::format("-Wl,--export-dynamic-symbol={}", s); }));
 #endif
       out ^= append(joinPath(libsPath, staticLibraryName("polyc-jit-static")));
-#if defined(__APPLE__)
-      if (needsCxxRuntime) {
-        // The LLVM dist also contains its build-time libc++ dylib, whose ABI
-        // dependencies are not part of the PolyFC distribution. Prefer the SDK
-        // runtime before adding llvmLibPath to the linker search path below.
-        out ^= concat(std::vector<std::string>{"-L/usr/lib"});
-      }
-#endif
-#if defined(POLYREGION_JIT_LLVM_DYLIB)
-      out ^= concat(Driver::dynamicOriginLinkFlags(llvmLibPath, "LLVMpolyregion"));
-#else
-      (void)llvmLibPath;
-#endif
-#if defined(__APPLE__)
-      if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lc++"});
-#elif !defined(_WIN32)
-      if (needsCxxRuntime) out ^= concat(std::vector<std::string>{"-lstdc++", "-lm"});
-#endif
-#if defined(__linux__)
-      // A merged archive cannot carry CMake's non-archive link dependencies. Keep
-      // these after it for older glibc/sysroots where pthread, dl and rt are separate.
-      out ^= concat(std::vector<std::string>{"-pthread", "-ldl", "-lrt"});
-#endif
-#if defined(POLYREGION_ASAN_BUILD) && !defined(_WIN32)
-      // The static compiler archive is built from the sanitizer-instrumented native objects;
-      // its client link must therefore provide the same ASan/UBSan shared runtimes.
-      if (needsCxxRuntime) {
-        // Flang does not accept Clang's -fsanitize/-shared-libsan driver flags.
-        // Link the shipped shared runtime explicitly; the ASan test runner also
-        // preloads this same DSO so its interceptors are installed first.
-        std::error_code ec;
-        const auto root = joinPath(llvmLibPath, "clang");
-  #if defined(__APPLE__)
-        constexpr auto runtimeName = "libclang_rt.asan_osx_dynamic.dylib";
-  #else
-        constexpr auto runtimeName = "libclang_rt.asan.so";
-  #endif
-        for (llvm::sys::fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
-          const auto runtime = it->path();
-          if (llvm::sys::path::filename(runtime) != runtimeName) continue;
-          const auto runtimeDir = llvm::sys::path::parent_path(runtime).str();
-  #if defined(__APPLE__)
-          out ^= concat(std::vector<std::string>{runtime, fmt::format("-Wl,-rpath,{}", runtimeDir)});
-  #else
-          out ^= concat(std::vector<std::string>{"-Wl,--push-state,--no-as-needed", runtime, "-Wl,--pop-state",
-                                                 fmt::format("-Wl,-rpath,{}", runtimeDir)});
-  #endif
-          break;
-        }
-      } else {
-        out ^=
-            concat(std::vector<std::string>{"-fsanitize=address,undefined", "-fno-sanitize=vptr", "-shared-libsan", "-frtlib-add-rpath"});
-      }
-#endif
+      out ^= concat(staticArchiveLinkFlags(llvmLibPath, needsCxxRuntime));
       break;
     }
     case StdParOptions::LinkKind::Disabled: break;

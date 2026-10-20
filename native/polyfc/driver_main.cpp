@@ -140,9 +140,12 @@ int main(int argc, const char *argv[]) {
 #endif
                        break;
                    }
+                   const auto compilerLibPath = flangPath.empty() ? joinPath(execParentPath, "..", "lib")
+                                                                  : joinPath(llvm::sys::path::parent_path(flangPath), "..", "lib");
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), joinPath(polyfcLibPath, staticLibraryName("polydco-static")));
+                       append(staticRuntimeLinkFlags(compilerLibPath, /*needsCxxRuntime*/ true));
                        // polydco-static references _rt_record / _rt_release / _rt_reflect_p; link the
                        // shared polyreflect-rt so MSVC's dllimport thunks resolve.
                        append(Driver::dynamicOriginLinkFlags(polyfcLibPath, "polyreflect-rt"));
@@ -183,8 +186,6 @@ int main(int argc, const char *argv[]) {
                      }
                      case StdParOptions::LinkKind::Disabled: break;
                    }
-                   const auto compilerLibPath = flangPath.empty() ? joinPath(execParentPath, "..", "lib")
-                                                                  : joinPath(llvm::sys::path::parent_path(flangPath), "..", "lib");
                    append(jitCompilerLinkFlags(opts->jit, polyfcLibPath, compilerLibPath, /*needsCxxRuntime*/ true));
                    if (const char *t = std::getenv(polyregion::env::PolyfcLinkThreads); t && *t)
                      append({fmt::format("-Wl,--threads={}", t)});
