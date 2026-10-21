@@ -485,11 +485,12 @@ int main(int argc, char **argv) {
                    << '\n';
     return valid ? 0 : 21;
   }
-  if (argc == 3 && std::string(argv[1]) == "--write-marker-interface") {
+  if (argc == 3 && (std::string(argv[1]) == "--write-marker-interface" || std::string(argv[1]) == "--write-binary-marker-interface")) {
     const auto t = Type::Var("T").widen();
-    const auto publicDecl =
-        FunctionDecl(Sym({"bar", "apply"}), {Type::Var("T")}, {},
-                     {Arg(Named("x", t), {}), Arg(Named("op", Type::Exec({}, {t}, t).widen()), {})}, {}, {}, t, FunctionAffinity::Host());
+    const auto operands = std::string(argv[1]) == "--write-binary-marker-interface" ? std::vector{t, t} : std::vector{t};
+    const auto publicDecl = FunctionDecl(Sym({"bar", "apply"}), {Type::Var("T")}, {},
+                                         {Arg(Named("x", t), {}), Arg(Named("op", Type::Exec({}, operands, t).widen()), {})}, {}, {}, t,
+                                         FunctionAffinity::Host());
     std::error_code error;
     llvm::raw_fd_ostream out(argv[2], error, llvm::sys::fs::OF_None);
     if (error) return 14;

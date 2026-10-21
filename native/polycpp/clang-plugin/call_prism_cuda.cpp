@@ -437,8 +437,13 @@ static Opt<MatchedCall> cubWarpScan(const clang::CallExpr &call, const clang::Fu
             steps.emplace_back(PathStep::Deref());
             callable = Term::Select(selected->root, std::move(steps), pointer->comp).widen();
           }
-          if (callable.tpe().is<Type::Var>() || callable.tpe().is<Type::FnRef>())
-            return r.newVar(Expr::Invoke(callable.tpe(), {}, {}, {shuffled, input}, result));
+          if (callable.tpe().is<Type::Var>() || callable.tpe().is<Type::FnRef>()) {
+            const auto receiver =
+                operation.tpe().is<Type::Ptr>()
+                    ? operation
+                    : r.newVar(Expr::RefTo(termToSelect(operation, r), {}, operation.tpe(), TypeSpace::Global(), Region::Opaque()));
+            return r.newVar(Expr::Invoke(callable.tpe(), {}, receiver, {shuffled, input}, result));
+          }
           if (operationCall) {
             const auto [name, function] = self.handleCall(operationCall, r);
             if (function->decl.args.size() != 3)
