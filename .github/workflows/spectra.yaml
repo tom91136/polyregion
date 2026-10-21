@@ -126,7 +126,7 @@ jobs:
 
   # A workflow_run fires once per finished Polyregion workflow; only the last one for a commit has every dist ready.
   resolve:
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'cancelled' }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.head_sha == github.sha }}
     runs-on: ubuntu-24.04
     outputs:
       ready: ${{ steps.runs.outputs.ready }}
