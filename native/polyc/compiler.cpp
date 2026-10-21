@@ -19,6 +19,7 @@
 #include "nlohmann/json.hpp"
 
 #include "polyregion/compat.h"
+#include "polyregion/conventions.h"
 #include "polyregion/io.hpp"
 #include "polyregion/llvm_utils.hpp"
 #include "polyregion/polypackage.h"
@@ -293,11 +294,34 @@ std::string packageEntryPipeline(const compiletime::Target target, const std::st
   }
 }
 
+std::vector<polyast::Sym> consumerRoots(const polyast::ProgramLinkRequest &request) {
+  std::vector<polyast::Sym> roots;
+  const auto add = [&](const polyast::Function &function) {
+    if (function.visibility.template is<polyast::FunctionVisibility::Exported>() && function.implements)
+      roots.emplace_back(function.decl.name);
+  };
+  if (request.consumer.entry) add(*request.consumer.entry);
+  for (const auto &function : request.consumer.functions)
+    add(function);
+  return roots;
+}
+
+std::vector<std::string> linkMetadata(const polyast::Program &program, const std::vector<polyast::Sym> &roots, const std::string &prefix) {
+  return roots ^ collect([&](const auto &root) {
+           const auto key = prefix + polyast::fqcn(root);
+           return program.metadata ^ find([&](const auto &entry) { return entry.key == key; })
+                  ^ map([](const auto &entry) { return entry.value; });
+         });
+}
+
 std::vector<std::string> validateImportedEntries(const polyast::ProgramLinkRequest &request, const polyast::Program &program) {
   std::vector<std::string> errors;
   const auto linked = indexFunctions(program);
   const auto validate = [&](const polyast::Function &root) {
     if (!root.visibility.template is<polyast::FunctionVisibility::Exported>() || !root.implements) return;
+    if (program.metadata
+        ^ exists([&](const auto &entry) { return entry.key == conventions::LinkUnfitMeta + polyast::fqcn(root.decl.name); }))
+      return;
     const auto found = linked.find(root.decl.name);
     const auto count = found == linked.end() ? 0 : found->second.size();
     if (count != 1) {
@@ -402,6 +426,10 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
   auto linked = linkProgram(request);
   if (!linked) return {{}, std::move(linked.errors)};
   if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};
+  const auto roots = consumerRoots(request);
+  auto implementations = linkMetadata(*linked.value, roots, conventions::LinkImplementationMeta);
+  auto unfit = linkMetadata(*linked.value, roots, conventions::LinkUnfitMeta);
+  if (implementations.empty() && !unfit.empty()) return {{polyast::CompileBundle({}, {}, {}, std::move(unfit))}, {}};
   if (auto errors = validateRemoteEntries(*linked.value); !errors.empty()) return {{}, std::move(errors)};
   initialise();
   std::unordered_set<polyast::Sym> consumerEntries;
@@ -447,7 +475,7 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
                                  device.features, *device.binary);
     }
   }
-  return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules))}, {}};
+  return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules), std::move(implementations), std::move(unfit))}, {}};
 }
 
 static polyast::PassRunResult runPipelineChain(const polyast::Program &p, std::string_view rawSpec) {

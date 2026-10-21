@@ -1,6 +1,7 @@
 #pragma region case: core-fallback
 #pragma region offload-only
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
 #pragma region requires: 3 600
 
@@ -8,6 +9,8 @@
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 2 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
 #pragma region requires: 3 600
 

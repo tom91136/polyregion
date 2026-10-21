@@ -25,6 +25,8 @@ int main(int argc, char **argv) {
   using namespace polyregion::polyast;
   using namespace polyregion::polyast::dsl;
   const bool writeInputs = argc == 3 && std::string(argv[1]) == "--write-package-inputs";
+  const bool sizedCore = argc == 3 && std::string(argv[1]) == "--sized-core";
+  const auto *packageRoot = sizedCore ? argv[2] : argv[1];
   if (argc == 3 && std::string(argv[1]) == "--print-program") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
     if (!source) return 10;
@@ -523,7 +525,7 @@ int main(int argc, char **argv) {
     const auto unrelatedValues = untouched.functions.front().collect_all<Term::IntU32Const>();
     return values.size() == 1 && values.front().value == 256 && unrelatedValues.size() == 1 && unrelatedValues.front().value == 64 ? 0 : 15;
   }
-  if (argc != 2 && !writeInputs) return 2;
+  if (argc != 2 && !writeInputs && !sizedCore) return 2;
 
   const auto publicName = Sym({"bar", "increment"});
   const auto implementationName = Sym({"bar", "implementation", "increment"});
@@ -655,14 +657,14 @@ int main(int argc, char **argv) {
                    {Arg(Named("n", i64), {}), Arg(Named("init", t), {}), Arg(Named("map", Type::Exec({}, {i64}, t)), {}),
                     Arg(Named("combine", Type::Exec({}, {t, t}, t)), {})},
                    {}, {}, t, FunctionAffinity::Host());
-  const auto value = Type::Var("Value").widen();
+  const auto value = Type::Var("Value", sizedCore ? std::optional<int32_t>(4) : std::nullopt).widen();
   const auto accumulator = Named("accumulator", value);
   const auto mapped = Named("mapped", value);
   const auto [mapReceiverDecl, mapReceiver] = callableReceiver("map", "Map");
   const auto [combineReceiverDecl, combineReceiver] = callableReceiver("combine", "Combine");
   const auto transformReduceImplementation =
       Function(FunctionDecl(Sym({"polyregion", "core", "host", "transform_reduce"}),
-                            {Type::Var("Value"), Type::Var("Map"), Type::Var("Combine")}, {},
+                            {*value.get<Type::Var>(), Type::Var("Map"), Type::Var("Combine")}, {},
                             {Arg(Named("n", i64), {}), Arg(Named("init", value), {}), Arg(Named("map", Type::Var("Map")), {}),
                              Arg(Named("combine", Type::Var("Combine")), {})},
                             {}, {}, value, FunctionAffinity::Host()),
@@ -720,7 +722,8 @@ int main(int argc, char **argv) {
     llvm::SmallString<256> interfacePath(inputs), programPath(inputs);
     llvm::sys::path::append(interfacePath, interfaceName);
     llvm::sys::path::append(programPath, programName);
-    const std::vector<std::string> ownedArgs{executable, "package", "link", interfacePath.str().str(), argv[1], programPath.str().str()};
+    const std::vector<std::string> ownedArgs{
+        executable, "package", "link", interfacePath.str().str(), packageRoot, programPath.str().str()};
     std::vector<llvm::StringRef> args;
     args.reserve(ownedArgs.size());
     for (const auto &arg : ownedArgs)

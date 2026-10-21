@@ -532,6 +532,69 @@ class PackageServiceSuite extends munit.FunSuite {
     assertEquals(entries.count(function => function.name == firstRoot.name || function.name == secondRoot.name), 2)
   }
 
+  test("program linking records the implementation of each bound root and the reason no implementation fits the rest") {
+    val publicName    = p.Sym("fit.identity")
+    val t: p.Type.Var = p.Type.Var("T")
+    val public = p.FunctionDecl(
+      publicName,
+      List(t),
+      None,
+      List(p.Arg(p.Named("value", t))),
+      Nil,
+      Nil,
+      t,
+      p.Function.Affinity.Host
+    )
+    val value: p.Type.Var = p.Type.Var("Value", Some(4))
+    val implementationDecl = public.copy(
+      name = p.Sym("implementation.fit.identity"),
+      tpeVars = List(value),
+      args = List(p.Arg(p.Named("value", value))),
+      rtn = value
+    )
+    val implementation = function(
+      implementationDecl,
+      List(p.Stmt.Return(p.Expr.Alias(p.Term.Select(implementationDecl.args.head.named, Nil, value)))),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val pkg = p.Package(p.Interface(p.Sym("fit"), List(public)), p.Program(None, List(implementation), Nil))
+    def root(name: String, tpe: p.Type) = function(
+      public.copy(name = p.Sym(name), tpeVars = Nil, args = List(p.Arg(p.Named("value", tpe))), rtn = tpe),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val narrow = root("consumer.narrow", p.Type.IntS32)
+    val wide   = root("consumer.wide", p.Type.Float64)
+    val sizes  = List(p.Program.TypeSize(p.Type.IntS32, 4), p.Program.TypeSize(p.Type.Float64, 8))
+    val linked =
+      ProgramLinker.link(p.Program.LinkRequest(List(pkg), p.Program(None, List(narrow, wide), Nil), Nil, sizes))
+    assert(linked.isRight, linked)
+    val program = linked.toOption.get
+    assertEquals(
+      program.metadata,
+      List(
+        p.MetaEntry(p.Conventions.LinkImplementationMeta + "consumer.narrow", "implementation.fit.identity"),
+        p.MetaEntry(
+          p.Conventions.LinkUnfitMeta + "consumer.wide",
+          "no implementation fits `F64` of 8 bytes (sizes: 4)"
+        )
+      )
+    )
+    val names = (program.entry.toList ::: program.functions).map(_.name)
+    assert(names.contains(narrow.name), names)
+    assert(!names.contains(wide.name), names)
+
+    val unfit = ProgramLinker.link(p.Program.LinkRequest(List(pkg), p.Program(None, List(wide), Nil), Nil, sizes))
+    assertEquals(unfit.map(program => (program.entry, program.functions)), Right((None, Nil)))
+    assert(
+      ProgramLinker
+        .link(p.Program.LinkRequest(List(pkg), p.Program(None, List(wide), Nil), Nil, sizes.take(1)))
+        .left
+        .exists(_.exists(_.contains("has no layout for `F64`")))
+    )
+  }
+
   test("program linking rejects invalid or conflicting type layouts") {
     val name = p.Sym("library.noop")
     val declaration = p.FunctionDecl(

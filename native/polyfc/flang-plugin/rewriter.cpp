@@ -481,7 +481,14 @@ public:
       linked.errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
       return false;
     }
-    if (!*linked.value) return false;
+    const auto declaration = polyast::fqcn(*root.implements);
+    if (!linked.value->unfit.empty()) {
+      emit(diag, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYFC "%0: %1 uses the inline body: %2", diagLoc, declaration,
+           linked.value->unfit ^ mk_string("; "));
+      return false;
+    }
+    emit(diag, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYFC "%0: %1 bound to polyregion.core (%2)", diagLoc, declaration,
+         linked.value->implementations ^ mk_string(", "));
 
     Binder binder(B, dco, FReduction, moduleId, region);
     if (int64_t binderSize = L.getTypeSize(binder.structType()); binderSize != region.captureLayout.sizeInBytes)
@@ -506,7 +513,7 @@ public:
     const auto count = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, 1), B.getI64IntegerAttr(8), i64).getRes();
     LLVM::StoreOp::create(B, uLoc(B), tripCount, count);
     if (!reduction) {
-      interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, **linked.value);
+      interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, *linked.value);
       binder.releaseTemporaries(B);
       return true;
     }
@@ -528,7 +535,7 @@ public:
       const auto type = llvm::cast<fir::ReferenceType>(reduction->slots[index].getType()).getEleTy();
       LLVM::StoreOp::create(B, uLoc(B), reduceIdentity(B, type, reduction->operations[index]), field(init, index));
     }
-    interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, init, capture, result}, **linked.value);
+    interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, init, capture, result}, *linked.value);
     for (size_t index = 0; index < reduction->slots.size(); ++index) {
       const auto slot = reduction->slots[index];
       const auto type = llvm::cast<fir::ReferenceType>(slot.getType()).getEleTy();
@@ -734,6 +741,59 @@ constexpr auto DoConcurrentAsWritten = "dco-as-written";
 // constexpr names (C2326).
 constexpr auto InductionStoreHoisted = "dco-induction-store-hoisted";
 constexpr auto HoistedStoreOp = "dco-hoisted-store-op";
+
+void demoteCoreReduce(fir::DoLoopOp doLoop) {
+  auto m = doLoop->getParentOfType<ModuleOp>();
+  const auto loc = doLoop.getLoc();
+  std::vector<fir::ReduceOperationEnum> operations;
+  for (const auto attribute : doLoop->getAttrOfType<ArrayAttr>(CoreReduceAttr))
+    operations.emplace_back(static_cast<fir::ReduceOperationEnum>(mlir::cast<IntegerAttr>(attribute).getInt()));
+  std::vector<fir::StoreOp> results(operations.size());
+  doLoop.walk([&](fir::StoreOp store) {
+    if (const auto index = store->getAttrOfType<IntegerAttr>(CoreReduceResultAttr)) results[index.getInt()] = store;
+  });
+  OpBuilder B(doLoop);
+  const auto lb = doLoop.getLowerBound(), step = doLoop.getStep();
+  const auto span = arith::AddIOp::create(B, loc, arith::SubIOp::create(B, loc, doLoop.getUpperBound(), lb), step).getResult();
+  const auto numIters = arith::MaxSIOp::create(B, loc, arith::DivSIOp::create(B, loc, span, step), idxConst(B, 0)).getResult();
+  const auto shape = fir::ShapeOp::create(B, loc, ValueRange{numIters}).getResult();
+  OpBuilder after(doLoop->getBlock(), std::next(doLoop->getIterator()));
+  auto releaseFn = m.lookupSymbol<LLVM::LLVMFuncOp>(polydco::abi::Release);
+  if (!releaseFn) releaseFn = defineFunc(m, polydco::abi::Release, LLVM::LLVMVoidType::get(m.getContext()), {ptrTy(B)});
+  for (size_t index = 0; index < results.size(); ++index) {
+    auto store = results[index];
+    const auto scalarTy = store.getValue().getType();
+    const auto slot = store.getMemref();
+    const auto arrTy = fir::SequenceType::get({fir::SequenceType::getUnknownExtent()}, scalarTy);
+    const auto heap =
+        fir::AllocMemOp::create(B, loc, arrTy, llvm::StringRef{}, llvm::StringRef{}, ValueRange{}, ValueRange{numIters}).getResult();
+    const auto scratch = fir::EmboxOp::create(B, loc, fir::BoxType::get(arrTy),
+                                              fir::ConvertOp::create(B, loc, fir::ReferenceType::get(arrTy), heap).getResult(), shape)
+                             .getResult();
+    OpBuilder body(store);
+    const auto offset = arith::SubIOp::create(body, loc, doLoop.getInductionVar(), lb).getResult();
+    const auto position = arith::AddIOp::create(body, loc, arith::DivSIOp::create(body, loc, offset, step), idxConst(body, 1)).getResult();
+    const auto element =
+        fir::ArrayCoorOp::create(body, loc, fir::ReferenceType::get(scalarTy), scratch, shape, Value{}, ValueRange{position}, ValueRange{})
+            .getResult();
+    fir::StoreOp::create(body, loc, store.getValue(), element);
+    store.erase();
+    fir::StoreOp::create(after, loc, reduceIdentity(after, scalarTy, operations[index]), slot);
+    auto fold = fir::DoLoopOp::create(after, loc, idxConst(after, 1), numIters, idxConst(after, 1), false, false);
+    OpBuilder folding(fold.getBody(), fold.getBody()->begin());
+    const auto delta = fir::LoadOp::create(folding, loc,
+                                           fir::ArrayCoorOp::create(folding, loc, fir::ReferenceType::get(scalarTy), scratch, shape,
+                                                                    Value{}, ValueRange{fold.getInductionVar()}, ValueRange{})
+                                               .getResult())
+                           .getResult();
+    const auto current = fir::LoadOp::create(folding, loc, slot).getResult();
+    fir::StoreOp::create(folding, loc, reduceCombine(folding, loc, scalarTy, operations[index], current, delta), slot);
+    const auto address = fir::ConvertOp::create(after, loc, after.getI64Type(), heap).getResult();
+    LLVM::CallOp::create(after, loc, releaseFn, ValueRange{LLVM::IntToPtrOp::create(after, loc, ptrTy(after), address).getResult()});
+    fir::FreeMemOp::create(after, loc, heap);
+  }
+  doLoop->removeAttr(CoreReduceAttr);
+}
 
 void doRewrite(ModuleOp op) {
 
@@ -1269,10 +1329,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
         lowered.emplace_back(doLoop);
         return;
       }
-      if (doLoop->hasAttr(CoreReduceAttr)) {
-        emit(diag, clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYFC "%0: reduction did not lower through polyregion.core", diagLoc);
-        return;
-      }
+      if (doLoop->hasAttr(CoreReduceAttr)) demoteCoreReduce(doLoop);
       auto executeOriginal = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());
       LLVM::StoreOp::create(B, uLoc(B), boolConst(B, true), executeOriginal);
       const auto dispatchKind = [&](OpBuilder &B0, const runtime::PlatformKind kind) {

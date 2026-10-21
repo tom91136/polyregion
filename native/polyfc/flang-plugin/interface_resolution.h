@@ -22,9 +22,9 @@ std::optional<polyfront::package::Archive> corePackage(clang::DiagnosticsEngine 
 // whether the archive has an implementation of `declaration` the capabilities allow
 bool implements(const polyfront::package::Archive &archive, const std::string &declaration, const polyfront::Options &opts);
 
-// links `root` against the archive's implementations of its declaration and keeps the host bitcode; an empty value means no
-// implementation the capabilities allow, so the caller keeps its own lowering
-polyfront::package::Checked<std::optional<polyast::CompileBundle>>
+// links `root` against the archive's implementations of its declaration and keeps the host bitcode; a bundle with unfit reasons
+// means no implementation fits the call, so the caller keeps its own lowering
+polyfront::package::Checked<polyast::CompileBundle>
 linkPackageProgram(const polyfront::Options &opts, const polyfront::package::Archive &archive, const polyast::Function &root,
                    std::vector<polyast::Function> consumerFunctions, std::vector<polyast::StructDef> consumerDefs,
                    std::vector<polyast::ProgramTypeSize> typeSizes, std::vector<std::string> &bitcodeFiles);

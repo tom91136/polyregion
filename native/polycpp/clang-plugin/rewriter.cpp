@@ -205,6 +205,7 @@ struct InterfaceSite {
   clang::FunctionDecl *callee;
   std::string packageName;
   std::string declaration;
+  clang::SourceLocation origin;
 };
 
 static std::optional<std::pair<std::string, std::string>> interfaceIdentity(const clang::FunctionDecl *decl) {
@@ -237,7 +238,7 @@ static Vector<InterfaceSite> interfaceSites(clang::ASTContext &context) {
         if (call && callee)
           if (const auto identity = interfaceIdentity(callee))
             results.emplace_back(InterfaceSite{const_cast<clang::CallExpr *>(call), const_cast<clang::FunctionDecl *>(callee),
-                                               identity->first, identity->second});
+                                               identity->first, identity->second, call->getExprLoc()});
       },
       callExpr(callee(functionDecl(hasAttr(clang::attr::Annotate)).bind("interfaceDecl"))).bind("interfaceCall"));
   return results;
@@ -503,9 +504,14 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
   site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
 }
 
+static void remarkInterfaceSite(clang::DiagnosticsEngine &D, const InterfaceSite &site, const std::string &outcome) {
+  emit(D, site.origin, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYSTL "%0 %1", site.declaration, outcome);
+}
+
 static void compileInterfaceCalls(const polyfront::Options &opts, clang::CompilerInstance &CI, clang::ASTContext &C,
                                   const std::vector<PreparedInterfaceCall> &prepared,
-                                  polystl::PackageProgramBitcodes &packageProgramBitcodes) {
+                                  polystl::PackageProgramBitcodes &packageProgramBitcodes,
+                                  std::map<const clang::FunctionDecl *, std::string> &outcomes) {
   if (prepared.empty()) return;
   auto &D = CI.getDiagnostics();
   const auto entryTarget = polyfront::objectTargetFor(CI.getTarget().getTriple());
@@ -515,7 +521,9 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
          CI.getTarget().getTriple().getArchName());
     return;
   }
-  const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
+  const auto capabilities = opts.libraryCapabilities.empty()
+                                ? polyfront::package::packageCapabilities()
+                                : std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
   const auto &targetCPU = CI.getTarget().getTargetOpts().CPU;
   auto *translationUnit = C.getTranslationUnitDecl();
   // Each interface call is an independent package root.  Keep it isolated through package linking and backend
@@ -528,15 +536,17 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
     const auto parsed = std::strtoul(value, &end, 10);
     if (end != value && *end == '\0' && parsed > 0) jobs = std::min<size_t>(parsed, prepared.size());
   }
-  // an empty bundle keeps the call, so the interface's inline fallback body runs
-  using CompileResult = polyfront::package::Checked<std::optional<CompileBundle>>;
+  // a bundle with unfit reasons keeps the call, so the interface's inline fallback body runs
+  using CompileResult = polyfront::package::Checked<CompileBundle>;
+  const auto unfit = [](std::string reason) -> CompileResult { return {CompileBundle({}, {}, {}, {std::move(reason)}), {}}; };
   const auto compile = [&](const PreparedInterfaceCall &item) -> CompileResult {
     const bool fallback = hasInterfaceFallback(item.site.callee);
-    if (fallback && !item.archive->entriesByDeclaration.contains(item.site.declaration)) return {std::optional<CompileBundle>{}, {}};
+    if (fallback && !item.archive->entriesByDeclaration.contains(item.site.declaration))
+      return unfit(polyfront::package::undeclaredReason(*item.archive, item.site.declaration));
     auto selected = polyfront::package::loadPackageSelection(*item.archive, item.site.declaration);
     if (!selected) return {{}, std::move(selected.errors)};
     if (fallback && !polyfront::package::satisfiable(*selected.value, item.site.declaration, capabilities))
-      return {std::optional<CompileBundle>{}, {}};
+      return unfit(polyfront::package::unsatisfiedReason(capabilities));
     const auto request =
         ProgramLinkRequest({std::move(*selected.value)}, polyfront::packageProgram(item.consumerFunctions, item.consumerDefinitions),
                            capabilities, item.typeSizes);
@@ -544,15 +554,29 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
         polyfront::package::compileProgram(request, opts.executable, *entryTarget,
                                            polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU), opts.targets, opts.stackDepth);
     if (!compiled) return {{}, std::move(compiled.errors)};
-    return {std::move(compiled.value), {}};
+    return compiled;
   };
   const auto consume = [&](const PreparedInterfaceCall &item, CompileResult result) {
     if (!result) {
       emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0", result.errors ^ mk_string("; "));
       return;
     }
-    if (!*result.value) return;
-    auto &compiled = *result.value;
+    auto &compiled = result.value;
+    if (!compiled->unfit.empty()) {
+      if (!hasInterfaceFallback(item.site.callee)) {
+        emit(D, item.site.call->getExprLoc(), clang::DiagnosticsEngine::Error, POLYREGION_DIAG_POLYSTL "%0",
+             compiled->unfit ^ mk_string("; "));
+        return;
+      }
+      const auto outcome = "uses the inline body: " + (compiled->unfit ^ mk_string("; "));
+      remarkInterfaceSite(D, item.site, outcome);
+      outcomes.emplace(item.site.callee->getCanonicalDecl(), outcome);
+      return;
+    }
+    const auto outcome = "bound to " + item.site.packageName
+                         + (compiled->implementations.empty() ? std::string{} : " (" + (compiled->implementations ^ mk_string(", ")) + ")");
+    remarkInterfaceSite(D, item.site, outcome);
+    outcomes.emplace(item.site.callee->getCanonicalDecl(), outcome);
     packageProgramBitcodes.emplace_back(std::move(compiled->hostObject));
     std::vector<InterfaceModuleResource> resources;
     resources.reserve(compiled->remoteModules.size());
@@ -1076,16 +1100,27 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   clang::ASTNameGenerator interfaceNames(C);
   const auto packageRoots =
       opts.libraryPath.empty() ? polyfront::package::packageRoots() : polyfront::package::splitPackageRoots(opts.libraryPath);
-  for (const auto &site : interfaceSites(C)) {
-    if (hasInterfaceFallback(site.callee)
-        && (!C.getLangOpts().CXXExceptions || polyfront::package::packageFiles(site.packageName, packageRoots).empty()))
-      continue;
+  std::vector<InterfaceSite> repeatedInterfaces;
+  const auto sites = interfaceSites(C);
+  std::optional<SpecialisationPathVisitor> specialisations;
+  if (!sites.empty()) specialisations.emplace(C);
+  for (auto site : sites) {
+    site.origin = specialisations->resolve(site.callee) ^ reverse() ^ head_maybe()
+                  ^ fold([](const auto &, const auto *call) { return call->getExprLoc(); }, [&] { return site.origin; });
+    if (hasInterfaceFallback(site.callee)) {
+      if (polyfront::package::packageFiles(site.packageName, packageRoots).empty()) continue;
+      if (!C.getLangOpts().CXXExceptions) {
+        remarkInterfaceSite(D, site, "uses the inline body: -fno-exceptions");
+        continue;
+      }
+    }
     const auto callableIdentities = interfaceCallableIdentities(site);
     const auto [existing, inserted] = interfaceCallables.emplace(site.callee->getCanonicalDecl(), callableIdentities);
     if (!inserted) {
       if (existing->second != callableIdentities)
         emit(D, site.call->getExprLoc(), clang::DiagnosticsEngine::Error,
              POLYREGION_DIAG_POLYSTL "one interface specialization cannot use conflicting callable identities");
+      else repeatedInterfaces.emplace_back(site);
       continue;
     }
     if (!C.getLangOpts().CXXExceptions) {
@@ -1106,7 +1141,11 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
     if (auto prepared = prepareInterfaceCall(CI, C, interfaceNames, site, found->second))
       preparedInterfaces.emplace_back(std::move(*prepared));
   }
-  compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcodes);
+  std::map<const clang::FunctionDecl *, std::string> interfaceOutcomes;
+  compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcodes, interfaceOutcomes);
+  for (const auto &site : repeatedInterfaces)
+    if (const auto outcome = interfaceOutcomes.find(site.callee->getCanonicalDecl()); outcome != interfaceOutcomes.end())
+      remarkInterfaceSite(D, site, outcome->second);
 }
 
 std::unique_ptr<clang::ASTConsumer>

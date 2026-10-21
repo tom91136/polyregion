@@ -8,11 +8,11 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "82b4b7f74d3aa8a471ef53aa841e7212";
+constexpr auto AdtHash = "b878e2cac390e6d9d8bdb1f327756891";
 constexpr auto ProgramHash = "de2de5f725108f6b01538c5ef974ec9a";
 constexpr auto PackageHash = "944c2b087ebac646c9d8a15c5fb76323";
 constexpr auto PackageWireHash = "ddf50b72239fc50bb6fddc26c62a5fec";
-constexpr auto CompileWireHash = "e6b6255e589708b2bd5b064b6b4fe04a";
+constexpr auto CompileWireHash = "6a5c5e89c9331829463c57f0815d95fe";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
 using msgpack::MsgpackReader;
@@ -3423,7 +3423,9 @@ CompileBundle compilebundle_from_json(const json &j_) {
   for (const auto &v_ : j_.at(1)) {
     remoteModules.emplace_back(compilemodule_from_json(v_));
   }
-  return {hostObject, remoteModules};
+  auto implementations = j_.at(2).get<std::vector<std::string>>();
+  auto unfit = j_.at(3).get<std::vector<std::string>>();
+  return {hostObject, remoteModules, implementations, unfit};
 }
 
 json compilebundle_to_json(const CompileBundle &x_) {
@@ -3432,7 +3434,9 @@ json compilebundle_to_json(const CompileBundle &x_) {
   for (const auto &v_ : x_.remoteModules) {
     remoteModules.emplace_back(compilemodule_to_json(v_));
   }
-  return json::array({hostObject, remoteModules});
+  auto implementations = x_.implementations;
+  auto unfit = x_.unfit;
+  return json::array({hostObject, remoteModules, implementations, unfit});
 }
 json hashed_from_json(const json &j_) {
   auto hash_ = j_.at(0).get<std::string>();
@@ -11788,7 +11792,7 @@ void compilemodule_to_msgpack(MsgpackWriter &w_, const CompileModule &x_) {
 }
 
 CompileBundle compilebundle_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 2) throw std::runtime_error("Expected CompileBundle with 2 field(s)");
+  if (n_ != 4) throw std::runtime_error("Expected CompileBundle with 4 field(s)");
   std::vector<int8_t> hostObject;
   {
     auto hostObject_size = r_.readArrayHeader();
@@ -11807,7 +11811,25 @@ CompileBundle compilebundle_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
       remoteModules.emplace_back(std::move(remoteModules_elem));
     }
   }
-  return {hostObject, remoteModules};
+  std::vector<std::string> implementations;
+  {
+    auto implementations_size = r_.readArrayHeader();
+    implementations.reserve(implementations_size);
+    for (size_t implementations_idx = 0; implementations_idx < implementations_size; ++implementations_idx) {
+      auto implementations_elem = r_.readString();
+      implementations.emplace_back(std::move(implementations_elem));
+    }
+  }
+  std::vector<std::string> unfit;
+  {
+    auto unfit_size = r_.readArrayHeader();
+    unfit.reserve(unfit_size);
+    for (size_t unfit_idx = 0; unfit_idx < unfit_size; ++unfit_idx) {
+      auto unfit_elem = r_.readString();
+      unfit.emplace_back(std::move(unfit_elem));
+    }
+  }
+  return {hostObject, remoteModules, implementations, unfit};
 }
 
 void compilebundle_fields_to_msgpack(MsgpackWriter &w_, const CompileBundle &x_) {
@@ -11819,6 +11841,14 @@ void compilebundle_fields_to_msgpack(MsgpackWriter &w_, const CompileBundle &x_)
   for (const auto &v0_ : x_.remoteModules) {
     compilemodule_to_msgpack(w_, v0_);
   }
+  w_.writeArrayHeader(x_.implementations.size());
+  for (const auto &v0_ : x_.implementations) {
+    w_.writeString(v0_);
+  }
+  w_.writeArrayHeader(x_.unfit.size());
+  for (const auto &v0_ : x_.unfit) {
+    w_.writeString(v0_);
+  }
 }
 
 CompileBundle compilebundle_from_msgpack(MsgpackReader &r_) {
@@ -11827,7 +11857,7 @@ CompileBundle compilebundle_from_msgpack(MsgpackReader &r_) {
 }
 
 void compilebundle_to_msgpack(MsgpackWriter &w_, const CompileBundle &x_) {
-  w_.writeArrayHeader(2);
+  w_.writeArrayHeader(4);
   compilebundle_fields_to_msgpack(w_, x_);
 }
 

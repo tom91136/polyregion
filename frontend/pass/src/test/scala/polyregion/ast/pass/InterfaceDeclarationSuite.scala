@@ -28,6 +28,12 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
         capabilities: Set[String],
         typeSizes: Map[p.Type, Int]
     ) = ProgramLinker.resolve(pkg, signature, callerDecls, capabilities, typeSizes)
+    private def unfit(
+        signature: ProgramLinker.CallSignature,
+        callerDecls: List[p.FunctionDecl],
+        capabilities: Set[String],
+        typeSizes: Map[p.Type, Int]
+    ) = ProgramLinker.resolution(pkg, signature, callerDecls, capabilities, typeSizes).left.map(_.unfit)
   }
 
   private def transformDecl = {
@@ -1010,6 +1016,25 @@ class InterfaceDeclarationSuite extends munit.FunSuite {
       pkgOf(List(w4))
         .resolve(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2))
         .isLeft
+    )
+    assertEquals(
+      pkgOf(List(w4, w8)).unfit(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 2)),
+      Left(Some("no implementation fits `F32` of 2 bytes (sizes: 4, 8)"))
+    )
+    assertEquals(
+      pkgOf(List(w4, variant(implementation("transform_w2", Some(2)), List("cpu"))))
+        .unfit(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 8)),
+      Left(Some("no implementation fits `F32` of 8 bytes (sizes: 4)"))
+    )
+    assertEquals(
+      pkg.unfit(call, List(lambda), Set.empty, Map(p.Type.Float32 -> 4)),
+      Left(Some("capability not satisfied"))
+    )
+    assertEquals(pkgOf(List(w4)).unfit(call, List(lambda), Set("gpu"), Map.empty), Left(None))
+    assertEquals(
+      pkgOf(List(variant(implementation("transform_w0", Some(0)))))
+        .unfit(call, List(lambda), Set("gpu"), Map(p.Type.Float32 -> 0)),
+      Left(None)
     )
     assert(
       pkgOf(List(fallback, variant(implementation("transform_fallback_alt", None))))

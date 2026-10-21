@@ -244,6 +244,8 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   for (const auto &error : compiled.errors)
     UNSCOPED_INFO(error);
   REQUIRE(compiled);
+  CHECK(compiled.value->implementations == std::vector<std::string>{"implementation.transform_w4"});
+  CHECK(compiled.value->unfit.empty());
   CHECK_FALSE(compiled.value->hostObject.empty());
   REQUIRE(compiled.value->remoteModules.size() == 1);
   CHECK_FALSE(compiled.value->remoteModules.front().image.empty());
@@ -266,6 +268,33 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   REQUIRE(distinctProfile);
   REQUIRE(distinctProfile.value->remoteModules.size() == 1);
   CHECK(distinctProfile.value->remoteModules.front().moduleName != compiled.value->remoteModules.front().moduleName);
+
+  const auto f64 = Type::Float64().widen();
+  const auto f64Pointer = Type::Ptr(f64, TypeSpace::Global()).widen();
+  const auto wideRoot = root.withDecl(
+      rootDecl.withArgs({Arg(Named("in", f64Pointer), {}), Arg(Named("out", f64Pointer), {}), Arg(Named("n", Type::IntS32()), {})}));
+  const auto compileWide = [&](std::vector<ProgramTypeSize> typeSizes) {
+    return polyfront::package::compileProgram(ProgramLinkRequest({pkg}, polyfront::packageProgram({wideRoot}, {}), {"gpu"}, typeSizes), {},
+                                              compiletime::Target::Object_LLVM_HOST, "native",
+                                              {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
+  };
+  const auto unfit = compileWide({ProgramTypeSize(f64, 8)});
+  for (const auto &error : unfit.errors)
+    UNSCOPED_INFO(error);
+  REQUIRE(unfit);
+  CHECK(unfit.value->unfit == std::vector<std::string>{"no implementation fits `F64` of 8 bytes (sizes: 4)"});
+  CHECK(unfit.value->implementations.empty());
+  CHECK(unfit.value->hostObject.empty());
+  CHECK(unfit.value->remoteModules.empty());
+  const auto unlaid = compileWide({});
+  REQUIRE_FALSE(unlaid);
+  CHECK((unlaid.errors ^ aspartame::exists([](const auto &error) { return error.find("has no layout for `F64`") != std::string::npos; })));
+  const auto mismatched = polyfront::package::compileProgram(
+      ProgramLinkRequest({pkg}, polyfront::packageProgram({root.withDecl(rootDecl.withArgs({}))}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)}),
+      {}, compiletime::Target::Object_LLVM_HOST, "native", {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
+  REQUIRE_FALSE(mismatched);
+  CHECK((mismatched.errors
+         ^ aspartame::exists([](const auto &error) { return error.find("no matching public declaration") != std::string::npos; })));
 
   CHECK(polyast::offloadEntrySymbol(polyast::Sym({"a", "b"})) != polyast::offloadEntrySymbol(polyast::Sym({"a_b"})));
   CHECK(polyast::offloadEntrySymbol(polyast::Sym({"-_3f"})) != polyast::offloadEntrySymbol(polyast::Sym({"_2d?"})));

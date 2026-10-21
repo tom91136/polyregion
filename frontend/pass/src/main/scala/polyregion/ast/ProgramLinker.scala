@@ -472,6 +472,8 @@ private[polyregion] object ProgramLinker {
     else Left(distinct)
   }
 
+  final case class Rejection(errors: List[String], unfit: Option[String] = None)
+
   def resolve(
       pkg: p.Package,
       signature: ProgramLinker.CallSignature,
@@ -479,23 +481,37 @@ private[polyregion] object ProgramLinker {
       capabilities: Set[String],
       typeSizes: Map[p.Type, Int],
       matchResult: Boolean = true
-  ): Either[List[String], ImplementationResolution] = {
+  ): Either[List[String], ImplementationResolution] =
+    resolution(pkg, signature, callerDecls, capabilities, typeSizes, matchResult).left.map(_.errors)
+
+  def resolution(
+      pkg: p.Package,
+      signature: ProgramLinker.CallSignature,
+      callerDecls: List[p.FunctionDecl],
+      capabilities: Set[String],
+      typeSizes: Map[p.Type, Int],
+      matchResult: Boolean = true
+  ): Either[Rejection, ImplementationResolution] = {
     val decls = pkg.interface.declarations.filter(_.name == signature.name)
     if (decls.isEmpty)
-      return Left(List(s"no public declaration `${signature.name.fqn.mkString(".")}`"))
+      return Left(Rejection(List(s"no public declaration `${signature.name.fqn.mkString(".")}`")))
     val declarationMatches = decls.map(decl => decl -> matchCall(decl, signature, callerDecls, matchResult))
     val matchingDecls      = declarationMatches.collect { case (decl, Right(result)) => decl -> result }
     val (decl, callMatch) = matchingDecls match {
       case List(result) => result
       case Nil =>
         return Left(
-          "no matching public declaration" :: declarationMatches.flatMap { case (candidate, result) =>
-            result.left.toOption.toList.flatten.map(error => s"`${candidate.toString}`: $error")
-          }
+          Rejection(
+            "no matching public declaration" :: declarationMatches.flatMap { case (candidate, result) =>
+              result.left.toOption.toList.flatten.map(error => s"`${candidate.toString}`: $error")
+            }
+          )
         )
       case matches =>
         return Left(
-          List(s"ambiguous public declaration `${signature.name.fqn.mkString(".")}`: ${matches.size} matches")
+          Rejection(
+            List(s"ambiguous public declaration `${signature.name.fqn.mkString(".")}`: ${matches.size} matches")
+          )
         )
     }
     def implementationKey(function: p.Function) = (
@@ -504,39 +520,49 @@ private[polyregion] object ProgramLinker {
     )
     val implementations = pkg.program.functions.filter(_.implements.contains(decl.name)).sortBy(implementationKey)
     if (implementations.isEmpty)
-      return Left(List(s"no implementations for `${decl.name.fqn.mkString(".")}`"))
+      return Left(Rejection(List(s"no implementations for `${decl.name.fqn.mkString(".")}`")))
 
     val compatible = List.newBuilder[(p.Function, ImplementationMatch)]
     val rejected   = List.newBuilder[String]
+    val sizeMisses = List.newBuilder[(p.Type, Int, Int)]
+    var structural = false
     implementations.foreach { implementation =>
-      val label  = implementation.name.fqn.mkString(".")
-      val errors = List.newBuilder[String]
+      val label   = implementation.name.fqn.mkString(".")
+      val errors  = List.newBuilder[String]
+      val misses  = List.newBuilder[(p.Type, Int, Int)]
+      val capable = implementation.requiredCapabilities.forall(capabilities)
+      var fits    = true
+      def reject(error: String): Unit = {
+        errors += error
+        fits = false
+      }
       implementation.requiredCapabilities.distinct.sorted.filterNot(capabilities).foreach { capability =>
         errors += s"requires capability `$capability`"
       }
       val implementationMatch = matchImplementation(implementation.decl, decl)
-      implementationMatch.left.foreach(_.foreach(errors += _))
+      implementationMatch.left.foreach(_.foreach(reject))
       implementationMatch.foreach { result =>
         val constraints = implementation.tpeVars.flatMap(variable => variable.exactSizeInBytes.map(variable -> _))
         val constrained = constraints.map(_._1.name)
         val sizeable    = result.types.keySet -- result.callables.keySet
         if (constrained.distinct.size != constrained.size)
-          errors += "type-size constraints must be distinct"
+          reject("type-size constraints must be distinct")
         if (constrained.nonEmpty && constrained.toSet != sizeable)
-          errors += s"type-size constraints must cover `${sizeable.toList.sorted.mkString(", ")}`"
+          reject(s"type-size constraints must cover `${sizeable.toList.sorted.mkString(", ")}`")
         constraints.sortBy(_._1.name).foreach { case (variable, requiredSize) =>
           if (requiredSize <= 0)
-            errors += s"type-size constraint for `${variable.name}` must be positive"
+            reject(s"type-size constraint for `${variable.name}` must be positive")
           result.types.get(variable.name) match {
-            case None => errors += s"type-size constraint references unbound variable `${variable.name}`"
+            case None => reject(s"type-size constraint references unbound variable `${variable.name}`")
             case Some(bound) =>
               substituteType(bound, callMatch.types) match {
-                case Left(reason) => errors += s"cannot resolve `${variable.name}`: $reason"
+                case Left(reason) => reject(s"cannot resolve `${variable.name}`: $reason")
                 case Right(tpe) =>
                   typeSizes.get(tpe) match {
-                    case None => errors += s"has no layout for `${tpe.repr}`"
+                    case None => reject(s"has no layout for `${tpe.repr}`")
                     case Some(actual) if actual != requiredSize =>
                       errors += s"requires `${variable.name}` size $requiredSize, got $actual for `${tpe.repr}`"
+                      misses += ((tpe, actual, requiredSize))
                     case _ => ()
                   }
               }
@@ -546,7 +572,10 @@ private[polyregion] object ProgramLinker {
       val distinct = errors.result().distinct
       implementationMatch match {
         case Right(result) if distinct.isEmpty => compatible += implementation -> result
-        case _                                 => distinct.foreach(error => rejected += s"`$label`: $error")
+        case _ =>
+          distinct.foreach(error => rejected += s"`$label`: $error")
+          if (!fits) structural = true
+          if (capable) sizeMisses ++= misses.result()
       }
     }
 
@@ -556,13 +585,30 @@ private[polyregion] object ProgramLinker {
     candidates match {
       case List((implementation, abi)) =>
         Right(ImplementationResolution(decl, callMatch, implementation, abi))
-      case Nil => Left(s"no compatible implementation for `${decl.name.fqn.mkString(".")}`" :: rejected.result())
+      case Nil =>
+        val unfit = Option.when(!structural)(sizeMisses.result() match {
+          case Nil => "capability not satisfied"
+          case misses =>
+            misses
+              .groupBy((tpe, actual, _) => (tpe, actual))
+              .toList
+              .sortBy { case ((tpe, actual), _) => (tpe.repr, actual) }
+              .map { case ((tpe, actual), required) =>
+                s"no implementation fits `${tpe.repr}` of $actual bytes (sizes: ${required.map(_._3).distinct.sorted.mkString(", ")})"
+              }
+              .mkString("; ")
+        })
+        Left(
+          Rejection(s"no compatible implementation for `${decl.name.fqn.mkString(".")}`" :: rejected.result(), unfit)
+        )
       case values =>
         Left(
-          List(
-            s"ambiguous implementations for `${decl.name.fqn.mkString(".")}`: ${values
-                .map(_._1.name.fqn.mkString("."))
-                .mkString(", ")}"
+          Rejection(
+            List(
+              s"ambiguous implementations for `${decl.name.fqn.mkString(".")}`: ${values
+                  .map(_._1.name.fqn.mkString("."))
+                  .mkString(", ")}"
+            )
           )
         )
     }
@@ -1014,6 +1060,11 @@ private[polyregion] object ProgramLinker {
     Either.cond(distinct.isEmpty, entry, distinct)
   }
 
+  private enum RootLink {
+    case Bound(root: p.Sym, program: p.Program, implementation: p.Sym)
+    case Unfit(root: p.Sym, reason: String)
+  }
+
   private def linkRoot(
       pkg: p.Package,
       root: p.Function,
@@ -1021,7 +1072,7 @@ private[polyregion] object ProgramLinker {
       callerDefs: List[p.StructDef],
       capabilities: Set[String],
       typeSizes: Map[p.Type, Int]
-  ): Either[List[String], p.Program] = {
+  ): Either[List[String], RootLink] = {
     val target = root.implements.toRight(List(s"consumer root `${root.name.repr}` has no public declaration"))
     target.flatMap { declaration =>
       val signature = ProgramLinker.CallSignature(
@@ -1031,19 +1082,27 @@ private[polyregion] object ProgramLinker {
         root.args.map(_.named.tpe),
         root.rtn
       )
-      for {
-        resolution <- resolve(
-          pkg,
-          signature,
-          callerFns.map(_.decl),
-          capabilities,
-          typeSizes,
-          matchResult = root.rtn != p.Type.Nothing
-        )
-        closure     <- implementationClosure(pkg, resolution, callerFns)
-        definitions <- resolvedStructClosure(pkg, closure, callerDefs)
-        entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions, closure)
-      } yield p.Program(Some(entry), closure, definitions)
+      resolution(
+        pkg,
+        signature,
+        callerFns.map(_.decl),
+        capabilities,
+        typeSizes,
+        matchResult = root.rtn != p.Type.Nothing
+      ) match {
+        case Left(Rejection(_, Some(reason))) => Right(RootLink.Unfit(root.name, reason))
+        case Left(Rejection(errors, None))    => Left(errors)
+        case Right(resolution) =>
+          for {
+            closure     <- implementationClosure(pkg, resolution, callerFns)
+            definitions <- resolvedStructClosure(pkg, closure, callerDefs)
+            entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions, closure)
+          } yield RootLink.Bound(
+            root.name,
+            p.Program(Some(entry), closure, definitions),
+            resolution.implementation.name
+          )
+      }
     }
   }
 
@@ -1273,7 +1332,7 @@ private[polyregion] object ProgramLinker {
     Either.cond(distinct.isEmpty, linked, distinct)
   }
 
-  private def resolveRequest(
+  private def resolveRequest[A](
       request: p.Program.LinkRequest,
       resolveRoot: (
           p.Package,
@@ -1282,8 +1341,8 @@ private[polyregion] object ProgramLinker {
           List[p.StructDef],
           Set[String],
           Map[p.Type, Int]
-      ) => Either[List[String], p.Program]
-  ): Either[List[String], List[p.Program]] = {
+      ) => Either[List[String], A]
+  ): Either[List[String], List[A]] = {
     val groupedTypeSizes = request.typeSizes.groupBy(_.tpe)
     val layoutErrors = groupedTypeSizes.toList
       .flatMap { case (tpe, values) =>
@@ -1317,12 +1376,21 @@ private[polyregion] object ProgramLinker {
   }
 
   def link(request: p.Program.LinkRequest): Either[List[String], p.Program] =
-    resolveRequest(request, linkRoot)
+    resolveRequest(request, linkRoot).flatMap { roots =>
+      val bound = roots.collect { case RootLink.Bound(_, program, _) => program }
+      val metadata = roots.map {
+        case RootLink.Bound(root, _, implementation) =>
+          p.MetaEntry(p.Conventions.LinkImplementationMeta + root.fqcn, implementation.fqcn)
+        case RootLink.Unfit(root, reason) => p.MetaEntry(p.Conventions.LinkUnfitMeta + root.fqcn, reason)
+      }
       // Package roots are independent imports. Prepare each selected closure before merging so specialisation and
       // offload-entry handling never retain unrelated widths in the same expanding AST. This is also the natural
       // unit for a future bounded-parallel implementation.
-      .flatMap(_.traverse(prepareLinkedProgram))
-      .flatMap(mergeLinkedPrograms)
+      val linked =
+        if (bound.isEmpty && roots.nonEmpty) Right(p.Program(None, Nil, Nil))
+        else bound.traverse(prepareLinkedProgram).flatMap(mergeLinkedPrograms)
+      linked.map(_.copy(metadata = metadata))
+    }
 
   def importProgram(
       request: p.Program.LinkRequest,

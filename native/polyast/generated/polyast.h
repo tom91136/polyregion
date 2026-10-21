@@ -10804,9 +10804,13 @@ struct POLYREGION_EXPORT CompileModule {
 struct POLYREGION_EXPORT CompileBundle {
   std::vector<int8_t> hostObject;
   std::vector<CompileModule> remoteModules;
+  std::vector<std::string> implementations;
+  std::vector<std::string> unfit;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT CompileBundle withHostObject(const std::vector<int8_t> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT CompileBundle withRemoteModules(const std::vector<CompileModule> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT CompileBundle withImplementations(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT CompileBundle withUnfit(const std::vector<std::string> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, CompileBundle>) {
@@ -10835,11 +10839,12 @@ struct POLYREGION_EXPORT CompileBundle {
     for (auto it = remoteModules.begin(); it != remoteModules.end(); ++it) {
       remoteModules__.emplace_back((*it).modify_all<T>(f));
     }
-    return CompileBundle(hostObject, remoteModules__);
+    return CompileBundle(hostObject, remoteModules__, implementations, unfit);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const CompileBundle &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const CompileBundle &) const;
-  CompileBundle(std::vector<int8_t> hostObject = {}, std::vector<CompileModule> remoteModules = {}) noexcept;
+  CompileBundle(std::vector<int8_t> hostObject = {}, std::vector<CompileModule> remoteModules = {},
+                std::vector<std::string> implementations = {}, std::vector<std::string> unfit = {}) noexcept;
 };
 
 } // namespace polyregion::polyast

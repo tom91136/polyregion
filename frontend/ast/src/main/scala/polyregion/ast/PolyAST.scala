@@ -546,7 +546,9 @@ object PolyAST {
 
     case class Bundle(
         hostObject: ArraySeq[Byte],
-        remoteModules: List[Module]
+        remoteModules: List[Module],
+        implementations: List[String] = Nil,
+        unfit: List[String] = Nil
     ) derives MsgPack.Codec
 
     case class Event(
@@ -742,6 +744,8 @@ object PolyAST {
     inline val BaseFieldPrefix         = "#base"
     inline val EmptyStructStorageField = "#empty_struct_storage"
     inline val KernelBundleType        = "KernelBundle"
+    inline val LinkImplementationMeta  = "#link_implementation:"
+    inline val LinkUnfitMeta           = "#link_unfit:"
 
     def assertMessageLimit: Int = 1024
 

@@ -26,8 +26,10 @@ inline std::string extractTestName(const std::string &path, const std::string &p
 struct TestCase {
   struct Run {
     using Expect = std::pair<std::optional<int>, std::string>;
+    using StderrCount = std::pair<size_t, std::string>;
     std::string command;
     std::vector<Expect> expect;
+    std::vector<StderrCount> stderrCounts;
   };
   using Variable = std::pair<std::string, std::vector<std::string>>;
   std::string name;
@@ -74,9 +76,21 @@ struct TestCase {
       });
     };
 
+    auto parseStderrCounts = [&]() {
+      return parseNormalised(file, [&](const std::string &line) -> std::optional<Run::StderrCount> {
+        const auto value = parseRight("stderr-count:", line);
+        const auto parts = value ? *value ^ trim() ^ split_once(' ') : std::nullopt;
+        if (!parts || parts->first.empty() || !(parts->first ^ forall([](char c) { return c >= '0' && c <= '9'; }))) return {};
+        return Run::StderrCount{std::stoul(parts->first), parts->second ^ trim()};
+      });
+    };
+
     auto parseRuns = [&]() {
       return parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
-        return parseRight("do:", line) ^ map([&](const auto &runLine) { return Run{runLine ^ trim(), parseExpects()}; });
+        return parseRight("do:", line) ^ map([&](const auto &runLine) {
+                 auto expect = parseExpects();
+                 return Run{runLine ^ trim(), std::move(expect), parseStderrCounts()};
+               });
       });
     };
 

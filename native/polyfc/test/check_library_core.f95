@@ -1,6 +1,7 @@
 !CHECK case: core-fallback
 !CHECK offload-only
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -o {output} {input}
+!CHECK stderr-count: 0 uses the inline body
 !CHECK do: {output}
 !CHECK requires: 200 10100 28 50 32 2 5050.0
 
@@ -8,6 +9,16 @@
 !CHECK offload-only
 !CHECK do: {package_fixture} {output}.packages
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 6 bound to polyregion.core
+!CHECK do: {output}
+!CHECK requires: 200 10100 28 50 32 2 5050.0
+
+!CHECK case: core-package-width
+!CHECK offload-only
+!CHECK do: {package_fixture} --sized-core {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 5 bound to polyregion.core
+!CHECK stderr-count: 1 polyregion.core.transform_reduce uses the inline body: no implementation fits
 !CHECK do: {output}
 !CHECK requires: 200 10100 28 50 32 2 5050.0
 

@@ -5053,19 +5053,34 @@ POLYREGION_EXPORT bool CompileModule::operator==(const CompileModule &rhs) const
          && (image == rhs.image);
 }
 
-CompileBundle::CompileBundle(std::vector<int8_t> hostObject, std::vector<CompileModule> remoteModules) noexcept
-    : hostObject(std::move(hostObject)), remoteModules(std::move(remoteModules)) {}
+CompileBundle::CompileBundle(std::vector<int8_t> hostObject, std::vector<CompileModule> remoteModules,
+                             std::vector<std::string> implementations, std::vector<std::string> unfit) noexcept
+    : hostObject(std::move(hostObject)), remoteModules(std::move(remoteModules)), implementations(std::move(implementations)),
+      unfit(std::move(unfit)) {}
 size_t CompileBundle::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(hostObject)>()(hostObject) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(remoteModules)>()(remoteModules) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(implementations)>()(implementations) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(unfit)>()(unfit) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-CompileBundle CompileBundle::withHostObject(const std::vector<int8_t> &v_) const { return CompileBundle(v_, remoteModules); }
-CompileBundle CompileBundle::withRemoteModules(const std::vector<CompileModule> &v_) const { return CompileBundle(hostObject, v_); }
+CompileBundle CompileBundle::withHostObject(const std::vector<int8_t> &v_) const {
+  return CompileBundle(v_, remoteModules, implementations, unfit);
+}
+CompileBundle CompileBundle::withRemoteModules(const std::vector<CompileModule> &v_) const {
+  return CompileBundle(hostObject, v_, implementations, unfit);
+}
+CompileBundle CompileBundle::withImplementations(const std::vector<std::string> &v_) const {
+  return CompileBundle(hostObject, remoteModules, v_, unfit);
+}
+CompileBundle CompileBundle::withUnfit(const std::vector<std::string> &v_) const {
+  return CompileBundle(hostObject, remoteModules, implementations, v_);
+}
 POLYREGION_EXPORT bool CompileBundle::operator!=(const CompileBundle &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileBundle::operator==(const CompileBundle &rhs) const {
-  return (hostObject == rhs.hostObject) && (remoteModules == rhs.remoteModules);
+  return (hostObject == rhs.hostObject) && (remoteModules == rhs.remoteModules) && (implementations == rhs.implementations)
+         && (unfit == rhs.unfit);
 }
 
 } // namespace polyregion::polyast

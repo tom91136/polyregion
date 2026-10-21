@@ -36,6 +36,8 @@ inline constexpr auto ExceptionCodeSuffix = "#code";
 inline constexpr auto BaseFieldPrefix = "#base";
 inline constexpr auto EmptyStructStorageField = "#empty_struct_storage";
 inline constexpr auto KernelBundleType = "KernelBundle";
+inline constexpr auto LinkImplementationMeta = "#link_implementation:";
+inline constexpr auto LinkUnfitMeta = "#link_unfit:";
 inline constexpr auto AssertMessageLimit = 1024;
 
 namespace reflect {

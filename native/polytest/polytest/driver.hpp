@@ -184,6 +184,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            polyregion::env::PolypassPlugins, polyregion::env::PolyregionCacheDir,             //
                            "XDG_CACHE_HOME", "POCL_CACHE_DIR", "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
+  for (const auto *name : {polyregion::env::PolyfrontLibraryPath, polyregion::env::PolyfrontLibraryCapabilities})
+    if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
   // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls
   // Mesa's LLVM in-process clashing with polystl's, so a pocl target must never see rusticl.icd (or vice versa)
@@ -377,6 +379,19 @@ inline bool checkExpect(const TestCase::Run::Expect &e, const std::vector<std::s
   return false;
 }
 
+inline bool checkStderrCounts(const TestCase::Run &run, TaskOutcome &o) {
+  for (const auto &[expected, text] : run.stderrCounts) {
+    size_t actual = 0;
+    for (auto at = o.stderrCapture.find(text); !text.empty() && at != std::string::npos; at = o.stderrCapture.find(text, at + text.size()))
+      ++actual;
+    if (actual == expected) continue;
+    o.status = TaskStatus::Fail;
+    o.failReason = fmt::format("stderr contains '{}' {} time(s), want {}", text, actual, expected);
+    return false;
+  }
+  return true;
+}
+
 inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   if (task.runs.empty()) return {};
   removeArtifacts(task.output);
@@ -428,6 +443,7 @@ inline TaskOutcome compileTask(const Task &task, const DriverConfig &cfg) {
   } else if (exit == 77) o.failReason = "polyrt: no compatible target during compile (exit 77)", o.status = TaskStatus::Skip;
   else if (exit != 0) o.failReason = fmt::format("compile failed (exit {})", exit), o.status = TaskStatus::Fail;
   else if (!reproReason.empty()) o.failReason = reproReason, o.status = TaskStatus::Fail;
+  else checkStderrCounts(task.runs[0], o);
   return o;
 }
 
@@ -451,6 +467,7 @@ inline TaskOutcome runTask(const Task &task, const DriverConfig &cfg) {
     }
     const auto lines = o.stdoutCapture ^ split('\n');
     if (!(task.runs[i].expect | forall([&](const auto &e) { return checkExpect(e, lines, o.stdoutCapture, o); }))) break;
+    if (!checkStderrCounts(task.runs[i], o)) break;
   }
   o.secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   return o;
@@ -525,7 +542,8 @@ inline std::vector<Task> enumerateTasks(const DriverConfig &cfg, bool offload, b
                            RunVariant{"usm", {{std::string(env::PolyrtMirror), "off"}}}};        // USM; 77 if no USM
              const auto output = fmt::format("{}_{}", baseOutput, modeName(mode));
              const auto store = mkArgStore(augmented ^ append(std::pair{std::string("output"), output}));
-             auto runs = tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect}; });
+             auto runs =
+                 tc.runs ^ map([&](const auto &r) { return TestCase::Run{fmt::vformat(r.command, store), r.expect, r.stderrCounts}; });
              return {mode, file, tc.name, varsWithLabel, output, tc.compileFailure, std::move(runs), std::move(variants)};
            });
   };

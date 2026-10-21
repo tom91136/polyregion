@@ -275,6 +275,13 @@ inline std::vector<std::string> packageRoots() {
   return value && *value ? splitPackageRoots(value) : std::vector<std::string>{};
 }
 
+inline std::vector<std::string> packageCapabilities() {
+  const auto *value = std::getenv(env::PolyfrontLibraryCapabilities);
+  return value ? std::string(value) ^ split(',') | filter([](const auto &capability) { return !capability.empty(); }) | distinct()
+                     | to_vector()
+               : std::vector<std::string>{};
+}
+
 inline bool safePathComponent(const std::string &value) {
   if (value.empty() || value == "." || value == ".." || value.back() == '.' || value.back() == ' ') return false;
   if (!(value ^ forall([](char x) {
@@ -348,6 +355,14 @@ inline Checked<polyast::Package> loadPackageSelection(const Archive &archive, co
       {polyast::Package(archive.interface, polyast::Program({}, functions | distinct() | to_vector(),
                                                             definitions | distinct() | to_vector(), polyast::PassPhase::Initial(), {}))},
       {}};
+}
+
+inline std::string undeclaredReason(const Archive &archive, const std::string &declaration) {
+  return "package `" + polyast::fqcn(archive.interface.name) + "` has no implementation of `" + declaration + "`";
+}
+
+inline std::string unsatisfiedReason(const std::vector<std::string> &capabilities) {
+  return "capability not satisfied (capabilities: " + (capabilities.empty() ? std::string("none") : capabilities ^ mk_string(", ")) + ")";
 }
 
 inline bool satisfiable(const polyast::Package &package, const std::string &declaration, const std::vector<std::string> &capabilities) {

@@ -229,8 +229,8 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       ProgramLinkRequest(std::move(packages), polyfront::packageProgram(std::move(roots), {}), capabilities, std::move(typeSizes));
   const auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
                                                            opts.targets, opts.stackDepth);
-  if (!compiled) {
-    emitErrors(diag, prepared.front().function.getLoc(), compiled.errors);
+  if (!compiled || !compiled.value->unfit.empty()) {
+    emitErrors(diag, prepared.front().function.getLoc(), compiled ? compiled.value->unfit : compiled.errors);
     return;
   }
   const auto bitcode = writeBitcode(compiled.value->hostObject);
@@ -392,27 +392,31 @@ void polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &builde
   checkContextStatus(fir::CallOp::create(builder, loc, contextRelease, ValueRange{context}).getResult(0));
 }
 
-polyfront::package::Checked<std::optional<polyast::CompileBundle>> polyregion::polyfc::interface_resolution::linkPackageProgram(
+polyfront::package::Checked<polyast::CompileBundle> polyregion::polyfc::interface_resolution::linkPackageProgram(
     const polyfront::Options &opts, const polyfront::package::Archive &archive, const polyast::Function &root,
     std::vector<polyast::Function> consumerFunctions, std::vector<polyast::StructDef> consumerDefs,
     std::vector<polyast::ProgramTypeSize> typeSizes, std::vector<std::string> &bitcodeFiles) {
   const auto declaration = root.implements ? polyast::fqcn(*root.implements) : std::string{};
   const auto capabilities = std::vector<std::string>(opts.libraryCapabilities.begin(), opts.libraryCapabilities.end());
-  if (archive.entriesByDeclaration.count(declaration) == 0) return {std::optional<polyast::CompileBundle>{}, {}};
+  const auto unfit = [](std::string reason) -> polyfront::package::Checked<polyast::CompileBundle> {
+    return {polyast::CompileBundle({}, {}, {}, {std::move(reason)}), {}};
+  };
+  if (archive.entriesByDeclaration.count(declaration) == 0) return unfit(polyfront::package::undeclaredReason(archive, declaration));
   auto selected = polyfront::package::loadPackageSelection(archive, declaration);
   if (!selected) return {{}, std::move(selected.errors)};
-  if (!polyfront::package::satisfiable(*selected.value, declaration, capabilities)) return {std::optional<polyast::CompileBundle>{}, {}};
+  if (!polyfront::package::satisfiable(*selected.value, declaration, capabilities))
+    return unfit(polyfront::package::unsatisfiedReason(capabilities));
   consumerFunctions.insert(consumerFunctions.begin(), root);
   const auto request = polyast::ProgramLinkRequest({std::move(*selected.value)},
                                                    polyfront::packageProgram(std::move(consumerFunctions), std::move(consumerDefs)),
                                                    capabilities, std::move(typeSizes));
   auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
                                                      opts.targets, opts.stackDepth);
-  if (!compiled) return {{}, std::move(compiled.errors)};
+  if (!compiled || !compiled.value->unfit.empty()) return compiled;
   const auto bitcode = writeBitcode(compiled.value->hostObject);
   if (!bitcode) return {{}, bitcode.errors};
   bitcodeFiles.emplace_back(*bitcode.value);
-  return {std::optional{std::move(*compiled.value)}, {}};
+  return compiled;
 }
 
 std::optional<polyfront::package::Archive> polyregion::polyfc::interface_resolution::corePackage(clang::DiagnosticsEngine &diag,

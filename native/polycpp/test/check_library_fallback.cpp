@@ -1,6 +1,7 @@
 #pragma region case: fallback-without-package
 #pragma region offload-only
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
 #pragma region requires: 141
 
@@ -8,6 +9,7 @@
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 1 bound to foo (bar.implementation.increment)
 #pragma region do: {output}
 #pragma region requires: 42
 
@@ -15,6 +17,7 @@
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fno-exceptions -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 1 uses the inline body: -fno-exceptions
 #pragma region do: {output}
 #pragma region requires: 141
 
@@ -22,6 +25,7 @@
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCAPABLE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 1 uses the inline body: capability not satisfied (capabilities: none)
 #pragma region do: {output}
 #pragma region requires: 141
 
@@ -29,10 +33,25 @@
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCAPABLE -fstdpar-library-path={output}.packages -fstdpar-library-capabilities=demo -o {output} {input}
+#pragma region stderr-count: 1 bound to foo (bar.implementation.capable_increment)
 #pragma region do: {output}
 #pragma region requires: 42
 
+#pragma region case: fallback-core-width
+#pragma region offload-only
+#pragma region do: {package_fixture} --sized-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCORE_WIDTH -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 1 bound to polyregion.core (polyregion.core.host.transform_reduce)
+#pragma region stderr-count: 2 uses the inline body: no implementation fits
+#pragma region stderr-count: 1 uses the inline body: no implementation fits `F64` of 8 bytes (sizes: 4)
+#pragma region do: {output}
+#pragma region requires: 5050 2525.0 15 30 45
+
 #include <cstdio>
+#include <execution>
+#include <functional>
+#include <numeric>
+#include <vector>
 
 namespace foo {
 template <class T>
@@ -47,7 +66,23 @@ capable_increment(T x) {
 }
 } // namespace foo
 
-#ifdef CAPABLE
+#if defined(CORE_WIDTH)
+struct Triple {
+  int a, b, c;
+};
+
+int main() {
+  std::vector<int> xs(100);
+  std::iota(xs.begin(), xs.end(), 1);
+  const int sum = std::transform_reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0, std::plus<>(), [](int x) { return x; });
+  const double half =
+      std::transform_reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0.0, std::plus<>(), [](int x) { return x * 0.5; });
+  const auto triple = std::transform_reduce(
+      std::execution::par_unseq, xs.begin(), xs.begin() + 5, Triple{0, 0, 0},
+      [](Triple l, Triple r) { return Triple{l.a + r.a, l.b + r.b, l.c + r.c}; }, [](int x) { return Triple{x, 2 * x, 3 * x}; });
+  std::printf("%d %.1f %d %d %d", sum, half, triple.a, triple.b, triple.c);
+}
+#elif defined(CAPABLE)
 int main() { std::printf("%d", foo::capable_increment(41)); }
 #else
 int main() { std::printf("%d", foo::increment(41)); }
