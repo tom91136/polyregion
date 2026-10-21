@@ -451,11 +451,11 @@ public:
   }
 
   // lowers the loop to `polyregion.core.for_each`, or `polyregion.core.transform_reduce` for a core reduction, over a closure of
-  // its body when the core package implements it
-  bool invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts,
-                  const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core,
-                  std::vector<std::string> &bitcodeFiles) {
-    if (doLoop.getNumResults() != 0 || !doLoop.getReduceOperands().empty()) return false;
+  // its body when the core package implements it; the returned i1 is false at runtime when the package call could not run
+  Value invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts,
+                   const std::string &moduleId, fir::DoLoopOp &doLoop, const polyfront::package::Archive &core,
+                   std::vector<std::string> &bitcodeFiles) {
+    if (doLoop.getNumResults() != 0 || !doLoop.getReduceOperands().empty()) return {};
     DataLayout L(M);
     auto symbol = moduleId;
     std::replace_if(symbol.begin(), symbol.end(), [](const char c) { return !std::isalnum(static_cast<unsigned char>(c)); }, '_');
@@ -479,13 +479,13 @@ public:
         interface_resolution::linkPackageProgram(opts, core, root, region.program.functions, region.program.defs, typeSizes, bitcodeFiles);
     if (!linked) {
       linked.errors ^ for_each([&](const auto &error) { emit(diag, clang::DiagnosticsEngine::Error, "%0", error); });
-      return false;
+      return {};
     }
     const auto declaration = polyast::fqcn(*root.implements);
     if (!linked.value->unfit.empty()) {
       emit(diag, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYFC "%0: %1 uses the inline body: %2", diagLoc, declaration,
            linked.value->unfit ^ mk_string("; "));
-      return false;
+      return {};
     }
     emit(diag, clang::DiagnosticsEngine::Remark, POLYREGION_DIAG_POLYFC "%0: %1 bound to polyregion.core (%2)", diagLoc, declaration,
          linked.value->implementations ^ mk_string(", "));
@@ -513,36 +513,38 @@ public:
     const auto count = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, 1), B.getI64IntegerAttr(8), i64).getRes();
     LLVM::StoreOp::create(B, uLoc(B), tripCount, count);
     if (!reduction) {
-      interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, *linked.value);
+      const auto bound = interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, capture}, *linked.value, true);
       binder.releaseTemporaries(B);
-      return true;
+      return bound;
     }
     const auto resultBuffer = [&] {
       return LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64, static_cast<int64_t>(reduction->resultLayout.sizeInBytes)),
                                     B.getI64IntegerAttr(static_cast<int64_t>(reduction->resultLayout.alignment)), B.getI8Type())
           .getRes();
     };
-    const auto field = [&](const Value buffer, const size_t index) {
+    const auto field = [&](OpBuilder &b, const Value buffer, const size_t index) {
       const auto name = fmt::format("#r{}", index);
       const auto member = reduction->resultLayout.members ^ find([&](const auto &m) { return m.name.symbol == name; });
       if (!member) raise(fmt::format("Reduce result field {} missing for {}", name, diagLoc));
-      return LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), B.getI8Type(), buffer,
+      return LLVM::GEPOp::create(b, uLoc(b), ptrTy(b), b.getI8Type(), buffer,
                                  ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(member->offsetInBytes)})
           .getRes();
     };
     const auto init = resultBuffer(), result = resultBuffer();
     for (size_t index = 0; index < reduction->slots.size(); ++index) {
       const auto type = llvm::cast<fir::ReferenceType>(reduction->slots[index].getType()).getEleTy();
-      LLVM::StoreOp::create(B, uLoc(B), reduceIdentity(B, type, reduction->operations[index]), field(init, index));
+      LLVM::StoreOp::create(B, uLoc(B), reduceIdentity(B, type, reduction->operations[index]), field(B, init, index));
     }
-    interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, init, capture, result}, *linked.value);
+    const auto bound = interface_resolution::emitPackageCall(B, M, uLoc(B), entryName, {count, init, capture, result}, *linked.value, true);
+    auto stores = fir::IfOp::create(B, uLoc(B), bound, false).getThenBodyBuilder();
     for (size_t index = 0; index < reduction->slots.size(); ++index) {
       const auto slot = reduction->slots[index];
       const auto type = llvm::cast<fir::ReferenceType>(slot.getType()).getEleTy();
-      fir::StoreOp::create(B, uLoc(B), LLVM::LoadOp::create(B, uLoc(B), type, field(result, index)).getResult(), slot);
+      fir::StoreOp::create(stores, uLoc(stores), LLVM::LoadOp::create(stores, uLoc(stores), type, field(stores, result, index)).getResult(),
+                           slot);
     }
     binder.releaseTemporaries(B);
-    return true;
+    return bound;
   }
 
   void invokeDispatch(OpBuilder &B, Value executeOriginal, const runtime::PlatformKind kind, clang::DiagnosticsEngine &diag,
@@ -1298,7 +1300,6 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
   OpBuilder B(m);
   Rewriter rewriter(m);
   const auto core = interface_resolution::corePackage(diag, opts);
-  std::vector<fir::DoLoopOp> lowered;
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
       if (!doLoop.getUnordered() || !doLoop->hasAttr(DoConcurrentAsWritten)) return;
@@ -1325,9 +1326,11 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       // still run the host doLoop instead of silently no-op'ing.
 
       B.setInsertionPoint(doLoop);
-      if (core && rewriter.invokeCore(B, diag, diagLoc, opts, moduleId, doLoop, *core, bitcodeFiles)) {
-        lowered.emplace_back(doLoop);
-        return;
+      if (const auto bound = core ? rewriter.invokeCore(B, diag, diagLoc, opts, moduleId, doLoop, *core, bitcodeFiles) : Value{}) {
+        auto unbound = fir::IfOp::create(B, uLoc(B), arith::XOrIOp::create(B, uLoc(B), bound, boolConst(B, true)), false);
+        auto &then = unbound.getThenRegion().front();
+        doLoop->moveBefore(&then, then.begin());
+        B.setInsertionPoint(doLoop);
       }
       if (doLoop->hasAttr(CoreReduceAttr)) demoteCoreReduce(doLoop);
       auto executeOriginal = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());
@@ -1344,6 +1347,4 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       doLoop->moveBefore(&then, then.begin());
     }
   });
-  for (auto doLoop : lowered)
-    doLoop.erase();
 }

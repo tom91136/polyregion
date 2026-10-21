@@ -447,8 +447,17 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
   auto *entry = mkExternCFn(C, entryName, C.VoidTy, entryTypes);
   auto *contextAcquire = mkExternCppFn(C, "polyrt_context_acquire_or_throw", C.VoidTy, {C.VoidPtrTy});
   auto *contextRelease = mkExternCppFn(C, "polyrt_context_release_or_throw", C.VoidTy, {C.VoidPtrTy});
+  auto *fallback = hasInterfaceFallback(site.callee) ? site.callee->getBody() : nullptr;
+  const auto boolLit = [&](const bool value) { return new (C) clang::CXXBoolLiteralExpr(value, C.BoolTy, {}); };
   std::vector<clang::Stmt *> statements;
   if (resultDecl) statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(resultDecl), {}, {}));
+  clang::VarDecl *boundDecl = nullptr;
+  if (fallback) {
+    boundDecl = clang::VarDecl::Create(C, site.callee, {}, {}, &C.Idents.get("__polyregion_interface_bound"), C.BoolTy,
+                                       C.getTrivialTypeSourceInfo(C.BoolTy), clang::SC_None);
+    boundDecl->setInit(boolLit(false));
+    statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(boundDecl), {}, {}));
+  }
   statements.emplace_back(mkCall(C, contextAcquire, {contextArg}));
   const auto protectedBegin = statements.size();
   auto *remoteLoad = mkExternCFn(C, "polyrt_remote_load", C.BoolTy,
@@ -463,7 +472,7 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
       auto *loaded = clang::VarDecl::Create(
           C, site.callee, {}, {}, &C.Idents.get("__polyregion_package_loaded_" + suffix + "_" + std::to_string(loadedModules.size() - 1)),
           C.BoolTy, C.getTrivialTypeSourceInfo(C.BoolTy), clang::SC_None);
-      loaded->setInit(new (C) clang::CXXBoolLiteralExpr(false, C.BoolTy, {}));
+      loaded->setInit(boolLit(false));
       loadedEntry->second = loaded;
       statements.emplace_back(new (C) clang::DeclStmt(clang::DeclGroupRef(loaded), {}, {}));
     }
@@ -483,12 +492,26 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
     auto *anyLoaded = S.CreateBuiltinBinOp({}, clang::BO_LOr, load, mkLoad(C, loaded)).get();
     statements.emplace_back(S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, loaded), anyLoaded).get());
   }
-  auto *requireLoaded = mkExternCFn(C, "polyrt_remote_require_loaded", C.VoidTy, {C.VoidPtrTy, constCharStarTy(C), C.BoolTy});
-  for (const auto &[moduleName, loaded] : loadedModules) {
-    statements.emplace_back(
-        mkCall(C, requireLoaded, {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)), mkLoad(C, loaded)}));
+  if (fallback) {
+    auto *remoteLoaded = mkExternCFn(C, "polyrt_remote_loaded", C.BoolTy, {constCharStarTy(C), C.BoolTy});
+    auto *allLoaded =
+        loadedModules | fold_left(static_cast<clang::Expr *>(boolLit(true)), [&](clang::Expr *acc, const auto &module) {
+          auto *loaded =
+              mkCall(C, remoteLoaded, {mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, module.first)), mkLoad(C, module.second)});
+          return S.CreateBuiltinBinOp({}, clang::BO_LAnd, acc, loaded).get();
+        });
+    const std::vector<clang::Stmt *> run{mkCall(C, entry, entryArgs),
+                                         S.CreateBuiltinBinOp({}, clang::BO_Assign, mkDeclRef(C, boundDecl), boolLit(true)).get()};
+    statements.emplace_back(clang::IfStmt::Create(C, {}, clang::IfStatementKind::Ordinary, nullptr, nullptr, allLoaded, {}, {},
+                                                  clang::CompoundStmt::Create(C, run, {}, {}, {})));
+  } else {
+    auto *requireLoaded = mkExternCFn(C, "polyrt_remote_require_loaded", C.VoidTy, {C.VoidPtrTy, constCharStarTy(C), C.BoolTy});
+    for (const auto &[moduleName, loaded] : loadedModules) {
+      statements.emplace_back(
+          mkCall(C, requireLoaded, {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, moduleName)), mkLoad(C, loaded)}));
+    }
+    statements.emplace_back(mkCall(C, entry, entryArgs));
   }
-  statements.emplace_back(mkCall(C, entry, entryArgs));
   std::vector<clang::Stmt *> protectedStatements(statements.begin() + protectedBegin, statements.end());
   statements.erase(statements.begin() + protectedBegin, statements.end());
   auto *release = mkCall(C, contextRelease, {contextArg});
@@ -500,8 +523,20 @@ static void materializeInterfaceCall(clang::CompilerInstance &CI, clang::ASTCont
   const std::vector<clang::Stmt *> handlers{handler};
   statements.emplace_back(clang::CXXTryStmt::Create(C, {}, tryBody, handlers));
   statements.emplace_back(mkCall(C, contextRelease, {contextArg}));
-  if (resultDecl) statements.emplace_back(clang::ReturnStmt::Create(C, {}, mkLoad(C, resultDecl), nullptr));
-  site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
+  auto *ret = clang::ReturnStmt::Create(C, {}, resultDecl ? mkLoad(C, resultDecl) : nullptr, nullptr);
+  if (!fallback) {
+    if (resultDecl) statements.emplace_back(ret);
+    site.callee->setBody(clang::CompoundStmt::Create(C, statements, {}, {}, {}));
+    return;
+  }
+  statements.emplace_back(
+      clang::IfStmt::Create(C, {}, clang::IfStatementKind::Ordinary, nullptr, nullptr, mkLoad(C, boundDecl), {}, {}, ret));
+  auto *contextAvailable = mkExternCFn(C, "polyrt_context_available", C.BoolTy, {C.VoidPtrTy, constCharStarTy(C)});
+  auto *available = mkCall(C, contextAvailable, {contextArg, mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, site.declaration))});
+  const std::vector<clang::Stmt *> body{clang::IfStmt::Create(C, {}, clang::IfStatementKind::Ordinary, nullptr, nullptr, available, {}, {},
+                                                              clang::CompoundStmt::Create(C, statements, {}, {}, {})),
+                                        fallback};
+  site.callee->setBody(clang::CompoundStmt::Create(C, body, {}, {}, {}));
 }
 
 static void remarkInterfaceSite(clang::DiagnosticsEngine &D, const InterfaceSite &site, const std::string &outcome) {

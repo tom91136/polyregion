@@ -13,6 +13,14 @@
 !CHECK do: {output}
 !CHECK requires: 200 10100 28 50 32 2 5050.0
 
+!CHECK case: core-package-without-device
+!CHECK offload-only
+!CHECK do: {package_fixture} {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 6 bound to polyregion.core
+!CHECK do: POLYRT_PLATFORM=none POLYRT_HOST_FALLBACK=1 {output}
+!CHECK requires: 200 10100 28 50 32 2 5050.0
+
 !CHECK case: core-package-width
 !CHECK offload-only
 !CHECK do: {package_fixture} --sized-core {output}.packages

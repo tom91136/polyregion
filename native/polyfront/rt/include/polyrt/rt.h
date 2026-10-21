@@ -82,6 +82,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_record_operator_new(size_t 
 
 extern "C" {
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void *polyrt_context_current();
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_available(void *context, const char *site) noexcept;
 // True means success. A failed status call leaves a thread-local diagnostic until the next status call on that thread.
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_acquire(void *context) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_context_release(void *context) noexcept;
@@ -114,6 +115,7 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_load(void *context, c
                                                                 size_t featureCount, const char **features, size_t imageLength,
                                                                 const uint8_t *image);
 POLYREGION_RT_PROTECT POLYREGION_EXPORT void polyrt_remote_require_loaded(void *context, const char *moduleName, bool loaded);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_loaded(const char *moduleName, bool loaded) noexcept;
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_launch(void *context, const char *moduleName, const char *kernelName,
                                                                   size_t gridX, size_t gridY, size_t gridZ, size_t blockX, size_t blockY,
                                                                   size_t blockZ, size_t localMemBytes, size_t argCount,

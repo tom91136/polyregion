@@ -29,8 +29,9 @@ linkPackageProgram(const polyfront::Options &opts, const polyfront::package::Arc
                    std::vector<polyast::Function> consumerFunctions, std::vector<polyast::StructDef> consumerDefs,
                    std::vector<polyast::ProgramTypeSize> typeSizes, std::vector<std::string> &bitcodeFiles);
 
-// calls a linked package entry at the builder's insertion point inside an acquired runtime context, loading its remote modules first
-void emitPackageCall(mlir::OpBuilder &builder, mlir::ModuleOp &module, mlir::Location loc, const std::string &entryName,
-                     const std::vector<mlir::Value> &args, const polyast::CompileBundle &compiled);
+// calls a linked package entry at the builder's insertion point inside an acquired runtime context, loading its remote modules first;
+// with a fallback, a missing context or module skips the call instead of exiting, and the returned i1 says whether it ran
+mlir::Value emitPackageCall(mlir::OpBuilder &builder, mlir::ModuleOp &module, mlir::Location loc, const std::string &entryName,
+                            const std::vector<mlir::Value> &args, const polyast::CompileBundle &compiled, bool fallback);
 
 } // namespace polyregion::polyfc::interface_resolution

@@ -13,6 +13,16 @@
 #pragma region do: {output}
 #pragma region requires: 42
 
+#pragma region case: fallback-remote-without-device
+#pragma region offload-only
+#pragma region do: {package_fixture} {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DREMOTE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 1 bound to foo (bar.implementation.remote_increment)
+#pragma region do: {output}
+#pragma region requires: 42
+#pragma region do: POLYRT_PLATFORM=none {output}
+#pragma region requires: 141
+
 #pragma region case: fallback-without-exceptions
 #pragma region offload-only
 #pragma region do: {package_fixture} {output}.packages
@@ -64,6 +74,12 @@ template <class T>
 capable_increment(T x) {
   return x + 100;
 }
+
+template <class T>
+[[clang::annotate("polyregion_interface:foo:bar.remote_increment")]] [[clang::annotate("polyregion_interface_fallback")]] inline T
+remote_increment(T x) {
+  return x + 100;
+}
 } // namespace foo
 
 #if defined(CORE_WIDTH)
@@ -82,6 +98,8 @@ int main() {
       [](Triple l, Triple r) { return Triple{l.a + r.a, l.b + r.b, l.c + r.c}; }, [](int x) { return Triple{x, 2 * x, 3 * x}; });
   std::printf("%d %.1f %d %d %d", sum, half, triple.a, triple.b, triple.c);
 }
+#elif defined(REMOTE)
+int main() { std::printf("%d", foo::remote_increment(41)); }
 #elif defined(CAPABLE)
 int main() { std::printf("%d", foo::capable_increment(41)); }
 #else

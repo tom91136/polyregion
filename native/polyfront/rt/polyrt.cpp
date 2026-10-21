@@ -278,6 +278,11 @@ polyregion::polyrt::ExecutionContext *polyregion::polyrt::currentContext() {
 
 POLYREGION_EXPORT extern "C" void *polyrt_context_current() { return polyregion::polyrt::currentContext(); }
 
+POLYREGION_EXPORT extern "C" bool polyrt_context_available(void *context, const char *site) noexcept {
+  if (!context) log(DebugLevel::Debug, "<%s> No execution context, running the interface fallback", site);
+  return context != nullptr;
+}
+
 namespace {
 polyregion::polyrt::ExecutionContext &requireContext(void *context, const char *site) {
   if (auto *value = static_cast<polyregion::polyrt::ExecutionContext *>(context)) return *value;
@@ -562,6 +567,11 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *
 POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, const char *moduleName, const bool loaded) {
   (void)requireContext(context, __func__);
   if (!loaded) polyregion::polyrt::noCompatibleKernelExit(moduleName);
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_loaded(const char *moduleName, const bool loaded) noexcept {
+  if (!loaded) log(DebugLevel::Debug, "<%s> No kernel object matched the device, running the interface fallback", moduleName);
+  return loaded;
 }
 
 static void remoteLaunch(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,

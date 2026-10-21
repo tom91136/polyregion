@@ -274,7 +274,7 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
       resultSlot = fir::AllocaOp::create(builder, function.getLoc(), type).getResult();
       entryArgs.emplace_back(resultSlot);
     }
-    interface_resolution::emitPackageCall(builder, module, function.getLoc(), entryName, entryArgs, *compiled.value);
+    interface_resolution::emitPackageCall(builder, module, function.getLoc(), entryName, entryArgs, *compiled.value, false);
     if (resultSlot && !erasedResult) {
       const auto value = fir::LoadOp::create(builder, function.getLoc(), resultSlot).getResult();
       func::ReturnOp::create(builder, function.getLoc(), value);
@@ -282,114 +282,107 @@ void polyregion::polyfc::interface_resolution::resolveInterfaces(clang::Diagnost
   }
 }
 
-void polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &builder, ModuleOp &module, const Location loc,
-                                                               const std::string &entryName, const std::vector<Value> &args,
-                                                               const polyast::CompileBundle &compiled) {
+Value polyregion::polyfc::interface_resolution::emitPackageCall(OpBuilder &builder, ModuleOp &module, const Location loc,
+                                                                const std::string &entryName, const std::vector<Value> &args,
+                                                                const polyast::CompileBundle &compiled, const bool fallback) {
   std::vector<Value> entryArgs;
   std::vector<mlir::Type> entryTypes;
   const auto contextType = fir::ReferenceType::get(builder.getI8Type());
-  auto contextFn = module.lookupSymbol<func::FuncOp>("polyrt_context_current");
-  if (!contextFn) {
-    OpBuilder::InsertionGuard guard(builder);
-    builder.setInsertionPointToStart(module.getBody());
-    contextFn = func::FuncOp::create(builder, loc, "polyrt_context_current", FunctionType::get(module.getContext(), {}, {contextType}));
-    contextFn.setPrivate();
-  }
-  const auto context = fir::CallOp::create(builder, loc, contextFn, ValueRange{}).getResult(0);
+  const auto pointerType = LLVM::LLVMPointerType::get(module.getContext());
+  const auto declare = [&](llvm::StringRef name, const std::vector<mlir::Type> &inputs, const std::vector<mlir::Type> &results) {
+    auto function = module.lookupSymbol<func::FuncOp>(name);
+    if (!function) {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(module.getBody());
+      function = func::FuncOp::create(builder, loc, name, FunctionType::get(module.getContext(), inputs, results));
+      function.setPrivate();
+    }
+    return function;
+  };
+  const auto context = fir::CallOp::create(builder, loc, declare("polyrt_context_current", {}, {contextType}), ValueRange{}).getResult(0);
   entryArgs.emplace_back(context);
   entryTypes.emplace_back(contextType);
   for (const auto argument : args) {
     entryArgs.emplace_back(argument);
     entryTypes.emplace_back(argument.getType());
   }
-  const auto contextOperation = [&](llvm::StringRef name) {
-    auto operation = module.lookupSymbol<func::FuncOp>(name);
-    if (!operation) {
-      OpBuilder::InsertionGuard guard(builder);
-      builder.setInsertionPointToStart(module.getBody());
-      operation = func::FuncOp::create(builder, loc, name, FunctionType::get(module.getContext(), {contextType}, {builder.getI1Type()}));
-      operation.setPrivate();
-    }
-    return operation;
-  };
-  const auto contextAcquire = contextOperation("polyrt_context_acquire");
-  const auto contextRelease = contextOperation("polyrt_context_release");
-  auto contextAbort = module.lookupSymbol<func::FuncOp>("polyrt_abort");
-  if (!contextAbort) {
-    OpBuilder::InsertionGuard guard(builder);
-    builder.setInsertionPointToStart(module.getBody());
-    contextAbort = func::FuncOp::create(builder, loc, "polyrt_abort", FunctionType::get(module.getContext(), {}, {}));
-    contextAbort.setPrivate();
-  }
-  const auto checkContextStatus = [&](Value status) {
-    auto failed = arith::CmpIOp::create(builder, loc, arith::CmpIPredicate::eq, status, polyfc::boolConst(builder, false));
-    auto body = fir::IfOp::create(builder, loc, failed.getResult(), false).getThenBodyBuilder();
+  const auto contextAcquire = declare("polyrt_context_acquire", {contextType}, {builder.getI1Type()});
+  const auto contextRelease = declare("polyrt_context_release", {contextType}, {builder.getI1Type()});
+  const auto contextAbort = declare("polyrt_abort", {}, {});
+  const auto checkContextStatus = [&](OpBuilder &b, Value status) {
+    auto failed = arith::CmpIOp::create(b, loc, arith::CmpIPredicate::eq, status, polyfc::boolConst(b, false));
+    auto body = fir::IfOp::create(b, loc, failed.getResult(), false).getThenBodyBuilder();
     fir::CallOp::create(body, loc, contextAbort, ValueRange{});
   };
-  auto entry = module.lookupSymbol<func::FuncOp>(entryName);
-  if (!entry) {
-    OpBuilder::InsertionGuard guard(builder);
-    builder.setInsertionPointToStart(module.getBody());
-    entry = func::FuncOp::create(builder, loc, entryName, FunctionType::get(module.getContext(), entryTypes, {}));
-    entry.setPrivate();
-  }
-  checkContextStatus(fir::CallOp::create(builder, loc, contextAcquire, ValueRange{context}).getResult(0));
-  if (!compiled.remoteModules.empty()) {
-    const auto pointerType = LLVM::LLVMPointerType::get(module.getContext());
-    const auto sizeType = builder.getI64Type();
-    auto remoteLoad = module.lookupSymbol<func::FuncOp>("polyrt_remote_load");
-    if (!remoteLoad) {
-      OpBuilder::InsertionGuard guard(builder);
-      builder.setInsertionPointToStart(module.getBody());
-      remoteLoad = func::FuncOp::create(builder, loc, "polyrt_remote_load",
-                                        FunctionType::get(module.getContext(),
-                                                          {contextType, pointerType, builder.getI32Type(), builder.getI32Type(), sizeType,
-                                                           pointerType, sizeType, pointerType},
-                                                          {builder.getI1Type()}));
-      remoteLoad.setPrivate();
-    }
+  const auto entry = declare(entryName, entryTypes, {});
+  const auto sizeType = builder.getI64Type();
+  const auto call = [&](OpBuilder &b, const Value bound) {
+    checkContextStatus(b, fir::CallOp::create(b, loc, contextAcquire, ValueRange{context}).getResult(0));
     std::map<std::string, Value> loadedModules;
     for (const auto &object : compiled.remoteModules) {
       const auto &moduleName = object.moduleName;
-      const auto moduleNameValue = polyfc::strConst(builder, module, moduleName, true);
-      const auto imageValue = polyfc::strConst(builder, module, std::string(object.image.begin(), object.image.end()), false);
-      Value featureData = polyfc::nullConst(builder);
+      const auto moduleNameValue = polyfc::strConst(b, module, moduleName, true);
+      const auto imageValue = polyfc::strConst(b, module, std::string(object.image.begin(), object.image.end()), false);
+      Value featureData = polyfc::nullConst(b);
       if (!object.features.empty()) {
-        featureData = LLVM::AllocaOp::create(builder, loc, pointerType, polyfc::intConst(builder, sizeType, object.features.size()),
-                                             builder.getI64IntegerAttr(sizeof(void *)), pointerType);
+        featureData = LLVM::AllocaOp::create(b, loc, pointerType, polyfc::intConst(b, sizeType, object.features.size()),
+                                             b.getI64IntegerAttr(sizeof(void *)), pointerType);
         for (size_t index = 0; index < object.features.size(); ++index) {
-          const auto slot = LLVM::GEPOp::create(builder, loc, pointerType, pointerType, featureData,
-                                                ValueRange{polyfc::intConst(builder, sizeType, index)})
-                                .getRes();
-          LLVM::StoreOp::create(builder, loc, polyfc::strConst(builder, module, object.features[index], true), slot);
+          const auto slot =
+              LLVM::GEPOp::create(b, loc, pointerType, pointerType, featureData, ValueRange{polyfc::intConst(b, sizeType, index)}).getRes();
+          LLVM::StoreOp::create(b, loc, polyfc::strConst(b, module, object.features[index], true), slot);
         }
       }
+      const auto remoteLoad =
+          declare("polyrt_remote_load",
+                  {contextType, pointerType, builder.getI32Type(), builder.getI32Type(), sizeType, pointerType, sizeType, pointerType},
+                  {builder.getI1Type()});
       const auto loaded =
-          func::CallOp::create(builder, loc, remoteLoad,
-                               ValueRange{context, moduleNameValue,
-                                          polyfc::intConst(builder, builder.getI32Type(), static_cast<int32_t>(object.kind)),
-                                          polyfc::intConst(builder, builder.getI32Type(), static_cast<int32_t>(object.format)),
-                                          polyfc::intConst(builder, sizeType, object.features.size()), featureData,
-                                          polyfc::intConst(builder, sizeType, object.image.size()), imageValue})
+          func::CallOp::create(b, loc, remoteLoad,
+                               ValueRange{context, moduleNameValue, polyfc::intConst(b, b.getI32Type(), static_cast<int32_t>(object.kind)),
+                                          polyfc::intConst(b, b.getI32Type(), static_cast<int32_t>(object.format)),
+                                          polyfc::intConst(b, sizeType, object.features.size()), featureData,
+                                          polyfc::intConst(b, sizeType, object.image.size()), imageValue})
               .getResult(0);
       const auto found = loadedModules.find(moduleName);
       if (found == loadedModules.end()) loadedModules.emplace(moduleName, loaded);
-      else found->second = arith::OrIOp::create(builder, loc, found->second, loaded).getResult();
+      else found->second = arith::OrIOp::create(b, loc, found->second, loaded).getResult();
     }
-    auto requireLoaded = module.lookupSymbol<func::FuncOp>("polyrt_remote_require_loaded");
-    if (!requireLoaded) {
-      OpBuilder::InsertionGuard guard(builder);
-      builder.setInsertionPointToStart(module.getBody());
-      requireLoaded = func::FuncOp::create(builder, loc, "polyrt_remote_require_loaded",
-                                           FunctionType::get(module.getContext(), {contextType, pointerType, builder.getI1Type()}, {}));
-      requireLoaded.setPrivate();
+    if (bound) {
+      const auto allLoaded = loadedModules | fold_left(polyfc::boolConst(b, true), [&](const Value acc, const auto &loaded) -> Value {
+                               const auto remoteLoaded = declare("polyrt_remote_loaded", {pointerType, b.getI1Type()}, {b.getI1Type()});
+                               const auto name = polyfc::strConst(b, module, loaded.first, true);
+                               const auto checked =
+                                   func::CallOp::create(b, loc, remoteLoaded, ValueRange{name, loaded.second}).getResult(0);
+                               return arith::AndIOp::create(b, loc, acc, checked).getResult();
+                             });
+      auto run = fir::IfOp::create(b, loc, allLoaded, false).getThenBodyBuilder();
+      fir::CallOp::create(run, loc, entry, entryArgs);
+      LLVM::StoreOp::create(run, loc, polyfc::boolConst(run, true), bound);
+    } else {
+      for (const auto &[moduleName, loaded] : loadedModules) {
+        const auto requireLoaded = declare("polyrt_remote_require_loaded", {contextType, pointerType, b.getI1Type()}, {});
+        func::CallOp::create(b, loc, requireLoaded, ValueRange{context, polyfc::strConst(b, module, moduleName, true), loaded});
+      }
+      fir::CallOp::create(b, loc, entry, entryArgs);
     }
-    for (const auto &[moduleName, loaded] : loadedModules) {
-      func::CallOp::create(builder, loc, requireLoaded, ValueRange{context, polyfc::strConst(builder, module, moduleName, true), loaded});
-    }
+    checkContextStatus(b, fir::CallOp::create(b, loc, contextRelease, ValueRange{context}).getResult(0));
+  };
+  if (!fallback) {
+    call(builder, {});
+    return polyfc::boolConst(builder, true);
   }
-  fir::CallOp::create(builder, loc, entry, entryArgs);
-  checkContextStatus(fir::CallOp::create(builder, loc, contextRelease, ValueRange{context}).getResult(0));
+  const auto bound = LLVM::AllocaOp::create(builder, loc, pointerType, polyfc::intConst(builder, sizeType, 1), builder.getI64IntegerAttr(1),
+                                            builder.getI1Type())
+                         .getRes();
+  LLVM::StoreOp::create(builder, loc, polyfc::boolConst(builder, false), bound);
+  const auto contextAvailable = declare("polyrt_context_available", {contextType, pointerType}, {builder.getI1Type()});
+  const auto available =
+      func::CallOp::create(builder, loc, contextAvailable, ValueRange{context, polyfc::strConst(builder, module, entryName, true)})
+          .getResult(0);
+  auto acquired = fir::IfOp::create(builder, loc, available, false).getThenBodyBuilder();
+  call(acquired, bound);
+  return LLVM::LoadOp::create(builder, loc, builder.getI1Type(), bound).getResult();
 }
 
 polyfront::package::Checked<polyast::CompileBundle> polyregion::polyfc::interface_resolution::linkPackageProgram(
