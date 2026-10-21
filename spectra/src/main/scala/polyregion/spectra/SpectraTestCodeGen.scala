@@ -239,7 +239,8 @@ private[spectra] object SpectraTestCodeGen {
       name: String,
       signature: p.Type.Exec,
       body: String,
-      useOnedplKeyEqual: Boolean
+      useOnedplKeyEqual: Boolean,
+      captured: Boolean
   ): String = {
     val names = signature.args match {
       case Nil                       => Nil
@@ -253,7 +254,13 @@ private[spectra] object SpectraTestCodeGen {
       case p.Type.Unit0 => s"$body;"
       case rtn          => s"return ${cppType(rtn)}($body);"
     }
-    val lambda = s"  const auto $name = [] SPECTRA_TEST_FN($parameters) { $result };"
+    val capturedResult = signature.rtn match {
+      case p.Type.Unit0 => s"live ? void($body) : void($body);"
+      case rtn          => s"return live ? ${cppType(rtn)}($body) : ${cppType(rtn)}($body);"
+    }
+    val lambda =
+      if (captured) s"  const auto $name = [live] SPECTRA_TEST_FN($parameters) { $capturedResult };"
+      else s"  const auto $name = [] SPECTRA_TEST_FN($parameters) { $result };"
     if (useOnedplKeyEqual)
       s"""#if defined(SPECTRA_NATIVE_ONEDPL)
          |  const spectra_test_key_equal<${cppType(signature.args.head)}> $name{};
@@ -276,10 +283,13 @@ private[spectra] object SpectraTestCodeGen {
     case other        => s"const ${cppType(other)} __r = "
   }
 
-  private def cppTestRun(decl: p.FunctionDecl): String = {
+  private def callableArgs(decl: p.FunctionDecl): List[p.Arg] =
+    decl.args.collect { case arg @ p.Arg(p.Named(_, _: p.Type.Exec, _), _, _) => arg }
+
+  private def cppTestRun(decl: p.FunctionDecl, captured: Boolean): String = {
     val name = decl.name.last
     val sem  = oracles.getOrElse(name, sys.error(s"no test oracle for algo '$name'"))
-    val fns  = decl.args.collect { case arg @ p.Arg(p.Named(_, _: p.Type.Exec, _), _, _) => arg }
+    val fns  = callableArgs(decl)
     val fdecls = fns
       .map(arg =>
         cppTestFunctor(
@@ -289,16 +299,18 @@ private[spectra] object SpectraTestCodeGen {
             arg.named.symbol,
             sys.error(s"algo '$name': no functor body for '${arg.named.symbol}'")
           ),
-          arg.named.symbol == "eq" && needsOnedplKeyEqual(name)
+          arg.named.symbol == "eq" && needsOnedplKeyEqual(name),
+          captured
         )
       )
       .mkString("\n")
-    val templateParams = decl.tpeVars.map(variable => s"class ${variable.name}").mkString(", ")
-    val templateArgs   = decl.tpeVars.map(_.name).mkString(", ")
+    val (runName, live) = if (captured) ("run_captured", "\n  const bool live = n >= 0;") else ("run", "")
+    val templateParams  = decl.tpeVars.map(variable => s"class ${variable.name}").mkString(", ")
+    val templateArgs    = decl.tpeVars.map(_.name).mkString(", ")
     val call =
       s"  ${cppTestRetCap(decl.rtn)}spectra::$name<$templateArgs>(${decl.args.map(cppTestCallArg).mkString(", ")});"
-    s"""template <$templateParams> static bool run(const char *scenario, int n) {
-       |${indentBlock(sem.setup, "  ")}
+    s"""template <$templateParams> static bool $runName(const char *scenario, int n) {
+       |${indentBlock(sem.setup, "  ")}$live
        |$fdecls
        |$call
        |${indentBlock(sem.verify, "  ")}
@@ -326,7 +338,16 @@ private[spectra] object SpectraTestCodeGen {
     val baseline = widths.head
     val sizeCalls = testSizes(name, sem.n)
       .map(n => s"  ok &= run<${baseline.types.mkString(", ")}>(\"${baseline.label}/n$n\", $n);")
-    val calls = (typeCalls ++ sizeCalls).mkString("\n")
+    val capturedCalls =
+      if (callableArgs(decl).isEmpty) Nil
+      else
+        (sem.n :: testSizes(name, sem.n).maxOption.toList).map(n =>
+          s"  ok &= run_captured<${baseline.types.mkString(", ")}>(\"${baseline.label}/n$n/captured\", $n);"
+        )
+    val runs =
+      if (callableArgs(decl).isEmpty) cppTestRun(decl, captured = false)
+      else s"${cppTestRun(decl, captured = false)}\n\n${cppTestRun(decl, captured = true)}"
+    val calls = (typeCalls ++ sizeCalls ++ capturedCalls).mkString("\n")
     s"""#pragma region case: $name
        |#pragma region offload-only
        |#pragma region do: polycpp {spectra_stdpar} -o {output} {input}
@@ -343,7 +364,7 @@ private[spectra] object SpectraTestCodeGen {
        |
        |#include "support.hpp"
        |
-       |$namespaceFunctors${cppTestRun(decl)}
+       |$namespaceFunctors$runs
        |
        |int main() {
        |  bool ok = true;

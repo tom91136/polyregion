@@ -30,6 +30,23 @@ template <class T, class U, class V> static bool run(const char *scenario, int n
   return ok;
 }
 
+template <class T, class U, class V> static bool run_captured(const char *scenario, int n) {
+  spectra_test_vector<T> a(n);
+  spectra_test_vector<U> b(n);
+  spectra_test_vector<V> out(n, V(0)), ref(n);
+  for (int i = 0; i < n; ++i) {
+    a[i] = T(i % 7);
+    b[i] = U((i * 3) % 5);
+    ref[i] = V(a[i]) + V(b[i]);
+  }
+  const bool live = n >= 0;
+  const auto op = [live] SPECTRA_TEST_FN(T a, U b) { return live ? V(a + b) : V(a + b); };
+  spectra::transform_binary<T, U, V>(a.data(), b.data(), out.data(), n, op);
+  const bool ok = sameSeq(out, ref, n);
+  std::fprintf(stderr, "  %-24s<%-18s> %s\n", "transform_binary", scenario, ok ? "OK" : "MISMATCH");
+  return ok;
+}
+
 int main() {
   bool ok = true;
   ok &= run<spectra_test_value4, spectra_test_value4, spectra_test_value4>("w4-w4-w4/n256", 256);
@@ -47,6 +64,8 @@ int main() {
   ok &= run<spectra_test_value4, spectra_test_value4, spectra_test_value4>("w4-w4-w4/n255", 255);
   ok &= run<spectra_test_value4, spectra_test_value4, spectra_test_value4>("w4-w4-w4/n257", 257);
   ok &= run<spectra_test_value4, spectra_test_value4, spectra_test_value4>("w4-w4-w4/n777", 777);
+  ok &= run_captured<spectra_test_value4, spectra_test_value4, spectra_test_value4>("w4-w4-w4/n256/captured", 256);
+  ok &= run_captured<spectra_test_value4, spectra_test_value4, spectra_test_value4>("w4-w4-w4/n777/captured", 777);
   std::printf("%s", ok ? "pass" : "fail");
   return ok ? 0 : 1;
 }

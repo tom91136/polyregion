@@ -28,11 +28,27 @@ template <class T> static bool run(const char *scenario, int n) {
   return ok;
 }
 
+template <class T> static bool run_captured(const char *scenario, int n) {
+  spectra_test_vector<T> in(n), out(n, T(0)), ref(n);
+  for (int i = 0; i < n; ++i)
+    in[i] = T((i * 37 + 11) % n);
+  const T new_value = T(-1);
+  for (int i = 0; i < n; ++i)
+    ref[i] = (in[i] >= T(100)) ? new_value : in[i];
+  const bool live = n >= 0;
+  const auto op = [live] SPECTRA_TEST_FN(T x) { return live ? bool(x >= T(100)) : bool(x >= T(100)); };
+  spectra::replace_copy_if<T>(in.data(), out.data(), n, new_value, op);
+  const bool ok = sameSeq(out, ref, n);
+  std::fprintf(stderr, "  %-24s<%-18s> %s\n", "replace_copy_if", scenario, ok ? "OK" : "MISMATCH");
+  return ok;
+}
+
 int main() {
   bool ok = true;
   ok &= run<spectra_test_value4>("w4/n200", 200);
   ok &= run<spectra_test_value8>("w8/n200", 200);
   ok &= run<spectra_test_value12>("w12/n200", 200);
+  ok &= run_captured<spectra_test_value4>("w4/n200/captured", 200);
   std::printf("%s", ok ? "pass" : "fail");
   return ok ? 0 : 1;
 }

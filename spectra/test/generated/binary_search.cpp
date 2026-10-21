@@ -26,11 +26,25 @@ template <class T> static bool run(const char *scenario, int n) {
   return ok;
 }
 
+template <class T> static bool run_captured(const char *scenario, int n) {
+  spectra_test_vector<T> in(n);
+  for (int i = 0; i < n; ++i)
+    in[i] = T(i);
+  const T value = T(137);
+  const bool live = n >= 0;
+  const auto op = [live] SPECTRA_TEST_FN(T a, T b) { return live ? bool(a < b) : bool(a < b); };
+  const bool __r = spectra::binary_search<T>(in.data(), n, value, op);
+  const bool ok = (__r == true);
+  std::fprintf(stderr, "  %-24s<%-18s> %s\n", "binary_search", scenario, ok ? "OK" : "MISMATCH");
+  return ok;
+}
+
 int main() {
   bool ok = true;
   ok &= run<spectra_test_value4>("w4/n300", 300);
   ok &= run<spectra_test_value8>("w8/n300", 300);
   ok &= run<spectra_test_value12>("w12/n300", 300);
+  ok &= run_captured<spectra_test_value4>("w4/n300/captured", 300);
   std::printf("%s", ok ? "pass" : "fail");
   return ok ? 0 : 1;
 }

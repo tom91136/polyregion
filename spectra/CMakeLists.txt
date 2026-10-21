@@ -603,25 +603,40 @@ if(NOT SPECTRA_VENDOR_ONLY AND SPECTRA_ENABLE_PACKAGE_TESTS)
          opencl1_1=spectra.dpl opencl2_0=spectra.dpl spirv64_kernel=spectra.dpl spirv_glcompute=spectra.dpl metal1_0=spectra.dpl)
   endif()
 
-  set(_spectra_suite_text "${_spectra_suite_profile}")
-  string(APPEND _spectra_suite_text
-         "POLYTEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-work\n"
-         "POLYTEST_ARCH_VAR=spectra_arch\n"
-         "POLYTEST_STDPAR_VAR=spectra_stdpar\n"
-         "POLYTEST_STDPAR={apple_target}-std=c++17 -fstdpar -fstdpar-mem=direct -fstdpar-rt={stdpar_rt} "
-         "-fstdpar-arch={spectra_arch} -fstdpar-library-path=${SPECTRA_PACKAGE_ROOT} "
-         "-fstdpar-library-capabilities={spectra_capability} -I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include "
-         "-I${CMAKE_CURRENT_SOURCE_DIR}/include -I${CMAKE_CURRENT_SOURCE_DIR}/test/generated\n"
-         "POLYTEST_TARGET_VAR=spectra_capability\n"
-         "POLYTEST_OUTPUT_PREFIX=spectra_test_\n"
-         "POLYTEST_TEMP_PREFIX=spectra_\n"
-         "POLYTEST_DEFAULT_ENV+=:POLYTEST_REPRO_CHECK=0\n")
-  foreach(_capability IN LISTS _spectra_capabilities)
-    string(APPEND _spectra_suite_text "POLYTEST_TARGET_VALUE+=:${_capability}\n")
+  # Captured pointers are mirrored only when allocations are tracked, so the closure suite needs reflect.
+  file(GLOB _spectra_closure_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/closure/*.cpp")
+  foreach(_spectra_suite_kind IN ITEMS generated closure)
+    if(_spectra_suite_kind STREQUAL "generated")
+      set(_spectra_suite_name spectra)
+      set(_spectra_suite_file "${_spectra_suite}")
+      set(_spectra_suite_mem direct)
+      set(_spectra_suite_tests ${_spectra_generated_tests})
+    else()
+      set(_spectra_suite_name spectra-closure)
+      set(_spectra_suite_file "${CMAKE_CURRENT_BINARY_DIR}/spectra-closure.suite.env")
+      set(_spectra_suite_mem reflect)
+      set(_spectra_suite_tests ${_spectra_closure_tests})
+    endif()
+    set(_spectra_suite_text "${_spectra_suite_profile}")
+    string(APPEND _spectra_suite_text
+           "POLYTEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-work-${_spectra_suite_kind}\n"
+           "POLYTEST_ARCH_VAR=spectra_arch\n"
+           "POLYTEST_STDPAR_VAR=spectra_stdpar\n"
+           "POLYTEST_STDPAR={apple_target}-std=c++17 -fstdpar -fstdpar-mem=${_spectra_suite_mem} -fstdpar-rt={stdpar_rt} "
+           "-fstdpar-arch={spectra_arch} -fstdpar-library-path=${SPECTRA_PACKAGE_ROOT} "
+           "-fstdpar-library-capabilities={spectra_capability} -I${CMAKE_CURRENT_SOURCE_DIR}/generated/cpp/include "
+           "-I${CMAKE_CURRENT_SOURCE_DIR}/include -I${CMAKE_CURRENT_SOURCE_DIR}/test/generated\n"
+           "POLYTEST_TARGET_VAR=spectra_capability\n"
+           "POLYTEST_OUTPUT_PREFIX=spectra_test_\n"
+           "POLYTEST_TEMP_PREFIX=spectra_\n"
+           "POLYTEST_DEFAULT_ENV+=:POLYTEST_REPRO_CHECK=0\n")
+    foreach(_capability IN LISTS _spectra_capabilities)
+      string(APPEND _spectra_suite_text "POLYTEST_TARGET_VALUE+=:${_capability}\n")
+    endforeach()
+    foreach(_source IN LISTS _spectra_suite_tests)
+      string(APPEND _spectra_suite_text "POLYTEST_FILES+=:${_source}\n")
+    endforeach()
+    file(WRITE "${_spectra_suite_file}" "${_spectra_suite_text}")
+    polyregion_add_polytest_suite(${_spectra_suite_name} SUITE "${_spectra_suite_file}" DEPENDS ${_spectra_suite_tests})
   endforeach()
-  foreach(_source IN LISTS _spectra_generated_tests)
-    string(APPEND _spectra_suite_text "POLYTEST_FILES+=:${_source}\n")
-  endforeach()
-  file(WRITE "${_spectra_suite}" "${_spectra_suite_text}")
-  polyregion_add_polytest_suite(spectra SUITE "${_spectra_suite}" DEPENDS ${_spectra_generated_tests})
 endif()
