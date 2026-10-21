@@ -150,10 +150,11 @@ contains
     error stop 'compiler did not replace'
   end subroutine polyregion_copy_n
 
-  function polyregion_count(in, n, value) result(r)
+  function polyregion_count(in, n, value, eq) result(r)
     type(*), dimension(*), intent(in) :: in
     integer(c_int32_t), intent(in), value :: n
     type(*), intent(in) :: value
+    procedure() :: eq
     integer(c_int32_t) :: r
     r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.count")
@@ -219,10 +220,11 @@ contains
     error stop 'compiler did not replace'
   end subroutine polyregion_fill_n
 
-  function polyregion_find(in, n, value) result(r)
+  function polyregion_find(in, n, value, eq) result(r)
     type(*), dimension(*), intent(in) :: in
     integer(c_int32_t), intent(in), value :: n
     type(*), intent(in) :: value
+    procedure() :: eq
     integer(c_int32_t) :: r
     r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.find")
@@ -478,21 +480,23 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_reduce_by_key
 
-  function polyregion_remove(data, n, value) result(r)
+  function polyregion_remove(data, n, value, eq) result(r)
     type(*), dimension(*), intent(inout) :: data
     integer(c_int32_t), intent(in), value :: n
     type(*), intent(in) :: value
+    procedure() :: eq
     integer(c_int32_t) :: r
     r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.remove")
     error stop 'compiler did not replace'
   end function polyregion_remove
 
-  function polyregion_remove_copy(in, n, out, value) result(r)
+  function polyregion_remove_copy(in, n, out, value, eq) result(r)
     type(*), dimension(*), intent(in) :: in
     integer(c_int32_t), intent(in), value :: n
     type(*), dimension(*), intent(inout) :: out
     type(*), intent(in) :: value
+    procedure() :: eq
     integer(c_int32_t) :: r
     r = 0
     call polyregion_interface("polyregion_interface:spectra:spectra.remove_copy")
@@ -520,21 +524,23 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_remove_if
 
-  subroutine polyregion_replace(io, n, oldv, newv)
+  subroutine polyregion_replace(io, n, oldv, newv, eq)
     type(*), dimension(*), intent(inout) :: io
     integer(c_int32_t), intent(in), value :: n
     type(*), intent(in) :: oldv
     type(*), intent(in) :: newv
+    procedure() :: eq
     call polyregion_interface("polyregion_interface:spectra:spectra.replace")
     error stop 'compiler did not replace'
   end subroutine polyregion_replace
 
-  subroutine polyregion_replace_copy(in, out, n, oldv, newv)
+  subroutine polyregion_replace_copy(in, out, n, oldv, newv, eq)
     type(*), dimension(*), intent(in) :: in
     type(*), dimension(*), intent(inout) :: out
     integer(c_int32_t), intent(in), value :: n
     type(*), intent(in) :: oldv
     type(*), intent(in) :: newv
+    procedure() :: eq
     call polyregion_interface("polyregion_interface:spectra:spectra.replace_copy")
     error stop 'compiler did not replace'
   end subroutine polyregion_replace_copy
@@ -607,11 +613,12 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_search_n
 
-  subroutine polyregion_sequence(out, n, init, step)
+  subroutine polyregion_sequence(out, n, init, step, value_at)
     type(*), dimension(*), intent(inout) :: out
     integer(c_int32_t), intent(in), value :: n
     type(*), intent(in) :: init
     type(*), intent(in) :: step
+    procedure() :: value_at
     call polyregion_interface("polyregion_interface:spectra:spectra.sequence")
     error stop 'compiler did not replace'
   end subroutine polyregion_sequence
@@ -629,13 +636,12 @@ contains
     error stop 'compiler did not replace'
   end function polyregion_set_difference
 
-  function polyregion_set_intersection(a, na, b, nb, out, out_n, op) result(r)
+  function polyregion_set_intersection(a, na, b, nb, out, op) result(r)
     type(*), dimension(*), intent(in) :: a
     integer(c_int32_t), intent(in), value :: na
     type(*), dimension(*), intent(in) :: b
     integer(c_int32_t), intent(in), value :: nb
     type(*), dimension(*), intent(inout) :: out
-    integer(c_int32_t), intent(in), value :: out_n
     procedure() :: op
     integer(c_int32_t) :: r
     r = 0

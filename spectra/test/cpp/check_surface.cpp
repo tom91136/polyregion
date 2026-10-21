@@ -1,6 +1,6 @@
 #include <functional>
 
-#include <polyregion/spectra_api.hpp>
+#include <polyregion/spectra.hpp>
 
 void check(int *xs, const int *ys, const int *map) {
   float fs[4]{};
@@ -8,6 +8,7 @@ void check(int *xs, const int *ys, const int *map) {
   const auto unary = [](const int &x) { return x + 1; };
   const auto binary = [](const int &x, const int &y) { return x + y; };
   const auto predicate = [](const int &x) { return x > 0; };
+  const auto equal = [](const int &x, const int &y) { return x == y; };
   const auto compare = [](const int &x, const int &y) { return x < y; };
   const auto valueOp = [](const float &x, const float &y) { return x + y; };
 
@@ -24,10 +25,10 @@ void check(int *xs, const int *ys, const int *map) {
   spectra::gather(map, 4, ys, 16, xs);
   spectra::scatter(ys, 4, map, xs, 16);
   (void)spectra::all_of(ys, 4, predicate);
-  (void)spectra::count(ys, 4, 1);
+  (void)spectra::count(ys, 4, 1, equal);
   (void)spectra::inner_product(ys, fs, 4, 0.0, std::plus<>{}, [](const int &x, const float &y) { return double(x) * y; });
   (void)spectra::transform_reduce(ys, 4, 0.0, [](const int &x) { return double(x); }, std::plus<>{});
-  (void)spectra::set_intersection(ys, 4, ys, 4, xs, 4, compare);
+  (void)spectra::set_intersection(ys, 4, ys, 4, xs, compare);
   spectra::sort_by_key(xs, fs, 4, compare);
   (void)spectra::reduce_by_key(ys, fs, xs, fs, 4, compare, valueOp);
 }

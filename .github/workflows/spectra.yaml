@@ -1,0 +1,397 @@
+name: Spectra
+
+on:
+  pull_request:
+    paths: [ 'spectra/**', '.github/workflows/spectra.yaml' ]
+  push:
+    paths: [ 'spectra/**', '.github/workflows/spectra.yaml' ]
+  workflow_run:
+    workflows: [ Linux builds, macOS builds, Windows builds, Linux cross builds ]
+    types: [ completed ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
+
+permissions:
+  actions: read
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: spectra
+
+jobs:
+  vendor:
+    if: ${{ github.event_name != 'workflow_run' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: &checkout actions/checkout@v6
+
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Test atomic vendor staging
+        run: just test-vendor-staging
+
+      - name: Restore pinned vendor inputs
+        if: ${{ !env.ACT }}
+        id: restore-vendor
+        uses: &cache-restore actions/cache/restore@v5
+        with:
+          path: &vendor-path |
+            spectra/thirdparty/vendor
+            spectra/thirdparty/.vendor.downloads
+          key: &vendor-key spectra-vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./spectra/cmake/spectra_vendor_versions.cmake', './spectra/cmake/prepare_spectra_vendor_dist.cmake') }}
+
+      - name: Stage and verify pinned vendor inputs
+        id: build-vendor
+        run: |
+          just build-vendor-libs
+          just verify-vendor-libs
+
+      - name: Save pinned vendor inputs
+        if: ${{ !env.ACT && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
+        uses: &cache-save actions/cache/save@v5
+        with:
+          path: *vendor-path
+          key: *vendor-key
+
+  vendor-smoke:
+    needs: vendor
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: cuda
+            runs_on: ubuntu-24.04
+          - backend: hip
+            runs_on: ubuntu-24.04
+          - backend: onedpl
+            runs_on: ubuntu-24.04
+          - backend: cuda
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - name: Free up disk space
+        if: ${{ !env.ACT }}
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-dotnet: 'true'
+
+      - uses: *checkout
+      - *setup-just
+
+      - &restore-vendor
+        name: Restore pinned vendor inputs
+        if: ${{ !env.ACT }}
+        id: restore-vendor
+        uses: *cache-restore
+        with:
+          path: *vendor-path
+          key: *vendor-key
+
+      - &build-vendor
+        name: Stage and verify pinned vendor inputs
+        id: build-vendor
+        run: |
+          just build-vendor-libs
+          just verify-vendor-libs
+
+      - &save-vendor
+        name: Save pinned vendor inputs
+        if: ${{ !env.ACT && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
+        uses: *cache-save
+        with:
+          path: *vendor-path
+          key: *vendor-key
+
+      - name: Compile ${{ matrix.backend }} vendor headers
+        env:
+          CONTAINER: docker
+        run: just smoke-vendor-containers ${{ matrix.backend }}
+
+      - name: Compile and link all ${{ matrix.backend }} vendor-native cases
+        env:
+          CONTAINER: docker
+        run: just test-vendor-native ${{ matrix.backend }} compile
+
+  # A workflow_run fires once per finished Polyregion workflow; only the last one for a commit has every dist ready.
+  resolve:
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'cancelled' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.runs.outputs.ready }}
+      linux: ${{ steps.runs.outputs.linux }}
+      macos: ${{ steps.runs.outputs.macos }}
+      windows: ${{ steps.runs.outputs.windows }}
+      cross: ${{ steps.runs.outputs.cross }}
+    steps:
+      - name: Resolve Polyregion runs for this commit
+        id: runs
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          ready=true
+          for entry in linux:linux.yaml macos:macos.yaml windows:windows.yaml cross:linux-cross.yaml; do
+            read -r id status < <(gh api "repos/${{ github.repository }}/actions/workflows/${entry#*:}/runs?head_sha=$SHA&per_page=1" \
+              --jq '.workflow_runs[0] | "\(.id) \(.status)"')
+            echo "${entry%%:*}: run $id ($status)"
+            echo "${entry%%:*}=$id" >> "$GITHUB_OUTPUT"
+            [ "$status" = completed ] || ready=false
+          done
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+  surface:
+    needs: resolve
+    if: ${{ needs.resolve.outputs.ready == 'true' }}
+    runs-on: ubuntu-24.04
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+    steps:
+      - uses: *checkout
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - *setup-just
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gfortran
+
+      - &setup-java
+        name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+
+      - &setup-sbt
+        name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - &download-linux-dist
+        name: Download Polyregion
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-linux-x86_64-Release
+          path: ${{ env.POLYREGION_DIST }}
+          run-id: ${{ needs.resolve.outputs.linux }}
+          github-token: ${{ github.token }}
+
+      - &restore-exec-bits
+        name: Restore executable bits
+        working-directory: .
+        run: just restore-exec-bits "$POLYREGION_DIST"
+
+      - name: Check format, codegen drift, and language surfaces
+        run: just ci
+
+  package:
+    needs: resolve
+    if: ${{ needs.resolve.outputs.ready == 'true' }}
+    runs-on: ubuntu-24.04
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      # One package serves every emulator leg: Thrust for the Ocelot cuda@ row, oneDPL for the rest.
+      POLYREGION_TEST_PROFILE: emulators
+    steps:
+      - uses: *checkout
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - *setup-just
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - *setup-java
+      - *setup-sbt
+      - *download-linux-dist
+      - *restore-exec-bits
+      - *restore-vendor
+      - *build-vendor
+      - *save-vendor
+
+      - name: Build the package
+        run: just build-package
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: spectra-package
+          path: spectra/target/package/packages/spectra/lib.polyast
+          if-no-files-found: error
+
+  test:
+    needs: [ resolve, package ]
+    if: ${{ needs.resolve.outputs.ready == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: linux, arch: x86_64, runs_on: ubuntu-24.04, run: linux }
+          - { os: linux, arch: aarch64, runs_on: ubuntu-24.04-arm, run: linux }
+          - { os: darwin, arch: arm64, runs_on: macos-26, run: macos }
+          - { os: darwin, arch: x86_64, runs_on: macos-26-intel, run: macos }
+          - { os: windows, arch: amd64, runs_on: windows-2025-vs2026, run: windows }
+          - { os: windows, arch: arm64, runs_on: windows-11-arm, run: windows }
+        shard: [ 1, 2, 3, 4 ]
+    runs-on: ${{ matrix.platform.runs_on }}
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      EMULATORS: ${{ github.workspace }}/emulators/out
+      SPECTRA_PACKAGE: ${{ github.workspace }}/package/spectra/lib.polyast
+      # macOS runners may or may not expose a paravirtualised Metal device
+      POLYRT_STRICT_SELECT: ${{ matrix.platform.os == 'darwin' && '0' || '' }}
+    steps:
+      - uses: *checkout
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - *setup-just
+
+      - name: Setup Ninja
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ninja
+
+      - name: Pin the SDK to the selected Xcode
+        if: ${{ matrix.platform.os == 'darwin' }}
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - name: Setup MSVC env
+        if: ${{ matrix.platform.os == 'windows' }}
+        shell: pwsh
+        working-directory: .
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
+          $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
+          if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+          Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ matrix.platform.arch }} -no_logo' | Out-Null
+          if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+          Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+      - name: Download Polyregion
+        uses: *download
+        with:
+          name: polyregion-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-Release
+          path: ${{ env.POLYREGION_DIST }}
+          run-id: ${{ needs.resolve.outputs[matrix.platform.run] }}
+          github-token: ${{ github.token }}
+
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: emulators
+          run-id: ${{ needs.resolve.outputs[matrix.platform.run] }}
+          github-token: ${{ github.token }}
+
+      - name: Download the package
+        uses: *download
+        with:
+          name: spectra-package
+          path: package/spectra
+
+      - name: Unpack emulators and restore executable bits
+        working-directory: .
+        run: |
+          tar xzf emulators/emulators-out.tar.gz -C emulators
+          just restore-exec-bits "$POLYREGION_DIST"
+
+      - name: Run shard ${{ matrix.shard }} of the package-import matrix on emulators
+        run: just test-package '' "-DSPECTRA_PREBUILT_PACKAGE=$SPECTRA_PACKAGE" "-I ${{ matrix.shard }},,4"
+
+  # No emulator bundle exists for these architectures, so cases compile under QEMU against the cross dist and skip at
+  # dispatch (no OpenCL platform); this proves package import on every host Polyregion ships for.
+  test-cross:
+    needs: [ resolve, package ]
+    if: ${{ needs.resolve.outputs.ready == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: riscv64, qemu_arch: riscv64, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
+          - { arch: ppc64le, qemu_arch: ppc64le, sysroot_variant: al8, sysroot_dockerfile: Dockerfile }
+          - { arch: arm, qemu_arch: arm, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
+    runs-on: ubuntu-24.04-arm
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      POLYREGION_TEST_TARGETS: opencl1_1@!opencl1_1@*Portable*source*
+    steps:
+      - uses: *checkout
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - *setup-just
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qemu-user-static binfmt-support
+
+      - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
+        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+
+      - name: Restore sysroot cache
+        uses: *cache-restore
+        with:
+          path: ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './justfile') }}
+
+      - name: Prepare sysroot
+        working-directory: .
+        run: |
+          [ -n "$(ls sysroot/out/sysroot-*-${{ matrix.arch }}.tar.xz 2>/dev/null)" ] || CONTAINER=docker just build-sysroot
+          just prepare-sysroot
+          SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
+          {
+            echo "POLYREGION_SYSROOT=$SYSROOT"
+            echo "QEMU_LD_PREFIX=$SYSROOT"
+          } >> "$GITHUB_ENV"
+
+      - name: Download Polyregion
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ${{ env.POLYREGION_DIST }}
+          run-id: ${{ needs.resolve.outputs.cross }}
+          github-token: ${{ github.token }}
+
+      - name: Download the package
+        uses: *download
+        with:
+          name: spectra-package
+          path: package/spectra
+
+      - name: Shim the dist for QEMU
+        working-directory: .
+        run: |
+          just restore-exec-bits "$POLYREGION_DIST"
+          ci/qemu_shim.sh "${{ matrix.arch }}" "$POLYREGION_DIST" "$POLYREGION_SYSROOT"
+
+      - name: Compile the smoke cases under QEMU
+        run: |
+          cmake -S . -B target/cross -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON \
+            -DSPECTRA_PREBUILT_PACKAGE="$GITHUB_WORKSPACE/package/spectra/lib.polyast" -DCMAKE_PREFIX_PATH="$POLYREGION_DIST"
+          cmake --build target/cross --target spectra-discover
+          ctest --test-dir target/cross --timeout 3600 --output-on-failure --no-tests=error \
+            -R '^spectra-offload-(equal|none_of|sort|inclusive_scan|reduce_by_key|minmax_element)-'

@@ -1,0 +1,5 @@
+/thirdparty/vendor/
+/thirdparty/.vendor.downloads/
+/thirdparty/.vendor.staging-*/
+/thirdparty/.vendor.previous-*/
+/generated/package/spectra.interface.polyast

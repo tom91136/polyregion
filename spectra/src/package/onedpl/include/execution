@@ -1,0 +1,4 @@
+#pragma once
+
+// oneDPL supplies the execution-policy surface used by Spectra. Keep PolySTL's
+// host <execution> shim out of this device-only package-build include path.

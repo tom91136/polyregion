@@ -33,7 +33,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.copy_n")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.count")
-  def count[T](in: Array[T], n: Int, value: T): Int =
+  def count[T](in: Array[T], n: Int, value: T, eq: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.count")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.count_if")
@@ -69,7 +69,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.fill_n")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.find")
-  def find[T](in: Array[T], n: Int, value: T): Int =
+  def find[T](in: Array[T], n: Int, value: T, eq: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.find")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.find_if")
@@ -195,11 +195,11 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.reduce_by_key")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.remove")
-  def remove[T](data: Array[T], n: Int, value: T): Int =
+  def remove[T](data: Array[T], n: Int, value: T, eq: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.remove")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.remove_copy")
-  def remove_copy[T](in: Array[T], n: Int, out: Array[T], value: T): Int =
+  def remove_copy[T](in: Array[T], n: Int, out: Array[T], value: T, eq: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.remove_copy")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.remove_copy_if")
@@ -211,11 +211,11 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.remove_if")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.replace")
-  def replace[T](io: Array[T], n: Int, oldv: T, newv: T): Unit =
+  def replace[T](io: Array[T], n: Int, oldv: T, newv: T, eq: (T, T) => Boolean): Unit =
     throw UnsupportedOperationException("compiler did not replace spectra.replace")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.replace_copy")
-  def replace_copy[T](in: Array[T], out: Array[T], n: Int, oldv: T, newv: T): Unit =
+  def replace_copy[T](in: Array[T], out: Array[T], n: Int, oldv: T, newv: T, eq: (T, T) => Boolean): Unit =
     throw UnsupportedOperationException("compiler did not replace spectra.replace_copy")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.replace_copy_if")
@@ -247,7 +247,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.search_n")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.sequence")
-  def sequence[T](out: Array[T], n: Int, init: T, step: T): Unit =
+  def sequence[T](out: Array[T], n: Int, init: T, step: T, value_at: (T, T, Int) => T): Unit =
     throw UnsupportedOperationException("compiler did not replace spectra.sequence")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.set_difference")
@@ -255,15 +255,7 @@ object spectra {
     throw UnsupportedOperationException("compiler did not replace spectra.set_difference")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.set_intersection")
-  def set_intersection[T](
-      a: Array[T],
-      na: Int,
-      b: Array[T],
-      nb: Int,
-      out: Array[T],
-      out_n: Int,
-      op: (T, T) => Boolean
-  ): Int =
+  def set_intersection[T](a: Array[T], na: Int, b: Array[T], nb: Int, out: Array[T], op: (T, T) => Boolean): Int =
     throw UnsupportedOperationException("compiler did not replace spectra.set_intersection")
 
   @compileTimeOnly("polyregion_interface:spectra:spectra.set_union")

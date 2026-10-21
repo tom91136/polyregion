@@ -4,13 +4,6 @@ import polyregion.ast.PolyAST as p
 
 object Spectra {
 
-  final case class ImplementationVariants(
-      name: String,
-      requiredCapabilities: List[String],
-      widths: List[Int],
-      includeFallback: Boolean = false
-  )
-
   private val t = p.Type.Var("T")
   private val u = p.Type.Var("U")
   private val k = p.Type.Var("K")
@@ -18,6 +11,7 @@ object Spectra {
 
   private def param(index: Int): p.Arg.SizeExpr            = p.Arg.SizeExpr.Param(index)
   private def sum(lhs: Int, rhs: Int): p.Arg.SizeExpr      = p.Arg.SizeExpr.Add(param(lhs), param(rhs))
+  private def min(lhs: Int, rhs: Int): p.Arg.SizeExpr      = p.Arg.SizeExpr.Min(param(lhs), param(rhs))
   private def elements(size: p.Arg.SizeExpr): p.Arg.Extent = p.Arg.Extent.Elements(size)
 
   private def buffer(
@@ -165,8 +159,7 @@ object Spectra {
         count("na"),
         read("b", size = param(3)),
         count("nb"),
-        write("out", size = param(5)),
-        count("out_n"),
+        write("out", size = min(1, 3)),
         callable("op", List(t, t), p.Type.Bool1)
       ),
       p.Type.IntS32
@@ -557,25 +550,59 @@ object Spectra {
       List(readWrite("a", size = param(1)), count("n"), readWrite("b", size = param(1))),
       p.Type.Unit0
     ),
-    declaration("count", T, List(read("in", size = param(1)), count("n"), scalar("value")), p.Type.IntS32),
-    declaration("find", T, List(read("in", size = param(1)), count("n"), scalar("value")), p.Type.IntS32),
-    declaration("remove", T, List(readWrite("data", size = param(1)), count("n"), scalar("value")), p.Type.IntS32),
+    declaration(
+      "count",
+      T,
+      List(read("in", size = param(1)), count("n"), scalar("value"), callable("eq", List(t, t), p.Type.Bool1)),
+      p.Type.IntS32
+    ),
+    declaration(
+      "find",
+      T,
+      List(read("in", size = param(1)), count("n"), scalar("value"), callable("eq", List(t, t), p.Type.Bool1)),
+      p.Type.IntS32
+    ),
+    declaration(
+      "remove",
+      T,
+      List(readWrite("data", size = param(1)), count("n"), scalar("value"), callable("eq", List(t, t), p.Type.Bool1)),
+      p.Type.IntS32
+    ),
     declaration(
       "remove_copy",
       T,
-      List(read("in", size = param(1)), count("n"), write("out", size = param(1)), scalar("value")),
+      List(
+        read("in", size = param(1)),
+        count("n"),
+        write("out", size = param(1)),
+        scalar("value"),
+        callable("eq", List(t, t), p.Type.Bool1)
+      ),
       p.Type.IntS32
     ),
     declaration(
       "replace",
       T,
-      List(readWrite("io", size = param(1)), count("n"), scalar("oldv"), scalar("newv")),
+      List(
+        readWrite("io", size = param(1)),
+        count("n"),
+        scalar("oldv"),
+        scalar("newv"),
+        callable("eq", List(t, t), p.Type.Bool1)
+      ),
       p.Type.Unit0
     ),
     declaration(
       "replace_copy",
       T,
-      List(read("in", size = param(2)), write("out", size = param(2)), count("n"), scalar("oldv"), scalar("newv")),
+      List(
+        read("in", size = param(2)),
+        write("out", size = param(2)),
+        count("n"),
+        scalar("oldv"),
+        scalar("newv"),
+        callable("eq", List(t, t), p.Type.Bool1)
+      ),
       p.Type.Unit0
     ),
     declaration(
@@ -599,7 +626,13 @@ object Spectra {
     declaration(
       "sequence",
       T,
-      List(write("out", size = param(1)), count("n"), scalar("init"), scalar("step")),
+      List(
+        write("out", size = param(1)),
+        count("n"),
+        scalar("init"),
+        scalar("step"),
+        callable("value_at", List(t, t, p.Type.IntS32), t)
+      ),
       p.Type.Unit0
     ),
     declaration(
@@ -612,9 +645,4 @@ object Spectra {
 
   val interfaceDef: p.Interface = p.Interface(p.Sym("spectra"), declarations)
 
-  def implementationCandidates(variants: ImplementationVariants): List[p.Function] =
-    SpectraImplementations.candidates(interfaceDef, variants)
-
-  def implementationPackage(variants: List[ImplementationVariants]): p.Package =
-    SpectraImplementations.packageFor(interfaceDef, variants)
 }

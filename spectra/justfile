@@ -1,0 +1,169 @@
+set shell := ["bash", "-cu"]
+set windows-shell := ["bash", "-cu"]
+
+container := env_var_or_default('CONTAINER', 'podman')
+sbt       := 'bash ./sbtx -no-colors'
+root      := replace(justfile_directory(), "\\", "/")
+jobs      := `nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2`
+
+clang_format_version := '20.1.0'
+# See https://github.com/muttleyxd/clang-tools-static-binaries/releases
+clang_format_release := 'master-796e77c'
+
+# List all recipes.
+default:
+    @just --list
+
+# Print the Polyregion dist in use: $POLYREGION_DIST, else the single dist staged by a sibling Polyregion checkout.
+dist:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${POLYREGION_DIST:-}" ]; then
+        dist="$POLYREGION_DIST"
+    else
+        shopt -s nullglob
+        candidates=("{{ root }}"/../native/out/polyregion-*-dist/lib/cmake/Polyregion)
+        [ ${#candidates[@]} -eq 1 ] || {
+            echo "set POLYREGION_DIST to a Polyregion dist (found ${#candidates[@]} candidates under ../native/out)" >&2
+            exit 1
+        }
+        dist="${candidates[0]%/lib/cmake/Polyregion}"
+    fi
+    [ -f "$dist/lib/cmake/Polyregion/PolyregionConfig.cmake" ] || { echo "not a Polyregion dist: $dist" >&2; exit 1; }
+    [ -d "$dist/share/polyregion/maven" ] || { echo "Polyregion dist has no JVM SDK: $dist" >&2; exit 1; }
+    cd "$dist" && pwd
+
+# Regenerate the language APIs, the interface package and the generated test matrix.
+codegen:
+    POLYREGION_DIST="$(just dist)" {{ sbt }} -batch -J-Dsbt.server.autostart=false genSpectra
+
+# Apply scalafmt and clang-format.
+format: (_format "format" "scalafmtAll" "scalafmtSbt")
+
+# Check scalafmt and clang-format without modifying files.
+check-format: (_format "format-check" "scalafmtCheckAll" "scalafmtSbtCheck")
+
+_format mode sbt_task_a sbt_task_b:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dist="$(just dist)"
+    cf="$(just _clang-format)"
+    case "{{ mode }}" in
+        format)       cf_args=(--style=file -i) ;;
+        format-check) cf_args=(--style=file --dry-run --Werror) ;;
+    esac
+    git ls-files -z --cached --others --exclude-standard -- '*.cpp' '*.cc' '*.cu' '*.h' '*.hpp' \
+        | grep -zv '^generated/cpp/include/polyregion/spectra_api\.hpp$' \
+        | xargs -0 -r "$cf" "${cf_args[@]}"
+    POLYREGION_DIST="$dist" {{ sbt }} '{{ sbt_task_a }} ; {{ sbt_task_b }}'
+
+_clang-format:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DIR=".cache/clang-format-{{ clang_format_version }}"
+    BIN="$DIR/clang-format"
+    [[ "{{ os() }}" == "windows" ]] && BIN="$BIN.exe"
+    if [ ! -x "$BIN" ]; then
+        mkdir -p "$DIR"
+        case "{{ os() }}-{{ arch() }}" in
+            linux-x86_64|linux-amd64)      asset=clang-format-20_linux-amd64 ;;
+            linux-aarch64|linux-arm64)     asset=clang-format-20_linux-arm64 ;;
+            macos-aarch64|macos-arm64)     asset=clang-format-20_macos-arm-arm64 ;;
+            macos-x86_64|macos-amd64)      asset=clang-format-20_macosx-amd64 ;;
+            windows-x86_64|windows-amd64)  asset=clang-format-20_windows-amd64.exe ;;
+            *) echo "unsupported {{ os() }}-{{ arch() }}" >&2; exit 1 ;;
+        esac
+        url="https://github.com/muttleyxd/clang-tools-static-binaries/releases/download/{{ clang_format_release }}/${asset}"
+        echo "Fetching clang-format {{ clang_format_version }} from $url" >&2
+        curl -fsSL "$url" -o "$BIN"
+        chmod +x "$BIN"
+    fi
+    echo "$BIN"
+
+# Validate the IDL, generated outputs, and the Scala, C++ and Fortran consumer surfaces.
+test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dist="$(just dist)"
+    POLYREGION_DIST="$dist" {{ sbt }} 'testOnly polyregion.spectra.SpectraSuite; spectraApi/compile'
+    cmake -S "{{ root }}" -B "{{ root }}/target/cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$dist"
+    cmake --build "{{ root }}/target/cmake" -j {{ jobs }}
+    ctest --test-dir "{{ root }}/target/cmake" --output-on-failure
+
+# Download, verify and atomically stage the pinned upstream distributions.
+build-vendor-libs extra='': (_vendor "spectra-vendor" extra)
+
+# Verify the staged vendor tree against its pinned content manifest without repairing it.
+verify-vendor-libs extra='': (_vendor "spectra-vendor-verify" extra)
+
+# Exercise vendor staging transactions with local mock archives (no network or GPU required).
+test-vendor-staging: (_vendor "spectra-vendor-staging-test" "")
+
+# Compile with the same digest-pinned official containers used by CI; backend: all/cuda/hip/onedpl.
+smoke-vendor-containers backend='all':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ backend }}" in
+      all) target=spectra-vendor-container-smoke ;;
+      cuda|hip|onedpl) target=spectra-vendor-container-smoke-{{ backend }} ;;
+      *) echo "unknown vendor backend: {{ backend }} (all/cuda/hip/onedpl)" >&2; exit 2 ;;
+    esac
+    just _vendor "$target"
+
+# Compile and link all generated cases with the selected normal vendor compiler.
+test-vendor-native backend='all' mode='compile':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ backend }}:{{ mode }}" in
+      all:compile) target=spectra-vendor-native-validation ;;
+      cuda:compile|hip:compile|onedpl:compile) target=spectra-vendor-native-validation-{{ backend }} ;;
+      cuda:run|hip:run|onedpl:run) target=spectra-vendor-native-validation-run-{{ backend }} ;;
+      *) echo "usage: just test-vendor-native [all|cuda|hip|onedpl] [compile|run]" >&2; exit 2 ;;
+    esac
+    just _vendor "$target"
+
+# Compile the vendor implementations the test profile needs into fragments and link the package.
+build-package extra='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dist="$(just dist)"
+    if [ "{{ os() }}" = linux ]; then just build-vendor-libs; fi
+    cmake -S "{{ root }}" -B "{{ root }}/target/package" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON -DSPECTRA_ENABLE_PACKAGE_TESTS=OFF \
+      -DCMAKE_PREFIX_PATH="$dist" {{ extra }}
+    cmake --build "{{ root }}/target/package" --target spectra-package --parallel {{ jobs }}
+
+# Run the package-import matrix for the test profile's targets; $EMULATORS selects a Polyregion emulator bundle.
+test-package filter='' extra='' ctest='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dist="$(just dist)"
+    if [ -n "${EMULATORS:-}" ]; then
+      if [ -f "$EMULATORS/env.sh" ]; then
+        source "$EMULATORS/env.sh"
+      else
+        export PATH="$(cygpath -u "$EMULATORS" 2>/dev/null || echo "$EMULATORS")/bin:$PATH"
+        vk="$EMULATORS/share/vulkan/icd.d"; icd=$(echo "$vk"/lvp_icd.*.json)
+        [ -f "$vk/vk_swiftshader_icd.json" ] && icd="$icd;$vk/vk_swiftshader_icd.json" || true
+        export VK_DRIVER_FILES="$icd" VK_ICD_FILENAMES="$icd" POLYINVOKE_OPENCL_CPU=1
+        export POLYINVOKE_OPENCL_LIB="$(cygpath -w "$EMULATORS/bin/OpenCL.dll" 2>/dev/null || echo "$EMULATORS/bin/OpenCL.dll")"
+      fi
+      export POLYREGION_TEST_PROFILE=emulators POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
+    fi
+    case "{{ extra }}" in
+      *SPECTRA_PREBUILT_PACKAGE*) ;;
+      *) if [ "{{ os() }}" = linux ]; then just build-vendor-libs; fi ;;
+    esac
+    cmake -S "{{ root }}" -B "{{ root }}/target/package" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON -DSPECTRA_ENABLE_PACKAGE_TESTS=ON \
+      -DSPECTRA_TEST_PROFILE="${POLYREGION_TEST_PROFILE:-}" -DCMAKE_PREFIX_PATH="$dist" {{ extra }}
+    cmake --build "{{ root }}/target/package" --parallel {{ jobs }}
+    ctest --test-dir "{{ root }}/target/package" --parallel {{ jobs }} --timeout 1500 --output-on-failure \
+      {{ if filter == "" { "" } else { "-R '" + filter + "'" } }} {{ ctest }}
+
+_vendor target extra='':
+    cmake -S "{{ root }}" -B "{{ root }}/target/vendor" -DSPECTRA_VENDOR_ONLY=ON -DSPECTRA_CONTAINER_RUNTIME={{ container }} {{ extra }}
+    cmake --build "{{ root }}/target/vendor" --target {{ target }}
+
+# Everything CI checks without vendor toolchains or devices.
+ci: check-format test
