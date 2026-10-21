@@ -16,6 +16,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/Mangle.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
@@ -297,15 +298,12 @@ static Vector<const clang::FunctionDecl *> interfaceCallableIdentities(const Int
   return identities;
 }
 
-static std::string interfaceKey(const clang::CompilerInstance &CI, const clang::ASTContext &C, const InterfaceSite &site) {
+static std::string interfaceKey(const clang::CompilerInstance &CI, clang::ASTNameGenerator &names, const InterfaceSite &site) {
   llvm::MD5 md5;
   md5.update(CI.getFrontendOpts().Inputs.empty() ? llvm::StringRef{} : CI.getFrontendOpts().Inputs.front().getFile());
   md5.update(site.packageName);
   md5.update(site.declaration);
-  md5.update(site.callee->getQualifiedNameAsString());
-  md5.update(site.callee->getType().getAsString(C.getPrintingPolicy()));
-  const auto location = C.getSourceManager().getExpansionLoc(site.callee->getLocation());
-  md5.update(std::to_string(C.getSourceManager().getFileOffset(location)));
+  md5.update(names.getName(site.callee));
   return md5.final().digest().str().str();
 }
 
@@ -321,7 +319,8 @@ struct PreparedInterfaceCall {
 };
 
 static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::CompilerInstance &CI, clang::ASTContext &C,
-                                                                 const InterfaceSite &site, const polyfront::package::Archive &archive) {
+                                                                 clang::ASTNameGenerator &names, const InterfaceSite &site,
+                                                                 const polyfront::package::Archive &archive) {
   auto &D = CI.getDiagnostics();
   Remapper remapper(C);
   Remapper::RemapContext context;
@@ -380,7 +379,7 @@ static std::optional<PreparedInterfaceCall> prepareInterfaceCall(clang::Compiler
   if (!site.callee->getReturnType()->isVoidType())
     typeSizes.emplace_back(returnType, static_cast<int32_t>(C.getTypeSize(site.callee->getReturnType()) / 8));
   const auto publicName = Sym(site.declaration ^ split('.'));
-  const auto suffix = interfaceKey(CI, C, site);
+  const auto suffix = interfaceKey(CI, names, site);
   const auto entryName = "__polyregion_package_program_" + suffix;
   auto callerFns = context.functions | values() | map([](const auto &function) { return *function; }) | to_vector();
   const auto callerDefs = context.structs | values() | map([](const auto &definition) { return *definition; }) | to_vector();
@@ -1074,6 +1073,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   std::map<const clang::FunctionDecl *, Vector<const clang::FunctionDecl *>> interfaceCallables;
   std::map<std::string, polyfront::package::Archive> interfacePackages;
   std::vector<PreparedInterfaceCall> preparedInterfaces;
+  clang::ASTNameGenerator interfaceNames(C);
   const auto packageRoots =
       opts.libraryPath.empty() ? polyfront::package::packageRoots() : polyfront::package::splitPackageRoots(opts.libraryPath);
   for (const auto &site : interfaceSites(C)) {
@@ -1103,7 +1103,8 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
       }
       found = interfacePackages.emplace(site.packageName, *package.value).first;
     }
-    if (auto prepared = prepareInterfaceCall(CI, C, site, found->second)) preparedInterfaces.emplace_back(std::move(*prepared));
+    if (auto prepared = prepareInterfaceCall(CI, C, interfaceNames, site, found->second))
+      preparedInterfaces.emplace_back(std::move(*prepared));
   }
   compileInterfaceCalls(opts, CI, C, preparedInterfaces, *packageProgramBitcodes);
 }
