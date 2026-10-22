@@ -1,0 +1,77 @@
+name: Linux emulators
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-emulators:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - name: Free up disk space
+        if: ${{ !env.ACT }}
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-dotnet: 'true'
+
+      - uses: actions/checkout@v6
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Restore emulators cache
+        if: ${{ !env.ACT }}
+        id: restore-emu
+        uses: ./.github/actions/restore-compressed-cache
+        with:
+          path: &emu-path emulators/out
+          archive: &emu-archive emulators/out.tar.zst
+          key: &emu-key emulators-linux-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/Dockerfile', './emulators/collect.sh', './emulators/gpuocelot.patch') }}
+
+      - name: Detect existing emulators (act fast-path)
+        if: ${{ env.ACT }}
+        id: act-emu-probe
+        run: |
+          bash emulators/check_inputs.sh emulators/out 2>/dev/null && echo "found=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Build emulators
+        id: build-emulators
+        if: steps.restore-emu.outputs.cache-hit != 'true' && steps.act-emu-probe.outputs.found != 'true'
+        env:
+          CONTAINER: docker
+        run: just build-emulators
+
+      - name: Save emulators cache
+        if: steps.build-emulators.outcome == 'success'
+        uses: ./.github/actions/save-compressed-cache
+        with:
+          path: *emu-path
+          archive: *emu-archive
+          key: *emu-key
+
+      - name: Pack emulators (tar preserves symlinks)
+        run: tar czf emulators-out.tar.gz -C emulators out
+
+      - name: Upload emulators artifact
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: polyregion-emulators-linux-${{ matrix.arch }}
+          path: emulators-out.tar.gz
+          if-no-files-found: error

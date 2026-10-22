@@ -1,0 +1,55 @@
+name: Windows emulators
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  build-emulators:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs_on: windows-2025-vs2026
+          - arch: arm64
+            runs_on: windows-11-arm
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Restore emulators cache
+        if: ${{ !env.ACT }}
+        id: restore-emu
+        uses: ./.github/actions/restore-compressed-cache
+        with:
+          path: &emu-path emulators/out
+          archive: &emu-archive emulators/out.tar.zst
+          key: &emu-key emulators-windows-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/windows.bat', './emulators/gpuocelot.patch', './emulators/gpuocelot.windows.patch') }}
+      - name: Build emulators
+        id: build-emulators
+        if: steps.restore-emu.outputs.cache-hit != 'true'
+        run: just build-emulators
+      - name: Save emulators cache
+        if: steps.build-emulators.outcome == 'success'
+        uses: ./.github/actions/save-compressed-cache
+        with:
+          path: *emu-path
+          archive: *emu-archive
+          key: *emu-key
+      - name: Pack emulators (tar preserves symlinks)
+        run: tar czf emulators-out.tar.gz -C emulators out
+      - name: Upload emulators artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: polyregion-emulators-windows-${{ matrix.arch }}
+          path: emulators-out.tar.gz
+          if-no-files-found: error

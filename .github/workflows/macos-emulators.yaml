@@ -1,0 +1,51 @@
+name: macOS emulators
+
+on:
+  workflow_call:
+
+jobs:
+  build-emulators:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-26
+          - arch: x86_64
+            runs_on: macos-26-intel
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Pin the SDK to the selected Xcode
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+      - name: Restore emulators cache
+        if: ${{ !env.ACT }}
+        id: restore-emu
+        uses: ./.github/actions/restore-compressed-cache
+        with:
+          path: &emu-path emulators/out
+          archive: &emu-archive emulators/out.tar.zst
+          key: &emu-key emulators-darwin-${{ matrix.arch }}-${{ hashFiles('./emulators/inputs.sh', './emulators/macos.sh') }}
+      - name: Build emulators
+        id: build-emulators
+        if: steps.restore-emu.outputs.cache-hit != 'true'
+        run: just build-emulators
+      - name: Save emulators cache
+        if: steps.build-emulators.outcome == 'success'
+        uses: ./.github/actions/save-compressed-cache
+        with:
+          path: *emu-path
+          archive: *emu-archive
+          key: *emu-key
+      - name: Pack emulators (tar preserves symlinks)
+        run: tar czf emulators-out.tar.gz -C emulators out
+      - name: Upload emulators artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: polyregion-emulators-darwin-${{ matrix.arch }}
+          path: emulators-out.tar.gz
+          if-no-files-found: error

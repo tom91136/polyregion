@@ -1,0 +1,115 @@
+name: Checks
+
+on:
+  workflow_call:
+
+jobs:
+  check-codegen:
+    runs-on: ubuntu-24.04
+    defaults: &bash
+      run:
+        shell: bash
+    steps:
+      - uses: &checkout actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gfortran
+
+      - &setup-java
+        name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+
+      - &setup-sbt
+        name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Regenerate Scala-derived sources
+        run: just _codegen-sbt
+
+      - name: Format generated C++
+        run: just _codegen-format
+
+      - name: Fail if regenerated sources drift
+        run: just _codegen-diff
+
+      - name: Test interface codegen
+        run: just test-interface-codegen
+
+  pass-js-linux:
+    runs-on: ubuntu-24.04
+    defaults: *bash
+    steps:
+      - uses: *checkout
+      - *setup-java
+      - *setup-sbt
+      - *setup-just
+
+      - name: Build pass bundle (js)
+        run: just build-pass-js
+
+      - name: Verify bundle staged
+        run: |
+          test -s native/polyc/polypass.js
+          echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
+  pass-js-macos:
+    runs-on: macos-26
+    steps:
+      - uses: *checkout
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - *setup-sbt
+
+      - *setup-just
+
+      - name: Build pass bundle (js)
+        run: just build-pass-js
+
+      - name: Verify bundle staged
+        run: |
+          test -s native/polyc/polypass.js
+          echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"
+
+  pass-js-windows:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - uses: *checkout
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: microsoft
+          java-version: '17'
+
+      - *setup-sbt
+
+      - *setup-just
+
+      - name: Build pass bundle (js)
+        run: just build-pass-js
+
+      - name: Verify bundle staged
+        shell: bash
+        run: |
+          test -s native/polyc/polypass.js
+          echo "polypass.js size: $(wc -c < native/polyc/polypass.js) bytes"

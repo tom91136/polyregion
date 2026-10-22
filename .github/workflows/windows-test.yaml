@@ -1,0 +1,118 @@
+name: Windows test
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  check-dist:
+    # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: &simple-matrix
+          - arch: amd64
+            runs_on: windows-2025-vs2026
+          - arch: arm64
+            runs_on: windows-11-arm
+    runs-on: ${{ matrix.runs_on }}
+    env: &arch-env
+      POLYREGION_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: &checkout actions/checkout@v6
+      - &setup-java
+        name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: microsoft
+          java-version: '17'
+      - name: Setup MSVC env
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
+          $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
+          if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+          Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ matrix.arch }} -no_logo' | Out-Null
+          if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+          Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Download dist
+        # v4: nektos/act#6022
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
+
+      - name: Run check-dist
+        run: just check-dist
+
+      - name: Annotate dist-check results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/build-dist-check-${{ matrix.arch }}-static/dist-check-results.xml
+          label: dist-check
+
+  test-scala:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: *checkout
+      - *setup-java
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+      - *setup-just
+
+      - name: Download dist
+        # v4: nektos/act#6022
+        uses: *download
+        with:
+          name: polyregion-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
+
+      - name: Run munit suite
+        env:
+          POLYREGION_NATIVE_LIB_DIR: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib
+          POLYPASS_PLUGINS: ${{ github.workspace }}\native\out\polyregion-Release-${{ matrix.arch }}-static-dist\lib\libpolypass.dll
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/native/out/polyregion-Release-${{ matrix.arch }}-static-dist/bin:${PATH}"
+          just test-scala
+
+      - name: Annotate scala results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          label: scala
+
+      - name: Upload test results
+        if: always()
+        # v4: nektos/act#6022
+        uses: actions/upload-artifact@v7
+        with:
+          name: scala-test-results-windows-${{ matrix.arch }}-Release
+          path: ./frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          if-no-files-found: warn

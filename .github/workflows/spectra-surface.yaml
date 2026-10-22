@@ -1,0 +1,50 @@
+name: Spectra surface
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: spectra
+
+jobs:
+  surface:
+    runs-on: ubuntu-24.04
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gfortran
+
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Download Polyregion
+        uses: actions/download-artifact@v8
+        with:
+          name: polyregion-linux-x86_64-Release
+          path: ${{ env.POLYREGION_DIST }}
+
+      - name: Restore executable bits
+        working-directory: .
+        run: just restore-exec-bits "$POLYREGION_DIST"
+
+      - name: Check format, codegen drift, and language surfaces
+        run: just ci

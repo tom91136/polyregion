@@ -1,0 +1,94 @@
+name: Spectra test
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: true
+      arch:
+        type: string
+        required: true
+      runs_on:
+        type: string
+        required: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: spectra
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [ 1, 2, 3, 4 ]
+    runs-on: ${{ inputs.runs_on }}
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      EMULATORS: ${{ github.workspace }}/emulators/out
+      SPECTRA_PACKAGE: ${{ github.workspace }}/package/spectra/lib.polyast
+      # macOS runners may or may not expose a paravirtualised Metal device
+      POLYRT_STRICT_SELECT: ${{ inputs.os == 'darwin' && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Setup Ninja
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ninja
+
+      - name: Pin the SDK to the selected Xcode
+        if: ${{ inputs.os == 'darwin' }}
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - name: Setup MSVC env
+        if: ${{ inputs.os == 'windows' }}
+        shell: pwsh
+        working-directory: .
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
+          $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
+          if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+          Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ inputs.arch }} -no_logo' | Out-Null
+          if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+          Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+
+      - name: Download Polyregion
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-${{ inputs.os }}-${{ inputs.arch }}-Release
+          path: ${{ env.POLYREGION_DIST }}
+
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-${{ inputs.os }}-${{ inputs.arch }}
+          path: emulators
+
+      - name: Download the package
+        uses: *download
+        with:
+          name: spectra-package
+          path: package/spectra
+
+      - name: Unpack emulators and restore executable bits
+        working-directory: .
+        run: |
+          tar xzf emulators/emulators-out.tar.gz -C emulators
+          just restore-exec-bits "$POLYREGION_DIST"
+
+      - name: Run shard ${{ matrix.shard }} of the package-import matrix on emulators
+        run: just test-package '' "-DSPECTRA_PREBUILT_PACKAGE=$SPECTRA_PACKAGE" "-I ${{ matrix.shard }},,4"

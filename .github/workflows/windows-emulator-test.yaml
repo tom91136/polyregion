@@ -1,0 +1,190 @@
+name: Windows emulator test
+
+on:
+  workflow_call:
+    inputs:
+      shards:
+        type: string
+        required: true
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  test-native-misc:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs_on: windows-2025-vs2026
+          - arch: arm64
+            runs_on: windows-11-arm
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: &checkout actions/checkout@v6
+
+      - name: Download dist
+        # v4: nektos/act#6022
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
+
+      - name: Download test dist (emulators)
+        # v4: nektos/act#6022
+        uses: *download
+        with:
+          name: polyregion-tests-emulators-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
+
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-windows-${{ matrix.arch }}
+          path: ./emulators
+
+      - name: Unpack emulators
+        run: tar xzf emulators\emulators-out.tar.gz -C emulators
+
+      - &msvc
+        name: Setup MSVC env
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $inst    = & $vswhere -latest -products * -property instanceId      | Select-Object -First 1
+          $install = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
+          if (-not $inst) { throw 'vswhere: no Visual Studio installation found' }
+          Import-Module (Join-Path $install 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Enter-VsDevShell -VsInstanceId $inst -SkipAutomaticLocation -DevCmdArguments '-arch=${{ matrix.arch }} -no_logo' | Out-Null
+          if (-not $env:VSCMD_ARG_TGT_ARCH) { throw 'VsDevShell did not initialise (no VSCMD_ARG_TGT_ARCH)' }
+          Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Enable crash dumps (WER)
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          try {
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpFolder -Value "$env:RUNNER_TEMP\crashdumps" -PropertyType ExpandString -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
+            New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
+          } catch { Write-Host "WER setup skipped: $_" }
+      - name: Run misc tests (non-codegen)
+        run: just test-native-dist emulators misc-test-results -LE codegen --repeat until-pass:3
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/misc-test-results.xml
+          label: ctest-misc
+
+      - name: Upload test results
+        if: always()
+        # v4: nektos/act#6022
+        uses: &upload actions/upload-artifact@v7
+        with:
+          name: misc-test-results-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/misc-test-results.xml
+          if-no-files-found: warn
+
+      # always() not failure(): --repeat until-pass recovers transient crashes, but WER still dumped them
+      - name: Collect crash dumps
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crash-reports | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
+          Get-ChildItem crash-reports -ErrorAction SilentlyContinue
+      - name: Upload crash reports
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-misc-windows-${{ matrix.arch }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore
+
+  test-native-with-emulators:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        shard: ${{ fromJSON(inputs.shards) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: *checkout
+      - name: Download dist
+        uses: *download
+        with:
+          name: polyregion-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-static-dist
+      - name: Download test dist (emulators)
+        uses: *download
+        with:
+          name: polyregion-tests-emulators-windows-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist
+      - name: Download emulators
+        uses: *download
+        with:
+          name: polyregion-emulators-windows-${{ matrix.arch }}
+          path: ./emulators
+      - name: Unpack emulators
+        run: tar xzf emulators\emulators-out.tar.gz -C emulators
+      - *msvc
+      - *setup-just
+      - name: Enable crash dumps (WER)
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          try {
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpFolder -Value "$env:RUNNER_TEMP\crashdumps" -PropertyType ExpandString -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
+            New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
+          } catch { Write-Host "WER setup skipped: $_" }
+      - name: Run emulator tests (${{ matrix.shard }})
+        shell: bash
+        run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
+          label: ctest-emulators-${{ matrix.shard }}
+      - name: Upload test results
+        if: always()
+        uses: *upload
+        with:
+          name: emulator-test-results-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
+          if-no-files-found: warn
+      - name: Collect crash dumps
+        if: failure()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path crash-reports | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
+          Get-ChildItem crash-reports -ErrorAction SilentlyContinue
+      - name: Upload crash reports
+        if: ${{ failure() && !env.ACT }}
+        uses: *upload
+        with:
+          name: crash-reports-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          path: crash-reports/
+          if-no-files-found: ignore

@@ -1,0 +1,82 @@
+name: Spectra package
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: spectra
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    env:
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      # One package serves every emulator leg: Thrust for the Ocelot cuda@ row, oneDPL for the rest.
+      POLYREGION_TEST_PROFILE: emulators
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Download Polyregion
+        uses: actions/download-artifact@v8
+        with:
+          name: polyregion-linux-x86_64-Release
+          path: ${{ env.POLYREGION_DIST }}
+
+      - name: Restore executable bits
+        working-directory: .
+        run: just restore-exec-bits "$POLYREGION_DIST"
+
+      - name: Restore pinned vendor inputs
+        if: ${{ !env.ACT }}
+        id: restore-vendor
+        uses: actions/cache/restore@v5
+        with:
+          path: &vendor-path |
+            spectra/thirdparty/vendor
+            spectra/thirdparty/.vendor.downloads
+          key: &vendor-key spectra-vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./spectra/cmake/spectra_vendor_versions.cmake', './spectra/cmake/prepare_spectra_vendor_dist.cmake') }}
+
+      - name: Stage and verify pinned vendor inputs
+        id: build-vendor
+        run: |
+          just build-vendor-libs
+          just verify-vendor-libs
+
+      - name: Save pinned vendor inputs
+        if: ${{ !env.ACT && steps.restore-vendor.outputs.cache-hit != 'true' && steps.build-vendor.outcome == 'success' }}
+        uses: actions/cache/save@v5
+        with:
+          path: *vendor-path
+          key: *vendor-key
+
+      - name: Build the package
+        run: just build-package
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: spectra-package
+          path: spectra/target/package/packages/spectra/lib.polyast
+          if-no-files-found: error

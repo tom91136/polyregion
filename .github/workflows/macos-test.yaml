@@ -1,0 +1,260 @@
+name: macOS test
+
+on:
+  workflow_call:
+
+jobs:
+  check-dist:
+    # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: &simple-matrix
+          - arch: arm64
+            runs_on: macos-26
+          - arch: x86_64
+            runs_on: macos-26-intel
+    runs-on: ${{ matrix.runs_on }}
+    env: &arch-env
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      # we may or may not get a paravirtualised Metal device
+      POLYRT_STRICT_SELECT: "0"
+    steps:
+      - uses: &checkout actions/checkout@v6
+
+      - &brew-cmake
+        name: Install dependencies
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
+          brew install --quiet cmake
+
+      - &sdkroot
+        name: Pin the SDK to the selected Xcode
+        run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Download dist
+        # v4: nektos/act#6022
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Restore executable bits
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Run check-dist
+        run: just check-dist
+
+      - name: Annotate dist-check results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/build-dist-check-${{ matrix.arch }}-dylib/dist-check-results.xml
+          label: dist-check
+
+  test-scala:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - &setup-java
+        name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+      - *setup-just
+      - *sdkroot
+
+      - name: Download dist
+        # v4: nektos/act#6022
+        uses: *download
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Run munit suite
+        env:
+          POLYREGION_NATIVE_LIB_DIR: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+          DYLD_FALLBACK_LIBRARY_PATH: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+          POLYPASS_PLUGINS: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib/libpolypass.dylib
+        run: just test-scala
+
+      - name: Annotate scala results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          label: scala
+
+      - name: Upload test results
+        if: always()
+        # v4: nektos/act#6022
+        uses: &upload actions/upload-artifact@v7
+        with:
+          name: scala-test-results-darwin-${{ matrix.arch }}-Release
+          path: ./frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          if-no-files-found: warn
+
+  build-san:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-26
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_ASAN: "ON"
+      ASAN_OPTIONS: detect_leaks=0
+    steps:
+      - uses: *checkout
+      - *setup-java
+
+      - name: Install dependencies
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then brew untap aws/tap; fi
+          brew install --quiet cmake ninja zlib
+      - *sdkroot
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - *setup-just
+
+      - name: Restore LLVM cache
+        uses: ./.github/actions/restore-compressed-cache
+        with:
+          path: native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          archive: native/out/llvm-${{ matrix.arch }}-dist.tar.zst
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Restore device libs cache
+        uses: &cache-restore actions/cache/restore@v5
+        with:
+          path: ./native/thirdparty/device_libs
+          key: device-libs-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Restore vcpkg cache
+        uses: *cache-restore
+        with:
+          path: ./native/.vcpkg/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env', './native/ports/**') }}
+
+      - name: Download dist (pass bundle)
+        uses: *download
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release
+          path: ./dist-regular
+
+      - name: Stage pass bundle and JVM SDK
+        run: |
+          if [ -f dist-regular/lib/libpolypass.dylib ]; then install -m755 dist-regular/lib/libpolypass.dylib native/polyc/libpolypass.dylib; fi
+          test -s native/polyc/libpolypass.dylib
+          mkdir -p native/out/maven && cp -R dist-regular/share/polyregion/maven/. native/out/maven/
+          test -d native/out/maven/uk
+
+      - name: Seed asan dist from LLVM dist
+        run: |
+          SRC=native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          DST=native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+          if [ ! -x "$DST/bin/clang++" ]; then
+            rm -rf "$DST"; mkdir -p "$DST"
+            cp -a "$SRC/." "$DST"
+          fi
+
+      - name: Configure (asan)
+        run: just configure-san
+
+      - name: Build dist (asan)
+        run: just build-dist-san
+
+      - name: Build test dist (asan)
+        run: just build-test-dist-san
+
+      - name: Upload dist (asan)
+        uses: *upload
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist/**
+          if-no-files-found: error
+
+      - name: Upload test dist (asan)
+        uses: *upload
+        with:
+          name: polyregion-tests-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/**
+          if-no-files-found: error
+
+  test-native-san:
+    needs: build-san
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runs_on: macos-26
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *setup-just
+      - *brew-cmake
+      - *sdkroot
+
+      - name: Download dist (asan)
+        uses: *download
+        with:
+          name: polyregion-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Download test dist (asan)
+        uses: *download
+        with:
+          name: polyregion-tests-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Restore executable bits
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Run native tests (asan)
+        run: just test-native-dist asan native-test-results-asan
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          label: ctest-asan
+
+      - name: Upload test results
+        if: always()
+        uses: *upload
+        with:
+          name: native-test-results-darwin-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          if-no-files-found: warn

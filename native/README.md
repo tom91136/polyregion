@@ -72,11 +72,14 @@ just build-llvm    ARCH=aarch64
 
 ## CI release artefacts
 
-Each platform workflow (`linux.yaml`, `macos.yaml`, `windows.yaml`) runs `check-codegen`, then
-matrix-driven `build` (`LLVM` + `DEVICE_LIBS` + `CONFIGURE` + `BUILD` + `DIST` + `DIST_TEST`),
-then in parallel `check-dist`, `test-native`, and (linux only) `test-scala`. The packaged
-dist is uploaded as a GitHub Actions artefact named `polyregion-${platform}-${arch}-${build_type}`
-(90-day retention, not a release).
+`ci.yaml` runs every platform in one workflow run. Each platform has a build workflow
+(`linux-build.yaml`, `macos-build.yaml`, `windows-build.yaml`, `cross-build.yaml`) that runs
+`build-llvm` and the matrix-driven `build` (`LLVM` + `DEVICE_LIBS` + `CONFIGURE` + `BUILD` +
+`DIST` + `DIST_TEST`), and a test workflow (`*-test.yaml`) that starts when the build finishes.
+The emulator bundles build separately (`*-emulators.yaml`), and only the tests that run on them
+(`*-emulator-test.yaml` and the Spectra tests) wait for both. `checks.yaml` holds `check-codegen`
+and `pass-js`. The packaged dist is uploaded as a GitHub Actions artefact named
+`polyregion-${platform}-${arch}-${build_type}` (90-day retention, not a release).
 
 ### Running CI locally with `act`
 
@@ -85,10 +88,13 @@ dist is uploaded as a GitHub Actions artefact named `polyregion-${platform}-${ar
 rootless podman's default bridge has no IPv6 egress), workspace bind-mount so artefacts
 survive between runs, and `/tmp/act-ccache` for compiler cache.
 
+Point `act` at a called workflow to pick a single job, or at a `ci.yaml` job to run a whole stage:
+
 ```sh
-act -W .github/workflows/linux.yaml -j check-codegen   # fast: sbt codegen + diff
-act -W .github/workflows/linux.yaml -j build           # full LLVM build (~30 min cold)
-act -W .github/workflows/linux.yaml -j check-dist      # uses the artefact from `build`
+act -W .github/workflows/checks.yaml -j check-codegen     # fast: sbt codegen + diff
+act -W .github/workflows/linux-build.yaml -j build        # full LLVM build (~30 min cold)
+act -W .github/workflows/linux-test.yaml -j check-dist    # uses the dist `build` left on disk
+act -W .github/workflows/ci.yaml -j linux-build           # every job in linux-build.yaml
 ```
 
 Notes:

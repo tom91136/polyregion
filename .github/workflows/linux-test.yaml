@@ -1,0 +1,318 @@
+name: Linux test
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # AL8 = glibc 2.28, gcc-toolset-12 libstdc++. Cross-only archs (riscv64, arm) live in cross-build.yaml.
+  SYSROOT_VARIANT: al8
+
+jobs:
+  check-dist:
+    # Run for whichever arch built; the leg whose build failed has no artifact and goes red on download.
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        distro:
+          - { image: 'almalinux:8',  pkg: 'dnf install -y --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
+          - { image: 'almalinux:9',  pkg: 'dnf install -y --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
+          - { image: 'almalinux:10', pkg: 'dnf install -y --setopt=strict=0 git cmake findutils tar gzip gcc-c++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath)' }
+          - { image: 'ubuntu:22.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath0)' }
+          - { image: 'ubuntu:24.04', pkg: 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake findutils curl g++ python3 $([ "$POLYREGION_ARCH" = x86_64 ] && echo libquadmath0)' }
+        include: &simple-matrix
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+    container: ${{ matrix.distro.image }}
+    env: &arch-env
+      POLYREGION_ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Install container dependencies
+        run: ${{ matrix.distro.pkg }}
+
+      - uses: &checkout actions/checkout@v6
+
+      - name: Download just
+        # XXX JS setup actions fail in node-less containers; download the host-built musl binary instead.
+        if: ${{ !env.ACT }}
+        uses: &download actions/download-artifact@v8
+        with:
+          name: just-linux-${{ matrix.arch }}
+          path: just-bin
+
+      - name: Setup just
+        run: |
+          if [ -f just-bin/just ]; then install -m755 just-bin/just /usr/local/bin/just
+          else curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin; fi
+
+      - name: Download dist
+        # XXX Under act the workspace is bind-mounted; the dist is already at this path.
+        if: ${{ !env.ACT }}
+        # v4: nektos/act#6022
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Restore executable bits
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Run check-dist
+        run: just check-dist
+
+      - name: Annotate dist-check results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/build-dist-check-${{ matrix.arch }}-dylib/dist-check-results.xml
+          label: dist-check
+
+  test-scala:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *simple-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - &setup-java
+        name: Setup JDK + sbt cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: sbt
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+      - &setup-just
+        name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Download dist
+        if: ${{ !env.ACT }}
+        # v4: nektos/act#6022
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+
+      - name: Run munit suite
+        env:
+          POLYREGION_NATIVE_LIB_DIR: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+          LD_LIBRARY_PATH: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib
+          POLYPASS_PLUGINS: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist/lib/libpolypass.so
+        run: just test-scala
+
+      - name: Annotate scala results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          label: scala
+
+      - name: Upload test results
+        if: ${{ always() && !env.ACT }}
+        # v4: nektos/act#6022
+        uses: &upload actions/upload-artifact@v7
+        with:
+          name: scala-test-results-linux-${{ matrix.arch }}-Release
+          path: ./frontend/target/out/**/compiler-testsuite-scala/test-reports/*.xml
+          if-no-files-found: warn
+
+  build-san:
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: &san-matrix
+          - arch: x86_64
+            runs_on: ubuntu-24.04
+            triple: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            runs_on: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runs_on }}
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_ASAN: "ON"
+      ASAN_OPTIONS: detect_leaks=0
+      LD_LIBRARY_PATH: ${{ github.workspace }}/native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist/lib/${{ matrix.triple }}
+    steps:
+      - name: Free up disk space
+        if: ${{ !env.ACT }}
+        uses: justinthelaw/maximize-github-runner-space@v0.9.0
+        with:
+          cleanup-profile: custom
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-dotnet: 'true'
+
+      - uses: *checkout
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang clang-tools lld llvm g++ libcrypt-dev libltdl-dev zlib1g-dev python3-requests ccache
+
+      - *setup-java
+
+      - name: Dotenv
+        id: dotenv
+        uses: falti/dotenv-action@v1.2
+        with:
+          path: ./native/.env
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - *setup-just
+
+      - name: Restore sysroot cache
+        if: ${{ !env.ACT }}
+        uses: &cache-restore actions/cache/restore@v5
+        with:
+          path: ./sysroot/out/sysroot-${{ env.SYSROOT_VARIANT }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./sysroot/Dockerfile', './justfile') }}
+
+      - name: Prepare sysroot
+        run: |
+          [ -n "$(ls sysroot/out/sysroot-*-${{ matrix.arch }}.tar.xz 2>/dev/null)" ] || CONTAINER=docker just build-sysroot
+          just prepare-sysroot
+          echo "SYSROOT_PATH=$PWD/sysroot/out/${{ matrix.arch }}" >> "$GITHUB_ENV"
+
+      - name: Restore LLVM cache
+        if: ${{ !env.ACT }}
+        uses: ./.github/actions/restore-compressed-cache
+        with:
+          path: native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          archive: native/out/llvm-${{ matrix.arch }}-dist.tar.zst
+          key: llvm-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Restore device libs cache
+        if: ${{ !env.ACT }}
+        uses: *cache-restore
+        with:
+          path: ./native/thirdparty/device_libs
+          key: device-libs-${{ env.SYSROOT_VARIANT }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/cmake/prepare_*_dist.cmake', './native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/build.cmake', './native/toolchains/*.cmake', './native/cmake/sysroot_gcc_dir.cmake', './sysroot/Dockerfile', './native/llvm-patches/*.patch', './native/llvm-patches-*/*.patch') }}
+
+      - name: Restore vcpkg cache
+        if: ${{ !env.ACT }}
+        uses: *cache-restore
+        with:
+          path: ./native/.vcpkg/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles('./native/vcpkg.json', './native/vcpkg-configuration.json', './native/toolchains/*.cmake', './native/.env', './native/ports/**') }}
+
+      - name: Download dist (pass bundle)
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ./dist-regular
+
+      - name: Stage pass bundle and JVM SDK
+        run: |
+          if [ -f dist-regular/lib/libpolypass.so ]; then install -m755 dist-regular/lib/libpolypass.so native/polyc/libpolypass.so; fi
+          test -s native/polyc/libpolypass.so
+          mkdir -p native/out/maven && cp -R dist-regular/share/polyregion/maven/. native/out/maven/
+          test -d native/out/maven/uk
+
+      - name: Seed asan dist from LLVM dist
+        run: |
+          SRC=native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist
+          DST=native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+          if [ ! -x "$DST/bin/clang++" ]; then
+            rm -rf "$DST"; mkdir -p "$DST"
+            cp -a "$SRC/." "$DST"
+          fi
+
+      - name: Configure (asan)
+        run: just configure-san
+
+      - name: Build dist (asan)
+        run: just build-dist-san
+
+      - name: Build test dist (asan)
+        run: just build-test-dist-san
+
+      - name: Upload dist (asan)
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist/**
+          if-no-files-found: error
+
+      - name: Upload test dist (asan)
+        if: ${{ !env.ACT }}
+        uses: *upload
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/**
+          if-no-files-found: error
+
+  test-native-san:
+    needs: build-san
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: *san-matrix
+    runs-on: ${{ matrix.runs_on }}
+    env: *arch-env
+    steps:
+      - uses: *checkout
+      - *setup-just
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
+      - name: Download dist (asan)
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Download test dist (asan)
+        if: ${{ !env.ACT }}
+        uses: *download
+        with:
+          name: polyregion-tests-linux-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Restore executable bits
+        run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-asan-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist
+
+      - name: Run native tests (asan)
+        run: just test-native-dist asan native-test-results-asan
+
+      - name: Annotate ctest results
+        if: always()
+        uses: ./.github/actions/annotate-junit
+        with:
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          label: ctest-asan
+
+      - name: Upload test results
+        if: ${{ always() && !env.ACT }}
+        uses: *upload
+        with:
+          name: native-test-results-linux-${{ matrix.arch }}-Release-asan
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-asan-dist/native-test-results-asan.xml
+          if-no-files-found: warn

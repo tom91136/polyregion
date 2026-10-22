@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yaml
+
+  linux-build:
+    uses: ./.github/workflows/linux-build.yaml
+
+  linux-emulators:
+    uses: ./.github/workflows/linux-emulators.yaml
+
+  linux-test:
+    needs: linux-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/linux-test.yaml
+
+  linux-emulator-test:
+    needs: [linux-build, linux-emulators]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/linux-emulator-test.yaml
+    with:
+      shards: ${{ needs.linux-build.outputs.shards }}
+
+  macos-build:
+    uses: ./.github/workflows/macos-build.yaml
+
+  macos-emulators:
+    uses: ./.github/workflows/macos-emulators.yaml
+
+  macos-test:
+    needs: macos-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/macos-test.yaml
+
+  macos-emulator-test:
+    needs: [macos-build, macos-emulators]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/macos-emulator-test.yaml
+    with:
+      shards: ${{ needs.macos-build.outputs.shards }}
+
+  windows-build:
+    uses: ./.github/workflows/windows-build.yaml
+
+  windows-emulators:
+    uses: ./.github/workflows/windows-emulators.yaml
+
+  windows-test:
+    needs: windows-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/windows-test.yaml
+
+  windows-emulator-test:
+    needs: [windows-build, windows-emulators]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/windows-emulator-test.yaml
+    with:
+      shards: ${{ needs.windows-build.outputs.shards }}
+
+  cross-build:
+    uses: ./.github/workflows/cross-build.yaml
+
+  cross-test:
+    needs: cross-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cross-test.yaml
+
+  spectra-vendor:
+    uses: ./.github/workflows/spectra-vendor.yaml
+
+  spectra-surface:
+    needs: linux-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/spectra-surface.yaml
+
+  spectra-package:
+    needs: linux-build
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/spectra-package.yaml
+
+  spectra-test-linux:
+    needs: [linux-build, linux-emulators, spectra-package]
+    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runs_on: ubuntu-24.04 }
+          - { arch: aarch64, runs_on: ubuntu-24.04-arm }
+    uses: ./.github/workflows/spectra-test.yaml
+    with:
+      os: linux
+      arch: ${{ matrix.arch }}
+      runs_on: ${{ matrix.runs_on }}
+
+  spectra-test-macos:
+    needs: [macos-build, macos-emulators, spectra-package]
+    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, runs_on: macos-26 }
+          - { arch: x86_64, runs_on: macos-26-intel }
+    uses: ./.github/workflows/spectra-test.yaml
+    with:
+      os: darwin
+      arch: ${{ matrix.arch }}
+      runs_on: ${{ matrix.runs_on }}
+
+  spectra-test-windows:
+    needs: [windows-build, windows-emulators, spectra-package]
+    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runs_on: windows-2025-vs2026 }
+          - { arch: arm64, runs_on: windows-11-arm }
+    uses: ./.github/workflows/spectra-test.yaml
+    with:
+      os: windows
+      arch: ${{ matrix.arch }}
+      runs_on: ${{ matrix.runs_on }}
+
+  spectra-test-cross:
+    needs: [cross-build, spectra-package]
+    if: ${{ !cancelled() && needs.spectra-package.result == 'success' }}
+    uses: ./.github/workflows/spectra-test-cross.yaml

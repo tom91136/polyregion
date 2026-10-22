@@ -1,0 +1,84 @@
+name: Spectra cross test
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: spectra
+
+jobs:
+  # No emulator bundle exists for these architectures, so cases compile under QEMU against the cross dist and skip at
+  # dispatch (no OpenCL platform); this proves package import on every host Polyregion ships for.
+  test-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: riscv64, qemu_arch: riscv64, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
+          - { arch: ppc64le, qemu_arch: ppc64le, sysroot_variant: al8, sysroot_dockerfile: Dockerfile }
+          - { arch: arm, qemu_arch: arm, sysroot_variant: ubuntu20, sysroot_dockerfile: Dockerfile.ubuntu }
+    runs-on: ubuntu-24.04-arm
+    env:
+      POLYREGION_ARCH: ${{ matrix.arch }}
+      POLYREGION_DIST: ${{ github.workspace }}/dist
+      POLYREGION_TEST_TARGETS: opencl1_1@!opencl1_1@*Portable*source*
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qemu-user-static binfmt-support
+
+      - name: Register binfmt-misc for ${{ matrix.qemu_arch }}
+        run: docker run --privileged --rm tonistiigi/binfmt --install ${{ matrix.qemu_arch }}
+
+      - name: Restore sysroot cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ./sysroot/out/sysroot-${{ matrix.sysroot_variant }}-${{ matrix.arch }}.tar.xz
+          key: sysroot-${{ matrix.sysroot_variant }}-${{ runner.os }}-${{ runner.arch }}-${{ matrix.arch }}-${{ hashFiles(format('./sysroot/{0}', matrix.sysroot_dockerfile), './justfile') }}
+
+      - name: Prepare sysroot
+        working-directory: .
+        run: |
+          [ -n "$(ls sysroot/out/sysroot-*-${{ matrix.arch }}.tar.xz 2>/dev/null)" ] || CONTAINER=docker just build-sysroot
+          just prepare-sysroot
+          SYSROOT="$PWD/sysroot/out/${{ matrix.arch }}"
+          {
+            echo "POLYREGION_SYSROOT=$SYSROOT"
+            echo "QEMU_LD_PREFIX=$SYSROOT"
+          } >> "$GITHUB_ENV"
+
+      - name: Download Polyregion
+        uses: &download actions/download-artifact@v8
+        with:
+          name: polyregion-linux-${{ matrix.arch }}-Release
+          path: ${{ env.POLYREGION_DIST }}
+
+      - name: Download the package
+        uses: *download
+        with:
+          name: spectra-package
+          path: package/spectra
+
+      - name: Shim the dist for QEMU
+        working-directory: .
+        run: |
+          just restore-exec-bits "$POLYREGION_DIST"
+          ci/qemu_shim.sh "${{ matrix.arch }}" "$POLYREGION_DIST" "$POLYREGION_SYSROOT"
+
+      - name: Compile the smoke cases under QEMU
+        run: |
+          cmake -S . -B target/cross -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON \
+            -DSPECTRA_PREBUILT_PACKAGE="$GITHUB_WORKSPACE/package/spectra/lib.polyast" -DCMAKE_PREFIX_PATH="$POLYREGION_DIST"
+          cmake --build target/cross --target spectra-discover
+          ctest --test-dir target/cross --timeout 3600 --output-on-failure --no-tests=error \
+            -R '^spectra-offload-(equal|none_of|sort|inclusive_scan|reduce_by_key|minmax_element)-'
