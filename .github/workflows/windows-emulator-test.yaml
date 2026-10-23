@@ -93,6 +93,7 @@ jobs:
           label: ctest-misc
 
       - name: Upload test results
+        continue-on-error: true
         if: always()
         # v4: nektos/act#6022
         uses: &upload actions/upload-artifact@v7
@@ -110,6 +111,7 @@ jobs:
           Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
           Get-ChildItem crash-reports -ErrorAction SilentlyContinue
       - name: Upload crash reports
+        continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
@@ -168,6 +170,7 @@ jobs:
           junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
           label: ctest-emulators-${{ matrix.shard }}
       - name: Upload test results
+        continue-on-error: true
         if: always()
         uses: *upload
         with:
@@ -182,6 +185,7 @@ jobs:
           Copy-Item "$env:RUNNER_TEMP\crashdumps\*.dmp" crash-reports\ -ErrorAction SilentlyContinue
           Get-ChildItem crash-reports -ErrorAction SilentlyContinue
       - name: Upload crash reports
+        continue-on-error: true
         if: ${{ failure() && !env.ACT }}
         uses: *upload
         with:

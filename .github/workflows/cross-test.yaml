@@ -112,6 +112,7 @@ jobs:
           label: ctest-misc-${{ matrix.arch }}
 
       - name: Upload test results
+        continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: &upload actions/upload-artifact@v7
         with:
@@ -135,6 +136,7 @@ jobs:
           ls -la crash-reports || true
 
       - name: Upload crash reports
+        continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
@@ -203,6 +205,7 @@ jobs:
           label: ctest-shard-${{ matrix.arch }}-${{ env.SHARD }}-${{ matrix.frontend }}
 
       - name: Upload test results
+        continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
@@ -213,6 +216,7 @@ jobs:
       - *collect-cores
 
       - name: Upload crash reports
+        continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
@@ -266,6 +270,7 @@ jobs:
       - *collect-cores
 
       - name: Upload crash reports
+        continue-on-error: true
         if: ${{ always() && !env.ACT }}
         uses: *upload
         with:
