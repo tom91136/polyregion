@@ -1,5 +1,6 @@
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -84,6 +85,14 @@ bool linkProgramModule(llvm::Module &module, std::unique_ptr<llvm::Module> linke
   return failed;
 }
 
+std::optional<std::string> translationUnitTargetFeatures(const llvm::Module &module) {
+  for (const auto &function : module) {
+    const auto attribute = function.getFnAttribute("target-features");
+    if (attribute.isValid()) return attribute.getValueAsString().str();
+  }
+  return {};
+}
+
 class LinkProgramBitcodePass final : public llvm::PassInfoMixin<LinkProgramBitcodePass> {
   std::shared_ptr<polystl::PackageProgramBitcodes> bitcode;
   clang::DiagnosticsEngine &diagnostics;
@@ -111,6 +120,9 @@ public:
       }
       linked->setTargetTriple(module.getTargetTriple());
       linked->setDataLayout(module.getDataLayout());
+      if (const auto features = translationUnitTargetFeatures(module))
+        for (auto &function : *linked)
+          function.addFnAttr("target-features", *features);
       if (linkProgramModule(module, std::move(linked), diagnostics)) {
         module.getContext().emitError("cannot link package program");
         return llvm::PreservedAnalyses::none();
