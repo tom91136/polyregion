@@ -201,18 +201,21 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
       }
     }
   }
-#if defined(__linux__) || defined(__APPLE__)
   // XXX likewise forward VK_DRIVER_FILES narrowed to the selected device's manifest, else the child falls back
   // to a system Vulkan driver, or none at all on clean CI runners
+#if defined(_WIN32)
+  constexpr char VkIcdSeparator = ';';
+#else
+  constexpr char VkIcdSeparator = ':';
+#endif
   if (const char *icds = std::getenv("VK_DRIVER_FILES") ? std::getenv("VK_DRIVER_FILES") : std::getenv("VK_ICD_FILENAMES")) {
     const auto a = archFor(t, cfg);
     if (const char *want = a ^ contains_slice("llvmpipe") ? "lvp_icd" : a ^ contains_slice("SwiftShader") ? "swiftshader" : nullptr)
-      if (const auto entry = std::string(icds) ^ split(':') ^ find([&](const auto &e) { return e ^ contains_slice(want); })) {
+      if (const auto entry = std::string(icds) ^ split(VkIcdSeparator) ^ find([&](const auto &e) { return e ^ contains_slice(want); })) {
         put("VK_DRIVER_FILES", *entry);
         put("VK_ICD_FILENAMES", *entry);
       }
   }
-#endif
   {
     std::string pathVal = std::getenv("PATH") ? std::getenv("PATH") : "";
 #if defined(_WIN32)
