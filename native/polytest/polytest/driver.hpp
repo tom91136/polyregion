@@ -654,11 +654,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
       if (!o.cmdline.empty()) std::fprintf(stderr, "  cmd: %s\n", o.cmdline.c_str());
       std::fprintf(stderr, "  stdout:\n%s\n  stderr:\n%s\n", o.stdoutCapture.c_str(), o.stderrCapture.c_str());
     }
-    if (o.status == TaskStatus::Skip) {
-      if (isCompile) return 77; // compile-skip cascades to dependents via the FIXTURES_SETUP SKIP_RETURN_CODE
-      recordSkip(t.id(), o.failReason);
-      return 0;
-    }
+    if (o.status == TaskStatus::Skip) return reportSkip(t.id(), o.failReason), 77;
     return o.status == TaskStatus::Pass ? 0 : 1;
   }
   if (!opts.runTask.empty()) {
@@ -670,7 +666,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     Task only = std::move(const_cast<Task &>(*it));
     allTasks.clear();
     allTasks.push_back(std::move(only));
-  } else std::remove("polytest-skips.log");
+  }
   const auto &tasks = allTasks;
   if (tasks.empty()) {
     std::fprintf(stderr, "polytest: no tasks discovered (filters=%zu)\n", opts.caseFilters.size());
@@ -743,14 +739,14 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
     const auto &co = compileOutcomes[i];
     if (co.status != TaskStatus::Pass) {
       finalOutcomes[i] = co;
-      if (co.status == TaskStatus::Skip) recordSkip(tasks[i].id(), co.failReason);
+      if (co.status == TaskStatus::Skip) reportSkip(tasks[i].id(), co.failReason);
       const char *label = co.status == TaskStatus::Skip ? "compile-skip" : "compile-fail";
       std::fprintf(stderr, "[run %zu/%zu] %s %s (%s)\n", i + 1, tasks.size(), statusTag(co.status), tasks[i].display().c_str(), label);
       continue;
     }
     auto out = detail::runTask(tasks[i], cfg);
     finalOutcomes[i] = out;
-    if (out.status == TaskStatus::Skip) recordSkip(tasks[i].id(), out.failReason);
+    if (out.status == TaskStatus::Skip) reportSkip(tasks[i].id(), out.failReason);
     std::fprintf(stderr, "[run %zu/%zu] %s %s (%.2fs)\n", i + 1, tasks.size(), statusTag(out.status), tasks[i].display().c_str(), out.secs);
     dumpDetails(out, /*includeStdout*/ true);
     if (cfg.cleanupOnSuccess && (out.status == TaskStatus::Pass || out.status == TaskStatus::Skip)) {
@@ -772,7 +768,7 @@ inline int runTasks(const DriverConfig &cfg, const RunnerOptions &opts) {
   }
   std::fprintf(stderr, "polytest: pass=%zu skip=%zu fail=%zu total=%zu compile=%.1fs run=%.1fs\n", pass, skip, fail, tasks.size(),
                compileSecs, runSecs);
-  return fail == 0 ? 0 : 1;
+  return fail > 0 ? 1 : !opts.runTask.empty() && skip > 0 ? 77 : 0;
 }
 
 namespace detail {

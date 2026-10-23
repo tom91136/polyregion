@@ -97,11 +97,7 @@ inline int runMain(int argc, char **argv) {
   };
 
   if (mode == "run") {
-    if (auto found = all ^ find([&](const auto &t) { return t.id == target; })) {
-      const int rc = runOne(*found);
-      if (rc == 77) return recordSkip(std::string(found->id), "no compatible device/feature"), 0;
-      return rc;
-    }
+    if (auto found = all ^ find([&](const auto &t) { return t.id == target; })) return runOne(*found);
     fmt::print(stderr, "No task with id `{}`\n", target);
     return 2;
   }

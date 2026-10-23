@@ -269,7 +269,6 @@ test-scala *args='':
     cd frontend && {{ sbt }} 'compiler-testsuite-scala/testFull' {{ args }}
 
 # Run the native ctest suite; device targets skip without a GPU/emulator. Extra ctest flags via *args.
-# Skips are not ctest SKIP entries (that property is O(n^2) at parse); the runner logs them per workdir.
 test-native *args='': build-pass-native
     #!/usr/bin/env bash
     set -euo pipefail
@@ -280,13 +279,13 @@ test-native *args='': build-pass-native
         if [ -s "$package_service" ]; then export POLYPASS_PLUGINS="$package_service"; break; fi
     done
     rm -f "$BUILD/Testing/Temporary/CTestCostData.txt"
-    find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
         polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
     # force ctest colour on a terminal; auto (off) when piped to a log so it stays greppable
-    rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }} || rc=$?
-    skips=$(find "$BUILD" -name polytest-skips.log -exec cat {} + 2>/dev/null | wc -l || true)
-    [ "${skips:-0}" -gt 0 ] && echo "polytest: ${skips} skipped (find $BUILD -name polytest-skips.log | xargs cat)" || true
+    junit="$BUILD/Testing/test-native.xml"; rm -f "$junit"
+    rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 --output-junit Testing/test-native.xml {{ args }} || rc=$?
+    skips=$(grep -m1 -o 'skipped="[0-9]*"' "$junit" 2>/dev/null | tr -dc 0-9 || true)
+    [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
     exit $rc
 
 # Print the unique shard labels (ctest -L keys) for a profile, one per line; CI builds the shard matrix from this.
@@ -334,7 +333,6 @@ test-native-with-emulators *args='': _pass-bundle
     BUILD=$(just _native-build)
     export POLYREGION_TEST_PROFILE=emulators
     export POLYINVOKE_TEST_LOCK="${POLYINVOKE_TEST_LOCK:-0}"
-    find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     ninja -C "$BUILD" polyinvoke-tests-discover polycpp-tests-discover polyfc-tests-discover \
         polycommon-tests polyc-tests polyrt-tests polyreflect-rt-tests polytest-tests
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" --timeout 600 {{ args }}
@@ -411,8 +409,11 @@ test-native-dist profile='' junit='native-test-results' *args='':
     j=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")
     to=600; if [ "{{ profile }}" = emulators ]; then to=1500; fi
     ulimit -c 0
-    find "$TESTS" -name polytest-skips.log -delete 2>/dev/null || true
-    CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$TESTS/{{ junit }}.xml" {{ args }}
+    junit="$TESTS/{{ junit }}.xml"; rm -f "$junit"
+    rc=0; CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$TESTS" -j "$j" --timeout "$to" --output-on-failure --output-junit "$junit" {{ args }} || rc=$?
+    skips=$(grep -m1 -o 'skipped="[0-9]*"' "$junit" 2>/dev/null | tr -dc 0-9 || true)
+    [ "${skips:-0}" -gt 0 ] && echo "ctest: ${skips} skipped (listed under 'did not run'; junit $junit)" || true
+    exit $rc
 
 # Smoke test of the emulator bundle (Vulkan on lavapipe, OpenCL on pocl[+rusticl], CUDA on gpuocelot/linux).
 check-emulators bundle='':
@@ -688,7 +689,6 @@ test-native-san *args='':
     export POLYREGION_ASAN=ON
     ulimit -c 0
     BUILD=$(just _native-build)
-    find "$BUILD" -name polytest-skips.log -delete 2>/dev/null || true
     CLICOLOR_FORCE=$([ -t 1 ] && echo 1 || echo 0) ctest --test-dir "$BUILD" {{ args }}
 
 # Run `cmake -DACTION=<action> -P native/build.cmake`. Auto-passes -DCMAKE_SYSROOT if it exists.

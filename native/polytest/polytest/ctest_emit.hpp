@@ -14,26 +14,12 @@
 
 #include "polyregion/env_keys.h"
 
-#ifndef _WIN32
-  #include <fcntl.h>
-  #include <unistd.h>
-#endif
-
 namespace polyregion::polytest {
 
 using namespace aspartame;
 
-// out-of-band skip log: ctest's SKIP_RETURN_CODE is an O(n^2) name scan at parse, so a skip exits 0
-// and appends here instead; shared by both runners
-inline void recordSkip(const std::string &id, const std::string &reason) {
+inline void reportSkip(const std::string &id, const std::string &reason) {
   fmt::print(stderr, "[SKIP] {}{}{}\n", id, reason.empty() ? "" : ": ", reason);
-#ifndef _WIN32
-  const auto line = fmt::format("{}\t{}\n", id, reason);
-  if (const int fd = ::open("polytest-skips.log", O_WRONLY | O_CREAT | O_APPEND, 0644); fd >= 0) {
-    [[maybe_unused]] const auto n = ::write(fd, line.data(), line.size()); // short line => atomic append
-    ::close(fd);
-  }
-#endif
 }
 
 // empty `variants` => a self-contained `--run-task`; non-empty => one FIXTURES_SETUP compile, a
@@ -46,9 +32,8 @@ struct CtestEntry {
 
 inline void emitCtestFragment(const std::string &file, const std::string &prefix, const std::string &binary,
                               const std::string & /*workdir*/, const std::string &env, const std::vector<CtestEntry> &tasks) {
-  // set_tests_properties is an O(n^2) name scan at parse, so emit it only where needed: the runner
-  // chdirs itself and reports run-skips out-of-band, so a plain test is a bare add_test. only the
-  // FIXTURES_SETUP keeps SKIP_RETURN_CODE, to cascade a compile-skip to its runs
+  // set_tests_properties scans every test per property at parse (O(n^2)), so emit only the properties a
+  // test needs; the runner chdirs itself, so no WORKING_DIRECTORY
   const auto joinEnv = [&](const std::string &extra) { return env.empty() ? extra : extra.empty() ? env : env + ";" + extra; };
   const auto envProp = [&](const std::string &extra) {
     const auto e = joinEnv(extra);
@@ -68,11 +53,9 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
           ^ mk_string("", [&](const CtestEntry &t) {
               const auto name = prefix.empty() ? t.id : prefix + "-" + t.id;
               if (t.variants.empty()) {
-                auto line = fmt::format("add_test(\"{}\" \"{}\" --run-task \"{}\")\n", name, binary, t.id);
                 const auto labelsProp = t.labels.empty() ? std::string{} : fmt::format(" LABELS \"{}\"", t.labels);
-                if (const auto p = labelsProp + envProp({}); !p.empty())
-                  line += fmt::format("set_tests_properties(\"{}\" PROPERTIES{})\n", name, p);
-                return line;
+                return fmt::format("add_test(\"{}\" \"{}\" --run-task \"{}\")\n", name, binary, t.id)
+                       + fmt::format("set_tests_properties(\"{}\" PROPERTIES SKIP_RETURN_CODE 77{}{})\n", name, labelsProp, envProp({}));
               }
               // shared-compile: one setup, a run per variant, one cleanup, gated on a per-task fixture
               const auto fix = "fix-" + name;
@@ -83,7 +66,8 @@ inline void emitCtestFragment(const std::string &file, const std::string &prefix
               frag += t.variants ^ mk_string("", [&](const auto &suffix, const auto &extraEnv) {
                         const auto vname = suffix.empty() ? name : name + "-" + suffix;
                         return fmt::format("add_test(\"{}\" \"{}\" --run-only-task \"{}\")\n", vname, binary, t.id)
-                               + fmt::format("set_tests_properties(\"{}\" PROPERTIES FIXTURES_REQUIRED \"{}\" RESOURCE_LOCK \"{}\"{}{})\n",
+                               + fmt::format("set_tests_properties(\"{}\" PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED \"{}\" "
+                                             "RESOURCE_LOCK \"{}\"{}{})\n",
                                              vname, fix, fix, labelsProp, envProp(extraEnv));
                       });
               return frag + fmt::format("add_test(\"cleanup-{}\" \"{}\" --cleanup-task \"{}\")\n", name, binary, t.id)
