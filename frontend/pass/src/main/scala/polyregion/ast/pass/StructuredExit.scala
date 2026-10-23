@@ -28,6 +28,9 @@ import polyregion.ast.{Log, PolyAST as p, *, given}
 // the first compatible handler clears the flag and binds its projected payload; an unmatched raise keeps
 // draining. finally saves pending exception state, runs once on normal, exceptional, and abrupt exits, and
 // replaces the pending exit when the finalizer itself exits.
+// a host function reports its assert through the runtime and drains to an early return instead; an internal one
+// also stores the flag through a trailing `#raised` arg, so its callers drain in turn, up to an exported function
+// or a linked callable, where one body invocation ends like a work-item.
 object StructuredExit extends ProgramPass {
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
@@ -47,10 +50,17 @@ object StructuredExit extends ProgramPass {
   private val ExceptionWhatPtr          = p.Type.Ptr(p.Type.IntS8, p.Type.Space.Private)
   private val ExceptionCodeSym          = p.Conventions.ExceptionCode
   private val AssertTag                 = 0
+  private val HostAssertSym             = "__polyregion_builtin_assert"
+  private val RaisedSym                 = "#raised"
+  private val AssertedPtrSym            = "#asserted_ptr"
+  private val DiscardSym                = "#raised_discard"
+  private val FlagPtr                   = p.Type.Ptr(p.Type.Bool1, p.Type.Space.Private)
 
-  private val asserted = sel(p.Named(AssertedSym, p.Type.Bool1))
-  private val error    = sel(p.Named(ErrorSym, ErrorPtr))
-  private val tagSel   = sel(p.Named(TagSym, p.Type.IntS32))
+  private val asserted    = sel(p.Named(AssertedSym, p.Type.Bool1))
+  private val assertedPtr = p.Named(AssertedPtrSym, FlagPtr)
+  private val raisedArg   = p.Named(RaisedSym, FlagPtr)
+  private val error       = sel(p.Named(ErrorSym, ErrorPtr))
+  private val tagSel      = sel(p.Named(TagSym, p.Type.IntS32))
 
   private def declarations(body: List[p.Stmt]): List[p.Named] = body.flatMap {
     case p.Stmt.Var(n, _, _)            => List(n)
@@ -168,7 +178,23 @@ object StructuredExit extends ProgramPass {
   private def mayAssert(s: p.Stmt): Boolean       = s.collectFirst_[p.Stmt] { case x if isAssert(x) => x }.isDefined
   private def containsBarrier(s: p.Stmt): Boolean = s.collectFirst_[p.Stmt] { case x if isBarrier(x) => x }.isDefined
 
-  private final class Flow(defs: List[p.StructDef]) {
+  private def callee(s: p.Stmt): Option[p.Sym] = s match {
+    case p.Stmt.Var(_, Some(p.Expr.Invoke(p.Type.FnRef(f), _, _, _, _)), _) => Some(f)
+    case p.Stmt.Mut(_, p.Expr.Invoke(p.Type.FnRef(f), _, _, _, _))          => Some(f)
+    case p.Stmt.Return(p.Expr.Invoke(p.Type.FnRef(f), _, _, _, _))          => Some(f)
+    case _                                                                  => None
+  }
+
+  private def flagRef(flag: p.Named): p.Expr =
+    p.Expr.RefTo(sel(flag), None, p.Type.Bool1, p.Type.Space.Private, p.Region.Rooted(flag))
+
+  private def passFlag(body: List[p.Stmt], raising: Set[p.Sym], flag: p.Named): List[p.Stmt] =
+    body.modifyAll[p.Expr] {
+      case invoke @ p.Expr.Invoke(p.Type.FnRef(f), _, _, args, _) if raising(f) => invoke.copy(args = args :+ sel(flag))
+      case other                                                                => other
+    }
+
+  private final class Flow(defs: List[p.StructDef], val raising: Set[p.Sym] = Set.empty) {
     private val byName      = defs.map(d => d.name -> d).toMap
     private val baseByField = defs.map(d => s"${p.Conventions.BaseFieldPrefix}_${d.name.fqcn}" -> d).toMap
 
@@ -236,8 +262,12 @@ object StructuredExit extends ProgramPass {
       case _                                 => Set.empty
     }
 
+    def callsRaising(s: p.Stmt): Boolean = callee(s).exists(raising)
+    def exits(s: p.Stmt): Boolean        = isAssert(s) || callsRaising(s)
+    def mayExit(s: p.Stmt): Boolean      = s.collectFirst_[p.Stmt] { case x if exits(x) => x }.isDefined
+
     def escapes(s: p.Stmt): Boolean = s match {
-      case _ if isAssert(s)               => true
+      case _ if exits(s)                  => true
       case _: p.Stmt.Raise                => true
       case p.Stmt.Rethrow                 => true
       case p.Stmt.Cond(_, t, f)           => t.exists(escapes) || f.exists(escapes)
@@ -245,7 +275,7 @@ object StructuredExit extends ProgramPass {
       case p.Stmt.ForRange(_, _, _, _, b) => b.exists(escapes)
       case p.Stmt.Annotated(inner, _, _)  => escapes(inner)
       case t: p.Stmt.Try =>
-        t.body.exists(mayAssert) || t.handlers.exists(_.body.exists(escapes)) || t.fin.exists(escapes) ||
+        t.body.exists(mayExit) || t.handlers.exists(_.body.exists(escapes)) || t.fin.exists(escapes) ||
         unhandled(t).nonEmpty
       case _ => false
     }
@@ -291,7 +321,13 @@ object StructuredExit extends ProgramPass {
     }
   }
 
-  private final class Lower(tags: List[Raised], flow: Flow, usesWhat: Boolean, finallySymbols: FinallySymbols) {
+  private final class Lower(
+      tags: List[Raised],
+      flow: Flow,
+      usesWhat: Boolean,
+      finallySymbols: FinallySymbols,
+      report: Boolean
+  ) {
 
     private val tagOf   = tags.map(_.thrown).zipWithIndex.map((t, i) => t -> (i + 1)).toMap
     private val raised  = tags.map(x => x.thrown -> x).toMap
@@ -445,6 +481,16 @@ object StructuredExit extends ProgramPass {
           )
         )
       )
+    }
+
+    private def assertTag: List[p.Stmt] =
+      Option.when(tags.nonEmpty)(p.Stmt.Mut(tagSel, p.Expr.Alias(p.Term.IntS32Const(AssertTag)))).toList
+
+    private def reportAssert(code: p.Term, message: p.Term): List[p.Stmt] = {
+      val out = ListBuffer.empty[p.Stmt]
+      let(p.Type.Unit0, p.Expr.ForeignCall(HostAssertSym, List(code, message), p.Type.Unit0), out)
+      out += p.Stmt.Mut(asserted, p.Expr.Alias(p.Term.Bool1Const(true)))
+      out.toList ::: assertTag
     }
 
     private def lowerAssert(code: p.Term, message: p.Term): List[p.Stmt] = {
@@ -751,7 +797,7 @@ object StructuredExit extends ProgramPass {
             )
           }
       val dispatch = if (chain.isEmpty) Nil else List(p.Stmt.Cond(asserted, chain, Nil))
-      val pendingPossible = body.exists(mayAssert) ||
+      val pendingPossible = body.exists(flow.mayExit) ||
         raised.exists(t => !handlers.exists(h => flow.catches(h, t))) || handlers.exists(
           _.body.exists(flow.escapes)
         )
@@ -759,7 +805,14 @@ object StructuredExit extends ProgramPass {
     }
 
     private def lower(s: p.Stmt, canBreak: Boolean, breakOnRaise: Boolean): List[p.Stmt] = s match {
-      case p.Stmt.Var(_, Some(p.Expr.SpecOp(p.Spec.Assert(code, message))), _) => lowerAssert(code, message)
+      case p.Stmt.Var(_, Some(p.Expr.SpecOp(p.Spec.Assert(code, message))), _) =>
+        if (report) reportAssert(code, message) else lowerAssert(code, message)
+      case p.Stmt.Return(call) if flow.callsRaising(s) =>
+        val result = fresh(call.tpe)
+        val value  = if (call.tpe == p.Type.Unit0) p.Term.Unit0Const else sel(result)
+        assertTag ::: p.Stmt.Var(result, Some(call)) ::
+          fence(List(p.Stmt.Return(p.Expr.Alias(value))), canBreak, breakOnRaise)
+      case _ if flow.callsRaising(s) => assertTag :+ s
       case p.Stmt.Mut(p.Term.Select(root, Nil, _), p.Expr.Alias(source)) if root.symbol == ExceptionWhatSym =>
         if (usesWhat) copyMessage(source) else Nil
       case p.Stmt.Raise(v, exceptionKind, _) =>
@@ -833,21 +886,21 @@ object StructuredExit extends ProgramPass {
     }
   }
 
-  private def lowerEntry(program: p.Program, log: Log): p.Program = {
-    val source = program.entry match {
-      case Some(function) => function
-      case None           => return program
-    }
+  private enum Exit {
+    case Buffer
+    case Report(propagates: Boolean)
+  }
+
+  private def lowerFunction(source: p.Function, flow: Flow, exit: Exit, log: Log): p.Function = {
     val finallySymbols = FinallySymbols(source.body)
     val e              = source.copy(body = materialiseFinally(source.body, finallySymbols))
-    val flow           = Flow(program.defs)
     val touched = e
       .collectFirst_[p.Stmt] {
-        case s if isAssert(s)                      => s
+        case s if flow.exits(s)                    => s
         case s @ (_: p.Stmt.Raise | _: p.Stmt.Try) => s
       }
       .isDefined
-    if (!touched) program
+    if (!touched) source
     else if (e.body.exists(flow.hasBarrierEscape))
       throw RuntimeException(
         "raise escaping a loop that also carries a collective barrier is unsupported: draining the loop would " +
@@ -855,10 +908,10 @@ object StructuredExit extends ProgramPass {
       )
     else {
       val tags    = tagTable(e)
-      val lower   = Lower(tags, flow, observesExceptionWhat(e.body), finallySymbols)
+      val lower   = Lower(tags, flow, observesExceptionWhat(e.body), finallySymbols, exit != Exit.Buffer)
       val lowered = lower.guard(e.body)
       // the deferred path predicts the #error arg before lowering, so pure try/finally must not change the ABI
-      if (tags.isEmpty && !e.body.exists(mayAssert)) program.copy(entry = Some(e.copy(body = lowered)))
+      if (tags.isEmpty && !e.body.exists(flow.mayExit)) e.copy(body = lowered)
       else {
         val tagDecls =
           if (tags.isEmpty) Nil
@@ -870,34 +923,110 @@ object StructuredExit extends ProgramPass {
                 Some(p.Expr.Alias(p.Term.IntS32Const(0))),
                 true
               ) :: lower.slotDecls
+        val flagDecls = Option
+          .when(e.body.exists(_.collectFirst_[p.Stmt] { case s if flow.callsRaising(s) => s }.isDefined))(
+            p.Stmt.Var(assertedPtr, Some(flagRef(p.Named(AssertedSym, p.Type.Bool1))))
+          )
+          .toList
         val decls =
-          p.Stmt.Var(p.Named(AssertedSym, p.Type.Bool1), Some(p.Expr.Alias(p.Term.Bool1Const(false))), true) :: tagDecls
-        val sentinel = if (e.rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Poison(e.rtn)
-        val exit     = p.Stmt.Return(p.Expr.Alias(sentinel))
-        val epilogue = if (e.body.exists(flow.escapes)) lower.escapeReport ::: List(exit) else Nil
-        log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
-        val needsError = e.body.exists(mayAssert) || e.body.exists(flow.escapes)
-        val args =
-          if (!needsError || e.args.exists(_.named.symbol == ErrorSym)) e.args
-          else p.Arg(p.Named(ErrorSym, ErrorPtr)) +: e.args
-        program.copy(
-          entry = Some(e.copy(decl = e.decl.remapArgs(args), body = decls ::: lowered ::: epilogue))
-        )
+          p.Stmt.Var(p.Named(AssertedSym, p.Type.Bool1), Some(p.Expr.Alias(p.Term.Bool1Const(false))), true) ::
+            flagDecls ::: tagDecls
+        val (sentinel, drain) = exit match {
+          case Exit.Buffer =>
+            (if (e.rtn == p.Type.Unit0) p.Term.Unit0Const else p.Term.Poison(e.rtn), lower.escapeReport)
+          case Exit.Report(propagates) =>
+            defaultTerm(e.rtn) -> Option
+              .when(propagates)(p.Stmt.Update(sel(raisedArg), p.Term.IntU32Const(0), asserted))
+              .toList
+        }
+        val epilogue = if (e.body.exists(flow.escapes)) drain ::: List(p.Stmt.Return(p.Expr.Alias(sentinel))) else Nil
+        val args = exit match {
+          case Exit.Buffer =>
+            log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + error buffer")
+            val needsError = e.body.exists(flow.mayExit) || e.body.exists(flow.escapes)
+            if (!needsError || e.args.exists(_.named.symbol == ErrorSym)) e.args
+            else p.Arg(p.Named(ErrorSym, ErrorPtr)) +: e.args
+          case Exit.Report(propagates) =>
+            log.info(s"${e.signatureKey}: lowered ${tags.size} raised type(s) to a structured drain + runtime report")
+            if (propagates) e.args :+ p.Arg(raisedArg) else e.args
+        }
+        e.copy(decl = e.decl.remapArgs(args), body = decls ::: lowered ::: epilogue)
       }
     }
   }
 
+  private def lowerEntry(program: p.Program, log: Log): p.Program =
+    program.entry.fold(program)(entry =>
+      program.copy(entry = Some(lowerFunction(entry, Flow(program.defs), Exit.Buffer, log)))
+    )
+
+  private def discardRaised(function: p.Function, raising: Set[p.Sym]): p.Function = {
+    val discard    = p.Named(DiscardSym, p.Type.Bool1)
+    val discardPtr = p.Named(s"${DiscardSym}_ptr", FlagPtr)
+    val body       = passFlag(function.body, raising, discardPtr)
+    if (body == function.body) function
+    else
+      function.copy(body =
+        p.Stmt.Var(discard, Some(p.Expr.Alias(p.Term.Bool1Const(false))), isMutable = true) ::
+          p.Stmt.Var(discardPtr, Some(flagRef(discard))) :: body
+      )
+  }
+
+  private def lowerHostExits(program: p.Program, log: Log): p.Program = {
+    val flow = Flow(program.defs)
+    val callables = program.metadata.collect {
+      case p.MetaEntry(key, _) if key.startsWith(p.Conventions.LinkCallableMeta) =>
+        key.stripPrefix(p.Conventions.LinkCallableMeta)
+    }.toSet
+    val candidates = program.functions.filter { f =>
+      f.affinity == p.Function.Affinity.Host && f.convention == p.CallConvention.RegularCall &&
+      flow.raised(f.body).isEmpty
+    }
+    val asserting = candidates.filter(_.body.exists(mayAssert)).map(_.name).toSet
+    val callees = candidates.map { f =>
+      f.name -> f.collectWhere[p.Expr] { case p.Expr.Invoke(p.Type.FnRef(callee), _, _, _, _) => callee }.toSet
+    }.toMap
+    val boundaries = candidates.collect {
+      case f if f.visibility == p.Function.Visibility.Exported || callables(f.name.fqcn) => f.name
+    }.toSet
+    @annotation.tailrec
+    def close(raising: Set[p.Sym]): Set[p.Sym] = {
+      val next = callees.collect {
+        case (f, called) if !boundaries(f) && (asserting(f) || called.exists(raising)) => f
+      }.toSet
+      if (next == raising) raising else close(next)
+    }
+    val raising  = close(Set.empty)
+    val lowered  = callees.collect { case (f, called) if asserting(f) || called.exists(raising) => f }.toSet
+    val hostFlow = Flow(program.defs, raising)
+    if (lowered.isEmpty) program
+    else
+      program.copy(
+        entry = program.entry.map(discardRaised(_, raising)),
+        functions = program.functions.map { f =>
+          if (!lowered(f.name)) discardRaised(f, raising)
+          else
+            lowerFunction(
+              f.copy(body = passFlag(f.body, raising, assertedPtr)),
+              hostFlow,
+              Exit.Report(raising(f.name)),
+              log
+            )
+        }
+      )
+  }
+
   override def apply(program: p.Program, log: Log): p.Program = {
     val flow = Flow(program.defs)
-    val functions = program.functions.map { function =>
+    val host = lowerHostExits(program, log)
+    val functions = host.functions.map { function =>
       val hasStructuredExit = function
         .collectFirst_[p.Stmt] { case s @ (_: p.Stmt.Raise | _: p.Stmt.Try) => s }
         .isDefined
-      if (hasStructuredExit && !function.body.exists(flow.escapes))
-        lowerEntry(p.Program(Some(function), Nil, program.defs), log).entry.getOrElse(function)
+      if (hasStructuredExit && !function.body.exists(flow.escapes)) lowerFunction(function, flow, Exit.Buffer, log)
       else function
     }
-    lowerEntry(program.copy(functions = functions), log)
+    lowerEntry(host.copy(functions = functions), log)
   }
 
   private[pass] def lowerHandledFunction(f: p.Function, defs: List[p.StructDef], log: Log): p.Function = {

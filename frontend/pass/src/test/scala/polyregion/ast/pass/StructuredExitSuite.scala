@@ -94,6 +94,100 @@ class StructuredExitSuite extends munit.FunSuite {
     assertEquals(out.functions.head.args, helper.args)
   }
 
+  test("a host assert ends one callable invocation and drains its internal callers") {
+    def host(
+        name: String,
+        args: List[p.Arg],
+        rtn: p.Type,
+        body: List[p.Stmt],
+        visibility: p.Function.Visibility = p.Function.Visibility.Internal
+    ): p.Function = {
+      val f = fn(name, args, rtn, body, visibility = visibility)
+      f.copy(decl = f.decl.copy(affinity = p.Function.Affinity.Host))
+    }
+    def invoke(f: p.Function, args: p.Term*): p.Expr =
+      p.Expr.Invoke(p.Type.FnRef(f.name), Nil, None, args.toList, f.rtn)
+    val x        = named("x", i32)
+    val negative = named("negative", p.Type.Bool1)
+    val helper = host(
+      "helper",
+      List(p.Arg(x)),
+      i32,
+      List(
+        p.Stmt.Var(negative, Some(p.Expr.IntrOp(p.Intr.LogicLt(selectT(x), p.Term.IntS32Const(0))))),
+        p.Stmt.Cond(selectT(negative), List(assertStmt(msg = "negative")), Nil),
+        p.Stmt.Return(p.Expr.IntrOp(p.Intr.Add(selectT(x), p.Term.IntS32Const(1), i32)))
+      )
+    )
+    val forward   = host("forward", List(p.Arg(x)), i32, List(p.Stmt.Return(invoke(helper, selectT(x)))))
+    val (i, v, r) = (named("i", i32), named("v", i32), named("r", i32))
+    val body = host(
+      "body",
+      List(p.Arg(outArg), p.Arg(i)),
+      p.Type.Unit0,
+      List(
+        p.Stmt.Var(v, Some(p.Expr.Index(selectT(outArg), selectT(i), i32))),
+        p.Stmt.Var(r, Some(invoke(forward, selectT(v)))),
+        p.Stmt.Update(selectT(outArg), selectT(i), selectT(r)),
+        ret
+      )
+    )
+    val (k, n) = (named("k", i32), named("n", i32))
+    val driver = host(
+      "driver",
+      List(p.Arg(outArg), p.Arg(n)),
+      p.Type.Unit0,
+      List(
+        p.Stmt.ForRange(
+          k,
+          p.Term.IntS32Const(0),
+          selectT(n),
+          p.Term.IntS32Const(1),
+          List(p.Stmt.Var(named("applied", p.Type.Unit0), Some(invoke(body, selectT(outArg), selectT(k)))))
+        ),
+        ret
+      ),
+      p.Function.Visibility.Exported
+    )
+    val device    = fn("device", body = List(assertStmt(), ret))
+    val functions = List(driver, body, forward, helper, device)
+    val callable  = p.MetaEntry(p.Conventions.LinkCallableMeta + body.name.fqcn, "root")
+
+    def run(in: p.Program): (List[Long], Int) = {
+      val out     = StructuredExit(in, NoopLog)
+      val vm      = Interpreter.Vm(out)
+      var reports = 0
+      vm.foreign = {
+        case ("__polyregion_builtin_assert", _, _) => reports += 1; V.U
+        case (name, _, _)                          => fail(s"unexpected foreign call $name")
+      }
+      val xs = vm.alloc(12)
+      List(1, -1, 3).zipWithIndex.foreach((value, index) => vm.store(xs + 4 * index, V.I(value), i32))
+      vm.call(driver.name, List(outArg.tpe -> V.I(xs), i32 -> V.I(3)))
+      (0 until 3).map(index => i32At(vm, xs + 4 * index)).toList -> reports
+    }
+
+    val out  = StructuredExit(p.Program(None, functions, Nil, metadata = List(callable)), NoopLog)
+    val flag = p.Type.Ptr(p.Type.Bool1, p.Type.Space.Private)
+    assertEquals(
+      out.functions.map(f => f.name -> f.args.map(_.named.tpe)).toMap,
+      Map(
+        driver.name  -> List(outArg.tpe, i32),
+        body.name    -> List(outArg.tpe, i32),
+        forward.name -> List(i32, flag),
+        helper.name  -> List(i32, flag),
+        device.name  -> Nil
+      )
+    )
+    assertEquals(out.functions.filter(f => f.name == driver.name || f.name == device.name), List(driver, device))
+    assertEquals(
+      out.hostFunctions.flatMap(_.collectWhere[p.Expr] { case p.Expr.SpecOp(a: p.Spec.Assert) => a }),
+      Nil
+    )
+    assertEquals(run(p.Program(None, functions, Nil, metadata = List(callable))), (List(2L, -1L, 4L), 1))
+    assertEquals(run(p.Program(None, functions, Nil)), (List(2L, -1L, 3L), 1))
+  }
+
   test("an asserting entry gains a leading error-buffer arg and a drain return") {
     val out = lower(Nil, List(assertStmt(), ret))
     assertEquals(out.entry.args.headOption.map(_.named.tpe), Some(errT)) // the leading Ptr<i8> the dispatch binds

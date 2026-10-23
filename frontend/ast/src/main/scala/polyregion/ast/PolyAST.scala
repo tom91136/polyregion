@@ -746,6 +746,7 @@ object PolyAST {
     inline val KernelBundleType        = "KernelBundle"
     inline val LinkImplementationMeta  = "#link_implementation:"
     inline val LinkUnfitMeta           = "#link_unfit:"
+    inline val LinkCallableMeta        = "#link_callable:"
 
     def assertMessageLimit: Int = 1024
 

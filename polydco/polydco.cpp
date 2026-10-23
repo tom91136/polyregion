@@ -48,6 +48,7 @@ POLYREGION_EXPORT extern "C" void __polyregion_fc_assert() {
 POLYREGION_EXPORT extern "C" void __polyregion_fc_assert_msg(const char *message) {
   g_assert.record(static_cast<uint32_t>(invoke::AssertCode::Assert), message);
 }
+POLYREGION_EXPORT extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message) { g_assert.record(code, message); }
 POLYREGION_EXPORT extern "C" int __polyregion_fc_assert_raised() { return g_assert.raised() ? 1 : 0; }
 
 static polyrt::SynchronisedMemAllocation allocations(

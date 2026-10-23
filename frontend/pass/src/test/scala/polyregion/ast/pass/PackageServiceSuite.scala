@@ -785,6 +785,10 @@ class PackageServiceSuite extends munit.FunSuite {
       .get
     assertEquals(resolvedImplementation.args.map(_.named.symbol), List("value"))
     assert(resolvedImplementation.collectAll[p.Type].contains(p.Type.FnRef(callable)))
+    assertEquals(
+      resolvedProgram.meta(p.Conventions.LinkCallableMeta + callable.fqcn),
+      Some(root.name.fqcn)
+    )
   }
 
   private def callableImplementation(name: p.Sym, publicName: p.Sym) = {

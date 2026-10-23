@@ -1099,7 +1099,14 @@ private[polyregion] object ProgramLinker {
             entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions, closure)
           } yield RootLink.Bound(
             root.name,
-            p.Program(Some(entry), closure, definitions),
+            p.Program(
+              Some(entry),
+              closure,
+              definitions,
+              metadata = resolution.call.callables.values.toList.distinct.map(callable =>
+                p.MetaEntry(p.Conventions.LinkCallableMeta + callable.fqcn, root.name.fqcn)
+              )
+            ),
             resolution.implementation.name
           )
       }
@@ -1308,7 +1315,12 @@ private[polyregion] object ProgramLinker {
         val rewritten = definition.modifyAll[p.Type](rewriteType)
         definitionNames.get(rewritten.name).fold(rewritten)(name => rewritten.copy(name = name))
       }
-      p.Program(None, functions, definitions)
+      val callableKeys = functionNames.map { (from, to) =>
+        (p.Conventions.LinkCallableMeta + from.fqcn) -> (p.Conventions.LinkCallableMeta + to.fqcn)
+      }
+      val metadata =
+        program.metadata.map(entry => callableKeys.get(entry.key).fold(entry)(key => entry.copy(key = key)))
+      p.Program(None, functions, definitions, metadata = metadata)
     }
 
     val functions = isolated.flatMap(_.functions).groupBy(_.name).toList.sortBy(_._1.fqn.mkString(".")).flatMap {
@@ -1323,11 +1335,13 @@ private[polyregion] object ProgramLinker {
         errors += s"linked consumer program contains conflicting struct `${name.repr}`"
         Nil
     }
+    val metadata     = isolated.flatMap(_.metadata).distinctBy(_.key)
     val distinct     = errors.result().distinct
     val primaryEntry = programs.flatMap(_.entry.map(_.name)).headOption.flatMap(name => functions.find(_.name == name))
     val linked = primaryEntry match {
-      case Some(entry) => p.Program(Some(entry), functions.filterNot(_.name == entry.name), definitions)
-      case None        => p.Program(None, functions, definitions)
+      case Some(entry) =>
+        p.Program(Some(entry), functions.filterNot(_.name == entry.name), definitions, metadata = metadata)
+      case None => p.Program(None, functions, definitions, metadata = metadata)
     }
     Either.cond(distinct.isEmpty, linked, distinct)
   }
@@ -1389,7 +1403,7 @@ private[polyregion] object ProgramLinker {
       val linked =
         if (bound.isEmpty && roots.nonEmpty) Right(p.Program(None, Nil, Nil))
         else bound.traverse(prepareLinkedProgram).flatMap(mergeLinkedPrograms)
-      linked.map(_.copy(metadata = metadata))
+      linked.map(program => program.copy(metadata = metadata ::: program.metadata))
     }
 
   def importProgram(

@@ -38,6 +38,14 @@
 !CHECK do: {output}
 !CHECK requires: 2
 
+!CHECK case: core-package-assert
+!CHECK offload-only
+!CHECK do: {package_fixture} {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DASSERT -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 1 bound to polyregion.core
+!CHECK do: {output}
+!CHECK requires: 1 7 -1 9 101
+
 #if defined(CHARACTER)
 program check_library_core
   implicit none
@@ -48,6 +56,31 @@ program check_library_core
     a(i) = merge(i, 0, word(i:i) == "o")
   end do
   write (*, '(I0)', advance='no') a(2)
+end program
+#elif defined(ASSERT)
+program check_library_core
+  implicit none
+  interface
+    pure subroutine fc_assert_msg(message) bind(C, name = "__polyregion_fc_assert_msg")
+      character(len = *), intent(in) :: message
+    end subroutine
+    function fc_assert_raised() bind(C, name = "__polyregion_fc_assert_raised") result(r)
+      integer :: r
+    end function
+  end interface
+  integer, parameter :: n = 100
+  integer :: i, xs(n)
+  character(len = 8) :: message
+  message = "core" // char(0)
+  do i = 1, n
+    xs(i) = i
+  end do
+  xs(7) = -1
+  do concurrent (i = 1:n)
+    if (xs(i) < 0) call fc_assert_msg(message)
+    xs(i) = xs(i) + 1
+  end do
+  write (*, '(I0,4(1X,I0))', advance='no') fc_assert_raised(), xs(6), xs(7), xs(8), xs(n)
 end program
 #else
 program check_library_core

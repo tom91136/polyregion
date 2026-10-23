@@ -38,6 +38,7 @@ inline constexpr auto EmptyStructStorageField = "#empty_struct_storage";
 inline constexpr auto KernelBundleType = "KernelBundle";
 inline constexpr auto LinkImplementationMeta = "#link_implementation:";
 inline constexpr auto LinkUnfitMeta = "#link_unfit:";
+inline constexpr auto LinkCallableMeta = "#link_callable:";
 inline constexpr auto AssertMessageLimit = 1024;
 
 namespace reflect {
