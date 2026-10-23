@@ -497,6 +497,17 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
     auto r = newVar(handleValueAsScalar(x.getRhs()));
     witness(x.getResult(), Expr::IntrOp(ap(l, r).widen()));
   };
+  const auto compare = [&](mlir::arith::CmpIOp x, auto ap, const std::optional<mlir::IntegerType::SignednessSemantics> order) -> void {
+    auto l = newVar(handleValueAsScalar(x.getLhs()));
+    auto r = newVar(handleValueAsScalar(x.getRhs()));
+    if (const auto integer = llvm::dyn_cast<mlir::IntegerType>(x.getLhs().getType()); integer && l.tpe != r.tpe) {
+      const auto common = order ? handleType(mlir::IntegerType::get(x.getContext(), integer.getWidth(), *order)) : l.tpe;
+      const auto cast = [&](const Term::Select &t) { return t.tpe == common ? t : newVar(Expr::Cast(t.widen(), common).widen()); };
+      l = cast(l);
+      r = cast(r);
+    }
+    witness(x.getResult(), Expr::IntrOp(ap(l, r).widen()));
+  };
   const auto intr2r = [&](auto x, auto ap) -> void {
     auto l = newVar(handleValueAsScalar(x.getLhs()));
     auto r = newVar(handleValueAsScalar(x.getRhs()));
@@ -595,19 +606,20 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](mlir::arith::ExtUIOp x) { scalarCast(x); }, [&](mlir::arith::ExtSIOp x) { scalarCast(x); },
       [&](mlir::arith::TruncIOp x) { scalarCast(x); },
       [&](mlir::arith::CmpIOp x) {
+        constexpr auto Signed = mlir::IntegerType::Signed, Unsigned = mlir::IntegerType::Unsigned;
         switch (x.getPredicate()) {
-          case mlir::arith::CmpIPredicate::eq: return intr2(x, Bind<Intr::LogicEq>());
-          case mlir::arith::CmpIPredicate::ne: return intr2(x, Bind<Intr::LogicNeq>());
+          case mlir::arith::CmpIPredicate::eq: return compare(x, Bind<Intr::LogicEq>(), {});
+          case mlir::arith::CmpIPredicate::ne: return compare(x, Bind<Intr::LogicNeq>(), {});
 
-          case mlir::arith::CmpIPredicate::slt: return intr2(x, Bind<Intr::LogicLt>());
-          case mlir::arith::CmpIPredicate::sle: return intr2(x, Bind<Intr::LogicLte>());
-          case mlir::arith::CmpIPredicate::sgt: return intr2(x, Bind<Intr::LogicGt>());
-          case mlir::arith::CmpIPredicate::sge: return intr2(x, Bind<Intr::LogicGte>());
+          case mlir::arith::CmpIPredicate::slt: return compare(x, Bind<Intr::LogicLt>(), Signed);
+          case mlir::arith::CmpIPredicate::sle: return compare(x, Bind<Intr::LogicLte>(), Signed);
+          case mlir::arith::CmpIPredicate::sgt: return compare(x, Bind<Intr::LogicGt>(), Signed);
+          case mlir::arith::CmpIPredicate::sge: return compare(x, Bind<Intr::LogicGte>(), Signed);
 
-          case mlir::arith::CmpIPredicate::ult: return intr2(x, Bind<Intr::LogicLt>());
-          case mlir::arith::CmpIPredicate::ule: return intr2(x, Bind<Intr::LogicLte>());
-          case mlir::arith::CmpIPredicate::ugt: return intr2(x, Bind<Intr::LogicGt>());
-          case mlir::arith::CmpIPredicate::uge: return intr2(x, Bind<Intr::LogicGte>());
+          case mlir::arith::CmpIPredicate::ult: return compare(x, Bind<Intr::LogicLt>(), Unsigned);
+          case mlir::arith::CmpIPredicate::ule: return compare(x, Bind<Intr::LogicLte>(), Unsigned);
+          case mlir::arith::CmpIPredicate::ugt: return compare(x, Bind<Intr::LogicGt>(), Unsigned);
+          case mlir::arith::CmpIPredicate::uge: return compare(x, Bind<Intr::LogicGte>(), Unsigned);
         }
       }, //
 

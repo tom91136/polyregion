@@ -30,6 +30,26 @@
 !CHECK do: {output}
 !CHECK requires: 200 10100 28 50 32 2 5050.0
 
+!CHECK case: core-package-character
+!CHECK offload-only
+!CHECK do: {package_fixture} {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHARACTER -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 1 bound to polyregion.core
+!CHECK do: {output}
+!CHECK requires: 2
+
+#if defined(CHARACTER)
+program check_library_core
+  implicit none
+  integer, parameter :: n = 4
+  integer :: i, a(n)
+  character(len = n), parameter :: word = "poly"
+  do concurrent (i = 1:n)
+    a(i) = merge(i, 0, word(i:i) == "o")
+  end do
+  write (*, '(I0)', advance='no') a(2)
+end program
+#else
 program check_library_core
   implicit none
   type :: pair
@@ -68,3 +88,4 @@ program check_library_core
   end do
   write (*, '(I0,1X,I0,1X,I0,1X,I0,1X,I0,1X,I0,1X,F0.1)', advance='no') xs(n), s, m, count(ys == 0), ys(7) + ys(11), lo, r
 end program
+#endif
