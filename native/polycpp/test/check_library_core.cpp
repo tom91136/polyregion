@@ -1,6 +1,6 @@
 #pragma region case: core-fallback
 #pragma region offload-only
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
 #pragma region stderr-count: 0 uses the inline body
 #pragma region do: {output}
 #pragma region requires: 3 600

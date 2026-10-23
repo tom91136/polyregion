@@ -1,6 +1,6 @@
 !CHECK case: core-fallback
 !CHECK offload-only
-!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -o {output} {input}
+!CHECK do: POLYFRONT_LIBRARY_PATH= polyfc {polyfc_defaults} {polyfc_stdpar} -o {output} {input}
 !CHECK stderr-count: 0 uses the inline body
 !CHECK do: {output}
 !CHECK requires: 200 10100 28 50 32 2 5050.0

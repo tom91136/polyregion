@@ -1,7 +1,7 @@
 #pragma region case: missing-package-import
 #pragma region offload-only
 #pragma region compile-fails: no package is available for library `foo`
-#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -c -o {output}.o {input}
+#pragma region do: POLYFRONT_LIBRARY_PATH= polycpp {polycpp_defaults} {polycpp_stdpar} -c -o {output}.o {input}
 
 #include <cstdint>
 
