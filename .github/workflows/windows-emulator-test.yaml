@@ -126,6 +126,7 @@ jobs:
       matrix:
         arch: [amd64, arm64]
         shard: ${{ fromJSON(inputs.shards) }}
+        part: [polycpp-offload, rest]
     runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025-vs2026' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -160,22 +161,24 @@ jobs:
             New-ItemProperty -Path $key -Name DumpType -Value 1 -PropertyType DWord -Force | Out-Null
             New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\crashdumps" | Out-Null
           } catch { Write-Host "WER setup skipped: $_" }
-      - name: Run emulator tests (${{ matrix.shard }})
+      - name: Run emulator tests (${{ matrix.shard }}, ${{ matrix.part }})
         shell: bash
-        run: just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error
+        run: |
+          just test-native-dist emulators emulator-test-results-${{ matrix.shard }}-${{ matrix.part }} -L "^${{ matrix.shard }}$" \
+            ${{ matrix.part == 'rest' && '-E' || '-R' }} polycpp-offload- --no-tests=error
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
-          label: ctest-emulators-${{ matrix.shard }}
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}-${{ matrix.part }}.xml
+          label: ctest-emulators-${{ matrix.shard }}-${{ matrix.part }}
       - name: Upload test results
         continue-on-error: true
         if: always()
         uses: *upload
         with:
-          name: emulator-test-results-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}.xml
+          name: emulator-test-results-windows-${{ matrix.arch }}-${{ matrix.shard }}-${{ matrix.part }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-static-dist/emulator-test-results-${{ matrix.shard }}-${{ matrix.part }}.xml
           if-no-files-found: warn
       - name: Collect crash dumps
         if: failure()
@@ -189,6 +192,6 @@ jobs:
         if: ${{ failure() && !env.ACT }}
         uses: *upload
         with:
-          name: crash-reports-windows-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          name: crash-reports-windows-${{ matrix.arch }}-${{ matrix.shard }}-${{ matrix.part }}-Release
           path: crash-reports/
           if-no-files-found: ignore

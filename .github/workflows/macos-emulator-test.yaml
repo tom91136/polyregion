@@ -109,6 +109,7 @@ jobs:
       matrix:
         arch: [arm64, x86_64]
         shard: ${{ fromJSON(inputs.shards) }}
+        part: [polycpp-offload, rest]
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     env:
       POLYREGION_ARCH: ${{ matrix.arch }}
@@ -143,28 +144,29 @@ jobs:
       - name: Restore executable bits
         run: just restore-exec-bits native/out/polyregion-Release-${{ matrix.arch }}-dylib-dist native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist
 
-      - name: Run emulator tests (${{ matrix.shard }})
+      - name: Run emulator tests (${{ matrix.shard }}, ${{ matrix.part }})
         run: |
           repeat=()
           if [[ "${{ matrix.arch }}" == "x86_64" ]]; then
             repeat=(--repeat until-pass:5)
           fi
-          just test-native-dist emulators emulator-test-results-${{ matrix.shard }} -L "^${{ matrix.shard }}$" --no-tests=error "${repeat[@]}"
+          just test-native-dist emulators emulator-test-results-${{ matrix.shard }}-${{ matrix.part }} -L "^${{ matrix.shard }}$" \
+            ${{ matrix.part == 'rest' && '-E' || '-R' }} polycpp-offload- --no-tests=error "${repeat[@]}"
 
       - name: Annotate ctest results
         if: always()
         uses: ./.github/actions/annotate-junit
         with:
-          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
-          label: ctest-emulators-${{ matrix.shard }}
+          junit: native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}-${{ matrix.part }}.xml
+          label: ctest-emulators-${{ matrix.shard }}-${{ matrix.part }}
 
       - name: Upload test results
         continue-on-error: true
         if: always()
         uses: *upload
         with:
-          name: emulator-test-results-darwin-${{ matrix.arch }}-${{ matrix.shard }}-Release
-          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}.xml
+          name: emulator-test-results-darwin-${{ matrix.arch }}-${{ matrix.shard }}-${{ matrix.part }}-Release
+          path: ./native/out/polyregion-test-Release-${{ matrix.arch }}-dylib-dist/emulator-test-results-${{ matrix.shard }}-${{ matrix.part }}.xml
           if-no-files-found: warn
 
       - name: Collect crash reports
@@ -181,6 +183,6 @@ jobs:
         if: ${{ failure() && !env.ACT }}
         uses: *upload
         with:
-          name: crash-reports-darwin-${{ matrix.arch }}-${{ matrix.shard }}-Release
+          name: crash-reports-darwin-${{ matrix.arch }}-${{ matrix.shard }}-${{ matrix.part }}-Release
           path: crash-reports/
           if-no-files-found: ignore
