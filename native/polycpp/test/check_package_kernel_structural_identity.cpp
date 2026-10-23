@@ -4,6 +4,7 @@
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_kernel 2
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_overloaded 2
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_nested_kernel 2
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #kernel_packed_kernel 2
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
 
@@ -19,6 +20,7 @@ extern "C" int cudaLaunch(const void *);
 
 template <class F> __attribute__((global)) void kernel(F function) { function(); }
 template <class F> __attribute__((global)) void nested_kernel(F function) { function(); }
+template <class F> __attribute__((global)) void packed_kernel(F function) { function(); }
 __attribute__((global)) void overloaded(int *) {}
 __attribute__((global)) void overloaded(float *) {}
 
@@ -32,6 +34,16 @@ template <class F> struct reordered {
 template <class T> void launch_nested(T value) {
   auto function = inner(value);
   nested_kernel<<<dim3(1), dim3(1)>>>(reordered<decltype(function)>{function});
+}
+
+template <class... F> struct packed;
+template <class F> struct packed<F> {
+  F function;
+  __attribute__((device)) void operator()() const { function(); }
+};
+template <class T> void launch_packed(T value) {
+  auto function = inner(value);
+  packed_kernel<<<dim3(1), dim3(1)>>>(packed<decltype(function)>{function});
 }
 
 #define LAUNCH_CAPTURE(value) kernel<<<dim3(1), dim3(1)>>>([=] { (void)value; })
@@ -49,4 +61,6 @@ POLYREGION_EXPORT_AS("kernel_identity.implementation.apply") void apply(int narr
   overloaded<<<dim3(1), dim3(1)>>>(static_cast<float *>(nullptr));
   launch_nested(narrow);
   launch_nested(wide);
+  launch_packed(narrow);
+  launch_packed(wide);
 }

@@ -754,10 +754,17 @@ static void collectAnonymousRecordIdentities(const clang::QualType type, clang::
   if (!canonical) return;
   if (const auto *record = canonical->getAs<clang::RecordType>()) {
     if (record->getDecl()->getDeclName().isEmpty()) result.emplace_back(anonymousRecordIdentity(*record->getDecl(), context, remapper, r));
-    if (const auto *specialisation = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl()))
-      for (const auto &argument : specialisation->getTemplateArgs().asArray())
+    if (const auto *specialisation = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl())) {
+      std::function<void(const clang::TemplateArgument &)> collectArgument = [&](const clang::TemplateArgument &argument) {
         if (argument.getKind() == clang::TemplateArgument::Type)
           collectAnonymousRecordIdentities(argument.getAsType(), context, remapper, r, result);
+        else if (argument.getKind() == clang::TemplateArgument::Pack)
+          for (const auto &element : argument.pack_elements())
+            collectArgument(element);
+      };
+      for (const auto &argument : specialisation->getTemplateArgs().asArray())
+        collectArgument(argument);
+    }
     return;
   }
   if (const auto *pointer = canonical->getAs<clang::PointerType>())
@@ -993,7 +1000,10 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
       const auto record = context.getCanonicalTagType(method->getParent())->getAs<clang::RecordType>();
       name += std::string(method->isInstance() ? "#recv" : "#owner") + hashSuffix(nameOfRecord(record, r));
     }
-    if (!decl->isExternC()) name += "#sig" + hashSuffix(decl->getType().getCanonicalType().getAsString(context.getPrintingPolicy()));
+    if (!decl->isExternC()) {
+      const auto parameters = decl->parameters() ^ mk_string(",", [&](const auto *p) { return repr(annotateLocalSpace(p, r)); });
+      name += "#sig" + hashSuffix(fmt::format("({}){}", parameters, repr(handleType(decl->getReturnType(), r))));
+    }
   }
   if (auto fn = r.functions ^ get_maybe(name)) return {name, *fn};
 
@@ -1658,7 +1668,7 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
   auto specName = [&](const clang::ClassTemplateSpecializationDecl *spec) {
     auto name = spec->getQualifiedNameAsString();
     bool erasedCallableSignature = false;
-    for (auto arg : spec->getTemplateArgs().asArray()) {
+    std::function<void(const clang::TemplateArgument &)> appendArgument = [&](const clang::TemplateArgument &arg) {
       name += "_";
       switch (arg.getKind()) {
         case clang::TemplateArgument::Null: name += "null"; break;
@@ -1675,10 +1685,15 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
         case clang::TemplateArgument::Template:
         case clang::TemplateArgument::TemplateExpansion:
         case clang::TemplateArgument::Expression:
-        case clang::TemplateArgument::Pack:
         case clang::TemplateArgument::StructuralValue: name += "???"; break;
+        case clang::TemplateArgument::Pack:
+          for (const auto &element : arg.pack_elements())
+            appendArgument(element);
+          break;
       }
-    }
+    };
+    for (const auto &arg : spec->getTemplateArgs().asArray())
+      appendArgument(arg);
     if (name.find("/*nothing*/") != std::string::npos || name.find("???") != std::string::npos || erasedCallableSignature)
       name += "_" + hashSuffix(diagnosticName(spec, context));
     return name;

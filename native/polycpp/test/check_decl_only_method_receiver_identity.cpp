@@ -3,11 +3,11 @@
 #pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-emit-library={output}.polyast -c -o {output}.o {input}
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recv 2
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sig 2
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recvda50d5cbfe5e0def#sig5982ee392f651bd2 1
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recvf1e376177472fdfe#sig5982ee392f651bd2 1
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sig508ecc398f34b46f 1
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sigfc2acedb11924e56 1
-#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::single#sigfc2acedb11924e56 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recvda50d5cbfe5e0def#sig46770b6296ba2dd1 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #recvf1e376177472fdfe#sig46770b6296ba2dd1 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sig6075d9058f19a744 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::choose#sig682934c66e12c5d9 1
+#pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast vendor::single#sig682934c66e12c5d9 1
 #pragma region do: {package_fixture} --assert-function-substring-count {output}.polyast #owner 2
 
 #define POLYREGION_EXPORT_AS(name) [[clang::annotate("polyregion_export:" name)]]
