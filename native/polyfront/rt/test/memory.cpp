@@ -23,6 +23,7 @@
   #include "polydco/polydco.h"
 #endif
 #include "polyinvoke/object_platform.h"
+#include "polyregion/conventions.h"
 #include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
@@ -97,10 +98,20 @@ struct StubQueue final : object::ObjectDeviceQueue {
 
   bool failInvoke = false;
   bool mutateFirstPointer = false;
+  bool raiseAssert = false;
+  std::vector<Type> invokedTypes;
 
   void enqueueInvokeAsync(const std::string &, const std::string &, const std::vector<Type> &types, std::vector<std::byte> data,
                           const Policy &, const MaybeCallback &) override {
     if (failInvoke) throw std::runtime_error("injected launch failure");
+    invokedTypes = types;
+    if (raiseAssert) {
+      const auto arguments = detail::argDataAsPointers(types, data);
+      uintptr_t error = 0;
+      std::memcpy(&error, arguments.front(), sizeof(error));
+      const uint8_t reported[] = {1, 0, 0, 0, 'b', 'o', 'o', 'm', 0};
+      std::memcpy(reinterpret_cast<void *>(error), reported, sizeof(reported));
+    }
     if (mutateFirstPointer) {
       const auto arguments = detail::argDataAsPointers(types, data);
       const auto pointerArgument = std::ranges::find(types, Type::Ptr);
@@ -127,7 +138,36 @@ struct WithStubDevice {
   ~WithStubDevice() { polyregion::polyrt::currentDevice = std::move(previous); }
 };
 
+struct StubManagedPlatform final : Platform {
+  std::string name() override { return "stub"; }
+  std::vector<Property> properties() override { return {}; }
+  PlatformKind kind() override { return PlatformKind::Managed; }
+  std::vector<std::unique_ptr<Device>> enumerate() override { return {}; }
+};
+
+struct WithStubManagedPlatform {
+  std::unique_ptr<Platform> previousPlatform = std::move(polyregion::polyrt::currentPlatform);
+  std::unique_ptr<DeviceQueue> previousQueue = std::move(polyregion::polyrt::currentQueue);
+  WithStubManagedPlatform() {
+    polyregion::polyrt::currentPlatform = std::make_unique<StubManagedPlatform>();
+    polyregion::polyrt::currentQueue = std::make_unique<StubQueue>(std::chrono::seconds(1));
+  }
+  ~WithStubManagedPlatform() {
+    polyregion::polyrt::currentQueue = std::move(previousQueue);
+    polyregion::polyrt::currentPlatform = std::move(previousPlatform);
+  }
+};
+
 } // namespace
+
+#ifdef POLYRT_TESTS_POLYDCO
+extern "C" int __polyregion_fc_assert_raised();
+static bool assertReported() { return __polyregion_fc_assert_raised() != 0; }
+#else
+static std::atomic<uint32_t> reportedAssertCode{0};
+extern "C" void __polyregion_builtin_assert(const uint32_t code, const char *) { reportedAssertCode = code; }
+static bool assertReported() { return reportedAssertCode.exchange(0) != 0; }
+#endif
 
 static uintptr_t remoteAlloc(void *context, size_t bytes) {
   uintptr_t result = 0;
@@ -406,6 +446,32 @@ TEST_CASE("remote launch copies a mutated local aggregate back from its mirror")
   REQUIRE(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
                                             arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
   CHECK(local == 0x123456789ABCDEF0ull);
+}
+
+TEST_CASE("asserting remote modules take a leading error buffer and report the assert") {
+  WithStubDevice device(false, false);
+  WithStubManagedPlatform platform;
+  StubQueue queue(std::chrono::seconds(1));
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  const unsigned char image = 0;
+  std::array<const char *, 1> asserting{polyregion::conventions::ErrorArg};
+  REQUIRE(polyrt_remote_load(&context, "asserting", static_cast<int32_t>(PlatformKind::Managed), static_cast<int32_t>(ModuleFormat::Object),
+                             asserting.size(), asserting.data(), sizeof(image), &image));
+  REQUIRE(polyrt_remote_load(&context, "plain", static_cast<int32_t>(PlatformKind::Managed), static_cast<int32_t>(ModuleFormat::Object), 0,
+                             nullptr, sizeof(image), &image));
+  int64_t n = 3;
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::IntS64)};
+  const std::array<void *, 1> arguments{&n};
+
+  REQUIRE(polyrt_remote_launch(&context, "plain", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data()));
+  CHECK(queue.invokedTypes == std::vector{Type::IntS64, Type::Void});
+
+  queue.raiseAssert = true;
+  REQUIRE(polyrt_remote_launch(&context, "asserting", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(), arguments.data()));
+  CHECK(queue.invokedTypes == std::vector{Type::Ptr, Type::IntS64, Type::Void});
+  CHECK(assertReported());
+  CHECK(device.stub->remoteAllocs == device.stub->remoteFrees);
+  CHECK(context.remoteAllocations.empty());
 }
 
 TEST_CASE("remote launch preserves null aggregate pointers") {
@@ -1392,30 +1458,6 @@ TEST_CASE("gen-arena-mirror") {
 }
 
 #ifdef POLYRT_TESTS_POLYDCO
-
-namespace {
-
-struct StubManagedPlatform final : Platform {
-  std::string name() override { return "stub"; }
-  std::vector<Property> properties() override { return {}; }
-  PlatformKind kind() override { return PlatformKind::Managed; }
-  std::vector<std::unique_ptr<Device>> enumerate() override { return {}; }
-};
-
-struct WithStubManagedPlatform {
-  std::unique_ptr<Platform> previousPlatform = std::move(polyregion::polyrt::currentPlatform);
-  std::unique_ptr<DeviceQueue> previousQueue = std::move(polyregion::polyrt::currentQueue);
-  WithStubManagedPlatform() {
-    polyregion::polyrt::currentPlatform = std::make_unique<StubManagedPlatform>();
-    polyregion::polyrt::currentQueue = std::make_unique<StubQueue>(std::chrono::seconds(1));
-  }
-  ~WithStubManagedPlatform() {
-    polyregion::polyrt::currentQueue = std::move(previousQueue);
-    polyregion::polyrt::currentPlatform = std::move(previousPlatform);
-  }
-};
-
-} // namespace
 
 TEST_CASE("polydco managed launches leave no device allocations behind") {
   WithStubDevice device(false, false);

@@ -622,12 +622,25 @@ int main(int argc, char **argv) {
                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   const auto remoteKernel = Function(FunctionDecl(remoteKernelName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
                                      {ret()}, FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
-  const auto interface = Interface(Sym({"foo"}), {publicDecl, copyDecl, applyDecl, combineDecl, capableDecl, remoteDecl}, {});
+  const auto remoteAssertName = Sym({"bar", "remote_assert"});
+  const auto remoteAssertKernelName = Sym({"bar", "implementation", "remote_assert_kernel"});
+  const auto remoteAssertImplementation =
+      Function(remoteImplementationDecl.withName(Sym({"bar", "implementation", "remote_assert"})),
+               {let("launched") = Expr::SpecOp(remoteLaunch.withKernel(Term::Poison(Type::FnRef(remoteAssertKernelName)).widen())).widen(),
+                ret(call(Intr::Add(x, Term::IntS32Const(1).widen(), i32)))},
+               FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  const auto remoteAssertKernel = Function(
+      FunctionDecl(remoteAssertKernelName, {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()),
+      {let("asserted") = Expr::SpecOp(Spec::Assert(Term::IntU32Const(1).widen(), Term::StringConst("remote").widen())).widen(), ret()},
+      FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  const auto interface = Interface(
+      Sym({"foo"}), {publicDecl, copyDecl, applyDecl, combineDecl, capableDecl, remoteDecl, publicDecl.withName(remoteAssertName)}, {});
   const auto program = polyregion::polyfront::packageProgram(
       {implementation.withImplements(publicName), copyImplementation.withImplements(copyName),
        applyImplementation.withImplements(applyName), combineImplementation.withImplements(combineName),
        capableImplementation.withImplements(capableName).withRequiredCapabilities({"demo"}),
-       remoteImplementation.withImplements(remoteName), remoteKernel},
+       remoteImplementation.withImplements(remoteName), remoteKernel, remoteAssertImplementation.withImplements(remoteAssertName),
+       remoteAssertKernel},
       {});
 
   const auto i64 = Type::IntS64().widen();

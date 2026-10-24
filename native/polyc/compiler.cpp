@@ -471,8 +471,11 @@ compiler::package::compile(const polyast::ProgramLinkRequest &request, const com
       if (!device.binary) return {{}, {"linked consumer entry compilation failed for " + moduleName + ": " + device.messages}};
       const auto format = runtime::moduleFormatOf(target);
       if (!format) continue;
+      auto features = device.features;
+      if (device.entryArgs ^ exists([](const auto &arg) { return arg.symbol == conventions::ErrorArg; }))
+        features.emplace_back(conventions::ErrorArg);
       remoteModules.emplace_back(moduleName, static_cast<int32_t>(*format), static_cast<int32_t>(runtime::targetPlatformKind(target)),
-                                 device.features, *device.binary);
+                                 std::move(features), *device.binary);
     }
   }
   return {{polyast::CompileBundle(std::move(*host.binary), std::move(remoteModules), std::move(implementations), std::move(unfit))}, {}};

@@ -12,7 +12,10 @@
 #include <new>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #if !defined(_WIN32) && !defined(__APPLE__)
@@ -36,6 +39,7 @@
 #include "polyregion/env_keys.h"
 #include "polyregion/polyc_jit_symbols.h"
 #include "polyregion/types.h"
+#include "polyrt/assert_buffer.hpp"
 #include "polyrt/rt.h"
 #include "polyrt/sma_runtime.hpp"
 
@@ -50,6 +54,9 @@
 
 using namespace polyregion::invoke;
 using namespace aspartame;
+
+extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message); // NOLINT(*-reserved-identifier)
+
 using polyregion::polyrt::DebugLevel;
 
 std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
@@ -549,6 +556,21 @@ POLYREGION_EXPORT extern "C" void polyrt_device_memset(void *context, void *dst,
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_sync(void *context) { requireContext(context, __func__).queue->enqueueWaitBlocking(); }
 
+static std::mutex &assertingModulesMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+static std::unordered_set<std::string> &assertingModules() {
+  static std::unordered_set<std::string> modules;
+  return modules;
+}
+
+static bool takesErrorBuffer(const char *moduleName) {
+  const std::lock_guard lock(assertingModulesMutex());
+  return assertingModules().contains(moduleName);
+}
+
 POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *moduleName, const int32_t kind, const int32_t format,
                                                      const size_t featureCount, const char **features, const size_t imageLength,
                                                      const uint8_t *image) {
@@ -565,7 +587,13 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_load(void *context, const char *
                                                  polyregion::compiletime::OptLevel::O3,
                                                  0,
                                                  nullptr};
-  return polyregion::polyrt::loadKernelObject(moduleName, object);
+  if (!polyregion::polyrt::loadKernelObject(moduleName, object)) return false;
+  if (std::any_of(features, features + featureCount,
+                  [](const char *feature) { return std::string_view(feature) == polyregion::conventions::ErrorArg; })) {
+    const std::lock_guard lock(assertingModulesMutex());
+    assertingModules().emplace(moduleName);
+  }
+  return true;
 }
 
 POLYREGION_EXPORT extern "C" void polyrt_remote_require_loaded(void *context, const char *moduleName, const bool loaded) {
@@ -582,23 +610,55 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
                          const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ, const size_t localMemBytes,
                          const size_t argCount, const uint8_t *argTypes, void *const *argPtrs) {
   auto &value = requireContext(context, __func__);
-  ArgBuffer buffer{};
-  if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
-  // a logical SPIR-V kernel reads its capture through the typed arena views bound where the capture was passed
-  const auto pointerArgs =
-      iota(size_t{0}, argCount) | filter([&](const size_t i) { return static_cast<Type>(argTypes[i]) == Type::Ptr; }) | to_vector();
-  const auto capture = value.device->arenaViewStart(moduleName) ^ flat_map([&](const size_t view) {
-                         return view < pointerArgs.size() ? std::optional{pointerArgs[view]} : std::nullopt;
-                       });
-  for (size_t i = 0; i < argCount; ++i)
-    for (int copy = 0; copy < (capture == i ? polyregion::polyrt::sma::arenaViewCount : 1); ++copy)
-      buffer.append(static_cast<Type>(argTypes[i]), argPtrs[i]);
-  buffer.append(Type::Void, nullptr);
-  value.queue->enqueueInvokeAsync(
-      moduleName, kernelName, buffer,
-      Policy{Dim3{gridX, gridY, gridZ}, blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
-      {});
-  value.queue->enqueueWaitBlocking();
+  uintptr_t error = 0;
+  if (takesErrorBuffer(moduleName)) {
+    error = remoteMalloc(context, polyregion::polyrt::assertBufferBytes);
+    const std::vector<uint8_t> zero(polyregion::polyrt::assertBufferBytes, 0);
+    remoteMemcpy(context, error, reinterpret_cast<uintptr_t>(zero.data()), zero.size(), 0);
+  }
+  try {
+    std::vector<uint8_t> types;
+    std::vector<void *> ptrs;
+    if (error) {
+      types.emplace_back(static_cast<uint8_t>(Type::Ptr));
+      ptrs.emplace_back(&error);
+    }
+    types.insert(types.end(), argTypes, argTypes + argCount);
+    ptrs.insert(ptrs.end(), argPtrs, argPtrs + argCount);
+    ArgBuffer buffer{};
+    if (value.platform->kind() == PlatformKind::HostThreaded) buffer.append(Type::IntS64, nullptr);
+    // a logical SPIR-V kernel reads its capture through the typed arena views bound where the capture was passed
+    const auto pointerArgs =
+        iota(size_t{0}, types.size()) | filter([&](const size_t i) { return static_cast<Type>(types[i]) == Type::Ptr; }) | to_vector();
+    const auto capture = value.device->arenaViewStart(moduleName) ^ flat_map([&](const size_t view) {
+                           return view < pointerArgs.size() ? std::optional{pointerArgs[view]} : std::nullopt;
+                         });
+    for (size_t i = 0; i < types.size(); ++i)
+      for (int copy = 0; copy < (capture == i ? polyregion::polyrt::sma::arenaViewCount : 1); ++copy)
+        buffer.append(static_cast<Type>(types[i]), ptrs[i]);
+    buffer.append(Type::Void, nullptr);
+    value.queue->enqueueInvokeAsync(
+        moduleName, kernelName, buffer,
+        Policy{Dim3{gridX, gridY, gridZ},
+               blockX > 0 ? std::optional{std::pair{Dim3{blockX, blockY, blockZ}, localMemBytes}} : std::nullopt},
+        {});
+    value.queue->enqueueWaitBlocking();
+    if (error) {
+      std::vector<uint8_t> reported(polyregion::polyrt::assertBufferBytes, 0);
+      remoteMemcpy(context, reinterpret_cast<uintptr_t>(reported.data()), error, reported.size(), 1);
+      remoteFree(context, std::exchange(error, 0));
+      const auto reason = polyregion::polyrt::decodeAssertBuffer(reported.data());
+      polyregion::polyrt::logAssertReason(reason, __func__, moduleName);
+      if (reason.raised) __polyregion_builtin_assert(reason.code, reason.message.c_str());
+    }
+  } catch (...) {
+    const auto failure = std::current_exception();
+    try {
+      remoteFree(context, error);
+    } catch (...) {
+    }
+    std::rethrow_exception(failure);
+  }
 }
 
 static void remoteLaunchWithMirrors(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
