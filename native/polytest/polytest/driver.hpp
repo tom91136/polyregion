@@ -184,7 +184,8 @@ inline std::vector<std::string> baseEnvs(const Task &t, const DriverConfig &cfg,
                            polyregion::env::PolypassPlugins, polyregion::env::PolyregionCacheDir,             //
                            "XDG_CACHE_HOME", "POCL_CACHE_DIR", "QEMU_LD_PREFIX", "CUEW_LIB_PATH", "HIPEW_LIB_PATH", "HSAEW_LIB_PATH"})
     if (auto v = std::getenv(name)) put(name, v);
-  for (const auto *name : {polyregion::env::PolyfrontLibraryPath, polyregion::env::PolyfrontLibraryCapabilities})
+  for (const auto *name : {polyregion::env::PolyfrontLibraryPath, polyregion::env::PolyfrontLibraryCapabilities,
+                           polyregion::env::PolyinvokeVulkanLib, "VK_LOADER_DEBUG"})
     if (auto v = std::getenv(name)) put(name, v);
   if (const auto a = archFor(t, cfg); a ^ starts_with("opencl")) put(polyregion::env::PolyinvokeDisableSvm, "1");
   // XXX forward OCL_ICD_VENDORS (dropped by the wholesale child env) narrowed to one vendor: rusticl pulls

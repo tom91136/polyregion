@@ -13,6 +13,8 @@
 
 #include "polyinvoke/spirv.h"
 
+#include "dl_util.h"
+
 #ifndef _MSC_VER
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wcast-align"
@@ -138,6 +140,8 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
   return {ctx, info};
 }
 std::variant<std::string, std::unique_ptr<Platform>> VulkanPlatform::create() {
+  if (const char *vkLib = std::getenv(polyregion::env::PolyinvokeVulkanLib); vkLib && *vkLib && !dl::open_first({vkLib}))
+    return fmt::format("Vulkan: failed to open {}", vkLib);
   try {
     return std::unique_ptr<Platform>(new VulkanPlatform());
   } catch (const std::exception &e) {

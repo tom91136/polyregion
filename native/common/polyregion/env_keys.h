@@ -45,6 +45,7 @@ inline constexpr auto PolyinvokeDisableSvm = "POLYINVOKE_DISABLE_SVM";
 inline constexpr auto PolyinvokeOpenclLib = "POLYINVOKE_OPENCL_LIB";
 inline constexpr auto PolyinvokeTestLock = "POLYINVOKE_TEST_LOCK";
 inline constexpr auto PolyinvokeTestTargets = "POLYINVOKE_TEST_TARGETS";
+inline constexpr auto PolyinvokeVulkanLib = "POLYINVOKE_VULKAN_LIB";
 
 inline constexpr auto PolyrtDebug = "POLYRT_DEBUG";
 inline constexpr auto PolyrtDevice = "POLYRT_DEVICE";
