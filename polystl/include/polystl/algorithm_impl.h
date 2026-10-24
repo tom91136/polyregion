@@ -153,9 +153,10 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       const int64_t *end = e.data();
 
       std::vector<T> groupPartial(groups);
-      auto kernel = [&f, &reduce, init, begin, end, out = groupPartial.data()](const int64_t tid) {
-        auto acc = init;
-        for (int64_t i = begin[tid]; i < end[tid]; ++i) {
+      auto kernel = [&f, &reduce, begin, end, out = groupPartial.data()](const int64_t tid) {
+        if (begin[tid] >= end[tid]) return;
+        auto acc = f(begin[tid]);
+        for (int64_t i = begin[tid] + 1; i < end[tid]; ++i) {
           acc = reduce(acc, f(i));
         }
         out[tid] = acc;
@@ -175,7 +176,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
         details::dispatchHostThreaded(groups, polyreflectTrackPtr(&kernel), loadedModule.c_str(), bundle.asserts);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
-          acc = reduce(acc, groupPartial[groupIdx]);
+          if (begin[groupIdx] < end[groupIdx]) acc = reduce(acc, groupPartial[groupIdx]);
         }
         return acc;
       }
@@ -184,23 +185,26 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
     case polyregion::runtime::PlatformKind::Managed: {
       const int64_t groups = program_meta::VkWorkgroupSizeXValue;
       std::vector<T> groupPartial(groups);
-      auto kernel = [out = groupPartial.data(), init, f, reduce,
-                     global]([[clang::annotate(POLYREGION_LOCAL_ANNOTATION)]] T *localPartialSum) {
+      auto kernel = [out = groupPartial.data(), f, reduce, global]([[clang::annotate(POLYREGION_LOCAL_ANNOTATION)]] T *localPartialSum) {
         const auto lim = static_cast<uint32_t>(global);
         const auto localIdx = __polyregion_gpu_local_idx(0);
-        localPartialSum[localIdx] = init;
         const auto gid = __polyregion_gpu_global_idx(0);
         const auto gs = __polyregion_gpu_global_size(0);
-        for (uint32_t i = gid; i < lim; i += gs) {
-          localPartialSum[localIdx] = reduce(localPartialSum[localIdx], f(static_cast<int64_t>(i)));
+        if (gid < lim) {
+          localPartialSum[localIdx] = f(static_cast<int64_t>(gid));
+          for (uint32_t i = gid + gs; i < lim; i += gs) {
+            localPartialSum[localIdx] = reduce(localPartialSum[localIdx], f(static_cast<int64_t>(i)));
+          }
         }
+        const auto groupStart = __polyregion_gpu_group_idx(0) * __polyregion_gpu_local_size(0);
+        const auto active = lim > groupStart ? lim - groupStart : 0;
         for (uint32_t offset = __polyregion_gpu_local_size(0) / 2; offset > 0; offset /= 2) {
           __polyregion_gpu_barrier_local();
-          if (localIdx < offset) {
+          if (localIdx < offset && localIdx + offset < active) {
             localPartialSum[localIdx] = reduce(localPartialSum[localIdx], localPartialSum[localIdx + offset]);
           }
         }
-        if (localIdx == 0) {
+        if (localIdx == 0 && active > 0) {
           out[__polyregion_gpu_group_idx(0)] = localPartialSum[localIdx];
         }
       };
@@ -221,7 +225,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
                                  &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, loadedModule.c_str(), bundle.prelude,
                                  bundle.postlude, bundle.asserts);
         T acc = init;
-        for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
+        for (int64_t groupIdx = 0; groupIdx < groups && groupIdx * program_meta::VkWorkgroupSizeXValue < global; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);
         }
         return acc;
