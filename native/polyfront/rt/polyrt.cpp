@@ -222,12 +222,16 @@ void polyregion::polyrt::initialise() {
     if (!currentPlatform) {
       log(DebugLevel::Info, "Initialising backends... (addr=%p)", (void *)&initialise);
       auto parsed = selectPlatform();
+      bool strict = false;
+      if (const auto env = std::getenv(polyregion::env::PolyrtStrictSelect); env && env[0] && env[0] != '0') strict = true;
+      if (parsed && strict && !currentPlatform)
+        skipExit(fmt::format("Backend {} selected by {} failed to initialise (strict)", magic_enum::enum_name(parsed->spec.runtime),
+                             polyregion::env::PolyrtPlatform)
+                     .c_str());
       if (currentPlatform) {
         const auto requiredFeatures = parsed ? parsed->spec.requiredDeviceFeatures : std::vector<std::string_view>{};
         std::string glob = parsed ? parsed->deviceGlob : std::string{};
         if (const auto env = std::getenv(polyregion::env::PolyrtDevice)) glob = env;
-        bool strict = false;
-        if (const auto env = std::getenv(polyregion::env::PolyrtStrictSelect); env && env[0] && env[0] != '0') strict = true;
         selectDevice(*currentPlatform, requiredFeatures, glob, strict);
       }
       // Test-only: cross-process lock so ctest -j workers do not race on the same device.

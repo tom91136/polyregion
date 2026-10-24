@@ -17,7 +17,7 @@ if (APPLE)
 endif ()
 
 
-add_executable(polyrt-tests test/memory.cpp test/page_guard.cpp test/package_service.cpp test/package_emit.cpp)
+add_executable(polyrt-tests test/memory.cpp test/page_guard.cpp test/package_service.cpp test/package_emit.cpp test/select.cpp)
 target_include_directories(polyrt-tests PRIVATE ..)
 target_link_libraries(polyrt-tests PRIVATE polyrt-obj polyinvoke-obj polyfront-options polyfront-polyc-client Catch2::Catch2WithMain
                                            Aspartame::Aspartame)
