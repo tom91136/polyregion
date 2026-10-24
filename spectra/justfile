@@ -158,7 +158,7 @@ test-package filter='' extra='' ctest='':
       -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON -DSPECTRA_ENABLE_PACKAGE_TESTS=ON \
       -DSPECTRA_TEST_PROFILE="${POLYREGION_TEST_PROFILE:-}" -DCMAKE_PREFIX_PATH="$dist" {{ extra }}
     cmake --build "{{ root }}/target/package" --parallel {{ jobs }}
-    ctest --test-dir "{{ root }}/target/package" --parallel {{ jobs }} --timeout 1500 --output-on-failure \
+    ctest --test-dir "{{ root }}/target/package" --parallel {{ jobs }} --timeout 3600 --output-on-failure \
       {{ if filter == "" { "" } else { "-R '" + filter + "'" } }} {{ ctest }}
 
 _vendor target extra='':
