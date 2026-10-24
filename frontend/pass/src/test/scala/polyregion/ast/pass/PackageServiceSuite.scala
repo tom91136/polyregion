@@ -992,6 +992,7 @@ class PackageServiceSuite extends munit.FunSuite {
     assertEquals(
       foreign,
       List(
+        p.Conventions.RuntimeAbi.SmaVisitClear,
         p.Conventions.RuntimeAbi.SmaEnsureMin,
         p.Conventions.RuntimeAbi.SmaVisitClear,
         p.Conventions.RuntimeAbi.SmaReadAlloc

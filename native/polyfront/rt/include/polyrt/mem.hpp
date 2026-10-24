@@ -863,7 +863,10 @@ public:
     else step(offset);
   }
 
-  void unmirrorVisitClear() { syncVisited.clear(); }
+  void unmirrorVisitClear() {
+    syncVisited.clear();
+    localSyncVisited.clear();
+  }
 
   struct MirroredGraph {
     std::vector<size_t> ptrOffsets; // sorted

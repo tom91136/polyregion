@@ -836,6 +836,12 @@ private[polyregion] object ProgramLinker {
     val contextType = p.Spec.ContextType
     val context     = p.Named("#context", contextType)
     entryArgs += p.Arg(context)
+    if (mirrored.nonEmpty)
+      body += p.Stmt.Var(
+        p.Named("#mirrorClear", p.Type.Unit0),
+        Some(p.Expr.ForeignCall(p.Conventions.RuntimeAbi.SmaVisitClear, Nil, p.Type.Unit0)),
+        isMutable = true
+      )
     if (resolution.abi.systemArguments != 0) invokeArgs += select(context)
     publicDecl.args.indices.foreach { index =>
       if (!omitted.contains(index)) {

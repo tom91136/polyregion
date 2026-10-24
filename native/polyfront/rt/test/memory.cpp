@@ -704,6 +704,27 @@ TEST_CASE("generated mirror refreshes cached allocations between launches") {
   CHECK(fixture.remoteWrites == 4);
 }
 
+TEST_CASE("linked package mirror refreshes cached allocations between launches") {
+  Fixture fixture;
+  auto x = fixture.mallocLocal<int32_t>();
+  *x = 41;
+
+  const auto launch = [&] {
+    fixture.allocation.unmirrorVisitClear();
+    auto remote = reinterpret_cast<int32_t *>(fixture.allocation.mirrorEnsure(x));
+    (*remote)++;
+    fixture.allocation.unmirrorVisitClear();
+    fixture.allocation.unmirrorReadAlloc(x);
+    return remote;
+  };
+
+  auto remote = launch();
+  CHECK(*x == 42);
+  *x = 6;
+  CHECK(launch() == remote);
+  CHECK(*x == 7);
+}
+
 TEST_CASE("resident heap blocks fault their device copy back and upload again only after a host write") {
   if (!polyregion::polyrt::guard::AtomicPublish) SKIP("no whole-page publish on this platform");
   Fixture fixture;
