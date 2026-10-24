@@ -14,7 +14,7 @@ namespace polyregion {
 
 } // namespace polyregion
 
-#if !defined(__PRETTY_FUNCTION__) && !defined(__GNUC__)
+#if defined(_MSC_VER) && !defined(__clang__)
   #define __PRETTY_FUNCTION__ __FUNCSIG__
 #endif
 
