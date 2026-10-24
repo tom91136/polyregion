@@ -35,6 +35,7 @@ struct __PolyreflectTrackPtr {
 [[gnu::always_inline]] inline void *polyreflectTrackPtr(void *p) { return __PolyreflectTrackPtr{p}.p; }
 
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
+  if (global <= 0) return;
   polyrt::initialise();
   auto N = std::thread::hardware_concurrency();
   log(DebugLevel::Debug, "<%s, %" PRId64 "> Dispatch", __func__, global);
@@ -128,6 +129,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
 template <typename T, class UnaryFunction, class BinaryFunction>
 T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce) {
+  if (global <= 0) return init;
   polyrt::initialise();
   auto N = std::thread::hardware_concurrency();
   log(DebugLevel::Debug, "<%s, %d> Dispatch", __func__, global);
