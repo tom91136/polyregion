@@ -25,4 +25,5 @@ extern "C" {
                                                          const polyregion::runtime::KernelBundle *bundle,                           //
                                                          size_t reductionsCount, const polyregion::polydco::FReduction *reductions, //
                                                          char *captures);
+[[maybe_unused]] POLYREGION_EXPORT void polydco_host_fallback();
 }

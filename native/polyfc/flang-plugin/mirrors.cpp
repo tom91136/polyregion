@@ -106,7 +106,8 @@ PolyDCOMirror::PolyDCOMirror(ModuleOp &m)
                              /* bundle         */ ptrTy,
                              /* reductionCount */ TLB.getI64Type(),
                              /* reductions     */ ptrTy,
-                             /* captures       */ ptrTy})) {}
+                             /* captures       */ ptrTy})),
+      hostFallbackFn(defineFunc(m, abi::HostFallback, voidTy, {})) {}
 void PolyDCOMirror::record(OpBuilder &B, const Value ptr, const Value sizeInBytes) {
   LLVM::CallOp::create(B, B.getUnknownLoc(), recordFn, ValueRange{ptr, convertIfNeeded(B, sizeInBytes, B.getI64Type())});
 }
@@ -120,6 +121,7 @@ void PolyDCOMirror::releaseBox(OpBuilder &B, const Value boxRef) {
 Value PolyDCOMirror::isPlatformKind(OpBuilder &B, runtime::PlatformKind kind) {
   return LLVM::CallOp::create(B, B.getUnknownLoc(), isPlatformKindFn, ValueRange{valueOf(B, kind)}).getResult();
 }
+void PolyDCOMirror::hostFallback(OpBuilder &B) { LLVM::CallOp::create(B, B.getUnknownLoc(), hostFallbackFn, ValueRange{}); }
 Value PolyDCOMirror::dispatch(OpBuilder &B, const Value lowerBound, const Value upperBound, const Value step,
                               const runtime::PlatformKind kind,                    //
                               const Value bundle,                                  //

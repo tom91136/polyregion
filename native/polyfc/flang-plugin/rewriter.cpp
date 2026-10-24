@@ -450,6 +450,8 @@ public:
     f(B0, kind);
   }
 
+  void hostFallback(OpBuilder &B) { dco.hostFallback(B); }
+
   // lowers the loop to `polyregion.core.for_each`, or `polyregion.core.transform_reduce` for a core reduction, over a closure of
   // its body when the core package implements it; the returned i1 is false at runtime when the package call could not run
   Value invokeCore(OpBuilder &B, clang::DiagnosticsEngine &diag, const std::string &diagLoc, const polyfront::Options &opts,
@@ -1320,10 +1322,10 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       //   } else if(isPlatformKind($Kind)) {
       //     (repeat)
       //   }
-      //   if (executeOriginal) (call original DoConcurrent)
+      //   if (executeOriginal) { hostFallback(); (call original DoConcurrent) }
       //
       // Default-true so unmatched platforms (no backend init succeeded, no compatible GPU)
-      // still run the host doLoop instead of silently no-op'ing.
+      // still run the host doLoop instead of silently no-op'ing, unless host fallback is disabled.
 
       B.setInsertionPoint(doLoop);
       if (const auto bound = core ? rewriter.invokeCore(B, diag, diagLoc, opts, moduleId, doLoop, *core, bitcodeFiles) : Value{}) {
@@ -1345,6 +1347,8 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m, std::vector
       auto ifOp = fir::IfOp::create(B, uLoc(B), LLVM::LoadOp::create(B, uLoc(B), B.getI1Type(), executeOriginal), false);
       auto &then = ifOp.getThenRegion().front();
       doLoop->moveBefore(&then, then.begin());
+      B.setInsertionPoint(doLoop);
+      rewriter.hostFallback(B);
     }
   });
 }

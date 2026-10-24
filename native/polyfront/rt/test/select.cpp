@@ -10,6 +10,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#ifdef POLYRT_TESTS_POLYDCO
+  #include "polydco/polydco.h"
+#endif
 #include "polyregion/env.h"
 #include "polyregion/env_keys.h"
 #include "polyrt/rt.h"
@@ -71,3 +74,20 @@ TEST_CASE("strict selection leaves an unrecognised platform to the fallback") {
   INFO(errors);
   CHECK(code == 0);
 }
+
+#ifdef POLYRT_TESTS_POLYDCO
+TEST_CASE("select probe: polydco host fallback", "[.probe]") { polydco_host_fallback(); }
+
+TEST_CASE("polydco host fallback skips when host fallback is disabled") {
+  const auto [code, errors] = probe("select probe: polydco host fallback", {{polyregion::env::PolyrtHostFallback, "0"}});
+  INFO(errors);
+  CHECK(code == 77);
+  CHECK(errors.find("host fallback is disabled, exiting 77 (skip)") != std::string::npos);
+}
+
+TEST_CASE("polydco host fallback runs the host loop by default") {
+  const auto [code, errors] = probe("select probe: polydco host fallback", {{polyregion::env::PolyrtHostFallback, "1"}});
+  INFO(errors);
+  CHECK(code == 0);
+}
+#endif

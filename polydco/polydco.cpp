@@ -502,3 +502,8 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
 
   return false;
 }
+
+POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_host_fallback() {
+  if (polyrt::hostFallback()) return;
+  polyrt::skipExit("polydco_host_fallback: no backend ran the loop and host fallback is disabled");
+}

@@ -9,5 +9,6 @@ inline constexpr auto ReleaseBox = "polydco_release_box";
 inline constexpr auto DebugTypeLayout = "polydco_debug_typelayout";
 inline constexpr auto IsPlatformKind = "polydco_is_platformkind";
 inline constexpr auto Dispatch = "polydco_dispatch";
+inline constexpr auto HostFallback = "polydco_host_fallback";
 
 } // namespace polyregion::polydco::abi
