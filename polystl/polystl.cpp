@@ -122,8 +122,8 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     if (polyrt::currentDevice->pagingMode() != PagingMode::System)
       polyrt::skipExit("POLYRT_MIRROR=off needs system paging (HMM / XNACK+ / system-USM)");
     ArgBuffer buffer;
-    if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     bindError(buffer);
+    if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     buffer.append(Type::Ptr, &functorData);
     launch(buffer);
     log(DebugLevel::Debug, "<%s:%s:%zu> Done (usm)", __func__, moduleId, global);
@@ -141,8 +141,8 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
     // buffer to every view slot; flat backends, and kernels that never read their capture, take it once
     const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;
     ArgBuffer buffer;
-    if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     bindError(buffer);
+    if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
     for (int i = 0; i < arenaViews; ++i)
       buffer.append(Type::Ptr, &arenaBase);
     launch(buffer);
@@ -158,8 +158,8 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
   auto functorDevicePtr = useGenerated ? reinterpret_cast<void *>(preludeResult)
                                        : reinterpret_cast<void *>(allocations.syncLocalToRemote(functorData, *layout));
   ArgBuffer buffer;
-  if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
   bindError(buffer);
+  if (localMemBytes > 0) buffer.append(Type::Scratch, nullptr);
   buffer.append(Type::Ptr, &functorDevicePtr);
   launch(buffer);
   // sync device-side writes to captured pointer-targets back before the device alloc is freed
