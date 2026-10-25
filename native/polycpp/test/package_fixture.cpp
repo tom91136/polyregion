@@ -14,6 +14,7 @@
 
 #include "polyfront/package.hpp"
 #include "polyfront/package_program.hpp"
+#include "polyregion/conventions.h"
 
 #include "ast.h"
 #include "polyast_codec.h"
@@ -26,7 +27,8 @@ int main(int argc, char **argv) {
   using namespace polyregion::polyast::dsl;
   const bool writeInputs = argc == 3 && std::string(argv[1]) == "--write-package-inputs";
   const bool sizedCore = argc == 3 && std::string(argv[1]) == "--sized-core";
-  const auto *packageRoot = sizedCore ? argv[2] : argv[1];
+  const bool deviceCore = argc == 3 && std::string(argv[1]) == "--device-core";
+  const auto *packageRoot = sizedCore || deviceCore ? argv[2] : argv[1];
   if (argc == 3 && std::string(argv[1]) == "--print-program") {
     const auto source = llvm::MemoryBuffer::getFile(argv[2]);
     if (!source) return 10;
@@ -525,7 +527,7 @@ int main(int argc, char **argv) {
     const auto unrelatedValues = untouched.functions.front().collect_all<Term::IntU32Const>();
     return values.size() == 1 && values.front().value == 256 && unrelatedValues.size() == 1 && unrelatedValues.front().value == 64 ? 0 : 15;
   }
-  if (argc != 2 && !writeInputs && !sizedCore) return 2;
+  if (argc != 2 && !writeInputs && !sizedCore && !deviceCore) return 2;
 
   const auto publicName = Sym({"bar", "increment"});
   const auto implementationName = Sym({"bar", "implementation", "increment"});
@@ -692,8 +694,125 @@ int main(int argc, char **argv) {
                 ret(Expr::Alias(Term::Select(accumulator, {}, value)).widen())},
                FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
   const auto coreInterface = Interface(Sym({"polyregion", "core"}), {forEachDecl, transformReduceDecl}, {});
-  const auto coreProgram = polyregion::polyfront::packageProgram(
+  const auto hostCoreProgram = polyregion::polyfront::packageProgram(
       {forEachImplementation.withImplements(forEachName), transformReduceImplementation.withImplements(transformReduceName)}, {});
+
+  const auto u32Zero = Term::IntU32Const(0).widen();
+  const auto u32One = Term::IntU32Const(1).widen();
+  const auto selected = [](const Named &named) { return Term::Select(named, {}, named.tpe); };
+  const auto field = [](const Named &root, const std::string &name, const Type::Any &tpe) {
+    return Term::Select(root, {PathStep::Field(name)}, tpe);
+  };
+  const auto local = [](const Named &named, const Expr::Any &expr, const bool isMutable = false) {
+    return Stmt::Var(named, expr, isMutable).widen();
+  };
+  const auto receiverOf = [&](const Named &callable, std::vector<Stmt::Any> &out) {
+    const Named receiver(callable.symbol + "_receiver", Type::Ptr(callable.tpe, TypeSpace::Global()));
+    out.emplace_back(local(receiver, Expr::RefTo(selected(callable), {}, callable.tpe, TypeSpace::Global(), Region::Rooted(callable))));
+    return selected(receiver);
+  };
+  const auto launchOf = [&](const Sym &kernel, const std::vector<Type::Any> &tpeArgs, const Term::Any &grid, const Named &capture) {
+    return Expr::SpecOp(Spec::RemoteLaunch(selectNamed(context).widen(), Term::Poison(Type::FnRef(kernel)).widen(), tpeArgs, grid, u32One,
+                                           u32One, u32Zero, u32Zero, u32Zero, u32Zero, {selected(capture)}))
+        .widen();
+  };
+  const auto kernelOf = [](const Sym &name, const std::vector<Type::Var> &tpeVars, const Named &capture, std::vector<Stmt::Any> body) {
+    body.emplace_back(ret());
+    return Function(FunctionDecl(name, tpeVars, {}, {Arg(capture, {})}, {}, {}, Type::Unit0(), FunctionAffinity::Offload()), body,
+                    FunctionVisibility::Internal(), FunctionFpMode::Relaxed(), CallConvention::OffloadEntry());
+  };
+  const Named gid("gid", Type::IntU32());
+  const auto gidDecl = local(gid, Expr::SpecOp(Spec::GpuGlobalIdx(u32Zero)));
+
+  const auto bodyType = Type::Var("Body");
+  const auto forEachCaptureName = Sym({"polyregion", "core", "device", "ForEachCapture"});
+  const auto forEachCaptureType = Type::Struct(forEachCaptureName, {bodyType});
+  const auto forEachKernelName = Sym({"polyregion", "core", "device", "for_each_kernel"});
+  const auto forEachKernel = [&] {
+    const Named capture(polyregion::conventions::CaptureArg, Type::Ptr(forEachCaptureType, TypeSpace::Global()));
+    const Named i("i", i64), count("count", i64), inRange("inRange", Type::Bool1()), body("body", bodyType);
+    std::vector<Stmt::Any> apply{local(body, Expr::Alias(field(capture, "body", bodyType)))};
+    const auto receiver = receiverOf(body, apply);
+    apply.emplace_back(local(Named("applied", unit), Expr::Invoke(bodyType, {}, receiver, {selected(i)}, unit)));
+    return kernelOf(forEachKernelName, {bodyType}, capture,
+                    {gidDecl, local(i, Expr::Cast(selected(gid), i64)), local(count, Expr::Alias(field(capture, "n", i64))),
+                     local(inRange, Expr::IntrOp(Intr::LogicLt(selected(i), selected(count)))), Stmt::Cond(selected(inRange), apply, {})});
+  }();
+  const auto forEachDevice = [&] {
+    const Named body("body", bodyType), capture("capture", forEachCaptureType), positive("positive", Type::Bool1());
+    const auto n = Named("n", i64);
+    return Function(FunctionDecl(Sym({"polyregion", "core", "device", "for_each"}), {bodyType}, {},
+                                 {Arg(context, {}), Arg(n, {}), Arg(body, {})}, {}, {}, unit, FunctionAffinity::Host()),
+                    {local(positive, Expr::IntrOp(Intr::LogicGt(selected(n), Term::IntS64Const(0)))),
+                     Stmt::Cond(selected(positive),
+                                {Stmt::Var(capture, {}, true), Stmt::Mut(field(capture, "n", i64), Expr::Alias(selected(n))),
+                                 Stmt::Mut(field(capture, "body", bodyType), Expr::Alias(selected(body))),
+                                 local(Named("launched", unit), launchOf(forEachKernelName, {bodyType}, selected(n), capture))},
+                                {}),
+                     ret()},
+                    FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  }();
+
+  const auto mapType = Type::Var("Map"), combineType = Type::Var("Combine");
+  const auto reduceCaptureName = Sym({"polyregion", "core", "device", "ReduceCapture"});
+  const auto reduceCaptureType = Type::Struct(reduceCaptureName, {*value.get<Type::Var>(), mapType, combineType});
+  const auto valuePtr = Type::Ptr(value, TypeSpace::Global());
+  const auto reduceKernelName = Sym({"polyregion", "core", "device", "transform_reduce_kernel"});
+  const auto reduceKernel = [&] {
+    const Named capture(polyregion::conventions::CaptureArg, Type::Ptr(reduceCaptureType, TypeSpace::Global()));
+    const Named first("first", Type::Bool1()), count("count", i64), accumulator("accumulator", value), mappedValue("mapped", value),
+        map("map", mapType), combine("combine", combineType), out("out", valuePtr), i("i", i64);
+    std::vector<Stmt::Any> reduce{
+        local(count, Expr::Alias(field(capture, "n", i64))), local(accumulator, Expr::Alias(field(capture, "init", value)), true),
+        local(map, Expr::Alias(field(capture, "map", mapType))), local(combine, Expr::Alias(field(capture, "combine", combineType)))};
+    const auto mapReceiver = receiverOf(map, reduce);
+    const auto combineReceiver = receiverOf(combine, reduce);
+    reduce.emplace_back(
+        Stmt::ForRange(i, Term::IntS64Const(0), selected(count), Term::IntS64Const(1),
+                       {local(mappedValue, Expr::Invoke(mapType, {}, mapReceiver, {selected(i)}, value)),
+                        Stmt::Mut(selected(accumulator),
+                                  Expr::Invoke(combineType, {}, combineReceiver, {selected(accumulator), selected(mappedValue)}, value))}));
+    reduce.emplace_back(local(out, Expr::Alias(field(capture, "out", valuePtr))));
+    reduce.emplace_back(Stmt::Update(selected(out), Term::IntS32Const(0), selected(accumulator)));
+    return kernelOf(reduceKernelName, {*value.get<Type::Var>(), mapType, combineType}, capture,
+                    {gidDecl, local(first, Expr::IntrOp(Intr::LogicEq(selected(gid), u32Zero))), Stmt::Cond(selected(first), reduce, {})});
+  }();
+  const auto reduceDevice = [&] {
+    const Named n("n", i64), init("init", value), map("map", mapType), combine("combine", combineType), result("result", value),
+        positive("positive", Type::Bool1()), bytes("bytes", Type::IntU64()), raw("raw", Type::Ptr(Type::IntU8(), TypeSpace::Global())),
+        out("out", valuePtr), capture("capture", reduceCaptureType), resultRef("resultRef", valuePtr);
+    return Function(
+        FunctionDecl(Sym({"polyregion", "core", "device", "transform_reduce"}), {*value.get<Type::Var>(), mapType, combineType}, {},
+                     {Arg(context, {}), Arg(n, {}), Arg(init, {}), Arg(map, {}), Arg(combine, {})}, {}, {}, value,
+                     FunctionAffinity::Host()),
+        {local(result, Expr::Alias(selected(init)), true), local(positive, Expr::IntrOp(Intr::LogicGt(selected(n), Term::IntS64Const(0)))),
+         Stmt::Cond(selected(positive),
+                    {local(bytes, Expr::SizeOf(value)), local(raw, Expr::SpecOp(Spec::RemoteAlloc(selectNamed(context), selected(bytes)))),
+                     local(out, Expr::Cast(selected(raw), valuePtr)), Stmt::Var(capture, {}, true),
+                     Stmt::Mut(field(capture, "n", i64), Expr::Alias(selected(n))),
+                     Stmt::Mut(field(capture, "init", value), Expr::Alias(selected(init))),
+                     Stmt::Mut(field(capture, "map", mapType), Expr::Alias(selected(map))),
+                     Stmt::Mut(field(capture, "combine", combineType), Expr::Alias(selected(combine))),
+                     Stmt::Mut(field(capture, "out", valuePtr), Expr::Alias(selected(out))),
+                     local(Named("launched", unit), launchOf(reduceKernelName, {value, mapType, combineType}, u32One, capture)),
+                     local(resultRef, Expr::RefTo(selected(result), {}, value, TypeSpace::Global(), Region::Rooted(result))),
+                     local(Named("copied", unit), Expr::SpecOp(Spec::RemoteMemcpy(selectNamed(context), selected(resultRef), selected(raw),
+                                                                                  selected(bytes), Direction::RemoteToLocal()))),
+                     local(Named("freed", unit), Expr::SpecOp(Spec::RemoteFree(selectNamed(context), selected(raw))))},
+                    {}),
+         ret(Expr::Alias(selected(result)))},
+        FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall());
+  }();
+  const auto coreProgram =
+      deviceCore
+          ? polyregion::polyfront::packageProgram(
+                {forEachDevice.withImplements(forEachName), forEachKernel, reduceDevice.withImplements(transformReduceName), reduceKernel},
+                {StructDef(forEachCaptureName, {bodyType}, {Named("n", i64), Named("body", bodyType)}, {}, false),
+                 StructDef(
+                     reduceCaptureName, {*value.get<Type::Var>(), mapType, combineType},
+                     {Named("n", i64), Named("init", value), Named("map", mapType), Named("combine", combineType), Named("out", valuePtr)},
+                     {}, false)})
+          : hostCoreProgram;
 
   const auto writePackageInputs = [&](const llvm::StringRef path) {
     llvm::SmallString<256> directory(path);

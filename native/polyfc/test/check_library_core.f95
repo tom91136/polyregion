@@ -46,7 +46,48 @@
 !CHECK do: {output}
 !CHECK requires: 1 7 -1 9 101
 
-#if defined(CHARACTER)
+!CHECK case: core-device-package
+!CHECK offload-only
+!CHECK do: {package_fixture} --device-core {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 6 bound to polyregion.core
+!CHECK do: {output}
+!CHECK requires: 200 10100 28 50 32 2 5050.0
+
+!CHECK case: core-device-package-allocatable
+!CHECK offload-only
+!CHECK do: {package_fixture} --device-core {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DALLOCATABLE -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 4 bound to polyregion.core
+!CHECK do: {output}
+!CHECK requires: 200 10100 2 199
+
+#if defined(ALLOCATABLE)
+program check_library_core
+  implicit none
+  integer, parameter :: n = 100
+  integer :: i, s, lo, hi
+  integer, allocatable :: xs(:), ys(:)
+  allocate(xs(n), ys(n))
+  do concurrent (i = 1:n)
+    xs(i) = i
+  end do
+  do concurrent (i = 1:n)
+    ys(i) = xs(i) * 2
+  end do
+  s = 0
+  do concurrent (i = 1:n) reduce(+:s)
+    s = s + ys(i)
+  end do
+  lo = huge(lo)
+  hi = 0
+  do concurrent (i = 1:n - 1) reduce(min:lo) reduce(max:hi)
+    lo = min(lo, ys(i))
+    hi = max(hi, xs(i) + ys(i + 1) - xs(i + 1))
+  end do
+  write (*, '(I0,1X,I0,1X,I0,1X,I0)', advance='no') ys(n), s, lo, hi
+end program
+#elif defined(CHARACTER)
 program check_library_core
   implicit none
   integer, parameter :: n = 4
