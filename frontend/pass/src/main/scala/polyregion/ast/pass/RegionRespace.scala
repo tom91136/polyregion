@@ -99,7 +99,15 @@ object RegionRespace extends ProgramPass {
     (rooted, respace.size)
   }
 
-  override def apply(program: p.Program, log: Log): p.Program = {
+  override def apply(program: p.Program, log: Log): p.Program = respace(program, log)._1
+
+  override def run(program: p.Program, ctx: PassContext): p.Program = {
+    val (respaced, solutions) = respace(program, ctx.log)
+    ctx.runner.carry(respaced, AddressRefinement.Handoff(solutions))
+    respaced
+  }
+
+  private def respace(program: p.Program, log: Log): (p.Program, List[AddressRefinement.Solution]) = {
     val analysis = AddressRefinement.session(program)
     val (entry, ec) = program.entry
       .map(run(_, analysis.solve))
@@ -108,6 +116,7 @@ object RegionRespace extends ProgramPass {
     val (functions, fcs) = program.functions.map(run(_, analysis.solve)).unzip
     val total            = ec + fcs.sum
     if (total > 0) log.info(s"respaced $total rooted pointer(s) to their resource's address space")
-    program.copy(entry = entry, functions = functions)
+    val solutions = (program.entry.toList ::: program.functions).map(analysis.solve)
+    program.copy(entry = entry, functions = functions) -> solutions
   }
 }

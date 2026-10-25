@@ -146,6 +146,14 @@ object PassClock {
 
 final class PassRunner(clock: PassClock = PassClock.system) {
   private val eventStack = mutable.ArrayBuffer.empty[mutable.ArrayBuffer[p.Compile.Event]]
+  private var carried    = Option.empty[(p.Program, Any)]
+
+  def carry(program: p.Program, value: Any): Unit = carried = Some(program -> value)
+
+  def claim(program: p.Program): Option[Any] = carried match {
+    case Some((owner, value)) if owner eq program => carried = None; Some(value)
+    case _                                        => None
+  }
 
   def run(pass: ProgramPass, program: p.Program, parent: PassContext): p.Program = {
     val log = parent.log.subLog(pass.name)

@@ -168,6 +168,24 @@ private[pass] object AddressRefinement {
 
   final class FactTable private[AddressRefinement] (private val entries: Map[Query[?], Any]) {
     def get[A](token: Query[A]): Option[A] = entries.get(token).map(_.asInstanceOf[A])
+
+    private[AddressRefinement] def rekeyed(terms: List[(p.Term, p.Term)], exprs: List[(p.Expr, p.Expr)]): FactTable = {
+      val structural = entries.filter { case (token, _) =>
+        token match {
+          case _: Query.TermValue | _: Query.ExprResult | _: Query.AddressOf => false
+          case _                                                             => true
+        }
+      }
+      val moved = Map.newBuilder[Query[?], Any]
+      terms.foreach { case (from, to) =>
+        entries.get(Query.TermValue(from)).foreach(moved += Query.TermValue(to) -> _)
+        entries.get(Query.AddressOf(from)).foreach(moved += Query.AddressOf(to) -> _)
+      }
+      exprs.foreach { case (from, to) =>
+        entries.get(Query.ExprResult(from)).foreach(moved += Query.ExprResult(to) -> _)
+      }
+      FactTable(structural ++ moved.result())
+    }
   }
 
   final case class CoercionSite(
@@ -204,7 +222,33 @@ private[pass] object AddressRefinement {
       if (diagnostics.nonEmpty) throw IllegalArgumentException(diagnostics.mkString("\n"))
       this
     }
+
+    /** Re-targets this solution at `to`, which must differ from `function` only in the address spaces of its pointer
+      * types.
+      *
+      * Encodings and provenances never depend on the declared space of a pointer, so they carry over unchanged. The
+      * spaces recorded in the facts and `refinedSpaces` describe `function` and are dropped. Calls are resolved by
+      * argument type, which a space change can alter, so a function containing one is not transferable.
+      */
+    def respaced(to: p.Function): Option[Solution] = {
+      lazy val exprs = function.collectAll[p.Expr]
+      if (model != AddressModel.Physical || diagnostics.nonEmpty) None
+      else if (exprs.exists { case _: p.Expr.Invoke => true; case _ => false }) None
+      else
+        Some(
+          copy(
+            function = to,
+            facts = facts.rekeyed(
+              function.collectAll[p.Term].zip(to.collectAll[p.Term]),
+              exprs.zip(to.collectAll[p.Expr])
+            ),
+            refinedSpaces = Map.empty
+          )
+        )
+    }
   }
+
+  final case class Handoff(solutions: List[Solution])
 
   type Field = (p.Sym, String)
 

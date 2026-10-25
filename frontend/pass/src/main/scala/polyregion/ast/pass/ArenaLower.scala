@@ -99,12 +99,26 @@ object ArenaLower extends ProgramPass {
     case _                => t
   }
 
-  override def apply(program: p.Program, log: Log): p.Program = {
+  override def apply(program: p.Program, log: Log): p.Program = lower(program, Nil)
+
+  override def run(program: p.Program, ctx: PassContext): p.Program =
+    lower(
+      program,
+      ctx.runner.claim(program).collect { case AddressRefinement.Handoff(solutions) => solutions }.getOrElse(Nil)
+    )
+
+  private def lower(program: p.Program, shared: List[AddressRefinement.Solution]): p.Program = {
     val members  = program.defs.iterator.map(d => d.name -> d.members).toMap
     val analysis = AddressRefinement.session(program)
+    val carried  = (program.entry.toList ::: program.functions).zip(shared)
+    def solve(function: p.Function): AddressRefinement.Solution =
+      carried
+        .collectFirst { case (candidate, solution) if candidate eq function => solution }
+        .flatMap(_.respaced(function))
+        .getOrElse(analysis.solve(function))
     program.copy(
-      entry = program.entry.map(run(members, analysis.solve, _)),
-      functions = program.functions.map(run(members, analysis.solve, _))
+      entry = program.entry.map(run(members, solve, _)),
+      functions = program.functions.map(run(members, solve, _))
     )
   }
 
