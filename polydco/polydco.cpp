@@ -303,10 +303,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   if (mode == polyrt::sma::MirrorMode::Arena) {
     // marshal the whole capture graph into one device arena (pointers -> arena offsets)
-    allocations.genArenaReset();
-    allocations.genArenaObjectSlack = invoke::overReadPadBytes(polyrt::currentDevice->features());
-    allocations.genArenaMirror(captures, 1, 1, *layout, layout->sizeInBytes);
-    auto arenaBase = reinterpret_cast<void *>(allocations.genArenaFinish());
+    auto arenaBase = reinterpret_cast<void *>(polyrt::sma::arenaMarshal(allocations, captures, *layout));
     // the arena binds where the capture was passed: once per typed view when the module declares them (logical
     // SPIR-V), otherwise once
     const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;

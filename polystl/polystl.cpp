@@ -133,10 +133,7 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
   if (mode == polyrt::sma::MirrorMode::Arena) {
     // lay the whole capture graph into one device arena (pointers -> arena offsets); the
     // arena-lowered kernel takes the arena base (capture root at offset 0) and derefs arena[off + i]
-    allocations.genArenaReset();
-    allocations.genArenaObjectSlack = invoke::overReadPadBytes(polyrt::currentDevice->features());
-    allocations.genArenaMirror(static_cast<const char *>(functorData), 1, 1, *layout, layout->sizeInBytes);
-    auto arenaBase = reinterpret_cast<void *>(allocations.genArenaFinish());
+    auto arenaBase = reinterpret_cast<void *>(polyrt::sma::arenaMarshal(allocations, functorData, *layout));
     // logical SPIR-V reads the arena through a fixed roster of typed views, so a module that declares them binds the one
     // buffer to every view slot; flat backends, and kernels that never read their capture, take it once
     const int arenaViews = polyrt::currentDevice->arenaViewStart(moduleId) ? polyrt::sma::arenaViewCount : 1;

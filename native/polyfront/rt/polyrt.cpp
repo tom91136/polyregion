@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstdarg>
@@ -58,6 +59,11 @@ using namespace aspartame;
 extern "C" void __polyregion_builtin_assert(uint32_t code, const char *message); // NOLINT(*-reserved-identifier)
 
 using polyregion::polyrt::DebugLevel;
+
+static std::atomic<polyregion::polyrt::sma::CaptureMarshal *> registeredCaptureMarshal{nullptr};
+
+void polyregion::polyrt::sma::registerCaptureMarshal(CaptureMarshal *marshal) { registeredCaptureMarshal.store(marshal); }
+polyregion::polyrt::sma::CaptureMarshal *polyregion::polyrt::sma::captureMarshal() { return registeredCaptureMarshal.load(); }
 
 std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};

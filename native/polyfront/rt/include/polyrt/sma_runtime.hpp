@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string_view>
+#include <type_traits>
 
 #include "polyregion/env_keys.h"
 #include "polyregion/show.hpp"
@@ -138,6 +139,47 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
   sma.invalidateLocal(origin);
 }
 
+// lays the capture graph into the device arena, pointers rewritten to arena offsets, with the capture at offset 0
+template <typename SMA>
+POLYREGION_RT_PROTECT inline uintptr_t arenaMarshal(SMA &sma, const void *capture, const runtime::TypeLayout &layout) {
+  sma.genArenaReset();
+  sma.genArenaObjectSlack = invoke::overReadPadBytes(currentDevice->features());
+  sma.genArenaMirror(static_cast<const char *>(capture), 1, 1, layout, layout.sizeInBytes);
+  return sma.genArenaFinish();
+}
+
+// the SMA of the library that hosts this runtime, for launches whose captures the runtime marshals itself
+struct CaptureMarshal {
+  virtual ~CaptureMarshal() = default;
+  virtual void visitClear() = 0;
+  virtual uintptr_t ensure(const void *local, size_t minSize) = 0;
+  virtual void readAlloc(const void *local) = 0;
+  virtual uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) = 0;
+  virtual void readMirror(void *capture) = 0;
+  virtual uintptr_t arena(const void *capture, const runtime::TypeLayout &layout) = 0;
+  virtual void readArena() = 0;
+};
+
+template <typename SMA> class CaptureMarshalOf final : public CaptureMarshal {
+  SMA &sma;
+
+public:
+  explicit CaptureMarshalOf(SMA &sma) : sma(sma) {}
+  void visitClear() override { sma.unmirrorVisitClear(); }
+  uintptr_t ensure(const void *local, const size_t minSize) override { return sma.mirrorEnsure(local, minSize); }
+  void readAlloc(const void *local) override { sma.unmirrorReadAlloc(local); }
+  uintptr_t mirror(const void *capture, const runtime::TypeLayout &layout) override { return sma.syncLocalToRemote(capture, layout); }
+  void readMirror(void *capture) override {
+    sma.syncRemoteToLocalAfterLaunch(capture);
+    sma.disassociate(capture);
+  }
+  uintptr_t arena(const void *capture, const runtime::TypeLayout &layout) override { return arenaMarshal(sma, capture, layout); }
+  void readArena() override { sma.genArenaReadback(); }
+};
+
+POLYREGION_RT_PROTECT POLYREGION_EXPORT void registerCaptureMarshal(CaptureMarshal *marshal);
+POLYREGION_RT_PROTECT POLYREGION_EXPORT CaptureMarshal *captureMarshal();
+
 } // namespace polyregion::polyrt::sma
 
 #define POLYREGION_SMA_ABI_SYMBOL_CHECK(constName, symbol) static_assert(sizeof(&symbol) > 0, #symbol);
@@ -170,14 +212,17 @@ POLYREGION_RT_PROTECT inline void mapReadwrite(SMA &sma, void *origin, const ptr
   }                                                                                                                                        \
   POLYREGION_EXPORT extern "C" void polyrt_sma_read_graph(const void *root) { (allocations).unmirrorReadGraph(root); }                     \
   namespace { /* XXX clears the SMA free-hook before `allocations` is destroyed (declared after it) */                                     \
+  ::polyregion::polyrt::sma::CaptureMarshalOf<std::remove_reference_t<decltype(allocations)>> captureMarshalOf{allocations};               \
   struct ReleaseHookRegistrar {                                                                                                            \
     ReleaseHookRegistrar() {                                                                                                               \
+      ::polyregion::polyrt::sma::registerCaptureMarshal(&captureMarshalOf);                                                                \
       ::polyregion::rt_reflect::_rt_set_release_cb(                                                                                        \
           +[](void *p) { (allocations).forget(p, ::polyregion::polyrt::currentDevice != nullptr); });                                      \
       ::polyregion::rt_reflect::_rt_set_reclaim_cb(                                                                                        \
           +[](const void *p, const size_t n, const bool forWrite) { (allocations).reclaimRange(p, n, forWrite); });                        \
     }                                                                                                                                      \
     ~ReleaseHookRegistrar() {                                                                                                              \
+      ::polyregion::polyrt::sma::registerCaptureMarshal(nullptr);                                                                          \
       ::polyregion::rt_reflect::_rt_set_release_cb(nullptr);                                                                               \
       ::polyregion::rt_reflect::_rt_set_reclaim_cb(nullptr);                                                                               \
     }                                                                                                                                      \
