@@ -6,6 +6,15 @@ extern "C" __global__ void vecadd(const float *a, const float *b, float *c) {
   c[i] = a[i] + b[i];
 }
 
+extern "C" __global__ void pick(const int *a, int *c) {
+  unsigned i = __nvvm_read_ptx_sreg_ctaid_x() * __nvvm_read_ptx_sreg_ntid_x() + __nvvm_read_ptx_sreg_tid_x();
+  int scratch[8];
+  for (int j = 0; j < 8; ++j)
+    scratch[j] = -j;
+  const int *p = i % 3 == 0 ? &scratch[i & 7] : &a[i];
+  c[i] = *p;
+}
+
 #else
 
   #include <array>
@@ -118,7 +127,22 @@ int main(int argc, char **argv) try {
   for (int i = 0; i < N; ++i)
     bad += c[i] != 3.0f * static_cast<float>(i);
   std::printf("  cuda %s (c[1023]=%g, mismatches=%d)\n", bad ? "FAIL" : "PASS", static_cast<double>(c[1023]), bad);
-  return bad == 0 ? 0 : 1;
+
+  CUfunction pick{};
+  check(cuModuleGetFunction(&pick, mod, "pick"), "cuModuleGetFunction");
+  std::array<int, N> in{}, out{};
+  for (int i = 0; i < N; ++i)
+    in[i] = i;
+  check(cuMemcpyHtoD_v2(da, in.data(), sizeof in), "cuMemcpyHtoD");
+  std::array<void *, 2> pickArgs{&da, &dc};
+  check(cuLaunchKernel(pick, N / 128, 1, 1, 128, 1, 1, 0, nullptr, pickArgs.data(), nullptr), "cuLaunchKernel");
+  check(cuCtxSynchronize(), "cuCtxSynchronize");
+  check(cuMemcpyDtoH_v2(out.data(), dc, sizeof out), "cuMemcpyDtoH");
+  int pickBad = 0;
+  for (int i = 0; i < N; ++i)
+    pickBad += out[i] != (i % 3 == 0 ? -(i & 7) : i);
+  std::printf("  cuda local/global pointer select %s (mismatches=%d)\n", pickBad ? "FAIL" : "PASS", pickBad);
+  return bad == 0 && pickBad == 0 ? 0 : 1;
 } catch (const std::exception &e) {
   std::fprintf(stderr, "  FAIL %s\n", e.what());
   return 1;

@@ -747,10 +747,10 @@ index a50178e..5fbbcd1 100644
  		void eval_Shr(CTAContext &context, const ir::PTXInstruction &instr);		
  		void eval_Sin(CTAContext &context, const ir::PTXInstruction &instr);		
 diff --git a/ocelot/src/executive/CooperativeThreadArray.cpp b/ocelot/src/executive/CooperativeThreadArray.cpp
-index 66543e0..9f5c9c0 100644
+index 81acd6dd..1b15c3d2 100644
 --- a/ocelot/src/executive/CooperativeThreadArray.cpp
 +++ b/ocelot/src/executive/CooperativeThreadArray.cpp
-@@ -569,6 +569,8 @@ void executive::CooperativeThreadArray::execute(int PC)
+@@ -569,6 +569,8 @@ void executive::CooperativeThreadArray::execute(int PC) {
  				eval_SetP(context, instr); break;
  			case ir::PTXInstruction::Shf:
  				eval_Shf(context, instr); break;
@@ -759,7 +759,27 @@ index 66543e0..9f5c9c0 100644
  			case ir::PTXInstruction::Shr:
  				eval_Shr(context, instr); break;
  			case ir::PTXInstruction::Shl:
-@@ -7831,6 +7833,71 @@ void executive::CooperativeThreadArray::eval_Shf(CTAContext &context, const ir::P
+@@ -3999,7 +4001,8 @@ void executive::CooperativeThreadArray::eval_Cvta(CTAContext &context,
+ 
+ 				if (instr.addressSpace == ir::PTXInstruction::Local) {
+ 					ir::PTXU32 localMemPtr;
+-					if (!instr.a.isGlobalLocal) {
++					if (instr.a.addressMode != ir::PTXOperand::Address
++						|| !instr.a.isGlobalLocal) {
+ 						hydrazine::bit_cast(localMemPtr,
+ 							functionCallStack.localMemoryPointer(tid));
+ 					}
+@@ -4051,7 +4054,8 @@ void executive::CooperativeThreadArray::eval_Cvta(CTAContext &context,
+ 
+ 				if (instr.addressSpace == ir::PTXInstruction::Local) {
+ 					ir::PTXU64 localMemPtr;
+-					if (!instr.a.isGlobalLocal) {
++					if (instr.a.addressMode != ir::PTXOperand::Address
++						|| !instr.a.isGlobalLocal) {
+ 						hydrazine::bit_cast(localMemPtr,
+ 							functionCallStack.localMemoryPointer(tid));
+ 					}
+@@ -7829,6 +7833,71 @@ void executive::CooperativeThreadArray::eval_Shf(CTAContext &context, const ir::
      }
  }
  
