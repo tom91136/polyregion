@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000011 Mon Sep 17 00:00:00 2001
+From: polyregion <noreply@polyregion>
+Date: Sun, 25 Oct 2026 00:00:00 +0000
+Subject: [PATCH] [SPIRV] move the assign-type record when replacing memory
+ instructions
+
+replaceMemInstrUses rebuilds the spv_assign_type user for the replacement and
+erases both the old user and the old instruction, but leaves the registry
+record keyed by the erased instruction pointing at the erased assign-type
+call. Once the allocator hands either address to a new value, a lookup
+(e.g. buildAssignPtr) returns the stale call and updateAssignType rewrites
+argument 1 of whatever call now lives there. A cmpxchg followed by
+extractvalue hits this: the spv_extractv index becomes `metadata i32 poison`
+and instruction selection asserts in foldImm. Whether it happens depends on
+heap address reuse, so it is intermittent and host dependent. Move the
+record to the replacement before rebuilding the users, as
+replaceAllUsesWith already does.
+
+Not upstream as of llvm/llvm-project main (2026-10-25).
+---
+ llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp b/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp
+--- a/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp
++++ b/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp
+@@ -1372,6 +1372,7 @@
+ void SPIRVEmitIntrinsics::replaceMemInstrUses(Instruction *Old,
+                                               Instruction *New,
+                                               IRBuilder<> &B) {
++  GR->updateIfExistAssignPtrTypeInstr(Old, New, true);
+   while (!Old->user_empty()) {
+     auto *U = Old->user_back();
+     if (isAssignTypeInstr(U)) {
