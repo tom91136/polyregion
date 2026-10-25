@@ -228,7 +228,8 @@ private[pass] object AddressRefinement {
       target: p.Named,
       targetPrefix: List[p.PathStep],
       source: p.Named,
-      sourcePrefix: List[p.PathStep]
+      sourcePrefix: List[p.PathStep],
+      tpe: p.Type
   )
   private final case class CallKey(function: String, boundary: List[(String, AddressValue)], model: AddressModel)
   private final class InferenceContext(program: p.Program) {
@@ -688,12 +689,12 @@ private[pass] object AddressRefinement {
     }.toMap
     val slotCopies = statements.flatMap {
       case p.Stmt.Var(target, Some(p.Expr.Alias(p.Term.Select(source, prefix, _))), _) if !isPtr(target.tpe) =>
-        Some(SlotCopy(target, Nil, source, prefix))
+        Some(SlotCopy(target, Nil, source, prefix, target.tpe))
       case p.Stmt.Mut(
             p.Term.Select(target, targetPrefix, tpe),
             p.Expr.Alias(p.Term.Select(source, sourcePrefix, _))
           ) if !isPtr(tpe) =>
-        Some(SlotCopy(target, targetPrefix, source, sourcePrefix))
+        Some(SlotCopy(target, targetPrefix, source, sourcePrefix, tpe))
       case _ => None
     }
     val storage: Map[Query[AddressValue], StorageInfo] =
@@ -1154,6 +1155,43 @@ private[pass] object AddressRefinement {
       case _                                             => false
     }
 
+    def pointerSlots(tpe: p.Type, prefix: List[p.PathStep], remaining: Int): List[(List[p.PathStep], p.Type)] =
+      if (remaining == 0) Nil
+      else
+        tpe match {
+          case p.Type.Struct(symbol, _) =>
+            members.getOrElse(symbol, Map.empty).toList.flatMap { case (name, memberType) =>
+              val path = prefix :+ p.PathStep.Field(name)
+              if (isPtr(memberType)) (path -> memberType) :: Nil
+              else pointerSlots(memberType, path, remaining - 1)
+            }
+          case p.Type.Arr(component, size, _) =>
+            (0 until size).toList.flatMap(index =>
+              pointerSlots(component, prefix :+ p.PathStep.Index(index), remaining - 1)
+            )
+          case _ => Nil
+        }
+
+    // an aggregate copied out of memory carries the pointer graphs stored there, read as that memory's pointers;
+    // a pointer to plain data is bound as its own launch argument and patched into the copy instead
+    def loadedSlots(
+        state: Map[Query[AddressValue], AddressValue],
+        sourceRoot: p.Named,
+        sourcePrefix: List[p.PathStep],
+        source: Query.Slot,
+        target: Query.Slot,
+        tpe: p.Type,
+        known: Set[Query.Slot]
+    ): List[(Query.Slot, AddressValue)] =
+      if (localAggregates(source.root)) Nil
+      else
+        pointerSlots(tpe, Nil, maxSlotDepth - target.path.size).collect {
+          case (path, slotType @ p.Type.Ptr(pointee, _))
+              if pointerSlotDepth(pointee) > 0 && !known(Query.Slot(target.root, target.path ++ path)) =>
+            Query.Slot(target.root, target.path ++ path) ->
+              termFact(state, p.Term.Select(sourceRoot, sourcePrefix ++ path, slotType))
+        }
+
     val initial = refineEncodings(seeds)
     val limit   = (pending.size + slotCopies.size + storage.size + 1) * 4
 
@@ -1187,7 +1225,7 @@ private[pass] object AddressRefinement {
       val nextRaw = slotCopies.foldLeft(assigned) { (facts, copy) =>
         val source = canonicalSlot(current, copy.source, copy.sourcePrefix)
         val target = canonicalSlot(current, copy.target, copy.targetPrefix)
-        slotsByRoot(current)
+        val copied = slotsByRoot(current)
           .getOrElse(source.root, Nil)
           .iterator
           .collect {
@@ -1195,9 +1233,13 @@ private[pass] object AddressRefinement {
               Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact.copy(obligations = Set.empty)
           }
           .filter { case (slot, _) => slot.path.size <= maxSlotDepth }
-          .foldLeft(facts) { case (acc, (slot, fact)) =>
-            acc.updated(slot, acc.getOrElse(slot, AddressValue()).join(fact))
-          }
+          .toList
+        val loaded =
+          loadedSlots(current, copy.source, copy.sourcePrefix, source, target, copy.tpe, copied.map(_._1).toSet)
+            .map((slot, fact) => slot -> fact.copy(obligations = Set.empty))
+        (copied ++ loaded).foldLeft(facts) { case (acc, (slot, fact)) =>
+          acc.updated(slot, acc.getOrElse(slot, AddressValue()).join(fact))
+        }
       }
       val next = refineEncodings(nextRaw)
       if (next == current) next -> Map.empty
@@ -1243,23 +1285,6 @@ private[pass] object AddressRefinement {
       CoercionSite(item.index, target, source, c, item.context)
     }
     val conversionDiagnostics = assignmentResults.collect { case (_, (_, Left(diagnostic))) => diagnostic }
-
-    def pointerSlots(tpe: p.Type, prefix: List[p.PathStep], remaining: Int): List[(List[p.PathStep], p.Type)] =
-      if (remaining == 0) Nil
-      else
-        tpe match {
-          case p.Type.Struct(symbol, _) =>
-            members.getOrElse(symbol, Map.empty).toList.flatMap { case (name, memberType) =>
-              val path = prefix :+ p.PathStep.Field(name)
-              if (isPtr(memberType)) (path -> memberType) :: Nil
-              else pointerSlots(memberType, path, remaining - 1)
-            }
-          case p.Type.Arr(component, size, _) =>
-            (0 until size).toList.flatMap(index =>
-              pointerSlots(component, prefix :+ p.PathStep.Index(index), remaining - 1)
-            )
-          case _ => Nil
-        }
 
     val aggregateParameterSeeds = bound.iterator
       .filterNot(n => isPtr(n.tpe))
@@ -1309,7 +1334,8 @@ private[pass] object AddressRefinement {
         targetRoot: p.Named,
         targetPrefix: List[p.PathStep],
         sourceRoot: p.Named,
-        sourcePrefix: List[p.PathStep]
+        sourcePrefix: List[p.PathStep],
+        tpe: p.Type
     ): Map[Query[AddressValue], AddressValue] = {
       val source = canonicalSlot(state, sourceRoot, sourcePrefix)
       val target = canonicalSlot(state, targetRoot, targetPrefix)
@@ -1323,7 +1349,8 @@ private[pass] object AddressRefinement {
             Query.Slot(target.root, target.path ++ path.drop(source.path.size)) -> fact
         }
         .toMap
-      rememberSlots(state, state ++ copied, copied)
+      val written = copied ++ loadedSlots(state, sourceRoot, sourcePrefix, source, target, tpe, copied.keySet)
+      rememberSlots(state, state ++ written, written)
     }
 
     type FlowState = Map[Query[AddressValue], AddressValue]
@@ -1448,12 +1475,12 @@ private[pass] object AddressRefinement {
         val value  = storedFact(target, selectValue(exprFact(state, expr)))
         rememberSlots(state, state.updated(target, value), List(target -> value)) -> Map.empty
       case p.Stmt.Var(target, Some(p.Expr.Alias(p.Term.Select(source, prefix, _))), _) if !isPtr(target.tpe) =>
-        copySlots(state, target, Nil, source, prefix) -> Map.empty
+        copySlots(state, target, Nil, source, prefix, target.tpe) -> Map.empty
       case p.Stmt.Mut(
             p.Term.Select(target, targetPrefix, tpe),
             p.Expr.Alias(p.Term.Select(source, sourcePrefix, _))
           ) if !isPtr(tpe) =>
-        copySlots(state, target, targetPrefix, source, sourcePrefix) -> Map.empty
+        copySlots(state, target, targetPrefix, source, sourcePrefix, tpe) -> Map.empty
       case _ => state -> Map.empty
     }
 

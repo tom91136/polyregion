@@ -378,7 +378,7 @@ object ArenaView extends ProgramPass {
     }
     val updated = stmts.collect {
       case p.Stmt.Update(p.Term.Select(root, path, _), _, _)
-          if !globalPointerLeaves(root.tpe, members).contains(path) =>
+          if !globalPointerLeaves(root.tpe, members).exists(path.startsWith(_)) =>
         root
     }.toSet
     def aggregateOf(root: p.Named, steps: List[p.PathStep]) = globalPointerLeaves(root.tpe, members).exists { leaf =>

@@ -428,6 +428,57 @@ class ArenaLowerSuite extends munit.FunSuite {
     assertEquals(Verify.validateRegions(program(out, defs = List(capDef, holderDef, nodeDef))), Nil)
   }
 
+  test("pointer graph fields of an aggregate copied out of the arena are rebased once") {
+    val capSym    = sym("GraphCap")
+    val holderSym = sym("GraphHolder")
+    val nodeSym   = sym("GraphNode")
+    val nodeTpe   = p.Type.Struct(nodeSym, Nil)
+    val nodePtr   = p.Type.Ptr(nodeTpe, p.Type.Space.Global)
+    val dataPtr   = p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global)
+    val capTpe    = p.Type.Struct(capSym, Nil)
+    val holderTpe = p.Type.Struct(holderSym, Nil)
+    val cap       = named(p.Conventions.CaptureArg, p.Type.Ptr(capTpe, p.Type.Space.Global))
+    val copied    = named("copied", holderTpe)
+    val data      = named("data", dataPtr)
+    val value     = named("value", p.Type.IntS32)
+    val capDef    = p.StructDef(capSym, Nil, List(named("holder", holderTpe)), Nil)
+    val holderDef = p.StructDef(holderSym, Nil, List(named("node", nodePtr), named("plain", dataPtr)), Nil)
+    val nodeDef   = p.StructDef(nodeSym, Nil, List(named("data", dataPtr)), Nil)
+    val nodeSlot  = p.Term.Select(copied, List(p.PathStep.Field("node")), nodePtr).asInstanceOf[p.Term.Select]
+    val e = entry(
+      args = List(p.Arg(cap)),
+      body = List(
+        p.Stmt.Var(
+          copied,
+          Some(p.Expr.Alias(p.Term.Select(cap, List(p.PathStep.Field("holder")), holderTpe))),
+          isMutable = true
+        ),
+        p.Stmt.Var(
+          data,
+          Some(p.Expr.Alias(p.Term.Select(copied, List(p.PathStep.Field("node"), p.PathStep.Field("data")), dataPtr))),
+          isMutable = false
+        ),
+        p.Stmt.Var(value, Some(p.Expr.Index(p.Term.Select(data, Nil, dataPtr), p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+
+    val defs = List(capDef, holderDef, nodeDef)
+    val out  = ArenaLower(program(e, defs = defs), NoopLog).entry
+    val rebased = out.collectAll[p.Stmt].collect {
+      case p.Stmt.Mut(p.Term.Select(`copied`, steps, _), p.Expr.Alias(p.Term.Select(root, Nil, _)))
+          if root.symbol.startsWith("#ab") =>
+        steps
+    }
+    assertEquals(rebased, List(List(p.PathStep.Field("node"))))
+    assert(out.collectAll[p.Stmt].exists {
+      case p.Stmt.Var(`value`, Some(p.Expr.Index(p.Term.Select(root, Nil, _), _, _)), _) =>
+        root.symbol.startsWith("#ab")
+      case _ => false
+    })
+    assertEquals(Verify.validateRegions(program(out, defs = defs)), Nil)
+  }
+
   test("pointer fields reached through a nested local alias are not rebased twice") {
     val capSym      = sym("Cap")
     val ownerSym    = sym("Owner")

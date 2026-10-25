@@ -219,7 +219,7 @@ object ArenaLower extends ProgramPass {
       }
 
     // bind `(baseTpe)&arena8[(u64)offVal]` and return the base var: a real arena pointer for an offset
-    def resolveAddress(offVal: p.Term, baseTpe0: p.Type): p.Named = {
+    def resolveAddress(offVal: p.Term, baseTpe0: p.Type, pre: ListBuffer[p.Stmt] = pre): p.Named = {
       val baseTpe       = globalOuter(baseTpe0)
       val (off, offPre) = toU64(offVal)
       pre ++= offPre
@@ -364,6 +364,49 @@ object ArenaLower extends ProgramPass {
       case p.Stmt.Return(e) => p.Stmt.Return(rwExpr(e))
       case s                => s
     }
-    (pre += out).toList
+    // a local aggregate copied out of the arena holds the copied offsets of its pointer graphs; rebase them so its
+    // pointer slots hold real arena addresses like any other pointer stored into a local aggregate. a pointer to
+    // plain data is bound as its own launch argument and patched into the copy instead
+    def bearsPointers(tpe: p.Type, seen: Set[p.Sym]): Boolean = tpe match {
+      case _: p.Type.Ptr                   => true
+      case p.Type.Arr(c, _, _)             => bearsPointers(c, seen)
+      case p.Type.Struct(s, _) if !seen(s) => members.getOrElse(s, Nil).exists(m => bearsPointers(m.tpe, seen + s))
+      case _                               => false
+    }
+    def pointerSlots(tpe: p.Type, depth: Int): List[(List[p.PathStep], p.Type)] = tpe match {
+      case p.Type.Struct(s, _) if depth > 0 =>
+        members.getOrElse(s, Nil).flatMap { m =>
+          m.tpe match {
+            case ptr @ p.Type.Ptr(pointee, _) if canBeArenaOffset(ptr) =>
+              if (bearsPointers(pointee, Set.empty)) List(List(p.PathStep.Field(m.symbol)) -> ptr) else Nil
+            case nested => pointerSlots(nested, depth - 1).map((path, t) => (p.PathStep.Field(m.symbol) :: path) -> t)
+          }
+        }
+      case _ => Nil
+    }
+    val copied = leaf match {
+      case p.Stmt.Var(n, Some(p.Expr.Alias(source: p.Term.Select)), _)
+          if !isPtr(n.tpe) && state.isArenaRooted(source) =>
+        Some((offsetNamed(n), Nil, n.tpe))
+      case p.Stmt.Mut(p.Term.Select(n, steps, tpe), p.Expr.Alias(source: p.Term.Select))
+          if !isPtr(tpe) && localAggregateLValue(p.Term.Select(n, steps, tpe)) && state.isArenaRooted(source) =>
+        Some((n, steps, tpe))
+      case _ => None
+    }
+    val rebased = copied.toList.flatMap { (n, steps, tpe) =>
+      pointerSlots(tpe, 8).flatMap { (path, slotTpe) =>
+        val slot: p.Term.Select = p.Term.Select(n, steps ++ path, slotTpe)
+        val body                = ListBuffer.empty[p.Stmt]
+        val nonNull             = p.Named(s"#an${ctr.incrementAndGet()}", p.Type.Bool1)
+        val (off, offPre)       = toU64(slot)
+        val real                = resolveAddress(off, slotTpe, body)
+        offPre :::
+          List(
+            p.Stmt.Var(nonNull, Some(p.Expr.IntrOp(p.Intr.LogicNeq(off, p.Term.IntU64Const(0)))), isMutable = false),
+            p.Stmt.Cond(sel(nonNull), body.toList :+ p.Stmt.Mut(slot, p.Expr.Alias(sel(real))), Nil)
+          )
+      }
+    }
+    ((pre += out) ++= rebased).toList
   }
 }
