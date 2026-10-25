@@ -78,5 +78,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: spectra-package
-          path: spectra/target/package/packages/spectra/lib.polyast
+          path: spectra/target/package/packages/
           if-no-files-found: error

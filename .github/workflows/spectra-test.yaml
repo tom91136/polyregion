@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [ 1, 2, 3, 4 ]
+        shard: ${{ fromJSON(inputs.os == 'windows' && '[1,2,3,4,5,6,7,8]' || '[1,2,3,4]') }}
     runs-on: ${{ inputs.runs_on }}
     env:
       POLYREGION_DIST: ${{ github.workspace }}/dist
@@ -82,7 +82,7 @@ jobs:
         uses: *download
         with:
           name: spectra-package
-          path: package/spectra
+          path: package
 
       - name: Unpack emulators and restore executable bits
         working-directory: .
@@ -91,4 +91,4 @@ jobs:
           just restore-exec-bits "$POLYREGION_DIST"
 
       - name: Run shard ${{ matrix.shard }} of the package-import matrix on emulators
-        run: just test-package '' "-DSPECTRA_PREBUILT_PACKAGE=${SPECTRA_PACKAGE//\\//}" "-I ${{ matrix.shard }},,4"
+        run: just test-package '' "-DSPECTRA_PREBUILT_PACKAGE=${SPECTRA_PACKAGE//\\//}" "-I ${{ matrix.shard }},,${{ inputs.os == 'windows' && 8 || 4 }}"

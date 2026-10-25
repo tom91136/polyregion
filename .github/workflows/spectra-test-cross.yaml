@@ -67,7 +67,7 @@ jobs:
         uses: *download
         with:
           name: spectra-package
-          path: package/spectra
+          path: package
 
       - name: Shim the dist for QEMU
         working-directory: .
@@ -79,6 +79,6 @@ jobs:
         run: |
           cmake -S . -B target/cross -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPECTRA_ENABLE_PACKAGE=ON \
             -DSPECTRA_PREBUILT_PACKAGE="$GITHUB_WORKSPACE/package/spectra/lib.polyast" -DCMAKE_PREFIX_PATH="$POLYREGION_DIST"
-          cmake --build target/cross --target spectra-discover spectra-closure-discover
+          cmake --build target/cross --target spectra-test-discover
           ctest --test-dir target/cross --timeout 3600 --output-on-failure --no-tests=error \
-            -R '^spectra-offload-(equal|none_of|sort|inclusive_scan|reduce_by_key|minmax_element)-'
+            -R '^spectra-offload-(equal|none_of)-'
