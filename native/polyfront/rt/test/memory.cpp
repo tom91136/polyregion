@@ -448,6 +448,24 @@ TEST_CASE("remote launch copies a mutated local aggregate back from its mirror")
   CHECK(local == 0x123456789ABCDEF0ull);
 }
 
+TEST_CASE("remote launch passes a capture pointer into device memory through unchanged") {
+  WithStubDevice device(false);
+  StubQueue queue(std::chrono::seconds(1));
+  queue.mutateFirstPointer = true;
+  polyregion::polyrt::ExecutionContext context{polyregion::polyrt::currentPlatform.get(), device.stub, &queue};
+  auto remote = remoteAlloc(&context, sizeof(uint64_t));
+  const std::array<uint8_t, 1> types{static_cast<uint8_t>(Type::Ptr)};
+  const std::array<void *, 1> arguments{&remote};
+  const std::array<size_t, 1> mirrorSizes{sizeof(uint64_t)};
+  const std::array<uint8_t, 1> mirrorKinds{3};
+  const std::array<const polyregion::runtime::TypeLayout *, 1> layouts{nullptr};
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), layouts.data()));
+  CHECK(device.stub->remoteAllocs == 1);
+  CHECK(*reinterpret_cast<uint64_t *>(remote) == 0x123456789ABCDEF0ull);
+  REQUIRE(polyrt_remote_free(&context, remote));
+}
+
 TEST_CASE("asserting remote modules take a leading error buffer and report the assert") {
   WithStubDevice device(false, false);
   WithStubManagedPlatform platform;

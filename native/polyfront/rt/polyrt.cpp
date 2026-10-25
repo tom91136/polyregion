@@ -667,17 +667,42 @@ static void remoteLaunch(void *context, const char *moduleName, const char *kern
   }
 }
 
-static void remoteLaunchWithMirrors(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
-                                    const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ,
-                                    const size_t localMemBytes, const size_t argCount, const uint8_t *argTypes, void *const *argPtrs,
-                                    const size_t *mirrorSizes, const uint8_t *mirrorKinds) {
+static bool remoteAllocation(polyregion::polyrt::ExecutionContext &execution, const uintptr_t pointer) {
+  const std::lock_guard lock(execution.transaction);
+  const auto upper = execution.remoteAllocations.upper_bound(pointer);
+  if (upper == execution.remoteAllocations.begin()) return false;
+  const auto &[base, allocation] = *std::prev(upper);
+  return pointer - base <= allocation.bytes;
+}
+
+static bool pointerBearing(const polyregion::runtime::TypeLayout *layout) {
+  return layout && view(layout->members, layout->members + layout->memberCount) | exists([](const auto &member) {
+                     return member.ptrIndirection > 0 || pointerBearing(member.type);
+                   });
+}
+
+static void remoteLaunchMarshalled(void *context, const char *moduleName, const char *kernelName, const size_t gridX, const size_t gridY,
+                                   const size_t gridZ, const size_t blockX, const size_t blockY, const size_t blockZ,
+                                   const size_t localMemBytes, const size_t argCount, const uint8_t *argTypes, void *const *argPtrs,
+                                   const size_t *mirrorSizes, const uint8_t *mirrorKinds,
+                                   const polyregion::runtime::TypeLayout *const *layouts) {
+  namespace sma = polyregion::polyrt::sma;
   auto &execution = requireContext(context, __func__);
   struct Mirror {
     uintptr_t remote = 0;
     uintptr_t source = 0;
   };
   std::vector<Mirror> mirrors(argCount);
+  std::vector<uintptr_t> marshalled(argCount, 0);
   std::vector<void *> launchArgPtrs(argCount, nullptr);
+  const auto mode = sma::mirrorModeFor(execution.device->moduleFormat());
+  const bool hostThreaded = execution.platform && execution.platform->kind() == PlatformKind::HostThreaded;
+  const auto marshalling = iota(size_t{0}, argCount) | exists([&](const size_t i) {
+                             return mirrorKinds[i] == 3 || (mirrorKinds[i] == 1 && layouts && pointerBearing(layouts[i]));
+                           });
+  auto *marshal = !marshalling || hostThreaded || mode == sma::MirrorMode::Off ? nullptr : sma::captureMarshal();
+  std::vector<size_t> mirroredCaptures, ensuredPointers;
+  std::optional<size_t> arenaCapture;
   const auto release = [&]() noexcept {
     std::exception_ptr failure;
     for (auto &mirror : mirrors) {
@@ -692,20 +717,37 @@ static void remoteLaunchWithMirrors(void *context, const char *moduleName, const
     return failure;
   };
   try {
+    if (marshal) marshal->visitClear();
     for (size_t i = 0; i < argCount; ++i) {
       launchArgPtrs[i] = argPtrs[i];
+      if (mirrorKinds[i] != 1 || !marshal || !pointerBearing(layouts ? layouts[i] : nullptr)) continue;
+      if (mode == sma::MirrorMode::Arena) {
+        if (arenaCapture) throw std::logic_error(fmt::format("{}: launch of {} has more than one arena capture", __func__, kernelName));
+        marshalled[i] = marshal->arena(argPtrs[i], *layouts[i]);
+        arenaCapture = i;
+      } else {
+        marshalled[i] = marshal->mirror(argPtrs[i], *layouts[i]);
+        mirroredCaptures.emplace_back(i);
+      }
+      launchArgPtrs[i] = &marshalled[i];
+    }
+    for (size_t i = 0; i < argCount; ++i) {
+      if (launchArgPtrs[i] != argPtrs[i]) continue;
+      if (mirrorKinds[i] == 3) {
+        const auto pointer = *static_cast<const uintptr_t *>(argPtrs[i]);
+        if (!marshal || pointer == 0 || remoteAllocation(execution, pointer)) continue;
+        if (const auto remote = marshal->ensure(reinterpret_cast<const void *>(pointer), mirrorSizes[i])) {
+          marshalled[i] = remote;
+          launchArgPtrs[i] = &marshalled[i];
+          ensuredPointers.emplace_back(i);
+        }
+        continue;
+      }
       if (mirrorKinds[i] == 0 || mirrorSizes[i] == 0) continue;
       uintptr_t source;
       if (mirrorKinds[i] == 2) {
         source = *static_cast<const uintptr_t *>(argPtrs[i]);
-        if (source == 0) continue;
-        const std::lock_guard lock(execution.transaction);
-        const auto upper = execution.remoteAllocations.upper_bound(source);
-        const auto remote = upper != execution.remoteAllocations.begin() && [&] {
-          const auto &[base, allocation] = *std::prev(upper);
-          return source - base < allocation.bytes;
-        }();
-        if (remote) continue;
+        if (source == 0 || remoteAllocation(execution, source)) continue;
       } else {
         source = reinterpret_cast<uintptr_t>(argPtrs[i]);
       }
@@ -719,6 +761,12 @@ static void remoteLaunchWithMirrors(void *context, const char *moduleName, const
     }
     remoteLaunch(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
                  launchArgPtrs.data());
+    if (marshal) marshal->visitClear();
+    for (const auto i : mirroredCaptures)
+      marshal->readMirror(argPtrs[i]);
+    if (arenaCapture) marshal->readArena();
+    for (const auto i : ensuredPointers)
+      marshal->readAlloc(*static_cast<void *const *>(argPtrs[i]));
     for (size_t i = 0; i < argCount; ++i)
       if (mirrorKinds[i] == 2 && mirrors[i].remote != 0) remoteMemcpy(context, mirrors[i].source, mirrors[i].remote, mirrorSizes[i], 1);
   } catch (...) {
@@ -770,8 +818,21 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_with_mirrors(void *contex
                                                                     const uint8_t *argTypes, void *const *argPtrs,
                                                                     const size_t *mirrorSizes, const uint8_t *mirrorKinds) noexcept {
   return runtimeStatus(__func__, [&] {
-    remoteLaunchWithMirrors(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
-                            argPtrs, mirrorSizes, mirrorKinds);
+    remoteLaunchMarshalled(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
+                           argPtrs, mirrorSizes, mirrorKinds, nullptr);
+  });
+}
+
+POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_marshalled(void *context, const char *moduleName, const char *kernelName,
+                                                                  const size_t gridX, const size_t gridY, const size_t gridZ,
+                                                                  const size_t blockX, const size_t blockY, const size_t blockZ,
+                                                                  const size_t localMemBytes, const size_t argCount,
+                                                                  const uint8_t *argTypes, void *const *argPtrs, const size_t *mirrorSizes,
+                                                                  const uint8_t *mirrorKinds,
+                                                                  const polyregion::runtime::TypeLayout *const *layouts) noexcept {
+  return runtimeStatus(__func__, [&] {
+    remoteLaunchMarshalled(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
+                           argPtrs, mirrorSizes, mirrorKinds, layouts);
   });
 }
 
