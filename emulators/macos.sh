@@ -5,7 +5,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${EMU_WORK:-$HOME/emu-build}"
-MESA_REF="${MESA_REF:-mesa-26.1.1}"
+MESA_REF="${MESA_REF:-mesa-26.2.4}"
 POCL_REF="${POCL_REF:-v7.1}"
 XLAT_REF="${XLAT_REF:-llvm_release_210}"
 SWIFTSHADER_REF="${SWIFTSHADER_REF:-2843cbcc714fe111e1083127c048a18002bc10ed}"

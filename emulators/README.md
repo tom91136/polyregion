@@ -3,8 +3,8 @@
 Fully relocatable CPU implementations of offload runtimes:
 
 - **gpuocelot** - CUDA / PTX (`libcuda.so.1`, `nvcuda.dll` on Windows)
-- **rusticl** (Mesa 26.1.1, llvmpipe) + **PoCL** - OpenCL source + SPIRV, behind an `ocl-icd` loader (`libOpenCL.so.1`)
-- **lavapipe** (Mesa 26.1.1) + Vulkan-Loader - Vulkan (`libvulkan_lvp.so`, `libvulkan.so.1`)
+- **rusticl** (Mesa 26.2.4, llvmpipe) + **PoCL** - OpenCL source + SPIRV, behind an `ocl-icd` loader (`libOpenCL.so.1`)
+- **lavapipe** (Mesa 26.2.4) + Vulkan-Loader - Vulkan (`libvulkan_lvp.so`, `libvulkan.so.1`)
 
 ## Recipes
 
