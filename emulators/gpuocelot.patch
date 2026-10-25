@@ -709,9 +709,18 @@ index 636237be..8867d4b1 100644
  	{
  		++returnOperands;
 diff --git a/ocelot/src/parser/ptxgrammar.yy b/ocelot/src/parser/ptxgrammar.yy
-index 32ab8e38..73158a6f 100644
+index 32ab8e38..6d5d9a94 100644
 --- a/ocelot/src/parser/ptxgrammar.yy
 +++ b/ocelot/src/parser/ptxgrammar.yy
+@@ -34,7 +34,7 @@
+ 
+ %union
+ {
+-	char text[1024];
++	const char* text;
+ 	long long int value;
+ 	long long unsigned int uvalue;
+ 
 @@ -815,11 +815,19 @@ memoryOperand : constantOperand | addressableOperand | offsetAddressableOperand;
  branchOperand : labelOperand;
  
@@ -734,6 +743,395 @@ index 32ab8e38..73158a6f 100644
  guard : TOKEN_PREDICATE_IDENTIFIER
  {
  	state.guard( $<text>1, @1, false );
+diff --git a/ocelot/include/ocelot/parser/PTXLexer.h b/ocelot/include/ocelot/parser/PTXLexer.h
+index de7b56e1..0e64f307 100644
+--- a/ocelot/include/ocelot/parser/PTXLexer.h
++++ b/ocelot/include/ocelot/parser/PTXLexer.h
+@@ -17,6 +17,9 @@
+ #include <ptxgrammar.hpp>
+ #undef yyparse
+ 
++#include <string>
++#include <unordered_set>
++
+ namespace parser
+ {
+ 	/*!	\brief A wrapper around yyFlexLexer to allow for a local variable */
+@@ -27,12 +30,17 @@ namespace parser
+ 			int          column;
+ 			int          nextColumn;
+ 
++		private:
++			std::unordered_set< std::string > _text;
++
+ 		public:
+ 			PTXLexer( std::istream* arg_yyin = 0,
+ 				std::ostream* arg_yyout = 0 );
+ 
+ 			int yylex();
+ 			int yylexPosition();
++			const char* intern( const char* text, size_t length );
++			const char* intern( const char* text );
+ 
+ 		public:
+ 			static std::string toString( int token );
+diff --git a/ocelot/src/parser/PTXLexer.cpp b/ocelot/src/parser/PTXLexer.cpp
+index 8d9c3c01..cb00ef74 100644
+--- a/ocelot/src/parser/PTXLexer.cpp
++++ b/ocelot/src/parser/PTXLexer.cpp
+@@ -26,6 +26,16 @@ namespace parser
+ 	
+ 	}
+ 	
++	const char* PTXLexer::intern( const char* text, size_t length )
++	{
++		return _text.emplace( text, length ).first->c_str();
++	}
++
++	const char* PTXLexer::intern( const char* text )
++	{
++		return intern( text, strlen( text ) );
++	}
++
+ 	int PTXLexer::yylexPosition()
+ 	{
+ 		int token = yylex();
+diff --git a/ocelot/src/parser/ptx.ll b/ocelot/src/parser/ptx.ll
+index e3d747ef..06a0ebf1 100644
+--- a/ocelot/src/parser/ptx.ll
++++ b/ocelot/src/parser/ptx.ll
+@@ -102,153 +102,153 @@ LABEL ({IDENTIFIER}{WHITESPACE}":")
+ "#file"                         { yylval->value = PREPROCESSOR_FILE; \
+                                     return PREPROCESSOR_FILE; }
+ 
+-"add"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"add"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_ADD; }
+-"addc"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"addc"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_ADDC; }
+-"and"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"and"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_AND; }
+-"atom"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"atom"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_ATOM; }
+-"abs"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"abs"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_ABS; }
+-"bar"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"bar"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_BAR; }
+-"bfi"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"bfi"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_BFI; }
+-"bfe"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"bfe"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_BFE; }
+-"bfind"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"bfind"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_BFIND; }
+-"bra"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"bra"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_BRA; }
+-"brev"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"brev"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_BREV; }
+-"brkpt"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"brkpt"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_BRKPT; }
+-"call"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"call"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_CALL; }
+-"clz"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"clz"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_CLZ; }
+-"cnot"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"cnot"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_CNOT; }
+-"copysign"                      { sstrcpy( yylval->text, yytext, 1024 ); \
++"copysign"                      { yylval->text = intern( yytext ); \
+                                     return OPCODE_COPYSIGN; }
+-"cos"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"cos"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_COS; }
+-"cvt"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"cvt"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_CVT; }
+-"cvta"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"cvta"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_CVTA; }
+-"div"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"div"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_DIV; }
+-"ex2"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"ex2"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_EX2; }
+-"exit"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"exit"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_EXIT; }
+-"fma"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"fma"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_FMA; }
+-"isspacep"                      { sstrcpy( yylval->text, yytext, 1024 ); \
++"isspacep"                      { yylval->text = intern( yytext ); \
+                                     return OPCODE_ISSPACEP; }
+-"ld"                            { sstrcpy( yylval->text, yytext, 1024 ); \
++"ld"                            { yylval->text = intern( yytext ); \
+                                     return OPCODE_LD; }
+-"ldu"                            { sstrcpy( yylval->text, yytext, 1024 ); \
++"ldu"                            { yylval->text = intern( yytext ); \
+                                     return OPCODE_LDU; }
+-"lg2"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"lg2"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_LG2; }
+-"membar"                        { sstrcpy( yylval->text, yytext, 1024 ); \
++"membar"                        { yylval->text = intern( yytext ); \
+                                     return OPCODE_MEMBAR; }
+-"min"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"min"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_MIN; }
+-"mad"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"mad"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_MAD; }
+-"madc"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"madc"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_MADC; }
+-"mad24"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"mad24"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_MAD24; }
+-"max"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"max"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_MAX; }
+-"mov"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"mov"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_MOV; }
+-"mul"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"mul"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_MUL; }
+-"mul24"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"mul24"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_MUL24; }
+-"neg"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"neg"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_NEG; }
+-"not"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"not"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_NOT; }
+-"or"                            { sstrcpy( yylval->text, yytext, 1024 ); \
++"or"                            { yylval->text = intern( yytext ); \
+                                     return OPCODE_OR; }
+-"pmevent"                       { sstrcpy( yylval->text, yytext, 1024 ); \
++"pmevent"                       { yylval->text = intern( yytext ); \
+                                     return OPCODE_PMEVENT; }
+-"prefetch"                      { sstrcpy( yylval->text, yytext, 1024 ); \
++"prefetch"                      { yylval->text = intern( yytext ); \
+                                   return OPCODE_PREFETCH; }
+-"prefetchu"                     { sstrcpy( yylval->text, yytext, 1024 ); \
++"prefetchu"                     { yylval->text = intern( yytext ); \
+                                   return OPCODE_PREFETCHU; }
+-"popc"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"popc"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_POPC; }
+-"prmt"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"prmt"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_PRMT; }
+-"rcp"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"rcp"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_RCP; }
+-"red"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"red"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_RED; }
+-"rem"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"rem"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_REM; }
+-"ret"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"ret"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_RET; }
+-"rsqrt"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"rsqrt"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_RSQRT; }
+-"sad"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"sad"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SAD; }
+-"selp"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"selp"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SELP; }
+-"set"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"set"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SET; }
+-"setp"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"setp"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SETP; }
+-"shf"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"shf"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SHF; }
+-"shfl"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"shfl"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SHFL; }
+-"shl"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"shl"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SHL; }
+-"shr"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"shr"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SHR; }
+-"sin"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"sin"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SIN; }
+-"slct"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"slct"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SLCT; }
+-"sqrt"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"sqrt"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SQRT; }
+-"st"                            { sstrcpy( yylval->text, yytext, 1024 ); \
++"st"                            { yylval->text = intern( yytext ); \
+                                     return OPCODE_ST; }
+-"sub"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"sub"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SUB; }
+-"subc"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"subc"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SUBC; }
+-"suld"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"suld"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SULD; }
+-"sust"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"sust"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_SUST; }
+-"sured"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"sured"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_SURED; }
+-"suq"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"suq"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_SUQ; }
+-"testp"                         { sstrcpy( yylval->text, yytext, 1024 ); \
++"testp"                         { yylval->text = intern( yytext ); \
+                                     return OPCODE_TESTP; }
+-"tex"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"tex"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_TEX; }
+-"tld4"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"tld4"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_TLD4; }
+-"trap"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"trap"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_TRAP; }
+-"txq"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"txq"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_TXQ; }
+-"vote"                          { sstrcpy( yylval->text, yytext, 1024 ); \
++"vote"                          { yylval->text = intern( yytext ); \
+                                     return OPCODE_VOTE; }
+-"xor"                           { sstrcpy( yylval->text, yytext, 1024 ); \
++"xor"                           { yylval->text = intern( yytext ); \
+                                     return OPCODE_XOR; }
+ 
+ 
+@@ -521,14 +521,14 @@ LABEL ({IDENTIFIER}{WHITESPACE}":")
+ ".subnormal"                    { yylval->value = TOKEN_SUBNORMAL; \
+                                     return TOKEN_SUBNORMAL; }
+ 
+-@{IDENTIFIER}                   { sstrcpy( yylval->text, yytext + 1, 1024 ); \
++@{IDENTIFIER}                   { yylval->text = intern( yytext + 1 ); \
+                                     return TOKEN_PREDICATE_IDENTIFIER; }
+-@!{IDENTIFIER}                  { sstrcpy( yylval->text, yytext + 2, 1024 ); \
++@!{IDENTIFIER}                  { yylval->text = intern( yytext + 2 ); \
+                                     return TOKEN_INV_PREDICATE_IDENTIFIER; }
+-{IDENTIFIER}                    { sstrcpy( yylval->text, yytext, 1024 ); \
++{IDENTIFIER}                    { yylval->text = intern( yytext ); \
+                                     return TOKEN_IDENTIFIER;}
+-{STRING}                        { sstrcpy( yylval->text, yytext + 1, \
+-                                    MIN( strlen( yytext ) - 1, 1024 ) ); \
++{STRING}                        { yylval->text = intern( yytext + 1, \
++                                    strlen( yytext ) - 2 ); \
+                                     return TOKEN_STRING;}
+                                                                        
+ {DECIMAL_CONSTANT}              { std::stringstream stream; stream << yytext; \
+@@ -574,61 +574,43 @@ LABEL ({IDENTIFIER}{WHITESPACE}":")
+ {LABEL}                         { const char* position = strchr( yytext, ' ' );\
+                                     if( position == 0 ) \
+                                     { \
+-                                        sstrcpy( yylval->text, yytext, \
+-                                           MIN( strlen( yytext ), 1024 ) ); \
++                                        yylval->text = intern( yytext, \
++                                           strlen( yytext ) - 1 ); \
+                                     } \
+                                     else \
+                                     { \
+-                                        sstrcpy( yylval->text, yytext, \
+-                                           MIN( position - yytext + 1, \
+-                                           1024 ) ); \
++                                        yylval->text = intern( yytext, \
++                                           position - yytext ); \
+                                     } \
+                                     \
+                                     return TOKEN_LABEL; \
+                                 }
+ 
+ 
+-{METADATA}                      { sstrcpy( yylval->text, yytext, 1024 );
++{METADATA}                      { yylval->text = intern( yytext );
+                                     return TOKEN_METADATA; }
+ {COMMENT}                       { nextColumn += strlen( yytext ); }
+ {TAB}                           { nextColumn += strlen( yytext ) * 4; }
+ {SPACE}                         { nextColumn += strlen( yytext ); }
+ {NEW_LINE}                      { nextColumn  = 1; }
+ 
+-","                             { yylval->text[0] = ','; 
+-                                    yylval->text[1] = '\0'; return (','); }
+-";"                             { yylval->text[0] = ';'; 
+-                                    yylval->text[1] = '\0'; return (';'); }
+-"."                             { yylval->text[0] = '.'; 
+-                                    yylval->text[1] = '\0'; return ('.'); }
+-"{"                             { yylval->text[0] = '{'; 
+-                                    yylval->text[1] = '\0'; return ('{'); }
+-"}"                             { yylval->text[0] = '}'; 
+-                                    yylval->text[1] = '\0'; return ('}'); }
+-"["                             { yylval->text[0] = '['; 
+-                                    yylval->text[1] = '\0'; return ('['); }
+-"]"                             { yylval->text[0] = ']'; 
+-                                    yylval->text[1] = '\0'; return (']'); }
+-"("                             { yylval->text[0] = '('; 
+-                                    yylval->text[1] = '\0'; return ('('); }
+-")"                             { yylval->text[0] = ')'; 
+-                                    yylval->text[1] = '\0'; return (')'); }
+-"<"                             { yylval->text[0] = '<'; 
+-                                    yylval->text[1] = '\0'; return ('<'); }
+-"+"                             { yylval->text[0] = '+'; 
+-                                    yylval->text[1] = '\0'; return ('+'); }
+-">"                             { yylval->text[0] = '>'; 
+-                                    yylval->text[1] = '\0'; return ('>'); }
+-"="                             { yylval->text[0] = '='; 
+-                                    yylval->text[1] = '\0'; return ('='); }
+-"-"                             { yylval->text[0] = '-'; 
+-                                    yylval->text[1] = '\0'; return ('-'); }
+-"!"                             { yylval->text[0] = '!'; 
+-                                    yylval->text[1] = '\0'; return ('!'); }
+-"|"                             { yylval->text[0] = '|'; 
+-                                    yylval->text[1] = '\0'; return ('|'); }
+-"_"                             { yylval->text[0] = '_'; 
+-                                    yylval->text[1] = '\0'; return ('_'); }
++","                             { yylval->text = ","; return (','); }
++";"                             { yylval->text = ";"; return (';'); }
++"."                             { yylval->text = "."; return ('.'); }
++"{"                             { yylval->text = "{"; return ('{'); }
++"}"                             { yylval->text = "}"; return ('}'); }
++"["                             { yylval->text = "["; return ('['); }
++"]"                             { yylval->text = "]"; return (']'); }
++"("                             { yylval->text = "("; return ('('); }
++")"                             { yylval->text = ")"; return (')'); }
++"<"                             { yylval->text = "<"; return ('<'); }
++"+"                             { yylval->text = "+"; return ('+'); }
++">"                             { yylval->text = ">"; return ('>'); }
++"="                             { yylval->text = "="; return ('='); }
++"-"                             { yylval->text = "-"; return ('-'); }
++"!"                             { yylval->text = "!"; return ('!'); }
++"|"                             { yylval->text = "|"; return ('|'); }
++"_"                             { yylval->text = "_"; return ('_'); }
+ 
+ %%
+ 
 diff --git a/ocelot/include/ocelot/executive/CooperativeThreadArray.h b/ocelot/include/ocelot/executive/CooperativeThreadArray.h
 index a50178e..5fbbcd1 100644
 --- a/ocelot/include/ocelot/executive/CooperativeThreadArray.h

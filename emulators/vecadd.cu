@@ -1,3 +1,17 @@
+#define CAT_(a, b) a##b
+#define CAT(a, b) CAT_(a, b)
+#define STR_(x) #x
+#define STR(x) STR_(x)
+#define L0 abcdefghij
+#define L1 CAT(L0, L0)
+#define L2 CAT(L1, L1)
+#define L3 CAT(L2, L2)
+#define L4 CAT(L3, L3)
+#define L5 CAT(L4, L4)
+#define L6 CAT(L5, L5)
+#define L7 CAT(L6, L6)
+#define LONG_NAME CAT(L7, L4)
+
 #if defined(__CUDA_ARCH__)
 
   #define __global__ __attribute__((global))
@@ -13,6 +27,11 @@ extern "C" __global__ void pick(const int *a, int *c) {
     scratch[j] = -j;
   const int *p = i % 3 == 0 ? &scratch[i & 7] : &a[i];
   c[i] = *p;
+}
+
+extern "C" __global__ void LONG_NAME(const int *a, const int *b, int *c) {
+  unsigned i = __nvvm_read_ptx_sreg_ctaid_x() * __nvvm_read_ptx_sreg_ntid_x() + __nvvm_read_ptx_sreg_tid_x();
+  c[i] = a[i] * 2 + b[i];
 }
 
 #else
@@ -142,7 +161,22 @@ int main(int argc, char **argv) try {
   for (int i = 0; i < N; ++i)
     pickBad += out[i] != (i % 3 == 0 ? -(i & 7) : i);
   std::printf("  cuda local/global pointer select %s (mismatches=%d)\n", pickBad ? "FAIL" : "PASS", pickBad);
-  return bad == 0 && pickBad == 0 ? 0 : 1;
+
+  CUfunction longName{};
+  check(cuModuleGetFunction(&longName, mod, STR(LONG_NAME)), "cuModuleGetFunction");
+  std::array<int, N> in2{};
+  for (int i = 0; i < N; ++i)
+    in2[i] = 3 * i;
+  check(cuMemcpyHtoD_v2(db, in2.data(), sizeof in2), "cuMemcpyHtoD");
+  std::array<void *, 3> longArgs{&da, &db, &dc};
+  check(cuLaunchKernel(longName, N / 128, 1, 1, 128, 1, 1, 0, nullptr, longArgs.data(), nullptr), "cuLaunchKernel");
+  check(cuCtxSynchronize(), "cuCtxSynchronize");
+  check(cuMemcpyDtoH_v2(out.data(), dc, sizeof out), "cuMemcpyDtoH");
+  int longBad = 0;
+  for (int i = 0; i < N; ++i)
+    longBad += out[i] != 2 * i + 3 * i;
+  std::printf("  cuda long kernel and parameter names %s (mismatches=%d)\n", longBad ? "FAIL" : "PASS", longBad);
+  return bad == 0 && pickBad == 0 && longBad == 0 ? 0 : 1;
 } catch (const std::exception &e) {
   std::fprintf(stderr, "  FAIL %s\n", e.what());
   return 1;
