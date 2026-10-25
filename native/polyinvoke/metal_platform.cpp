@@ -242,6 +242,11 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
   auto args = detail::argDataAsPointers(types, argData);
   auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
 
+  const size_t threads = local.x * local.y * local.z;
+  if (const size_t supported = kernel->maxTotalThreadsPerThreadgroup(); threads > supported)
+    POLYINVOKE_FATAL(PREFIX, "Threadgroup of %zu threads exceeds the %zu supported by the pipeline of kernel `%s`", threads, supported,
+                     symbol.c_str());
+
   auto buffer = queue->commandBuffer();
   auto encoder = buffer->computeCommandEncoder(MTL::DispatchTypeSerial);
   encoder->setComputePipelineState(kernel);
