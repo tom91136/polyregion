@@ -286,8 +286,9 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
   buffer->waitUntilCompleted();
   if (buffer->status() == MTL::CommandBufferStatusError) {
     auto err = buffer->error();
-    POLYINVOKE_FATAL(PREFIX, "Kernel `%s` (%s) failed: %s", moduleName.c_str(), symbol.c_str(),
-                     err && err->localizedDescription() ? err->localizedDescription()->utf8String() : "<unknown>");
+    POLYINVOKE_FATAL(PREFIX, "Kernel failed: %s (symbol `%s`, module `%s`)",
+                     err && err->localizedDescription() ? err->localizedDescription()->utf8String() : "<unknown>", symbol.c_str(),
+                     moduleName.c_str());
   }
 }
 
