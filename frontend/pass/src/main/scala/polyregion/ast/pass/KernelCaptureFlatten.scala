@@ -6,17 +6,19 @@ import polyregion.ast.Traversal.*
 // makes global pointer fields embedded in an offload capture explicit kernel arguments, rewriting both the
 // kernel body and every direct or remote launch site to keep the constrained buffer ABI in sync. scalar
 // capture fields stay in the aggregate; an escaped by-value subobject is copied locally and its pointer
-// fields patched from the explicit arguments before use
+// fields patched from the explicit arguments before use. a pointer whose pointee holds pointers stays in the
+// aggregate, which the runtime marshals as a whole graph (mirror or arena) at the launch
 // examples:
 //   kernel(cap){ cap.data[i] }          ->  kernel(cap, #ptr){ #ptr[i] }
 //   launch(kernel, cap)                 ->  launch(kernel, cap, cap.data)
 //   kernel(cap){ copy = cap.view }      ->  copy = cap.view; copy.data = #ptr  (then use copy)
+//   kernel(cap){ (*cap.xs).data[i] }    ->  unchanged
 // edge cases:
 //   scalar-only capture                ->  unchanged
 //   a trampoline's single by-value aggregate argument -> treated as its capture
 //   module/term captures               ->  retain their flattened call/launch order ahead of ordinary args
 //   overloaded remote kernel           ->  selected by substituted effective parameter types
-//   nested pointer graph / union / slot mutation / unsupported escape  ->  rejected
+//   pointer-bearing array / union / slot mutation / unsupported escape  ->  rejected
 object KernelCaptureFlatten extends ProgramPass {
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
@@ -70,9 +72,7 @@ object KernelCaptureFlatten extends ProgramPass {
     def leavesOf(kernel: p.Function, root: p.Type.Struct): List[Leaf] = {
       def walk(tpe: p.Type, path: List[p.PathStep], seen: Set[p.Sym]): List[Leaf] = tpe match {
         case ptr @ p.Type.Ptr(comp, p.Type.Space.Global) =>
-          if (hasPointers(comp, Set.empty))
-            fail(kernel, s"pointer graph at capture field ${pathRepr(path)} (${ptr.repr}) is unsupported")
-          List(Leaf(path, ptr))
+          if (hasPointers(comp, Set.empty)) Nil else List(Leaf(path, ptr))
         case ptr: p.Type.Ptr =>
           fail(kernel, s"non-global capture pointer at field ${pathRepr(path)} (${ptr.repr}) is unsupported")
         case array @ p.Type.Arr(comp, _, _) =>

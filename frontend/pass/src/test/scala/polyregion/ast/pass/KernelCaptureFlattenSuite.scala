@@ -429,7 +429,7 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     assertEquals(KernelCaptureFlatten(in, NoopLog), in)
   }
 
-  test("rejects a pointer whose pointee contains another pointer") {
+  test("keeps a pointer whose pointee contains another pointer in the capture") {
     val nodeSym = sym("Node")
     val capSym  = sym("GraphCapture")
     val nodeTpe = p.Type.Struct(nodeSym, Nil)
@@ -447,10 +447,9 @@ class KernelCaptureFlattenSuite extends munit.FunSuite {
     ).modifyDecl(_.copy(receiver = Some(p.Arg(self)), affinity = p.Function.Affinity.Offload))
     val capture = named("capture", p.Type.Ptr(capTpe, global))
 
-    val ex = intercept[RuntimeException] {
-      KernelCaptureFlatten(program(host(kernel, capture), List(kernel), List(nodeDef, capDef)), NoopLog)
-    }
-    assert(ex.getMessage.contains("pointer graph"))
+    val in = program(host(kernel, capture), List(kernel), List(nodeDef, capDef))
+
+    assertEquals(KernelCaptureFlatten(in, NoopLog), in)
   }
 
   test("repairs a by-value escape of a pointer-bearing subobject") {
