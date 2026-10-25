@@ -986,22 +986,10 @@ class PackageServiceSuite extends munit.FunSuite {
     functions.find(_.name == rootName).get
   }
 
-  test("program linking mirrors pointers captured by a closure environment for device launches") {
-    val entry   = closureEnvironmentLink(launching = true, hostCall = false)
-    val foreign = entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }
-    assertEquals(
-      foreign,
-      List(
-        p.Conventions.RuntimeAbi.SmaVisitClear,
-        p.Conventions.RuntimeAbi.SmaEnsureMin,
-        p.Conventions.RuntimeAbi.SmaVisitClear,
-        p.Conventions.RuntimeAbi.SmaReadAlloc
-      )
-    )
-    val patched = entry.collectAll[p.Stmt].collect { case p.Stmt.Cond(_, List(p.Stmt.Mut(target, _)), Nil) =>
-      target.root.symbol -> target.steps
-    }
-    assertEquals(patched, List("v1" -> List(p.PathStep.Field("table"))))
+  test("program linking leaves closure environments for device launches to the runtime") {
+    val entry = closureEnvironmentLink(launching = true, hostCall = false)
+    assertEquals(entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }, Nil)
+    assertEquals(entry.collectAll[p.Stmt].collect { case p.Stmt.Mut(target, _) => target.root.symbol }, Nil)
   }
 
   test("program linking keeps host closure environments for host-only implementations") {
@@ -1009,10 +997,9 @@ class PackageServiceSuite extends munit.FunSuite {
     assertEquals(entry.collectAll[p.Expr].collect { case call: p.Expr.ForeignCall => call.name }, Nil)
   }
 
-  test("program linking rejects an implementation that launches and calls a captured closure on the host") {
+  test("program linking accepts an implementation that launches and calls a captured closure on the host") {
     val (resolved, _) = linkClosureEnvironment(launching = true, hostCall = true)
-    assert(resolved.isLeft, resolved)
-    assert(resolved.left.toOption.get.exists(_.contains("on the host")), resolved)
+    assert(resolved.isRight, resolved)
   }
 
   test("program linking binds a closure invoked by a package helper") {

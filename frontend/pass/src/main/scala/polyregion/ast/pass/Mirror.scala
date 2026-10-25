@@ -81,7 +81,6 @@ final case class Mirror(id: String = "") extends ProgramPass derives PassArgCode
 
 enum MirrorTarget {
   case Remote(base: p.Term, offset: p.Term)
-  case Local(root: p.Named, steps: List[p.PathStep])
 }
 
 final class MirrorWalk(program: p.Program) {
@@ -148,16 +147,6 @@ final class MirrorWalk(program: p.Program) {
                   )._2
                 )
               )
-            case MirrorTarget.Local(root, steps) =>
-              Nil -> { (dev: p.Named) =>
-                val (mirrored, mirroredDecl) =
-                  vlet(s"m_$tag", p.Type.Bool1, p.Expr.IntrOp(p.Intr.LogicNeq(sel(dev), p.Term.IntU64Const(0L))))
-                val field: p.Term.Select = p.Term.Select(root, steps :+ p.PathStep.Field(mn), ptrTpe)
-                List(
-                  mirroredDecl,
-                  p.Stmt.Cond(sel(mirrored), List(p.Stmt.Mut(field, p.Expr.Cast(sel(dev), ptrTpe))), Nil)
-                )
-              }
           }
           val body = comp match {
             // straight-line code can't unroll a runtime-length chain; mirror the whole graph at runtime
@@ -230,7 +219,6 @@ final class MirrorWalk(program: p.Program) {
             val (ofn, ofDecl)  = u64v(s"of_$tag", p.Expr.OffsetOf(structTpe, mn))
             val (off, offDecl) = u64v(s"off_$tag", add(offAcc, sel(ofn)))
             List(ofDecl, offDecl) -> MirrorTarget.Remote(remote, sel(off))
-          case MirrorTarget.Local(root, steps) => Nil -> MirrorTarget.Local(root, steps :+ p.PathStep.Field(mn))
         }
         structDefOf(s.name).toList.flatMap(d =>
           offset ::: mirror(

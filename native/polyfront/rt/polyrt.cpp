@@ -811,18 +811,6 @@ POLYREGION_EXPORT extern "C" bool polyrt_remote_launch(void *context, const char
   });
 }
 
-POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName,
-                                                                    const size_t gridX, const size_t gridY, const size_t gridZ,
-                                                                    const size_t blockX, const size_t blockY, const size_t blockZ,
-                                                                    const size_t localMemBytes, const size_t argCount,
-                                                                    const uint8_t *argTypes, void *const *argPtrs,
-                                                                    const size_t *mirrorSizes, const uint8_t *mirrorKinds) noexcept {
-  return runtimeStatus(__func__, [&] {
-    remoteLaunchMarshalled(context, moduleName, kernelName, gridX, gridY, gridZ, blockX, blockY, blockZ, localMemBytes, argCount, argTypes,
-                           argPtrs, mirrorSizes, mirrorKinds, nullptr);
-  });
-}
-
 POLYREGION_EXPORT extern "C" bool polyrt_remote_launch_marshalled(void *context, const char *moduleName, const char *kernelName,
                                                                   const size_t gridX, const size_t gridY, const size_t gridZ,
                                                                   const size_t blockX, const size_t blockY, const size_t blockZ,

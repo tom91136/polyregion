@@ -120,11 +120,6 @@ POLYREGION_RT_PROTECT POLYREGION_EXPORT bool polyrt_remote_launch(void *context,
                                                                   size_t gridX, size_t gridY, size_t gridZ, size_t blockX, size_t blockY,
                                                                   size_t blockZ, size_t localMemBytes, size_t argCount,
                                                                   const uint8_t *argTypes, void *const *argPtrs) noexcept;
-POLYREGION_RT_PROTECT POLYREGION_EXPORT bool
-polyrt_remote_launch_with_mirrors(void *context, const char *moduleName, const char *kernelName, size_t gridX, size_t gridY, size_t gridZ,
-                                  size_t blockX, size_t blockY, size_t blockZ, size_t localMemBytes, size_t argCount,
-                                  const uint8_t *argTypes, void *const *argPtrs, const size_t *mirrorSizes,
-                                  const uint8_t *mirrorKinds) noexcept;
 // mirror kinds: 0 none, 1 by-value capture copied (and marshalled by its layout when pointer-bearing), 2 pointer to a
 // pointer-free host aggregate copied both ways, 3 capture pointer mirrored unless it already addresses device memory
 POLYREGION_RT_PROTECT POLYREGION_EXPORT bool

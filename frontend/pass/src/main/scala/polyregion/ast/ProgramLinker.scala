@@ -782,9 +782,7 @@ private[polyregion] object ProgramLinker {
   private def materializeEntry(
       name: String,
       resolution: ImplementationResolution,
-      typeSizes: Map[p.Type, Int],
-      definitions: List[p.StructDef],
-      closure: List[p.Function]
+      typeSizes: Map[p.Type, Int]
   ): Either[List[String], p.Function] = {
     val errors         = List.newBuilder[String]
     val publicDecl     = resolution.publicDeclaration
@@ -792,56 +790,23 @@ private[polyregion] object ProgramLinker {
     val concreteTypes = publicDecl.args.zipWithIndex.map { (arg, index) =>
       resolution.call.environments.getOrElse(index, substitute(arg.named.tpe, resolution.call.types))
     }
-    val omitted      = resolution.call.callables.keySet -- resolution.call.environments.keySet
-    val entryArgs    = mutable.ListBuffer.empty[p.Arg]
-    val body         = mutable.ListBuffer.empty[p.Stmt]
-    val downloads    = mutable.ListBuffer.empty[p.Stmt]
-    val allocations  = mutable.ListBuffer.empty[(p.Stmt, List[p.Stmt], p.Stmt)]
-    val invokeArgs   = mutable.ListBuffer.empty[p.Term]
-    val sourceArgs   = mutable.Map.empty[Int, p.Named]
-    val scalarValues = mutable.Map.empty[Int, p.Named]
-    val walk         = MirrorWalk(p.Program(None, Nil, definitions))
-    val launches = closure.exists(_.collectAll[p.Expr].exists {
-      case p.Expr.SpecOp(_: p.Spec.RemoteLaunch) => true
-      case _                                     => false
-    })
-    val mirrored =
-      if (!launches) Nil
-      else
-        resolution.call.environments.toList.sortBy(_._1).flatMap {
-          case (index, environment: p.Type.Struct) if walk.hasPointers(environment.name, Set.empty) =>
-            walk.structDefOf(environment.name).map(index -> _)
-          case _ => None
-        }
-    mirrored.foreach { case (index, _) =>
-      resolution.call.callables.get(index).foreach { callable =>
-        val hostCalled = closure.exists { function =>
-          function.decl.affinity == p.Function.Affinity.Host && function.collectAll[p.Expr].exists {
-            case p.Expr.Invoke(p.Type.FnRef(`callable`), _, Some(_), _, _) => true
-            case _                                                         => false
-          }
-        }
-        if (hostCalled)
-          errors += s"implementation `${implementation.name.repr}` launches device work with closure `${callable.repr}` and also " +
-            "calls it on the host; its captured pointers are mirrored for the device, so the host call would see device addresses"
-      }
-    }
-
-    def select(named: p.Named): p.Term.Select           = p.Term.Select(named, Nil, named.tpe)
-    def spec(op: p.Spec): p.Expr                        = p.Expr.SpecOp(op)
-    def intr(op: p.Intr): p.Expr                        = p.Expr.IntrOp(op)
+    val omitted                               = resolution.call.callables.keySet -- resolution.call.environments.keySet
+    val entryArgs                             = mutable.ListBuffer.empty[p.Arg]
+    val body                                  = mutable.ListBuffer.empty[p.Stmt]
+    val downloads                             = mutable.ListBuffer.empty[p.Stmt]
+    val allocations                           = mutable.ListBuffer.empty[(p.Stmt, List[p.Stmt], p.Stmt)]
+    val invokeArgs                            = mutable.ListBuffer.empty[p.Term]
+    val sourceArgs                            = mutable.Map.empty[Int, p.Named]
+    val scalarValues                          = mutable.Map.empty[Int, p.Named]
+    def select(named: p.Named): p.Term.Select = p.Term.Select(named, Nil, named.tpe)
+    def spec(op: p.Spec): p.Expr              = p.Expr.SpecOp(op)
+    def intr(op: p.Intr): p.Expr              = p.Expr.IntrOp(op)
     def immutable(named: p.Named, expr: p.Expr): Unit   = body += p.Stmt.Var(named, Some(expr), isMutable = false)
     def temporary(prefix: String, tpe: p.Type): p.Named = p.Named(s"$prefix${body.size}", tpe)
 
     val contextType = p.Spec.ContextType
     val context     = p.Named("#context", contextType)
     entryArgs += p.Arg(context)
-    if (mirrored.nonEmpty)
-      body += p.Stmt.Var(
-        p.Named("#mirrorClear", p.Type.Unit0),
-        Some(p.Expr.ForeignCall(p.Conventions.RuntimeAbi.SmaVisitClear, Nil, p.Type.Unit0)),
-        isMutable = true
-      )
     if (resolution.abi.systemArguments != 0) invokeArgs += select(context)
     publicDecl.args.indices.foreach { index =>
       if (!omitted.contains(index)) {
@@ -860,20 +825,7 @@ private[polyregion] object ProgramLinker {
         val concrete = concreteTypes(index)
         val named    = p.Named(s"v$index", concrete)
         val load     = p.Expr.Index(select(sourceArgs(index)), p.Term.IntS32Const(0), concrete)
-        mirrored.toMap.get(index) match {
-          case Some(definition) =>
-            body += p.Stmt.Var(named, Some(load), isMutable = true)
-            body ++= walk.mirror(
-              MirrorTarget.Local(named, Nil),
-              sourceArgs(index),
-              Nil,
-              definition,
-              concrete,
-              s"e$index",
-              Set(definition.name)
-            )
-          case None => immutable(named, load)
-        }
+        immutable(named, load)
         scalarValues(index) = named
       }
     }
@@ -1029,15 +981,6 @@ private[polyregion] object ProgramLinker {
         invokeBody += p.Stmt.Update(select(result.get), p.Term.IntS32Const(0), select(callResult))
       case _ => invokeBody += p.Stmt.Var(p.Named("invoke", invokeResult), Some(invoke), isMutable = true)
     }
-    if (mirrored.nonEmpty)
-      invokeBody += p.Stmt.Var(
-        p.Named("#visitClear", p.Type.Unit0),
-        Some(p.Expr.ForeignCall(p.Conventions.RuntimeAbi.SmaVisitClear, Nil, p.Type.Unit0)),
-        isMutable = true
-      )
-    mirrored.foreach { case (index, definition) =>
-      invokeBody ++= walk.readback(sourceArgs(index), Nil, definition, s"e$index", Set(definition.name))
-    }
     val guarded = allocations.foldRight(invokeBody.result() ::: downloads.toList) {
       case ((acquire, setup, cleanup), nested) =>
         List(acquire, p.Stmt.Try(setup ::: nested, Nil, List(cleanup)))
@@ -1102,7 +1045,7 @@ private[polyregion] object ProgramLinker {
           for {
             closure     <- implementationClosure(pkg, resolution, callerFns)
             definitions <- resolvedStructClosure(pkg, closure, callerDefs)
-            entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes, definitions, closure)
+            entry       <- materializeEntry(root.name.fqn.mkString("."), resolution, typeSizes)
           } yield RootLink.Bound(
             root.name,
             p.Program(

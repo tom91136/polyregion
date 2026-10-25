@@ -382,8 +382,8 @@ TEST_CASE("remote launch releases mirrored arguments after a failure") {
   const std::array<void *, 2> arguments{first.data(), second.data()};
   const std::array<size_t, 2> mirrorSizes{first.size(), second.size()};
   const std::array<uint8_t, 2> mirrorKinds{1, 1};
-  CHECK_FALSE(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                                arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
+  CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                              arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
   CHECK(device.stub->remoteAllocs == 2);
   CHECK(device.stub->remoteFrees == 2);
   CHECK(context.remoteAllocations.empty());
@@ -399,8 +399,8 @@ TEST_CASE("failed mirror cleanup is retried by the next transaction") {
   const std::array<size_t, 1> mirrorSizes{local.size()};
   const std::array<uint8_t, 1> mirrorKinds{1};
   device.stub->failRemoteFree = true;
-  CHECK_FALSE(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                                arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
+  CHECK_FALSE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                              arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
   REQUIRE(context.remoteAllocations.size() == 1);
   CHECK(context.remoteAllocations.begin()->second.cleanupPending);
 
@@ -422,8 +422,8 @@ TEST_CASE("remote launch preserves tracked aggregate pointers and mirrors local 
   const std::array<void *, 2> arguments{&remote, &localPointer};
   const std::array<size_t, 2> mirrorSizes{local.size(), local.size()};
   const std::array<uint8_t, 2> mirrorKinds{2, 2};
-  REQUIRE(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
   CHECK(device.stub->remoteAllocs == 2);
   CHECK(device.stub->remoteFrees == 1);
   CHECK(context.remoteAllocations.size() == 1);
@@ -443,8 +443,8 @@ TEST_CASE("remote launch copies a mutated local aggregate back from its mirror")
   const std::array<void *, 1> arguments{&localPointer};
   const std::array<size_t, 1> mirrorSizes{sizeof(local)};
   const std::array<uint8_t, 1> mirrorKinds{2};
-  REQUIRE(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
   CHECK(local == 0x123456789ABCDEF0ull);
 }
 
@@ -501,8 +501,8 @@ TEST_CASE("remote launch preserves null aggregate pointers") {
   const std::array<void *, 1> arguments{&nullPointer};
   const std::array<size_t, 1> mirrorSizes{sizeof(uintptr_t)};
   const std::array<uint8_t, 1> mirrorKinds{2};
-  REQUIRE(polyrt_remote_launch_with_mirrors(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
-                                            arguments.data(), mirrorSizes.data(), mirrorKinds.data()));
+  REQUIRE(polyrt_remote_launch_marshalled(&context, "module", "kernel", 1, 1, 1, 1, 1, 1, 0, arguments.size(), types.data(),
+                                          arguments.data(), mirrorSizes.data(), mirrorKinds.data(), nullptr));
   CHECK(device.stub->remoteAllocs == 0);
   CHECK(device.stub->remoteFrees == 0);
   CHECK(context.remoteAllocations.empty());

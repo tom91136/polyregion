@@ -5,6 +5,7 @@
 #include "aspartame/all.hpp"
 
 #include "polyregion/enums.h"
+#include "polyregion/types.h"
 
 using namespace polyregion::backend::details;
 using namespace aspartame;
@@ -35,6 +36,104 @@ static llvm::Value *recoverSingleStoredPointer(llvm::Value *value) {
   }
   return definition ? definition->getValueOperand() : value;
 }
+
+namespace polyregion::backend::details { namespace {
+
+// static runtime::TypeLayout tables for a launch capture; a field the launch passes as its own argument is
+// described as plain bytes so the runtime marshals the remaining graph without following it twice
+class CaptureLayouts {
+  using Path = std::vector<std::string>;
+  CodeGen &cg;
+  llvm::Type *sizeTy;
+  llvm::PointerType *ptrTy;
+  llvm::StructType *layoutTy, *memberTy;
+  std::map<std::string, llvm::GlobalVariable *> emitted;
+  std::map<llvm::Constant *, bool> pointerFree;
+  Map<Type::Struct, StructLayout> table;
+
+  llvm::Constant *size(const uint64_t value) const { return llvm::ConstantInt::get(sizeTy, value); }
+  llvm::Constant *string(const std::string &value) const {
+    return llvm::ConstantExpr::getPointerCast(cg.B.CreateGlobalString(value, "capture_layout_name", 0, &cg.M), ptrTy);
+  }
+
+  llvm::GlobalVariable *global(const std::string &key) {
+    auto *variable = new llvm::GlobalVariable(cg.M, layoutTy, true, llvm::GlobalValue::PrivateLinkage, nullptr, "capture_layout");
+    emitted.emplace(key, variable);
+    return variable;
+  }
+
+  llvm::Constant *primitive(const std::string &name, const uint64_t bytes) {
+    const auto key = "#" + name;
+    if (const auto found = emitted.find(key); found != emitted.end()) return found->second;
+    auto *variable = global(key);
+    const auto attrs = polyregion::runtime::LayoutAttrs::Opaque | polyregion::runtime::LayoutAttrs::SelfOpaque
+                       | polyregion::runtime::LayoutAttrs::Primitive;
+    variable->setInitializer(
+        llvm::ConstantStruct::get(layoutTy, {string(name), size(bytes), size(bytes), size(polyregion::runtime::to_underlying(attrs)),
+                                             size(0), llvm::ConstantPointerNull::get(ptrTy)}));
+    pointerFree[variable] = true;
+    return variable;
+  }
+
+  llvm::Constant *component(const Type::Any &tpe) {
+    if (const auto structure = tpe.get<Type::Struct>()) return of(*structure, {});
+    if (const auto bytes = primitiveSize(tpe)) return primitive(to_string(tpe), *bytes);
+    return primitive("U8", 1);
+  }
+
+public:
+  CaptureLayouts(CodeGen &cg, llvm::Type *sizeTy, llvm::PointerType *ptrTy)
+      : cg(cg), sizeTy(sizeTy), ptrTy(ptrTy), layoutTy(llvm::StructType::get(cg.C.actual, {ptrTy, sizeTy, sizeTy, sizeTy, sizeTy, ptrTy})),
+        memberTy(llvm::StructType::get(cg.C.actual, {ptrTy, sizeTy, sizeTy, sizeTy, sizeTy, ptrTy, sizeTy, ptrTy})),
+        table(cg.structTypes | values() | map([](const auto &info) { return std::pair{Type::Struct(info.def.name, {}), info.layout}; })
+              | to<Map>()) {}
+
+  llvm::Constant *of(const Type::Struct &tpe, const std::vector<Path> &opaque) {
+    const auto name = fqcn(tpe.name);
+    const auto info = cg.structTypes ^ get_maybe(name);
+    if (!info) throw BackendException("capture layout has no definition for " + name);
+    const auto key = name + (opaque ^ mk_string("|", [](const auto &path) { return path ^ mk_string("."); }));
+    if (const auto found = emitted.find(key); found != emitted.end()) return found->second;
+    auto *variable = global(key);
+    bool selfOpaque = true, allOpaque = true;
+    const auto members =
+        info->layout.members ^ map([&](const auto &member) -> llvm::Constant * {
+          const auto below = opaque | collect([&](const auto &path) -> Opt<Path> {
+                               if (path.empty() || path.front() != member.name.symbol) return {};
+                               return Path(path.begin() + 1, path.end());
+                             })
+                             | to_vector();
+          const auto bytes = below ^ exists([](const auto &path) { return path.empty(); });
+          const auto [indirections, componentSize] = countIndirectionsAndComponentSize(member.name.tpe, table);
+          llvm::Constant *type = llvm::ConstantPointerNull::get(ptrTy);
+          size_t indirection = 0;
+          if (!bytes && indirections > 0 && member.name.tpe.template is<Type::Ptr>()) {
+            indirection = indirections;
+            type = component(*extractComponent(member.name.tpe));
+            selfOpaque = allOpaque = false;
+          } else if (const auto structure = member.name.tpe.template get<Type::Struct>(); structure && !bytes) {
+            type = of(*structure, below);
+            allOpaque = allOpaque && pointerFree[type];
+          } else if (const auto primitiveBytes = primitiveSize(member.name.tpe); primitiveBytes && !bytes)
+            type = primitive(to_string(member.name.tpe), *primitiveBytes);
+          return llvm::ConstantStruct::get(memberTy, {string(member.name.symbol), size(member.offsetInBytes), size(member.sizeInBytes),
+                                                      size(indirection), size(componentSize.value_or(member.sizeInBytes)), type, size(0),
+                                                      llvm::ConstantPointerNull::get(ptrTy)});
+        });
+    auto *array = llvm::ConstantArray::get(llvm::ArrayType::get(memberTy, members.size()), members);
+    auto *storage = new llvm::GlobalVariable(cg.M, array->getType(), true, llvm::GlobalValue::PrivateLinkage, array, "capture_members");
+    auto attrs = polyregion::runtime::LayoutAttrs::None;
+    if (selfOpaque) attrs |= polyregion::runtime::LayoutAttrs::SelfOpaque;
+    if (allOpaque) attrs |= polyregion::runtime::LayoutAttrs::Opaque;
+    variable->setInitializer(
+        llvm::ConstantStruct::get(layoutTy, {string(name), size(info->layout.sizeInBytes), size(info->layout.alignment),
+                                             size(polyregion::runtime::to_underlying(attrs)), size(members.size()), storage}));
+    pointerFree[variable] = allOpaque;
+    return variable;
+  }
+};
+
+}} // namespace polyregion::backend::details
 
 void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const Function &source) {
   if (!source.visibility.is<FunctionVisibility::Exported>()) {
@@ -159,7 +258,26 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         auto *argTypesType = llvm::ArrayType::get(i8, count ? count : 1);
         auto *mirrorSizesType = llvm::ArrayType::get(sizeTy, count ? count : 1);
         auto *mirrorKindsType = llvm::ArrayType::get(i8, count ? count : 1);
+        auto *layoutsType = llvm::ArrayType::get(ptr, count ? count : 1);
         auto *argPointers = cg.B.CreateAlloca(argPointersType, nullptr, "remote_argptrs");
+        auto *layouts = cg.B.CreateAlloca(layoutsType, nullptr, "remote_layouts");
+        CaptureLayouts captureLayouts(cg, sizeTy, ptr);
+        const auto passedFields = [&](const Term::Select &capture) {
+          return v.args | collect([&](const auto &arg) -> Opt<std::vector<std::string>> {
+                   const auto select = arg.template get<Term::Select>();
+                   if (!select || select->root != capture.root || select->steps.size() <= capture.steps.size()
+                       || !std::equal(capture.steps.begin(), capture.steps.end(), select->steps.begin()))
+                     return {};
+                   std::vector<std::string> path;
+                   for (auto step = select->steps.begin() + capture.steps.size(); step != select->steps.end(); ++step) {
+                     const auto field = step->template get<PathStep::Field>();
+                     if (!field) return {};
+                     path.emplace_back(field->name);
+                   }
+                   return path;
+                 })
+                 | to_vector();
+        };
         auto *argTypes = cg.B.CreateAlloca(argTypesType, nullptr, "remote_argtypes");
         auto *mirrorSizes = cg.B.CreateAlloca(mirrorSizesType, nullptr, "remote_mirror_sizes");
         auto *mirrorKinds = cg.B.CreateAlloca(mirrorKindsType, nullptr, "remote_mirror_kinds");
@@ -169,7 +287,8 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
           bool directAggregate = false;
           auto *mirrorSize = llvm::ConstantInt::get(sizeTy, 0);
           auto *mirrorKind = llvm::ConstantInt::get(i8, 0);
-          if (arg.tpe().template is<Type::Struct>()) {
+          llvm::Constant *layout = llvm::ConstantPointerNull::get(ptr);
+          if (const auto structure = arg.tpe().template get<Type::Struct>()) {
             auto *type = cg.resolveType(arg.tpe());
             const auto allocationSize = cg.M.getDataLayout().getTypeAllocSize(type).getFixedValue();
             if (allocationSize == 0) {
@@ -182,6 +301,8 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
               cg.B.CreateStore(cg.mkTermVal(arg), local);
               value = local;
               mirrorSize = llvm::ConstantInt::get(sizeTy, allocationSize);
+              const auto select = arg.template get<Term::Select>();
+              layout = captureLayouts.of(*structure, select ? passedFields(*select) : std::vector<std::vector<std::string>>{});
             }
             directAggregate = true;
             mirrorKind = llvm::ConstantInt::get(i8, 1);
@@ -201,6 +322,10 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
                 }
               }
             }
+            if (const auto pointer = arg.tpe().template get<Type::Ptr>(); pointer && mirrorKind->isZeroValue()) {
+              mirrorSize = llvm::ConstantInt::get(sizeTy, primitiveSize(pointer->comp).value_or(0));
+              mirrorKind = llvm::ConstantInt::get(i8, 3);
+            }
           }
           auto *offset = llvm::ConstantInt::get(i64, index);
           if (!directAggregate) {
@@ -213,6 +338,7 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
           cg.B.CreateStore(llvm::ConstantInt::get(i8, runtimeType(arg.tpe())), cg.B.CreateGEP(argTypesType, argTypes, {zero, offset}));
           cg.B.CreateStore(mirrorSize, cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, offset}));
           cg.B.CreateStore(mirrorKind, cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, offset}));
+          cg.B.CreateStore(layout, cg.B.CreateGEP(layoutsType, layouts, {zero, offset}));
         }
         std::string kernelName = "_kernel";
         if (const auto fn = v.kernel.tpe().get<Type::FnRef>()) {
@@ -221,12 +347,12 @@ ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr
         auto *module = cg.B.CreateGlobalString(kernelName, "remote_module", 0, &cg.M);
         auto *kernel = cg.B.CreateGlobalString(kernelName, "remote_kernel", 0, &cg.M);
         checkedRuntimeCall(
-            external("polyrt_remote_launch_with_mirrors", i1,
-                     {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr, ptr}),
+            external("polyrt_remote_launch_marshalled", i1,
+                     {ptr, ptr, ptr, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, sizeTy, ptr, ptr, ptr, ptr, ptr}),
             {cg.mkTermVal(v.context), module, kernel, asSize(v.gridX), asSize(v.gridY), asSize(v.gridZ), asSize(v.blockX), asSize(v.blockY),
              asSize(v.blockZ), asSize(v.shmem), llvm::ConstantInt::get(sizeTy, count), cg.B.CreateGEP(argTypesType, argTypes, {zero, zero}),
              cg.B.CreateGEP(argPointersType, argPointers, {zero, zero}), cg.B.CreateGEP(mirrorSizesType, mirrorSizes, {zero, zero}),
-             cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, zero})});
+             cg.B.CreateGEP(mirrorKindsType, mirrorKinds, {zero, zero}), cg.B.CreateGEP(layoutsType, layouts, {zero, zero})});
         return noop();
       },
       [&](const Spec::RemoteAlloc &v) -> ValPtr {

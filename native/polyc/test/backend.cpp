@@ -588,7 +588,7 @@ TEST_CASE("CPU remote-operation ABI follows the target pointer width", "[backend
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(
                        fmt::format("declare i1 @polyrt_remote_memcpy(ptr, {}, {}, {}, i32)", sizeType, sizeType, sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format(
-                       "declare i1 @polyrt_remote_launch_with_mirrors(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
+                       "declare i1 @polyrt_remote_launch_marshalled(ptr, ptr, ptr, {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0}", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring(fmt::format("declare i1 @polyrt_remote_free(ptr, {})", sizeType)));
     CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("call void @polyrt_abort()"));
     if (sizeType == "i64") CHECK_THAT(ir, Catch::Matchers::ContainsSubstring("zext i32"));
@@ -3305,22 +3305,24 @@ TEST_CASE("host lowering emits remote launches through the context ABI", "[backe
   REQUIRE(compiled.binary);
   const auto &ir = llvmIrOf(compiled);
   INFO(ir);
-  CHECK(ir ^ contains_slice("polyrt_remote_launch_with_mirrors"));
+  CHECK(ir ^ contains_slice("polyrt_remote_launch_marshalled"));
   const auto callCount = [&](const std::string &callee) {
     const auto needle = "@" + callee + "(";
     const auto lines = ir ^ split('\n');
     return lines ^ count([&](const auto &line) { return (line ^ contains_slice("call ")) && (line ^ contains_slice(needle)); });
   };
-  // By-value aggregates are always mirrored. Pointer arguments are mirrored only when they resolve
-  // to the start of a pointer-free, unescaped local aggregate; remote, interior, pointer-bearing, and escaped values stay opaque.
-  CHECK(callCount("polyrt_remote_launch_with_mirrors") == 1);
+  // By-value aggregates are always mirrored. Pointer arguments are copied as aggregates only when they resolve to the start
+  // of a pointer-free, unescaped local aggregate; remote, interior, pointer-bearing, and escaped values are left to the runtime.
+  CHECK(callCount("polyrt_remote_launch_marshalled") == 1);
   CHECK(callCount("polyrt_remote_malloc") == 0);
   CHECK(callCount("polyrt_remote_memcpy") == 0);
   CHECK(ir ^ contains_slice("store i" + std::to_string(sizeof(size_t) * 8) + " 4"));
-  CHECK(ir ^ contains_slice("store i8 0, ptr"));
   CHECK(ir ^ contains_slice("store i8 1, ptr"));
-  const auto mirrorKindTwoStores = ir ^ split('\n') ^ count([](const auto &line) { return line ^ contains_slice("store i8 2, ptr"); });
-  CHECK(mirrorKindTwoStores == 1);
+  const auto mirrorKindStores = [&](const char *kind) {
+    return ir ^ split('\n') ^ count([&](const auto &line) { return line ^ contains_slice(fmt::format("store i8 {}, ptr", kind)); });
+  };
+  CHECK(mirrorKindStores("2") == 1);
+  CHECK(mirrorKindStores("3") == 4);
 }
 
 TEST_CASE("host lowering transports stateless callable kernel slots as one byte", "[backend]") {
