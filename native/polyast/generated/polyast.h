@@ -10629,11 +10629,13 @@ struct POLYREGION_EXPORT ProgramLinkRequest {
   Program consumer;
   std::vector<std::string> capabilities;
   std::vector<ProgramTypeSize> typeSizes;
+  std::optional<int32_t> stackDepth;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT ProgramLinkRequest withPackages(const std::vector<Package> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT ProgramLinkRequest withConsumer(const Program &v_) const;
   [[nodiscard]] POLYREGION_EXPORT ProgramLinkRequest withCapabilities(const std::vector<std::string> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT ProgramLinkRequest withTypeSizes(const std::vector<ProgramTypeSize> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT ProgramLinkRequest withStackDepth(const std::optional<int32_t> &v_) const;
   template <typename T, typename U>
   POLYREGION_EXPORT void collect_where(std::vector<U> &results_, const std::function<std::optional<U>(const T &)> &f) const {
     if constexpr (std::is_same_v<T, ProgramLinkRequest>) {
@@ -10670,12 +10672,12 @@ struct POLYREGION_EXPORT ProgramLinkRequest {
     for (auto it = typeSizes.begin(); it != typeSizes.end(); ++it) {
       typeSizes__.emplace_back((*it).modify_all<T>(f));
     }
-    return ProgramLinkRequest(packages__, consumer.modify_all<T>(f), capabilities, typeSizes__);
+    return ProgramLinkRequest(packages__, consumer.modify_all<T>(f), capabilities, typeSizes__, stackDepth);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const ProgramLinkRequest &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const ProgramLinkRequest &) const;
   ProgramLinkRequest(std::vector<Package> packages, Program consumer, std::vector<std::string> capabilities = {},
-                     std::vector<ProgramTypeSize> typeSizes = {}) noexcept;
+                     std::vector<ProgramTypeSize> typeSizes = {}, std::optional<int32_t> stackDepth = {}) noexcept;
 };
 
 struct POLYREGION_EXPORT PackageFragment {

@@ -72,6 +72,15 @@
 #pragma region do: {output}
 #pragma region requires: 3 400
 
+#pragma region case: core-device-package-recursion
+#pragma region offload-only
+#pragma region do: {package_fixture} --device-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DRECURSION -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 2 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 55 94
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -105,6 +114,21 @@ int main() {
   std::for_each(std::execution::par_unseq, ids.begin(), ids.end(), [&](int i) { g.a[i] = g.b[i] * 2 + static_cast<int>(g.b.size()); });
   const int sum = std::transform_reduce(std::execution::par_unseq, ids.begin(), ids.end(), 0, std::plus<>(), [&](int i) { return g.a[i]; });
   std::printf("%d %d", g.a[7], sum);
+  return 0;
+}
+#elif defined(RECURSION)
+static int fib(int n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+
+int main() {
+  std::vector<int> xs(16);
+  std::iota(xs.begin(), xs.end(), 0);
+  std::for_each(std::execution::par_unseq, xs.begin(), xs.end(), [](int &x) { x = fib(x); });
+  const int sum =
+      std::transform_reduce(std::execution::par_unseq, xs.begin(), xs.end(), 0, std::plus<>(), [](int x) { return fib(x % 10); });
+  std::printf("%d %d", xs[10], sum);
   return 0;
 }
 #elif defined(POINTER_CAPTURE)

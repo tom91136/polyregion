@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "b878e2cac390e6d9d8bdb1f327756891";
+constexpr auto AdtHash = "6ddc7cb5e6a7d0da691b9ab27d26e1c9";
 constexpr auto ProgramHash = "de2de5f725108f6b01538c5ef974ec9a";
 constexpr auto PackageHash = "944c2b087ebac646c9d8a15c5fb76323";
-constexpr auto PackageWireHash = "ddf50b72239fc50bb6fddc26c62a5fec";
+constexpr auto PackageWireHash = "5bfd34bb50423f97f57fe5f45fd63dfd";
 constexpr auto CompileWireHash = "6a5c5e89c9331829463c57f0815d95fe";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -3348,7 +3348,8 @@ ProgramLinkRequest programlinkrequest_from_json(const json &j_) {
   for (const auto &v_ : j_.at(3)) {
     typeSizes.emplace_back(programtypesize_from_json(v_));
   }
-  return {packages, consumer, capabilities, typeSizes};
+  auto stackDepth = j_.at(4).is_null() ? std::nullopt : std::make_optional(j_.at(4).get<int32_t>());
+  return {packages, consumer, capabilities, typeSizes, stackDepth};
 }
 
 json programlinkrequest_to_json(const ProgramLinkRequest &x_) {
@@ -3362,7 +3363,8 @@ json programlinkrequest_to_json(const ProgramLinkRequest &x_) {
   for (const auto &v_ : x_.typeSizes) {
     typeSizes.emplace_back(programtypesize_to_json(v_));
   }
-  return json::array({packages, consumer, capabilities, typeSizes});
+  auto stackDepth = x_.stackDepth ? json(*x_.stackDepth) : json();
+  return json::array({packages, consumer, capabilities, typeSizes, stackDepth});
 }
 
 PackageFragment packagefragment_from_json(const json &j_) {
@@ -11613,7 +11615,7 @@ void programtypesize_to_msgpack(MsgpackWriter &w_, const ProgramTypeSize &x_) {
 }
 
 ProgramLinkRequest programlinkrequest_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 4) throw std::runtime_error("Expected ProgramLinkRequest with 4 field(s)");
+  if (n_ != 5) throw std::runtime_error("Expected ProgramLinkRequest with 5 field(s)");
   std::vector<Package> packages;
   {
     auto packages_size = r_.readArrayHeader();
@@ -11642,7 +11644,12 @@ ProgramLinkRequest programlinkrequest_fields_from_msgpack(MsgpackReader &r_, siz
       typeSizes.emplace_back(std::move(typeSizes_elem));
     }
   }
-  return {packages, consumer, capabilities, typeSizes};
+  std::optional<int32_t> stackDepth;
+  if (!r_.tryReadNil()) {
+    auto stackDepth_value = static_cast<int32_t>(r_.readInt32());
+    stackDepth = std::move(stackDepth_value);
+  }
+  return {packages, consumer, capabilities, typeSizes, stackDepth};
 }
 
 void programlinkrequest_fields_to_msgpack(MsgpackWriter &w_, const ProgramLinkRequest &x_) {
@@ -11659,6 +11666,11 @@ void programlinkrequest_fields_to_msgpack(MsgpackWriter &w_, const ProgramLinkRe
   for (const auto &v0_ : x_.typeSizes) {
     programtypesize_to_msgpack(w_, v0_);
   }
+  if (x_.stackDepth) {
+    w_.writeInt32(static_cast<int32_t>((*x_.stackDepth)));
+  } else {
+    w_.writeNil();
+  }
 }
 
 ProgramLinkRequest programlinkrequest_from_msgpack(MsgpackReader &r_) {
@@ -11667,7 +11679,7 @@ ProgramLinkRequest programlinkrequest_from_msgpack(MsgpackReader &r_) {
 }
 
 void programlinkrequest_to_msgpack(MsgpackWriter &w_, const ProgramLinkRequest &x_) {
-  w_.writeArrayHeader(4);
+  w_.writeArrayHeader(5);
   programlinkrequest_fields_to_msgpack(w_, x_);
 }
 

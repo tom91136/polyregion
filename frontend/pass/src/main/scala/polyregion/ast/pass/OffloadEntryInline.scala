@@ -2,12 +2,13 @@ package polyregion.ast.pass
 
 import polyregion.ast.{Log, PolyAST as p}
 
-object OffloadEntryInline extends ProgramPass {
+final case class OffloadEntryInline(maxDepth: Int = 1024) extends ProgramPass derives PassArgCodec {
 
   override def phase: p.Pass.Phase = p.Pass.Phase.PostMono
 
   override def apply(program: p.Program, log: Log): p.Program = {
-    val all = program.entry.toList ::: program.functions
+    val all    = program.entry.toList ::: program.functions
+    val frames = List.newBuilder[p.StructDef]
 
     def inlineEntry(entry: p.Function): p.Function = {
       val entryLog = log.subLog(entry.name.repr)
@@ -19,7 +20,9 @@ object OffloadEntryInline extends ProgramPass {
         program.copy(entry = Some(entry), functions = candidates),
         entryLog.subLog("reachable")
       )
-      FnInline(reachable, entryLog).entry
+      val lowered = RecursionLower(maxDepth)(reachable, entryLog.subLog("recursion"))
+      frames ++= lowered.defs.drop(reachable.defs.size)
+      FnInline(lowered, entryLog).entry
         .getOrElse(entry)
     }
 
@@ -28,6 +31,10 @@ object OffloadEntryInline extends ProgramPass {
         inlineEntry(function)
       else function
 
-    program.copy(entry = program.entry.map(transform), functions = program.functions.map(transform))
+    val out = program.copy(entry = program.entry.map(transform), functions = program.functions.map(transform))
+    frames.result() match {
+      case Nil   => out
+      case added => out.copy(defs = (out.defs ::: added).distinct)
+    }
   }
 }

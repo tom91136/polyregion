@@ -423,7 +423,7 @@ compiler::package::Result<polyast::CompileBundle>
 compiler::package::compile(const polyast::ProgramLinkRequest &request, const compiletime::Target hostTarget, const std::string &hostArch,
                            const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
                            const std::optional<int> stackDepth) {
-  auto linked = linkProgram(request);
+  auto linked = linkProgram(request.withStackDepth(stackDepth));
   if (!linked) return {{}, std::move(linked.errors)};
   if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};
   const auto roots = consumerRoots(request);

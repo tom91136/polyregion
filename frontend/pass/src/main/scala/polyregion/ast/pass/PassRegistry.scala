@@ -43,7 +43,7 @@ object PassRegistry {
     PassDef.singleton(MonoStruct),
     PassDef.singleton(Specialisation),
     PassDef.singleton(KernelCaptureFlatten),
-    PassDef.singleton(OffloadEntryInline),
+    PassDef.configured(OffloadEntryInline()),
     PassDef.configured(SubgroupLower()),
     PassDef.configured(VerifyAnchors()),
     PassDef.singleton(ArenaLower),

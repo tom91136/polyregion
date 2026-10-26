@@ -62,7 +62,39 @@
 !CHECK do: {output}
 !CHECK requires: 200 10100 2 199
 
-#if defined(ALLOCATABLE)
+!CHECK case: core-device-package-recursion
+!CHECK offload-only
+!CHECK do: {package_fixture} --device-core {output}.packages
+!CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DRECURSION -fstdpar-library-path={output}.packages -o {output} {input}
+!CHECK stderr-count: 2 bound to polyregion.core
+!CHECK do: {output}
+!CHECK requires: 55 108
+
+#if defined(RECURSION)
+program check_library_core
+  implicit none
+  integer, parameter :: n = 16
+  integer :: i, s, xs(n)
+  do concurrent (i = 1:n)
+    xs(i) = fib(i - 1)
+  end do
+  s = 0
+  do concurrent (i = 1:n) reduce(+:s)
+    s = s + fib(mod(i, 10))
+  end do
+  write (*, '(I0,1X,I0)', advance='no') xs(11), s
+contains
+  pure recursive function fib(k) result(r)
+    integer, intent(in) :: k
+    integer :: r
+    if (k < 2) then
+      r = k
+    else
+      r = fib(k - 1) + fib(k - 2)
+    end if
+  end function fib
+end program
+#elif defined(ALLOCATABLE)
 program check_library_core
   implicit none
   integer, parameter :: n = 100
