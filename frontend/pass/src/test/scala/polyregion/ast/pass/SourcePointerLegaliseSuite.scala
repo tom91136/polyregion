@@ -334,6 +334,52 @@ class SourcePointerLegaliseSuite extends munit.FunSuite {
     )
   }
 
+  test("an indexed address through a pointer stored in a local aggregate keeps that pointer's space") {
+    val baseSym   = sym("ConstIter")
+    val iterSym   = sym("Iter")
+    val baseTpe   = p.Type.Struct(baseSym, Nil)
+    val iterTpe   = p.Type.Struct(iterSym, Nil)
+    val baseField = s"${p.Conventions.BaseFieldPrefix}_ConstIter"
+    val input     = named("input", globalPtr)
+    val iter      = named("iter", iterTpe)
+    val advanced  = named("advanced", globalPtr)
+    val stored = p.Term
+      .Select(iter, List(p.PathStep.Field(baseField), p.PathStep.Field("ptr")), globalPtr)
+      .asInstanceOf[p.Term.Select]
+    val kernel = entry(
+      args = List(p.Arg(input)),
+      body = List(
+        p.Stmt.Var(iter, None, isMutable = true),
+        p.Stmt.Mut(stored, p.Expr.Alias(selectT(input))),
+        p.Stmt.Var(
+          advanced,
+          Some(p.Expr.RefTo(stored, Some(p.Term.IntS64Const(1)), p.Type.IntS32, p.Type.Space.Global, p.Region.Opaque))
+        ),
+        p.Stmt.Mut(stored, p.Expr.Alias(selectT(advanced))),
+        p.Stmt.Var(named("value"), Some(p.Expr.Index(stored, p.Term.IntS64Const(0), p.Type.IntS32))),
+        p.Stmt.Return(p.Expr.Alias(p.Term.Unit0Const))
+      )
+    )
+    val defs = List(
+      p.StructDef(baseSym, Nil, List(named("ptr", globalPtr)), Nil),
+      p.StructDef(iterSym, Nil, List(named(baseField, baseTpe)), Nil)
+    )
+
+    val out = SourcePointerLegalise()(program(Some(kernel), defs), NoopLog).entry.required
+
+    assertEquals(
+      out
+        .collectAll[p.Stmt]
+        .collect { case p.Stmt.Var(name, _, _) if name.symbol == advanced.symbol => name.tpe }
+        .toSet,
+      Set[p.Type](globalPtr)
+    )
+    assertEquals(
+      out.collectAll[p.Expr].collect { case p.Expr.RefTo(_, Some(_), _, space, _) => space }.toSet,
+      Set[p.Type.Space](p.Type.Space.Global)
+    )
+  }
+
   test("taking an indexed address preserves the element type") {
     val input   = named("input", globalPtr)
     val element = named("element", globalPtr)

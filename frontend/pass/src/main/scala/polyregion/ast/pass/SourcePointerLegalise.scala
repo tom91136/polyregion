@@ -236,9 +236,10 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         index: Option[p.Term],
         selected: p.Type,
         fallback: p.Type.Space
-    ): p.Type.Space =
+    ): p.Type.Space = {
+      val addressed = index.fold(select)(i => select.copy(steps = select.steps :+ p.PathStep.IndexDyn(i)))
       if (select.steps.isEmpty && index.isEmpty) p.Type.Space.Private
-      else if (storedPointerSpace(rootTpe, select).nonEmpty) storedPointerSpace(rootTpe, select).get
+      else if (storedPointerSpace(rootTpe, addressed).nonEmpty) storedPointerSpace(rootTpe, addressed).get
       else if (localStorage(select.root.symbol) && !AddressRefinement.isPtr(select.root.tpe))
         select.root.tpe match {
           case p.Type.Arr(_, _, p.Type.Space.Global) => p.Type.Space.Private
@@ -246,6 +247,7 @@ final case class SourcePointerLegalise(requiresConcreteSpaces: Boolean = true) e
         }
       else if (select.steps.isEmpty) AddressRefinement.spaceOf(selected).getOrElse(fallback)
       else fallback
+    }
 
     private def inferredTypes(function: p.Function, requirement: Map[String, Requirement]): Map[String, p.Type] = {
       val declared     = declarations(function)
