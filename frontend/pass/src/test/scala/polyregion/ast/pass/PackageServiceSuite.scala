@@ -106,6 +106,108 @@ class PackageServiceSuite extends munit.FunSuite {
     targets.foreach(target => assertEquals(functions.count(_.name == target), 1))
   }
 
+  private def linkPointerCapture(logicalAddressing: Boolean) = {
+    val publicName  = p.Sym("library.fill")
+    val data        = p.Named("data", p.Type.Ptr(p.Type.IntS32, p.Type.Space.Global))
+    val publicDecl  = p.FunctionDecl(publicName, Nil, None, Nil, Nil, Nil, p.Type.Unit0, p.Function.Affinity.Host)
+    val captureName = p.Sym("implementation.Capture")
+    val captureTpe  = p.Type.Struct(captureName, Nil)
+    val kernelName  = p.Sym("implementation.fill_kernel")
+    val captureArg  = p.Named(p.Conventions.CaptureArg, p.Type.Ptr(captureTpe, p.Type.Space.Global))
+    val kernel = function(
+      p.FunctionDecl(
+        kernelName,
+        Nil,
+        None,
+        List(p.Arg(captureArg)),
+        Nil,
+        Nil,
+        p.Type.Unit0,
+        p.Function.Affinity.Offload
+      ),
+      List(
+        p.Stmt.Update(
+          p.Term.Select(captureArg, List(p.PathStep.Field("data")), data.tpe),
+          p.Term.IntS32Const(0),
+          p.Term.IntS32Const(1)
+        ),
+        unitReturn.head
+      )
+    ).copy(convention = p.CallConvention.OffloadEntry)
+    val capture = p.Named("capture", captureTpe)
+    val one     = p.Term.IntU32Const(1)
+    val context = p.Term.NullPtrConst(p.Type.IntU8, p.Type.Space.Global, p.Region.Opaque)
+    val raw     = p.Named("raw", p.Type.Ptr(p.Type.IntU8, p.Type.Space.Global))
+    val launch = p.Spec.RemoteLaunch(
+      context,
+      p.Term.Poison(p.Type.FnRef(kernelName)),
+      Nil,
+      one,
+      one,
+      one,
+      one,
+      one,
+      one,
+      p.Term.IntU32Const(0),
+      List(p.Term.Select(capture, Nil, captureTpe))
+    )
+    val implementation = function(
+      publicDecl.copy(name = p.Sym("implementation.fill")),
+      List(
+        p.Stmt.Var(raw, Some(p.Expr.SpecOp(p.Spec.RemoteAlloc(context, p.Term.IntU64Const(4)))), isMutable = false),
+        p.Stmt.Var(data, Some(p.Expr.Cast(p.Term.Select(raw, Nil, raw.tpe), data.tpe)), isMutable = false),
+        p.Stmt.Var(capture, None, isMutable = true),
+        p.Stmt.Mut(
+          p.Term.Select(capture, List(p.PathStep.Field("data")), data.tpe),
+          p.Expr.Alias(p.Term.Select(data, Nil, data.tpe))
+        ),
+        p.Stmt.Var(p.Named("launch", p.Type.Unit0), Some(p.Expr.SpecOp(launch)), isMutable = false),
+        unitReturn.head
+      ),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val pkg = p.Package(
+      p.Interface(p.Sym("library"), List(publicDecl)),
+      p.Program(None, List(implementation, kernel), List(p.StructDef(captureName, Nil, List(data), Nil)))
+    )
+    val root = function(
+      publicDecl.copy(name = p.Sym("consumer.fill")),
+      implements = Some(publicName),
+      visibility = p.Function.Visibility.Exported
+    )
+    val linked = ProgramLinker.link(
+      p.Program.LinkRequest(List(pkg), p.Program(None, List(root), Nil), logicalAddressing = logicalAddressing)
+    )
+    assert(linked.isRight, linked)
+    val functions = linked.toOption.get.entry.toList ::: linked.toOption.get.functions
+    val launches = functions.flatMap(_.collectAll[p.Expr].collect { case p.Expr.SpecOp(value: p.Spec.RemoteLaunch) =>
+      value
+    })
+    assertEquals(launches.size, 1)
+    val target = launches.head.kernel.tpe match {
+      case p.Type.FnRef(name) => functions.find(_.name == name).get
+      case other              => fail(s"unresolved launch target ${other.repr}")
+    }
+    launches.head -> target
+  }
+
+  test("program linking flattens capture pointers into kernel arguments for physical addressing") {
+    val (launch, kernel) = linkPointerCapture(logicalAddressing = false)
+    assertEquals(kernel.args.map(_.named.symbol), List(p.Conventions.CaptureArg, "#capture_ptr_0"))
+    assertEquals(launch.args.size, 2)
+  }
+
+  test("program linking keeps the whole capture graph for logical addressing") {
+    val (launch, kernel) = linkPointerCapture(logicalAddressing = true)
+    assertEquals(kernel.args.map(_.named.symbol), List(p.Conventions.CaptureArg))
+    assertEquals(launch.args.size, 1)
+    assert(kernel.collectAll[p.Term].exists {
+      case p.Term.Select(root, List(p.PathStep.Field("data")), _) => root.symbol == p.Conventions.CaptureArg
+      case _                                                      => false
+    })
+  }
+
   test("host affinity follows calls rather than stored function handles") {
     val publicName = p.Sym("library.handle")
     val publicDecl = p.FunctionDecl(

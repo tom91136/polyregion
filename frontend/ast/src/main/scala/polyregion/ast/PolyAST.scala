@@ -510,7 +510,8 @@ object PolyAST {
         consumer: Program,
         capabilities: List[String] = Nil,
         typeSizes: List[TypeSize] = Nil,
-        stackDepth: Option[Int] = None
+        stackDepth: Option[Int] = None,
+        logicalAddressing: Boolean = false
     ) derives MsgPack.Codec
   }
 

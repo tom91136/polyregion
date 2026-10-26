@@ -369,6 +369,7 @@ inline std::string unsatisfiedReason(const std::vector<std::string> &capabilitie
 struct CapabilityGroup {
   std::vector<std::pair<compiletime::Target, std::string>> targets;
   std::vector<std::string> capabilities;
+  bool logicalAddressing;
 };
 
 inline std::vector<std::string> capabilitiesFor(const std::vector<std::string> &capabilities, const compiletime::Target target) {
@@ -387,11 +388,15 @@ inline std::vector<CapabilityGroup> capabilityGroups(const std::vector<std::stri
   for (const auto &[target, arch] : targets) {
     auto resolved = capabilitiesFor(capabilities, target);
     const auto key = resolved ^ sort();
-    auto group = std::find_if(groups.begin(), groups.end(), [&](const auto &existing) { return (existing.capabilities ^ sort()) == key; });
-    if (group == groups.end()) groups.push_back({{{target, arch}}, std::move(resolved)});
+    const auto logical = compiletime::logicalAddressing(target);
+    auto group = std::find_if(groups.begin(), groups.end(), [&](const auto &existing) {
+      return (existing.capabilities ^ sort()) == key && existing.logicalAddressing == logical;
+    });
+    if (group == groups.end()) groups.push_back({{{target, arch}}, std::move(resolved), logical});
     else group->targets.emplace_back(target, arch);
   }
-  if (groups.empty()) groups.push_back({{}, capabilities ^ filter([](const auto &capability) { return !(capability ^ contains('@')); })});
+  if (groups.empty())
+    groups.push_back({{}, capabilities ^ filter([](const auto &capability) { return !(capability ^ contains('@')); }), false});
   return groups;
 }
 

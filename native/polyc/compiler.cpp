@@ -270,10 +270,9 @@ namespace {
 
 std::string packageEntryPipeline(const compiletime::Target target, const std::string &arch, const std::optional<int> stackDepth) {
   const auto opt = stackDepth ? fmt::format("DeadFunctionElimination;Intrinsify;RecursionLower(maxDepth={});FnInline;Intrinsify;"
-                                            "KernelCaptureFlatten;FullOpt(level=1)",
+                                            "FullOpt(level=1)",
                                             *stackDepth)
-                              : std::string("DeadFunctionElimination;Intrinsify;RecursionLower;FnInline;Intrinsify;KernelCaptureFlatten;"
-                                            "FullOpt(level=1)");
+                              : std::string("DeadFunctionElimination;Intrinsify;RecursionLower;FnInline;Intrinsify;FullOpt(level=1)");
   switch (target) {
     case compiletime::Target::Object_LLVM_SPIRV_GLCompute:
       return opt
@@ -423,6 +422,9 @@ compiler::package::Result<polyast::CompileBundle>
 compiler::package::compile(const polyast::ProgramLinkRequest &request, const compiletime::Target hostTarget, const std::string &hostArch,
                            const std::vector<std::pair<compiletime::Target, std::string>> &deviceTargets,
                            const std::optional<int> stackDepth) {
+  if (!(deviceTargets
+        ^ forall([&](const auto &target) { return compiletime::logicalAddressing(target.first) == request.logicalAddressing; })))
+    return {{}, {fmt::format("device targets do not all use {} addressing", request.logicalAddressing ? "logical" : "physical")}};
   auto linked = linkProgram(request.withStackDepth(stackDepth));
   if (!linked) return {{}, std::move(linked.errors)};
   if (auto errors = validateImportedEntries(request, *linked.value); !errors.empty()) return {{}, std::move(errors)};

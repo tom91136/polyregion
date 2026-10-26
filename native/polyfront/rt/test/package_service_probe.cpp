@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
   const auto rootDecl = FunctionDecl(Sym({"__probe"}), {}, {}, {}, {}, {}, Type::Unit0(), FunctionAffinity::Host());
   const auto root = Function(rootDecl, {}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall(), name);
   const auto request = ProgramLinkRequest({Package(Interface(name, {}, {}), polyregion::polyfront::packageProgram({}, {}))},
-                                          polyregion::polyfront::packageProgram({root}, {}));
+                                          polyregion::polyfront::packageProgram({root}, {}), {}, {}, std::nullopt, false);
   const auto result =
       polyregion::polyfront::package::compileProgram(request, {}, polyregion::compiletime::Target::Object_LLVM_HOST, "native", {});
   if (result) return 3;

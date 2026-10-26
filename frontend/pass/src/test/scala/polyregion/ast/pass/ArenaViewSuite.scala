@@ -924,6 +924,43 @@ class ArenaViewSuite extends munit.FunSuite {
     assertEquals(indexedPointer(result), Some(selectT(explicit.named)))
   }
 
+  test("a plain-data pointer in an aggregate copied from the capture reads as an arena offset") {
+    val viewSym   = sym("View")
+    val viewTpe   = p.Type.Struct(viewSym, Nil)
+    val outerSym  = sym("Outer")
+    val outerTpe  = p.Type.Struct(outerSym, Nil)
+    val capArg    = arg(p.Conventions.CaptureArg, p.Type.Ptr(outerTpe, p.Type.Space.Global))
+    val copy      = named("copy", viewTpe)
+    val loaded    = named("loaded", pointerTpe)
+    val copyField = p.Term.Select(copy, List(p.PathStep.Field("m_p")), pointerTpe).asInstanceOf[p.Term.Select]
+    val program = PassTest.program(
+      entry(
+        args = List(capArg),
+        body = p.Stmt.Var(
+          copy,
+          Some(p.Expr.Alias(p.Term.Select(capArg.named, List(p.PathStep.Field("view")), viewTpe))),
+          true
+        ) :: loadAndIndex(copyField, loaded)
+      ),
+      Nil,
+      List(
+        p.StructDef(outerSym, Nil, List(named("view", viewTpe)), Nil),
+        p.StructDef(viewSym, Nil, List(named("m_p", pointerTpe), named("m_count", p.Type.IntS64)), Nil)
+      )
+    )
+    val result = ArenaView(program, NoopLog)
+    val views  = LogicalArenaViewAbi.bindings.map(_.symbol).toSet
+    assertEquals(result.entry.args.map(_.named.symbol), LogicalArenaViewAbi.bindings.map(_.symbol))
+    assert(result.entry.collectAll[p.Stmt].exists {
+      case p.Stmt.Var(p.Named("loaded", tpe, _), _, _) => tpe == p.Type.IntS64
+      case _                                           => false
+    })
+    assert(result.entry.collectAll[p.Expr].exists {
+      case p.Expr.Index(p.Term.Select(root, Nil, _), _, p.Type.IntS32) => views(root.symbol)
+      case _                                                           => false
+    })
+  }
+
   test("a copy of a by-value aggregate argument patched right after its definition forwards to the patch") {
     val viewSym   = sym("View")
     val viewTpe   = p.Type.Struct(viewSym, Nil)

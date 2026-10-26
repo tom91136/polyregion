@@ -539,8 +539,7 @@ object ArenaView extends ProgramPass {
 
   // A native global pointer stored into a local aggregate is unrepresentable in logical SPIR-V, but a pointer leaf whose
   // every definition is the same never-reassigned argument (directly, or through struct copies of such leaves) always
-  // holds that argument: its reads become the argument and its stores are dead. KernelCaptureFlatten's patched capture
-  // copies are the common source; copies taken from the capture itself are always patched, so they define nothing.
+  // holds that argument: its reads become the argument and its stores are dead.
   private def forwardArgumentSlots(entry: p.Function, members: Map[p.Sym, List[p.Named]]): p.Function = {
     type Key = (p.Named, List[p.PathStep])
     enum Value {
@@ -563,14 +562,14 @@ object ArenaView extends ProgramPass {
     val candidates  = localPointerSlots(entry, members)
     val overwritten = overwrittenOnDefinition(entry, members)
     def slot(root: p.Named, path: List[p.PathStep]): Option[Either[Value, Key]] =
-      if (path.isEmpty && arguments(root) && !reassigned(root.symbol)) Some(Left(Value.Argument(root)))
+      if (path.isEmpty && arguments(root) && !capture.contains(root) && !reassigned(root.symbol))
+        Some(Left(Value.Argument(root)))
       else Option.when(candidates(root -> path))(Right(root -> path))
     // each definition is an argument, the address of a local subobject, another candidate leaf, or a conflict (None)
     val definitions: Map[Key, List[Option[Either[Value, Key]]]] = candidates.iterator.map { case key @ (root, leaf) =>
       val fromInit = inits.get(root).flatten.toList.flatMap {
-        case _ if overwritten(key)                                                 => Nil
-        case p.Expr.Alias(p.Term.Select(source, _, _)) if capture.contains(source) => Nil
-        case p.Expr.Alias(p.Term.Select(source, steps, _))                         => List(slot(source, steps ++ leaf))
+        case _ if overwritten(key)                         => Nil
+        case p.Expr.Alias(p.Term.Select(source, steps, _)) => List(slot(source, steps ++ leaf))
         case p.Expr.RefTo(p.Term.Select(target, path, _), None, comp, _, _)
             if leaf.isEmpty && !reassigned(root.symbol) && !arguments(target) &&
               typeAt(target.tpe, path, members).contains(comp) =>
@@ -580,7 +579,6 @@ object ArenaView extends ProgramPass {
       val fromStores = stmts.collect {
         case p.Stmt.Mut(p.Term.Select(`root`, prefix, _), expr) if leaf.startsWith(prefix) =>
           expr match {
-            case p.Expr.Alias(p.Term.Select(source, _, _)) if capture.contains(source) => None
             case p.Expr.Alias(p.Term.Select(source, steps, _)) => slot(source, steps ++ leaf.drop(prefix.length))
             case _                                             => None
           }

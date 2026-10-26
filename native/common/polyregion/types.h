@@ -175,6 +175,8 @@ inline constexpr std::array<std::string_view, 2> SpirvKernelLevels{"1_1", "2_0"}
 inline constexpr std::array<std::string_view, 2> OpenCL2Features{"generic_address_space", "work_group_collectives"};
 POLYREGION_RT_PROTECT inline bool spirvKernelGeneric(std::string_view arch) { return arch == "2_0"; }
 
+POLYREGION_RT_PROTECT inline bool logicalAddressing(const Target target) { return target == Target::Object_LLVM_SPIRV_GLCompute; }
+
 } // namespace polyregion::compiletime
 
 namespace polyregion::runtime {

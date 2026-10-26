@@ -90,6 +90,33 @@
 #pragma region do: {output}
 #pragma region requires: 9 5149
 
+#pragma region case: core-device-package-iterator-copy
+#pragma region offload-only
+#pragma region do: {package_fixture} --device-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DITERATOR_COPY -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 2 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 8 5050
+
+#pragma region case: core-device-package-iterator-copy-base
+#pragma region offload-only
+#pragma region do: {package_fixture} --device-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DITERATOR_COPY_BASE -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 2 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 8 5050
+
+#pragma region case: core-device-package-iterator-copy-multi-target
+#pragma region offload-only
+#pragma region do: {package_fixture} --device-core {output}.packages
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -fstdpar-arch={polycpp_arch};x86_64@native -DITERATOR_COPY -fstdpar-library-path={output}.packages -o {output} {input}
+#pragma region stderr-count: 2 bound to polyregion.core
+#pragma region stderr-count: 0 uses the inline body
+#pragma region do: {output}
+#pragma region requires: 8 5050
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -159,6 +186,57 @@ int main() {
   int *p = out.data();
   std::for_each(std::execution::par_unseq, ids.begin(), ids.end(), [&](int i) { p[i] = i + static_cast<int>(words[i % 3].size()); });
   const int sum = std::transform_reduce(std::execution::par_unseq, ids.begin(), ids.end(), 0, std::plus<>(), [&](int i) { return p[i]; });
+  std::printf("%d %d", out[7], sum);
+  return 0;
+}
+#elif defined(ITERATOR_COPY) || defined(ITERATOR_COPY_BASE)
+struct Empty {};
+
+  #if defined(ITERATOR_COPY_BASE)
+struct ConstIter : Empty {
+  int *_Ptr;
+};
+
+struct Iter : ConstIter {
+  static Iter of(int *p) { return Iter{{{}, p}}; }
+  #else
+struct Iter {
+  int *_Ptr;
+  static Iter of(int *p) { return Iter{p}; }
+  #endif
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = int;
+  using difference_type = long;
+  using pointer = int *;
+  using reference = int &;
+  int &operator*() const { return *_Ptr; }
+  Iter &operator+=(long n) {
+    _Ptr += n;
+    return *this;
+  }
+  Iter operator+(long n) const {
+    Iter t = *this;
+    t += n;
+    return t;
+  }
+  long operator-(const Iter &o) const { return _Ptr - o._Ptr; }
+};
+
+struct Span {
+  int *first, *last;
+  int &operator[](long n) const { return first[n]; }
+  Iter begin() const { return Iter::of(first); }
+  Iter end() const { return Iter::of(last); }
+};
+
+int main() {
+  const int n = 100;
+  std::vector<int> idsData(n), xsData(n, 1), outData(n, 0);
+  std::iota(idsData.begin(), idsData.end(), 0);
+  const Span ids{idsData.data(), idsData.data() + n}, xs{xsData.data(), xsData.data() + n}, out{outData.data(), outData.data() + n};
+  std::for_each(std::execution::par_unseq, ids.begin(), ids.end(), [&](int i) { out[i] = xs[i] + i; });
+  const int sum =
+      std::transform_reduce(std::execution::par_unseq, ids.begin(), ids.end(), 0, std::plus<>(), [&](int i) { return out[i] * xs[i]; });
   std::printf("%d %d", out[7], sum);
   return 0;
 }

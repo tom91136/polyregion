@@ -4953,9 +4953,10 @@ POLYREGION_EXPORT bool ProgramTypeSize::operator==(const ProgramTypeSize &rhs) c
 }
 
 ProgramLinkRequest::ProgramLinkRequest(std::vector<Package> packages, Program consumer, std::vector<std::string> capabilities,
-                                       std::vector<ProgramTypeSize> typeSizes, std::optional<int32_t> stackDepth) noexcept
+                                       std::vector<ProgramTypeSize> typeSizes, std::optional<int32_t> stackDepth,
+                                       bool logicalAddressing) noexcept
     : packages(std::move(packages)), consumer(std::move(consumer)), capabilities(std::move(capabilities)), typeSizes(std::move(typeSizes)),
-      stackDepth(std::move(stackDepth)) {}
+      stackDepth(std::move(stackDepth)), logicalAddressing(logicalAddressing) {}
 size_t ProgramLinkRequest::hash_code() const {
   size_t seed = 0;
   seed ^= std::hash<decltype(packages)>()(packages) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -4963,27 +4964,31 @@ size_t ProgramLinkRequest::hash_code() const {
   seed ^= std::hash<decltype(capabilities)>()(capabilities) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(typeSizes)>()(typeSizes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(stackDepth)>()(stackDepth) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(logicalAddressing)>()(logicalAddressing) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 ProgramLinkRequest ProgramLinkRequest::withPackages(const std::vector<Package> &v_) const {
-  return ProgramLinkRequest(v_, consumer, capabilities, typeSizes, stackDepth);
+  return ProgramLinkRequest(v_, consumer, capabilities, typeSizes, stackDepth, logicalAddressing);
 }
 ProgramLinkRequest ProgramLinkRequest::withConsumer(const Program &v_) const {
-  return ProgramLinkRequest(packages, v_, capabilities, typeSizes, stackDepth);
+  return ProgramLinkRequest(packages, v_, capabilities, typeSizes, stackDepth, logicalAddressing);
 }
 ProgramLinkRequest ProgramLinkRequest::withCapabilities(const std::vector<std::string> &v_) const {
-  return ProgramLinkRequest(packages, consumer, v_, typeSizes, stackDepth);
+  return ProgramLinkRequest(packages, consumer, v_, typeSizes, stackDepth, logicalAddressing);
 }
 ProgramLinkRequest ProgramLinkRequest::withTypeSizes(const std::vector<ProgramTypeSize> &v_) const {
-  return ProgramLinkRequest(packages, consumer, capabilities, v_, stackDepth);
+  return ProgramLinkRequest(packages, consumer, capabilities, v_, stackDepth, logicalAddressing);
 }
 ProgramLinkRequest ProgramLinkRequest::withStackDepth(const std::optional<int32_t> &v_) const {
-  return ProgramLinkRequest(packages, consumer, capabilities, typeSizes, v_);
+  return ProgramLinkRequest(packages, consumer, capabilities, typeSizes, v_, logicalAddressing);
+}
+ProgramLinkRequest ProgramLinkRequest::withLogicalAddressing(const bool &v_) const {
+  return ProgramLinkRequest(packages, consumer, capabilities, typeSizes, stackDepth, v_);
 }
 POLYREGION_EXPORT bool ProgramLinkRequest::operator!=(const ProgramLinkRequest &rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool ProgramLinkRequest::operator==(const ProgramLinkRequest &rhs) const {
   return (packages == rhs.packages) && (consumer == rhs.consumer) && (capabilities == rhs.capabilities) && (typeSizes == rhs.typeSizes)
-         && (stackDepth == rhs.stackDepth);
+         && (stackDepth == rhs.stackDepth) && (logicalAddressing == rhs.logicalAddressing);
 }
 
 PackageFragment::PackageFragment(std::string identity, Program program) noexcept

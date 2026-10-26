@@ -8,10 +8,10 @@ template <class... Ts> struct overloaded : Ts... {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast {
-constexpr auto AdtHash = "6ddc7cb5e6a7d0da691b9ab27d26e1c9";
+constexpr auto AdtHash = "c8117feea959cfe89ee40068e93ce3fa";
 constexpr auto ProgramHash = "de2de5f725108f6b01538c5ef974ec9a";
 constexpr auto PackageHash = "944c2b087ebac646c9d8a15c5fb76323";
-constexpr auto PackageWireHash = "5bfd34bb50423f97f57fe5f45fd63dfd";
+constexpr auto PackageWireHash = "956e868514bb0e0e4190efc14c8bfe8d";
 constexpr auto CompileWireHash = "6a5c5e89c9331829463c57f0815d95fe";
 using msgpack::decodeMaybeInterned;
 using msgpack::encodeInterned;
@@ -3349,7 +3349,8 @@ ProgramLinkRequest programlinkrequest_from_json(const json &j_) {
     typeSizes.emplace_back(programtypesize_from_json(v_));
   }
   auto stackDepth = j_.at(4).is_null() ? std::nullopt : std::make_optional(j_.at(4).get<int32_t>());
-  return {packages, consumer, capabilities, typeSizes, stackDepth};
+  auto logicalAddressing = j_.at(5).get<bool>();
+  return {packages, consumer, capabilities, typeSizes, stackDepth, logicalAddressing};
 }
 
 json programlinkrequest_to_json(const ProgramLinkRequest &x_) {
@@ -3364,7 +3365,8 @@ json programlinkrequest_to_json(const ProgramLinkRequest &x_) {
     typeSizes.emplace_back(programtypesize_to_json(v_));
   }
   auto stackDepth = x_.stackDepth ? json(*x_.stackDepth) : json();
-  return json::array({packages, consumer, capabilities, typeSizes, stackDepth});
+  auto logicalAddressing = x_.logicalAddressing;
+  return json::array({packages, consumer, capabilities, typeSizes, stackDepth, logicalAddressing});
 }
 
 PackageFragment packagefragment_from_json(const json &j_) {
@@ -11615,7 +11617,7 @@ void programtypesize_to_msgpack(MsgpackWriter &w_, const ProgramTypeSize &x_) {
 }
 
 ProgramLinkRequest programlinkrequest_fields_from_msgpack(MsgpackReader &r_, size_t n_) {
-  if (n_ != 5) throw std::runtime_error("Expected ProgramLinkRequest with 5 field(s)");
+  if (n_ != 6) throw std::runtime_error("Expected ProgramLinkRequest with 6 field(s)");
   std::vector<Package> packages;
   {
     auto packages_size = r_.readArrayHeader();
@@ -11649,7 +11651,8 @@ ProgramLinkRequest programlinkrequest_fields_from_msgpack(MsgpackReader &r_, siz
     auto stackDepth_value = static_cast<int32_t>(r_.readInt32());
     stackDepth = std::move(stackDepth_value);
   }
-  return {packages, consumer, capabilities, typeSizes, stackDepth};
+  auto logicalAddressing = r_.readBoolean();
+  return {packages, consumer, capabilities, typeSizes, stackDepth, logicalAddressing};
 }
 
 void programlinkrequest_fields_to_msgpack(MsgpackWriter &w_, const ProgramLinkRequest &x_) {
@@ -11671,6 +11674,7 @@ void programlinkrequest_fields_to_msgpack(MsgpackWriter &w_, const ProgramLinkRe
   } else {
     w_.writeNil();
   }
+  w_.writeBoolean(x_.logicalAddressing);
 }
 
 ProgramLinkRequest programlinkrequest_from_msgpack(MsgpackReader &r_) {
@@ -11679,7 +11683,7 @@ ProgramLinkRequest programlinkrequest_from_msgpack(MsgpackReader &r_) {
 }
 
 void programlinkrequest_to_msgpack(MsgpackWriter &w_, const ProgramLinkRequest &x_) {
-  w_.writeArrayHeader(5);
+  w_.writeArrayHeader(6);
   programlinkrequest_fields_to_msgpack(w_, x_);
 }
 

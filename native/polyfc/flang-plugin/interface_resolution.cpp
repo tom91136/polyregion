@@ -146,8 +146,8 @@ linkGroups(const polyfront::Options &opts, const std::vector<polyast::Package> &
     for (auto &function : renamed)
       if (entryNames ^ exists([&](const auto &name) { return function.decl.name == polyast::Sym({name}); }))
         function.decl.name = polyast::Sym({function.decl.name.fqn.front() + suffix});
-    const auto request =
-        polyast::ProgramLinkRequest(packages, polyfront::packageProgram(std::move(renamed), definitions), group.capabilities, typeSizes);
+    const auto request = polyast::ProgramLinkRequest(packages, polyfront::packageProgram(std::move(renamed), definitions),
+                                                     group.capabilities, typeSizes, std::nullopt, group.logicalAddressing);
     auto compiled = polyfront::package::compileProgram(request, opts.executable, compiletime::Target::Object_LLVM_HOST, "native",
                                                        group.targets, opts.stackDepth);
     if (!compiled) return {{}, std::move(compiled.errors)};

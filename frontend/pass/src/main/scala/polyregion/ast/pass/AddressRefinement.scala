@@ -1225,7 +1225,7 @@ private[pass] object AddressRefinement {
     }
 
     // an aggregate copied out of memory carries the pointer graphs stored there, read as that memory's pointers;
-    // a pointer to plain data is bound as its own launch argument and patched into the copy instead
+    // on physical targets a pointer to plain data is bound as its own launch argument and patched into the copy instead
     def loadedSlots(
         state: Map[Query[AddressValue], AddressValue],
         sourceRoot: p.Named,
@@ -1239,7 +1239,8 @@ private[pass] object AddressRefinement {
       else
         pointerSlots(tpe, Nil, maxSlotDepth - target.path.size).collect {
           case (path, slotType @ p.Type.Ptr(pointee, _))
-              if bearsPointers(pointee) && !known(Query.Slot(target.root, target.path ++ path)) =>
+              if (model == AddressModel.Logical || bearsPointers(pointee)) &&
+                !known(Query.Slot(target.root, target.path ++ path)) =>
             Query.Slot(target.root, target.path ++ path) ->
               termFact(state, p.Term.Select(sourceRoot, sourcePrefix ++ path, slotType))
         }

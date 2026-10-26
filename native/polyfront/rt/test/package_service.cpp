@@ -238,7 +238,8 @@ TEST_CASE("package service links and compiles a typed consumer program") {
                    Type::Unit0(), FunctionAffinity::Host());
   const auto root =
       Function(rootDecl, {}, FunctionVisibility::Exported(), FunctionFpMode::Relaxed(), CallConvention::RegularCall(), publicName);
-  const auto request = ProgramLinkRequest({pkg}, polyfront::packageProgram({root}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)});
+  const auto request =
+      ProgramLinkRequest({pkg}, polyfront::packageProgram({root}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)}, std::nullopt, false);
   const auto compiled = polyfront::package::compileProgram(request, {}, compiletime::Target::Object_LLVM_HOST, "native",
                                                            {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
   for (const auto &error : compiled.errors)
@@ -256,7 +257,7 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   const auto distinctKernel = remoteKernel.withBody({let("distinct") = Term::IntS32Const(7), ret()});
   const auto distinctPackage = pkg.withProgram(polyfront::packageProgram({remoteImplementation, distinctKernel}, {}));
   const auto distinctRequest =
-      ProgramLinkRequest({distinctPackage}, polyfront::packageProgram({root}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)});
+      ProgramLinkRequest({distinctPackage}, polyfront::packageProgram({root}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)}, std::nullopt, false);
   const auto distinct = polyfront::package::compileProgram(distinctRequest, {}, compiletime::Target::Object_LLVM_HOST, "native",
                                                            {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
   REQUIRE(distinct);
@@ -274,9 +275,9 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   const auto wideRoot = root.withDecl(
       rootDecl.withArgs({Arg(Named("in", f64Pointer), {}), Arg(Named("out", f64Pointer), {}), Arg(Named("n", Type::IntS32()), {})}));
   const auto compileWide = [&](std::vector<ProgramTypeSize> typeSizes) {
-    return polyfront::package::compileProgram(ProgramLinkRequest({pkg}, polyfront::packageProgram({wideRoot}, {}), {"gpu"}, typeSizes), {},
-                                              compiletime::Target::Object_LLVM_HOST, "native",
-                                              {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
+    return polyfront::package::compileProgram(
+        ProgramLinkRequest({pkg}, polyfront::packageProgram({wideRoot}, {}), {"gpu"}, typeSizes, std::nullopt, false), {},
+        compiletime::Target::Object_LLVM_HOST, "native", {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
   };
   const auto unfit = compileWide({ProgramTypeSize(f64, 8)});
   for (const auto &error : unfit.errors)
@@ -290,7 +291,8 @@ TEST_CASE("package service links and compiles a typed consumer program") {
   REQUIRE_FALSE(unlaid);
   CHECK((unlaid.errors ^ aspartame::exists([](const auto &error) { return error.find("has no layout for `F64`") != std::string::npos; })));
   const auto mismatched = polyfront::package::compileProgram(
-      ProgramLinkRequest({pkg}, polyfront::packageProgram({root.withDecl(rootDecl.withArgs({}))}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)}),
+      ProgramLinkRequest({pkg}, polyfront::packageProgram({root.withDecl(rootDecl.withArgs({}))}, {}), {"gpu"}, {ProgramTypeSize(f32, 4)},
+                         std::nullopt, false),
       {}, compiletime::Target::Object_LLVM_HOST, "native", {{compiletime::Target::Source_C_Metal1_0, "host"}}, 8);
   REQUIRE_FALSE(mismatched);
   CHECK((mismatched.errors

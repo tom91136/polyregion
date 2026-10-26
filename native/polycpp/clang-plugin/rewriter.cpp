@@ -630,7 +630,7 @@ static void compileInterfaceCalls(const polyfront::Options &opts, clang::Compile
       for (auto &function : consumerFunctions)
         if (function.decl.name == Sym({item.entryName})) function.decl.name = Sym({entryName});
       const auto request = ProgramLinkRequest({*selected.value}, polyfront::packageProgram(consumerFunctions, item.consumerDefinitions),
-                                              capabilities, item.typeSizes);
+                                              capabilities, item.typeSizes, std::nullopt, groups[group].logicalAddressing);
       auto compiled = polyfront::package::compileProgram(request, opts.executable, *entryTarget,
                                                          polyfront::objectCPUFor(CI.getTarget().getTriple(), targetCPU),
                                                          groups[group].targets, opts.stackDepth);

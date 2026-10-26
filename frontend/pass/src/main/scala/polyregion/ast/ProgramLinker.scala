@@ -1172,7 +1172,11 @@ private[polyregion] object ProgramLinker {
     program.copy(entry = program.entry.map(promote), functions = program.functions.map(promote))
   }
 
-  private def prepareLinkedProgram(program: p.Program, stackDepth: Option[Int]): Either[List[String], p.Program] = {
+  private def prepareLinkedProgram(
+      program: p.Program,
+      stackDepth: Option[Int],
+      logicalAddressing: Boolean
+  ): Either[List[String], p.Program] = {
     val specialised = Specialisation(program, PluginEntry.defaultLog)
     val monomorphic = MonoStruct(specialised, PluginEntry.defaultLog)._2
     val candidates  = program.functions.groupBy(_.name)
@@ -1211,8 +1215,9 @@ private[polyregion] object ProgramLinker {
     val closed = closeRemoteTargets(monomorphic, Set.empty)
     closed
       .map { program =>
-        val inlined   = stackDepth.fold(OffloadEntryInline())(OffloadEntryInline(_))(program, PluginEntry.defaultLog)
-        val flattened = KernelCaptureFlatten(inlined, PluginEntry.defaultLog)
+        val inlined = stackDepth.fold(OffloadEntryInline())(OffloadEntryInline(_))(program, PluginEntry.defaultLog)
+        val flattened =
+          if (logicalAddressing) inlined else KernelCaptureFlatten(inlined, PluginEntry.defaultLog)
         val functions = DeadFunctionElimination(flattened, PluginEntry.defaultLog)
         val structs   = DeadStructElimination(functions, PluginEntry.defaultLog)
         propagateHostAffinity(structs)
@@ -1351,7 +1356,10 @@ private[polyregion] object ProgramLinker {
       // unit for a future bounded-parallel implementation.
       val linked =
         if (bound.isEmpty && roots.nonEmpty) Right(p.Program(None, Nil, Nil))
-        else bound.traverse(prepareLinkedProgram(_, request.stackDepth)).flatMap(mergeLinkedPrograms)
+        else
+          bound
+            .traverse(prepareLinkedProgram(_, request.stackDepth, request.logicalAddressing))
+            .flatMap(mergeLinkedPrograms)
       linked.map(program => program.copy(metadata = metadata ::: program.metadata))
     }
 
