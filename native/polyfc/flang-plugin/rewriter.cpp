@@ -827,15 +827,27 @@ bool hasAliasingAttrs(Operation *declare) {
   return false;
 }
 
-bool isDirectAccess(Operation *user, Value address) {
-  if (llvm::isa<fir::LoadOp>(user)) return true;
-  auto store = llvm::dyn_cast<fir::StoreOp>(user);
-  return store && store.getMemref() == address && store.getValue() != address;
+enum class Access { None, Read, Write };
+
+Access accessOf(Operation *user, Value address) {
+  if (llvm::isa<fir::LoadOp>(user)) return Access::Read;
+  if (auto store = llvm::dyn_cast<fir::StoreOp>(user))
+    return store.getMemref() == address && store.getValue() != address ? Access::Write : Access::None;
+  if (auto assign = llvm::dyn_cast<hlfir::AssignOp>(user)) {
+    if (assign.getLhs() == address && assign.getRhs() != address) return Access::Write;
+    if (assign.getRhs() == address && assign.getLhs() != address) return Access::Read;
+  }
+  return Access::None;
 }
 
-void privatiseIndex(fir::DoLoopOp loop, fir::AllocaOp storage) {
+bool isScalarType(Type t) { return fir::isa_integer(t) || fir::isa_real(t) || llvm::isa<fir::LogicalType>(t); }
+
+enum class Storage { Index, Scalar };
+
+void privatise(fir::DoLoopOp loop, fir::AllocaOp storage, Storage kind) {
   llvm::SetVector<Value> aliases;
   aliases.insert(storage.getResult());
+  llvm::SmallVector<Operation *> insideReads, insideWrites, outsideReads, outsideWrites;
   for (size_t i = 0; i < aliases.size(); ++i) {
     for (auto *user : aliases[i].getUsers()) {
       if (llvm::isa<fir::DeclareOp, hlfir::DeclareOp>(user)) {
@@ -843,8 +855,35 @@ void privatiseIndex(fir::DoLoopOp loop, fir::AllocaOp storage) {
         for (auto result : user->getResults())
           aliases.insert(result);
       } else if (auto convert = llvm::dyn_cast<fir::ConvertOp>(user)) aliases.insert(convert.getResult());
-      else if (!loop->isProperAncestor(user) && !isDirectAccess(user, aliases[i])) return;
+      else {
+        const auto access = accessOf(user, aliases[i]);
+        const bool inside = loop->isProperAncestor(user);
+        if (access == Access::None && (!inside || kind == Storage::Scalar)) return;
+        if (access == Access::Read) (inside ? insideReads : outsideReads).push_back(user);
+        if (access == Access::Write) (inside ? insideWrites : outsideWrites).push_back(user);
+      }
     }
+  }
+
+  if (kind == Storage::Scalar) {
+    if (insideWrites.empty() || insideReads.empty()) return;
+    DominanceInfo dominance(loop);
+    const auto defined = [&](Operation *read) {
+      return insideWrites ^ exists([&](auto *write) { return dominance.properlyDominates(write, read); });
+    };
+    if (!(insideReads ^ forall(defined))) return;
+    auto *block = loop->getBlock();
+    const bool repeated = loop->getParentOfType<fir::DoLoopOp>() || loop->getParentOfType<fir::IterWhileOp>();
+    const auto shielded = [&](Operation *read) {
+      auto *ancestor = block->findAncestorOpInBlock(*read);
+      if (!ancestor) return false;
+      const bool after = loop->isBeforeInBlock(ancestor);
+      if (!after && !repeated) return true;
+      return outsideWrites ^ exists([&](auto *write) {
+               return write->getBlock() == block && write->isBeforeInBlock(ancestor) && (!after || loop->isBeforeInBlock(write));
+             });
+    };
+    if (!(outsideReads ^ forall(shielded))) return;
   }
 
   OpBuilder B(loop.getBody(), loop.getBody()->begin());
@@ -889,16 +928,31 @@ void privatiseIndex(fir::DoLoopOp loop, fir::AllocaOp storage) {
   local.getDefiningOp()->erase();
 }
 
-void privatiseLoopIndices(fir::DoLoopOp loop) {
-  llvm::SmallVector<fir::AllocaOp> storages;
+void privatiseLoopStorage(fir::DoLoopOp loop) {
+  const auto outsideAlloca = [&](Value memref) {
+    auto alloca = storageRoot(memref).getDefiningOp<fir::AllocaOp>();
+    return alloca && !loop->isAncestor(alloca) ? alloca : fir::AllocaOp{};
+  };
+  llvm::SmallVector<fir::AllocaOp> indices;
   loop.walk([&](fir::StoreOp store) {
     if (!isLoopIndex(store.getValue(), loop)) return;
-    auto alloca = storageRoot(store.getMemref()).getDefiningOp<fir::AllocaOp>();
-    if (!alloca || loop->isAncestor(alloca) || !llvm::isa<IntegerType>(alloca.getInType())) return;
-    if (!(storages ^ contains(alloca))) storages.push_back(alloca);
+    auto alloca = outsideAlloca(store.getMemref());
+    if (alloca && llvm::isa<IntegerType>(alloca.getInType()) && !(indices ^ contains(alloca))) indices.push_back(alloca);
   });
-  for (auto storage : storages)
-    privatiseIndex(loop, storage);
+  for (auto storage : indices)
+    privatise(loop, storage, Storage::Index);
+
+  llvm::SmallVector<fir::AllocaOp> scalars;
+  const auto collect = [&](Value memref) {
+    auto alloca = outsideAlloca(memref);
+    if (alloca && isScalarType(alloca.getInType()) && !(scalars ^ contains(alloca))) scalars.push_back(alloca);
+  };
+  loop.walk([&](Operation *op) {
+    if (auto store = llvm::dyn_cast<fir::StoreOp>(op)) collect(store.getMemref());
+    else if (auto assign = llvm::dyn_cast<hlfir::AssignOp>(op)) collect(assign.getLhs());
+  });
+  for (auto storage : scalars)
+    privatise(loop, storage, Storage::Scalar);
 }
 
 } // namespace
@@ -1313,7 +1367,7 @@ void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
   m.walk<WalkOrder::PreOrder>([&](fir::DoLoopOp doLoop) {
     if (doLoop->hasAttr(DoConcurrentAsWritten)) concurrentLoops.push_back(doLoop);
   });
-  concurrentLoops ^ for_each([](auto doLoop) { privatiseLoopIndices(doLoop); });
+  concurrentLoops ^ for_each([](auto doLoop) { privatiseLoopStorage(doLoop); });
 
   // XXX orphan declare_reduction trips LLVM Translation when body SSA refs no longer resolve.
   llvm::SmallVector<fir::DeclareReductionOp> deadReductions;
